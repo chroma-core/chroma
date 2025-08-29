@@ -572,10 +572,7 @@ impl InMemoryFrontend {
                     },
                 },
                 filter,
-                limit: Limit {
-                    skip: offset,
-                    fetch: limit,
-                },
+                limit: Limit { offset, limit },
                 proj: Projection {
                     document: include.0.contains(&Include::Document),
                     embedding: include.0.contains(&Include::Embedding),

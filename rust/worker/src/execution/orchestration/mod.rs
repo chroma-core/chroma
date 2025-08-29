@@ -7,3 +7,4 @@ mod compact;
 pub mod get;
 pub mod knn;
 pub mod knn_filter;
+pub mod projection;

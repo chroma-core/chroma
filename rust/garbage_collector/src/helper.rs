@@ -201,8 +201,8 @@ impl ChromaGrpcClients {
                 where_document: None,
             }),
             limit: Some(LimitOperator {
-                skip: 0,
-                fetch: None,
+                offset: 0,
+                limit: None,
             }),
             projection: Some(ProjectionOperator {
                 document: false, // include_documents,

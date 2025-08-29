@@ -2,7 +2,7 @@ use core::mem::discriminant;
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::{
-    cmp::{Ordering, Reverse},
+    cmp::Ordering,
     collections::{BinaryHeap, HashSet},
     hash::{Hash, Hasher},
 };
@@ -251,16 +251,16 @@ impl TryFrom<KnnBatch> for chroma_proto::KnnOperator {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Limit {
     #[serde(default)]
-    pub skip: u32,
+    pub offset: u32,
     #[serde(default)]
-    pub fetch: Option<u32>,
+    pub limit: Option<u32>,
 }
 
 impl From<chroma_proto::LimitOperator> for Limit {
     fn from(value: chroma_proto::LimitOperator) -> Self {
         Self {
-            skip: value.skip,
-            fetch: value.fetch,
+            offset: value.offset,
+            limit: value.limit,
         }
     }
 }
@@ -268,34 +268,34 @@ impl From<chroma_proto::LimitOperator> for Limit {
 impl From<Limit> for chroma_proto::LimitOperator {
     fn from(value: Limit) -> Self {
         Self {
-            skip: value.skip,
-            fetch: value.fetch,
+            offset: value.offset,
+            limit: value.limit,
         }
     }
 }
 
 /// The `RecordDistance` represents a measure of embedding (identified by `offset_id`) with respect to query embedding
 #[derive(Clone, Debug)]
-pub struct RecordDistance {
+pub struct RecordMeasure {
     pub offset_id: u32,
     pub measure: f32,
 }
 
-impl PartialEq for RecordDistance {
+impl PartialEq for RecordMeasure {
     fn eq(&self, other: &Self) -> bool {
-        self.measure.eq(&other.measure)
+        self.offset_id.eq(&other.offset_id)
     }
 }
 
-impl Eq for RecordDistance {}
+impl Eq for RecordMeasure {}
 
-impl Ord for RecordDistance {
+impl Ord for RecordMeasure {
     fn cmp(&self, other: &Self) -> Ordering {
         self.measure.total_cmp(&other.measure)
     }
 }
 
-impl PartialOrd for RecordDistance {
+impl PartialOrd for RecordMeasure {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -303,56 +303,47 @@ impl PartialOrd for RecordDistance {
 
 #[derive(Debug, Default)]
 pub struct KnnOutput {
-    pub distances: Vec<RecordDistance>,
+    pub distances: Vec<RecordMeasure>,
 }
 
-/// The `KnnMerge` operator selects the records nearest to target from the batch vectors of records
-/// which are all sorted by distance in ascending order. If the same record occurs multiple times
+/// The `Merge` operator selects the top records from the batch vectors of records
+/// which are all sorted in descending order. If the same record occurs multiple times
 /// only one copy will remain in the final result.
 ///
 /// # Parameters
-/// - `fetch`: The total number of records to fetch
+/// - `k`: The total number of records to take after merge
 ///
 /// # Usage
 /// It can be used to merge the query results from different operators
 #[derive(Clone, Debug)]
-pub struct KnnMerge {
-    pub fetch: u32,
+pub struct Merge {
+    pub k: u32,
 }
 
-impl KnnMerge {
-    pub fn merge(&self, input: Vec<Vec<RecordDistance>>) -> Vec<RecordDistance> {
+impl Merge {
+    pub fn merge<M: Eq + Ord>(&self, input: Vec<Vec<M>>) -> Vec<M> {
         let mut batch_iters = input.into_iter().map(Vec::into_iter).collect::<Vec<_>>();
 
-        // NOTE: `BinaryHeap<_>` is a max-heap, so we use `Reverse` to convert it into a min-heap
-        let mut heap_dist = batch_iters
+        let mut max_heap = batch_iters
             .iter_mut()
             .enumerate()
-            .filter_map(|(idx, itr)| itr.next().map(|rec| Reverse((rec, idx))))
+            .filter_map(|(idx, itr)| itr.next().map(|rec| (rec, idx)))
             .collect::<BinaryHeap<_>>();
 
-        let mut distances = Vec::<RecordDistance>::with_capacity(self.fetch as usize);
-        while distances.len() < self.fetch as usize {
-            if let Some(Reverse((rec, idx))) = heap_dist.pop() {
-                if distances.last().is_none()
-                    || distances
-                        .last()
-                        .is_some_and(|last_rec| last_rec.offset_id != rec.offset_id)
-                {
-                    distances.push(rec);
-                }
-                if let Some(next_rec) = batch_iters
-                    .get_mut(idx)
-                    .expect("Enumerated index should be valid")
-                    .next()
-                {
-                    heap_dist.push(Reverse((next_rec, idx)));
-                }
-            } else {
+        let mut fusion = Vec::with_capacity(self.k as usize);
+        while let Some((m, idx)) = max_heap.pop() {
+            if self.k <= fusion.len() as u32 {
                 break;
             }
+            if let Some(next_m) = batch_iters[idx].next() {
+                max_heap.push((next_m, idx));
+            }
+            if fusion.last().is_some_and(|tail| tail == &m) {
+                continue;
+            }
+            fusion.push(m);
         }
-        distances
+        fusion
     }
 }
 
@@ -1441,15 +1432,15 @@ mod tests {
     #[test]
     fn test_limit_json_serialization() {
         let limit = Limit {
-            skip: 10,
-            fetch: Some(20),
+            offset: 10,
+            limit: Some(20),
         };
 
         let json = serde_json::to_string(&limit).unwrap();
         let deserialized: Limit = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(deserialized.skip, limit.skip);
-        assert_eq!(deserialized.fetch, limit.fetch);
+        assert_eq!(deserialized.offset, limit.offset);
+        assert_eq!(deserialized.limit, limit.limit);
     }
 
     #[test]
@@ -1517,5 +1508,312 @@ mod tests {
         assert!(deserialized
             .fields
             .contains(&SelectField::MetadataField("author".to_string())));
+    }
+
+    #[test]
+    fn test_merge_basic_integers() {
+        use std::cmp::Reverse;
+
+        let merge = Merge { k: 5 };
+
+        // Input: sorted vectors of Reverse(u32) - ascending order of inner values
+        let input = vec![
+            vec![Reverse(1), Reverse(4), Reverse(7), Reverse(10)],
+            vec![Reverse(2), Reverse(5), Reverse(8)],
+            vec![Reverse(3), Reverse(6), Reverse(9), Reverse(11), Reverse(12)],
+        ];
+
+        let result = merge.merge(input);
+
+        // Should get top-5 smallest values (largest Reverse values)
+        assert_eq!(result.len(), 5);
+        assert_eq!(
+            result,
+            vec![Reverse(1), Reverse(2), Reverse(3), Reverse(4), Reverse(5)]
+        );
+    }
+
+    #[test]
+    fn test_merge_u32_descending() {
+        let merge = Merge { k: 6 };
+
+        // Regular u32 in descending order (largest first)
+        let input = vec![
+            vec![100u32, 75, 50, 25],
+            vec![90, 60, 30],
+            vec![95, 85, 70, 40, 10],
+        ];
+
+        let result = merge.merge(input);
+
+        // Should get top-6 largest u32 values
+        assert_eq!(result.len(), 6);
+        assert_eq!(result, vec![100, 95, 90, 85, 75, 70]);
+    }
+
+    #[test]
+    fn test_merge_i32_descending() {
+        let merge = Merge { k: 5 };
+
+        // i32 values in descending order (including negatives)
+        let input = vec![
+            vec![50i32, 10, -10, -50],
+            vec![30, 0, -30],
+            vec![40, 20, -20, -40],
+        ];
+
+        let result = merge.merge(input);
+
+        // Should get top-5 largest i32 values
+        assert_eq!(result.len(), 5);
+        assert_eq!(result, vec![50, 40, 30, 20, 10]);
+    }
+
+    #[test]
+    fn test_merge_with_duplicates() {
+        let merge = Merge { k: 10 };
+
+        // Input with duplicates using regular u32 in descending order
+        let input = vec![
+            vec![100u32, 80, 80, 60, 40],
+            vec![90, 80, 50, 30],
+            vec![100, 70, 60, 20],
+        ];
+
+        let result = merge.merge(input);
+
+        // Duplicates should be removed
+        assert_eq!(result, vec![100, 90, 80, 70, 60, 50, 40, 30, 20]);
+    }
+
+    #[test]
+    fn test_merge_empty_vectors() {
+        let merge = Merge { k: 5 };
+
+        // All empty with u32
+        let input: Vec<Vec<u32>> = vec![vec![], vec![], vec![]];
+        let result = merge.merge(input);
+        assert_eq!(result.len(), 0);
+
+        // Some empty, some with data (u64)
+        let input = vec![vec![], vec![1000u64, 750, 500], vec![], vec![850, 600]];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![1000, 850, 750, 600, 500]);
+
+        // Single non-empty vector (i32)
+        let input = vec![vec![], vec![100i32, 50, 25], vec![]];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![100, 50, 25]);
+    }
+
+    #[test]
+    fn test_merge_k_boundary_conditions() {
+        // k = 0 with u32
+        let merge = Merge { k: 0 };
+        let input = vec![vec![100u32, 50], vec![75, 25]];
+        let result = merge.merge(input);
+        assert_eq!(result.len(), 0);
+
+        // k = 1 with i64
+        let merge = Merge { k: 1 };
+        let input = vec![vec![1000i64, 500], vec![750, 250], vec![900, 100]];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![1000]);
+
+        // k larger than total unique elements with u128
+        let merge = Merge { k: 100 };
+        let input = vec![vec![10000u128, 5000], vec![8000, 3000]];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![10000, 8000, 5000, 3000]);
+    }
+
+    #[test]
+    fn test_merge_with_strings() {
+        let merge = Merge { k: 4 };
+
+        // Strings must be sorted in descending order (largest first) for the max heap merge
+        let input = vec![
+            vec!["zebra".to_string(), "dog".to_string(), "apple".to_string()],
+            vec!["elephant".to_string(), "banana".to_string()],
+            vec!["fish".to_string(), "cat".to_string()],
+        ];
+
+        let result = merge.merge(input);
+
+        // Should get top-4 lexicographically largest strings
+        assert_eq!(
+            result,
+            vec![
+                "zebra".to_string(),
+                "fish".to_string(),
+                "elephant".to_string(),
+                "dog".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_merge_with_custom_struct() {
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+        struct Score {
+            value: i32,
+            id: String,
+        }
+
+        let merge = Merge { k: 3 };
+
+        // Custom structs sorted by value (descending), then by id
+        let input = vec![
+            vec![
+                Score {
+                    value: 100,
+                    id: "a".to_string(),
+                },
+                Score {
+                    value: 80,
+                    id: "b".to_string(),
+                },
+                Score {
+                    value: 60,
+                    id: "c".to_string(),
+                },
+            ],
+            vec![
+                Score {
+                    value: 90,
+                    id: "d".to_string(),
+                },
+                Score {
+                    value: 70,
+                    id: "e".to_string(),
+                },
+            ],
+            vec![
+                Score {
+                    value: 95,
+                    id: "f".to_string(),
+                },
+                Score {
+                    value: 85,
+                    id: "g".to_string(),
+                },
+            ],
+        ];
+
+        let result = merge.merge(input);
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(
+            result[0],
+            Score {
+                value: 100,
+                id: "a".to_string()
+            }
+        );
+        assert_eq!(
+            result[1],
+            Score {
+                value: 95,
+                id: "f".to_string()
+            }
+        );
+        assert_eq!(
+            result[2],
+            Score {
+                value: 90,
+                id: "d".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_merge_preserves_order() {
+        use std::cmp::Reverse;
+
+        let merge = Merge { k: 10 };
+
+        // For Reverse, smaller inner values are "larger" in ordering
+        // So vectors should be sorted with smallest inner values first
+        let input = vec![
+            vec![Reverse(2), Reverse(6), Reverse(10), Reverse(14)],
+            vec![Reverse(4), Reverse(8), Reverse(12), Reverse(16)],
+            vec![Reverse(1), Reverse(3), Reverse(5), Reverse(7), Reverse(9)],
+        ];
+
+        let result = merge.merge(input);
+
+        // Verify output maintains order - should be sorted by Reverse ordering
+        // which means ascending inner values
+        for i in 1..result.len() {
+            assert!(
+                result[i - 1] >= result[i],
+                "Output should be in descending Reverse order"
+            );
+            assert!(
+                result[i - 1].0 <= result[i].0,
+                "Inner values should be in ascending order"
+            );
+        }
+
+        // Check we got the right elements
+        assert_eq!(
+            result,
+            vec![
+                Reverse(1),
+                Reverse(2),
+                Reverse(3),
+                Reverse(4),
+                Reverse(5),
+                Reverse(6),
+                Reverse(7),
+                Reverse(8),
+                Reverse(9),
+                Reverse(10)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_merge_single_vector() {
+        let merge = Merge { k: 3 };
+
+        // Single vector input with u64
+        let input = vec![vec![1000u64, 800, 600, 400, 200]];
+
+        let result = merge.merge(input);
+
+        assert_eq!(result, vec![1000, 800, 600]);
+    }
+
+    #[test]
+    fn test_merge_all_same_values() {
+        let merge = Merge { k: 5 };
+
+        // All vectors contain the same value (using i16)
+        let input = vec![vec![42i16, 42, 42], vec![42, 42], vec![42, 42, 42, 42]];
+
+        let result = merge.merge(input);
+
+        // Should deduplicate to single value
+        assert_eq!(result, vec![42]);
+    }
+
+    #[test]
+    fn test_merge_mixed_types_sizes() {
+        // Test with usize (common in real usage)
+        let merge = Merge { k: 4 };
+        let input = vec![
+            vec![1000usize, 500, 100],
+            vec![800, 300],
+            vec![900, 600, 200],
+        ];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![1000, 900, 800, 600]);
+
+        // Test with negative integers (i32)
+        let merge = Merge { k: 5 };
+        let input = vec![vec![10i32, 0, -10, -20], vec![5, -5, -15], vec![15, -25]];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![15, 10, 5, 0, -5]);
     }
 }
