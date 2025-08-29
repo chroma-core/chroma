@@ -610,7 +610,7 @@ impl S3Storage {
                     path: key.to_string(),
                     source: Arc::new(err),
                 }
-            } else if err.meta().code() == Some("PreconditionFailed") {
+            } else if err.meta().code() == Some("SlowDown") {
                 StorageError::Backoff
             } else {
                 StorageError::Generic {
