@@ -39,6 +39,11 @@ SERVER_PID=$!
 # Wait for the server to be ready
 wait_for_server
 
+# Build packages
+echo "Building..."
+cd clients/new-js
+pnpm build
+
 # Generate API
 echo "Generating JS client..."
 cd clients/new-js/packages/chromadb
