@@ -164,7 +164,6 @@ impl Orchestrator for RankOrchestrator {
         let rank_task = wrap(
             Box::new(self.rank.clone()),
             RankInput {
-                blockfile_provider: self.blockfile_provider.clone(),
                 knn_results: self.knn_results.clone(),
             },
             ctx.receiver(),
