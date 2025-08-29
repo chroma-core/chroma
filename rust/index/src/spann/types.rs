@@ -2896,6 +2896,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3109,6 +3110,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3373,6 +3375,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3609,6 +3612,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3872,6 +3876,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -4171,6 +4176,7 @@ mod tests {
             PathBuf::from(temp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         )
     }
 

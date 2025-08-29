@@ -920,6 +920,7 @@ mod tests {
             PathBuf::from(tmpdir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let spann_provider = SpannProvider {
             hnsw_provider: hnsw_provider.clone(),
