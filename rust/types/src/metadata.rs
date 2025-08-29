@@ -1220,8 +1220,22 @@ mod tests {
                 )),
             },
         );
+        // Add sparse vector test
+        proto_metadata.metadata.insert(
+            "sparse".to_string(),
+            chroma_proto::UpdateMetadataValue {
+                value: Some(
+                    chroma_proto::update_metadata_value::Value::SparseVectorValue(
+                        chroma_proto::SparseVector {
+                            indices: vec![0, 5, 10],
+                            values: vec![0.1, 0.5, 0.9],
+                        },
+                    ),
+                ),
+            },
+        );
         let converted_metadata: UpdateMetadata = proto_metadata.try_into().unwrap();
-        assert_eq!(converted_metadata.len(), 3);
+        assert_eq!(converted_metadata.len(), 4);
         assert_eq!(
             converted_metadata.get("foo").unwrap(),
             &UpdateMetadataValue::Int(42)
@@ -1233,6 +1247,13 @@ mod tests {
         assert_eq!(
             converted_metadata.get("baz").unwrap(),
             &UpdateMetadataValue::Str("42".to_string())
+        );
+        assert_eq!(
+            converted_metadata.get("sparse").unwrap(),
+            &UpdateMetadataValue::SparseVector(SparseVector::new(
+                vec![0, 5, 10],
+                vec![0.1, 0.5, 0.9]
+            ))
         );
     }
 
@@ -1261,8 +1282,22 @@ mod tests {
                 )),
             },
         );
+        // Add sparse vector test
+        proto_metadata.metadata.insert(
+            "sparse".to_string(),
+            chroma_proto::UpdateMetadataValue {
+                value: Some(
+                    chroma_proto::update_metadata_value::Value::SparseVectorValue(
+                        chroma_proto::SparseVector {
+                            indices: vec![1, 10, 100],
+                            values: vec![0.2, 0.4, 0.6],
+                        },
+                    ),
+                ),
+            },
+        );
         let converted_metadata: Metadata = proto_metadata.try_into().unwrap();
-        assert_eq!(converted_metadata.len(), 3);
+        assert_eq!(converted_metadata.len(), 4);
         assert_eq!(
             converted_metadata.get("foo").unwrap(),
             &MetadataValue::Int(42)
@@ -1274,6 +1309,10 @@ mod tests {
         assert_eq!(
             converted_metadata.get("baz").unwrap(),
             &MetadataValue::Str("42".to_string())
+        );
+        assert_eq!(
+            converted_metadata.get("sparse").unwrap(),
+            &MetadataValue::SparseVector(SparseVector::new(vec![1, 10, 100], vec![0.2, 0.4, 0.6]))
         );
     }
 
@@ -1421,5 +1460,68 @@ mod tests {
             }
             _ => panic!("Invalid where document type"),
         }
+    }
+
+    #[test]
+    fn test_sparse_vector_new() {
+        let indices = vec![0, 5, 10];
+        let values = vec![0.1, 0.5, 0.9];
+        let sparse = SparseVector::new(indices.clone(), values.clone());
+        assert_eq!(sparse.indices, indices);
+        assert_eq!(sparse.values, values);
+    }
+
+    #[test]
+    fn test_sparse_vector_from_pairs() {
+        let pairs = vec![(0, 0.1), (5, 0.5), (10, 0.9)];
+        let sparse = SparseVector::from_pairs(pairs.clone());
+        assert_eq!(sparse.indices, vec![0, 5, 10]);
+        assert_eq!(sparse.values, vec![0.1, 0.5, 0.9]);
+    }
+
+    #[test]
+    fn test_sparse_vector_iter() {
+        let sparse = SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]);
+        let collected: Vec<(u32, f32)> = sparse.iter().collect();
+        assert_eq!(collected, vec![(0, 0.1), (5, 0.5), (10, 0.9)]);
+    }
+
+    #[test]
+    fn test_sparse_vector_ordering() {
+        let sparse1 = SparseVector::new(vec![0, 5], vec![0.1, 0.5]);
+        let sparse2 = SparseVector::new(vec![0, 5], vec![0.1, 0.5]);
+        let sparse3 = SparseVector::new(vec![0, 6], vec![0.1, 0.5]);
+        let sparse4 = SparseVector::new(vec![0, 5], vec![0.1, 0.6]);
+
+        assert_eq!(sparse1, sparse2);
+        assert!(sparse1 < sparse3);
+        assert!(sparse1 < sparse4);
+    }
+
+    #[test]
+    fn test_sparse_vector_proto_conversion() {
+        let sparse = SparseVector::new(vec![1, 10, 100], vec![0.2, 0.4, 0.6]);
+        let proto: chroma_proto::SparseVector = sparse.clone().into();
+        assert_eq!(proto.indices, vec![1, 10, 100]);
+        assert_eq!(proto.values, vec![0.2, 0.4, 0.6]);
+
+        let converted: SparseVector = proto.into();
+        assert_eq!(converted, sparse);
+    }
+
+    #[test]
+    fn test_sparse_vector_logical_size() {
+        let metadata = Metadata::from([(
+            "sparse".to_string(),
+            MetadataValue::SparseVector(SparseVector::new(
+                vec![0, 1, 2, 3, 4],
+                vec![0.1, 0.2, 0.3, 0.4, 0.5],
+            )),
+        )]);
+
+        let size = logical_size_of_metadata(&metadata);
+        // Size should include the key string length and the sparse vector data
+        // "sparse" = 6 bytes + 5 * 4 bytes (u32 indices) + 5 * 4 bytes (f32 values) = 46 bytes
+        assert_eq!(size, 46);
     }
 }
