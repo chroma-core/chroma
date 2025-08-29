@@ -10,7 +10,7 @@ class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model_name: str = "morph-embedding-v2",
+        model_name: str = "morph-embedding-v3",
         api_base: str = "https://api.morphllm.com/v1",
         encoding_format: str = "float",
         api_key_env_var: str = "MORPH_API_KEY",
@@ -22,7 +22,7 @@ class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
             api_key (str, optional): The API key for the Morph API. If not provided,
                 it will be read from the environment variable specified by api_key_env_var.
             model_name (str, optional): The name of the model to use for embeddings.
-                Defaults to "morph-embedding-v2".
+                Defaults to "morph-embedding-v3".
             api_base (str, optional): The base URL for the Morph API.
                 Defaults to "https://api.morphllm.com/v1".
             encoding_format (str, optional): The format for embeddings (float or base64).

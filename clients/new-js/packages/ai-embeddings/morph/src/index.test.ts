@@ -6,7 +6,7 @@ describe("MorphEmbeddingFunction", () => {
     jest.resetAllMocks();
   });
 
-  const MODEL = "morph-embedding-v2";
+  const MODEL = "morph-embedding-v3";
 
   const defaultParametersTest = "should initialize with default parameters";
   if (!process.env.MORPH_API_KEY) {
