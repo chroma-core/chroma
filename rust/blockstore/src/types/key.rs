@@ -2,7 +2,7 @@ use std::fmt::{Debug, Display};
 
 use crate::key::KeyWrapper;
 
-pub trait Key: PartialEq + Debug + Display + Into<KeyWrapper> + Clone {
+pub trait Key: Clone + Debug + Display + Into<KeyWrapper> + PartialEq + Send + Sync {
     fn get_size(&self) -> usize;
 }
 

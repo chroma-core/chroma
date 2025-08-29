@@ -41,6 +41,14 @@ impl SignedRoaringBitmap {
         Self::Exclude(RoaringBitmap::new())
     }
 
+    pub fn contains(&self, value: u32) -> bool {
+        use SignedRoaringBitmap::*;
+        match self {
+            Include(rbm) => rbm.contains(value),
+            Exclude(rbm) => !rbm.contains(value),
+        }
+    }
+
     pub fn flip(self) -> Self {
         use SignedRoaringBitmap::*;
         match self {
