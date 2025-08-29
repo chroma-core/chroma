@@ -41,6 +41,7 @@ from chromadb.api.types import (
     Include,
     GetResult,
     QueryResult,
+    SearchResult,
     validate_metadata,
     validate_update_metadata,
     validate_where,
@@ -74,6 +75,7 @@ from functools import wraps
 import time
 import logging
 import re
+from chromadb.execution.expression.plan import Search
 
 T = TypeVar("T", bound=Callable[..., Any])
 
@@ -415,6 +417,18 @@ class SegmentAPI(ServerAPI):
     ) -> CollectionModel:
         raise NotImplementedError(
             "Collection forking is not implemented for SegmentAPI"
+        )
+
+    @override
+    def _search(
+        self,
+        collection_id: UUID,
+        searches: List[Search],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> SearchResult:
+        raise NotImplementedError(
+            "Seach is not implemented for SegmentAPI"
         )
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)

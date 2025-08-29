@@ -613,7 +613,7 @@ def to_proto_knn(knn: KNN) -> query_pb.KNNOperator:
 
 
 def to_proto_limit(limit: Limit) -> query_pb.LimitOperator:
-    return query_pb.LimitOperator(skip=limit.skip, fetch=limit.fetch)
+    return query_pb.LimitOperator(offset=limit.offset, limit=limit.limit)
 
 
 def to_proto_projection(projection: Projection) -> query_pb.ProjectionOperator:
