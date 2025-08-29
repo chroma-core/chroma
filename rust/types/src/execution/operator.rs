@@ -1529,122 +1529,102 @@ mod tests {
         assert_eq!(result.len(), 5);
         assert_eq!(
             result,
-            vec![
-                Reverse(1),
-                Reverse(2),
-                Reverse(3),
-                Reverse(4),
-                Reverse(5)
-            ]
+            vec![Reverse(1), Reverse(2), Reverse(3), Reverse(4), Reverse(5)]
         );
     }
 
     #[test]
-    fn test_merge_with_duplicates() {
-        use std::cmp::Reverse;
+    fn test_merge_u32_descending() {
+        let merge = Merge { k: 6 };
 
+        // Regular u32 in descending order (largest first)
+        let input = vec![
+            vec![100u32, 75, 50, 25],
+            vec![90, 60, 30],
+            vec![95, 85, 70, 40, 10],
+        ];
+
+        let result = merge.merge(input);
+
+        // Should get top-6 largest u32 values
+        assert_eq!(result.len(), 6);
+        assert_eq!(result, vec![100, 95, 90, 85, 75, 70]);
+    }
+
+    #[test]
+    fn test_merge_i32_descending() {
+        let merge = Merge { k: 5 };
+
+        // i32 values in descending order (including negatives)
+        let input = vec![
+            vec![50i32, 10, -10, -50],
+            vec![30, 0, -30],
+            vec![40, 20, -20, -40],
+        ];
+
+        let result = merge.merge(input);
+
+        // Should get top-5 largest i32 values
+        assert_eq!(result.len(), 5);
+        assert_eq!(result, vec![50, 40, 30, 20, 10]);
+    }
+
+    #[test]
+    fn test_merge_with_duplicates() {
         let merge = Merge { k: 10 };
 
-        // Input with duplicates both within and across vectors
+        // Input with duplicates using regular u32 in descending order
         let input = vec![
-            vec![Reverse(1), Reverse(3), Reverse(3), Reverse(5), Reverse(7)],
-            vec![Reverse(2), Reverse(3), Reverse(6), Reverse(8)],
-            vec![Reverse(1), Reverse(4), Reverse(5), Reverse(9)],
+            vec![100u32, 80, 80, 60, 40],
+            vec![90, 80, 50, 30],
+            vec![100, 70, 60, 20],
         ];
 
         let result = merge.merge(input);
 
         // Duplicates should be removed
-        assert_eq!(
-            result,
-            vec![
-                Reverse(1),
-                Reverse(2),
-                Reverse(3),
-                Reverse(4),
-                Reverse(5),
-                Reverse(6),
-                Reverse(7),
-                Reverse(8),
-                Reverse(9)
-            ]
-        );
+        assert_eq!(result, vec![100, 90, 80, 70, 60, 50, 40, 30, 20]);
     }
 
     #[test]
     fn test_merge_empty_vectors() {
-        use std::cmp::Reverse;
-
         let merge = Merge { k: 5 };
 
-        // All empty
-        let input: Vec<Vec<Reverse<u32>>> = vec![vec![], vec![], vec![]];
+        // All empty with u32
+        let input: Vec<Vec<u32>> = vec![vec![], vec![], vec![]];
         let result = merge.merge(input);
         assert_eq!(result.len(), 0);
 
-        // Some empty, some with data
-        let input = vec![
-            vec![],
-            vec![Reverse(1), Reverse(3), Reverse(5)],
-            vec![],
-            vec![Reverse(2), Reverse(4)],
-        ];
+        // Some empty, some with data (u64)
+        let input = vec![vec![], vec![1000u64, 750, 500], vec![], vec![850, 600]];
         let result = merge.merge(input);
-        assert_eq!(
-            result,
-            vec![
-                Reverse(1),
-                Reverse(2),
-                Reverse(3),
-                Reverse(4),
-                Reverse(5)
-            ]
-        );
+        assert_eq!(result, vec![1000, 850, 750, 600, 500]);
 
-        // Single non-empty vector
-        let input = vec![
-            vec![],
-            vec![Reverse(1), Reverse(2), Reverse(3)],
-            vec![],
-        ];
+        // Single non-empty vector (i32)
+        let input = vec![vec![], vec![100i32, 50, 25], vec![]];
         let result = merge.merge(input);
-        assert_eq!(result, vec![Reverse(1), Reverse(2), Reverse(3)]);
+        assert_eq!(result, vec![100, 50, 25]);
     }
 
     #[test]
     fn test_merge_k_boundary_conditions() {
-        use std::cmp::Reverse;
-
-        // k = 0
+        // k = 0 with u32
         let merge = Merge { k: 0 };
-        let input = vec![
-            vec![Reverse(1), Reverse(3)],
-            vec![Reverse(2), Reverse(4)],
-        ];
+        let input = vec![vec![100u32, 50], vec![75, 25]];
         let result = merge.merge(input);
         assert_eq!(result.len(), 0);
 
-        // k = 1
+        // k = 1 with i64
         let merge = Merge { k: 1 };
-        let input = vec![
-            vec![Reverse(5), Reverse(10)],
-            vec![Reverse(3), Reverse(8)],
-            vec![Reverse(1), Reverse(7)],
-        ];
+        let input = vec![vec![1000i64, 500], vec![750, 250], vec![900, 100]];
         let result = merge.merge(input);
-        assert_eq!(result, vec![Reverse(1)]);
+        assert_eq!(result, vec![1000]);
 
-        // k larger than total unique elements
+        // k larger than total unique elements with u128
         let merge = Merge { k: 100 };
-        let input = vec![
-            vec![Reverse(1), Reverse(3)],
-            vec![Reverse(2), Reverse(4)],
-        ];
+        let input = vec![vec![10000u128, 5000], vec![8000, 3000]];
         let result = merge.merge(input);
-        assert_eq!(
-            result,
-            vec![Reverse(1), Reverse(2), Reverse(3), Reverse(4)]
-        );
+        assert_eq!(result, vec![10000, 8000, 5000, 3000]);
     }
 
     #[test]
@@ -1685,26 +1665,65 @@ mod tests {
         // Custom structs sorted by value (descending), then by id
         let input = vec![
             vec![
-                Score { value: 100, id: "a".to_string() },
-                Score { value: 80, id: "b".to_string() },
-                Score { value: 60, id: "c".to_string() },
+                Score {
+                    value: 100,
+                    id: "a".to_string(),
+                },
+                Score {
+                    value: 80,
+                    id: "b".to_string(),
+                },
+                Score {
+                    value: 60,
+                    id: "c".to_string(),
+                },
             ],
             vec![
-                Score { value: 90, id: "d".to_string() },
-                Score { value: 70, id: "e".to_string() },
+                Score {
+                    value: 90,
+                    id: "d".to_string(),
+                },
+                Score {
+                    value: 70,
+                    id: "e".to_string(),
+                },
             ],
             vec![
-                Score { value: 95, id: "f".to_string() },
-                Score { value: 85, id: "g".to_string() },
+                Score {
+                    value: 95,
+                    id: "f".to_string(),
+                },
+                Score {
+                    value: 85,
+                    id: "g".to_string(),
+                },
             ],
         ];
 
         let result = merge.merge(input);
 
         assert_eq!(result.len(), 3);
-        assert_eq!(result[0], Score { value: 100, id: "a".to_string() });
-        assert_eq!(result[1], Score { value: 95, id: "f".to_string() });
-        assert_eq!(result[2], Score { value: 90, id: "d".to_string() });
+        assert_eq!(
+            result[0],
+            Score {
+                value: 100,
+                id: "a".to_string()
+            }
+        );
+        assert_eq!(
+            result[1],
+            Score {
+                value: 95,
+                id: "f".to_string()
+            }
+        );
+        assert_eq!(
+            result[2],
+            Score {
+                value: 90,
+                id: "d".to_string()
+            }
+        );
     }
 
     #[test]
@@ -1726,8 +1745,14 @@ mod tests {
         // Verify output maintains order - should be sorted by Reverse ordering
         // which means ascending inner values
         for i in 1..result.len() {
-            assert!(result[i - 1] >= result[i], "Output should be in descending Reverse order");
-            assert!(result[i - 1].0 <= result[i].0, "Inner values should be in ascending order");
+            assert!(
+                result[i - 1] >= result[i],
+                "Output should be in descending Reverse order"
+            );
+            assert!(
+                result[i - 1].0 <= result[i].0,
+                "Inner values should be in ascending order"
+            );
         }
 
         // Check we got the right elements
@@ -1750,34 +1775,45 @@ mod tests {
 
     #[test]
     fn test_merge_single_vector() {
-        use std::cmp::Reverse;
-
         let merge = Merge { k: 3 };
 
-        // Single vector input
-        let input = vec![vec![Reverse(1), Reverse(2), Reverse(3), Reverse(4), Reverse(5)]];
+        // Single vector input with u64
+        let input = vec![vec![1000u64, 800, 600, 400, 200]];
 
         let result = merge.merge(input);
 
-        assert_eq!(result, vec![Reverse(1), Reverse(2), Reverse(3)]);
+        assert_eq!(result, vec![1000, 800, 600]);
     }
 
     #[test]
     fn test_merge_all_same_values() {
-        use std::cmp::Reverse;
-
         let merge = Merge { k: 5 };
 
-        // All vectors contain the same value
-        let input = vec![
-            vec![Reverse(42), Reverse(42), Reverse(42)],
-            vec![Reverse(42), Reverse(42)],
-            vec![Reverse(42), Reverse(42), Reverse(42), Reverse(42)],
-        ];
+        // All vectors contain the same value (using i16)
+        let input = vec![vec![42i16, 42, 42], vec![42, 42], vec![42, 42, 42, 42]];
 
         let result = merge.merge(input);
 
         // Should deduplicate to single value
-        assert_eq!(result, vec![Reverse(42)]);
+        assert_eq!(result, vec![42]);
+    }
+
+    #[test]
+    fn test_merge_mixed_types_sizes() {
+        // Test with usize (common in real usage)
+        let merge = Merge { k: 4 };
+        let input = vec![
+            vec![1000usize, 500, 100],
+            vec![800, 300],
+            vec![900, 600, 200],
+        ];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![1000, 900, 800, 600]);
+
+        // Test with negative integers (i32)
+        let merge = Merge { k: 5 };
+        let input = vec![vec![10i32, 0, -10, -20], vec![5, -5, -15], vec![15, -25]];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![15, 10, 5, 0, -5]);
     }
 }
