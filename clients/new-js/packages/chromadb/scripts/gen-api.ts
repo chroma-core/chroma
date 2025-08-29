@@ -16,7 +16,7 @@ const main = async () => {
   if (useLocalHost) {
     server = {
       url: "http://localhost:8000",
-      host: "127.0.0.1",
+      host: "localhost",
       port: 8000,
       stop: () => true,
     };
