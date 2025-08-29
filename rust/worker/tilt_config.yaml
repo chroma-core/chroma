@@ -39,12 +39,10 @@ query_service:
           bandwidth_allocation: [0.7, 0.3]
   log:
     grpc:
-      host: "logservice.chroma"
+      host: "rust-log-service.chroma"
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 60000 # 1 minute
-      alt_host: "rust-log-service.chroma"
-      alt_host_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff"
   dispatcher:
     num_worker_threads: 4
     dispatcher_queue_size: 1000
@@ -124,12 +122,10 @@ compaction_service:
           bandwidth_allocation: [0.7, 0.3]
   log:
     grpc:
-      host: "logservice.chroma"
+      host: "rust-log-service.chroma"
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 60000 # 1 minute
-      alt_host: "rust-log-service.chroma"
-      alt_host_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff"
   dispatcher:
     num_worker_threads: 4
     dispatcher_queue_size: 1000
@@ -214,8 +210,6 @@ log_service:
     port: 50051
     connect_timeout_ms: 5000
     request_timeout_ms: 60000 # 1 minute
-    alt_host: "rust-log-service.chroma"
-    alt_host_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff"
 garbage_collector:
   service_name: "garbage-collector"
   otel_endpoint: "http://otel-collector:4317"
@@ -249,8 +243,7 @@ garbage_collector:
       queue_size: 100
   log:
     grpc:
-      host: "logservice.chroma"
+      host: "rust-log-service.chroma"
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 5000
-      alt_host: "rust-log-service.chroma"
