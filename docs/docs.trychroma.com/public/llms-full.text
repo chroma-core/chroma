@@ -2891,7 +2891,7 @@ Not an exhaustive list, but these are some of the core team’s biggest prioriti
 
 - **Workflow**: Building tools for answer questions like: what embedding model should I use? And how should I chunk up my documents?
 - **Visualization**: Building visualization tool to give developers greater intuition embedding spaces
-- **Query Planner**: Building tools to enable per-query and post-query transforms
+- **Query Planner**: Building tools to enable pre-query and post-query transforms
 - **Developer experience**: Adding more features to our CLI
 - **Easier Data Sharing**: Working on formats for serialization and easier data sharing of embedding Collections
 - **Improving recall**: Fine-tuning embedding transforms through human feedback
