@@ -1211,3 +1211,311 @@ impl TryFrom<SearchResult> for chroma_proto::SearchResult {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_query_vector_dense_proto_conversion() {
+        let dense_vec = vec![0.1, 0.2, 0.3, 0.4, 0.5];
+        let query_vector = QueryVector::Dense(dense_vec.clone());
+
+        // Convert to proto
+        let proto: chroma_proto::QueryVector = query_vector.clone().try_into().unwrap();
+
+        // Convert back
+        let converted: QueryVector = proto.try_into().unwrap();
+
+        assert_eq!(converted, query_vector);
+        if let QueryVector::Dense(v) = converted {
+            assert_eq!(v, dense_vec);
+        } else {
+            panic!("Expected dense vector");
+        }
+    }
+
+    #[test]
+    fn test_query_vector_sparse_proto_conversion() {
+        let sparse = SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]);
+        let query_vector = QueryVector::Sparse(sparse.clone());
+
+        // Convert to proto
+        let proto: chroma_proto::QueryVector = query_vector.clone().try_into().unwrap();
+
+        // Convert back
+        let converted: QueryVector = proto.try_into().unwrap();
+
+        assert_eq!(converted, query_vector);
+        if let QueryVector::Sparse(s) = converted {
+            assert_eq!(s, sparse);
+        } else {
+            panic!("Expected sparse vector");
+        }
+    }
+
+    #[test]
+    fn test_query_vector_equality_and_hash() {
+        use std::collections::HashSet;
+
+        let dense1 = QueryVector::Dense(vec![0.1, 0.2, 0.3]);
+        let dense2 = QueryVector::Dense(vec![0.1, 0.2, 0.3]);
+        let dense3 = QueryVector::Dense(vec![0.1, 0.2, 0.4]);
+
+        // Test equality
+        assert_eq!(dense1, dense2);
+        assert_ne!(dense1, dense3);
+
+        // Test hash - equal vectors should have same hash
+        let mut set = HashSet::new();
+        set.insert(dense1.clone());
+        assert!(set.contains(&dense2));
+        assert!(!set.contains(&dense3));
+
+        // Test sparse vectors
+        let sparse1 = QueryVector::Sparse(SparseVector::new(vec![0, 5], vec![0.1, 0.5]));
+        let sparse2 = QueryVector::Sparse(SparseVector::new(vec![0, 5], vec![0.1, 0.5]));
+        assert_eq!(sparse1, sparse2);
+
+        set.insert(sparse1.clone());
+        assert!(set.contains(&sparse2));
+    }
+
+    #[test]
+    fn test_filter_json_serialization() {
+        // Test basic filter serialization
+        let filter = Filter {
+            query_ids: Some(vec!["id1".to_string(), "id2".to_string()]),
+            where_clause: None,
+        };
+
+        let json = serde_json::to_string(&filter).unwrap();
+        let deserialized: Filter = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.query_ids, filter.query_ids);
+        assert_eq!(deserialized.where_clause, filter.where_clause);
+
+        // Test filter deserialization from JSON with composite where clause
+        // This includes both document filters ($contains, $regex) and metadata filters ($gte, $eq)
+        let json_str = r#"{
+            "query_ids": ["doc1", "doc2", "doc3"],
+            "where_clause": {
+                "$and": [
+                    {
+                        "content": {
+                            "$contains": "machine learning"
+                        }
+                    },
+                    {
+                        "author": "John Doe"
+                    },
+                    {
+                        "year": {
+                            "$gte": 2020
+                        }
+                    },
+                    {
+                        "description": {
+                            "$regex": "^[A-Z].*learning.*"
+                        }
+                    },
+                    {
+                        "tags": {
+                            "$in": ["AI", "ML", "Deep Learning"]
+                        }
+                    }
+                ]
+            }
+        }"#;
+
+        let filter: Filter = serde_json::from_str(json_str).unwrap();
+
+        // Verify query_ids
+        assert_eq!(
+            filter.query_ids,
+            Some(vec![
+                "doc1".to_string(),
+                "doc2".to_string(),
+                "doc3".to_string()
+            ])
+        );
+
+        // Verify where_clause structure
+        assert!(filter.where_clause.is_some());
+        let where_clause = filter.where_clause.unwrap();
+
+        // Should be a composite AND expression
+        if let crate::metadata::Where::Composite(composite) = where_clause {
+            assert_eq!(composite.operator, crate::metadata::BooleanOperator::And);
+            assert_eq!(composite.children.len(), 5);
+
+            // Check first child - document $contains filter
+            if let crate::metadata::Where::Document(doc) = &composite.children[0] {
+                assert_eq!(doc.operator, crate::metadata::DocumentOperator::Contains);
+                assert_eq!(doc.pattern, "machine learning");
+            } else {
+                panic!("Expected document filter as first child");
+            }
+
+            // Check second child - metadata equality filter (direct form)
+            if let crate::metadata::Where::Metadata(meta) = &composite.children[1] {
+                assert_eq!(meta.key, "author");
+                if let crate::metadata::MetadataComparison::Primitive(op, val) = &meta.comparison {
+                    assert_eq!(*op, crate::metadata::PrimitiveOperator::Equal);
+                    assert_eq!(
+                        *val,
+                        crate::metadata::MetadataValue::Str("John Doe".to_string())
+                    );
+                } else {
+                    panic!("Expected primitive comparison for author");
+                }
+            } else {
+                panic!("Expected metadata filter as second child");
+            }
+
+            // Check third child - metadata $gte filter
+            if let crate::metadata::Where::Metadata(meta) = &composite.children[2] {
+                assert_eq!(meta.key, "year");
+                if let crate::metadata::MetadataComparison::Primitive(op, val) = &meta.comparison {
+                    assert_eq!(*op, crate::metadata::PrimitiveOperator::GreaterThanOrEqual);
+                    assert_eq!(*val, crate::metadata::MetadataValue::Int(2020));
+                } else {
+                    panic!("Expected primitive comparison for year");
+                }
+            } else {
+                panic!("Expected metadata filter as third child");
+            }
+
+            // Check fourth child - document $regex filter
+            if let crate::metadata::Where::Document(doc) = &composite.children[3] {
+                assert_eq!(doc.operator, crate::metadata::DocumentOperator::Regex);
+                assert_eq!(doc.pattern, "^[A-Z].*learning.*");
+            } else {
+                panic!("Expected document regex filter as fourth child");
+            }
+
+            // Check fifth child - metadata $in filter
+            if let crate::metadata::Where::Metadata(meta) = &composite.children[4] {
+                assert_eq!(meta.key, "tags");
+                if let crate::metadata::MetadataComparison::Set(op, val) = &meta.comparison {
+                    assert_eq!(*op, crate::metadata::SetOperator::In);
+                    if let crate::metadata::MetadataSetValue::Str(tags) = val {
+                        assert_eq!(tags.len(), 3);
+                        assert!(tags.contains(&"AI".to_string()));
+                        assert!(tags.contains(&"ML".to_string()));
+                        assert!(tags.contains(&"Deep Learning".to_string()));
+                    } else {
+                        panic!("Expected string set for tags");
+                    }
+                } else {
+                    panic!("Expected set comparison for tags");
+                }
+            } else {
+                panic!("Expected metadata filter as fifth child");
+            }
+        } else {
+            panic!("Expected composite where clause");
+        }
+
+        // Test filter with empty query_ids
+        let json_str = r#"{
+            "query_ids": [],
+            "where_clause": null
+        }"#;
+
+        let filter: Filter = serde_json::from_str(json_str).unwrap();
+        assert_eq!(filter.query_ids, Some(vec![]));
+        assert_eq!(filter.where_clause, None);
+
+        // Test filter with null query_ids
+        let json_str = r#"{
+            "query_ids": null,
+            "where_clause": null
+        }"#;
+
+        let filter: Filter = serde_json::from_str(json_str).unwrap();
+        assert_eq!(filter.query_ids, None);
+        assert_eq!(filter.where_clause, None);
+    }
+
+    #[test]
+    fn test_limit_json_serialization() {
+        let limit = Limit {
+            skip: 10,
+            fetch: Some(20),
+        };
+
+        let json = serde_json::to_string(&limit).unwrap();
+        let deserialized: Limit = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.skip, limit.skip);
+        assert_eq!(deserialized.fetch, limit.fetch);
+    }
+
+    #[test]
+    fn test_query_vector_json_serialization() {
+        // Test dense vector
+        let dense = QueryVector::Dense(vec![0.1, 0.2, 0.3]);
+        let json = serde_json::to_string(&dense).unwrap();
+        let deserialized: QueryVector = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, dense);
+
+        // Test sparse vector
+        let sparse = QueryVector::Sparse(SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]));
+        let json = serde_json::to_string(&sparse).unwrap();
+        let deserialized: QueryVector = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, sparse);
+    }
+
+    #[test]
+    fn test_select_field_json_serialization() {
+        use std::collections::HashSet;
+
+        // Test predefined fields
+        let doc_field = SelectField::Document;
+        assert_eq!(serde_json::to_string(&doc_field).unwrap(), "\"#document\"");
+
+        let embed_field = SelectField::Embedding;
+        assert_eq!(
+            serde_json::to_string(&embed_field).unwrap(),
+            "\"#embedding\""
+        );
+
+        let meta_field = SelectField::Metadata;
+        assert_eq!(serde_json::to_string(&meta_field).unwrap(), "\"#metadata\"");
+
+        let score_field = SelectField::Score;
+        assert_eq!(serde_json::to_string(&score_field).unwrap(), "\"#score\"");
+
+        // Test metadata field
+        let custom_field = SelectField::MetadataField("custom_key".to_string());
+        assert_eq!(
+            serde_json::to_string(&custom_field).unwrap(),
+            "\"custom_key\""
+        );
+
+        // Test deserialization
+        let deserialized: SelectField = serde_json::from_str("\"#document\"").unwrap();
+        assert!(matches!(deserialized, SelectField::Document));
+
+        let deserialized: SelectField = serde_json::from_str("\"custom_field\"").unwrap();
+        assert!(matches!(deserialized, SelectField::MetadataField(s) if s == "custom_field"));
+
+        // Test Select struct with multiple fields
+        let mut fields = HashSet::new();
+        fields.insert(SelectField::Document);
+        fields.insert(SelectField::Embedding);
+        fields.insert(SelectField::MetadataField("author".to_string()));
+
+        let select = Select { fields };
+        let json = serde_json::to_string(&select).unwrap();
+        let deserialized: Select = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.fields.len(), 3);
+        assert!(deserialized.fields.contains(&SelectField::Document));
+        assert!(deserialized.fields.contains(&SelectField::Embedding));
+        assert!(deserialized
+            .fields
+            .contains(&SelectField::MetadataField("author".to_string())));
+    }
+}
