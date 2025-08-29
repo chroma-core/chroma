@@ -195,3 +195,124 @@ impl Operator<SelectInput, SelectOutput> for Select {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_log::test::{upsert_generator, LoadFromGenerator, LogGenerator};
+    use chroma_segment::test::TestDistributedSegment;
+    use chroma_system::Operator;
+    use std::collections::HashSet;
+
+    async fn setup_select_input() -> (TestDistributedSegment, SelectInput) {
+        let mut test_segment = TestDistributedSegment::new().await;
+        test_segment
+            .populate_with_generator(10, upsert_generator)
+            .await;
+
+        let records = vec![
+            RecordMeasure {
+                offset_id: 1,
+                measure: 0.9,
+            },
+            RecordMeasure {
+                offset_id: 5,
+                measure: 0.7,
+            },
+            RecordMeasure {
+                offset_id: 8,
+                measure: 0.5,
+            },
+        ];
+
+        let input = SelectInput {
+            records,
+            logs: upsert_generator.generate_chunk(11..=15),
+            blockfile_provider: test_segment.blockfile_provider.clone(),
+            record_segment: test_segment.record_segment.clone(),
+        };
+
+        (test_segment, input)
+    }
+
+    #[tokio::test]
+    async fn test_select_with_score_only() {
+        let (_test_segment, input) = setup_select_input().await;
+
+        let mut fields = HashSet::new();
+        fields.insert(SelectField::Score);
+
+        let select_operator = Select { fields };
+
+        let output = select_operator
+            .run(&input)
+            .await
+            .expect("Select should succeed");
+
+        assert_eq!(output.records.len(), 3);
+
+        // Check first record - ID should always be present
+        assert!(!output.records[0].id.is_empty());
+        assert_eq!(output.records[0].score, Some(0.9));
+        assert!(output.records[0].document.is_none());
+        assert!(output.records[0].embedding.is_none());
+        assert!(output.records[0].metadata.is_none());
+
+        // Check scores are preserved
+        assert_eq!(output.records[1].score, Some(0.7));
+        assert_eq!(output.records[2].score, Some(0.5));
+    }
+
+    #[tokio::test]
+    async fn test_select_with_all_fields() {
+        let (_test_segment, input) = setup_select_input().await;
+
+        let mut fields = HashSet::new();
+        fields.insert(SelectField::Document);
+        fields.insert(SelectField::Embedding);
+        fields.insert(SelectField::Metadata);
+        fields.insert(SelectField::Score);
+
+        let select_operator = Select { fields };
+
+        let output = select_operator
+            .run(&input)
+            .await
+            .expect("Select should succeed");
+
+        assert_eq!(output.records.len(), 3);
+
+        // Check all fields are present
+        for record in &output.records {
+            assert!(!record.id.is_empty());
+            assert!(record.document.is_some());
+            assert!(record.embedding.is_some());
+            assert!(record.metadata.is_some());
+            assert!(record.score.is_some());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_select_empty_records() {
+        let test_segment = TestDistributedSegment::new().await;
+
+        let input = SelectInput {
+            records: vec![],
+            logs: upsert_generator.generate_chunk(1..=5),
+            blockfile_provider: test_segment.blockfile_provider,
+            record_segment: test_segment.record_segment,
+        };
+
+        let mut fields = HashSet::new();
+        fields.insert(SelectField::Score);
+
+        let select_operator = Select { fields };
+
+        let output = select_operator
+            .run(&input)
+            .await
+            .expect("Select should succeed");
+
+        assert_eq!(output.records.len(), 0);
+    }
+}

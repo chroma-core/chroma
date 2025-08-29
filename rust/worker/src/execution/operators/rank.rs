@@ -206,3 +206,215 @@ impl Operator<RankInput, RankOutput> for Rank {
         Ok(RankOutput { ranks })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_rank_with_knn_results() {
+        // Setup KNN results
+        let mut knn_results = HashMap::new();
+        let query = KnnQuery {
+            embedding: chroma_types::operator::QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+            key: String::new(),
+            limit: 3,
+        };
+        knn_results.insert(
+            query.clone(),
+            vec![
+                RecordMeasure {
+                    offset_id: 1,
+                    measure: 0.9,
+                },
+                RecordMeasure {
+                    offset_id: 2,
+                    measure: 0.7,
+                },
+                RecordMeasure {
+                    offset_id: 3,
+                    measure: 0.5,
+                },
+            ],
+        );
+
+        // Test simple KNN rank
+        let rank = Rank::Knn {
+            embedding: query.embedding.clone(),
+            key: String::new(),
+            limit: query.limit,
+            default: None,
+            ordinal: false,
+        };
+        let input = RankInput {
+            knn_results,
+            blockfile_provider: BlockfileProvider::new_memory(),
+        };
+
+        let output = rank.run(&input).await.expect("Rank should succeed");
+        assert_eq!(output.ranks.len(), 3);
+        assert_eq!(output.ranks[0].offset_id, 1);
+        assert_eq!(output.ranks[0].measure, 0.9);
+    }
+
+    #[tokio::test]
+    async fn test_rank_arithmetic_operations() {
+        // Setup two KNN queries
+        let mut knn_results = HashMap::new();
+        let query1 = KnnQuery {
+            embedding: chroma_types::operator::QueryVector::Dense(vec![0.1]),
+            key: String::new(),
+            limit: 2,
+        };
+        let query2 = KnnQuery {
+            embedding: chroma_types::operator::QueryVector::Sparse(chroma_types::SparseVector {
+                indices: vec![0],
+                values: vec![1.0],
+            }),
+            key: "sparse".to_string(),
+            limit: 2,
+        };
+
+        knn_results.insert(
+            query1.clone(),
+            vec![
+                RecordMeasure {
+                    offset_id: 1,
+                    measure: 0.8,
+                },
+                RecordMeasure {
+                    offset_id: 2,
+                    measure: 0.6,
+                },
+            ],
+        );
+        knn_results.insert(
+            query2.clone(),
+            vec![
+                RecordMeasure {
+                    offset_id: 1,
+                    measure: 0.4,
+                },
+                RecordMeasure {
+                    offset_id: 3,
+                    measure: 0.2,
+                },
+            ],
+        );
+
+        // Test summation
+        let rank = Rank::Summation(vec![
+            Rank::Knn {
+                embedding: query1.embedding.clone(),
+                key: String::new(),
+                limit: query1.limit,
+                default: None,
+                ordinal: false,
+            },
+            Rank::Knn {
+                embedding: query2.embedding.clone(),
+                key: "sparse".to_string(),
+                limit: query2.limit,
+                default: None,
+                ordinal: false,
+            },
+        ]);
+        let input = RankInput {
+            knn_results: knn_results.clone(),
+            blockfile_provider: BlockfileProvider::new_memory(),
+        };
+
+        let output = rank.run(&input).await.expect("Rank should succeed");
+        // Record 1 appears in both: 0.8 + 0.4 = 1.2
+        assert_eq!(output.ranks[0].offset_id, 1);
+        assert_eq!(output.ranks[0].measure, 1.2);
+
+        // Test multiplication with constant
+        let rank = Rank::Multiplication(vec![
+            Rank::Knn {
+                embedding: query1.embedding.clone(),
+                key: String::new(),
+                limit: query1.limit,
+                default: None,
+                ordinal: false,
+            },
+            Rank::Value(0.5),
+        ]);
+        let input = RankInput {
+            knn_results,
+            blockfile_provider: BlockfileProvider::new_memory(),
+        };
+
+        let output = rank.run(&input).await.expect("Rank should succeed");
+        assert_eq!(output.ranks[0].offset_id, 1);
+        assert_eq!(output.ranks[0].measure, 0.4); // 0.8 * 0.5
+    }
+
+    #[tokio::test]
+    async fn test_rank_min_max_functions() {
+        let mut knn_results = HashMap::new();
+        let query = KnnQuery {
+            embedding: chroma_types::operator::QueryVector::Dense(vec![0.1]),
+            key: String::new(),
+            limit: 2,
+        };
+
+        knn_results.insert(
+            query.clone(),
+            vec![
+                RecordMeasure {
+                    offset_id: 1,
+                    measure: 0.8,
+                },
+                RecordMeasure {
+                    offset_id: 2,
+                    measure: 0.3,
+                },
+            ],
+        );
+
+        // Test max
+        let rank = Rank::Maximum(vec![
+            Rank::Knn {
+                embedding: query.embedding.clone(),
+                key: String::new(),
+                limit: query.limit,
+                default: None,
+                ordinal: false,
+            },
+            Rank::Value(0.5),
+        ]);
+        let input = RankInput {
+            knn_results: knn_results.clone(),
+            blockfile_provider: BlockfileProvider::new_memory(),
+        };
+
+        let output = rank.run(&input).await.expect("Rank should succeed");
+        assert_eq!(output.ranks[0].offset_id, 1);
+        assert_eq!(output.ranks[0].measure, 0.8); // max(0.8, 0.5) = 0.8
+        assert_eq!(output.ranks[1].offset_id, 2);
+        assert_eq!(output.ranks[1].measure, 0.5); // max(0.3, 0.5) = 0.5
+
+        // Test min
+        let rank = Rank::Minimum(vec![
+            Rank::Knn {
+                embedding: query.embedding.clone(),
+                key: String::new(),
+                limit: query.limit,
+                default: None,
+                ordinal: false,
+            },
+            Rank::Value(0.5),
+        ]);
+        let input = RankInput {
+            knn_results,
+            blockfile_provider: BlockfileProvider::new_memory(),
+        };
+
+        let output = rank.run(&input).await.expect("Rank should succeed");
+        assert_eq!(output.ranks[0].offset_id, 1);
+        assert_eq!(output.ranks[0].measure, 0.5); // min(0.8, 0.5) = 0.5
+        assert_eq!(output.ranks[1].offset_id, 2);
+        assert_eq!(output.ranks[1].measure, 0.3); // min(0.3, 0.5) = 0.3
+    }
+}
