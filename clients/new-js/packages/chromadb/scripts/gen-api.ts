@@ -3,15 +3,28 @@ import { dirname, join } from "path";
 import { rm, readFile, writeFile } from "node:fs/promises";
 import { createClient } from "@hey-api/openapi-ts";
 import { startChromaServer } from "./start-chroma.js";
+import { ServerInfo } from "./start-chroma-common.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const main = async () => {
-  console.log("Starting Chroma server via Rust binary...");
+  const args = process.argv.slice(2);
+  const useLocalHost = args.includes("--use-localhost");
 
-  const server = await startChromaServer();
-  console.log(`Server started at ${server.url}`);
+  let server: ServerInfo;
+  if (useLocalHost) {
+    server = {
+      url: "http://localhost:8000",
+      host: "localhost",
+      port: 8000,
+      stop: () => true,
+    };
+  } else {
+    server = await startChromaServer();
+    console.log(`Server started at ${server.url}`);
+    console.log("Starting Chroma server via Rust binary...");
+  }
 
   try {
     await createClient({
@@ -21,7 +34,7 @@ const main = async () => {
         {
           name: "@hey-api/client-fetch",
           throwOnError: true,
-          baseUrl: "http://localhost:8000",
+          baseUrl: server.url,
         },
         { name: "@hey-api/sdk", asClass: true },
         "@hey-api/typescript",
@@ -36,7 +49,7 @@ const main = async () => {
 
     // Fix the HashMap type to include null and remove duplicate number
     typesContent = typesContent.replace(
-      /export type HashMap = \{\s*\[key: string\]: boolean \| number \| number \| string;\s*\};/,
+      /export type HashMap = \{\s*\[key: string]: boolean \| number \| number \| string;\s*};/,
       "export type HashMap = {\n  [key: string]: boolean | number | string | null;\n};",
     );
 
@@ -48,6 +61,10 @@ const main = async () => {
 
     try {
       await rm("./chroma", { recursive: true, force: true });
+      await rm("../../../../chroma_integration_test_tmp_dir/", {
+        recursive: true,
+        force: true,
+      });
       console.log("✅ Cleaned up ./chroma directory");
     } catch (err) {
       console.warn("Warning: Could not delete ./chroma directory:", err);

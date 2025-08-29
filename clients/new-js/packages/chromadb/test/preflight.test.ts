@@ -4,7 +4,8 @@ import { DefaultService as Api } from "../src/api";
 
 test("preflight", async () => {
   const client = new ChromaClient({
-    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+    host: process.env.DEFAULT_CHROMA_INSTANCE_HOST,
+    port: +process.env.DEFAULT_CHROMA_INSTANCE_PORT!,
   });
   const preflight = await client.getPreflightChecks();
   expect(preflight).toBeDefined();
@@ -20,7 +21,8 @@ test("legacy preflight", async () => {
   } as any);
 
   const client = new ChromaClient({
-    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+    host: process.env.DEFAULT_CHROMA_INSTANCE_HOST,
+    port: +process.env.DEFAULT_CHROMA_INSTANCE_PORT!,
   });
   const preflight = await client.getPreflightChecks();
   expect(preflight).toBeDefined();
@@ -36,7 +38,8 @@ test("preflight with no values", async () => {
   } as any);
 
   const client = new ChromaClient({
-    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+    host: process.env.DEFAULT_CHROMA_INSTANCE_HOST,
+    port: +process.env.DEFAULT_CHROMA_INSTANCE_PORT!,
   });
   const preflight = await client.getPreflightChecks();
   expect(preflight).toBeDefined();

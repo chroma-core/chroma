@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
+
 set -e
+
 # Function to check if server is ready
 check_server() {
     curl -s http://localhost:8000/openapi.json > /dev/null
     return $?
 }
+
 # Function to wait for server with exponential backoff
 wait_for_server() {
     local max_attempts=10
@@ -26,35 +29,38 @@ wait_for_server() {
     echo "Error: Server failed to start after $max_attempts attempts"
     return 1
 }
+
 # Start the Chroma server in the background
 echo "Building and starting Chroma server..."
 cargo build --bin chroma
-cargo run --bin chroma run &
+cargo run --bin chroma run ./bin/ts-integration-test-fe-config.yml &
 SERVER_PID=$!
+
 # Wait for the server to be ready
 wait_for_server
 
-# Install dependencies
-cd clients/js
+# Build packages
+echo "Building..."
+cd clients/new-js
+pnpm build
 
-# Generate the JS client
+# Generate API
 echo "Generating JS client..."
-pnpm genapi
+cd packages/chromadb
+pnpm genapi -- --use-localhost
 
-# Cleanup: kill the server process
-kill $SERVER_PID
-
-pnpm prettier
-
-# run git diff and check if packages/chromadb-core/src/generated/ has changed
+# run git diff and check if packages/chromadb/src/api/ has changed
 echo "Checking for changes in generated client..."
-if ! git diff --quiet --exit-code packages/chromadb-core/src/generated/; then
+if ! git diff --quiet --exit-code src/api/; then
     echo "Error: Generated JS client has changed. Please commit the changes."
-    git diff packages/chromadb-core/src/generated/ | cat
+    git diff src/api/ | cat
     exit 1
 fi
 echo "No changes detected in generated client."
 
-# Install dependencies and run tests
+# Run tests
 echo "Running tests..."
-pnpm -r test --verbose
+EXTERNAL_CHROMA_SERVER=http://localhost:8000 pnpm test
+
+# Cleanup: kill the server process
+kill $SERVER_PID
