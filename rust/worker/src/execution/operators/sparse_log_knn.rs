@@ -62,7 +62,7 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
         &self,
         input: &SparseLogKnnInput,
     ) -> Result<SparseLogKnnOutput, SparseLogKnnError> {
-        let query_sparse_verctor: CsVec<f32> = (&self.embedding).into();
+        let query_sparse_vector: CsVec<f32> = (&self.embedding).into();
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
@@ -95,8 +95,8 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
                 else {
                     continue;
                 };
-                let log_sparse_verctor: CsVec<f32> = sparse_vector.into();
-                let score = query_sparse_verctor.dot(&log_sparse_verctor);
+                let log_sparse_vector: CsVec<f32> = sparse_vector.into();
+                let score = query_sparse_vector.dot(&log_sparse_vector);
                 if (min_heap.len() as u32) < self.limit {
                     min_heap.push(Reverse(RecordMeasure {
                         offset_id: log.get_offset_id(),
