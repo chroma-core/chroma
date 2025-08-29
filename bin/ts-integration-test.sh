@@ -46,16 +46,16 @@ pnpm genapi -- --use-localhost
 
 # run git diff and check if packages/chromadb/src/api/ has changed
 echo "Checking for changes in generated client..."
-if ! git diff --quiet --exit-code packages/chromadb/src/api/; then
+if ! git diff --quiet --exit-code src/api/; then
     echo "Error: Generated JS client has changed. Please commit the changes."
-    git diff packages/chromadb/src/api/ | cat
+    git diff src/api/ | cat
     exit 1
 fi
 echo "No changes detected in generated client."
 
 # Run tests
-DEFAULT_CHROMA_INSTANCE_URL = "http://localhost:8000"
-DEFAULT_CHROMA_INSTANCE_HOST = "127.0.0.1"
+export DEFAULT_CHROMA_INSTANCE_URL="http://localhost:8000"
+export DEFAULT_CHROMA_INSTANCE_HOST="127.0.0.1"
 
 echo "Running tests..."
 pnpm -r test
