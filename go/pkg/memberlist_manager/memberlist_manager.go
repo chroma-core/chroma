@@ -68,6 +68,7 @@ func (m *MemberlistManager) reconcileMemberlist(updates map[string]bool) {
 	}
 	// do not update memberlist if there's no change
 	if !memberlistSame(memberlist, newMemberlist) {
+		log.Info("Memberlist has changed, updating", zap.Any("old", memberlist), zap.Any("new", newMemberlist))
 		err = m.updateMemberlist(newMemberlist, *resourceVersion)
 		if err != nil {
 			log.Error("Error while updating memberlist", zap.Error(err))
