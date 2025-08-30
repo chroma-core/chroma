@@ -85,7 +85,7 @@ export type OperatorExpression =
   | { $lte: LiteralValue }
   | { $ne: LiteralValue }
   | { $eq: LiteralValue }
-  | { $exists: boolean }
+  | { $exists: LiteralValue }
   | { $and: LiteralValue }
   | { $or: LiteralValue }
   | { $in: LiteralValue[] }
