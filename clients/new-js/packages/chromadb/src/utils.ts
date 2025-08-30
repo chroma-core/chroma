@@ -390,16 +390,23 @@ export const validateWhere = (where: Where) => {
       }
 
       if (
-        !["$gt", "$gte", "$lt", "$lte", "$ne", "$eq", "$in", "$nin"].includes(
+        !["$gt", "$gte", "$lt", "$lte", "$ne", "$eq", "$in", "$nin", "$exists"].includes(
           operator,
         )
       ) {
         throw new ChromaValueError(
-          `Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, but got ${operator}`,
+          `Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, $exists, but got ${operator}`,
+        );
+      }
+
+      if (operator === "$exists" && typeof operand !== "boolean") {
+        throw new ChromaValueError(
+          `Expected operand value to be a boolean for ${operator}, but got ${typeof operand}`,
         );
       }
 
       if (
+        operator !== "$exists" &&
         !["string", "number", "boolean"].includes(typeof operand) &&
         !Array.isArray(operand)
       ) {
@@ -409,6 +416,7 @@ export const validateWhere = (where: Where) => {
       }
 
       if (
+        operator !== "$exists" &&
         Array.isArray(operand) &&
         (operand.length === 0 ||
           !operand.every((item) => typeof item === typeof operand[0]))

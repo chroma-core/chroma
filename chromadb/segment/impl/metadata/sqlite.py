@@ -677,7 +677,7 @@ def _where_clause(
 
 def _value_criterion(
     key: str,
-    value: Union[LiteralValue, List[LiteralValue]],
+    value: Union[LiteralValue, List[LiteralValue], bool],
     op: Union[WhereOperator, InclusionExclusionOperator],
     metadata_q: QueryBuilder,
     metadata_t: Table,
@@ -689,6 +689,18 @@ def _value_criterion(
         return (not isinstance(obj, bool)) and isinstance(obj, (int, float))
 
     sub_q = metadata_q.where(metadata_t.key == ParameterValue(key))
+
+    # $exists: true means there exists a row in embedding_metadata with this key
+    # $exists: false means there is no row with this key
+    if op == "$exists":
+        if not isinstance(value, bool):
+            raise ValueError("$exists expects a boolean operand")
+        return (
+            embeddings_t.id.isin(sub_q)
+            if value
+            else embeddings_t.id.notin(sub_q)
+        )
+
     p_val = ParameterValue(value)
 
     if is_numeric(value) or (isinstance(value, list) and is_numeric(value[0])):

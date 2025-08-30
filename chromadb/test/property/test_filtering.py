@@ -59,6 +59,9 @@ def _filter_where_clause(clause: Where, metadata: Optional[Metadata]) -> bool:
         return key in metadata and metadata[key] in val  # type: ignore[operator]
     elif op == "$nin":
         return key not in metadata or metadata[key] not in val  # type: ignore[operator]
+    elif op == "$exists":
+        assert isinstance(val, bool)
+        return (key in metadata) == val
 
     # The following conditions only make sense for numeric values
     assert (
@@ -586,3 +589,18 @@ def test_regex(client: ClientAPI) -> None:
         where={"test": {"$ne": 10}}, where_document={"$regex": "(?i)c(?-i)at"}  # type: ignore[dict-item]
     )
     assert res["ids"] == ["2"]
+
+
+def test_exists_operator(client: ClientAPI) -> None:
+    reset(client)
+    coll = client.create_collection(name="test")
+    ids: IDs = ["1", "2", "3"]
+    embeddings: Embeddings = [np.array([1, 1]), np.array([2, 2]), np.array([3, 3])]
+    metadatas: Metadatas = [{"a": 1}, {}, {"b": 2}]
+    coll.add(ids=ids, embeddings=embeddings, metadatas=metadatas)
+
+    res = coll.get(where={"a": {"$exists": True}})
+    assert res["ids"] == ["1"]
+
+    res = coll.get(where={"a": {"$exists": False}})
+    assert sorted(res["ids"]) == ["2", "3"]
