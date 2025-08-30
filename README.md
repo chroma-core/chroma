@@ -81,7 +81,6 @@ For example, the `"Chat your data"` use case:
 ## Embeddings?
 
 What are embeddings?
-
 - [Read the guide from OpenAI](https://platform.openai.com/docs/guides/embeddings/what-are-embeddings)
 - __Literal__: Embedding something turns it from image/text/audio into a list of numbers. 🖼️ or 📄 => `[1.2, 2.1, ....]`. This process makes documents "understandable" to a machine learning model.
 - __By analogy__: An embedding represents the essence of a document. This enables documents and queries with the same essence to be "near" each other and therefore easy to find.
@@ -93,13 +92,13 @@ Embeddings databases (also known as **vector databases**) store embeddings and a
 ## Get involved
 
 Chroma is a rapidly developing project. We welcome PR contributors and ideas for how to improve the project.
+
 - [Join the conversation on Discord](https://discord.gg/MMeYNTmh3x) - `#contributing` channel
 - [Review the 🛣️ Roadmap and contribute your ideas](https://docs.trychroma.com/roadmap)
 - [Grab an issue and open a PR](https://github.com/chroma-core/chroma/issues) - [`Good first issue tag`](https://github.com/chroma-core/chroma/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
 - [Read our contributing guide](https://docs.trychroma.com/contributing)
 
-**Release Cadence**
-We currently release new tagged versions of the `pypi` and `npm` packages on Mondays. Hotfixes go out at any time during the week.
+**Release Cadence:** We currently release new tagged versions of the `pypi` and `npm` packages on Mondays. Hotfixes go out at any time during the week.
 
 ## License
 
