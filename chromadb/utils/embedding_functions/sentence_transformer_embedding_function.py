@@ -1,10 +1,11 @@
-from chromadb.api.types import EmbeddingFunction, Space, Embeddings, Documents
+from chromadb.api.types import Embeddable, EmbeddingFunction, Space, Embeddings, Documents
 from typing import List, Dict, Any
 import numpy as np
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 
 
-class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
+class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Embeddable]):
     # Since we do dynamic imports we have to type this as Any
     models: Dict[str, Any] = {}
 
@@ -46,7 +47,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
             )
         self._model = self.models[model_name]
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """Generate embeddings for the given documents.
 
         Args:
@@ -55,6 +56,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         Returns:
             Embeddings for the documents.
         """
+        input = text_only_embeddable_check(input, "Sentence Transformers")
         embeddings = self._model.encode(
             list(input),
             convert_to_numpy=True,
@@ -75,7 +77,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         model_name = config.get("model_name")
         device = config.get("device")
         normalize_embeddings = config.get("normalize_embeddings")

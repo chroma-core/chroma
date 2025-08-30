@@ -1,4 +1,5 @@
-from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
+from chromadb.api.types import Embeddable, Embeddings, EmbeddingFunction, Space
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import List, Dict, Any, Union, Optional
 import os
@@ -6,7 +7,7 @@ import numpy as np
 import warnings
 
 
-class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
+class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
     """
     This class is used to get embeddings for a list of texts using the Jina AI API.
     It requires an API key and a model name. The default model name is "jina-embeddings-v2-base-en".
@@ -81,12 +82,12 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             {"Authorization": f"Bearer {self.api_key}", "Accept-Encoding": "identity"}
         )
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Get the embeddings for a list of texts.
 
         Args:
-            input (Documents): A list of texts to get embeddings for.
+            input (Embeddable): A list of texts to get embeddings for.
 
         Returns:
             Embeddings: The embeddings for the texts.
@@ -96,8 +97,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> input = ["Hello, world!", "How are you?"]
         """
         # Jina AI only works with text documents
-        if not all(isinstance(item, str) for item in input):
-            raise ValueError("Jina AI only supports text documents, not images")
+        input = text_only_embeddable_check(input, "Jina AI")
 
         payload: Dict[str, Any] = {
             "input": input,
@@ -150,7 +150,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")
         task = config.get("task")
