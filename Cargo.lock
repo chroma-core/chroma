@@ -2001,10 +2001,22 @@ dependencies = [
 name = "chromadb-js-bindings"
 version = "0.1.0"
 dependencies = [
+ "chroma-cache",
  "chroma-cli",
+ "chroma-config",
+ "chroma-error",
+ "chroma-frontend",
+ "chroma-log",
+ "chroma-segment",
+ "chroma-sqlite",
+ "chroma-sysdb",
+ "chroma-system",
+ "chroma-types",
  "napi",
  "napi-build",
  "napi-derive",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -5163,6 +5175,9 @@ dependencies = [
  "napi-derive",
  "napi-sys",
  "once_cell",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
