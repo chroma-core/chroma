@@ -17,6 +17,7 @@ WhereOperator = Union[
     Literal["$lte"],
     Literal["$ne"],
     Literal["$eq"],
+    Literal["$exists"],
 ]
 InclusionExclusionOperator = Union[Literal["$in"], Literal["$nin"]]
 OperatorExpression = Union[

@@ -840,6 +840,11 @@ def validate_where(where: Where) -> None:
                         raise ValueError(
                             f"Expected operand value to be an int or a float for operator {operator}, got {operand}"
                         )
+                if operator == "$exists":
+                    if not isinstance(operand, bool):
+                        raise ValueError(
+                            f"Expected operand value to be a bool for operator {operator}, got {operand}"
+                        )
                 if operator in ["$in", "$nin"]:
                     if not isinstance(operand, list):
                         raise ValueError(
@@ -854,17 +859,18 @@ def validate_where(where: Where) -> None:
                     "$eq",
                     "$in",
                     "$nin",
+                    "$exists",
                 ]:
                     raise ValueError(
-                        f"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, "
+                        f"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, $exists, "
                         f"got {operator}"
                     )
 
-                if not isinstance(operand, (str, int, float, list)):
+                if operator != "$exists" and not isinstance(operand, (str, int, float, list)):
                     raise ValueError(
                         f"Expected where operand value to be a str, int, float, or list of those type, got {operand}"
                     )
-                if isinstance(operand, list) and (
+                if operator != "$exists" and isinstance(operand, list) and (
                     len(operand) == 0
                     or not all(isinstance(x, type(operand[0])) for x in operand)
                 ):

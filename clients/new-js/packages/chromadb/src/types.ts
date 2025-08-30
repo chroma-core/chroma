@@ -74,17 +74,18 @@ type LiteralValue = string | number | boolean;
 
 type LogicalOperator = "$and" | "$or";
 
-type WhereOperator = "$gt" | "$gte" | "$lt" | "$lte" | "$ne" | "$eq";
+type WhereOperator = "$gt" | "$gte" | "$lt" | "$lte" | "$ne" | "$eq" | "$exists";
 
 type InclusionExclusionOperator = "$in" | "$nin";
 
-type OperatorExpression =
+export type OperatorExpression =
   | { $gt: LiteralValue }
   | { $gte: LiteralValue }
   | { $lt: LiteralValue }
   | { $lte: LiteralValue }
   | { $ne: LiteralValue }
   | { $eq: LiteralValue }
+  | { $exists: boolean }
   | { $and: LiteralValue }
   | { $or: LiteralValue }
   | { $in: LiteralValue[] }

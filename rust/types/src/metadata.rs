@@ -557,6 +557,7 @@ impl Where {
                     MetadataSetValue::Float(items) => items.len() as u64,
                     MetadataSetValue::Str(items) => items.len() as u64,
                 },
+                MetadataComparison::Exists(_) => 1,
             },
         }
     }
@@ -840,6 +841,10 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
                 MetadataSetValue::Float(vec) => chroma_proto::direct_comparison::Comparison::DoubleListOperand(chroma_proto::DoubleListComparison { values: vec, list_operator: chroma_proto::ListOperator::from(set_operator) as i32 }),
                 MetadataSetValue::Str(vec) => chroma_proto::direct_comparison::Comparison::StringListOperand(chroma_proto::StringListComparison { values: vec, list_operator: chroma_proto::ListOperator::from(set_operator) as i32 }),
             },
+            MetadataComparison::Exists(_) => {
+                // Exists is not representable in current proto; return a conversion error
+                return Err(WhereConversionError::cause("$exists not supported in proto conversion"));
+            }
         };
         Ok(Self {
             key: value.key,
@@ -852,6 +857,7 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
 pub enum MetadataComparison {
     Primitive(PrimitiveOperator, MetadataValue),
     Set(SetOperator, MetadataSetValue),
+    Exists(bool),
 }
 
 #[derive(Clone, Debug, PartialEq)]
