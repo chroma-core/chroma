@@ -82,6 +82,9 @@ collection = client.create_collection(
 
 Instead of having Chroma embed documents, you can also provide embeddings directly when [adding data](./add-data) to a collection. In this case, your collection will not have an embedding function set, and you will be responsible for providing embeddings directly when adding data and querying.
 
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
 ```python
 collection = client.create_collection(
     name="my_collection",
