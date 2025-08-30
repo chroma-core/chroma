@@ -564,6 +564,19 @@ impl IntoSqliteExpr for MetadataExpression {
             .eq(self.key.to_string())
             .and(key_col.is_not_null());
         match &self.comparison {
+            MetadataComparison::Exists(exists) => {
+                let subq = Query::select()
+                    .column(EmbeddingMetadata::Id)
+                    .from(EmbeddingMetadata::Table)
+                    .and_where(key_cond.clone())
+                    .to_owned();
+                let id_col = Expr::col((Embeddings::Table, Embeddings::Id));
+                if *exists {
+                    id_col.in_subquery(subq)
+                } else {
+                    id_col.not_in_subquery(subq)
+                }
+            }
             MetadataComparison::Primitive(op, val) => {
                 let (col, sval) = match val {
                     MetadataValue::Bool(b) => (EmbeddingMetadata::BoolValue, Expr::val(*b)),

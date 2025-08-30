@@ -388,6 +388,26 @@ impl<'me> RoaringMetadataFilter<'me> for MetadataExpression {
         metadata_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
         let result = match &self.comparison {
+            MetadataComparison::Exists(exists) => {
+                let mut bitmaps: Vec<SignedRoaringBitmap> = Vec::new();
+                for val in [
+                    MetadataValue::Bool(true),
+                    MetadataValue::Bool(false),
+                    MetadataValue::Int(0),
+                    MetadataValue::Float(0.0),
+                    MetadataValue::Str(String::new()),
+                ] {
+                    let bm = metadata_provider
+                        .filter_by_metadata(&self.key, &val, &PrimitiveOperator::GreaterThanOrEqual)
+                        .await
+                        .unwrap_or_default();
+                    bitmaps.push(SignedRoaringBitmap::Include(bm));
+                }
+                let union = bitmaps
+                    .into_iter()
+                    .fold(SignedRoaringBitmap::empty(), BitOr::bitor);
+                if *exists { union } else { union.flip() }
+            }
             MetadataComparison::Primitive(primitive_operator, metadata_value) => {
                 match primitive_operator {
                     // We convert the inequality check in to an equality check, and then negate the result
