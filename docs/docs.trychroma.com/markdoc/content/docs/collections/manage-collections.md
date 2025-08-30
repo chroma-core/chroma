@@ -150,32 +150,6 @@ const collection = await client.createCollection({
 
 {% /Tabs %}
 
-{% TabbedCodeBlock %}
-
-{% Tab label="python" %}
-```python
-collection = client.create_collection(
-    name="my_collection",
-    embedding_function=None
-)
-```
-{% /Tab %}
-
-{% Tab label="typescript" %}
-```typescript
-let collection = await client.createCollection({
-    name: "my_collection",
-    embeddingFunction: emb_fn,
-    metadata: {
-        description: "my first Chroma collection",
-        created: (new Date()).toString()
-    }
-});
-```
-{% /Tab %}
-
-{% /TabbedCodeBlock %}
-
 ### Collection Metadata
 
 When creating collections, you can pass the optional `metadata` argument to add a mapping of metadata key-value pairs to your collections. This can be useful for adding general about the collection like creation time, description of the data stored in the collection, and more.
