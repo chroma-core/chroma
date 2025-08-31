@@ -13,17 +13,19 @@ def test_jina_ef_timeout_init():
     with patch("httpx.Client") as mock_client:
         mock_session = Mock()
         mock_client.return_value = mock_session
-        
+
         # Test with timeout
-        JinaEmbeddingFunction(api_key="test_key", timeout=10.0)
+        ef_with_timeout = JinaEmbeddingFunction(api_key="test_key", timeout=10.0)
         mock_client.assert_called_once_with(timeout=10.0)
-        
+        assert ef_with_timeout.timeout == 10.0
+
         # Reset mock
         mock_client.reset_mock()
-        
+
         # Test without timeout (default behavior)
-        JinaEmbeddingFunction(api_key="test_key")
+        ef_no_timeout = JinaEmbeddingFunction(api_key="test_key")
         mock_client.assert_called_once_with()
+        assert ef_no_timeout.timeout is None
 
 
 def test_jina_ef_timeout_config_serialization():
