@@ -28,7 +28,6 @@ use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
-use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -665,10 +664,7 @@ async fn create_database(
     State(mut server): State<FrontendServer>,
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
-    server
-        .metrics
-        .create_database
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.create_database.add(1, &[]);
     tracing::info!(name: "create_database", tenant_name = %tenant, database_name = %name);
     server
         .authenticate_and_authorize(
@@ -727,10 +723,7 @@ async fn list_databases(
     Query(ListDatabasesParams { limit, offset }): Query<ListDatabasesParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
-    server
-        .metrics
-        .list_databases
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.list_databases.add(1, &[]);
     tracing::info!(name: "list_databases", tenant_name = %tenant);
     server
         .authenticate_and_authorize(
@@ -770,10 +763,7 @@ async fn get_database(
     Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetDatabaseResponse>, ServerError> {
-    server
-        .metrics
-        .get_database
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.get_database.add(1, &[]);
     tracing::info!(name: "get_database", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
@@ -813,10 +803,7 @@ async fn delete_database(
     Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<DeleteDatabaseResponse>, ServerError> {
-    server
-        .metrics
-        .delete_database
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.delete_database.add(1, &[]);
     tracing::info!(name: "delete_database", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
@@ -864,10 +851,7 @@ async fn list_collections(
     Query(ListCollectionsParams { limit, offset }): Query<ListCollectionsParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListCollectionsResponse>, ServerError> {
-    server
-        .metrics
-        .list_collections
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.list_collections.add(1, &[]);
     tracing::info!(name: "list_collections", tenant_name = %tenant, database_name = %database, limit = ?limit, offset = ?offset);
     server
         .authenticate_and_authorize(
@@ -924,10 +908,7 @@ async fn count_collections(
     Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountCollectionsResponse>, ServerError> {
-    server
-        .metrics
-        .count_collections
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.count_collections.add(1, &[]);
     tracing::info!(name: "count_collections", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
@@ -979,10 +960,7 @@ async fn create_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<CreateCollectionPayload>,
 ) -> Result<Json<Collection>, ServerError> {
-    server
-        .metrics
-        .create_collection
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.create_collection.add(1, &[]);
     tracing::info!(name: "create_collection", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
@@ -1059,10 +1037,7 @@ async fn get_collection(
     Path((tenant, database, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<Collection>, ServerError> {
-    server
-        .metrics
-        .get_collection
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.get_collection.add(1, &[]);
     tracing::info!(name: "get_collection", tenant_name = %tenant, database_name = %database, collection_name = %collection_name);
     server
         .authenticate_and_authorize(
@@ -1101,10 +1076,7 @@ async fn get_collection_by_crn(
     Path(crn): Path<String>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<Collection>, ServerError> {
-    server
-        .metrics
-        .get_collection_by_crn
-        .add(1, &[KeyValue::new("crn", crn.clone())]);
+    server.metrics.get_collection_by_crn.add(1, &[]);
     tracing::info!(name: "get_collection_by_crn", crn = %crn);
     server
         .authenticate_and_authorize(
@@ -1152,10 +1124,7 @@ async fn update_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionPayload>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
-    server
-        .metrics
-        .update_collection
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.update_collection.add(1, &[]);
     tracing::info!(name: "update_collection", tenant_name = %tenant, database_name = %database, collection_id = %collection_id);
     server
         .authenticate_and_authorize_collection(
@@ -1228,10 +1197,7 @@ async fn delete_collection(
     Path((tenant, database, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
-    server
-        .metrics
-        .delete_collection
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.delete_collection.add(1, &[]);
     tracing::info!(name: "delete_collection", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
@@ -1283,10 +1249,7 @@ async fn fork_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<ForkCollectionPayload>,
 ) -> Result<Json<ForkCollectionResponse>, ServerError> {
-    server
-        .metrics
-        .fork_collection
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.fork_collection.add(1, &[]);
     tracing::info!(name: "fork_collection", tenant_name = %tenant, database_name = %database, collection_id = %collection_id);
     server
         .authenticate_and_authorize(
@@ -1388,10 +1351,7 @@ async fn collection_add(
     State(mut server): State<FrontendServer>,
     TracedJson(payload): TracedJson<AddCollectionRecordsPayload>,
 ) -> Result<(StatusCode, Json<AddCollectionRecordsResponse>), ServerError> {
-    server
-        .metrics
-        .collection_add
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.collection_add.add(1, &[]);
     server
         .authenticate_and_authorize_collection(
             &headers,
@@ -1497,10 +1457,7 @@ async fn collection_update(
     State(mut server): State<FrontendServer>,
     TracedJson(payload): TracedJson<UpdateCollectionRecordsPayload>,
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
-    server
-        .metrics
-        .collection_update
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.collection_update.add(1, &[]);
     server
         .authenticate_and_authorize_collection(
             &headers,
@@ -1614,10 +1571,7 @@ async fn collection_upsert(
     State(mut server): State<FrontendServer>,
     TracedJson(payload): TracedJson<UpsertCollectionRecordsPayload>,
 ) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
-    server
-        .metrics
-        .collection_upsert
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.collection_upsert.add(1, &[]);
     server
         .authenticate_and_authorize_collection(
             &headers,
@@ -1723,10 +1677,7 @@ async fn collection_delete(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<DeleteCollectionRecordsPayload>,
 ) -> Result<Json<DeleteCollectionRecordsResponse>, ServerError> {
-    server
-        .metrics
-        .collection_delete
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.collection_delete.add(1, &[]);
     let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
@@ -1809,10 +1760,7 @@ async fn collection_count(
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountResponse>, ServerError> {
-    server
-        .metrics
-        .collection_count
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.collection_count.add(1, &[]);
     tracing::info!(
         name: "collection_count",
         tenant = tenant,
@@ -1906,10 +1854,7 @@ async fn collection_get(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<GetRequestPayload>,
 ) -> Result<Json<GetResponse>, ServerError> {
-    server
-        .metrics
-        .collection_get
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.collection_get.add(1, &[]);
     let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
@@ -2042,10 +1987,7 @@ async fn collection_query(
     State(mut server): State<FrontendServer>,
     TracedJson(payload): TracedJson<QueryRequestPayload>,
 ) -> Result<Json<QueryResponse>, ServerError> {
-    server
-        .metrics
-        .collection_query
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.collection_query.add(1, &[]);
     let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
@@ -2139,6 +2081,107 @@ async fn collection_query(
     Ok(Json(res))
 }
 
+<<<<<<< HEAD
+=======
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct SearchRequestPayload {
+    searches: Vec<SearchPayload>,
+}
+
+/// Search records from a collection with hybrid criterias.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
+    request_body = SearchRequestPayload,
+    responses(
+        (status = 200, description = "Records searched from the collection", body = SearchResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name for the collection"),
+        ("collection_id" = String, Path, description = "Collection ID to search records from")
+    )
+)]
+async fn collection_search(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    TracedJson(payload): TracedJson<SearchRequestPayload>,
+) -> Result<Json<SearchResponse>, ServerError> {
+    server.metrics.collection_search.add(1, &[]);
+    // TODO: Maybe add AuthzAction:Search
+    let requester_identity = server
+        .authenticate_and_authorize_collection(
+            &headers,
+            AuthzAction::Query,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.clone()),
+            },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
+        )
+        .await?;
+    let collection_id =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+
+    let _api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+
+    // TODO: Add quota enforcement for search
+    let _guard = server.scorecard_request(&[
+        "op:read",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+        format!("requester:{}", requester_identity.tenant).as_str(),
+    ])?;
+
+    // TODO: Maybe add ReadAction::Search
+    // Create a metering context
+    let metering_context_container = if requester_identity.tenant == tenant {
+        chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            requester_identity.tenant.clone(),
+            database.clone(),
+            collection_id.0.to_string(),
+            ReadAction::Query,
+        ))
+    } else {
+        chroma_metering::create::<ExternalCollectionReadContext>(
+            ExternalCollectionReadContext::new(
+                requester_identity.tenant.clone(),
+                database.clone(),
+                collection_id.0.to_string(),
+                ReadAction::Query,
+            ),
+        )
+    };
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
+
+    tracing::info!(
+        name: "collection_search",
+        num_queries = payload.searches.len(),
+    );
+
+    let request = SearchRequest::try_new(tenant, database, collection_id, payload.searches)?;
+    let res = server
+        .frontend
+        .search(request)
+        .meter(metering_context_container)
+        .await?;
+    Ok(Json(res))
+}
+
+>>>>>>> ecaf17b8c ([BUG] Reduce RFE metric cardinality (#5395))
 async fn v1_deprecation_notice() -> Response {
     let err_response = ErrorResponse::new(
         "Unimplemented".to_string(),
