@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union, List
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
 from chromadb.api.types import (
@@ -17,8 +17,10 @@ from chromadb.api.types import (
     ID,
     OneOrMany,
     WhereDocument,
+    SearchResult,
 )
 from chromadb.api.collection_configuration import UpdateCollectionConfiguration
+from chromadb.execution.expression.plan import Search
 
 import logging
 
@@ -290,6 +292,62 @@ class Collection(CollectionCommon["ServerAPI"]):
             model=model,
             embedding_function=self._embedding_function,
             data_loader=self._data_loader,
+        )
+
+    def search(
+        self,
+        searches: List[Search],
+    ) -> SearchResult:
+        """Perform hybrid search on the collection.
+        This is an experimental API that only works for Hosted Chroma for now.
+        
+        Args:
+            searches: List of Search objects, each containing:
+                - filter: SearchFilter with query_ids and where_clause
+                - rank: Ranking expression for hybrid search (defaults to Val(0.0))
+                - limit: Limit configuration for pagination (defaults to no limit)
+                - select: Select configuration for fields to return (defaults to empty)
+        
+        Returns:
+            SearchResult: List of search results for each search payload.
+                         Each result is a list of SearchRecord objects.
+        
+        Raises:
+            NotImplementedError: For local/segment API implementations
+        
+        Examples:
+            # Using builder pattern
+            from chromadb.execution.expression import (
+                Search, Key, K, Knn, Val, SelectField
+            )
+            
+            search = (Search()
+                .where((Key("category") == "science") & (Key("score") > 0.5))
+                .rank(Knn(embedding=[0.1, 0.2, 0.3]) * 0.8 + Val(0.5) * 0.2)
+                .limit(10, offset=0)
+                .select(SelectField.DOCUMENT, SelectField.SCORE, "title"))
+            
+            # Direct construction
+            from chromadb.execution.expression import (
+                Search, SearchFilter, Eq, And, Gt, Knn, Limit, Select, SelectField
+            )
+            
+            search = Search(
+                filter=SearchFilter(
+                    where_clause=And([Eq("category", "science"), Gt("score", 0.5)])
+                ),
+                rank=Knn(embedding=[0.1, 0.2, 0.3]),
+                limit=Limit(offset=0, limit=10),
+                select=Select(fields={SelectField.DOCUMENT, SelectField.SCORE})
+            )
+            
+            results = collection.search([search])
+        """
+        return self._client._search(
+            collection_id=self.id,
+            searches=searches,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     def update(
