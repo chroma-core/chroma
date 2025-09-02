@@ -244,6 +244,29 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
             distance_function: index_config.distance_function.clone(),
         })
     }
+
+    fn load_from_hnsw_data(
+        hnsw_data: hnswlib::HnswData,
+        index_config: &IndexConfig,
+        ef_search: usize,
+        id: IndexUuid,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let index = hnswlib::HnswIndex::load_from_hnsw_data(
+            hnswlib::HnswIndexMemoryLoadConfig {
+                distance_function: map_distance_function(index_config.distance_function.clone()),
+                dimensionality: index_config.dimensionality,
+                ef_search,
+            },
+            hnsw_data,
+        )
+        .map_err(|e| WrappedHnswInitError::Other(e).boxed())?;
+
+        Ok(HnswIndex {
+            index,
+            id,
+            distance_function: index_config.distance_function.clone(),
+        })
+    }
 }
 
 fn map_distance_function(distance_function: DistanceFunction) -> hnswlib::HnswDistanceFunction {

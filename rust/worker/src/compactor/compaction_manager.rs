@@ -447,11 +447,12 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         )
         .await?;
 
-        let hnsw_index_provider = HnswIndexProvider::try_from_config(
-            &(config.hnsw_provider.clone(), storage.clone()),
-            registry,
-        )
-        .await?;
+        // TODO(tanujnay112): Remove this after we support loading hnsw from memory
+        // on the write path.
+        let mut hnsw_config = config.hnsw_provider.clone();
+        hnsw_config.use_direct_hnsw = false;
+        let hnsw_index_provider =
+            HnswIndexProvider::try_from_config(&(hnsw_config, storage.clone()), registry).await?;
 
         let spann_provider = SpannProvider::try_from_config(
             &(
@@ -920,6 +921,7 @@ mod tests {
             PathBuf::from(tmpdir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let spann_provider = SpannProvider {
             hnsw_provider: hnsw_provider.clone(),

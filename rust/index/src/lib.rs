@@ -26,6 +26,7 @@ pub fn test_hnsw_index_provider() -> (TempDir, HnswIndexProvider) {
         temp_dir.path().to_path_buf(),
         new_non_persistent_cache_for_test(),
         16,
+        false,
     );
     (temp_dir, provider)
 }

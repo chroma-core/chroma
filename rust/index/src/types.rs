@@ -67,6 +67,18 @@ pub trait PersistentIndex<C>: Index<C> {
     ) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
+
+    // This function is used to load the index from memory without using disk.
+    // TODO(tanujnay112): Replace `load` from above with this once we stablize
+    // loading HNSW via memory.
+    fn load_from_hnsw_data(
+        hnsw_data: hnswlib::HnswData,
+        index_config: &IndexConfig,
+        ef_search: usize,
+        id: IndexUuid,
+    ) -> Result<Self, Box<dyn ChromaError>>
+    where
+        Self: Sized;
 }
 
 /// IndexUuid is a wrapper around Uuid to provide a type for the index id.
