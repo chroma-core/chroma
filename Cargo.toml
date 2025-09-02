@@ -46,7 +46,7 @@ tokio-util = "0.7.12"
 tonic = "0.12"
 tonic-health = "0.12.3"
 tower = { version = "0.4.13", features = ["discover"] }
-backon = "1.3.0"
+backon = "1.5.2"
 tracing = { version = "0.1" }
 tracing-bunyan-formatter = "0.3"
 tracing-opentelemetry = "0.28.0"
