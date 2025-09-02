@@ -1,4 +1,3 @@
-use backon::ConstantBuilder;
 use chroma_cache::{AysncPartitionedMutex, Cache, CacheError, Weighted};
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -11,37 +10,11 @@ use std::{
 };
 use thiserror::Error;
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct CacheInvalidationRetryConfig {
-    pub delay_ms: u32,
-    pub max_retries: u32,
-}
-
-impl CacheInvalidationRetryConfig {
-    pub fn new(delay_ms: u32, max_retries: u32) -> Self {
-        Self {
-            delay_ms,
-            max_retries,
-        }
-    }
-}
-
-impl Default for CacheInvalidationRetryConfig {
-    fn default() -> Self {
-        Self {
-            delay_ms: 0,
-            max_retries: 3,
-        }
-    }
-}
-
 #[derive(Deserialize, Clone, Serialize, Debug)]
 pub struct CollectionsWithSegmentsProviderConfig {
     pub cache: chroma_cache::CacheConfig,
     pub cache_ttl_secs: u32,
     pub permitted_parallelism: u32,
-    #[serde(default = "CacheInvalidationRetryConfig::default")]
-    pub cache_invalidation_retry_policy: CacheInvalidationRetryConfig,
 }
 
 impl Default for CollectionsWithSegmentsProviderConfig {
@@ -50,7 +23,6 @@ impl Default for CollectionsWithSegmentsProviderConfig {
             cache: chroma_cache::CacheConfig::Nop,
             cache_ttl_secs: 60,
             permitted_parallelism: 100,
-            cache_invalidation_retry_policy: CacheInvalidationRetryConfig::default(),
         }
     }
 }
@@ -69,12 +41,6 @@ impl Configurable<CollectionsWithSegmentsProviderConfig> for CollectionsWithSegm
         let sysdb_rpc_lock =
             AysncPartitionedMutex::with_parallelism(config.permitted_parallelism as usize, ());
 
-        let retry_backoff = ConstantBuilder::default()
-            .with_delay(Duration::from_millis(
-                config.cache_invalidation_retry_policy.delay_ms as u64,
-            ))
-            .with_max_times(config.cache_invalidation_retry_policy.max_retries as usize);
-
         let sysdb = registry
             .get::<SysDb>()
             .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
@@ -84,7 +50,6 @@ impl Configurable<CollectionsWithSegmentsProviderConfig> for CollectionsWithSegm
             collections_with_segments_cache: collections_with_segments_cache.into(),
             cache_ttl_secs: config.cache_ttl_secs,
             sysdb_rpc_lock,
-            retry_backoff,
         })
     }
 }
@@ -109,7 +74,6 @@ pub struct CollectionsWithSegmentsProvider {
         Arc<dyn Cache<CollectionUuid, CollectionAndSegmentsWithTtl>>,
     pub(crate) cache_ttl_secs: u32,
     pub(crate) sysdb_rpc_lock: chroma_cache::AysncPartitionedMutex<CollectionUuid>,
-    pub(crate) retry_backoff: ConstantBuilder,
 }
 
 #[derive(Debug, Error)]
@@ -130,10 +94,6 @@ impl ChromaError for CollectionsWithSegmentsProviderError {
 }
 
 impl CollectionsWithSegmentsProvider {
-    pub(crate) fn get_retry_backoff(&self) -> ConstantBuilder {
-        self.retry_backoff
-    }
-
     pub(crate) async fn get_collection_with_segments(
         &mut self,
         collection_id: CollectionUuid,

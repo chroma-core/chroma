@@ -3,10 +3,8 @@ use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_frontend::{
-    executor::config::{ExecutorConfig, LocalExecutorConfig},
-    get_collection_with_segments_provider::{
-        CacheInvalidationRetryConfig, CollectionsWithSegmentsProviderConfig,
-    },
+    executor::config::{ExecutorConfig, LocalExecutorConfig, RetryConfig},
+    get_collection_with_segments_provider::CollectionsWithSegmentsProviderConfig,
     Frontend, FrontendConfig,
 };
 use chroma_log::config::{LogConfig, SqliteLogConfig};
@@ -102,8 +100,6 @@ impl Bindings {
         });
 
         let collection_cache_config = CollectionsWithSegmentsProviderConfig {
-            // No retry to sysdb on local chroma
-            cache_invalidation_retry_policy: CacheInvalidationRetryConfig::new(0, 0),
             permitted_parallelism: 32,
             cache: chroma_cache::CacheConfig::Nop,
             cache_ttl_secs: 60,
@@ -124,6 +120,7 @@ impl Bindings {
             default_knn_index: knn_index,
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
+            retry: RetryConfig::default(),
         };
 
         let frontend = runtime.block_on(async {

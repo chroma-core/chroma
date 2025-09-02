@@ -1,3 +1,6 @@
+use std::future::Future;
+
+use chroma_error::ChromaError;
 use chroma_types::{
     operator::{CountResult, GetResult, KnnBatchResult, SearchResult},
     plan::{Count, Get, Knn, Search},
@@ -26,10 +29,20 @@ impl Executor {
             Executor::Local(local_executor) => local_executor.count(plan).await,
         }
     }
-    pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
+    pub async fn get<F, Fut>(
+        &mut self,
+        plan: Get,
+        replan_closure: F,
+    ) -> Result<GetResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Get, Box<dyn ChromaError>>>,
+    {
         match self {
-            Executor::Distributed(distributed_executor) => distributed_executor.get(plan).await,
-            Executor::Local(local_executor) => local_executor.get(plan).await,
+            Executor::Distributed(distributed_executor) => {
+                distributed_executor.get(plan, replan_closure).await
+            }
+            Executor::Local(local_executor) => local_executor.get(plan, replan_closure).await,
         }
     }
     pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {

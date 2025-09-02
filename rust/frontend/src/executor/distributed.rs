@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use super::config;
 use async_trait::async_trait;
 use backon::ExponentialBuilder;
@@ -22,6 +24,7 @@ use chroma_types::{
 
 use rand::distributions::Distribution;
 use tonic::Request;
+use tonic::Status;
 
 // Convenience type alias for the gRPC query client used by the DistributedExecutor
 type QueryClient =
@@ -148,7 +151,15 @@ impl DistributedExecutor {
         Ok(res.into_inner().into())
     }
 
-    pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
+    pub async fn get<F, Fut>(
+        &mut self,
+        plan: Get,
+        replan_closure: F,
+    ) -> Result<GetResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Get, Box<dyn ChromaError>>>,
+    {
         let clients = self
             .client_assigner
             .clients(
@@ -161,6 +172,7 @@ impl DistributedExecutor {
             )
             .map_err(|e| ExecutorError::Internal(e.boxed()))?;
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let last_error = std::sync::Arc::new(parking_lot::Mutex::new(tonic::Code::Ok));
         let config = self.client_selection_config.clone();
         let res = {
             let attempt_count = attempt_count.clone();
@@ -168,12 +180,31 @@ impl DistributedExecutor {
                 let current_attempt =
                     attempt_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let is_retry = current_attempt > 0;
+                if is_retry {
+                    let last_error_code = *last_error.lock();
+                    let replan_get =
+                        replan_closure(last_error_code)
+                            .await
+                            .map_err(|e| -> tonic::Status {
+                                Status::new(
+                                    e.code().into(),
+                                    format!("Failed to replan get {:?}", e),
+                                )
+                            })?;
+                    return choose_query_client_weighted(&clients, &config, is_retry)?
+                        .get(Request::new(replan_get.clone().try_into()?))
+                        .await;
+                }
                 choose_query_client_weighted(&clients, &config, is_retry)?
                     .get(Request::new(plan.clone().try_into()?))
                     .await
             })
             .retry(self.backoff)
             .when(is_retryable_error)
+            .notify(|e, _| {
+                let mut last_error = last_error.lock();
+                *last_error = e.code();
+            })
             .await?
         };
         Ok(res.into_inner().try_into()?)
@@ -199,12 +230,22 @@ impl DistributedExecutor {
                 let current_attempt =
                     attempt_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let is_retry = current_attempt > 0;
-                choose_query_client_weighted(&clients, &config, is_retry)?
+                let r = choose_query_client_weighted(&clients, &config, is_retry)?
                     .knn(Request::new(plan.clone().try_into()?))
-                    .await
+                    .await;
+                if r.is_err() {
+                    println!("(Sanket-temp) Knn query failed with error {:?}", r);
+                }
+                r
             })
             .retry(self.backoff)
             .when(is_retryable_error)
+            .notify(|e, dur| {
+                println!(
+                    "(Sanket-temp) KNN query failed with error: {}, retrying in {:?}",
+                    e, dur
+                )
+            })
             .await?
         };
         Ok(res.into_inner().try_into()?)
@@ -313,6 +354,8 @@ fn is_retryable_error(e: &tonic::Status) -> bool {
         || e.code() == tonic::Code::DeadlineExceeded
         || e.code() == tonic::Code::Aborted
         || e.code() == tonic::Code::ResourceExhausted
+        || e.code() == tonic::Code::Unknown
+        || e.code() == tonic::Code::NotFound
 }
 
 fn no_clients_found_status() -> tonic::Status {

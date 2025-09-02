@@ -77,9 +77,9 @@ pub struct ServiceBasedFrontend {
     max_batch_size: u32,
     metrics: Arc<Metrics>,
     default_knn_index: KnnIndex,
-    retries_builder: ExponentialBuilder,
     tenants_to_migrate_immediately: HashSet<String>,
     tenants_to_migrate_immediately_threshold: Option<String>,
+    retry_policy: ExponentialBuilder,
 }
 
 impl ServiceBasedFrontend {
@@ -94,6 +94,7 @@ impl ServiceBasedFrontend {
         default_knn_index: KnnIndex,
         tenants_to_migrate_immediately: HashSet<String>,
         tenants_to_migrate_immediately_threshold: Option<String>,
+        retry_policy: ExponentialBuilder,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -124,18 +125,6 @@ impl ServiceBasedFrontend {
             metering_write_counter,
             metering_external_read_counter,
         });
-        // factor: 2.0,
-        // min_delay_ms: 100,
-        // max_delay_ms: 5000,
-        // max_attempts: 5,
-        // jitter: true,
-        // TODO(Sanket): Ideally config for this.
-        let retries_builder = ExponentialBuilder::default()
-            .with_max_times(5)
-            .with_factor(2.0)
-            .with_max_delay(Duration::from_millis(5000))
-            .with_min_delay(Duration::from_millis(100))
-            .with_jitter();
         ServiceBasedFrontend {
             allow_reset,
             executor,
@@ -145,9 +134,9 @@ impl ServiceBasedFrontend {
             max_batch_size,
             metrics,
             default_knn_index,
-            retries_builder,
             tenants_to_migrate_immediately,
             tenants_to_migrate_immediately_threshold,
+            retry_policy,
         }
     }
 
@@ -718,12 +707,12 @@ impl ServiceBasedFrontend {
         };
 
         let res = fork_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
+            .retry(self.retry_policy)
             // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
             .when(|e| {
                 matches!(
                     e.code(),
-                    ErrorCodes::FailedPrecondition | ErrorCodes::Unknown
+                    ErrorCodes::FailedPrecondition | ErrorCodes::Unknown | ErrorCodes::Unavailable
                 )
             })
             .notify(|_, _| {
@@ -792,9 +781,10 @@ impl ServiceBasedFrontend {
                     .await
             }
         };
+        // Any error other than a backoff is not safe to retry.
         let res = add_to_retry
-            .retry(self.retries_builder)
-            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
+            .retry(self.retry_policy)
+            .when(|e| matches!(e.code(), ErrorCodes::Unavailable))
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -831,7 +821,7 @@ impl ServiceBasedFrontend {
                 Ok(AddCollectionRecordsResponse {})
             }
             Err(e) => {
-                if e.code() == ErrorCodes::AlreadyExists {
+                if e.code() == ErrorCodes::Unavailable {
                     Err(AddCollectionRecordsError::Backoff)
                 } else {
                     Err(AddCollectionRecordsError::Other(Box::new(e) as _))
@@ -880,9 +870,10 @@ impl ServiceBasedFrontend {
                     .await
             }
         };
+        // Any error other than a backoff is not safe to retry.
         let res = add_to_retry
-            .retry(self.retries_builder)
-            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
+            .retry(self.retry_policy)
+            .when(|e| matches!(e.code(), ErrorCodes::Unavailable))
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -919,7 +910,7 @@ impl ServiceBasedFrontend {
                 Ok(UpdateCollectionRecordsResponse {})
             }
             Err(e) => {
-                if e.code() == ErrorCodes::AlreadyExists {
+                if e.code() == ErrorCodes::Unavailable {
                     Err(UpdateCollectionRecordsError::Backoff)
                 } else {
                     Err(UpdateCollectionRecordsError::Other(Box::new(e) as _))
@@ -973,9 +964,10 @@ impl ServiceBasedFrontend {
                     .await
             }
         };
+        // Any error other than a backoff is not safe to retry.
         let res = add_to_retry
-            .retry(self.retries_builder)
-            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
+            .retry(self.retry_policy)
+            .when(|e| matches!(e.code(), ErrorCodes::Unavailable))
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -1012,7 +1004,7 @@ impl ServiceBasedFrontend {
                 Ok(UpsertCollectionRecordsResponse {})
             }
             Err(e) => {
-                if e.code() == ErrorCodes::AlreadyExists {
+                if e.code() == ErrorCodes::Unavailable {
                     Err(UpsertCollectionRecordsError::Backoff)
                 } else {
                     Err(UpsertCollectionRecordsError::Other(Box::new(e) as _))
@@ -1021,107 +1013,13 @@ impl ServiceBasedFrontend {
         }
     }
 
-    pub async fn retryable_delete(
+    pub async fn retryable_push_delete_logs(
         &mut self,
-        DeleteCollectionRecordsRequest {
-            tenant_id,
-            database_name,
-            collection_id,
-            ids,
-            r#where,
-            ..
-        }: DeleteCollectionRecordsRequest,
+        tenant_id: String,
+        database_name: String,
+        collection_id: CollectionUuid,
+        records: Vec<OperationRecord>,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
-        let mut records = Vec::new();
-
-        let read_event = if let Some(where_clause) = r#where {
-            let collection_and_segments = self
-                .collections_with_segments_provider
-                .get_collection_with_segments(collection_id)
-                .await
-                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-            let latest_collection_logical_size_bytes = collection_and_segments
-                .collection
-                .size_bytes_post_compaction;
-            let fts_query_length = where_clause.fts_query_length();
-            let metadata_predicate_count = where_clause.metadata_predicate_count();
-
-            let filter = Filter {
-                query_ids: ids,
-                where_clause: Some(where_clause),
-            };
-
-            let get_result = self
-                .executor
-                .get(Get {
-                    scan: Scan {
-                        collection_and_segments,
-                    },
-                    filter,
-                    limit: Limit {
-                        offset: 0,
-                        limit: None,
-                    },
-                    proj: Projection {
-                        document: false,
-                        embedding: false,
-                        metadata: false,
-                    },
-                })
-                .await?;
-
-            let return_bytes = get_result.size_bytes();
-
-            for record in get_result.result.records {
-                records.push(OperationRecord {
-                    id: record.id,
-                    operation: Operation::Delete,
-                    document: None,
-                    embedding: None,
-                    encoding: None,
-                    metadata: None,
-                });
-            }
-
-            // Attach metadata to the read context
-            chroma_metering::with_current(|context| {
-                context.fts_query_length(fts_query_length);
-                context.metadata_predicate_count(metadata_predicate_count);
-                context.query_embedding_count(0);
-                context.pulled_log_size_bytes(get_result.pulled_log_bytes);
-                context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
-                context.return_bytes(return_bytes);
-            });
-
-            match chroma_metering::close::<CollectionReadContext>() {
-                Ok(collection_read_context) => {
-                    Some(MeterEvent::CollectionRead(collection_read_context))
-                }
-                Err(e) => {
-                    tracing::error!("Failed to submit metering event to receiver: {:?}", e);
-                    None
-                }
-            }
-        } else if let Some(user_ids) = ids {
-            records.extend(user_ids.into_iter().map(|id| OperationRecord {
-                id,
-                operation: Operation::Delete,
-                document: None,
-                embedding: None,
-                encoding: None,
-                metadata: None,
-            }));
-            None
-        } else {
-            None
-        };
-
-        if let Some(event) = read_event {
-            if let Ok(()) = event.submit().await {
-                self.metrics.metering_read_counter.add(1, &[]);
-            }
-        }
-
         let collection_write_context_container =
             chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
                 tenant_id.clone(),
@@ -1181,12 +1079,133 @@ impl ServiceBasedFrontend {
         Ok(DeleteCollectionRecordsResponse {})
     }
 
+    pub async fn retryable_get_records_to_delete(
+        &mut self,
+        DeleteCollectionRecordsRequest {
+            collection_id,
+            ids,
+            r#where,
+            ..
+        }: DeleteCollectionRecordsRequest,
+    ) -> Result<Vec<OperationRecord>, DeleteCollectionRecordsError> {
+        let mut records = Vec::new();
+
+        let read_event = if let Some(where_clause) = r#where {
+            let collection_and_segments = self
+                .collections_with_segments_provider
+                .get_collection_with_segments(collection_id)
+                .await
+                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            let latest_collection_logical_size_bytes = collection_and_segments
+                .collection
+                .size_bytes_post_compaction;
+            let fts_query_length = where_clause.fts_query_length();
+            let metadata_predicate_count = where_clause.metadata_predicate_count();
+
+            let filter = Filter {
+                query_ids: ids,
+                where_clause: Some(where_clause),
+            };
+
+            let get_plan = Get {
+                scan: Scan {
+                    collection_and_segments,
+                },
+                filter,
+                limit: Limit {
+                    offset: 0,
+                    limit: None,
+                },
+                proj: Projection {
+                    document: false,
+                    embedding: false,
+                    metadata: false,
+                },
+            };
+
+            let get_result = self
+                .executor
+                .get(get_plan.clone(), |code: tonic::Code| {
+                    let mut provider = self.collections_with_segments_provider.clone();
+                    let mut get_plan2 = get_plan.clone();
+                    async move {
+                        if code == tonic::Code::NotFound {
+                            provider
+                                .collections_with_segments_cache
+                                .remove(&collection_id)
+                                .await;
+                        }
+                        let collection_and_segments = provider
+                            .get_collection_with_segments(collection_id)
+                            .await
+                            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+                        get_plan2.scan = Scan {
+                            collection_and_segments,
+                        };
+                        Ok(get_plan2)
+                    }
+                })
+                .await?;
+
+            let return_bytes = get_result.size_bytes();
+
+            for record in get_result.result.records {
+                records.push(OperationRecord {
+                    id: record.id,
+                    operation: Operation::Delete,
+                    document: None,
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                });
+            }
+
+            // Attach metadata to the read context
+            chroma_metering::with_current(|context| {
+                context.fts_query_length(fts_query_length);
+                context.metadata_predicate_count(metadata_predicate_count);
+                context.query_embedding_count(0);
+                context.pulled_log_size_bytes(get_result.pulled_log_bytes);
+                context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+                context.return_bytes(return_bytes);
+            });
+
+            match chroma_metering::close::<CollectionReadContext>() {
+                Ok(collection_read_context) => {
+                    Some(MeterEvent::CollectionRead(collection_read_context))
+                }
+                Err(e) => {
+                    tracing::error!("Failed to submit metering event to receiver: {:?}", e);
+                    None
+                }
+            }
+        } else if let Some(user_ids) = ids {
+            records.extend(user_ids.into_iter().map(|id| OperationRecord {
+                id,
+                operation: Operation::Delete,
+                document: None,
+                embedding: None,
+                encoding: None,
+                metadata: None,
+            }));
+            None
+        } else {
+            None
+        };
+
+        if let Some(event) = read_event {
+            event.submit().await;
+        }
+
+        Ok(records)
+    }
+
     pub async fn delete(
         &mut self,
         request: DeleteCollectionRecordsRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
         let retries = Arc::new(AtomicUsize::new(0));
-        let delete_to_retry = || {
+        let retryable_get_records_to_delete = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
             let cache_clone = self
@@ -1194,7 +1213,9 @@ impl ServiceBasedFrontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.retryable_delete(request_clone).await;
+                let res = self_clone
+                    .retryable_get_records_to_delete(request_clone)
+                    .await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -1210,24 +1231,70 @@ impl ServiceBasedFrontend {
                 }
             }
         };
-        let res = delete_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
+        let records_to_delete = retryable_get_records_to_delete
+            .retry(self.retry_policy)
             // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+            .when(|e| {
+                matches!(
+                    e.code(),
+                    ErrorCodes::NotFound | ErrorCodes::Unknown | ErrorCodes::Unavailable
+                )
+            })
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
                     tracing::info!(
-                        "Retrying delete() request for collection {}",
+                        "Retrying get records to delete request for collection {}",
                         request.collection_id
                     );
                 }
             })
-            .await;
+            .adjust(|e, d| {
+                if e.code() == ErrorCodes::NotFound {
+                    // Retry immediately for cache invalidation
+                    Some(Duration::from_micros(0))
+                } else {
+                    d
+                }
+            })
+            .await?;
+
+        let retries = Arc::new(AtomicUsize::new(0));
+        let retryable_push_delete_logs = || {
+            let mut self_clone = self.clone();
+            let tenant = request.tenant_id.clone();
+            let database_name = request.database_name.clone();
+            let records_to_delete = records_to_delete.clone();
+            async move {
+                self_clone
+                    .retryable_push_delete_logs(
+                        tenant,
+                        database_name,
+                        request.collection_id,
+                        records_to_delete,
+                    )
+                    .await
+            }
+        };
+        let res = retryable_push_delete_logs
+            .retry(self.retry_policy)
+            // NOTE: It's not safe to retry adds to the log except when it is unavailable.
+            .when(|e| matches!(e.code(), ErrorCodes::Unavailable))
+            .notify(|_, _| {
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!(
+                        "Retrying push delete logs request for collection {}",
+                        request.collection_id
+                    );
+                }
+            })
+            .await?;
+
         self.metrics
             .delete_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
-        res
+        Ok(res)
     }
 
     pub async fn retryable_count(
@@ -1318,9 +1385,14 @@ impl ServiceBasedFrontend {
             }
         };
         let res = count_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
+            .retry(self.retry_policy)
             // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+            .when(|e| {
+                matches!(
+                    e.code(),
+                    ErrorCodes::NotFound | ErrorCodes::Unknown | ErrorCodes::Unavailable
+                )
+            })
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -1328,6 +1400,14 @@ impl ServiceBasedFrontend {
                         "Retrying count() request for collection {}",
                         request.collection_id
                     );
+                }
+            })
+            .adjust(|e, d| {
+                if e.code() == ErrorCodes::NotFound {
+                    // Retry immediately for cache invalidation
+                    Some(Duration::from_micros(0))
+                } else {
+                    d
                 }
             })
             .await;
@@ -1365,24 +1445,44 @@ impl ServiceBasedFrontend {
             .as_ref()
             .map(Where::fts_query_length)
             .unwrap_or_default();
+        let get_plan = Get {
+            scan: Scan {
+                collection_and_segments,
+            },
+            filter: Filter {
+                query_ids: ids,
+                where_clause: r#where,
+            },
+            limit: Limit { offset, limit },
+            proj: Projection {
+                document: include.0.contains(&Include::Document),
+                embedding: include.0.contains(&Include::Embedding),
+                // If URI is requested, metadata is also requested so we can extract the URI.
+                metadata: (include.0.contains(&Include::Metadata)
+                    || include.0.contains(&Include::Uri)),
+            },
+        };
         let get_result = self
             .executor
-            .get(Get {
-                scan: Scan {
-                    collection_and_segments,
-                },
-                filter: Filter {
-                    query_ids: ids,
-                    where_clause: r#where,
-                },
-                limit: Limit { offset, limit },
-                proj: Projection {
-                    document: include.0.contains(&Include::Document),
-                    embedding: include.0.contains(&Include::Embedding),
-                    // If URI is requested, metadata is also requested so we can extract the URI.
-                    metadata: (include.0.contains(&Include::Metadata)
-                        || include.0.contains(&Include::Uri)),
-                },
+            .get(get_plan.clone(), |code: tonic::Code| {
+                let mut provider = self.collections_with_segments_provider.clone();
+                let mut get_plan2 = get_plan.clone();
+                async move {
+                    if code == tonic::Code::NotFound {
+                        provider
+                            .collections_with_segments_cache
+                            .remove(&collection_id)
+                            .await;
+                    }
+                    let collection_and_segments = provider
+                        .get_collection_with_segments(collection_id)
+                        .await
+                        .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+                    get_plan2.scan = Scan {
+                        collection_and_segments,
+                    };
+                    Ok(get_plan2)
+                }
             })
             .await?;
         let return_bytes = get_result.size_bytes();
@@ -1454,9 +1554,14 @@ impl ServiceBasedFrontend {
             }
         };
         let res = get_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
+            .retry(self.retry_policy)
             // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+            .when(|e| {
+                matches!(
+                    e.code(),
+                    ErrorCodes::NotFound | ErrorCodes::Unknown | ErrorCodes::Unavailable
+                )
+            })
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -1464,6 +1569,14 @@ impl ServiceBasedFrontend {
                         "Retrying get() request for collection {}",
                         request.collection_id
                     );
+                }
+            })
+            .adjust(|e, d| {
+                if e.code() == ErrorCodes::NotFound {
+                    // Retry immediately for cache invalidation
+                    Some(Duration::from_micros(0))
+                } else {
+                    d
                 }
             })
             .await;
@@ -1606,9 +1719,14 @@ impl ServiceBasedFrontend {
             }
         };
         let res = query_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
+            .retry(self.retry_policy)
             // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+            .when(|e| {
+                matches!(
+                    e.code(),
+                    ErrorCodes::NotFound | ErrorCodes::Unknown | ErrorCodes::Unavailable
+                )
+            })
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -1616,6 +1734,14 @@ impl ServiceBasedFrontend {
                         "Retrying query() request for collection {}",
                         request.collection_id
                     );
+                }
+            })
+            .adjust(|e, d| {
+                if e.code() == ErrorCodes::NotFound {
+                    // Retry immediately for cache invalidation
+                    Some(Duration::from_micros(0))
+                } else {
+                    d
                 }
             })
             .await;
@@ -1828,6 +1954,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             .collect::<HashSet<String>>();
         let tenants_to_migrate_immediately_threshold =
             config.tenants_to_migrate_immediately_threshold.clone();
+        let retry_config = &config.retry;
         Ok(ServiceBasedFrontend::new(
             config.allow_reset,
             sysdb,
@@ -1838,6 +1965,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             config.default_knn_index,
             tenants_to_migrate_immediately,
             tenants_to_migrate_immediately_threshold,
+            retry_config.into(),
         ))
     }
 }
@@ -1851,7 +1979,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        executor::config::{DistributedExecutorConfig, ExecutorConfig},
+        executor::config::{DistributedExecutorConfig, ExecutorConfig, RetryConfig},
         server::CreateCollectionPayload,
     };
 
@@ -1929,6 +2057,7 @@ mod tests {
                 client_selection_config: Default::default(),
             }),
             default_knn_index: KnnIndex::Spann,
+            retry: RetryConfig::default(),
         };
         let frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
             .await

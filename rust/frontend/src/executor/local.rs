@@ -95,7 +95,11 @@ impl LocalExecutor {
         Ok(())
     }
 
-    pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
+    pub async fn get<F, Fut>(&mut self, plan: Get, _: F) -> Result<GetResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: std::future::Future<Output = Result<Get, Box<dyn ChromaError>>>,
+    {
         let collection_and_segments = plan.scan.collection_and_segments.clone();
         self.try_backfill_collection(&collection_and_segments)
             .await?;
@@ -169,7 +173,7 @@ impl LocalExecutor {
                 };
 
                 let allowed_uids = self
-                    .get(filter_plan)
+                    .get(filter_plan.clone(), |_| async { Ok(filter_plan.clone()) })
                     .await?
                     .result
                     .records
@@ -278,7 +282,11 @@ impl LocalExecutor {
                 },
             };
 
-            let hydrated_records = self.get(projection_plan).await?;
+            let hydrated_records = self
+                .get(projection_plan.clone(), |_| async {
+                    Ok(projection_plan.clone())
+                })
+                .await?;
             let mut user_id_to_document = HashMap::new();
             let mut user_id_to_metadata = HashMap::new();
             for ProjectionRecord {
