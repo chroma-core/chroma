@@ -15,6 +15,10 @@ pub struct HnswProviderConfig {
     // inspired by the birthday paradox.
     #[serde(default = "HnswProviderConfig::default_permitted_parallelism")]
     pub permitted_parallelism: u32,
+    // Control whether HNSW indices are loaded from memory
+    // instead of disk. Defaults to false.
+    #[serde(default = "HnswProviderConfig::default_load_hnsw_from_memory")]
+    pub load_hnsw_from_memory: bool,
 }
 
 impl HnswProviderConfig {
@@ -24,6 +28,10 @@ impl HnswProviderConfig {
 
     const fn default_permitted_parallelism() -> u32 {
         180
+    }
+
+    const fn default_load_hnsw_from_memory() -> bool {
+        false
     }
 }
 
