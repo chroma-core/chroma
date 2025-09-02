@@ -15,11 +15,17 @@ use chroma_index::fulltext::types::{
 use chroma_index::metadata::types::{
     MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader, MetadataIndexWriter,
 };
+use chroma_index::sparse::reader::SparseReader;
+use chroma_index::sparse::types::DEFAULT_BLOCK_SIZE;
+use chroma_index::sparse::writer::SparseFlusher;
+use chroma_index::sparse::writer::SparseWriter;
 use chroma_types::DatabaseUuid;
 use chroma_types::SegmentType;
 use chroma_types::BOOL_METADATA;
 use chroma_types::F32_METADATA;
 use chroma_types::FULL_TEXT_PLS;
+use chroma_types::SPARSE_MAX;
+use chroma_types::SPARSE_OFFSET_VALUE;
 use chroma_types::STRING_METADATA;
 use chroma_types::U32_METADATA;
 use chroma_types::{MaterializedLogOperation, MetadataValue, Segment, SegmentUuid};
@@ -37,6 +43,7 @@ pub struct MetadataSegmentWriter<'me> {
     pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) u32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
+    pub(crate) sparse_index_writer: Option<SparseWriter<'me>>,
     pub id: SegmentUuid,
 }
 
@@ -300,7 +307,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
                 None => match blockfile_provider
-                    .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+                    .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
                     .await
                 {
                     Ok(writer) => (writer, None),
@@ -310,12 +317,80 @@ impl<'me> MetadataSegmentWriter<'me> {
         let u32_metadata_index_writer =
             MetadataIndexWriter::new_u32(u32_metadata_writer, u32_metadata_index_reader);
 
+        let max_file_path = segment
+            .file_path
+            .get(SPARSE_MAX)
+            .and_then(|paths| paths.first());
+        let offset_value_file_path = segment
+            .file_path
+            .get(SPARSE_OFFSET_VALUE)
+            .and_then(|paths| paths.first());
+        let sparse_index_writer = if let (Some(max_file_path), Some(offset_value_file_path)) =
+            (max_file_path, offset_value_file_path)
+        {
+            let (max_prefix, max_uuid) = Segment::extract_prefix_and_id(max_file_path)
+                .map_err(|_| MetadataSegmentError::UuidParseError(max_file_path.to_string()))?;
+            let max_reader = blockfile_provider
+                .read::<u32, f32>(BlockfileReaderOptions::new(
+                    max_uuid,
+                    max_prefix.to_string(),
+                ))
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
+            let max_writer = blockfile_provider
+                .write::<u32, f32>(
+                    BlockfileWriterOptions::new(max_prefix.to_string()).fork(max_uuid),
+                )
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+            let (offset_value_prefix, offset_value_uuid) =
+                Segment::extract_prefix_and_id(offset_value_file_path).map_err(|_| {
+                    MetadataSegmentError::UuidParseError(offset_value_file_path.to_string())
+                })?;
+            let offset_value_reader = blockfile_provider
+                .read::<u32, f32>(BlockfileReaderOptions::new(
+                    offset_value_uuid,
+                    offset_value_prefix.to_string(),
+                ))
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
+            let offset_value_writer = blockfile_provider
+                .write::<u32, f32>(
+                    BlockfileWriterOptions::new(offset_value_prefix.to_string())
+                        .fork(offset_value_uuid),
+                )
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+            Some(SparseWriter::new(
+                DEFAULT_BLOCK_SIZE,
+                max_writer,
+                offset_value_writer,
+                Some(SparseReader::new(max_reader, offset_value_reader)),
+            ))
+        } else {
+            let max_writer = blockfile_provider
+                .write::<u32, f32>(BlockfileWriterOptions::new(prefix_path.clone()))
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+            let offset_value_writer = blockfile_provider
+                .write::<u32, f32>(BlockfileWriterOptions::new(prefix_path.clone()))
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+            Some(SparseWriter::new(
+                DEFAULT_BLOCK_SIZE,
+                max_writer,
+                offset_value_writer,
+                None,
+            ))
+        };
+
         Ok(MetadataSegmentWriter {
             full_text_index_writer: Some(full_text_index_writer),
             string_metadata_index_writer: Some(string_metadata_index_writer),
             bool_metadata_index_writer: Some(bool_metadata_index_writer),
             f32_metadata_index_writer: Some(f32_metadata_index_writer),
             u32_metadata_index_writer: Some(u32_metadata_index_writer),
+            sparse_index_writer,
             id: segment.id,
         })
     }
@@ -383,6 +458,15 @@ impl<'me> MetadataSegmentWriter<'me> {
                     None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
                 }
             }
+            MetadataValue::SparseVector(offset_value) => {
+                match &self.sparse_index_writer {
+                    Some(writer) => {
+                        writer.set(offset_id, offset_value.iter()).await;
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. sparse index writer should be set for metadata segment"),
+                }
+            },
         }
     }
 
@@ -449,6 +533,13 @@ impl<'me> MetadataSegmentWriter<'me> {
                     None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
                 }
             }
+            MetadataValue::SparseVector(offset_value) => match &self.sparse_index_writer {
+                Some(writer) => {
+                    writer.delete(offset_id, offset_value.indices.iter().cloned()).await;
+                    Ok(())
+                }
+                    None => panic!("Invariant violation. sparse index writer should be set for metadata segment"),
+            },
         }
     }
 
@@ -744,6 +835,14 @@ impl<'me> MetadataSegmentWriter<'me> {
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
+        let sparse_index_flusher = match self.sparse_index_writer {
+            Some(sparse_index_writer) => match sparse_index_writer.commit().await {
+                Ok(flusher) => flusher,
+                Err(e) => return Err(Box::new(e)),
+            },
+            None => return Err(Box::new(MetadataSegmentError::NoWriter)),
+        };
+
         Ok(MetadataSegmentFlusher {
             id: self.id,
             full_text_index_flusher: full_text_flusher,
@@ -751,6 +850,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             bool_metadata_index_flusher: bool_metadata_flusher,
             f32_metadata_index_flusher: f32_metadata_flusher,
             u32_metadata_index_flusher: u32_metadata_flusher,
+            sparse_index_flusher,
         })
     }
 }
@@ -762,6 +862,7 @@ pub struct MetadataSegmentFlusher {
     pub(crate) bool_metadata_index_flusher: MetadataIndexFlusher,
     pub(crate) f32_metadata_index_flusher: MetadataIndexFlusher,
     pub(crate) u32_metadata_index_flusher: MetadataIndexFlusher,
+    pub(crate) sparse_index_flusher: SparseFlusher,
 }
 
 impl Debug for MetadataSegmentFlusher {
@@ -843,6 +944,24 @@ impl MetadataSegmentFlusher {
             )],
         );
 
+        let max_id = self.sparse_index_flusher.max_id();
+        let offset_value_id = self.sparse_index_flusher.offset_value_id();
+        match self.sparse_index_flusher.flush().await {
+            Ok(_) => {}
+            Err(e) => return Err(Box::new(e)),
+        }
+        flushed.insert(
+            SPARSE_MAX.to_string(),
+            vec![ChromaSegmentFlusher::flush_key(&prefix_path, &max_id)],
+        );
+        flushed.insert(
+            SPARSE_OFFSET_VALUE.to_string(),
+            vec![ChromaSegmentFlusher::flush_key(
+                &prefix_path,
+                &offset_value_id,
+            )],
+        );
+
         Ok(flushed)
     }
 }
@@ -853,6 +972,7 @@ pub struct MetadataSegmentReader<'me> {
     pub bool_metadata_index_reader: Option<MetadataIndexReader<'me>>,
     pub f32_metadata_index_reader: Option<MetadataIndexReader<'me>>,
     pub u32_metadata_index_reader: Option<MetadataIndexReader<'me>>,
+    pub sparse_index_reader: Option<SparseReader<'me>>,
 }
 
 impl MetadataSegmentReader<'_> {
@@ -902,18 +1022,27 @@ impl MetadataSegmentReader<'_> {
         let u32_metadata_future =
             Self::load_index_reader(segment, U32_METADATA, blockfile_provider);
 
+        let sparse_max_future = Self::load_index_reader(segment, SPARSE_MAX, blockfile_provider);
+
+        let sparse_offset_value_future =
+            Self::load_index_reader(segment, SPARSE_OFFSET_VALUE, blockfile_provider);
+
         let (
             pls_reader,
             string_metadata_reader,
             bool_metadata_reader,
             f32_metadata_reader,
             u32_metadata_reader,
+            sparse_max_reader,
+            sparse_offset_value_reader,
         ) = tokio::join!(
             pls_future,
             string_metadata_future,
             bool_metadata_future,
             f32_metadata_future,
-            u32_metadata_future
+            u32_metadata_future,
+            sparse_max_future,
+            sparse_offset_value_future,
         );
 
         // Handle results and create index readers
@@ -936,12 +1065,25 @@ impl MetadataSegmentReader<'_> {
         let f32_metadata_reader = f32_metadata_reader?;
         let f32_metadata_index_reader = f32_metadata_reader.map(MetadataIndexReader::new_f32);
 
+        let sparse_index_reader =
+            if let (Some(sparse_max_reader), Some(sparse_offset_value_reader)) =
+                (sparse_max_reader?, sparse_offset_value_reader?)
+            {
+                Some(SparseReader::new(
+                    sparse_max_reader,
+                    sparse_offset_value_reader,
+                ))
+            } else {
+                None
+            };
+
         Ok(MetadataSegmentReader {
             full_text_index_reader,
             string_metadata_index_reader,
             bool_metadata_index_reader,
             f32_metadata_index_reader,
             u32_metadata_index_reader,
+            sparse_index_reader,
         })
     }
 }
@@ -970,7 +1112,7 @@ mod test {
         regex::literal_expr::{LiteralExpr, NgramLiteralProvider},
         strategies::{ArbitraryChromaRegexTestDocumentsParameters, ChromaRegexTestDocuments},
         Chunk, CollectionUuid, DatabaseUuid, LogRecord, MetadataValue, Operation, OperationRecord,
-        ScalarEncoding, SegmentUuid, UpdateMetadataValue,
+        ScalarEncoding, SegmentUuid, UpdateMetadataValue, SPARSE_MAX, SPARSE_OFFSET_VALUE,
     };
     use proptest::prelude::any_with;
     use roaring::RoaringBitmap;
@@ -2216,7 +2358,7 @@ mod test {
             "tenant/{}/database/{}/collection/{}/segment/{}",
             tenant, database_id, record_segment.collection, metadata_segment.id,
         );
-        assert_eq!(metadata_segment.file_path.len(), 5);
+        assert_eq!(metadata_segment.file_path.len(), 7);
         for (_, file_path) in metadata_segment.file_path.iter() {
             assert_eq!(file_path.len(), 1);
             assert!(file_path
@@ -2342,6 +2484,165 @@ mod test {
             runtime.block_on(async {
                 run_regex_test(test_case).await
             });
+        }
+    }
+
+    #[tokio::test]
+    async fn test_metadata_sparse_vector() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+
+        let mut record_segment = chroma_types::Segment {
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let mut metadata_segment = chroma_types::Segment {
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        // Create segments and add records with sparse vectors
+        {
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+
+            let metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+
+            // Verify that sparse index writer is created
+            assert!(
+                metadata_writer.sparse_index_writer.is_some(),
+                "Sparse index writer should be created"
+            );
+
+            // Create metadata with sparse vectors
+            let mut update_metadata1 = HashMap::new();
+            update_metadata1.insert(
+                String::from("sparse_vec"),
+                UpdateMetadataValue::SparseVector(chroma_types::SparseVector::new(
+                    vec![0, 5, 10],
+                    vec![0.1, 0.5, 0.9],
+                )),
+            );
+            update_metadata1.insert(
+                String::from("category"),
+                UpdateMetadataValue::Str(String::from("science")),
+            );
+
+            let data = vec![LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: Some(update_metadata1.clone()),
+                    document: Some(String::from("Document with sparse vector 1")),
+                    operation: Operation::Add,
+                },
+            }];
+
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => match *e {
+                        RecordSegmentReaderCreationError::UninitializedSegment => None,
+                        _ => panic!("Error creating record segment reader"),
+                    },
+                };
+
+            let materialized_logs = materialize_logs(&record_segment_reader, data, None)
+                .await
+                .expect("Error materializing logs");
+
+            // Apply logs - this should handle sparse vectors
+            segment_writer
+                .apply_materialized_log_chunk(&record_segment_reader, &materialized_logs)
+                .await
+                .expect("Error applying materialized log chunk");
+            metadata_writer
+                .apply_materialized_log_chunk(&record_segment_reader, &materialized_logs)
+                .await
+                .expect("Error applying materialized log chunk");
+
+            let record_flusher = segment_writer
+                .commit()
+                .await
+                .expect("Commit record segment writer failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .await
+                .expect("Commit metadata segment writer failed");
+
+            record_segment.file_path = record_flusher
+                .flush()
+                .await
+                .expect("Flush record segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
+
+            // Verify that sparse index files are created
+            assert!(
+                metadata_segment.file_path.contains_key(SPARSE_MAX),
+                "Sparse max file should be created"
+            );
+            assert!(
+                metadata_segment.file_path.contains_key(SPARSE_OFFSET_VALUE),
+                "Sparse offset value file should be created"
+            );
+        }
+
+        // Verify we can read the segment back
+        {
+            let metadata_segment_reader =
+                MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating metadata segment reader");
+
+            // Verify sparse index reader is created
+            assert!(
+                metadata_segment_reader.sparse_index_reader.is_some(),
+                "Sparse index reader should be created"
+            );
         }
     }
 }
