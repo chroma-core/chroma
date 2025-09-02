@@ -1,10 +1,9 @@
-use core::mem::discriminant;
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashSet},
-    hash::{Hash, Hasher},
+    hash::Hash,
 };
 use thiserror::Error;
 use utoipa::ToSchema;
@@ -660,31 +659,6 @@ pub enum QueryVector {
     Sparse(SparseVector),
 }
 
-impl Eq for QueryVector {}
-
-impl Hash for QueryVector {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        discriminant(self).hash(state);
-        match self {
-            QueryVector::Dense(embedding) => {
-                let bits = embedding
-                    .iter()
-                    .map(|val| (val + 0.0).to_bits())
-                    .collect::<Vec<_>>();
-                bits.hash(state);
-            }
-            QueryVector::Sparse(embedding) => {
-                let mut sorted_bits = embedding
-                    .iter()
-                    .map(|(index, val)| (index, (val + 0.0).to_bits()))
-                    .collect::<Vec<_>>();
-                sorted_bits.sort_unstable();
-                sorted_bits.hash(state);
-            }
-        }
-    }
-}
-
 impl TryFrom<chroma_proto::QueryVector> for QueryVector {
     type Error = QueryConversionError;
 
@@ -721,7 +695,7 @@ impl TryFrom<QueryVector> for chroma_proto::QueryVector {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct KnnQuery {
     pub embedding: QueryVector,
     pub key: String,
@@ -773,7 +747,7 @@ impl Rank {
         128
     }
 
-    pub fn knn_queries(&self) -> HashSet<KnnQuery> {
+    pub fn knn_queries(&self) -> Vec<KnnQuery> {
         match self {
             Rank::Absolute(rank) | Rank::Exponentiation(rank) | Rank::Logarithm(rank) => {
                 rank.knn_queries()
@@ -787,18 +761,18 @@ impl Rank {
             | Rank::Minimum(ranks)
             | Rank::Multiplication(ranks)
             | Rank::Summation(ranks) => ranks.iter().flat_map(Rank::knn_queries).collect(),
-            Rank::Value(_) => HashSet::new(),
+            Rank::Value(_) => Vec::new(),
             Rank::Knn {
                 embedding,
                 key,
                 limit,
                 default: _,
                 ordinal: _,
-            } => HashSet::from_iter([KnnQuery {
+            } => vec![KnnQuery {
                 embedding: embedding.clone(),
                 key: key.clone(),
                 limit: *limit,
-            }]),
+            }],
         }
     }
 }
@@ -1243,33 +1217,6 @@ mod tests {
         } else {
             panic!("Expected sparse vector");
         }
-    }
-
-    #[test]
-    fn test_query_vector_equality_and_hash() {
-        use std::collections::HashSet;
-
-        let dense1 = QueryVector::Dense(vec![0.1, 0.2, 0.3]);
-        let dense2 = QueryVector::Dense(vec![0.1, 0.2, 0.3]);
-        let dense3 = QueryVector::Dense(vec![0.1, 0.2, 0.4]);
-
-        // Test equality
-        assert_eq!(dense1, dense2);
-        assert_ne!(dense1, dense3);
-
-        // Test hash - equal vectors should have same hash
-        let mut set = HashSet::new();
-        set.insert(dense1.clone());
-        assert!(set.contains(&dense2));
-        assert!(!set.contains(&dense3));
-
-        // Test sparse vectors
-        let sparse1 = QueryVector::Sparse(SparseVector::new(vec![0, 5], vec![0.1, 0.5]));
-        let sparse2 = QueryVector::Sparse(SparseVector::new(vec![0, 5], vec![0.1, 0.5]));
-        assert_eq!(sparse1, sparse2);
-
-        set.insert(sparse1.clone());
-        assert!(set.contains(&sparse2));
     }
 
     #[test]
