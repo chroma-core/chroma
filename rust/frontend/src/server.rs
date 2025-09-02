@@ -35,8 +35,10 @@ use std::sync::{
     Arc,
 };
 use std::{str::FromStr, time::Instant};
-use tokio::signal::unix::signal;
-use tokio::signal::unix::SignalKind;
+#[cfg(unix)]
+use tokio::signal::unix::{signal, SignalKind};
+#[cfg(windows)]
+use tokio::signal::windows::ctrl_c;
 use tower_http::cors::CorsLayer;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::ToSchema;
@@ -85,18 +87,36 @@ impl chroma_error::ChromaError for RateLimitError {
 }
 
 async fn graceful_shutdown(system: System) {
-    match signal(SignalKind::terminate()) {
-        Ok(mut sigterm) => {
-            sigterm.recv().await;
-            tracing::info!("Received SIGTERM, shutting down service");
-
-            system.stop().await;
-            system.join().await;
-        }
-        Err(err) => {
-            tracing::error!("Failed to create SIGTERM handler: {err}")
+    #[cfg(unix)]
+    {
+        match signal(SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                sigterm.recv().await;
+                tracing::info!("Received SIGTERM, shutting down service");
+            }
+            Err(err) => {
+                tracing::error!("Failed to create SIGTERM handler: {err}");
+                return;
+            }
         }
     }
+
+    #[cfg(windows)]
+    {
+        match ctrl_c() {
+            Ok(mut ctrl_c_signal) => {
+                ctrl_c_signal.recv().await;
+                tracing::info!("Received Ctrl+C, shutting down service");
+            }
+            Err(err) => {
+                tracing::error!("Failed to create Ctrl+C handler: {err}");
+                return;
+            }
+        }
+    }
+
+    system.stop().await;
+    system.join().await;
 }
 
 pub struct Metrics {
