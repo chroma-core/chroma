@@ -131,7 +131,7 @@ export type GetUserIdentityResponse = {
 };
 
 export type HashMap = {
-  [key: string]: boolean | number | string | null;
+    [key: string]: boolean | number | number | string | SparseVector;
 };
 
 export type HeartbeatResponse = {
@@ -185,6 +185,20 @@ export type SpannConfiguration = {
     space?: null | HnswSpace;
     split_threshold?: number | null;
     write_nprobe?: number | null;
+};
+
+/**
+ * Represents a sparse vector using parallel arrays for indices and values.
+ */
+export type SparseVector = {
+    /**
+     * Dimension indices
+     */
+    indices: Array<number>;
+    /**
+     * Values corresponding to each index
+     */
+    values: Array<number>;
 };
 
 export type UpdateCollectionConfiguration = {
