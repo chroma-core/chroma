@@ -1035,8 +1035,8 @@ impl ServiceBasedFrontend {
                     },
                     filter,
                     limit: Limit {
-                        skip: 0,
-                        fetch: None,
+                        offset: 0,
+                        limit: None,
                     },
                     proj: Projection {
                         document: false,
@@ -1339,10 +1339,7 @@ impl ServiceBasedFrontend {
                     query_ids: ids,
                     where_clause: r#where,
                 },
-                limit: Limit {
-                    skip: offset,
-                    fetch: limit,
-                },
+                limit: Limit { offset, limit },
                 proj: Projection {
                     document: include.0.contains(&Include::Document),
                     embedding: include.0.contains(&Include::Embedding),

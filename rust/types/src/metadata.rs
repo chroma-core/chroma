@@ -1,6 +1,7 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
+use sprs::CsVec;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -81,6 +82,23 @@ impl From<SparseVector> for chroma_proto::SparseVector {
             indices: sparse.indices,
             values: sparse.values,
         }
+    }
+}
+
+/// Convert SparseVector to sprs::CsVec for efficient sparse operations
+impl From<&SparseVector> for CsVec<f32> {
+    fn from(sparse: &SparseVector) -> Self {
+        let (indices, values) = sparse
+            .iter()
+            .map(|(index, value)| (index as usize, value))
+            .unzip();
+        CsVec::new(u32::MAX as usize, indices, values)
+    }
+}
+
+impl From<SparseVector> for CsVec<f32> {
+    fn from(sparse: SparseVector) -> Self {
+        (&sparse).into()
     }
 }
 
