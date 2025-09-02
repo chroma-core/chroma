@@ -20,7 +20,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::{
     admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage, StorageError,
 };
-use chroma_tracing::util::Stopwatch;
+use chroma_tracing::util::{LogSlowOperation, Stopwatch};
 use futures::{stream::FuturesUnordered, StreamExt};
 use opentelemetry::global;
 use std::{
@@ -481,41 +481,50 @@ impl BlockManager {
         let key_clone = key.clone();
         let num_get_requests_metric_clone = self.block_metrics.num_get_requests.clone();
 
-        let res = self.storage
-            .fetch(&key, GetOptions::new(priority), move |bytes| async move {
-                let bytes = match bytes {
-                    Ok(bytes) => bytes,
-                    Err(e) => {
-                        tracing::error!("Error loading block from storage: {:?}", e);
-                        return Err(StorageError::Message {
-                            message: "Error loading block".to_string(),
-                        });
+        let res = {
+            let _slow_operation_log = LogSlowOperation::new(
+                format!(
+                    "Cold block fetch from storage and deserialize: {}",
+                    key_clone
+                ),
+                Duration::from_millis(500),
+            );
+            self.storage
+                .fetch(&key, GetOptions::new(priority), move |bytes| async move {
+                    let bytes = match bytes {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            tracing::error!("Error loading block from storage: {:?}", e);
+                            return Err(StorageError::Message {
+                                message: "Error loading block".to_string(),
+                            });
+                        }
+                    };
+                    num_get_requests_metric_clone.record(1, &[]);
+                    let block = Block::from_bytes(&bytes, id_clone);
+                    match block {
+                        Ok(block) => {
+                            block_cache_clone.insert(id_clone, block.clone()).await;
+                            Ok(block)
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "Error converting bytes to Block {:?}/{:?}",
+                                key_clone,
+                                e
+                            );
+                            // TODO(hammadb): We should ideally use BlockLoadError here since that is what this level of the code expects,
+                            // however that type is not trivially Clone. Since for all practical purposes this error results in the same upstream handling
+                            // and observability properties we use a generic StorageError here.
+                            Err(StorageError::Message {
+                                message: "Error converting bytes to Block".to_string(),
+                            })
+                        }
                     }
-                };
-                num_get_requests_metric_clone.record(1, &[]);
-                let deserialization_span = tracing::trace_span!(
-                    parent: Span::current(),
-                    "BlockManager deserialize block",
-                    id = id_clone.to_string()
-                );
-                let block = deserialization_span.in_scope(|| Block::from_bytes(&bytes, id_clone));
-                match block {
-                    Ok(block) => {
-                        block_cache_clone.insert(id_clone, block.clone()).await;
-                        Ok(block)
-                    }
-                    Err(e) => {
-                        tracing::error!("Error converting bytes to Block {:?}/{:?}", key_clone, e);
-                        // TODO(hammadb): We should ideally use BlockLoadError here since that is what this level of the code expects,
-                        // however that type is not trivially Clone. Since for all practical purposes this error results in the same upstream handling
-                        // and observability properties we use a generic StorageError here.
-                        Err(StorageError::Message {
-                            message: "Error converting bytes to Block".to_string(),
-                        })
-                    }
-                }
-            }).instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold", block_id = id.to_string()))
-            .await;
+                })
+                .instrument(Span::current())
+                .await
+        };
         match res {
             Ok(block) => Ok(Some(block.0)),
             Err(e) => {

@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
@@ -8,6 +11,7 @@ use chroma_segment::{
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
+use chroma_tracing::util::LogSlowOperation;
 use chroma_types::{
     operator::{Projection, ProjectionOutput, ProjectionRecord},
     Chunk, LogRecord, Segment,
@@ -107,59 +111,64 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             })
             .collect();
 
+        let current_span = Span::current();
         let futures: Vec<_> = input
             .offset_ids
             .iter()
-            .map(|offset_id| async {
-                let record = match offset_id_to_log_record.get(offset_id) {
-                    // The offset id is in the log
-                    Some(log) => {
-                        let log = log
-                            .hydrate(record_segment_reader.as_ref())
-                            .await
-                            .map_err(ProjectionError::LogMaterializer)?;
+            .map(|offset_id| {
+                async {
+                    // Emit a warning if the projection operation on this record takes > 500ms.
+                    let _slow_operation_log = LogSlowOperation::new(
+                        format!("Projection for offset id {}", *offset_id),
+                        Duration::from_millis(100),
+                    );
+                    let record = match offset_id_to_log_record.get(offset_id) {
+                        // The offset id is in the log
+                        Some(log) => {
+                            let log = log
+                                .hydrate(record_segment_reader.as_ref())
+                                .await
+                                .map_err(ProjectionError::LogMaterializer)?;
 
-                        ProjectionRecord {
-                            id: log.get_user_id().to_string(),
-                            document: log
-                                .merged_document_ref()
-                                .filter(|_| self.document)
-                                .map(str::to_string),
-                            embedding: self
-                                .embedding
-                                .then_some(log.merged_embeddings_ref().to_vec()),
-                            metadata: self
-                                .metadata
-                                .then_some(log.merged_metadata())
-                                .filter(|metadata| !metadata.is_empty()),
-                        }
-                    }
-                    // The offset id is in the record segment
-                    None => {
-                        if let Some(reader) = &record_segment_reader {
-                            let record = reader
-                                .get_data_for_offset_id(*offset_id)
-                                .instrument(tracing::trace_span!(
-                                    parent: Span::current(), "Get DataRecord for offset",
-                                    offset_id = *offset_id
-                                ))
-                                .await?
-                                .ok_or(ProjectionError::RecordSegmentPhantomRecord(*offset_id))?;
                             ProjectionRecord {
-                                id: record.id.to_string(),
-                                document: record
-                                    .document
+                                id: log.get_user_id().to_string(),
+                                document: log
+                                    .merged_document_ref()
                                     .filter(|_| self.document)
                                     .map(str::to_string),
-                                embedding: self.embedding.then_some(record.embedding.to_vec()),
-                                metadata: record.metadata.filter(|_| self.metadata),
+                                embedding: self
+                                    .embedding
+                                    .then_some(log.merged_embeddings_ref().to_vec()),
+                                metadata: self
+                                    .metadata
+                                    .then_some(log.merged_metadata())
+                                    .filter(|metadata| !metadata.is_empty()),
                             }
-                        } else {
-                            return Err(ProjectionError::RecordSegmentUninitialized);
                         }
-                    }
-                };
-                Ok::<_, ProjectionError>(record)
+                        // The offset id is in the record segment
+                        None => {
+                            if let Some(reader) = &record_segment_reader {
+                                let record =
+                                    reader.get_data_for_offset_id(*offset_id).await?.ok_or(
+                                        ProjectionError::RecordSegmentPhantomRecord(*offset_id),
+                                    )?;
+                                ProjectionRecord {
+                                    id: record.id.to_string(),
+                                    document: record
+                                        .document
+                                        .filter(|_| self.document)
+                                        .map(str::to_string),
+                                    embedding: self.embedding.then_some(record.embedding.to_vec()),
+                                    metadata: record.metadata.filter(|_| self.metadata),
+                                }
+                            } else {
+                                return Err(ProjectionError::RecordSegmentUninitialized);
+                            }
+                        }
+                    };
+                    Ok::<_, ProjectionError>(record)
+                }
+                .instrument(current_span.clone())
             })
             .collect();
 
