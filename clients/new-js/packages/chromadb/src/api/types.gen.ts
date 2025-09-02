@@ -131,7 +131,7 @@ export type GetUserIdentityResponse = {
 };
 
 export type HashMap = {
-    [key: string]: boolean | number | number | string | SparseVector;
+  [key: string]: boolean | number | string | SparseVector | null;
 };
 
 export type HeartbeatResponse = {
@@ -173,6 +173,52 @@ export type QueryResponse = {
 export type RawWhereFields = {
     where?: unknown;
     where_document?: unknown;
+};
+
+/**
+ * Payload for hybrid search
+ */
+export type SearchPayload = {
+    /**
+     * Filter criteria for search
+     */
+    filter: {
+        query_ids?: Array<string>;
+        where_clause?: {
+            [key: string]: unknown;
+        };
+    };
+    limit: {
+        fetch?: number;
+        skip: number;
+    };
+    /**
+     * Ranking expression for hybrid search
+     */
+    rank: {
+        [key: string]: {
+            [key: string]: unknown;
+        };
+    };
+    select: {
+        fields: Array<string>;
+    };
+};
+
+export type SearchRecord = {
+    document?: string | null;
+    embedding?: Array<number> | null;
+    id: string;
+    metadata?: null | HashMap;
+    score?: number | null;
+};
+
+export type SearchRequestPayload = {
+    searches: Array<SearchPayload>;
+};
+
+export type SearchResponse = {
+    results: Array<Array<SearchRecord>>;
 };
 
 export type SpannConfiguration = {
@@ -1204,6 +1250,52 @@ export type CollectionQueryResponses = {
 };
 
 export type CollectionQueryResponse = CollectionQueryResponses[keyof CollectionQueryResponses];
+
+export type CollectionSearchData = {
+    body: SearchRequestPayload;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name for the collection
+         */
+        database: string;
+        /**
+         * Collection ID to search records from
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search';
+};
+
+export type CollectionSearchErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Collection not found
+     */
+    404: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type CollectionSearchError = CollectionSearchErrors[keyof CollectionSearchErrors];
+
+export type CollectionSearchResponses = {
+    /**
+     * Records searched from the collection
+     */
+    200: SearchResponse;
+};
+
+export type CollectionSearchResponse = CollectionSearchResponses[keyof CollectionSearchResponses];
 
 export type CollectionUpdateData = {
     body: UpdateCollectionRecordsPayload;
