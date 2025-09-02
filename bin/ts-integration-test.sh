@@ -20,4 +20,5 @@ echo "No changes detected in generated client."
 
 # Install dependencies and run tests
 echo "Running tests..."
-pnpm -r test --verbose
+cd packages/chromadb
+pnpm test --verbose
