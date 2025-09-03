@@ -22,6 +22,7 @@ use futures::future;
 use opentelemetry::{global, KeyValue};
 use rand::seq::SliceRandom;
 use thiserror::Error;
+use tracing::{Instrument, Span};
 use uuid::Uuid;
 
 use crate::{
@@ -2620,12 +2621,14 @@ impl<'me> SpannIndexReader<'me> {
             match (pl_blockfile_id, versions_map_blockfile_id) {
                 (Some(pl_id), Some(versions_id)) => {
                     let (pl_result, vm_result) = tokio::join!(
-                        Self::posting_list_reader_from_id(pl_id, blockfile_provider, prefix_path),
+                        Self::posting_list_reader_from_id(pl_id, blockfile_provider, prefix_path)
+                            .instrument(Span::current()),
                         Self::versions_map_reader_from_id(
                             versions_id,
                             blockfile_provider,
                             prefix_path
                         )
+                        .instrument(Span::current())
                     );
                     (pl_result?, vm_result?)
                 }
