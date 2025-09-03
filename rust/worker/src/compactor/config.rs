@@ -1,9 +1,17 @@
+use std::time::Duration;
+
+use chroma_config::helpers::deserialize_duration_from_milliseconds;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CompactorConfig {
     #[serde(default = "CompactorConfig::default_compaction_manager_queue_size")]
     pub compaction_manager_queue_size: usize,
+    #[serde(
+        default = "CompactorConfig::default_compaction_manager_send_timeout",
+        deserialize_with = "deserialize_duration_from_milliseconds"
+    )]
+    pub compaction_manager_send_timeout: Duration,
     #[serde(default = "CompactorConfig::default_job_expiry_seconds")]
     pub job_expiry_seconds: u64,
     #[serde(default = "CompactorConfig::default_max_concurrent_jobs")]
@@ -31,6 +39,10 @@ pub struct CompactorConfig {
 impl CompactorConfig {
     fn default_compaction_manager_queue_size() -> usize {
         1000
+    }
+
+    fn default_compaction_manager_send_timeout() -> Duration {
+        Duration::from_millis(500)
     }
 
     fn default_max_concurrent_jobs() -> usize {
@@ -82,6 +94,8 @@ impl Default for CompactorConfig {
     fn default() -> Self {
         CompactorConfig {
             compaction_manager_queue_size: CompactorConfig::default_compaction_manager_queue_size(),
+            compaction_manager_send_timeout:
+                CompactorConfig::default_compaction_manager_send_timeout(),
             job_expiry_seconds: CompactorConfig::default_job_expiry_seconds(),
             max_concurrent_jobs: CompactorConfig::default_max_concurrent_jobs(),
             compaction_interval_sec: CompactorConfig::default_compaction_interval_sec(),

@@ -1,7 +1,10 @@
 use super::{dispatcher::TaskRequestMessage, operator::TaskMessage};
 use crate::{Component, ComponentContext, ComponentRuntime, Handler, ReceiverForMessage};
 use async_trait::async_trait;
-use std::fmt::{Debug, Formatter, Result};
+use std::{
+    fmt::{Debug, Formatter, Result},
+    time::Duration,
+};
 
 /// A worker thread is responsible for executing tasks
 /// It sends requests to the dispatcher for new tasks.
@@ -10,16 +13,19 @@ use std::fmt::{Debug, Formatter, Result};
 pub(super) struct WorkerThread {
     dispatcher: Box<dyn ReceiverForMessage<TaskRequestMessage>>,
     queue_size: usize,
+    send_timeout: Duration,
 }
 
 impl WorkerThread {
     pub(super) fn new(
         dispatcher: Box<dyn ReceiverForMessage<TaskRequestMessage>>,
         queue_size: usize,
+        send_timeout: Duration,
     ) -> WorkerThread {
         WorkerThread {
             dispatcher,
             queue_size,
+            send_timeout,
         }
     }
 }
@@ -38,6 +44,10 @@ impl Component for WorkerThread {
 
     fn queue_size(&self) -> usize {
         self.queue_size
+    }
+
+    fn send_timeout(&self) -> Duration {
+        self.send_timeout
     }
 
     fn runtime() -> ComponentRuntime {

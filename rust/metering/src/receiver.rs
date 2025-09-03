@@ -25,7 +25,10 @@ impl MeterEvent {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::{
+        sync::{Arc, Mutex, OnceLock},
+        time::Duration,
+    };
 
     use crate::{core::MeterEvent, CollectionForkContext, MeteredFutureExt};
     use chroma_system::{Component, ComponentContext, Handler, ReceiverForMessage, System};
@@ -47,6 +50,9 @@ mod tests {
         }
         fn queue_size(&self) -> usize {
             100
+        }
+        fn send_timeout(&self) -> Duration {
+            Duration::from_millis(500)
         }
         async fn on_start(&mut self, _: &ComponentContext<Self>) {}
         fn on_stop_timeout(&self) -> std::time::Duration {

@@ -37,7 +37,7 @@ impl System {
         C: Component + Send + 'static,
     {
         let (tx, rx) = tokio::sync::mpsc::channel(component.queue_size());
-        let sender: ComponentSender<C> = ComponentSender::new(tx);
+        let sender: ComponentSender<C> = ComponentSender::new(tx, component.send_timeout());
         let cancel_token = tokio_util::sync::CancellationToken::new();
         let mut executor = ComponentExecutor::new(
             sender.clone(),
@@ -142,7 +142,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::utils::get_panic_message;
-    use std::sync::Mutex;
+    use std::{sync::Mutex, time::Duration};
 
     use super::*;
     use async_trait::async_trait;
@@ -150,14 +150,20 @@ mod tests {
     #[derive(Debug)]
     struct TestComponent {
         queue_size: usize,
+        send_timeout: Duration,
         counter: usize,
         caught_panic: Arc<Mutex<Option<String>>>,
     }
 
     impl TestComponent {
-        fn new(queue_size: usize, caught_panic: Arc<Mutex<Option<String>>>) -> Self {
+        fn new(
+            queue_size: usize,
+            send_timeout: Duration,
+            caught_panic: Arc<Mutex<Option<String>>>,
+        ) -> Self {
             TestComponent {
                 queue_size,
+                send_timeout,
                 counter: 0,
                 caught_panic,
             }
@@ -192,6 +198,10 @@ mod tests {
             self.queue_size
         }
 
+        fn send_timeout(&self) -> Duration {
+            self.send_timeout
+        }
+
         fn on_handler_panic(&mut self, panic_value: Box<dyn std::any::Any + Send>) {
             self.caught_panic
                 .lock()
@@ -203,7 +213,8 @@ mod tests {
     #[tokio::test]
     async fn response_types() {
         let system = System::new();
-        let component = TestComponent::new(10, Arc::new(Mutex::new(None)));
+        let component =
+            TestComponent::new(10, Duration::from_millis(500), Arc::new(Mutex::new(None)));
         let handle = system.start_component(component);
 
         assert_eq!(1, handle.request(1, None).await.unwrap());
@@ -215,7 +226,7 @@ mod tests {
         let caught_panic = Arc::new(Mutex::new(None));
 
         let system = System::new();
-        let component = TestComponent::new(10, caught_panic.clone());
+        let component = TestComponent::new(10, Duration::from_millis(500), caught_panic.clone());
         let handle = system.start_component(component);
 
         handle.request(0, None).await.unwrap_err();

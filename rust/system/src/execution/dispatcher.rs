@@ -14,6 +14,7 @@ use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 use tracing::{trace_span, Instrument, Span};
 
@@ -133,7 +134,11 @@ impl Dispatcher {
     ) {
         let mut worker_handles = self.worker_handles.lock();
         for _ in 0..self.config.num_worker_threads {
-            let worker = WorkerThread::new(self_receiver.clone(), self.config.worker_queue_size);
+            let worker = WorkerThread::new(
+                self_receiver.clone(),
+                self.config.worker_queue_size,
+                self.config.worker_send_timeout,
+            );
             worker_handles.push(system.start_component(worker));
         }
     }
@@ -295,6 +300,10 @@ impl Component for Dispatcher {
         self.config.dispatcher_queue_size
     }
 
+    fn send_timeout(&self) -> Duration {
+        self.config.dispatcher_send_timeout
+    }
+
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         self.spawn_workers(&mut ctx.system.clone(), ctx.receiver());
     }
@@ -443,6 +452,10 @@ mod tests {
             1000
         }
 
+        fn send_timeout(&self) -> Duration {
+            Duration::from_millis(500)
+        }
+
         async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
             // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
             let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
@@ -511,6 +524,10 @@ mod tests {
             1000
         }
 
+        fn send_timeout(&self) -> Duration {
+            Duration::from_millis(500)
+        }
+
         async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
             // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
             let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
@@ -562,7 +579,9 @@ mod tests {
             num_worker_threads: THREAD_COUNT,
             task_queue_limit: 1000,
             dispatcher_queue_size: 1000,
+            dispatcher_send_timeout: Duration::from_millis(500),
             worker_queue_size: 1000,
+            worker_send_timeout: Duration::from_millis(500),
             active_io_tasks: 1000,
         });
         let dispatcher_handle = system.start_component(dispatcher);
@@ -596,7 +615,9 @@ mod tests {
             num_worker_threads: THREAD_COUNT,
             task_queue_limit: 1000,
             dispatcher_queue_size: 1000,
+            dispatcher_send_timeout: Duration::from_millis(500),
             worker_queue_size: 1000,
+            worker_send_timeout: Duration::from_millis(500),
             active_io_tasks: 1000,
         });
         let dispatcher_handle = system.start_component(dispatcher);
@@ -631,7 +652,9 @@ mod tests {
             // Must be zero to fail things.
             task_queue_limit: 0,
             dispatcher_queue_size: 1,
+            dispatcher_send_timeout: Duration::from_millis(500),
             worker_queue_size: 1,
+            worker_send_timeout: Duration::from_millis(500),
             active_io_tasks: 1,
         });
         let dispatcher_handle = system.start_component(dispatcher);
@@ -660,7 +683,9 @@ mod tests {
             // Must be zero to fail things.
             task_queue_limit: 0,
             dispatcher_queue_size: 1,
+            dispatcher_send_timeout: Duration::from_millis(500),
             worker_queue_size: 1,
+            worker_send_timeout: Duration::from_millis(500),
             active_io_tasks: 1,
         });
         let dispatcher_handle = system.start_component(dispatcher);

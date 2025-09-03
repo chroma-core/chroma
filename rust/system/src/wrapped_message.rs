@@ -102,6 +102,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use crate::ComponentSender;
 
@@ -119,6 +121,9 @@ mod tests {
             fn queue_size(&self) -> usize {
                 10
             }
+            fn send_timeout(&self) -> Duration {
+                Duration::from_millis(500)
+            }
             fn on_handler_panic(&mut self, panic_value: Box<dyn std::any::Any + Send>) {
                 tracing::error!("Handler panicked: {:?}", panic_value);
                 std::panic::resume_unwind(panic_value);
@@ -135,7 +140,7 @@ mod tests {
 
         let mut comp = TestComponent;
         let (tx, _) = tokio::sync::mpsc::channel(comp.queue_size());
-        let sender = ComponentSender::new(tx);
+        let sender = ComponentSender::new(tx, comp.send_timeout());
 
         let ctx = ComponentContext {
             system,

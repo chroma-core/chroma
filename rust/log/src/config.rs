@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use chroma_memberlist::config::CustomResourceMemberlistProviderConfig;
 use serde::{Deserialize, Serialize};
 
@@ -66,6 +68,7 @@ impl GrpcLogConfig {
                 kube_namespace: "chroma".to_string(),
                 memberlist_name: "rust-log-service-memberlist".to_string(),
                 queue_size: 100,
+                send_timeout: Duration::from_millis(500),
             },
         )
     }

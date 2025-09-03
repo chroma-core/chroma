@@ -15,6 +15,7 @@ use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+use std::time::Duration;
 use thiserror::Error;
 
 /* =========== Basic Types ============== */
@@ -58,6 +59,7 @@ pub struct CustomResourceMemberlistProvider {
     #[allow(dead_code)]
     memberlist_cr_client: Api<MemberListKubeResource>,
     queue_size: usize,
+    send_timeout: Duration,
     current_memberlist: RwLock<Memberlist>,
     subscribers: Vec<Box<dyn ReceiverForMessage<Memberlist> + Send>>,
 }
@@ -68,6 +70,7 @@ impl Debug for CustomResourceMemberlistProvider {
             .field("memberlist_name", &self.memberlist_name)
             .field("kube_ns", &self.kube_ns)
             .field("queue_size", &self.queue_size)
+            .field("send_timeout", &self.send_timeout)
             .finish()
     }
 }
@@ -114,6 +117,7 @@ impl Configurable<MemberlistProviderConfig> for CustomResourceMemberlistProvider
             kube_client,
             memberlist_cr_client,
             queue_size: my_config.queue_size,
+            send_timeout: my_config.send_timeout,
             current_memberlist: RwLock::new(vec![]),
             subscribers: vec![],
         };
@@ -130,6 +134,7 @@ impl CustomResourceMemberlistProvider {
         kube_client: Client,
         kube_ns: String,
         queue_size: usize,
+        send_timeout: Duration,
     ) -> Self {
         let memberlist_cr_client =
             Api::<MemberListKubeResource>::namespaced(kube_client.clone(), &kube_ns);
@@ -139,6 +144,7 @@ impl CustomResourceMemberlistProvider {
             kube_client,
             memberlist_cr_client,
             queue_size,
+            send_timeout,
             current_memberlist: RwLock::new(vec![]),
             subscribers: vec![],
         }
@@ -183,6 +189,10 @@ impl Component for CustomResourceMemberlistProvider {
 
     fn queue_size(&self) -> usize {
         self.queue_size
+    }
+
+    fn send_timeout(&self) -> Duration {
+        self.send_timeout
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<CustomResourceMemberlistProvider>) {
@@ -252,6 +262,10 @@ mod tests {
             10
         }
 
+        fn send_timeout(&self) -> Duration {
+            Duration::from_millis(500)
+        }
+
         fn get_name() -> &'static str {
             "Memberlist subscriber"
         }
@@ -288,6 +302,7 @@ mod tests {
             kube_client.clone(),
             kube_ns.clone(),
             10,
+            Duration::from_millis(500),
         );
 
         let debug_memberlist = Arc::new(RwLock::new(None));

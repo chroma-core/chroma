@@ -167,6 +167,7 @@ mod tests {
     #[derive(Debug)]
     struct TestComponent {
         queue_size: usize,
+        send_timeout: Duration,
         counter: Arc<AtomicUsize>,
     }
 
@@ -174,9 +175,10 @@ mod tests {
     struct ScheduleMessage {}
 
     impl TestComponent {
-        fn new(queue_size: usize, counter: Arc<AtomicUsize>) -> Self {
+        fn new(queue_size: usize, send_timeout: Duration, counter: Arc<AtomicUsize>) -> Self {
             TestComponent {
                 queue_size,
+                send_timeout,
                 counter,
             }
         }
@@ -204,6 +206,10 @@ mod tests {
             self.queue_size
         }
 
+        fn send_timeout(&self) -> Duration {
+            self.send_timeout
+        }
+
         async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let duration = Duration::from_millis(100);
             ctx.scheduler
@@ -224,7 +230,7 @@ mod tests {
     async fn test_schedule() {
         let system = System::new();
         let counter = Arc::new(AtomicUsize::new(0));
-        let component = TestComponent::new(10, counter.clone());
+        let component = TestComponent::new(10, Duration::from_millis(500), counter.clone());
         let _handle = system.start_component(component);
         // yield to allow the component to process the messages
         tokio::task::yield_now().await;

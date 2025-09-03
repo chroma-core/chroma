@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -37,6 +39,8 @@ pub struct CustomResourceMemberlistProviderConfig {
     pub memberlist_name: String,
     #[serde(default = "CustomResourceMemberlistProviderConfig::default_queue_size")]
     pub queue_size: usize,
+    #[serde(default = "CustomResourceMemberlistProviderConfig::default_send_timeout")]
+    pub send_timeout: Duration,
 }
 
 impl CustomResourceMemberlistProviderConfig {
@@ -51,6 +55,10 @@ impl CustomResourceMemberlistProviderConfig {
     fn default_queue_size() -> usize {
         100
     }
+
+    fn default_send_timeout() -> Duration {
+        Duration::from_millis(500)
+    }
 }
 
 impl Default for CustomResourceMemberlistProviderConfig {
@@ -59,6 +67,7 @@ impl Default for CustomResourceMemberlistProviderConfig {
             kube_namespace: CustomResourceMemberlistProviderConfig::default_kube_namespace(),
             memberlist_name: CustomResourceMemberlistProviderConfig::default_memberlist_name(),
             queue_size: CustomResourceMemberlistProviderConfig::default_queue_size(),
+            send_timeout: CustomResourceMemberlistProviderConfig::default_send_timeout(),
         }
     }
 }

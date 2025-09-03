@@ -254,6 +254,10 @@ impl Component for GarbageCollector {
         1000
     }
 
+    fn send_timeout(&self) -> Duration {
+        Duration::from_millis(500)
+    }
+
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         ctx.scheduler.schedule(
             GarbageCollectMessage { tenant: None },

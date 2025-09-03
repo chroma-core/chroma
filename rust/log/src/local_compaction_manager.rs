@@ -1,4 +1,5 @@
 use std::fmt::{Debug, Formatter};
+use std::time::Duration;
 
 use crate::Log;
 use async_trait::async_trait;
@@ -63,6 +64,10 @@ impl Component for LocalCompactionManager {
     fn queue_size(&self) -> usize {
         // TODO(Sanket): Make this configurable.
         1000
+    }
+
+    fn send_timeout(&self) -> Duration {
+        Duration::from_millis(500)
     }
 
     async fn on_start(&mut self, _: &ComponentContext<Self>) -> () {}

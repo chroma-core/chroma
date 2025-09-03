@@ -4,7 +4,7 @@ use crate::{
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use core::fmt::Debug;
-use std::any::type_name;
+use std::{any::type_name, time::Duration};
 use tokio::sync::oneshot::{self, error::RecvError, Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::Span;
@@ -60,6 +60,10 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
 
     fn queue_size(&self) -> usize {
         1000
+    }
+
+    fn send_timeout(&self) -> Duration {
+        Duration::from_millis(500)
     }
 
     /// Runs the orchestrator in a system and returns the result
@@ -192,6 +196,10 @@ impl<O: Orchestrator> Component for O {
 
     fn queue_size(&self) -> usize {
         self.queue_size()
+    }
+
+    fn send_timeout(&self) -> Duration {
+        self.send_timeout()
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
@@ -364,7 +372,7 @@ mod tests {
             self.sender
                 .send(message)
                 .await
-                .map_err(|_| crate::ChannelError::SendError)
+                .map_err(|error| crate::ChannelError::SendError(error.to_string()))
         }
     }
 
@@ -378,7 +386,9 @@ mod tests {
             num_worker_threads: num_workers,
             task_queue_limit: 1,
             dispatcher_queue_size: 1,
+            dispatcher_send_timeout: Duration::from_millis(500),
             worker_queue_size: 1,
+            worker_send_timeout: Duration::from_millis(500),
             active_io_tasks: 10,
         });
         let dispatcher_handle = system.start_component(dispatcher);
