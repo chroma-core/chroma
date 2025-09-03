@@ -13,11 +13,18 @@ export interface ComboboxEntryProps {
 export const ComboboxEntry: React.FC<ComboboxEntryProps> = ({ children }) => {
   return <div>{children}</div>;
 };
+ComboboxEntry.displayName = "ComboboxEntry";
 
 const isComboboxEntry = (
   node: React.ReactNode,
 ): node is React.ReactElement<ComboboxEntryProps> => {
-  return React.isValidElement(node) && node.type === ComboboxEntry;
+  if (!React.isValidElement(node)) return false;
+
+  return (
+    node.props &&
+    typeof node.props.value === "string" &&
+    typeof node.props.label === "string"
+  );
 };
 
 const ComboboxSteps: React.FC<{
@@ -26,10 +33,12 @@ const ComboboxSteps: React.FC<{
 }> = ({ children, defaultValue }) => {
   const allChildren = React.Children.toArray(children);
   const comboboxEntries = allChildren.filter(isComboboxEntry);
-  const options = comboboxEntries.map((entry) => ({
-    value: entry.props.value,
-    label: entry.props.label,
-  }));
+  const options = comboboxEntries
+    .map((entry) => ({
+      value: entry.props.value,
+      label: entry.props.label,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   const [activeValue, setActiveValue] = useState<string>(
     defaultValue || (options.length > 0 && options[0].value) || "",
@@ -43,11 +52,20 @@ const ComboboxSteps: React.FC<{
         activeValue={activeValue}
       />
       <Steps>
-        {allChildren.map((child, i) => {
-          if (!isComboboxEntry(child)) {
-            return child;
-          }
-        })}
+        {allChildren
+          .filter(
+            (child) =>
+              !isComboboxEntry(child) || child.props.value === activeValue,
+          )
+          .map((child) => {
+            if (!isComboboxEntry(child)) {
+              return child;
+            }
+            if (child.props.value === activeValue) {
+              return React.Children.toArray(child.props.children);
+            }
+            return null;
+          })}
       </Steps>
     </div>
   );

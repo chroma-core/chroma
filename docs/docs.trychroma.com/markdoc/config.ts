@@ -24,6 +24,7 @@ import ComboboxSteps, {
   ComboboxEntry,
 } from "@/components/markdoc/combobox-content";
 import Steps, { Step } from "@/components/markdoc/steps";
+import ImageHoverText from "@/components/markdoc/image-hover-text";
 
 interface MarkDocConfig extends Config {
   components?: Record<string, React.FC<any>>;
@@ -186,6 +187,16 @@ const markdocConfig: MarkDocConfig = {
     ComboboxEntry: {
       render: "ComboboxEntry",
       selfClosing: false,
+      attributes: {
+        value: {
+          type: String,
+          required: true,
+        },
+        label: {
+          type: String,
+          required: true,
+        },
+      },
     },
     Steps: {
       render: "Steps",
@@ -198,6 +209,17 @@ const markdocConfig: MarkDocConfig = {
         title: {
           type: String,
           required: false,
+        },
+      },
+    },
+    ImageHoverText: {
+      render: "ImageHoverText",
+      selfClosing: false,
+      inline: true,
+      attributes: {
+        src: {
+          type: String,
+          required: true,
         },
       },
     },
@@ -228,6 +250,7 @@ const markdocConfig: MarkDocConfig = {
     ComboboxEntry,
     Steps,
     Step,
+    ImageHoverText,
   },
 };
 

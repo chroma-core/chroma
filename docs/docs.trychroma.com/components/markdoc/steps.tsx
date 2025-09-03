@@ -9,7 +9,7 @@ const Steps: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         children.map((child, index) => (
           <div
             key={index}
-            className="grid grid-cols-[2rem,1fr] gap-4 items-baseline"
+            className="grid grid-cols-[2rem,minmax(0,1fr)] gap-4 items-baseline"
           >
             <div
               className="relative mx-auto flex h-6 w-6 items-center justify-center

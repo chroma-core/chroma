@@ -14,7 +14,7 @@ const Header84: React.FC<{ title: string; children?: React.ReactNode }> = ({
             className="w-full h-[1px] bg-black dark:bg-gray-300"
           />
         ))}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-2 py-1 bg-white dark:bg-gray-950 font-mono select-none">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-2 py-0.5 bg-white border-black dark:border-gray-300 dark:bg-gray-950 font-mono select-none">
           {title}
         </div>
         {children}
