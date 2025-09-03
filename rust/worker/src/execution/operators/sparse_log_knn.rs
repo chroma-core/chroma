@@ -1,4 +1,4 @@
-use std::{cmp::Reverse, collections::BinaryHeap};
+use std::collections::BinaryHeap;
 
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
@@ -78,7 +78,7 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
 
         let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None).await?;
 
-        let mut min_heap = BinaryHeap::with_capacity(self.limit as usize);
+        let mut max_heap = BinaryHeap::with_capacity(self.limit as usize);
         for log in &logs {
             if !matches!(
                 log.get_operation(),
@@ -96,32 +96,29 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
                     continue;
                 };
                 let log_sparse_vector: CsVec<f32> = sparse_vector.into();
-                let score = query_sparse_vector.dot(&log_sparse_vector);
-                if (min_heap.len() as u32) < self.limit {
-                    min_heap.push(Reverse(RecordMeasure {
+                // NOTE: We use `1 - query · document` as similarity metrics
+                let score = 1.0 - query_sparse_vector.dot(&log_sparse_vector);
+                if (max_heap.len() as u32) < self.limit {
+                    max_heap.push(RecordMeasure {
                         offset_id: log.get_offset_id(),
                         measure: score,
-                    }));
-                } else if min_heap
-                    .peek()
-                    .map(|Reverse(record)| record.measure)
-                    .unwrap_or(f32::MIN)
-                    < score
+                    });
+                } else if score
+                    < max_heap
+                        .peek()
+                        .map(|record| record.measure)
+                        .unwrap_or(f32::MAX)
                 {
-                    min_heap.pop();
-                    min_heap.push(Reverse(RecordMeasure {
+                    max_heap.pop();
+                    max_heap.push(RecordMeasure {
                         offset_id: log.get_offset_id(),
                         measure: score,
-                    }))
+                    })
                 }
             }
         }
         Ok(SparseLogKnnOutput {
-            records: min_heap
-                .into_sorted_vec()
-                .into_iter()
-                .map(|Reverse(record)| record)
-                .collect(),
+            records: max_heap.into_sorted_vec(),
         })
     }
 }
