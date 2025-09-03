@@ -42,7 +42,7 @@ impl CompactorConfig {
     }
 
     fn default_compaction_manager_send_timeout() -> Duration {
-        Duration::from_millis(500)
+        Duration::from_millis(10_000)
     }
 
     fn default_max_concurrent_jobs() -> usize {
