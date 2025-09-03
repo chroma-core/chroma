@@ -268,6 +268,12 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
             distance_function: index_config.distance_function.clone(),
         })
     }
+
+    fn serialize_to_hnsw_data(&self) -> Result<hnswlib::HnswData, Box<dyn ChromaError>> {
+        self.index
+            .serialize_index_to_hnsw_data()
+            .map_err(|e| WrappedHnswError(e).boxed())
+    }
 }
 
 fn map_distance_function(distance_function: DistanceFunction) -> hnswlib::HnswDistanceFunction {

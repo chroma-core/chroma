@@ -76,6 +76,8 @@ pub trait PersistentIndex<C>: Index<C> {
     ) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
+
+    fn serialize_to_hnsw_data(&self) -> Result<hnswlib::HnswData, Box<dyn ChromaError>>;
 }
 
 /// IndexUuid is a wrapper around Uuid to provide a type for the index id.

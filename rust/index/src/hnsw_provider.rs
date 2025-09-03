@@ -63,6 +63,7 @@ pub struct HnswIndexFlusher {
     pub provider: HnswIndexProvider,
     pub prefix_path: String,
     pub index_id: IndexUuid,
+    pub hnsw_index: HnswIndexRef,
 }
 
 #[derive(Clone)]
@@ -559,11 +560,57 @@ impl HnswIndexProvider {
         Ok(())
     }
 
+    pub async fn flush_from_memory(
+        &self,
+        prefix_path: &str,
+        index_uuid: &IndexUuid,
+        hnsw_index: &HnswIndexRef,
+    ) -> Result<(), Box<HnswIndexProviderFlushError>> {
+        let hnsw_data = hnsw_index
+            .inner
+            .read()
+            .hnsw_index
+            .serialize_to_hnsw_data()
+            .map_err(HnswIndexProviderFlushError::SerializeError)?;
+        let buffers = vec![
+            hnsw_data.header_buffer(),
+            hnsw_data.data_level0_buffer(),
+            hnsw_data.length_buffer(),
+            hnsw_data.link_list_buffer(),
+        ];
+
+        // TODO(tanujnay112): Should we parallelize this?
+        for (file, buffer) in FILES.iter().zip(buffers) {
+            let key = Self::format_key(prefix_path, index_uuid, file);
+            let res = self
+                .storage
+                .put_bytes(
+                    &key,
+                    buffer.to_vec(),
+                    PutOptions::with_priority(StorageRequestPriority::P0),
+                )
+                .await;
+            match res {
+                Ok(_) => {
+                    tracing::info!("Flushed hnsw index file: {}", file);
+                }
+                Err(e) => {
+                    return Err(Box::new(HnswIndexProviderFlushError::StoragePutError(e)));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn flush(
         &self,
         prefix_path: &str,
         id: &IndexUuid,
+        hnsw_index: &HnswIndexRef,
     ) -> Result<(), Box<HnswIndexProviderFlushError>> {
+        if self.load_hnsw_from_memory {
+            return self.flush_from_memory(prefix_path, id, hnsw_index).await;
+        }
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
         for file in FILES.iter() {
             let file_path = index_storage_path.join(file);
@@ -726,6 +773,8 @@ pub enum HnswIndexProviderFlushError {
     StoragePutError(#[from] chroma_storage::StorageError),
     #[error("Failed to fsync file: {0}")]
     FsyncError(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Failed to serialize HNSW index")]
+    SerializeError(Box<dyn ChromaError>),
 }
 
 impl ChromaError for HnswIndexProviderFlushError {
@@ -735,6 +784,7 @@ impl ChromaError for HnswIndexProviderFlushError {
             HnswIndexProviderFlushError::HnswSaveError(e) => e.code(),
             HnswIndexProviderFlushError::StoragePutError(e) => e.code(),
             HnswIndexProviderFlushError::FsyncError(_) => ErrorCodes::Internal,
+            HnswIndexProviderFlushError::SerializeError(e) => e.code(),
         }
     }
 }
@@ -766,7 +816,7 @@ mod tests {
 
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
         let cache = new_non_persistent_cache_for_test();
-        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, 16, false);
+        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, 16, true);
         let collection_id = CollectionUuid(Uuid::new_v4());
 
         let dimensionality = 128;
@@ -838,9 +888,11 @@ mod tests {
             .add(1, &[1.0, 3.0])
             .expect("Expected to add");
         let created_index_id = created_index.inner.read().hnsw_index.id;
-        provider.commit(created_index).expect("Expected to commit");
         provider
-            .flush(prefix_path, &created_index_id)
+            .commit(created_index.clone())
+            .expect("Expected to commit");
+        provider
+            .flush(prefix_path, &created_index_id, &created_index)
             .await
             .expect("Expected to flush");
         // clear the cache.
