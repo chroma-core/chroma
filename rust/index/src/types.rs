@@ -2,6 +2,8 @@ use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
 use uuid::Uuid;
 
+use crate::WrappedHnswError;
+
 #[derive(Clone, Debug)]
 pub struct IndexConfig {
     pub dimensionality: i32,
@@ -79,6 +81,8 @@ pub trait PersistentIndex<C>: Index<C> {
     ) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
+
+    fn serialize_to_hnsw_data(&self) -> Result<hnswlib::HnswData, WrappedHnswError>;
 }
 
 /// IndexUuid is a wrapper around Uuid to provide a type for the index id.
