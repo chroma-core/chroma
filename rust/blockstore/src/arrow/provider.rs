@@ -487,7 +487,7 @@ impl BlockManager {
                     "Cold block fetch from storage and deserialize: {}",
                     key_clone
                 ),
-                Duration::from_millis(500),
+                Duration::from_millis(100),
             );
             self.storage
                 .fetch(&key, GetOptions::new(priority), move |bytes| async move {

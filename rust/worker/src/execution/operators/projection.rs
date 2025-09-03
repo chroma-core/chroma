@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    time::Duration,
-};
+use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
@@ -11,7 +8,6 @@ use chroma_segment::{
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
-use chroma_tracing::util::LogSlowOperation;
 use chroma_types::{
     operator::{Projection, ProjectionOutput, ProjectionRecord},
     Chunk, LogRecord, Segment,
@@ -117,11 +113,6 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             .iter()
             .map(|offset_id| {
                 async {
-                    // Emit a warning if the projection operation on this record takes > 500ms.
-                    let _slow_operation_log = LogSlowOperation::new(
-                        format!("Projection for offset id {}", *offset_id),
-                        Duration::from_millis(100),
-                    );
                     let record = match offset_id_to_log_record.get(offset_id) {
                         // The offset id is in the log
                         Some(log) => {
