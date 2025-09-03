@@ -668,9 +668,14 @@ impl RootManager {
         match index {
             Some(index) => Ok(Some(index)),
             None => {
-                tracing::info!("Cache miss - fetching root from storage");
                 let key = Self::get_storage_key(prefix_path, id);
-                tracing::debug!("Reading root from storage with key: {}", key);
+                let _slow_operation_log = LogSlowOperation::new(
+                    format!(
+                        "Cold root fetch from storage and deserialize for key: {}",
+                        key
+                    ),
+                    Duration::from_millis(50),
+                );
                 match self
                     .storage
                     .get(&key, GetOptions::new(StorageRequestPriority::P0))
