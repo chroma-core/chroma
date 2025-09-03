@@ -20,6 +20,7 @@ import Heading from "@/components/markdoc/markdoc-heading";
 import MarkdocImage from "@/components/markdoc/markdoc-image";
 import Accordion, { AccordionItem } from "@/components/markdoc/accordion";
 import Video from "@/components/markdoc/video";
+import ComboboxContent from "@/components/markdoc/combobox-content";
 
 interface MarkDocConfig extends Config {
   components?: Record<string, React.FC<any>>;
@@ -175,6 +176,10 @@ const markdocConfig: MarkDocConfig = {
         },
       },
     },
+    ComboboxContent: {
+      render: "ComboboxContent",
+      selfClosing: false,
+    },
   },
   components: {
     InlineCode,
@@ -198,6 +203,7 @@ const markdocConfig: MarkDocConfig = {
     Accordion,
     AccordionItem,
     Video,
+    ComboboxContent,
   },
 };
 
