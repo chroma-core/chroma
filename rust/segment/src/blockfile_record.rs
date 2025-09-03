@@ -22,6 +22,7 @@ use std::ops::RangeBounds;
 use std::sync::atomic::{self, AtomicU32};
 use std::sync::Arc;
 use thiserror::Error;
+use tracing::{Instrument, Span};
 
 #[derive(Clone)]
 pub struct RecordSegmentWriter {
@@ -763,16 +764,20 @@ impl RecordSegmentReader<'_> {
             match segment.file_path.len() {
                 4 => {
                     let user_id_to_id_future =
-                        Self::load_index_reader(segment, USER_ID_TO_OFFSET_ID, blockfile_provider);
+                        Self::load_index_reader(segment, USER_ID_TO_OFFSET_ID, blockfile_provider)
+                            .instrument(Span::current());
 
                     let id_to_user_id_future =
-                        Self::load_index_reader(segment, OFFSET_ID_TO_USER_ID, blockfile_provider);
+                        Self::load_index_reader(segment, OFFSET_ID_TO_USER_ID, blockfile_provider)
+                            .instrument(Span::current());
 
                     let id_to_data_future =
-                        Self::load_index_reader(segment, OFFSET_ID_TO_DATA, blockfile_provider);
+                        Self::load_index_reader(segment, OFFSET_ID_TO_DATA, blockfile_provider)
+                            .instrument(Span::current());
 
                     let max_offset_id_future =
-                        Self::load_index_reader(segment, MAX_OFFSET_ID, blockfile_provider);
+                        Self::load_index_reader(segment, MAX_OFFSET_ID, blockfile_provider)
+                            .instrument(Span::current());
 
                     let (
                         max_offset_id_result,

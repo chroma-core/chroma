@@ -35,6 +35,8 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use tantivy::tokenizer::NgramTokenizer;
 use thiserror::Error;
+use tracing::Instrument;
+use tracing::Span;
 
 #[derive(Clone)]
 pub struct MetadataSegmentWriter<'me> {
@@ -1011,21 +1013,27 @@ impl MetadataSegmentReader<'_> {
         let pls_future = Self::load_index_reader(segment, FULL_TEXT_PLS, blockfile_provider);
 
         let string_metadata_future =
-            Self::load_index_reader(segment, STRING_METADATA, blockfile_provider);
+            Self::load_index_reader(segment, STRING_METADATA, blockfile_provider)
+                .instrument(Span::current());
 
         let bool_metadata_future =
-            Self::load_index_reader(segment, BOOL_METADATA, blockfile_provider);
+            Self::load_index_reader(segment, BOOL_METADATA, blockfile_provider)
+                .instrument(Span::current());
 
         let f32_metadata_future =
-            Self::load_index_reader(segment, F32_METADATA, blockfile_provider);
+            Self::load_index_reader(segment, F32_METADATA, blockfile_provider)
+                .instrument(Span::current());
 
         let u32_metadata_future =
-            Self::load_index_reader(segment, U32_METADATA, blockfile_provider);
+            Self::load_index_reader(segment, U32_METADATA, blockfile_provider)
+                .instrument(Span::current());
 
-        let sparse_max_future = Self::load_index_reader(segment, SPARSE_MAX, blockfile_provider);
+        let sparse_max_future = Self::load_index_reader(segment, SPARSE_MAX, blockfile_provider)
+            .instrument(Span::current());
 
         let sparse_offset_value_future =
-            Self::load_index_reader(segment, SPARSE_OFFSET_VALUE, blockfile_provider);
+            Self::load_index_reader(segment, SPARSE_OFFSET_VALUE, blockfile_provider)
+                .instrument(Span::current());
 
         let (
             pls_reader,
