@@ -245,8 +245,9 @@ mod tests {
 
         let output = rank.run(&input).await.expect("Rank should succeed");
         assert_eq!(output.ranks.len(), 3);
-        assert_eq!(output.ranks[0].offset_id, 1);
-        assert_eq!(output.ranks[0].measure, 0.9);
+        // After removing .reverse(), results are in ascending order by measure
+        assert_eq!(output.ranks[0].offset_id, 3);
+        assert_eq!(output.ranks[0].measure, 0.5);
     }
 
     #[tokio::test]
@@ -309,7 +310,11 @@ mod tests {
         };
 
         let output = rank.run(&input).await.expect("Rank should succeed");
-        // Record 1 appears in both: 0.8 + 0.4 = 1.2
+        // Summation results:
+        // Only Record 1 appears in both lists: 0.8 + 0.4 = 1.2
+        // Records 2 and 3 are filtered out since they don't appear in both lists
+        // and both Knn operations have default: None
+        assert_eq!(output.ranks.len(), 1);
         assert_eq!(output.ranks[0].offset_id, 1);
         assert_eq!(output.ranks[0].measure, 1.2);
 
@@ -328,8 +333,10 @@ mod tests {
         let input = RankInput { knn_results };
 
         let output = rank.run(&input).await.expect("Rank should succeed");
-        assert_eq!(output.ranks[0].offset_id, 1);
-        assert_eq!(output.ranks[0].measure, 0.4); // 0.8 * 0.5
+        // Results are in ascending order, so the record with the lowest measure comes first
+        // After multiplication by 0.5: record 1 = 0.8 * 0.5 = 0.4, record 2 = 0.6 * 0.5 = 0.3
+        assert_eq!(output.ranks[0].offset_id, 2);
+        assert_eq!(output.ranks[0].measure, 0.3); // 0.6 * 0.5
     }
 
     #[tokio::test]
@@ -366,10 +373,11 @@ mod tests {
         };
 
         let output = rank.run(&input).await.expect("Rank should succeed");
-        assert_eq!(output.ranks[0].offset_id, 1);
-        assert_eq!(output.ranks[0].measure, 0.8); // max(0.8, 0.5) = 0.8
-        assert_eq!(output.ranks[1].offset_id, 2);
-        assert_eq!(output.ranks[1].measure, 0.5); // max(0.3, 0.5) = 0.5
+        // Results are in ascending order
+        assert_eq!(output.ranks[0].offset_id, 2);
+        assert_eq!(output.ranks[0].measure, 0.5); // max(0.3, 0.5) = 0.5
+        assert_eq!(output.ranks[1].offset_id, 1);
+        assert_eq!(output.ranks[1].measure, 0.8); // max(0.8, 0.5) = 0.8
 
         // Test min
         let rank = Rank::Minimum(vec![
@@ -385,9 +393,10 @@ mod tests {
         let input = RankInput { knn_results };
 
         let output = rank.run(&input).await.expect("Rank should succeed");
-        assert_eq!(output.ranks[0].offset_id, 1);
-        assert_eq!(output.ranks[0].measure, 0.5); // min(0.8, 0.5) = 0.5
-        assert_eq!(output.ranks[1].offset_id, 2);
-        assert_eq!(output.ranks[1].measure, 0.3); // min(0.3, 0.5) = 0.3
+        // Results are in ascending order
+        assert_eq!(output.ranks[0].offset_id, 2);
+        assert_eq!(output.ranks[0].measure, 0.3); // min(0.3, 0.5) = 0.3
+        assert_eq!(output.ranks[1].offset_id, 1);
+        assert_eq!(output.ranks[1].measure, 0.5); // min(0.8, 0.5) = 0.5
     }
 }
