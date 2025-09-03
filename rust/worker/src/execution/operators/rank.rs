@@ -201,7 +201,6 @@ impl Operator<RankInput, RankOutput> for Rank {
             .map(|(offset_id, measure)| RecordMeasure { offset_id, measure })
             .collect::<Vec<_>>();
         ranks.sort_unstable();
-        ranks.reverse();
         Ok(RankOutput { ranks })
     }
 }

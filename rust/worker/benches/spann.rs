@@ -212,7 +212,7 @@ fn calculate_recall<'a>(
             }
             // Now merge.
             let knn_input = KnnMergeInput {
-                batch_distances: merge_list,
+                batch_measures: merge_list,
             };
             let knn_operator = Merge { k: k as u32 };
             let knn_output = knn_operator
@@ -245,7 +245,7 @@ fn calculate_recall<'a>(
                 .expect("Error running operator");
             let mut recall = 0;
             for bf_record in bf_output.records.iter() {
-                for spann_record in knn_output.distances.iter() {
+                for spann_record in knn_output.measures.iter() {
                     if bf_record.offset_id == spann_record.offset_id {
                         recall += 1;
                     }
