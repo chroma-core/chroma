@@ -321,7 +321,7 @@ where
 #[cfg(test)]
 mod tests {
     use core::panic;
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
 
     use parking_lot::Mutex;
 
@@ -363,6 +363,10 @@ mod tests {
             1000
         }
 
+        fn send_timeout(&self) -> Duration {
+            Duration::from_millis(500)
+        }
+
         async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
             let task = wrap(
                 Box::new(MockOperator {}),
@@ -394,7 +398,9 @@ mod tests {
             num_worker_threads: 1,
             task_queue_limit: 1000,
             dispatcher_queue_size: 1000,
+            dispatcher_send_timeout: Duration::from_millis(500),
             worker_queue_size: 1000,
+            worker_send_timeout: Duration::from_millis(500),
             active_io_tasks: 1000,
         });
         let dispatcher_handle = system.start_component(dispatcher);

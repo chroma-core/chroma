@@ -83,6 +83,7 @@ pub(crate) struct CompactionManagerContext {
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     // Config
     compaction_manager_queue_size: usize,
+    compaction_manager_send_timeout: Duration,
     compaction_interval: Duration,
     #[allow(dead_code)]
     min_compaction_size: usize,
@@ -128,6 +129,7 @@ impl CompactionManager {
         hnsw_index_provider: HnswIndexProvider,
         spann_provider: SpannProvider,
         compaction_manager_queue_size: usize,
+        compaction_manager_send_timeout: Duration,
         compaction_interval: Duration,
         min_compaction_size: usize,
         max_compaction_size: usize,
@@ -158,6 +160,7 @@ impl CompactionManager {
                 spann_provider,
                 dispatcher: None,
                 compaction_manager_queue_size,
+                compaction_manager_send_timeout,
                 compaction_interval,
                 min_compaction_size,
                 max_compaction_size,
@@ -409,6 +412,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let compaction_interval_sec = config.compactor.compaction_interval_sec;
         let max_concurrent_jobs = config.compactor.max_concurrent_jobs;
         let compaction_manager_queue_size = config.compactor.compaction_manager_queue_size;
+        let compaction_manager_send_timeout = config.compactor.compaction_manager_send_timeout;
         let min_compaction_size = config.compactor.min_compaction_size;
         let max_compaction_size = config.compactor.max_compaction_size;
         let max_partition_size = config.compactor.max_partition_size;
@@ -473,6 +477,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             hnsw_index_provider,
             spann_provider,
             compaction_manager_queue_size,
+            compaction_manager_send_timeout,
             Duration::from_secs(compaction_interval_sec),
             min_compaction_size,
             max_compaction_size,
@@ -529,6 +534,10 @@ impl Component for CompactionManager {
 
     fn queue_size(&self) -> usize {
         self.context.compaction_manager_queue_size
+    }
+
+    fn send_timeout(&self) -> Duration {
+        self.context.compaction_manager_send_timeout
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
@@ -866,6 +875,7 @@ mod tests {
             member_node_name: "node_1".to_string(),
         };
         let compaction_manager_queue_size = 1000;
+        let compaction_manager_send_timeout = Duration::from_millis(500);
         let max_concurrent_jobs = 10;
         let compaction_interval = Duration::from_secs(1);
         let min_compaction_size = 0;
@@ -940,6 +950,7 @@ mod tests {
             hnsw_provider,
             spann_provider,
             compaction_manager_queue_size,
+            compaction_manager_send_timeout,
             compaction_interval,
             min_compaction_size,
             max_compaction_size,
@@ -953,7 +964,9 @@ mod tests {
             num_worker_threads: 10,
             task_queue_limit: 100,
             dispatcher_queue_size: 100,
+            dispatcher_send_timeout: Duration::from_millis(500),
             worker_queue_size: 100,
+            worker_send_timeout: Duration::from_millis(500),
             active_io_tasks: 100,
         });
         let dispatcher_handle = system.start_component(dispatcher);

@@ -15,6 +15,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     sync::Arc,
+    time::Duration,
 };
 use thiserror::Error;
 use tonic::transport::{Channel, Endpoint};
@@ -345,6 +346,10 @@ where
 
     fn queue_size(&self) -> usize {
         1000
+    }
+
+    fn send_timeout(&self) -> Duration {
+        Duration::from_millis(500)
     }
 }
 

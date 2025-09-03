@@ -733,7 +733,9 @@ mod tests {
             num_worker_threads: 4,
             task_queue_limit: 10,
             dispatcher_queue_size: 10,
+            dispatcher_send_timeout: Duration::from_millis(500),
             worker_queue_size: 10,
+            worker_send_timeout: Duration::from_millis(500),
             active_io_tasks: 10,
         });
         let dispatcher_handle = system.start_component(dispatcher);

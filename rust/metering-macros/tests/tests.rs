@@ -4,7 +4,7 @@
 #[cfg(test)]
 use chroma_metering_macros::initialize_metering;
 use chroma_system::{Component, ComponentContext, Handler, ReceiverForMessage, System};
-use std::sync::atomic::Ordering;
+use std::{sync::atomic::Ordering, time::Duration};
 
 use crate::metering::{Enterable, MeteredFutureExt, SubmitExt, TestCapability};
 
@@ -90,6 +90,10 @@ async fn test_init_custom_receiver() {
 
         fn queue_size(&self) -> usize {
             100
+        }
+
+        fn send_timeout(&self) -> Duration {
+            Duration::from_millis(500)
         }
 
         async fn on_start(&mut self, _: &ComponentContext<Self>) {}

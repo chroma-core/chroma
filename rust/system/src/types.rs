@@ -42,6 +42,7 @@ pub enum ComponentRuntime {
 pub trait Component: Send + Sized + Debug + 'static {
     fn get_name() -> &'static str;
     fn queue_size(&self) -> usize;
+    fn send_timeout(&self) -> Duration;
     fn runtime() -> ComponentRuntime {
         ComponentRuntime::Inherit
     }
@@ -159,11 +160,18 @@ impl ConsumableJoinHandle {
 #[derive(Debug)]
 pub(crate) struct ComponentSender<C: Component> {
     sender: tokio::sync::mpsc::Sender<WrappedMessage<C>>,
+    send_timeout: Duration,
 }
 
 impl<C: Component> ComponentSender<C> {
-    pub(super) fn new(sender: tokio::sync::mpsc::Sender<WrappedMessage<C>>) -> Self {
-        ComponentSender { sender }
+    pub(super) fn new(
+        sender: tokio::sync::mpsc::Sender<WrappedMessage<C>>,
+        send_timeout: Duration,
+    ) -> Self {
+        ComponentSender {
+            sender,
+            send_timeout,
+        }
     }
 
     pub(super) async fn wrap_and_send<M>(
@@ -176,8 +184,12 @@ impl<C: Component> ComponentSender<C> {
         M: Message,
     {
         self.sender
-            .try_send(WrappedMessage::new(message, None, tracing_context))
-            .map_err(|_| ChannelError::SendError)
+            .send_timeout(
+                WrappedMessage::new(message, None, tracing_context),
+                self.send_timeout,
+            )
+            .await
+            .map_err(|error| ChannelError::SendError(error.to_string()))
     }
 
     #[allow(dead_code)]
@@ -207,6 +219,7 @@ impl<C: Component> Clone for ComponentSender<C> {
     fn clone(&self) -> Self {
         ComponentSender {
             sender: self.sender.clone(),
+            send_timeout: self.send_timeout,
         }
     }
 }
@@ -355,13 +368,15 @@ mod tests {
     #[derive(Debug)]
     struct TestComponent {
         queue_size: usize,
+        send_timeout: Duration,
         counter: Arc<AtomicUsize>,
     }
 
     impl TestComponent {
-        fn new(queue_size: usize, counter: Arc<AtomicUsize>) -> Self {
+        fn new(queue_size: usize, send_timeout: Duration, counter: Arc<AtomicUsize>) -> Self {
             TestComponent {
                 queue_size,
+                send_timeout,
                 counter,
             }
         }
@@ -387,6 +402,10 @@ mod tests {
             self.queue_size
         }
 
+        fn send_timeout(&self) -> Duration {
+            self.send_timeout
+        }
+
         async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let test_stream = stream::iter(vec![1, 2, 3]);
             self.register_stream(test_stream, ctx);
@@ -397,7 +416,7 @@ mod tests {
     async fn it_can_work() {
         let system = System::new();
         let counter = Arc::new(AtomicUsize::new(0));
-        let component = TestComponent::new(10, counter.clone());
+        let component = TestComponent::new(10, Duration::from_millis(500), counter.clone());
         let mut handle = system.start_component(component);
         handle.send(1, None).await.unwrap();
         handle.send(2, None).await.unwrap();
