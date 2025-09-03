@@ -65,7 +65,8 @@ const ComboboxSteps: React.FC<{
               return React.Children.toArray(child.props.children);
             }
             return null;
-          })}
+          })
+          .flat()}
       </Steps>
     </div>
   );

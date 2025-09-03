@@ -22,9 +22,10 @@ import Accordion, { AccordionItem } from "@/components/markdoc/accordion";
 import Video from "@/components/markdoc/video";
 import ComboboxSteps, {
   ComboboxEntry,
-} from "@/components/markdoc/combobox-content";
+} from "@/components/markdoc/combobox-steps";
 import Steps, { Step } from "@/components/markdoc/steps";
 import ImageHoverText from "@/components/markdoc/image-hover-text";
+import PythonInstallation from "@/components/markdoc/python-installation";
 
 interface MarkDocConfig extends Config {
   components?: Record<string, React.FC<any>>;
@@ -223,6 +224,16 @@ const markdocConfig: MarkDocConfig = {
         },
       },
     },
+    PythonInstallation: {
+      render: "PythonInstallation",
+      selfClosing: true,
+      attributes: {
+        packages: {
+          type: String,
+          required: true,
+        },
+      },
+    },
   },
   components: {
     InlineCode,
@@ -251,6 +262,7 @@ const markdocConfig: MarkDocConfig = {
     Steps,
     Step,
     ImageHoverText,
+    PythonInstallation,
   },
 };
 

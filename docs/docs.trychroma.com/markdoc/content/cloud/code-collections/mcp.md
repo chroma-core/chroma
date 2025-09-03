@@ -86,7 +86,7 @@ if __name__ == "__main__":
 
 {% ComboboxEntry value="open-code" label="Open Code" %}
 {% Step %}
-Add the following to your `~/.config/opencode/opencode.json` file:
+Add the following to your `~/.config/opencode/opencode.json` file with your Chroma Cloud API key:
 ```JSON
 {
   "$schema": "https://opencode.ai/config.json",
@@ -106,9 +106,151 @@ Add the following to your `~/.config/opencode/opencode.json` file:
 {% /ComboboxEntry %}
 
 {% ComboboxEntry value="ollama" label="Ollama" %}
+
 {% Step %}
-Install the `ollmcp` package
+Install the `ollmcp` package:
+{% PythonInstallation packages="ollmcp" / %}
+{% /Step %}
+
+{% Step %}
+Create an `mcp_config.json` file with the following content and your Chroma Cloud API key:
+```JSON
+{
+	"mcpServers": {
+		"code-packages": {
+			"type": "streamable_http",
+			"url": "https://mcp.trychroma.com/mcp",
+			"headers": {
+				"x-chroma-token": "<YOUR_CHROMA_API_KEY>"
+			},
+			"disabled": false
+		}
+	}
+}
+```
+{% /Step %}
+
+{% Step %}
+Start an Ollama MCP session with the path to your `mcp_config.json` file and model of choice:
+```terminal
+ollmcp --servers-json <path/to/mcp_config.json> --model qwen2.5
+```
+{% /Step %}
+
+{% /ComboboxEntry %}
+
+{% ComboboxEntry value="google-gemini" label="Google Gemini" %}
+
+{% Step %}
+Get a Gemini API key in [Google's AI Studio](https://aistudio.google.com/app/apikey)
+{% /Step %}
+
+{% Step %}
+Connect the Chroma MCP server with Gemini to enable AI-powered code searches. In this example, we ask Gemini to find logging levels in Uber's Zap Go module, with Gemini using the Chroma MCP tools to search and analyze the code.
+
+```python
+import asyncio
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+from google import genai
+
+client = genai.Client(api_key="<YOUR_GEMINI_API_KEY>")
+
+
+async def run():
+    async with streamablehttp_client(
+        "https://mcp.trychroma.com/mcp",
+        headers={"x-chroma-token": "<YOUR_CHROMA_API_KEY>"},
+    ) as (read, write, _):
+        async with ClientSession(read, write) as session:
+
+            prompt = f"what logging levels are available in uber's zap go module?"
+
+            await session.initialize()
+
+            try:
+                response = await client.aio.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt,
+                    config=genai.types.GenerateContentConfig(
+                        temperature=0,
+                        tools=[session],
+                    ),
+                )
+
+                try:
+                    if response.text:
+                        print("--- Generated Text ---")
+                        print(response.text)
+                    else:
+
+                        print("Model did not return text.")
+                        print(
+                            f"Finish Reason: {response.candidates[0].finish_reason.name}"
+                        )
+
+                except ValueError:
+                    print(
+                        "Could not access response.text. The response may have been blocked or contain non-text parts."
+                    )
+
+            except Exception as e:
+                print(f"An error occurred: {e}")
+
+asyncio.run(run())
+```
+{% /Step %}
+
+{% /ComboboxEntry %}
+
+{% ComboboxEntry value="cursor" label="Cursor" %}
+{% Step %}
+In Cursor's settings, search for "MCP" and add the following configuration with your Chroma Cloud API key:
+```JSON
+{
+  "mcpServers": {
+    "code-collections": {
+      "transport": "streamable_http",
+      "url": "https://mcp.trychroma.com/mcp",
+      "headers": {
+        "x-chroma-token": "<YOUR_CHROMA_API_KEY>"
+      }
+    }
+  }
+} 
+```
+{% /Step %}
+{% /ComboboxEntry %}
+
+{% ComboboxEntry value="windsurf" label="Windsurf" %}
+{% Step %}
+In Windsurf's settings, search for "MCP" and add the following configuration with your Chroma Cloud API key:
+```JSON
+{
+  "mcpServers": {
+    "code-collections": {
+      "serverUrl": "https://mcp.trychroma.com/mcp",
+      "headers": {
+        "x-chroma-token": "<YOUR_CHROMA_API_KEY>"
+      }
+    }
+  }
+}
+```
 {% /Step %}
 {% /ComboboxEntry %}
 
 {% /ComboboxSteps %}
+
+## Direct Queries
+
+To quickly test Chroma's Package Search, simply ask your model a question about a specific package. For instance, if you're wondering about the implementation of `join_set` in Rust's `tokio` crate, just ask: "How is join_set implemented in `tokio`?" Unless you specify a particular version, the MCP server will default to the latest version of `tokio` available in Chroma's index.
+
+## Automatic Queries
+
+Developers don't always think to directly ask about implementation details in dependencies. It's more valuable when your model knows when to use the Package Search MCP server automatically when encountering uncertainty about third-party libraries. We've carefully crafted our tool descriptions to make this happen naturally, so you don't need to take any additional steps beyond following the Setup Guide above. If your model isn't using the Package Search tools when you think it should, please share this feedback with us through your shared Slack channel or via support@trychroma.com.
+
+## Known Issues
+
+1. **Over-querying:** Models often fall into loops of repeatedly using grep/hybrid search functions, gathering more information than needed. This issue will be addressed in a future prompt upgrade. Enabling the "thinking" feature provides another solution, giving the model more time to reason before making tool calls.
+2. **Lack of parameter utilization:** Models frequently fail to use available non-required arguments (such as a, b, c in grep) that could help them find necessary context more efficiently. Instead, they create unnecessarily complex regex patterns.
