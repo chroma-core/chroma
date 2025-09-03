@@ -20,9 +20,10 @@ import Heading from "@/components/markdoc/markdoc-heading";
 import MarkdocImage from "@/components/markdoc/markdoc-image";
 import Accordion, { AccordionItem } from "@/components/markdoc/accordion";
 import Video from "@/components/markdoc/video";
-import ComboboxContent, {
+import ComboboxSteps, {
   ComboboxEntry,
 } from "@/components/markdoc/combobox-content";
+import Steps, { Step } from "@/components/markdoc/steps";
 
 interface MarkDocConfig extends Config {
   components?: Record<string, React.FC<any>>;
@@ -178,13 +179,27 @@ const markdocConfig: MarkDocConfig = {
         },
       },
     },
-    ComboboxContent: {
-      render: "ComboboxContent",
+    ComboboxSteps: {
+      render: "ComboboxSteps",
       selfClosing: false,
     },
     ComboboxEntry: {
       render: "ComboboxEntry",
       selfClosing: false,
+    },
+    Steps: {
+      render: "Steps",
+      selfClosing: false,
+    },
+    Step: {
+      render: "Step",
+      selfClosing: false,
+      attributes: {
+        title: {
+          type: String,
+          required: false,
+        },
+      },
     },
   },
   components: {
@@ -209,8 +224,10 @@ const markdocConfig: MarkDocConfig = {
     Accordion,
     AccordionItem,
     Video,
-    ComboboxContent,
+    ComboboxSteps,
     ComboboxEntry,
+    Steps,
+    Step,
   },
 };
 

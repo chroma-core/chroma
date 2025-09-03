@@ -18,5 +18,10 @@ Different platforms have different conventions for naming transports. We recomme
 
 ## Setup
 
-{% ComboboxContent %}
-{% /ComboboxContent %}
+{% ComboboxSteps %}
+
+{% Step %}
+Sign up
+{% /Step %}
+
+{% /ComboboxSteps %}
