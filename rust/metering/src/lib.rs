@@ -1,4 +1,5 @@
 mod core;
+mod errors;
 mod receiver;
 mod types;
 
@@ -10,5 +11,6 @@ pub use {
         MeterEvent, MeteredFutureExt, PulledLogSizeBytes, QueryEmbeddingCount, ReadAction,
         ReturnBytes, StartRequest, WriteAction,
     },
+    errors::MeteringError,
     types::{MeteringAtomicU64, MeteringInstant},
 };
