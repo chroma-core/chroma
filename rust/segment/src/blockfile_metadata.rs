@@ -908,16 +908,6 @@ impl MetadataSegmentReader<'_> {
             Self::load_index_reader(segment, U32_METADATA, blockfile_provider)
                 .instrument(Span::current());
 
-<<<<<<< HEAD
-=======
-        let sparse_max_future = Self::load_index_reader(segment, SPARSE_MAX, blockfile_provider)
-            .instrument(Span::current());
-
-        let sparse_offset_value_future =
-            Self::load_index_reader(segment, SPARSE_OFFSET_VALUE, blockfile_provider)
-                .instrument(Span::current());
-
->>>>>>> ff53c9ab1 ([CLN]: Remove spans + add tracing for slow operations (#5398))
         let (
             pls_reader,
             string_metadata_reader,
