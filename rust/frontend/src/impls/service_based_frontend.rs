@@ -61,6 +61,10 @@ struct Metrics {
     update_retries_counter: Counter<u64>,
     upsert_retries_counter: Counter<u64>,
     search_retries_counter: Counter<u64>,
+    metering_fork_counter: Counter<u64>,
+    metering_read_counter: Counter<u64>,
+    metering_write_counter: Counter<u64>,
+    metering_external_read_counter: Counter<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -101,6 +105,10 @@ impl ServiceBasedFrontend {
         let update_retries_counter = meter.u64_counter("update_retries").build();
         let upsert_retries_counter = meter.u64_counter("upsert_retries").build();
         let search_retries_counter = meter.u64_counter("search_retries").build();
+        let metering_fork_counter = meter.u64_counter("metering_events_sent.fork").with_description("The number of fork metering events sent by the frontend to the metering event receiver.").build();
+        let metering_read_counter = meter.u64_counter("metering_events_sent.read").with_description("The number of read metering events sent by the frontend to the metering event receiver.").build();
+        let metering_write_counter = meter.u64_counter("metering_events_sent.write").with_description("The number of write metering events sent by the frontend to the metering event receiver.").build();
+        let metering_external_read_counter = meter.u64_counter("metering_events_sent.external_read").with_description("The number of external read metering events sent by the frontend to the metering event receiver.").build();
         let metrics = Arc::new(Metrics {
             fork_retries_counter,
             delete_retries_counter,
@@ -111,6 +119,10 @@ impl ServiceBasedFrontend {
             update_retries_counter,
             upsert_retries_counter,
             search_retries_counter,
+            metering_fork_counter,
+            metering_read_counter,
+            metering_write_counter,
+            metering_external_read_counter,
         });
         // factor: 2.0,
         // min_delay_ms: 100,
@@ -681,9 +693,12 @@ impl ServiceBasedFrontend {
         // TODO: Submit event after the response is sent
         match chroma_metering::close::<CollectionForkContext>() {
             Ok(collection_fork_context) => {
-                MeterEvent::CollectionFork(collection_fork_context)
+                if let Ok(()) = MeterEvent::CollectionFork(collection_fork_context)
                     .submit()
-                    .await;
+                    .await
+                {
+                    self.metrics.metering_fork_counter.add(1, &[]);
+                }
             }
             Err(e) => tracing::error!("Failed to submit metering event to receiver: {:?}", e),
         }
@@ -802,9 +817,12 @@ impl ServiceBasedFrontend {
             Ok(()) => {
                 match chroma_metering::close::<CollectionWriteContext>() {
                     Ok(collection_write_context) => {
-                        MeterEvent::CollectionWrite(collection_write_context)
+                        if let Ok(()) = MeterEvent::CollectionWrite(collection_write_context)
                             .submit()
-                            .await;
+                            .await
+                        {
+                            self.metrics.metering_write_counter.add(1, &[]);
+                        }
                     }
                     Err(e) => {
                         tracing::error!("Failed to submit metering event to receiver: {:?}", e)
@@ -887,9 +905,12 @@ impl ServiceBasedFrontend {
             Ok(()) => {
                 match chroma_metering::close::<CollectionWriteContext>() {
                     Ok(collection_write_context) => {
-                        MeterEvent::CollectionWrite(collection_write_context)
+                        if let Ok(()) = MeterEvent::CollectionWrite(collection_write_context)
                             .submit()
-                            .await;
+                            .await
+                        {
+                            self.metrics.metering_write_counter.add(1, &[]);
+                        }
                     }
                     Err(e) => {
                         tracing::error!("Failed to submit metering event to receiver: {:?}", e)
@@ -977,9 +998,12 @@ impl ServiceBasedFrontend {
             Ok(()) => {
                 match chroma_metering::close::<CollectionWriteContext>() {
                     Ok(collection_write_context) => {
-                        MeterEvent::CollectionWrite(collection_write_context)
+                        if let Ok(()) = MeterEvent::CollectionWrite(collection_write_context)
                             .submit()
-                            .await;
+                            .await
+                        {
+                            self.metrics.metering_write_counter.add(1, &[]);
+                        }
                     }
                     Err(e) => {
                         tracing::error!("Failed to submit metering event to receiver: {:?}", e)
@@ -1093,7 +1117,9 @@ impl ServiceBasedFrontend {
         };
 
         if let Some(event) = read_event {
-            event.submit().await;
+            if let Ok(()) = event.submit().await {
+                self.metrics.metering_read_counter.add(1, &[]);
+            }
         }
 
         let collection_write_context_container =
@@ -1140,9 +1166,12 @@ impl ServiceBasedFrontend {
         // TODO: Submit event after the response is sent
         match chroma_metering::close::<CollectionWriteContext>() {
             Ok(collection_write_context) => {
-                MeterEvent::CollectionWrite(collection_write_context)
+                if let Ok(()) = MeterEvent::CollectionWrite(collection_write_context)
                     .submit()
-                    .await;
+                    .await
+                {
+                    self.metrics.metering_write_counter.add(1, &[]);
+                }
             }
             Err(e) => {
                 tracing::error!("Failed to submit metering event to receiver: {:?}", e)
@@ -1236,15 +1265,22 @@ impl ServiceBasedFrontend {
         // TODO: Submit event after the response is sent
         match chroma_metering::close::<CollectionReadContext>() {
             Ok(collection_read_context) => {
-                MeterEvent::CollectionRead(collection_read_context)
+                if let Ok(()) = MeterEvent::CollectionRead(collection_read_context)
                     .submit()
-                    .await;
+                    .await
+                {
+                    self.metrics.metering_read_counter.add(1, &[]);
+                }
             }
             Err(_) => match chroma_metering::close::<ExternalCollectionReadContext>() {
                 Ok(external_collection_read_context) => {
-                    MeterEvent::ExternalCollectionRead(external_collection_read_context)
-                        .submit()
-                        .await;
+                    if let Ok(()) =
+                        MeterEvent::ExternalCollectionRead(external_collection_read_context)
+                            .submit()
+                            .await
+                    {
+                        self.metrics.metering_external_read_counter.add(1, &[]);
+                    }
                 }
                 Err(e) => {
                     tracing::error!("Failed to submit metering event to receiver: {:?}", e)
@@ -1365,15 +1401,22 @@ impl ServiceBasedFrontend {
         // TODO: Submit event after the response is sent
         match chroma_metering::close::<CollectionReadContext>() {
             Ok(collection_read_context) => {
-                MeterEvent::CollectionRead(collection_read_context)
+                if let Ok(()) = MeterEvent::CollectionRead(collection_read_context)
                     .submit()
-                    .await;
+                    .await
+                {
+                    self.metrics.metering_read_counter.add(1, &[]);
+                }
             }
             Err(_) => match chroma_metering::close::<ExternalCollectionReadContext>() {
                 Ok(external_collection_read_context) => {
-                    MeterEvent::ExternalCollectionRead(external_collection_read_context)
-                        .submit()
-                        .await;
+                    if let Ok(()) =
+                        MeterEvent::ExternalCollectionRead(external_collection_read_context)
+                            .submit()
+                            .await
+                    {
+                        self.metrics.metering_external_read_counter.add(1, &[]);
+                    }
                 }
                 Err(e) => {
                     tracing::error!("Failed to submit metering event to receiver: {:?}", e)
@@ -1501,15 +1544,22 @@ impl ServiceBasedFrontend {
         // TODO: Submit event after the response is sent
         match chroma_metering::close::<CollectionReadContext>() {
             Ok(collection_read_context) => {
-                MeterEvent::CollectionRead(collection_read_context)
+                if let Ok(()) = MeterEvent::CollectionRead(collection_read_context)
                     .submit()
-                    .await;
+                    .await
+                {
+                    self.metrics.metering_read_counter.add(1, &[]);
+                }
             }
             Err(_) => match chroma_metering::close::<ExternalCollectionReadContext>() {
                 Ok(external_collection_read_context) => {
-                    MeterEvent::ExternalCollectionRead(external_collection_read_context)
-                        .submit()
-                        .await;
+                    if let Ok(()) =
+                        MeterEvent::ExternalCollectionRead(external_collection_read_context)
+                            .submit()
+                            .await
+                    {
+                        self.metrics.metering_external_read_counter.add(1, &[]);
+                    }
                 }
                 Err(e) => {
                     tracing::error!("Failed to submit metering event to receiver: {:?}", e)
@@ -1637,15 +1687,22 @@ impl ServiceBasedFrontend {
         // TODO: Submit metering event after the response is sent
         match chroma_metering::close::<CollectionReadContext>() {
             Ok(collection_read_context) => {
-                MeterEvent::CollectionRead(collection_read_context)
+                if let Ok(()) = MeterEvent::CollectionRead(collection_read_context)
                     .submit()
-                    .await;
+                    .await
+                {
+                    self.metrics.metering_read_counter.add(1, &[]);
+                }
             }
             Err(_) => match chroma_metering::close::<ExternalCollectionReadContext>() {
                 Ok(external_collection_read_context) => {
-                    MeterEvent::ExternalCollectionRead(external_collection_read_context)
-                        .submit()
-                        .await;
+                    if let Ok(()) =
+                        MeterEvent::ExternalCollectionRead(external_collection_read_context)
+                            .submit()
+                            .await
+                    {
+                        self.metrics.metering_external_read_counter.add(1, &[]);
+                    }
                 }
                 Err(e) => {
                     tracing::error!("Failed to submit metering event to receiver: {:?}", e)
