@@ -3800,6 +3800,9 @@ mod tests {
                     .expect("Logs should be valid"),
             });
             if let Err(err) = server.push_logs(proto_push_log_req).await {
+                if err.code() == Code::Unavailable {
+                    sleep(Duration::from_milllis(500)).await;
+                }
                 println!("Failed to push log: {err}");
             } else {
                 break;
@@ -3808,7 +3811,7 @@ mod tests {
             if retries >= 6 {
                 panic!("Unable to push log within six retries");
             }
-            sleep(Duration::from_millis(150)).await;
+            sleep(Duration::from_millis(1)).await;
         }
     }
 
