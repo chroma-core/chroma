@@ -364,7 +364,7 @@ mod tests {
             self.sender
                 .send(message)
                 .await
-                .map_err(|_| crate::ChannelError::SendError)
+                .map_err(|error| crate::ChannelError::SendError(error.to_string()))
         }
     }
 
