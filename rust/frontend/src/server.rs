@@ -2141,7 +2141,9 @@ async fn collection_search(
 
     // TODO: Add quota enforcement for search
     let _guard = server.scorecard_request(&[
-        "op:read",
+        // TODO: Make this a read operation once we stablize this
+        // "op:read",
+        "op:search",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
         format!("requester:{}", requester_identity.tenant).as_str(),
