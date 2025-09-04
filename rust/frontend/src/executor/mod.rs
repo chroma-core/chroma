@@ -23,10 +23,20 @@ pub enum Executor {
 }
 
 impl Executor {
-    pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
+    pub async fn count<F, Fut>(
+        &mut self,
+        plan: Count,
+        replan_closure: F,
+    ) -> Result<CountResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Count, Box<dyn ChromaError>>>,
+    {
         match self {
-            Executor::Distributed(distributed_executor) => distributed_executor.count(plan).await,
-            Executor::Local(local_executor) => local_executor.count(plan).await,
+            Executor::Distributed(distributed_executor) => {
+                distributed_executor.count(plan, replan_closure).await
+            }
+            Executor::Local(local_executor) => local_executor.count(plan, replan_closure).await,
         }
     }
     pub async fn get<F, Fut>(
@@ -45,10 +55,20 @@ impl Executor {
             Executor::Local(local_executor) => local_executor.get(plan, replan_closure).await,
         }
     }
-    pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
+    pub async fn knn<F, Fut>(
+        &mut self,
+        plan: Knn,
+        replan_closure: F,
+    ) -> Result<KnnBatchResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Knn, Box<dyn ChromaError>>>,
+    {
         match self {
-            Executor::Distributed(distributed_executor) => distributed_executor.knn(plan).await,
-            Executor::Local(local_executor) => local_executor.knn(plan).await,
+            Executor::Distributed(distributed_executor) => {
+                distributed_executor.knn(plan, replan_closure).await
+            }
+            Executor::Local(local_executor) => local_executor.knn(plan, replan_closure).await,
         }
     }
     pub async fn search(&mut self, plan: Search) -> Result<SearchResult, ExecutorError> {
