@@ -377,17 +377,31 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json=payload,
         )
         
-        # Parse response into SearchResult
+        # Parse response into SearchResult (column-major format)
         results = []
-        for batch_results in resp_json.get("results", []):
+        ids = resp_json.get("ids", [])
+        documents = resp_json.get("documents", [])
+        embeddings = resp_json.get("embeddings", [])
+        metadatas = resp_json.get("metadatas", [])
+        scores = resp_json.get("scores", [])
+        
+        # Convert column-major to row-major (list of SearchRecord lists)
+        for batch_idx in range(len(ids)):
             batch = []
-            for record in batch_results:
+            batch_ids = ids[batch_idx]
+            # Each field can be None if the payload didn't request it
+            batch_documents = documents[batch_idx] if documents[batch_idx] is not None else [None] * len(batch_ids)
+            batch_embeddings = embeddings[batch_idx] if embeddings[batch_idx] is not None else [None] * len(batch_ids)
+            batch_metadatas = metadatas[batch_idx] if metadatas[batch_idx] is not None else [None] * len(batch_ids)
+            batch_scores = scores[batch_idx] if scores[batch_idx] is not None else [None] * len(batch_ids)
+            
+            for i in range(len(batch_ids)):
                 batch.append(SearchRecord(
-                    id=record["id"],
-                    document=record.get("document"),
-                    embedding=record.get("embedding"),
-                    metadata=record.get("metadata"),
-                    score=record.get("score"),
+                    id=batch_ids[i],
+                    document=batch_documents[i],
+                    embedding=batch_embeddings[i],
+                    metadata=batch_metadatas[i],
+                    score=batch_scores[i],
                 ))
             results.append(batch)
         return results
