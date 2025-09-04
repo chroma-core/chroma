@@ -19,6 +19,7 @@ use chroma_types::{
 };
 use std::{
     collections::{HashMap, HashSet},
+    future::Future,
     sync::Arc,
 };
 
@@ -54,7 +55,11 @@ impl LocalExecutor {
 }
 
 impl LocalExecutor {
-    pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
+    pub async fn count<F, Fut>(&mut self, plan: Count, _: F) -> Result<CountResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Count, Box<dyn ChromaError>>>,
+    {
         self.try_backfill_collection(&plan.scan.collection_and_segments)
             .await?;
         self.metadata_reader
@@ -133,7 +138,11 @@ impl LocalExecutor {
         Ok(result)
     }
 
-    pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
+    pub async fn knn<F, Fut>(&mut self, plan: Knn, _: F) -> Result<KnnBatchResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: std::future::Future<Output = Result<Knn, Box<dyn ChromaError>>>,
+    {
         let collection_and_segments = plan.scan.collection_and_segments.clone();
         self.try_backfill_collection(&collection_and_segments)
             .await?;

@@ -20,33 +20,36 @@ use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn, Search},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
-    CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError,
-    CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantError, CreateTenantRequest, CreateTenantResponse,
-    DeleteCollectionError, DeleteCollectionRecordsError, DeleteCollectionRecordsRequest,
-    DeleteCollectionRecordsResponse, DeleteCollectionRequest, DeleteDatabaseError,
-    DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError, ForkCollectionRequest,
-    ForkCollectionResponse, GetCollectionByCrnError, GetCollectionByCrnRequest,
-    GetCollectionByCrnResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
-    GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
-    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
-    HeartbeatError, HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
-    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where,
+    Collection, CollectionAndSegments, CollectionUuid, CountCollectionsError,
+    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
+    CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
+    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
+    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError,
+    ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
+    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
+    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
+    Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
+    ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError,
+    QueryRequest, QueryResponse, ResetError, ResetResponse, SearchRequest, SearchResponse, Segment,
+    SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
+    VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Instant,
+};
 
 use super::utils::to_records;
 
@@ -54,12 +57,24 @@ use super::utils::to_records;
 struct Metrics {
     fork_retries_counter: Counter<u64>,
     delete_retries_counter: Counter<u64>,
-    count_retries_counter: Counter<u64>,
-    query_retries_counter: Counter<u64>,
-    get_retries_counter: Counter<u64>,
     add_retries_counter: Counter<u64>,
     update_retries_counter: Counter<u64>,
     upsert_retries_counter: Counter<u64>,
+    list_db_retries_counter: Counter<u64>,
+    create_db_retries_counter: Counter<u64>,
+    get_db_retries_counter: Counter<u64>,
+    delete_db_retries_counter: Counter<u64>,
+    list_collections_retries_counter: Counter<u64>,
+    count_collections_retries_counter: Counter<u64>,
+    get_collection_retries_counter: Counter<u64>,
+    get_collection_by_crn_retries_counter: Counter<u64>,
+    create_collection_retries_counter: Counter<u64>,
+    update_collection_retries_counter: Counter<u64>,
+    delete_collection_retries_counter: Counter<u64>,
+    get_tenant_retries_counter: Counter<u64>,
+    create_tenant_retries_counter: Counter<u64>,
+    update_tenant_retries_counter: Counter<u64>,
+    get_collection_with_segments_counter: Counter<u64>,
     search_retries_counter: Counter<u64>,
     metering_fork_counter: Counter<u64>,
     metering_read_counter: Counter<u64>,
@@ -95,9 +110,6 @@ impl ServiceBasedFrontend {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
         let delete_retries_counter = meter.u64_counter("delete_retries").build();
-        let count_retries_counter = meter.u64_counter("count_retries").build();
-        let query_retries_counter = meter.u64_counter("query_retries").build();
-        let get_retries_counter = meter.u64_counter("get_retries").build();
         let add_retries_counter = meter.u64_counter("add_retries").build();
         let update_retries_counter = meter.u64_counter("update_retries").build();
         let upsert_retries_counter = meter.u64_counter("upsert_retries").build();
@@ -106,15 +118,50 @@ impl ServiceBasedFrontend {
         let metering_read_counter = meter.u64_counter("metering_events_sent.read").with_description("The number of read metering events sent by the frontend to the metering event receiver.").build();
         let metering_write_counter = meter.u64_counter("metering_events_sent.write").with_description("The number of write metering events sent by the frontend to the metering event receiver.").build();
         let metering_external_read_counter = meter.u64_counter("metering_events_sent.external_read").with_description("The number of external read metering events sent by the frontend to the metering event receiver.").build();
+        let list_db_retries_counter = meter.u64_counter("list_database_retries").build();
+        let create_db_retries_counter = meter.u64_counter("create_database_retries").build();
+        let get_db_retries_counter = meter.u64_counter("get_database_retries").build();
+        let delete_db_retries_counter = meter.u64_counter("delete_database_retries").build();
+        let list_collections_retries_counter =
+            meter.u64_counter("list_collections_retries").build();
+        let count_collections_retries_counter =
+            meter.u64_counter("count_collections_retries").build();
+        let get_collection_retries_counter = meter.u64_counter("get_collection_retries").build();
+        let get_collection_by_crn_retries_counter =
+            meter.u64_counter("get_collection_by_crn_retries").build();
+        let get_tenant_retries_counter = meter.u64_counter("get_tenant_retries").build();
+        let create_collection_retries_counter =
+            meter.u64_counter("create_collection_retries").build();
+        let update_collection_retries_counter =
+            meter.u64_counter("update_collection_retries").build();
+        let delete_collection_retries_counter =
+            meter.u64_counter("delete_collection_retries").build();
+        let create_tenant_retries_counter = meter.u64_counter("create_tenant_retries").build();
+        let update_tenant_retries_counter = meter.u64_counter("update_tenant_retries").build();
+        let get_collection_with_segments_counter = meter
+            .u64_counter("get_collection_with_segments_retries")
+            .build();
         let metrics = Arc::new(Metrics {
             fork_retries_counter,
             delete_retries_counter,
-            count_retries_counter,
-            query_retries_counter,
-            get_retries_counter,
             add_retries_counter,
             update_retries_counter,
             upsert_retries_counter,
+            get_collection_with_segments_counter,
+            list_db_retries_counter,
+            get_db_retries_counter,
+            list_collections_retries_counter,
+            count_collections_retries_counter,
+            get_collection_retries_counter,
+            get_collection_by_crn_retries_counter,
+            get_tenant_retries_counter,
+            create_collection_retries_counter,
+            update_collection_retries_counter,
+            create_tenant_retries_counter,
+            update_tenant_retries_counter,
+            create_db_retries_counter,
+            delete_db_retries_counter,
+            delete_collection_retries_counter,
             search_retries_counter,
             metering_fork_counter,
             metering_read_counter,
@@ -262,14 +309,56 @@ impl ServiceBasedFrontend {
         &mut self,
         CreateTenantRequest { name, .. }: CreateTenantRequest,
     ) -> Result<CreateTenantResponse, CreateTenantError> {
-        self.sysdb_client.create_tenant(name).await
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_create_tenant = || {
+            let mut self_clone = self.clone();
+            let tenant_clone = name.clone();
+            async move { self_clone.sysdb_client.create_tenant(tenant_clone).await }
+        };
+        let res = retryable_create_tenant
+            .retry(self.retry_policy)
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "create tenant failed with error {:?} for tenant {}. Retrying",
+                    e,
+                    name,
+                );
+            })
+            .await?;
+        self.metrics
+            .create_tenant_retries_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
+        Ok(res)
     }
 
     pub async fn get_tenant(
         &mut self,
         GetTenantRequest { name, .. }: GetTenantRequest,
     ) -> Result<GetTenantResponse, GetTenantError> {
-        self.sysdb_client.get_tenant(name).await
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_get_tenant = || {
+            let mut self_clone = self.clone();
+            let tenant_clone = name.clone();
+            async move { self_clone.sysdb_client.get_tenant(tenant_clone).await }
+        };
+        let res = retryable_get_tenant
+            .retry(self.retry_policy)
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "get tenant failed with error {:?} for tenant {}. Retrying",
+                    e,
+                    name,
+                );
+            })
+            .await?;
+        self.metrics
+            .get_tenant_retries_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
+        Ok(res)
     }
 
     pub async fn update_tenant(
@@ -280,9 +369,35 @@ impl ServiceBasedFrontend {
             ..
         }: UpdateTenantRequest,
     ) -> Result<UpdateTenantResponse, UpdateTenantError> {
-        self.sysdb_client
-            .update_tenant(tenant_id, resource_name)
-            .await
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_update_tenant = || {
+            let mut self_clone = self.clone();
+            let tenant_clone = tenant_id.clone();
+            let resource_clone = resource_name.clone();
+            async move {
+                self_clone
+                    .sysdb_client
+                    .update_tenant(tenant_clone, resource_clone)
+                    .await
+            }
+        };
+        let res = retryable_update_tenant
+            .retry(self.retry_policy)
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "update tenant failed with error {:?} for tenant {} for resource {}. Retrying",
+                    e,
+                    tenant_id,
+                    resource_name
+                );
+            })
+            .await?;
+        self.metrics
+            .update_tenant_retries_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
+        Ok(res)
     }
 
     pub async fn create_database(
@@ -294,9 +409,36 @@ impl ServiceBasedFrontend {
             ..
         }: CreateDatabaseRequest,
     ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
-        self.sysdb_client
-            .create_database(database_id, database_name, tenant_id)
-            .await
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_create_db = || {
+            let mut self_clone = self.clone();
+            let tenant_clone = tenant_id.clone();
+            let db_name_clone = database_name.clone();
+            async move {
+                self_clone
+                    .sysdb_client
+                    .create_database(database_id, db_name_clone, tenant_clone)
+                    .await
+            }
+        };
+        let res = retryable_create_db
+            .retry(self.retry_policy)
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "create database failed with error {:?} for tenant {}, database name {}, database id {}. Retrying",
+                    e,
+                    tenant_id,
+                    database_id,
+                    database_name
+                );
+            })
+            .await;
+        self.metrics
+            .create_db_retries_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
+        res
     }
 
     pub async fn list_databases(
@@ -308,9 +450,33 @@ impl ServiceBasedFrontend {
             ..
         }: ListDatabasesRequest,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
-        self.sysdb_client
-            .list_databases(tenant_id, limit, offset)
-            .await
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_list_db = || {
+            let mut self_clone = self.clone();
+            let tenant_clone = tenant_id.clone();
+            async move {
+                self_clone
+                    .sysdb_client
+                    .list_databases(tenant_clone, limit, offset)
+                    .await
+            }
+        };
+        let res = retryable_list_db
+            .retry(self.retry_policy)
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "list databases failed with error {:?} for tenant {}. Retrying",
+                    e,
+                    tenant_id
+                );
+            })
+            .await;
+        self.metrics
+            .list_db_retries_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
+        res
     }
 
     pub async fn get_database(
@@ -321,9 +487,35 @@ impl ServiceBasedFrontend {
             ..
         }: GetDatabaseRequest,
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
-        self.sysdb_client
-            .get_database(database_name, tenant_id)
-            .await
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_get_db = || {
+            let mut self_clone = self.clone();
+            let tenant_clone = tenant_id.clone();
+            let db_name_clone = database_name.clone();
+            async move {
+                self_clone
+                    .sysdb_client
+                    .get_database(db_name_clone, tenant_clone)
+                    .await
+            }
+        };
+        let res = retryable_get_db
+            .retry(self.retry_policy)
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "get database failed with error {:?} for tenant {} database name {}. Retrying",
+                    e,
+                    tenant_id,
+                    database_name
+                );
+            })
+            .await;
+        self.metrics
+            .get_db_retries_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
+        res
     }
 
     pub async fn delete_database(
@@ -334,9 +526,35 @@ impl ServiceBasedFrontend {
             ..
         }: DeleteDatabaseRequest,
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
-        self.sysdb_client
-            .delete_database(database_name, tenant_id)
-            .await
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_delete_db = || {
+            let mut self_clone = self.clone();
+            let tenant_clone = tenant_id.clone();
+            let db_name_clone = database_name.clone();
+            async move {
+                self_clone
+                    .sysdb_client
+                    .delete_database(db_name_clone, tenant_clone)
+                    .await
+            }
+        };
+        let res = retryable_delete_db
+            .retry(self.retry_policy)
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "delete database failed with error {:?} for tenant {} database name {}. Retrying",
+                    e,
+                    tenant_id,
+                    database_name
+                );
+            })
+            .await;
+        self.metrics
+            .delete_db_retries_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
+        res
     }
 
     pub async fn list_collections(
@@ -349,15 +567,41 @@ impl ServiceBasedFrontend {
             ..
         }: ListCollectionsRequest,
     ) -> Result<ListCollectionsResponse, GetCollectionsError> {
-        self.sysdb_client
-            .get_collections(GetCollectionsOptions {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
-                limit,
-                offset,
-                ..Default::default()
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_list_collection = || {
+            let mut self_clone = self.clone();
+            let tenant_clone = tenant_id.clone();
+            let db_name_clone = database_name.clone();
+            async move {
+                self_clone
+                    .sysdb_client
+                    .get_collections(GetCollectionsOptions {
+                        tenant: Some(tenant_clone),
+                        database: Some(db_name_clone),
+                        limit,
+                        offset,
+                        ..Default::default()
+                    })
+                    .await
+            }
+        };
+        let res = retryable_list_collection
+            .retry(self.retry_policy)
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "list collections failed with error {:?} for tenant {} database name {}. Retrying",
+                    e,
+                    tenant_id,
+                    database_name
+                );
             })
-            .await
+            .await;
+        self.metrics
+            .list_collections_retries_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
+        res
     }
 
     pub async fn count_collections(
@@ -368,10 +612,36 @@ impl ServiceBasedFrontend {
             ..
         }: CountCollectionsRequest,
     ) -> Result<CountCollectionsResponse, CountCollectionsError> {
-        self.sysdb_client
-            .count_collections(tenant_id, Some(database_name))
-            .await
-            .map(|count| count as u32)
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_count_collection = || {
+            let mut self_clone = self.clone();
+            let tenant_clone = tenant_id.clone();
+            let db_name_clone = database_name.clone();
+            async move {
+                self_clone
+                    .sysdb_client
+                    .count_collections(tenant_clone, Some(db_name_clone))
+                    .await
+                    .map(|count| count as u32)
+            }
+        };
+        let res = retryable_count_collection
+            .retry(self.retry_policy)
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "count collections failed with error {:?} for tenant {} database name {}. Retrying",
+                    e,
+                    tenant_id,
+                    database_name
+                );
+            })
+            .await;
+        self.metrics
+            .count_collections_retries_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
+        res
     }
 
     pub async fn get_collection(
@@ -383,37 +653,86 @@ impl ServiceBasedFrontend {
             ..
         }: GetCollectionRequest,
     ) -> Result<GetCollectionResponse, GetCollectionError> {
-        let mut collections = self
-            .sysdb_client
-            .get_collections(GetCollectionsOptions {
-                name: Some(collection_name.clone()),
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
-                limit: Some(1),
-                ..Default::default()
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_get_collection = || {
+            let mut self_clone = self.clone();
+            let tenant_clone = tenant_id.clone();
+            let db_name_clone = database_name.clone();
+            let collection_name_clone = collection_name.clone();
+            async move {
+                let mut collections = self_clone
+                    .sysdb_client
+                    .get_collections(GetCollectionsOptions {
+                        name: Some(collection_name_clone.clone()),
+                        tenant: Some(tenant_clone),
+                        database: Some(db_name_clone),
+                        limit: Some(1),
+                        ..Default::default()
+                    })
+                    .await
+                    .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+                collections
+                    .pop()
+                    .ok_or(GetCollectionError::NotFound(collection_name_clone))
+            }
+        };
+        let res = retryable_get_collection
+            .retry(self.retry_policy)
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "get collection failed with error {:?} for tenant {} database name {}, collection name {}. Retrying",
+                    e,
+                    tenant_id,
+                    database_name,
+                    collection_name,
+                );
             })
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-        collections
-            .pop()
-            .ok_or(GetCollectionError::NotFound(collection_name))
+            .await;
+        self.metrics
+            .get_collection_retries_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
+        res
     }
 
     pub async fn get_collection_by_crn(
         &mut self,
         GetCollectionByCrnRequest { parsed_crn, .. }: GetCollectionByCrnRequest,
     ) -> Result<GetCollectionByCrnResponse, GetCollectionByCrnError> {
-        let collection = self
-            .sysdb_client
-            .get_collection_by_crn(
-                parsed_crn.tenant_resource_name.clone(),
-                parsed_crn.database_name.clone(),
-                parsed_crn.collection_name.clone(),
-            )
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_get_by_crn = || {
+            let mut self_clone = self.clone();
+            let tenant_clone = parsed_crn.tenant_resource_name.clone();
+            let db_name_clone = parsed_crn.database_name.clone();
+            let coll_name_clone = parsed_crn.collection_name.clone();
+            async move {
+                self_clone
+                    .sysdb_client
+                    .get_collection_by_crn(tenant_clone, db_name_clone, coll_name_clone)
+                    .await
+                    .map_err(|err| Box::new(err) as Box<dyn ChromaError>)
+            }
+        };
+        let res = retryable_get_by_crn
+            .retry(self.retry_policy)
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "get collection by crn failed with error {:?} for tenant {} database name {}, collection name {}. Retrying",
+                    e,
+                    parsed_crn.tenant_resource_name,
+                    parsed_crn.database_name,
+                    parsed_crn.collection_name,
+                );
+            })
+            .await?;
+        self.metrics
+            .get_collection_by_crn_retries_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
 
-        Ok(collection)
+        Ok(res)
     }
 
     pub async fn create_collection(
@@ -526,26 +845,52 @@ impl ServiceBasedFrontend {
             }
         };
 
-        let collection = self
-            .sysdb_client
-            .create_collection(
-                tenant_id.clone(),
-                database_name,
-                collection_id,
-                name,
-                segments,
-                configuration,
-                metadata,
-                None,
-                get_or_create,
-            )
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_create_collection = || {
+            let mut self_clone = self.clone();
+            let tenant_clone = tenant_id.clone();
+            let db_name_clone = database_name.clone();
+            let coll_name_clone = name.clone();
+            let segments_clone = segments.clone();
+            let config_clone = configuration.clone();
+            let metadata_clone = metadata.clone();
+            async move {
+                self_clone
+                    .sysdb_client
+                    .create_collection(
+                        tenant_clone,
+                        db_name_clone,
+                        collection_id,
+                        coll_name_clone,
+                        segments_clone,
+                        config_clone,
+                        metadata_clone,
+                        None,
+                        get_or_create,
+                    )
+                    .await
+                    .map_err(|err| Box::new(err) as Box<dyn ChromaError>)
+            }
+        };
+        let res = retryable_create_collection
+            .retry(self.retry_policy)
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "create collection failed with error {:?} for tenant {} database name {}, collection name {}. Retrying",
+                    e,
+                    tenant_id,
+                    database_name,
+                    name,
+                );
+            })
+            .await?;
         self.collections_with_segments_provider
             .collections_with_segments_cache
             .remove(&collection_id)
             .await;
-        Ok(collection)
+        Ok(res)
     }
 
     pub async fn update_collection(
@@ -558,34 +903,55 @@ impl ServiceBasedFrontend {
             ..
         }: UpdateCollectionRequest,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
-        self.sysdb_client
-            .update_collection(
-                collection_id,
-                new_name,
-                new_metadata,
-                None,
-                new_configuration,
-            )
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_update_collection = || {
+            let mut self_clone = self.clone();
+            let new_name_clone = new_name.clone();
+            let new_metadata_clone = new_metadata.clone();
+            let new_config_clone = new_configuration.clone();
+            async move {
+                self_clone
+                    .sysdb_client
+                    .update_collection(
+                        collection_id,
+                        new_name_clone,
+                        new_metadata_clone,
+                        None,
+                        new_config_clone,
+                    )
+                    .await
+                    .map_err(|err| Box::new(err) as Box<dyn ChromaError>)
+            }
+        };
+        retryable_update_collection
+            .retry(self.retry_policy)
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "Update collection failed with error {:?} for collection id {}. Retrying",
+                    e,
+                    collection_id,
+                );
+            })
+            .await?;
         // Invalidate the cache.
         self.collections_with_segments_provider
             .collections_with_segments_cache
             .remove(&collection_id)
             .await;
-
+        self.metrics
+            .update_collection_retries_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
         Ok(UpdateCollectionResponse {})
     }
 
-    pub async fn delete_collection(
+    pub async fn retryable_delete_collection(
         &mut self,
-        DeleteCollectionRequest {
-            tenant_id,
-            database_name,
-            collection_name,
-            ..
-        }: DeleteCollectionRequest,
-    ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionError> {
+        tenant_id: String,
+        database_name: String,
+        collection_name: String,
+    ) -> Result<CollectionUuid, DeleteCollectionError> {
         let collection = self
             .get_collection(
                 GetCollectionRequest::try_new(
@@ -612,12 +978,52 @@ impl ServiceBasedFrontend {
             )
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+        Ok(collection.collection_id)
+    }
+
+    pub async fn delete_collection(
+        &mut self,
+        DeleteCollectionRequest {
+            tenant_id,
+            database_name,
+            collection_name,
+            ..
+        }: DeleteCollectionRequest,
+    ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionError> {
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_delete_collection = || {
+            let mut self_clone = self.clone();
+            let tenant_clone = tenant_id.clone();
+            let db_name_clone = database_name.clone();
+            let coll_name_clone = collection_name.clone();
+            async move {
+                self_clone
+                    .retryable_delete_collection(tenant_clone, db_name_clone, coll_name_clone)
+                    .await
+            }
+        };
+        let id = retryable_delete_collection
+            .retry(self.retry_policy)
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "delete collection failed with error {:?} for collection name {}, database name {}. Retrying",
+                    e,
+                    collection_name,
+                    database_name,
+                );
+            })
+            .await?;
         // Invalidate the cache.
         self.collections_with_segments_provider
             .collections_with_segments_cache
-            .remove(&collection.collection_id)
+            .remove(&id)
             .await;
-
+        self.metrics
+            .delete_collection_retries_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
         Ok(DeleteCollectionRecordsResponse {})
     }
 
@@ -697,13 +1103,11 @@ impl ServiceBasedFrontend {
                 )
             })
             .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying fork() request for collection {}",
-                        request.source_collection_id
-                    );
-                }
+                retries.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "Retrying fork() request for collection {}",
+                    request.source_collection_id
+                );
             })
             .await;
         self.metrics
@@ -765,7 +1169,7 @@ impl ServiceBasedFrontend {
         // Any error other than a backoff is not safe to retry.
         let res = add_to_retry
             .retry(self.retry_policy)
-            .when(|e| matches!(e.code(), ErrorCodes::Unavailable))
+            .when(|e| Self::is_retryable(e.code().into()))
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -854,7 +1258,7 @@ impl ServiceBasedFrontend {
         // Any error other than a backoff is not safe to retry.
         let res = add_to_retry
             .retry(self.retry_policy)
-            .when(|e| matches!(e.code(), ErrorCodes::Unavailable))
+            .when(|e| Self::is_retryable(e.code().into()))
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -948,7 +1352,7 @@ impl ServiceBasedFrontend {
         // Any error other than a backoff is not safe to retry.
         let res = add_to_retry
             .retry(self.retry_policy)
-            .when(|e| matches!(e.code(), ErrorCodes::Unavailable))
+            .when(|e| Self::is_retryable(e.code().into()))
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -1073,10 +1477,8 @@ impl ServiceBasedFrontend {
 
         let read_event = if let Some(where_clause) = r#where {
             let collection_and_segments = self
-                .collections_with_segments_provider
-                .get_collection_with_segments(collection_id)
-                .await
-                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+                .retryable_get_collection_with_segments(collection_id)
+                .await?;
             let latest_collection_logical_size_bytes = collection_and_segments
                 .collection
                 .size_bytes_post_compaction;
@@ -1108,22 +1510,22 @@ impl ServiceBasedFrontend {
                 .executor
                 .get(get_plan.clone(), |code: tonic::Code| {
                     let mut provider = self.collections_with_segments_provider.clone();
-                    let mut get_plan2 = get_plan.clone();
+                    let mut replan_get = get_plan.clone();
                     async move {
                         if code == tonic::Code::NotFound {
                             provider
                                 .collections_with_segments_cache
                                 .remove(&collection_id)
                                 .await;
+                            let collection_and_segments = provider
+                                .get_collection_with_segments(collection_id)
+                                .await
+                                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+                            replan_get.scan = Scan {
+                                collection_and_segments,
+                            };
                         }
-                        let collection_and_segments = provider
-                            .get_collection_with_segments(collection_id)
-                            .await
-                            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-                        get_plan2.scan = Scan {
-                            collection_and_segments,
-                        };
-                        Ok(get_plan2)
+                        Ok(replan_get)
                     }
                 })
                 .await?;
@@ -1185,59 +1587,8 @@ impl ServiceBasedFrontend {
         &mut self,
         request: DeleteCollectionRecordsRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
-        let retries = Arc::new(AtomicUsize::new(0));
-        let retryable_get_records_to_delete = || {
-            let mut self_clone = self.clone();
-            let request_clone = request.clone();
-            let cache_clone = self
-                .collections_with_segments_provider
-                .collections_with_segments_cache
-                .clone();
-            async move {
-                let res = self_clone
-                    .retryable_get_records_to_delete(request_clone)
-                    .await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => {
-                        if e.code() == ErrorCodes::NotFound {
-                            tracing::info!(
-                                "Invalidating cache for collection {}",
-                                request.collection_id
-                            );
-                            cache_clone.remove(&request.collection_id).await;
-                        }
-                        Err(e)
-                    }
-                }
-            }
-        };
-        let records_to_delete = retryable_get_records_to_delete
-            .retry(self.retry_policy)
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| {
-                matches!(
-                    e.code(),
-                    ErrorCodes::NotFound | ErrorCodes::Unknown | ErrorCodes::Unavailable
-                )
-            })
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying get records to delete request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .adjust(|e, d| {
-                if e.code() == ErrorCodes::NotFound {
-                    // Retry immediately for cache invalidation
-                    Some(Duration::from_micros(0))
-                } else {
-                    d
-                }
-            })
+        let records_to_delete = self
+            .retryable_get_records_to_delete(request.clone())
             .await?;
 
         let retries = Arc::new(AtomicUsize::new(0));
@@ -1260,7 +1611,7 @@ impl ServiceBasedFrontend {
         let res = retryable_push_delete_logs
             .retry(self.retry_policy)
             // NOTE: It's not safe to retry adds to the log except when it is unavailable.
-            .when(|e| matches!(e.code(), ErrorCodes::Unavailable))
+            .when(|e| Self::is_retryable(e.code().into()))
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -1283,19 +1634,37 @@ impl ServiceBasedFrontend {
         CountRequest { collection_id, .. }: CountRequest,
     ) -> Result<CountResponse, QueryError> {
         let collection_and_segments = self
-            .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .retryable_get_collection_with_segments(collection_id)
+            .await?;
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
+        let count_plan = Count {
+            scan: Scan {
+                collection_and_segments,
+            },
+        };
         let count_result = self
             .executor
-            .count(Count {
-                scan: Scan {
-                    collection_and_segments,
-                },
+            .count(count_plan.clone(), |code: tonic::Code| {
+                let mut provider = self.collections_with_segments_provider.clone();
+                let mut count_replanned = count_plan.clone();
+                async move {
+                    if code == tonic::Code::NotFound {
+                        provider
+                            .collections_with_segments_cache
+                            .remove(&collection_id)
+                            .await;
+                        let collection_and_segments = provider
+                            .get_collection_with_segments(collection_id)
+                            .await
+                            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+                        count_replanned.scan = Scan {
+                            collection_and_segments,
+                        };
+                    }
+                    Ok(count_replanned)
+                }
             })
             .await?;
         let return_bytes = count_result.size_bytes();
@@ -1340,61 +1709,44 @@ impl ServiceBasedFrontend {
     }
 
     pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
-        let retries = Arc::new(AtomicUsize::new(0));
-        let count_to_retry = || {
+        self.retryable_count(request).await
+    }
+
+    fn is_retryable(code: tonic::Code) -> bool {
+        code == tonic::Code::Unavailable || code == tonic::Code::Unknown
+    }
+
+    async fn retryable_get_collection_with_segments(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<CollectionAndSegments, Box<dyn ChromaError>> {
+        let retry_count = Arc::new(AtomicUsize::new(0));
+        let retryable_get_collection = || {
             let mut self_clone = self.clone();
-            let request_clone = request.clone();
-            let cache_clone = self
-                .collections_with_segments_provider
-                .collections_with_segments_cache
-                .clone();
             async move {
-                let res = self_clone.retryable_count(request_clone).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => {
-                        if e.code() == ErrorCodes::NotFound {
-                            tracing::info!(
-                                "Invalidating cache for collection {}",
-                                request.collection_id
-                            );
-                            cache_clone.remove(&request.collection_id).await;
-                        }
-                        Err(e)
-                    }
-                }
+                self_clone
+                    .collections_with_segments_provider
+                    .get_collection_with_segments(collection_id)
+                    .await
+                    .map_err(|err| Box::new(err) as Box<dyn ChromaError>)
             }
         };
-        let res = count_to_retry
+
+        let res = retryable_get_collection
             .retry(self.retry_policy)
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| {
-                matches!(
-                    e.code(),
-                    ErrorCodes::NotFound | ErrorCodes::Unknown | ErrorCodes::Unavailable
-                )
-            })
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying count() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .adjust(|e, d| {
-                if e.code() == ErrorCodes::NotFound {
-                    // Retry immediately for cache invalidation
-                    Some(Duration::from_micros(0))
-                } else {
-                    d
-                }
+            .when(|e| Self::is_retryable(e.code().into()))
+            .notify(|e, _| {
+                retry_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(
+                    "get collection with segments failed with error {:?} for collection {}. Retrying",
+                    e,
+                    collection_id
+                );
             })
             .await;
         self.metrics
-            .count_retries_counter
-            .add(retries.load(Ordering::Relaxed) as u64, &[]);
+            .get_collection_with_segments_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
         res
     }
 
@@ -1411,10 +1763,8 @@ impl ServiceBasedFrontend {
         }: GetRequest,
     ) -> Result<GetResponse, QueryError> {
         let collection_and_segments = self
-            .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .retryable_get_collection_with_segments(collection_id)
+            .await?;
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
@@ -1447,22 +1797,22 @@ impl ServiceBasedFrontend {
             .executor
             .get(get_plan.clone(), |code: tonic::Code| {
                 let mut provider = self.collections_with_segments_provider.clone();
-                let mut get_plan2 = get_plan.clone();
+                let mut get_replanned = get_plan.clone();
                 async move {
                     if code == tonic::Code::NotFound {
                         provider
                             .collections_with_segments_cache
                             .remove(&collection_id)
                             .await;
+                        let collection_and_segments = provider
+                            .get_collection_with_segments(collection_id)
+                            .await
+                            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+                        get_replanned.scan = Scan {
+                            collection_and_segments,
+                        };
                     }
-                    let collection_and_segments = provider
-                        .get_collection_with_segments(collection_id)
-                        .await
-                        .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-                    get_plan2.scan = Scan {
-                        collection_and_segments,
-                    };
-                    Ok(get_plan2)
+                    Ok(get_replanned)
                 }
             })
             .await?;
@@ -1509,62 +1859,7 @@ impl ServiceBasedFrontend {
     }
 
     pub async fn get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
-        let retries = Arc::new(AtomicUsize::new(0));
-        let get_to_retry = || {
-            let mut self_clone = self.clone();
-            let request_clone = request.clone();
-            let cache_clone = self
-                .collections_with_segments_provider
-                .collections_with_segments_cache
-                .clone();
-            async move {
-                let res = self_clone.retryable_get(request_clone).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => {
-                        if e.code() == ErrorCodes::NotFound {
-                            tracing::info!(
-                                "Invalidating cache for collection {}",
-                                request.collection_id
-                            );
-                            cache_clone.remove(&request.collection_id).await;
-                        }
-                        Err(e)
-                    }
-                }
-            }
-        };
-        let res = get_to_retry
-            .retry(self.retry_policy)
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| {
-                matches!(
-                    e.code(),
-                    ErrorCodes::NotFound | ErrorCodes::Unknown | ErrorCodes::Unavailable
-                )
-            })
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying get() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .adjust(|e, d| {
-                if e.code() == ErrorCodes::NotFound {
-                    // Retry immediately for cache invalidation
-                    Some(Duration::from_micros(0))
-                } else {
-                    d
-                }
-            })
-            .await;
-        self.metrics
-            .get_retries_counter
-            .add(retries.load(Ordering::Relaxed) as u64, &[]);
-        res
+        self.retryable_get(request).await
     }
 
     async fn retryable_query(
@@ -1580,10 +1875,8 @@ impl ServiceBasedFrontend {
         }: QueryRequest,
     ) -> Result<QueryResponse, QueryError> {
         let collection_and_segments = self
-            .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .retryable_get_collection_with_segments(collection_id)
+            .await?;
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
@@ -1596,30 +1889,50 @@ impl ServiceBasedFrontend {
             .map(Where::fts_query_length)
             .unwrap_or_default();
         let query_embedding_count = embeddings.len() as u64;
+        let knn_plan = Knn {
+            scan: Scan {
+                collection_and_segments,
+            },
+            filter: Filter {
+                query_ids: ids,
+                where_clause: r#where,
+            },
+            knn: KnnBatch {
+                embeddings,
+                fetch: n_results,
+            },
+            proj: KnnProjection {
+                projection: Projection {
+                    document: include.0.contains(&Include::Document),
+                    embedding: include.0.contains(&Include::Embedding),
+                    // If URI is requested, metadata is also requested so we can extract the URI.
+                    metadata: (include.0.contains(&Include::Metadata)
+                        || include.0.contains(&Include::Uri)),
+                },
+                distance: include.0.contains(&Include::Distance),
+            },
+        };
         let query_result = self
             .executor
-            .knn(Knn {
-                scan: Scan {
-                    collection_and_segments,
-                },
-                filter: Filter {
-                    query_ids: ids,
-                    where_clause: r#where,
-                },
-                knn: KnnBatch {
-                    embeddings,
-                    fetch: n_results,
-                },
-                proj: KnnProjection {
-                    projection: Projection {
-                        document: include.0.contains(&Include::Document),
-                        embedding: include.0.contains(&Include::Embedding),
-                        // If URI is requested, metadata is also requested so we can extract the URI.
-                        metadata: (include.0.contains(&Include::Metadata)
-                            || include.0.contains(&Include::Uri)),
-                    },
-                    distance: include.0.contains(&Include::Distance),
-                },
+            .knn(knn_plan.clone(), |code: tonic::Code| {
+                let mut provider = self.collections_with_segments_provider.clone();
+                let mut knn_replanned = knn_plan.clone();
+                async move {
+                    if code == tonic::Code::NotFound {
+                        provider
+                            .collections_with_segments_cache
+                            .remove(&collection_id)
+                            .await;
+                        let collection_and_segments = provider
+                            .get_collection_with_segments(collection_id)
+                            .await
+                            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+                        knn_replanned.scan = Scan {
+                            collection_and_segments,
+                        };
+                    }
+                    Ok(knn_replanned)
+                }
             })
             .await?;
         let return_bytes = query_result.size_bytes();
@@ -1673,63 +1986,7 @@ impl ServiceBasedFrontend {
         )
         .await
         .map_err(|err| err.boxed())?;
-
-        let retries = Arc::new(AtomicUsize::new(0));
-        let query_to_retry = || {
-            let mut self_clone = self.clone();
-            let request_clone = request.clone();
-            let cache_clone = self
-                .collections_with_segments_provider
-                .collections_with_segments_cache
-                .clone();
-            async move {
-                let res = self_clone.retryable_query(request_clone).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => {
-                        if e.code() == ErrorCodes::NotFound {
-                            tracing::info!(
-                                "Invalidating cache for collection {}",
-                                request.collection_id
-                            );
-                            cache_clone.remove(&request.collection_id).await;
-                        }
-                        Err(e)
-                    }
-                }
-            }
-        };
-        let res = query_to_retry
-            .retry(self.retry_policy)
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| {
-                matches!(
-                    e.code(),
-                    ErrorCodes::NotFound | ErrorCodes::Unknown | ErrorCodes::Unavailable
-                )
-            })
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying query() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .adjust(|e, d| {
-                if e.code() == ErrorCodes::NotFound {
-                    // Retry immediately for cache invalidation
-                    Some(Duration::from_micros(0))
-                } else {
-                    d
-                }
-            })
-            .await;
-        self.metrics
-            .query_retries_counter
-            .add(retries.load(Ordering::Relaxed) as u64, &[]);
-        res
+        self.retryable_query(request).await
     }
 
     pub async fn retryable_search(
