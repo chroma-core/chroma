@@ -942,7 +942,7 @@ impl TryFrom<Rank> for chroma_proto::Rank {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ToSchema)]
 pub enum SelectField {
     // Predefined fields
     Document,
