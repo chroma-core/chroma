@@ -116,7 +116,25 @@ impl<'me> MetadataSegmentWriter<'me> {
         if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(MetadataSegmentError::InvalidSegmentType);
         }
-        let prefix_path = segment.construct_prefix_path(tenant, database_id);
+        // NOTE: We hope that all blockfiles of the same collection should live under the same prefix.
+        // But according to the implementation above the forking child collection will live under the root
+        // collection prefix. Although this is not a desired behavior, as a temporary fix we create the sparse
+        // vector index blockfiles under the same prefix as other blockfiles if they are present.
+        let prefix_path = if let Some(existing_file_path) = segment
+            .file_path
+            .values()
+            .next()
+            .and_then(|paths| paths.first())
+            .as_ref()
+        {
+            let (existing_prefix, _) =
+                Segment::extract_prefix_and_id(existing_file_path).map_err(|_| {
+                    MetadataSegmentError::UuidParseError(existing_file_path.to_string())
+                })?;
+            existing_prefix.to_string()
+        } else {
+            segment.construct_prefix_path(tenant, database_id)
+        };
         let pls_writer = match segment.file_path.get(FULL_TEXT_PLS) {
             Some(pls_paths) => match pls_paths.first() {
                 Some(pls_path) => {
