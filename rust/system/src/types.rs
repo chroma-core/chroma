@@ -177,7 +177,7 @@ impl<C: Component> ComponentSender<C> {
     {
         self.sender
             .try_send(WrappedMessage::new(message, None, tracing_context))
-            .map_err(|_| ChannelError::SendError)
+            .map_err(|error| ChannelError::SendError(error.to_string()))
     }
 
     #[allow(dead_code)]
