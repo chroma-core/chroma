@@ -3801,7 +3801,7 @@ mod tests {
             });
             if let Err(err) = server.push_logs(proto_push_log_req).await {
                 if err.code() == Code::Unavailable {
-                    sleep(Duration::from_milllis(500)).await;
+                    sleep(Duration::from_millis(500)).await;
                 }
                 println!("Failed to push log: {err}");
             } else {
