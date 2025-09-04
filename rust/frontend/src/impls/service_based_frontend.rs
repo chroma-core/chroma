@@ -17,7 +17,29 @@ use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_types::{
-    operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan}, plan::{Count, Get, Knn, Search}, AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection, CollectionAndSegments, CollectionUuid, CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest, CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError, GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where
+    operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
+    plan::{Count, Get, Knn, Search},
+    AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
+    Collection, CollectionAndSegments, CollectionUuid, CountCollectionsError,
+    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
+    CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
+    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
+    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError,
+    ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
+    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
+    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
+    Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
+    ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError,
+    QueryRequest, QueryResponse, ResetError, ResetResponse, SearchRequest, SearchResponse, Segment,
+    SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
+    VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -53,7 +75,6 @@ struct Metrics {
     create_tenant_retries_counter: Counter<u64>,
     update_tenant_retries_counter: Counter<u64>,
     get_collection_with_segments_counter: Counter<u64>,
-    search_retries_counter: Counter<u64>,
     metering_fork_counter: Counter<u64>,
     metering_read_counter: Counter<u64>,
     metering_write_counter: Counter<u64>,
@@ -95,7 +116,6 @@ impl ServiceBasedFrontend {
         let add_retries_counter = meter.u64_counter("add_retries").build();
         let update_retries_counter = meter.u64_counter("update_retries").build();
         let upsert_retries_counter = meter.u64_counter("upsert_retries").build();
-        let search_retries_counter = meter.u64_counter("search_retries").build();
         let metering_fork_counter = meter.u64_counter("metering_events_sent.fork").with_description("The number of fork metering events sent by the frontend to the metering event receiver.").build();
         let metering_read_counter = meter.u64_counter("metering_events_sent.read").with_description("The number of read metering events sent by the frontend to the metering event receiver.").build();
         let metering_write_counter = meter.u64_counter("metering_events_sent.write").with_description("The number of write metering events sent by the frontend to the metering event receiver.").build();
@@ -144,7 +164,6 @@ impl ServiceBasedFrontend {
             create_db_retries_counter,
             delete_db_retries_counter,
             delete_collection_retries_counter,
-            search_retries_counter,
             metering_fork_counter,
             metering_read_counter,
             metering_write_counter,
@@ -1578,7 +1597,9 @@ impl ServiceBasedFrontend {
         };
 
         if let Some(event) = read_event {
-            event.submit().await;
+            if let Ok(()) = event.submit().await {
+                self.metrics.metering_read_counter.add(1, &[]);
+            }
         }
 
         Ok(records)
@@ -1997,10 +2018,8 @@ impl ServiceBasedFrontend {
         // TODO: The dispatch logic is mostly the same for count/get/query/search, we should consider unifying them
         // Get collection and segments once for all queries
         let collection_and_segments = self
-            .collections_with_segments_provider
-            .get_collection_with_segments(request.collection_id)
-            .await
-            .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
+            .retryable_get_collection_with_segments(request.collection_id)
+            .await?;
 
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
@@ -2032,8 +2051,36 @@ impl ServiceBasedFrontend {
             payloads: request.searches,
         };
 
+        let collection_id = search_plan
+            .scan
+            .collection_and_segments
+            .collection
+            .collection_id;
+
         // Execute the single search plan using the executor
-        let result = self.executor.search(search_plan).await?;
+        let result = self
+            .executor
+            .search(search_plan.clone(), |code: tonic::Code| {
+                let mut provider = self.collections_with_segments_provider.clone();
+                let mut search_replanned = search_plan.clone();
+                async move {
+                    if code == tonic::Code::NotFound {
+                        provider
+                            .collections_with_segments_cache
+                            .remove(&collection_id)
+                            .await;
+                        let collection_and_segments = provider
+                            .get_collection_with_segments(collection_id)
+                            .await
+                            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+                        search_replanned.scan = Scan {
+                            collection_and_segments,
+                        };
+                    }
+                    Ok(search_replanned)
+                }
+            })
+            .await?;
 
         // Calculate return bytes (approximate size of the response)
         let return_bytes = result.size_bytes();
@@ -2085,50 +2132,7 @@ impl ServiceBasedFrontend {
     }
 
     pub async fn search(&mut self, request: SearchRequest) -> Result<SearchResponse, QueryError> {
-        // TODO: The retry logic is mostly the same for count/get/query/search, we should consider unifying them
-        let retries = Arc::new(AtomicUsize::new(0));
-        let search_to_retry = || {
-            let mut self_clone = self.clone();
-            let request_clone = request.clone();
-            let cache_clone = self
-                .collections_with_segments_provider
-                .collections_with_segments_cache
-                .clone();
-            async move {
-                let res = self_clone.retryable_search(request_clone).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => {
-                        if e.code() == ErrorCodes::NotFound {
-                            tracing::info!(
-                                "Invalidating cache for collection {}",
-                                request.collection_id
-                            );
-                            cache_clone.remove(&request.collection_id).await;
-                        }
-                        Err(e)
-                    }
-                }
-            }
-        };
-        let res = search_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying search() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .await;
-        self.metrics
-            .search_retries_counter
-            .add(retries.load(Ordering::Relaxed) as u64, &[]);
-        res
+        self.retryable_search(request).await
     }
 
     pub async fn healthcheck(&self) -> HealthCheckResponse {
