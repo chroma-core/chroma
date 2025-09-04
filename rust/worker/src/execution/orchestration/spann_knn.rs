@@ -121,7 +121,9 @@ impl SpannKnnOrchestrator {
             let batch_distances = std::mem::take(&mut self.records);
             let task = wrap(
                 Box::new(self.merge.clone()),
-                KnnMergeInput { batch_distances },
+                KnnMergeInput {
+                    batch_measures: batch_distances,
+                },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
             );
@@ -348,6 +350,6 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for SpannKnnOrchestrator
             None => return,
         };
 
-        self.terminate_with_result(Ok(output.distances), ctx).await;
+        self.terminate_with_result(Ok(output.measures), ctx).await;
     }
 }
