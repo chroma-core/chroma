@@ -3808,7 +3808,7 @@ mod tests {
             if retries >= 6 {
                 panic!("Unable to push log within six retries");
             }
-            sleep(Duration::from_millis(1)).await;
+            sleep(Duration::from_millis(150)).await;
         }
     }
 
