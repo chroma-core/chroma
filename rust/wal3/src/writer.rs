@@ -285,6 +285,15 @@ impl LogWriter {
         inner
             .writer
             .as_ref()
+            .map(|writer| writer.manifest_manager.latest().manifest)
+    }
+
+    pub fn manifest_and_etag(&self) -> Option<ManifestAndETag> {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let inner = self.inner.lock().unwrap();
+        inner
+            .writer
+            .as_ref()
             .map(|writer| writer.manifest_manager.latest())
     }
 

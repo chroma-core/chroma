@@ -67,6 +67,10 @@ impl LocalStorage {
         Ok((bytes, Some(etag)))
     }
 
+    pub async fn confirm_same(&self, _: &str, _: &ETag) -> Result<bool, StorageError> {
+        Err(StorageError::NotImplemented)
+    }
+
     pub async fn put_bytes(
         &self,
         key: &str,

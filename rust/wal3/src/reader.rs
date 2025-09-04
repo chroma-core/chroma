@@ -13,8 +13,8 @@ use chroma_storage::{
 };
 
 use crate::{
-    parse_fragment_path, Error, Fragment, LogPosition, LogReaderOptions, Manifest, ScrubError,
-    ScrubSuccess, Snapshot, SnapshotCache,
+    parse_fragment_path, Error, Fragment, LogPosition, LogReaderOptions, Manifest, ManifestAndETag,
+    ScrubError, ScrubSuccess, Snapshot, SnapshotCache,
 };
 
 fn ranges_overlap(lhs: (LogPosition, LogPosition), rhs: (LogPosition, LogPosition)) -> bool {
@@ -74,12 +74,30 @@ impl LogReader {
         self.cache = Some(cache);
     }
 
+    pub async fn verify(&self, manifest_and_etag: &ManifestAndETag) -> Result<bool, Error> {
+        Manifest::head(
+            &self.options.throttle,
+            &self.storage,
+            &self.prefix,
+            &manifest_and_etag.e_tag,
+        )
+        .await
+    }
+
     pub async fn manifest(&self) -> Result<Option<Manifest>, Error> {
         Ok(
             Manifest::load(&self.options.throttle, &self.storage, &self.prefix)
                 .await?
                 .map(|(m, _)| m),
         )
+    }
+
+    pub async fn manifest_and_e_tag(&self) -> Result<Option<ManifestAndETag>, Error> {
+        match Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await {
+            Ok(Some((manifest, e_tag))) => Ok(Some(ManifestAndETag { manifest, e_tag })),
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     pub async fn oldest_timestamp(&self) -> Result<LogPosition, Error> {
