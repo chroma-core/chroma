@@ -1,5 +1,4 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use core::mem::discriminant;
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::{

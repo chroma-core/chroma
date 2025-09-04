@@ -1175,9 +1175,6 @@ impl LogServer {
         &self,
         request: Request<ScoutLogsRequest>,
     ) -> Result<Response<ScoutLogsResponse>, Status> {
-        println!("(Sanket-temp) Sleeping for 30 secs");
-        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-        println!("(Sanket-temp) Slept for 30 secs");
         let scout_logs = request.into_inner();
         let collection_id = Uuid::parse_str(&scout_logs.collection_id)
             .map(CollectionUuid)

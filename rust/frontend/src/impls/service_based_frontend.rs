@@ -887,6 +887,9 @@ impl ServiceBasedFrontend {
             .collections_with_segments_cache
             .remove(&collection_id)
             .await;
+        self.metrics
+            .create_collection_retries_counter
+            .add(retry_count.load(Ordering::Relaxed) as u64, &[]);
         Ok(res)
     }
 
@@ -2183,10 +2186,7 @@ mod tests {
     use chroma_types::Collection;
     use uuid::Uuid;
 
-    use crate::{
-        executor::config::{DistributedExecutorConfig, ExecutorConfig, RetryConfig},
-        server::CreateCollectionPayload,
-    };
+    use crate::server::CreateCollectionPayload;
 
     use super::*;
 
