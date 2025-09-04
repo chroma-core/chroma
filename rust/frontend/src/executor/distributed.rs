@@ -62,6 +62,7 @@ struct Metrics {
     delete_retries_counter: Counter<u64>,
     count_retries_counter: Counter<u64>,
     query_retries_counter: Counter<u64>,
+    search_retries_counter: Counter<u64>,
     get_retries_counter: Counter<u64>,
     add_retries_counter: Counter<u64>,
     update_retries_counter: Counter<u64>,
@@ -122,6 +123,7 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
         let delete_retries_counter = meter.u64_counter("delete_retries").build();
         let count_retries_counter = meter.u64_counter("count_retries").build();
         let query_retries_counter = meter.u64_counter("query_retries").build();
+        let search_retries_counter = meter.u64_counter("search_retries").build();
         let get_retries_counter = meter.u64_counter("get_retries").build();
         let add_retries_counter = meter.u64_counter("add_retries").build();
         let update_retries_counter = meter.u64_counter("update_retries").build();
@@ -135,6 +137,7 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
             add_retries_counter,
             update_retries_counter,
             upsert_retries_counter,
+            search_retries_counter,
         });
         Ok(Self {
             client_assigner,
@@ -395,7 +398,16 @@ impl DistributedExecutor {
         Ok(res.into_inner().try_into()?)
     }
 
-    pub async fn search(&mut self, plan: Search) -> Result<SearchResult, ExecutorError> {
+    pub async fn search<F, Fut>(
+        &mut self,
+        plan: Search,
+        replan_closure: F,
+    ) -> Result<SearchResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Search, Box<dyn ChromaError>>>,
+    {
+        let retry_count = Arc::new(AtomicUsize::new(0));
         // Get the collection ID from the plan
         let collection_id = &plan
             .scan
@@ -413,6 +425,7 @@ impl DistributedExecutor {
         let request: chroma_types::chroma_proto::SearchPlan = plan.try_into()?;
 
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let last_error = std::sync::Arc::new(parking_lot::Mutex::new(tonic::Code::Ok));
         let config = self.client_selection_config.clone();
         let res = {
             let attempt_count = attempt_count.clone();
@@ -420,14 +433,49 @@ impl DistributedExecutor {
                 let current_attempt =
                     attempt_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let is_retry = current_attempt > 0;
+                if is_retry {
+                    let last_error_code = *last_error.lock();
+                    let replan_search =
+                        replan_closure(last_error_code)
+                            .await
+                            .map_err(|e| -> tonic::Status {
+                                Status::new(
+                                    e.code().into(),
+                                    format!("Failed to replan search {:?}", e),
+                                )
+                            })?;
+                    return choose_query_client_weighted(&clients, &config, is_retry)?
+                        .search(Request::new(replan_search.try_into()?))
+                        .await;
+                }
                 choose_query_client_weighted(&clients, &config, is_retry)?
                     .search(Request::new(request.clone()))
                     .await
             })
             .retry(self.backoff)
             .when(is_retryable_error)
+            .notify(|e, _| {
+                let mut last_error = last_error.lock();
+                *last_error = e.code();
+                tracing::info!(
+                    "Retrying search for collection {}, error {:?}",
+                    collection_id,
+                    e
+                );
+                retry_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            })
+            .adjust(|e, d| {
+                if e.code() == Code::NotFound {
+                    return Some(Duration::from_micros(0));
+                }
+                d
+            })
             .await?
         };
+        self.metrics.search_retries_counter.add(
+            retry_count.load(std::sync::atomic::Ordering::Relaxed) as u64,
+            &[],
+        );
         Ok(res.into_inner().try_into()?)
     }
 

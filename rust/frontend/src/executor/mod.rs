@@ -71,9 +71,19 @@ impl Executor {
             Executor::Local(local_executor) => local_executor.knn(plan, replan_closure).await,
         }
     }
-    pub async fn search(&mut self, plan: Search) -> Result<SearchResult, ExecutorError> {
+    pub async fn search<F, Fut>(
+        &mut self,
+        plan: Search,
+        replan_closure: F,
+    ) -> Result<SearchResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Search, Box<dyn ChromaError>>>,
+    {
         match self {
-            Executor::Distributed(distributed_executor) => distributed_executor.search(plan).await,
+            Executor::Distributed(distributed_executor) => {
+                distributed_executor.search(plan, replan_closure).await
+            }
             Executor::Local(local_executor) => local_executor.search(plan).await,
         }
     }
