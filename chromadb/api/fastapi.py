@@ -6,6 +6,14 @@ from uuid import UUID
 import httpx
 import urllib.parse
 from overrides import override
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+    RetryError
+)
 
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
@@ -58,6 +66,23 @@ from chromadb.telemetry.product import ProductTelemetryClient
 
 logger = logging.getLogger(__name__)
 
+def is_retryable_exception(exception: BaseException) -> bool:
+    if isinstance(exception, (
+        httpx.ConnectError,
+        httpx.ConnectTimeout,
+        httpx.ReadTimeout,
+        httpx.WriteTimeout,
+        httpx.PoolTimeout,
+        httpx.NetworkError,
+        httpx.RemoteProtocolError,
+    )):
+        return True
+    
+    if isinstance(exception, httpx.HTTPStatusError):
+        # Retry on server errors that might be temporary
+        return exception.response.status_code in [502, 503, 504]
+    
+    return False
 
 class FastAPI(BaseHTTPClient, ServerAPI):
     def __init__(self, system: System):
@@ -99,20 +124,38 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 self._session.headers[header] = value.get_secret_value()
 
     def _make_request(self, method: str, path: str, **kwargs: Dict[str, Any]) -> Any:
-        # If the request has json in kwargs, use orjson to serialize it,
-        # remove it from kwargs, and add it to the content parameter
-        # This is because httpx uses a slower json serializer
-        if "json" in kwargs:
-            data = orjson.dumps(kwargs.pop("json"))
-            kwargs["content"] = data
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(
+                multiplier=2,
+                min=1,
+                max=60
+            ),
+            retry=retry_if_exception_type(is_retryable_exception),
+            before_sleep=before_sleep_log(logger, logging.INFO),
+            reraise=True
+        )
+        def _request_with_retry():
+            # If the request has json in kwargs, use orjson to serialize it,
+            # remove it from kwargs, and add it to the content parameter
+            # This is because httpx uses a slower json serializer
+            if "json" in kwargs:
+                data = orjson.dumps(kwargs.pop("json"))
+                kwargs["content"] = data
 
-        # Unlike requests, httpx does not automatically escape the path
-        escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
-        url = self._api_url + escaped_path
+            # Unlike requests, httpx does not automatically escape the path
+            escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
+            url = self._api_url + escaped_path
 
-        response = self._session.request(method, url, **cast(Any, kwargs))
-        BaseHTTPClient._raise_chroma_error(response)
-        return orjson.loads(response.text)
+            response = self._session.request(method, url, **cast(Any, kwargs))
+            BaseHTTPClient._raise_chroma_error(response)
+            return orjson.loads(response.text)
+    
+        try:
+            return _request_with_retry()
+        except RetryError as e:
+            # Re-raise the last exception that caused the retry to fail
+            raise e.last_attempt.exception() from None
 
     @trace_method("FastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override
