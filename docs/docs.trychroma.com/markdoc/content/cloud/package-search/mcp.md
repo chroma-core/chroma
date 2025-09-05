@@ -1,14 +1,14 @@
-# Code Collections MCP Server
+# Package Search MCP Server
 
-The Code Collections MCP Server is a [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http) MCP server implemented according to the `2025-06-18` MCP specification. It requires a custom authorization header, `x-chroma-token`, to authenticate incoming requests. Since custom authorization headers were introduced in the latest version of the MCP specification, you'll need to use [mcp-remote](https://github.com/geelen/mcp-remote) if your environment runs an older version of the spec. Using `mcp-remote` requires no additional steps beyond ensuring the `npx` executable is available on your system.
+The Package Search MCP Server is a [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http) MCP server implemented according to the `2025-06-18` MCP specification. It requires a custom authorization header, `x-chroma-token`, to authenticate incoming requests. Since custom authorization headers were introduced in the latest version of the MCP specification, you'll need to use [mcp-remote](https://github.com/geelen/mcp-remote) if your environment runs an older version of the spec. Using `mcp-remote` requires no additional steps beyond ensuring the `npx` executable is available on your system.
 
-You can continue using your existing system for connecting to MCP servers (remote or local) to access Chroma's Code Collections server. Simply provide these details in your MCP configuration parameters:
+You can continue using your existing system for connecting to MCP servers (remote or local) to access Chroma's Package Search server. Simply provide these details in your MCP configuration parameters:
 
 | Parameter | Value                                      |
 |-----------|--------------------------------------------|
-| URL       | `https://mcp.trychroma.com/package-search` |
+| URL       | `https://mcp.trychroma.com/package-search/v1` |
 | Headers   | `x-chroma-token: <YOUR_CHROMA_API_KEY>`    |
-| Type      | `streamble-http`                           |
+| Type      | `streamable-http`                           |
 
 {% Banner type="note" %}
 
@@ -16,7 +16,11 @@ Different platforms have different conventions for naming transports. We recomme
 
 {% /Banner %}
 
-## Setup
+## Getting started
+
+Visit the [Package Search installation page](https://trychroma.com/package-search) for quick setup in most clients.
+
+## Configuration
 
 {% ComboboxSteps defaultValue="claude-code" %}
 
@@ -36,7 +40,7 @@ In the Setting's menu, click on the {% ImageHoverText src="code-collections-api-
 {% Step %}
 Add the Chroma MCP server to Claude Code with your Chroma API key
 ```terminal
-claude mcp add --transport http chroma-code-mcp https://mcp.trychroma.com/mcp --header "x-chroma-token: <YOUR_CHROMA_API_KEY>" 
+claude mcp add --transport http chroma-code-mcp https://mcp.trychroma.com/package-search/v1 --header "x-chroma-token: <YOUR_CHROMA_API_KEY>"
 ```
 {% /Step %}
 {% /ComboboxEntry %}
@@ -53,7 +57,7 @@ from mcp.client.streamable_http import streamablehttp_client
 
 async def main():
     async with streamablehttp_client(
-        "https://mcp.trychroma.com/mcp",
+        "https://mcp.trychroma.com/package-search/v1",
         headers={"x-chroma-token": "<YOUR_CHROMA_API_KEY>"},
     ) as (
         read_stream,
@@ -93,7 +97,7 @@ Add the following to your `~/.config/opencode/opencode.json` file with your Chro
   "mcp": {
     "code-packages": {
       "type": "remote",
-      "url": "https://mcp.trychroma.com/mcp",
+      "url": "https://mcp.trychroma.com/package-search/v1",
       "enabled": true,
       "headers": {
         "x-chroma-token": "<YOUR_CHROMA_API_KEY>"
@@ -119,7 +123,7 @@ Create an `mcp_config.json` file with the following content and your Chroma Clou
 	"mcpServers": {
 		"code-packages": {
 			"type": "streamable_http",
-			"url": "https://mcp.trychroma.com/mcp",
+			"url": "https://mcp.trychroma.com/package-search/v1",
 			"headers": {
 				"x-chroma-token": "<YOUR_CHROMA_API_KEY>"
 			},
@@ -159,7 +163,7 @@ client = genai.Client(api_key="<YOUR_GEMINI_API_KEY>")
 
 async def run():
     async with streamablehttp_client(
-        "https://mcp.trychroma.com/mcp",
+        "https://mcp.trychroma.com/package-search/v1",
         headers={"x-chroma-token": "<YOUR_CHROMA_API_KEY>"},
     ) as (read, write, _):
         async with ClientSession(read, write) as session:
@@ -211,13 +215,13 @@ In Cursor's settings, search for "MCP" and add the following configuration with 
   "mcpServers": {
     "code-collections": {
       "transport": "streamable_http",
-      "url": "https://mcp.trychroma.com/mcp",
+      "url": "https://mcp.trychroma.com/package-search/v1",
       "headers": {
         "x-chroma-token": "<YOUR_CHROMA_API_KEY>"
       }
     }
   }
-} 
+}
 ```
 {% /Step %}
 {% /ComboboxEntry %}
@@ -229,7 +233,7 @@ In Windsurf's settings, search for "MCP" and add the following configuration wit
 {
   "mcpServers": {
     "code-collections": {
-      "serverUrl": "https://mcp.trychroma.com/mcp",
+      "serverUrl": "https://mcp.trychroma.com/package-search/v1",
       "headers": {
         "x-chroma-token": "<YOUR_CHROMA_API_KEY>"
       }
