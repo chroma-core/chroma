@@ -32,7 +32,6 @@ from chromadb.api.types import (
     GetResult,
     QueryResult,
     SearchResult,
-    SearchRecord,
     CollectionMetadata,
     validate_batch,
     convert_np_embeddings_to_list,
@@ -377,20 +376,15 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json=payload,
         )
         
-        # Parse response into SearchResult
-        results = []
-        for batch_results in resp_json.get("results", []):
-            batch = []
-            for record in batch_results:
-                batch.append(SearchRecord(
-                    id=record["id"],
-                    document=record.get("document"),
-                    embedding=record.get("embedding"),
-                    metadata=record.get("metadata"),
-                    score=record.get("score"),
-                ))
-            results.append(batch)
-        return results
+        # Return the column-major format directly
+        return SearchResult(
+            ids=resp_json.get("ids", []),
+            documents=resp_json.get("documents", []),
+            embeddings=resp_json.get("embeddings", []),
+            metadatas=resp_json.get("metadatas", []),
+            scores=resp_json.get("scores", []),
+            select=resp_json.get("select", [])
+        )
 
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override

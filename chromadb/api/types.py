@@ -10,6 +10,7 @@ from typing import (
     cast,
     Literal,
     get_args,
+    TYPE_CHECKING,
 )
 from numpy.typing import NDArray
 import numpy as np
@@ -29,6 +30,9 @@ from chromadb.base_types import (
     WhereDocument,
     SparseVector,
 )
+
+if TYPE_CHECKING:
+    from chromadb.execution.expression.operator import SelectField
 from inspect import signature
 from tenacity import retry
 from abc import abstractmethod
@@ -44,7 +48,6 @@ __all__ = [
     "WhereDocument",
     "UpdateCollectionMetadata",
     "UpdateMetadata",
-    "SearchRecord",
     "SearchResult",
     "SparseVector",
     "is_valid_sparse_vector",
@@ -490,17 +493,26 @@ class QueryResult(TypedDict):
     included: Include
 
 
-class SearchRecord(TypedDict):
-    """Individual record returned from a search operation"""
-    id: str
-    document: Optional[str]
-    embedding: Optional[List[float]]
-    metadata: Optional[Metadata]
-    score: Optional[float]
-
-
-# SearchResult is a list of results for each search payload
-SearchResult = List[List[SearchRecord]]
+class SearchResult(TypedDict):
+    """Column-major response from the search API matching Rust SearchResponse structure.
+    
+    This is the format returned to users:
+    - ids: Always present, list of result IDs for each search payload
+    - documents: Optional per payload, None if not requested
+    - embeddings: Optional per payload, None if not requested
+    - metadatas: Optional per payload, None if not requested
+    - scores: Optional per payload, None if not requested
+    - select: List of selected fields for each payload (sorted)
+    
+    Each top-level list index corresponds to a search payload.
+    Within each payload, the inner lists are aligned by record index.
+    """
+    ids: List[List[str]]
+    documents: List[Optional[List[Optional[str]]]]
+    embeddings: List[Optional[List[Optional[List[float]]]]]
+    metadatas: List[Optional[List[Optional[Dict[str, Any]]]]]
+    scores: List[Optional[List[Optional[float]]]]
+    select: List[List[Union["SelectField", str]]]  # List of SelectField enums or string field names for each payload
 
 
 class UpdateRequest(TypedDict):
