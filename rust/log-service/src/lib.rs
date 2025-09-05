@@ -2276,7 +2276,7 @@ mod tests {
     use opentelemetry::global::meter;
     use proptest::prelude::*;
     use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel, time::sleep};
-    use tonic::IntoRequest;
+    use tonic::{Code, IntoRequest};
     use wal3::{GarbageCollector, SnapshotOptions, ThrottleOptions};
 
     #[test]
