@@ -1472,6 +1472,7 @@ dependencies = [
  "rand 0.8.5",
  "roaring",
  "serde",
+ "serde_bytes",
  "shuttle",
  "tempfile",
  "thiserror 1.0.69",
@@ -7337,6 +7338,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
  "ordered-float",
+ "serde",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8437fd221bde2d4ca316d61b90e337e9e702b3820b87d63caa9ba6c02bd06d96"
+dependencies = [
  "serde",
 ]
 
