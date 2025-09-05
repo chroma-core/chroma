@@ -78,8 +78,6 @@ pub struct ServiceBasedFrontend {
     metrics: Arc<Metrics>,
     default_knn_index: KnnIndex,
     retries_builder: ExponentialBuilder,
-    tenants_to_migrate_immediately: HashSet<String>,
-    tenants_to_migrate_immediately_threshold: Option<String>,
 }
 
 impl ServiceBasedFrontend {
@@ -92,8 +90,6 @@ impl ServiceBasedFrontend {
         executor: Executor,
         max_batch_size: u32,
         default_knn_index: KnnIndex,
-        tenants_to_migrate_immediately: HashSet<String>,
-        tenants_to_migrate_immediately_threshold: Option<String>,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -146,8 +142,6 @@ impl ServiceBasedFrontend {
             metrics,
             default_knn_index,
             retries_builder,
-            tenants_to_migrate_immediately,
-            tenants_to_migrate_immediately_threshold,
         }
     }
 
@@ -562,20 +556,7 @@ impl ServiceBasedFrontend {
             .collections_with_segments_cache
             .remove(&collection_id)
             .await;
-        if self.tenant_is_on_new_log_by_default(&tenant_id) {
-            if let Err(err) = self.log_client.seal_log(&tenant_id, collection_id).await {
-                tracing::error!("could not seal collection right away: {err}");
-            }
-        }
         Ok(collection)
-    }
-
-    fn tenant_is_on_new_log_by_default(&self, tenant_id: &str) -> bool {
-        self.tenants_to_migrate_immediately.contains(tenant_id)
-            || self
-                .tenants_to_migrate_immediately_threshold
-                .as_ref()
-                .is_some_and(|threshold| tenant_id <= threshold.as_str())
     }
 
     pub async fn update_collection(
@@ -1821,13 +1802,6 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
         let executor =
             Executor::try_from_config(&(config.executor.clone(), system.clone()), registry).await?;
 
-        let tenants_to_migrate_immediately = config
-            .tenants_to_migrate_immediately
-            .iter()
-            .cloned()
-            .collect::<HashSet<String>>();
-        let tenants_to_migrate_immediately_threshold =
-            config.tenants_to_migrate_immediately_threshold.clone();
         Ok(ServiceBasedFrontend::new(
             config.allow_reset,
             sysdb,
@@ -1836,8 +1810,6 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             executor,
             max_batch_size,
             config.default_knn_index,
-            tenants_to_migrate_immediately,
-            tenants_to_migrate_immediately_threshold,
         ))
     }
 }
@@ -1845,15 +1817,11 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
 #[cfg(test)]
 mod tests {
     use chroma_config::registry::Registry;
-    use chroma_log::config::{GrpcLogConfig, LogConfig};
     use chroma_sysdb::GrpcSysDbConfig;
     use chroma_types::Collection;
     use uuid::Uuid;
 
-    use crate::{
-        executor::config::{DistributedExecutorConfig, ExecutorConfig},
-        server::CreateCollectionPayload,
-    };
+    use crate::server::CreateCollectionPayload;
 
     use super::*;
 
@@ -1895,48 +1863,6 @@ mod tests {
         assert!(segments.iter().any(
             |s| s.r#type == SegmentType::HnswLocalPersisted && s.scope == SegmentScope::VECTOR
         ));
-    }
-
-    #[tokio::test]
-    async fn test_k8s_integration_migrate_immediately_criteria() {
-        let registry = Registry::new();
-        let system = System::new();
-        let config = FrontendConfig {
-            tenants_to_migrate_immediately: vec!["cccccccc-cccc-cccc-cccc-cccccccccccc".to_string()],
-            tenants_to_migrate_immediately_threshold: Some(
-                "66666666-6666-6666-6666-666666666666".to_string(),
-            ),
-            allow_reset: false,
-            sqlitedb: None,
-            segment_manager: None,
-            sysdb: Default::default(),
-            collections_with_segments_provider: Default::default(),
-            log: LogConfig::Grpc(GrpcLogConfig {
-                host: "localhost".to_string(),
-                port: 50054,
-                alt_host: Some("localhost".to_string()),
-                ..Default::default()
-            }),
-            executor: ExecutorConfig::Distributed(DistributedExecutorConfig {
-                connections_per_node: 128,
-                replication_factor: 2,
-                connect_timeout_ms: 1000,
-                request_timeout_ms: 1000,
-                retry: Default::default(),
-                assignment: Default::default(),
-                memberlist_provider: Default::default(),
-                max_query_service_response_size_bytes: 65536,
-                client_selection_config: Default::default(),
-            }),
-            default_knn_index: KnnIndex::Spann,
-        };
-        let frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
-            .await
-            .unwrap();
-        assert!(frontend.tenant_is_on_new_log_by_default("22222222-2222-2222-2222-222222222222"));
-        assert!(frontend.tenant_is_on_new_log_by_default("66666666-6666-6666-6666-666666666666"));
-        assert!(!frontend.tenant_is_on_new_log_by_default("77777777-7777-7777-7777-777777777777"));
-        assert!(frontend.tenant_is_on_new_log_by_default("cccccccc-cccc-cccc-cccc-cccccccccccc"));
     }
 
     #[tokio::test]
