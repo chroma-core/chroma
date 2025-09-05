@@ -117,8 +117,8 @@ impl<'me> MetadataSegmentWriter<'me> {
             return Err(MetadataSegmentError::InvalidSegmentType);
         }
         // NOTE: We hope that all blockfiles of the same collection should live under the same prefix.
-        // But according to the implementation above the forking child collection will live under the root
-        // collection prefix. Although this is not a desired behavior, as a temporary fix we create the sparse
+        // The implementation below implies all collections in the fork tree share the same prefix for
+        // blockfiles. Although this is not a desired behavior, as a temporary fix we create the sparse
         // vector index blockfiles under the same prefix as other blockfiles if they are present.
         let prefix_path =
             if let Some(existing_file_path) = segment.file_path.values().flatten().next() {
