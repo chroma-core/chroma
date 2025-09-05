@@ -71,7 +71,7 @@ pub enum GetCollectionWithSegmentsError {
     GetSegmentsError(#[from] GetSegmentsError),
     #[error("Grpc error: {0}")]
     Grpc(#[from] Status),
-    #[error("Collection [{0}] does not exists.")]
+    #[error("Collection [{0}] does not exist.")]
     NotFound(String),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
@@ -638,7 +638,7 @@ pub type GetCollectionResponse = Collection;
 pub enum GetCollectionError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
 }
 
@@ -871,7 +871,7 @@ pub struct UpdateCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpdateCollectionError {
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
     #[error("Metadata reset unsupported")]
     MetadataResetUnsupported,
@@ -927,7 +927,7 @@ pub struct DeleteCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum DeleteCollectionError {
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
     #[error(transparent)]
     Validation(#[from] ChromaValidationError),
@@ -997,7 +997,7 @@ pub enum ForkCollectionError {
     Local,
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
     #[error("Failed to convert proto segment")]
     SegmentConversionError(#[from] SegmentConversionError),
@@ -1046,7 +1046,7 @@ impl ChromaError for CountForksError {
 pub enum GetCollectionSizeError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
 }
 
@@ -1063,7 +1063,7 @@ impl ChromaError for GetCollectionSizeError {
 pub enum ListCollectionVersionsError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
 }
 
