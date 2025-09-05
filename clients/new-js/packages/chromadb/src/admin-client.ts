@@ -1,7 +1,8 @@
 import { defaultAdminClientArgs, HttpMethod, normalizeMethod } from "./utils";
 import { createClient, createConfig } from "@hey-api/client-fetch";
 import { Database, DefaultService as Api } from "./api";
-import { chromaFetch } from "./chroma-fetch";
+import { createChromaFetch } from "./chroma-fetch";
+import type { RetryConfig } from "./retry";
 
 /**
  * Configuration options for the AdminClient.
@@ -17,6 +18,8 @@ export interface AdminClientArgs {
   headers?: Record<string, string>;
   /** Additional fetch options for HTTP requests */
   fetchOptions?: RequestInit;
+  /** Retry configuration for HTTP requests. Set to null to disable retries */
+  retryConfig?: RetryConfig | null;
 }
 
 /**
@@ -43,8 +46,17 @@ export class AdminClient {
    * @param args - Optional configuration for the admin client
    */
   constructor(args?: AdminClientArgs) {
-    const { host, port, ssl, headers, fetchOptions } =
-      args || defaultAdminClientArgs;
+    const {
+      host,
+      port,
+      ssl,
+      headers,
+      fetchOptions,
+      retryConfig,
+    } = {
+      ...defaultAdminClientArgs,
+      ...(args ?? {}),
+    };
 
     const baseUrl = `${ssl ? "https" : "http"}://${host}:${port}`;
 
@@ -56,7 +68,7 @@ export class AdminClient {
     };
 
     this.apiClient = createClient(createConfig(configOptions));
-    this.apiClient.setConfig({ fetch: chromaFetch });
+    this.apiClient.setConfig({ fetch: createChromaFetch({ retryConfig }) });
   }
 
   /**

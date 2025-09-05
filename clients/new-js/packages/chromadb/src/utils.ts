@@ -1,5 +1,6 @@
-import { AdminClientArgs } from "./admin-client";
-import { ChromaClientArgs } from "./chroma-client";
+import type { AdminClientArgs } from "./admin-client";
+import type { ChromaClientArgs } from "./chroma-client";
+import { defaultRetryConfig } from "./retry";
 import {
   BaseRecordSet,
   IncludeEnum,
@@ -22,6 +23,7 @@ export const defaultAdminClientArgs: AdminClientArgs = {
   host: "localhost",
   port: 8000,
   ssl: false,
+  retryConfig: defaultRetryConfig,
 };
 
 /** Default configuration for ChromaClient connections */
