@@ -2819,5 +2819,76 @@ mod test {
                 "Sparse index reader should be created, verifying files exist and are readable"
             );
         }
+        // Simulate legacy files without prefix
+        metadata_segment.file_path.drain();
+        metadata_segment.file_path.insert(
+            "legacy_file".to_string(),
+            vec!["11111111-1111-1111-1111-111111111111".to_string()],
+        );
+
+        // Change collection ID to simulate a forked collection
+        let forked_collection_id =
+            CollectionUuid::from_str("00000000-0000-0000-0000-000000000004").expect("parse error");
+        metadata_segment.collection = forked_collection_id;
+
+        // Third flush: recreate all index files
+        // The bug fix ensures they use the existing prefix, not a new one
+        {
+            let metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating metadata writer");
+
+            let metadata_flusher = metadata_writer
+                .commit()
+                .await
+                .expect("Error committing metadata");
+
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Error flushing metadata");
+        }
+
+        // Verify sparse index files were recreated
+        assert!(
+            metadata_segment.file_path.contains_key(SPARSE_MAX),
+            "Sparse max should be recreated"
+        );
+        assert!(
+            metadata_segment.file_path.contains_key(SPARSE_OFFSET_VALUE),
+            "Sparse offset value should be recreated"
+        );
+
+        // Verify ALL blockfiles use the original prefix
+        for (key, paths) in &metadata_segment.file_path {
+            for path in paths {
+                let (prefix, _) = chroma_types::Segment::extract_prefix_and_id(path)
+                    .expect("Should be able to extract prefix");
+                assert!(
+                    prefix.is_empty(),
+                    "All blockfiles should use empty prefix. Key: {}, Path: {}",
+                    key,
+                    path
+                );
+            }
+        }
+
+        // Verify we can read from the segment with recreated sparse indices
+        {
+            let metadata_reader =
+                MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                    .await
+                    .expect("Should be able to read from segment with recreated sparse indices");
+
+            assert!(
+                metadata_reader.sparse_index_reader.is_some(),
+                "Sparse index reader should be created, verifying files exist and are readable"
+            );
+        }
     }
 }
