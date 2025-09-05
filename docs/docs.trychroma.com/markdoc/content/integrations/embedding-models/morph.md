@@ -17,7 +17,7 @@ This embedding function relies on the `openai` python package, which you can ins
 import chromadb.utils.embedding_functions as embedding_functions
 morph_ef = embedding_functions.MorphEmbeddingFunction(
     api_key="YOUR_API_KEY",  # or set MORPH_API_KEY environment variable
-    model_name="morph-embedding-v2"
+    model_name="morph-embedding-v3"
 )
 morph_ef(input=["def calculate_sum(a, b):\n    return a + b", "class User:\n    def __init__(self, name):\n        self.name = name"])
 ```
@@ -33,7 +33,7 @@ import { MorphEmbeddingFunction } from '@chroma-core/morph';
 
 const embedder = new MorphEmbeddingFunction({
     api_key: "apiKey",  // or set MORPH_API_KEY environment variable
-    model_name: "morph-embedding-v2"
+    model_name: "morph-embedding-v3"
 })
 
 // use directly
