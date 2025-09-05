@@ -205,20 +205,21 @@ export type SearchPayload = {
     };
 };
 
-export type SearchRecord = {
-    document?: string | null;
-    embedding?: Array<number> | null;
-    id: string;
-    metadata?: null | HashMap;
-    score?: number | null;
-};
-
 export type SearchRequestPayload = {
     searches: Array<SearchPayload>;
 };
 
 export type SearchResponse = {
-    results: Array<Array<SearchRecord>>;
+    documents: Array<Array<string | null> | null>;
+    embeddings: Array<Array<Array<number> | null> | null>;
+    ids: Array<Array<string>>;
+    metadatas: Array<Array<null | HashMap> | null>;
+    scores: Array<Array<number | null> | null>;
+    select: Array<Array<SelectField>>;
+};
+
+export type SelectField = 'Document' | 'Embedding' | 'Metadata' | 'Score' | {
+    MetadataField: string;
 };
 
 export type SpannConfiguration = {
