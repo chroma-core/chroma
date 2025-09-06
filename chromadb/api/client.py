@@ -156,7 +156,7 @@ class Client(SharedSystemClient, ClientAPI):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = ef.DefaultEmbeddingFunction(),
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
@@ -195,7 +195,7 @@ class Client(SharedSystemClient, ClientAPI):
         name: str,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = ef.DefaultEmbeddingFunction(),
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         model = self._server.get_collection(
@@ -224,7 +224,7 @@ class Client(SharedSystemClient, ClientAPI):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = ef.DefaultEmbeddingFunction(),
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         if configuration is None:

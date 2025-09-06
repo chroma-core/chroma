@@ -1,11 +1,12 @@
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
-from chromadb.api.types import Embeddings, Documents, EmbeddingFunction
+from chromadb.api.types import Embeddable, Embeddings, EmbeddingFunction
 from typing import Dict, Any, cast
 import json
 import numpy as np
 
 
-class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
+class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Embeddable]):
     """
     This class is used to generate embeddings for a list of texts using Amazon Bedrock.
     """
@@ -51,7 +52,7 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
             **kwargs,
         )
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
@@ -65,6 +66,7 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         content_type = "application/json"
         embeddings = []
 
+        input = text_only_embeddable_check(input, "Amazon Bedrock")
         for text in input:
             input_body = {"inputText": text}
             body = json.dumps(input_body)
@@ -86,7 +88,7 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         return "amazon_bedrock"
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         try:
             import boto3
         except ImportError:

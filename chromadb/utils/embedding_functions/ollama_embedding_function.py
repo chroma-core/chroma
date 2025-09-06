@@ -1,4 +1,5 @@
-from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
+from chromadb.api.types import Embeddable, Embeddings, EmbeddingFunction, Space
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import List, Dict, Any
 import numpy as np
@@ -7,7 +8,7 @@ from urllib.parse import urlparse
 DEFAULT_MODEL_NAME = "chroma/all-minilm-l6-v2-f32"
 
 
-class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
+class OllamaEmbeddingFunction(EmbeddingFunction[Embeddable]):
     """
     This class is used to generate embeddings for a list of texts using the Ollama Embedding API
     (https://github.com/ollama/ollama/blob/main/docs/api.md#generate-embeddings).
@@ -47,12 +48,12 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self._client = Client(host=self._base_url, timeout=timeout)
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Get the embeddings for a list of texts.
 
         Args:
-            input (Documents): A list of texts to get embeddings for.
+            input (Embeddable): A list of texts to get embeddings for.
 
         Returns:
             Embeddings: The embeddings for the texts.
@@ -62,6 +63,8 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> texts = ["Hello, world!", "How are you?"]
             >>> embeddings = ollama_ef(texts)
         """
+        input = text_only_embeddable_check(input, "Ollama")
+
         # Call Ollama client
         response = self._client.embed(model=self.model_name, input=input)
 
@@ -82,7 +85,7 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         url = config.get("url")
         model_name = config.get("model_name")
         timeout = config.get("timeout")

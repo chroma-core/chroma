@@ -413,7 +413,7 @@ def test_delete_add_after_persist(settings: Settings) -> None:
                 "hnsw:batch_size": 3,
                 "hnsw:sync_threshold": 3,
             },
-            embedding_function=DefaultEmbeddingFunction(),  # type: ignore[arg-type]
+            embedding_function=DefaultEmbeddingFunction(),
             id=UUID("0851f751-2f11-4424-ab23-4ae97074887a"),
             dimension=2,
             dtype=None,

@@ -1,10 +1,11 @@
-from chromadb.api.types import EmbeddingFunction, Space, Embeddings, Documents
+from chromadb.api.types import Embeddable, EmbeddingFunction, Space, Embeddings
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import List, Dict, Any
 import numpy as np
 
 
-class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
+class Text2VecEmbeddingFunction(EmbeddingFunction[Embeddable]):
     """
     This class is used to generate embeddings for a list of texts using the Text2Vec model.
     """
@@ -27,19 +28,18 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
         self.model_name = model_name
         self._model = SentenceModel(model_name_or_path=model_name)
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
         Args:
-            input: Documents or images to generate embeddings for.
+            input: Documents to generate embeddings for.
 
         Returns:
             Embeddings for the documents.
         """
         # Text2Vec only works with text documents
-        if not all(isinstance(item, str) for item in input):
-            raise ValueError("Text2Vec only supports text documents, not images")
+        input = text_only_embeddable_check(input, "Text2Vec")
 
         embeddings = self._model.encode(list(input), convert_to_numpy=True)
 
@@ -57,7 +57,7 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         model_name = config.get("model_name")
 
         if model_name is None:
