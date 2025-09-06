@@ -149,7 +149,7 @@ def normalize_embeddings(
 
     if len(target) == 0:
         raise ValueError(
-            f"Expected Embeddings to be non-empty list or numpy array, got {target}"
+            f"Expected embeddings to be non-empty list or numpy array, got {target}"
         )
 
     if isinstance(target, list):
@@ -158,6 +158,8 @@ def normalize_embeddings(
             return [np.array(target, dtype=np.float32)]
         # List of PyEmbeddings
         if isinstance(target[0], list):
+            if len(target[0]) == 0:
+                raise ValueError("Expected embeddings to be at least 1-dimensional")
             if isinstance(target[0][0], (int, float)) and not isinstance(
                 target[0][0], bool
             ):
