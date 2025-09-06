@@ -30,7 +30,8 @@ func (s *logServer) ForkLogs(ctx context.Context, req *logservicepb.ForkLogsRequ
 }
 
 func (s *logServer) GetAllCollectionInfoToCompact(ctx context.Context, req *logservicepb.GetAllCollectionInfoToCompactRequest) (res *logservicepb.GetAllCollectionInfoToCompactResponse, err error) {
-	return nil, errors.New("Go log service doesn't support GetAllCollectionInfoToCompact; migrated to Rust")
+	res = &logservicepb.GetAllCollectionInfoToCompactResponse{}
+	return
 }
 
 func (s *logServer) UpdateCollectionLogOffset(ctx context.Context, req *logservicepb.UpdateCollectionLogOffsetRequest) (res *logservicepb.UpdateCollectionLogOffsetResponse, err error) {
