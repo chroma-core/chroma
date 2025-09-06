@@ -23,6 +23,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         dimensions: Optional[int] = None,
         embedding_type: Optional[str] = None,
         normalized: Optional[bool] = None,
+        timeout: Optional[float] = None,
     ):
         """
         Initialize the JinaEmbeddingFunction.
@@ -44,6 +45,8 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
                 Defaults to None.
             normalized (bool, optional): Whether to normalize the Jina AI API.
                 Defaults to None.
+            timeout (float, optional): The timeout in seconds for API requests.
+                Defaults to None (uses httpx default of 5 seconds).
 
         """
         try:
@@ -74,9 +77,13 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         self.dimensions = dimensions
         self.embedding_type = embedding_type
         self.normalized = normalized
+        self.timeout = timeout
 
         self._api_url = "https://api.jina.ai/v1/embeddings"
-        self._session = httpx.Client()
+        client_kwargs = {}
+        if self.timeout is not None:
+            client_kwargs["timeout"] = self.timeout
+        self._session = httpx.Client(**client_kwargs)
         self._session.headers.update(
             {"Authorization": f"Bearer {self.api_key}", "Accept-Encoding": "identity"}
         )
@@ -159,6 +166,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         dimensions = config.get("dimensions")
         embedding_type = config.get("embedding_type")
         normalized = config.get("normalized")
+        timeout = config.get("timeout")
 
         if api_key_env_var is None or model_name is None:
             assert False, "This code should not be reached"  # this is for type checking
@@ -172,6 +180,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             dimensions=dimensions,
             embedding_type=embedding_type,
             normalized=normalized,
+            timeout=timeout,
         )
 
     def get_config(self) -> Dict[str, Any]:
@@ -184,6 +193,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             "dimensions": self.dimensions,
             "embedding_type": self.embedding_type,
             "normalized": self.normalized,
+            "timeout": self.timeout,
         }
 
     def validate_config_update(
