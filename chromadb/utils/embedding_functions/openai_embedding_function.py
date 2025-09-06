@@ -1,3 +1,4 @@
+import httpx
 from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
 from typing import List, Dict, Any, Optional
 import os
@@ -19,6 +20,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         default_headers: Optional[Dict[str, str]] = None,
         dimensions: Optional[int] = None,
         api_key_env_var: str = "CHROMA_OPENAI_API_KEY",
+        http_client: Optional[httpx.Client] = None,
     ):
         """
         Initialize the OpenAIEmbeddingFunction.
@@ -42,6 +44,10 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             dimensions (int, optional): The number of dimensions for the embeddings.
                 Only supported for `text-embedding-3` or later models from OpenAI.
                 https://platform.openai.com/docs/api-reference/embeddings/create#embeddings-create-dimensions
+            http_client (httpx.Client, optional): A custom httpx client.
+                We provide a `DefaultHttpxClient` class that you can pass to retain the default values we use for `limits`, `timeout` & `follow_redirects`.
+                See the [httpx documentation](https://www.python-httpx.org/api/#client) for more details.
+
         """
         try:
             import openai
@@ -70,6 +76,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self.deployment_id = deployment_id
         self.default_headers = default_headers
         self.dimensions = dimensions
+        self.http_client = http_client
 
         # Initialize the OpenAI client
         client_params: Dict[str, Any] = {"api_key": self.api_key}
@@ -80,6 +87,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             client_params["base_url"] = self.api_base
         if self.default_headers is not None:
             client_params["default_headers"] = self.default_headers
+        if self.http_client is not None:
+            client_params["http_client"] = self.http_client
 
         self.client = openai.OpenAI(**client_params)
 
@@ -100,6 +109,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 azure_endpoint=self.api_base,
                 azure_deployment=self.deployment_id,
                 default_headers=self.default_headers,
+                http_client=self.http_client,
             )
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -152,6 +162,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         deployment_id = config.get("deployment_id")
         default_headers = config.get("default_headers")
         dimensions = config.get("dimensions")
+        http_client = config.get("http_client")
 
         if api_key_env_var is None or model_name is None:
             assert False, "This code should not be reached"
@@ -167,6 +178,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             deployment_id=deployment_id,
             default_headers=default_headers,
             dimensions=dimensions,
+            http_client=http_client,
         )
 
     def get_config(self) -> Dict[str, Any]:
@@ -180,6 +192,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             "deployment_id": self.deployment_id,
             "default_headers": self.default_headers,
             "dimensions": self.dimensions,
+            "http_client": self.http_client,
         }
 
     def validate_config_update(
