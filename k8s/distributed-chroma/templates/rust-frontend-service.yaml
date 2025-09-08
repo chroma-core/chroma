@@ -39,7 +39,7 @@ spec:
             failureThreshold: 60
             httpGet:
               port: 8000
-              path: /api/v2/healthcheck
+              path: /api/v2/startup
           readinessProbe:
             httpGet:
               port: 8000

@@ -258,6 +258,7 @@ impl FrontendServer {
             )
             .route("/api/v2", get(heartbeat))
             .route("/api/v2/healthcheck", get(healthcheck))
+            .route("/api/v2/startup", get(startup_check))
             .route("/api/v2/heartbeat", get(heartbeat))
             .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
             .route("/api/v2/reset", post(reset))
@@ -437,6 +438,21 @@ impl FrontendServer {
 ////////////////////////// Method Handlers //////////////////////////
 // These handlers simply proxy the call and the relevant inputs into
 // the appropriate method on the `FrontendServer` struct.
+
+/// Startup check endpoint that returns 200 if the server is running
+/// This is more lenient than healthcheck and used for startup probes
+#[utoipa::path(
+    get,
+    path = "/api/v2/startup",
+    responses(
+        (status = 200, description = "Server is starting up", body = String, content_type = "application/json"),
+    )
+)]
+async fn startup_check() -> impl IntoResponse {
+    // Simple check that the server is up and can respond
+    // Doesn't check if dependencies are ready
+    (StatusCode::OK, Json(serde_json::json!({"status": "starting"})))
+}
 
 /// Health check endpoint that returns 200 if the server and executor are ready
 #[utoipa::path(
