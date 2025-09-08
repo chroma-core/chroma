@@ -522,7 +522,7 @@ impl Block {
 
     /// Load a block from bytes in Arrow IPC format with the given id
     pub fn from_bytes(bytes: &[u8], id: Uuid) -> Result<Self, BlockLoadError> {
-        Self::from_bytes_internal(bytes, id, false)
+        Self::load_from_bytes(bytes, id, false)
     }
 
     /// Load a block from bytes in Arrow IPC format with the given id and validate the layout
@@ -530,11 +530,7 @@ impl Block {
     /// - This method should be used in tests to ensure that the layout of the IPC file is as expected
     /// - The validation is not performant and should not be used in production code
     pub fn from_bytes_with_validation(bytes: &[u8], id: Uuid) -> Result<Self, BlockLoadError> {
-        Self::from_bytes_internal(bytes, id, true)
-    }
-
-    fn from_bytes_internal(bytes: &[u8], id: Uuid, validate: bool) -> Result<Self, BlockLoadError> {
-        Self::load_from_bytes(bytes, id, validate)
+        Self::load_from_bytes(bytes, id, true)
     }
 
     /// Load a block from the given path with the given id and validate the layout
@@ -596,12 +592,9 @@ impl Block {
         // This is something we can optimize later if it becomes a bottleneck.
         let buffer =
             Buffer::from(&bytes[record_batch_offset..record_batch_offset + record_batch_len]);
-        decoder.read_record_batch(block, &buffer).map(
-            |maybe_record_batch| match maybe_record_batch {
-                Some(rb) => Ok(rb),
-                None => Err(BlockLoadError::NoRecordBatches),
-            },
-        )?
+        decoder
+            .read_record_batch(block, &buffer)?
+            .ok_or(BlockLoadError::NoRecordBatches)
     }
 }
 
