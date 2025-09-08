@@ -269,6 +269,6 @@ k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('grafana', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('prometheus', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('otel-collector', resource_deps=['k8s_setup'], labels=["observability"])
-k8s_resource('garbage-collector', resource_deps=['k8s_setup', 'minio-deployment', 'logservice'], labels=["chroma"])
+k8s_resource('garbage-collector', resource_deps=['k8s_setup', 'minio-deployment', 'rust-log-service'], labels=["chroma"])
 # Local S3
 k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards=['9000:9000', '9005:9005'])
