@@ -38,7 +38,7 @@ spec:
             periodSeconds: 1
             failureThreshold: 30
             grpc:
-              port: 50051
+              port: 8000
           readinessProbe:
             httpGet:
               port: 8000
