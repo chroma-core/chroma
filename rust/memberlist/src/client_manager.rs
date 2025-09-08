@@ -65,6 +65,23 @@ where
     /// - If no client is found for the given key
     /// - If the assignment policy fails to assign the key
     pub fn clients(&mut self, assignment_key: &str) -> Result<Vec<T>, ClientAssignmentError> {
+        self.clients_with_assignment(assignment_key)
+            .map(|(clients, _)| clients)
+    }
+
+    /// Get both the assigned nodes and clients for the given key in a single lock acquisition
+    /// This avoids race conditions between separate calls to assigned_nodes() and clients()
+    /// # Arguments
+    /// - `assignment_key` - The key for which the client is to be fetched
+    /// # Returns
+    /// - A tuple of (clients, assigned_nodes) where clients are the gRPC clients and assigned_nodes are the node names
+    /// # Errors
+    /// - If no client is found for the given key
+    /// - If the assignment policy fails to assign the key
+    pub fn clients_with_assignment(
+        &mut self,
+        assignment_key: &str,
+    ) -> Result<(Vec<T>, Vec<String>), ClientAssignmentError> {
         let node_name_to_client_guard = self.node_name_to_client.read();
         let members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
         let target_replication_factor = min(self.replication_factor, members.len());
@@ -72,6 +89,7 @@ where
         let assigned = self
             .assignment_policy
             .assign(assignment_key, target_replication_factor)?;
+
         let clients = assigned
             .iter()
             .map(|node_name| {
@@ -81,7 +99,26 @@ where
                     .cloned()
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(clients)
+        Ok((clients, assigned))
+    }
+
+    /// return current node names present in the map
+    pub fn node_names(&self) -> Vec<String> {
+        self.node_name_to_client.read().keys().cloned().collect()
+    }
+
+    /// return the client for a specific node if present
+    pub fn client_for_node(&self, node_name: &str) -> Option<T> {
+        self.node_name_to_client.read().get(node_name).cloned()
+    }
+
+    /// return assigned node names for a given key
+    pub fn assigned_nodes(
+        &mut self,
+        assignment_key: &str,
+    ) -> Result<Vec<String>, ClientAssignmentError> {
+        self.clients_with_assignment(assignment_key)
+            .map(|(_, assigned)| assigned)
     }
 
     pub fn all(&self) -> Vec<T> {
@@ -495,6 +532,62 @@ mod test {
             node_name_to_client_guard
                 .get(node)
                 .expect("Client to exist");
+        }
+    }
+
+    // ClientAssigner tests
+    #[tokio::test]
+    async fn test_client_assigner_node_names_and_client_for_node() {
+        let assigner: ClientAssigner<String> = ClientAssigner::new(
+            Box::new(chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy::default()),
+            2,
+        );
+        {
+            let mut guard = assigner.node_name_to_client.write();
+            for i in 0..5 {
+                guard.insert(format!("node{}", i), format!("client{}", i));
+            }
+        }
+        let mut names = assigner.node_names();
+        names.sort();
+        assert_eq!(names, vec!["node0", "node1", "node2", "node3", "node4"]);
+
+        assert_eq!(
+            assigner.client_for_node("node3"),
+            Some("client3".to_string())
+        );
+        assert!(assigner.client_for_node("missing").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_client_assigner_assigned_nodes() {
+        use std::collections::HashSet;
+
+        let mut assigner: ClientAssigner<String> = ClientAssigner::new(
+            Box::new(chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy::default()),
+            3,
+        );
+        {
+            let mut guard = assigner.node_name_to_client.write();
+            for i in 0..5 {
+                guard.insert(format!("node{}", i), format!("client{}", i));
+            }
+        }
+        // Test nodes that do not exist
+        let assigned = assigner
+            .assigned_nodes("some-key")
+            .expect("assignment succeeds");
+
+        assert!(!assigned.is_empty());
+        assert!(assigned.len() <= 3);
+
+        let assigned_set: HashSet<_> = assigned.iter().cloned().collect();
+        assert_eq!(assigned.len(), assigned_set.len(), "no duplicates");
+
+        // Find each node in our assigner
+        let all_names: HashSet<_> = assigner.node_names().into_iter().collect();
+        for n in assigned {
+            assert!(all_names.contains(&n), "assigned node must be in members");
         }
     }
 }
