@@ -96,10 +96,11 @@ message QueryVector {
     }
 }
 
-message Rank {
+// RankExpr represents a ranking expression
+message RankExpr {
     message Division {
-        Rank left = 1;
-        Rank right = 2;
+        RankExpr left = 1;
+        RankExpr right = 2;
     }
 
     message Knn {
@@ -111,20 +112,20 @@ message Rank {
     }
     
     message Subtraction {
-        Rank left = 1;
-        Rank right = 2;
+        RankExpr left = 1;
+        RankExpr right = 2;
     }
 
     message RankList {
-        repeated Rank ranks = 1;
+        repeated RankExpr exprs = 1;
     }
 
     oneof rank {
-        Rank absolute = 1;
+        RankExpr absolute = 1;
         Division division = 2;
-        Rank exponentiation = 3;
+        RankExpr exponentiation = 3;
         Knn knn = 4;
-        Rank logarithm = 5;
+        RankExpr logarithm = 5;
         RankList maximum = 6;
         RankList minimum = 7;
         RankList multiplication = 8;
@@ -134,13 +135,17 @@ message Rank {
     }
 }
 
+message RankOperator {
+    optional RankExpr expr = 1;
+}
+
 message SelectOperator {
     repeated string fields = 1;
 }
 
 message SearchPayload {
     FilterOperator filter = 1;
-    Rank rank = 2;
+    RankOperator rank = 2;
     LimitOperator limit = 3;
     SelectOperator select = 4;
 }
