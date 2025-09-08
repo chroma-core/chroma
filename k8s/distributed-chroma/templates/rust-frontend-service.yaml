@@ -36,7 +36,7 @@ spec:
           imagePullPolicy: IfNotPresent
           startupProbe:
             periodSeconds: 1
-            failureThreshold: 30
+            failureThreshold: 60
             grpc:
               port: 50051
           readinessProbe:
