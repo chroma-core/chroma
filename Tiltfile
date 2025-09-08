@@ -262,7 +262,7 @@ k8s_resource('logservice-migration-latest', resource_deps=['postgres'], labels=[
 k8s_resource('logservice', resource_deps=['sysdb-migration-latest'], labels=["chroma"], port_forwards='50052:50051')
 k8s_resource('rust-log-service', labels=["chroma"], port_forwards='50054:50051', resource_deps=['logservice'])
 k8s_resource('sysdb', resource_deps=['sysdb-migration-latest'], labels=["chroma"], port_forwards='50051:50051')
-k8s_resource('rust-frontend-service', resource_deps=['sysdb', 'logservice', 'rust-log-service'], labels=["chroma"], port_forwards='8000:8000')
+k8s_resource('rust-frontend-service', resource_deps=['sysdb', 'rust-log-service'], labels=["chroma"], port_forwards='8000:8000')
 k8s_resource('query-service', resource_deps=['sysdb', 'rust-log-service'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service', resource_deps=['sysdb', 'rust-log-service'], labels=["chroma"])
 k8s_resource('load-service', resource_deps=['k8s_setup'], labels=["infrastructure"], port_forwards='3001:3001')
