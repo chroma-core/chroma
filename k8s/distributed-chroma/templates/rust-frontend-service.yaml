@@ -37,8 +37,9 @@ spec:
           startupProbe:
             periodSeconds: 1
             failureThreshold: 30
-            grpc:
+            httpGet:
               port: 8000
+              path: /api/v2/healthcheck
           readinessProbe:
             httpGet:
               port: 8000
