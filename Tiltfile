@@ -5,6 +5,7 @@ update_settings(max_parallel_updates=6)
 # Echo CLUSTERDOMAIN value for debugging during CI
 if config.tilt_subcommand == "ci":
   local('echo "CLUSTERDOMAIN: $CLUSTERDOMAIN"')
+  local('grep -- "--cluster-domain=$CLUSTER_DOMAIN" "${SNAP_DATA}/args/kubelet"')
 
 if config.tilt_subcommand == "ci":
   custom_build(
