@@ -2147,7 +2147,7 @@ async fn collection_search(
     let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
-            AuthzAction::Query,
+            AuthzAction::Search,
             AuthzResource {
                 tenant: Some(tenant.clone()),
                 database: Some(database.clone()),
