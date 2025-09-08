@@ -386,6 +386,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         {
             Ok(log) => log,
             Err(err) => {
+                println!("Failed to create Log for CompactionManager: {:?}", err);
                 return Err(err);
             }
         };
@@ -393,6 +394,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let sysdb = match SysDb::try_from_config(sysdb_config, registry).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
+                println!("Failed to create SysDb for CompactionManager: {:?}", err);
                 return Err(err);
             }
         };
@@ -400,6 +402,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let storage = match Storage::try_from_config(&config.storage, registry).await {
             Ok(storage) => storage,
             Err(err) => {
+                println!("Failed to create Storage for CompactionManager: {:?}", err);
                 return Err(err);
             }
         };
@@ -424,8 +427,18 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
 
         let assignment_policy_config = &config.assignment_policy;
         let assignment_policy =
-            Box::<dyn AssignmentPolicy>::try_from_config(assignment_policy_config, registry)
-                .await?;
+            match Box::<dyn AssignmentPolicy>::try_from_config(assignment_policy_config, registry)
+                .await
+            {
+                Ok(assignment_policy) => assignment_policy,
+                Err(err) => {
+                    println!(
+                        "Failed to create Box<dyn AssignmentPolicy> for CompactionManager: {:?}",
+                        err
+                    );
+                    return Err(err);
+                }
+            };
         let job_expiry_seconds = config.compactor.job_expiry_seconds;
         let max_failure_count = config.compactor.max_failure_count;
         let scheduler = Scheduler::new(
@@ -441,11 +454,21 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             max_failure_count,
         );
 
-        let blockfile_provider = BlockfileProvider::try_from_config(
+        let blockfile_provider = match BlockfileProvider::try_from_config(
             &(config.blockfile_provider.clone(), storage.clone()),
             registry,
         )
-        .await?;
+        .await
+        {
+            Ok(provider) => provider,
+            Err(err) => {
+                println!(
+                    "Failed to create BlockfileProvider for CompactionManager: {:?}",
+                    err
+                );
+                return Err(err);
+            }
+        };
 
         let hnsw_index_provider = HnswIndexProvider::try_from_config(
             &(config.hnsw_provider.clone(), storage.clone()),
