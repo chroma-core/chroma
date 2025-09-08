@@ -1,13 +1,6 @@
 update_settings(max_parallel_updates=6)
 
 # *:ci images are defined in .github/actions/tilt/docker-bake.hcl and used for .github/actions/tilt/action.yaml.
-
-# Echo CLUSTERDOMAIN value for debugging during CI
-if config.tilt_subcommand == "ci":
-  local('echo "CLUSTERDOMAIN: $CLUSTERDOMAIN"')
-  local('grep -- "--cluster-domain=$CLUSTER_DOMAIN" "${SNAP_DATA}/args/kubelet"')
-  local('echo "CLUSTERDOMAIN is empty: ${CLUSTERDOMAIN:-empty}')
-
 if config.tilt_subcommand == "ci":
   custom_build(
     'chroma-postgres',
@@ -269,8 +262,8 @@ k8s_resource('logservice', resource_deps=['sysdb-migration-latest'], labels=["ch
 k8s_resource('rust-log-service', labels=["chroma"], port_forwards='50054:50051', resource_deps=['logservice'])
 k8s_resource('sysdb', resource_deps=['sysdb-migration-latest'], labels=["chroma"], port_forwards='50051:50051')
 k8s_resource('rust-frontend-service', resource_deps=['sysdb', 'logservice', 'rust-log-service'], labels=["chroma"], port_forwards='8000:8000')
-k8s_resource('query-service', resource_deps=['sysdb', 'logservice'], labels=["chroma"], port_forwards='50053:50051')
-k8s_resource('compaction-service', resource_deps=['sysdb'], labels=["chroma"])
+k8s_resource('query-service', resource_deps=['sysdb', 'logservice', 'rust-log-service'], labels=["chroma"], port_forwards='50053:50051')
+k8s_resource('compaction-service', resource_deps=['sysdb', 'rust-log-service'], labels=["chroma"])
 k8s_resource('load-service', resource_deps=['k8s_setup'], labels=["infrastructure"], port_forwards='3001:3001')
 k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('grafana', resource_deps=['k8s_setup'], labels=["observability"])
