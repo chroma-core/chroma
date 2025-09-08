@@ -97,29 +97,31 @@ def _to_f32(value: float) -> float:
     return value
 
 
-def pack_embedding_safely(pyEmbedding: PyEmbedding) -> str:
-    try:
-        return pybase64.b64encode_as_string(  # type: ignore
-            _get_struct(len(pyEmbedding)).pack(*pyEmbedding)
-        )
-    except OverflowError:
-        return pybase64.b64encode_as_string(  # type: ignore
-            _get_struct(len(pyEmbedding)).pack(
-                *[_to_f32(value) for value in pyEmbedding]
-            )
-        )
+def pack_embedding_safely(embedding: Embedding) -> str:
+    # try:
+    return pybase64.b64encode_as_string(  # type: ignore
+        _get_struct(len(embedding)).pack(*embedding)
+    )
+
+
+# except OverflowError:
+#     return pybase64.b64encode_as_string(  # type: ignore
+#         _get_struct(len(embedding)).pack(
+#             *[_to_f32(value) for value in embedding]
+#         )
+#     )
 
 
 # returns base64 encoded embeddings or None if the embedding is None
 # currently, PyEmbeddings can't have None, but this is to future proof, we want to be able to handle None embeddings
 def optional_embeddings_to_base64_strings(
-    pyEmbeddings: Optional[PyEmbeddings],
+    embeddings: Optional[Embeddings],
 ) -> Optional[list[Union[str, None]]]:
-    if pyEmbeddings is None:
+    if embeddings is None:
         return None
     return [
-        pack_embedding_safely(pyEmbedding) if pyEmbedding is not None else None
-        for pyEmbedding in pyEmbeddings
+        pack_embedding_safely(embedding) if embedding is not None else None
+        for embedding in embeddings
     ]
 
 
@@ -152,32 +154,34 @@ def normalize_embeddings(
             f"Expected Embeddings to be non-empty list or numpy array, got {target}"
         )
 
-    if isinstance(target, list):
-        # One PyEmbedding
-        if isinstance(target[0], (int, float)) and not isinstance(target[0], bool):
-            return [np.array(target, dtype=np.float32)]
-        # List of PyEmbeddings
-        if isinstance(target[0], list):
-            if isinstance(target[0][0], (int, float)) and not isinstance(
-                target[0][0], bool
-            ):
-                return [np.array(embedding, dtype=np.float32) for embedding in target]
-        # List of np.ndarrays
-        if isinstance(target[0], np.ndarray):
-            return cast(Embeddings, target)
+    return target  # type: ignore
 
-    elif isinstance(target, np.ndarray):
-        # A single embedding as a numpy array
-        if target.ndim == 1:
-            return cast(Embeddings, [target])
-        # 2-D numpy array (comes out of embedding models)
-        # TODO: Enforce this at the embedding function level
-        if target.ndim == 2:
-            return list(target)
+    # if isinstance(target, list):
+    #     # One PyEmbedding
+    #     if isinstance(target[0], (int, float)) and not isinstance(target[0], bool):
+    #         return [np.array(target, dtype=np.float32)]
+    #     # List of PyEmbeddings
+    #     if isinstance(target[0], list):
+    #         if isinstance(target[0][0], (int, float)) and not isinstance(
+    #             target[0][0], bool
+    #         ):
+    #             return [np.array(embedding, dtype=np.float32) for embedding in target]
+    #     # List of np.ndarrays
+    #     if isinstance(target[0], np.ndarray):
+    #         return cast(Embeddings, target)
 
-    raise ValueError(
-        f"Expected embeddings to be a list of floats or ints, a list of lists, a numpy array, or a list of numpy arrays, got {target}"
-    )
+    # elif isinstance(target, np.ndarray):
+    #     # A single embedding as a numpy array
+    #     if target.ndim == 1:
+    #         return cast(Embeddings, [target])
+    #     # 2-D numpy array (comes out of embedding models)
+    #     # TODO: Enforce this at the embedding function level
+    #     if target.ndim == 2:
+    #         return list(target)
+
+    # raise ValueError(
+    #     f"Expected embeddings to be a list of floats or ints, a list of lists, a numpy array, or a list of numpy arrays, got {target}"
+    # )
 
 
 # Metadatas
@@ -295,7 +299,8 @@ def validate_base_record_set(record_set: BaseRecordSet) -> None:
     _validate_record_set_length_consistency(record_set)
 
     if record_set["embeddings"] is not None:
-        validate_embeddings(embeddings=record_set["embeddings"])
+        # validate_embeddings(embeddings=record_set["embeddings"])
+        pass
     if record_set["documents"] is not None:
         validate_documents(
             documents=record_set["documents"],
@@ -492,6 +497,7 @@ class QueryResult(TypedDict):
 
 class SearchRecord(TypedDict):
     """Individual record returned from a search operation"""
+
     id: str
     document: Optional[str]
     embedding: Optional[List[float]]
@@ -755,41 +761,43 @@ def is_valid_sparse_vector(value: Any) -> bool:
 
 def validate_sparse_vector(value: Any) -> None:
     """Validate that a value is a properly formed SparseVector.
-    
+
     Args:
         value: The value to validate as a SparseVector
-        
+
     Raises:
         ValueError: If the value is not a valid SparseVector
     """
     if not isinstance(value, dict):
-        raise ValueError(f"Expected SparseVector to be a dict, got {type(value).__name__}")
-    
+        raise ValueError(
+            f"Expected SparseVector to be a dict, got {type(value).__name__}"
+        )
+
     if "indices" not in value or "values" not in value:
         raise ValueError("SparseVector must have 'indices' and 'values' keys")
-    
+
     indices = value.get("indices")
     values = value.get("values")
-    
+
     # Validate indices
     if not isinstance(indices, list):
         raise ValueError(
             f"Expected SparseVector indices to be a list, got {type(indices).__name__}"
         )
-    
+
     # Validate values
     if not isinstance(values, list):
         raise ValueError(
             f"Expected SparseVector values to be a list, got {type(values).__name__}"
         )
-    
+
     # Check lengths match
     if len(indices) != len(values):
         raise ValueError(
             f"SparseVector indices and values must have the same length, "
             f"got {len(indices)} indices and {len(values)} values"
         )
-    
+
     # Validate each index
     for i, idx in enumerate(indices):
         if not isinstance(idx, int):
@@ -800,7 +808,7 @@ def validate_sparse_vector(value: Any) -> None:
             raise ValueError(
                 f"SparseVector indices must be non-negative, got {idx} at position {i}"
             )
-    
+
     # Validate each value
     for i, val in enumerate(values):
         if not isinstance(val, (int, float)):

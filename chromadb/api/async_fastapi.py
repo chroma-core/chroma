@@ -31,7 +31,6 @@ from chromadb.execution.expression.plan import Search
 from chromadb.api.types import (
     Documents,
     Embeddings,
-    PyEmbeddings,
     IDs,
     Include,
     Metadatas,
@@ -413,25 +412,27 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         """Performs hybrid search on a collection"""
         # Convert Search objects to dictionaries
         payload = {"searches": [s.to_dict() for s in searches]}
-        
+
         resp_json = await self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
             json=payload,
         )
-        
+
         # Parse response into SearchResult
         results = []
         for batch_results in resp_json.get("results", []):
             batch = []
             for record in batch_results:
-                batch.append(SearchRecord(
-                    id=record["id"],
-                    document=record.get("document"),
-                    embedding=record.get("embedding"),
-                    metadata=record.get("metadata"),
-                    score=record.get("score"),
-                ))
+                batch.append(
+                    SearchRecord(
+                        id=record["id"],
+                        document=record.get("document"),
+                        embedding=record.get("embedding"),
+                        metadata=record.get("metadata"),
+                        score=record.get("score"),
+                    )
+                )
             results.append(batch)
         return results
 
@@ -546,7 +547,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self,
         batch: Tuple[
             IDs,
-            Optional[PyEmbeddings],
+            Optional[Embeddings],
             Optional[Metadatas],
             Optional[Documents],
             Optional[URIs],
@@ -588,7 +589,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> bool:
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings),
+            embeddings,
             metadatas,
             documents,
             uris,
@@ -615,9 +616,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> bool:
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings)
-            if embeddings is not None
-            else None,
+            embeddings if embeddings is not None else None,
             metadatas,
             documents,
             uris,
@@ -646,7 +645,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> bool:
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings),
+            embeddings,
             metadatas,
             documents,
             uris,
