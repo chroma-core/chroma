@@ -46,9 +46,12 @@ spec:
       - name: garbage-collector
         image: "{{ .Values.garbageCollector.image.repository }}:{{ .Values.garbageCollector.image.tag }}"
         imagePullPolicy: IfNotPresent
-        readinessProbe:
+        startupProbe:
           periodSeconds: 1
-          failureThreshold: 30 # 30 seconds to allow for initial startup
+          failureThreshold: 30
+          grpc:
+            port: 50055
+        readinessProbe:
           grpc:
             port: 50055
         ports:
