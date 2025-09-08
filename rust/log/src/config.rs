@@ -37,7 +37,7 @@ pub struct GrpcLogConfig {
 
 impl GrpcLogConfig {
     fn default_host() -> String {
-        "rust-log-service.chroma".to_string()
+        "rust-log-service.chromachroma".to_string()
     }
 
     fn default_port() -> u16 {

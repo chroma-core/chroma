@@ -42,7 +42,7 @@ query_service:
           bandwidth_allocation: [0.7, 0.3]
   log:
     grpc:
-      host: "logservice.chroma"
+      host: "rust-log-service.chroma"
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 5000
@@ -121,7 +121,7 @@ compaction_service:
           bandwidth_allocation: [0.7, 0.3]
   log:
     grpc:
-      host: "logservice.chroma"
+      host: "rust-log-service.chroma"
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 5000
@@ -223,7 +223,7 @@ garbage_collector:
       queue_size: 100
   log:
     grpc:
-      host: "logservice.chroma"
+      host: "rust-log-service.chroma"
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 5000
