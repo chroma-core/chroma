@@ -35,9 +35,12 @@ spec:
           ports:
             - containerPort: 50051
               name: grpc
-          readinessProbe:
+          startupProbe:
             periodSeconds: 1
-            failureThreshold: 30 # 30 seconds to allow for initial startup
+            failureThreshold: 30
+            grpc:
+              port: 50051
+          readinessProbe:
             grpc:
               port: 50051
           {{ if .Values.logService.resources }}

@@ -14,11 +14,14 @@ fi
 OUTPUT_FILE_PATH=$(readlink -m $1)
 TEMP_DIR=$(mktemp -d)
 
+netstat -tulnap
+
 mkdir "$TEMP_DIR/logs"
 mkdir "$TEMP_DIR/traces"
 
 # Create a description of the k8s cluster
 kubectl describe -A all > "${TEMP_DIR}/logs/describe-all.txt" || true
+kubectl cluster-info dump --all-namespaces --output-directory="${TEMP_DIR}/logs/cluster/"
 
 # Get the list of all pods in the namespace
 PODS=$(kubectl get pods -n $NAMESPACE -o jsonpath='{.items[*].metadata.name}')
