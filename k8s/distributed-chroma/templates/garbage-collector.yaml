@@ -50,7 +50,7 @@ spec:
           periodSeconds: 1
           failureThreshold: 30
           grpc:
-            port: 50051
+            port: 50055
         readinessProbe:
           grpc:
             port: 50055
