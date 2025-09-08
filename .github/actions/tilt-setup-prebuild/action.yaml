@@ -7,7 +7,7 @@ runs:
       uses: medyagh/setup-minikube@latest
       with:
         driver: none # uses Docker engine on host instead of Docker-in-Docker
-    # tilt ci can automatically build images while bringing up the cluster. However, this results in flaky runs for our usage so we split up image building and pod deployment into separate steps. See https://github.com/chroma-core/chroma/pull/4720.
+    # tilt ci ca automatically build images while bringing up the cluster. However, this results in flaky runs for our usage so we split up image building and pod deployment into separate steps. See https://github.com/chroma-core/chroma/pull/4720.
     - name: Install Tilt, bake images, pre-pull external images
       shell: bash
       env:
