@@ -13,10 +13,13 @@ use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
 
-use crate::execution::operators::{
-    fetch_log::FetchLogOutput,
-    rank::{RankError, RankInput, RankOutput},
-    select::{SelectError, SelectInput, SelectOutput},
+use crate::execution::{
+    operators::{
+        limit::{LimitError, LimitInput, LimitOutput},
+        rank::{RankError, RankInput, RankOutput},
+        select::{SelectError, SelectInput, SelectOutput},
+    },
+    orchestration::knn_filter::KnnFilterOutput,
 };
 
 #[derive(Error, Debug)]
@@ -25,6 +28,8 @@ pub enum RankOrchestratorError {
     Aborted,
     #[error("Error sending message through channel: {0}")]
     Channel(#[from] ChannelError),
+    #[error("Error running Limit Operator: {0}")]
+    Limit(#[from] LimitError),
     #[error("Panic: {0}")]
     Panic(#[from] PanicError),
     #[error("Error receiving final result: {0}")]
@@ -40,6 +45,7 @@ impl ChromaError for RankOrchestratorError {
         match self {
             RankOrchestratorError::Aborted => ErrorCodes::ResourceExhausted,
             RankOrchestratorError::Channel(err) => err.code(),
+            RankOrchestratorError::Limit(e) => e.code(),
             RankOrchestratorError::Panic(_) => ErrorCodes::Aborted,
             RankOrchestratorError::Result(_) => ErrorCodes::Internal,
             RankOrchestratorError::Rank(err) => err.code(),
@@ -71,26 +77,46 @@ pub struct RankOrchestratorOutput {
 /// for search results from multiple KNN orchestrators.
 ///
 /// # Pipeline
+///
+/// When rank expression is provided:
 /// ```text
-///   HashMap<Rank, Vec<RecordMeasure>>
-///                  │
-///                  ▼
-///         ┌──────────────────┐
-///         │  Rank Operator   │
-///         └────────┬─────────┘
-///                  │
-///                  ▼
-///         ┌──────────────────┐
-///         │  Slice by Limit  │
-///         └────────┬─────────┘
-///                  │
-///                  ▼
-///         ┌──────────────────┐
-///         │ Select Operator  │
-///         └────────┬─────────┘
-///                  │
-///                  ▼
-///        RankOrchestratorOutput
+///   Vec<Vec<RecordMeasure>>
+///            │
+///            ▼
+///   ┌──────────────────┐
+///   │  Rank Operator   │
+///   └────────┬─────────┘
+///            │
+///            ▼
+///   ┌──────────────────┐
+///   │  Slice by Limit  │
+///   └────────┬─────────┘
+///            │
+///            ▼
+///   ┌──────────────────┐
+///   │ Select Operator  │
+///   └────────┬─────────┘
+///            │
+///            ▼
+///   RankOrchestratorOutput
+/// ```
+///
+/// When rank expression is None:
+/// ```text
+///     KnnFilterOutput
+///            │
+///            ▼
+///   ┌──────────────────┐
+///   │  Limit Operator  │
+///   └────────┬─────────┘
+///            │
+///            ▼
+///   ┌──────────────────┐
+///   │ Select Operator  │
+///   └────────┬─────────┘
+///            │
+///            ▼
+///   RankOrchestratorOutput
 /// ```
 #[derive(Debug)]
 pub struct RankOrchestrator {
@@ -100,6 +126,7 @@ pub struct RankOrchestrator {
     queue: usize,
 
     // Input data
+    knn_filter_output: KnnFilterOutput,
     knn_results: Vec<Vec<RecordMeasure>>,
     rank: Rank,
     limit: Limit,
@@ -107,7 +134,6 @@ pub struct RankOrchestrator {
 
     // Collection information
     collection_and_segments: CollectionAndSegments,
-    logs: FetchLogOutput,
 
     // Result channel
     result_channel: Option<Sender<Result<RankOrchestratorOutput, RankOrchestratorError>>>,
@@ -119,12 +145,12 @@ impl RankOrchestrator {
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
+        knn_filter_output: KnnFilterOutput,
         knn_results: Vec<Vec<RecordMeasure>>,
         rank: Rank,
         limit: Limit,
         select: Select,
         collection_and_segments: CollectionAndSegments,
-        logs: FetchLogOutput,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -136,7 +162,7 @@ impl RankOrchestrator {
             limit,
             select,
             collection_and_segments,
-            logs,
+            knn_filter_output,
             result_channel: None,
         }
     }
@@ -159,16 +185,35 @@ impl Orchestrator for RankOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        // Start with Rank operator
-        let rank_task = wrap(
-            Box::new(self.rank.clone()),
-            RankInput {
-                knn_results: self.knn_results.clone(),
-            },
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-        vec![(rank_task, Some(Span::current()))]
+        // If a rank expression is provided, start with the Rank operator
+        // Otherwise, start the Limit operator which implicitly rank by internal offset
+        let task = match self.rank.clone().expr {
+            Some(expr) => wrap(
+                Box::new(expr),
+                RankInput {
+                    knn_results: self.knn_results.clone(),
+                },
+                ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
+            ),
+            None => wrap(
+                Box::new(self.limit.clone()),
+                LimitInput {
+                    logs: self.knn_filter_output.logs.clone(),
+                    blockfile_provider: self.blockfile_provider.clone(),
+                    record_segment: self.collection_and_segments.record_segment.clone(),
+                    log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
+                    compact_offset_ids: self
+                        .knn_filter_output
+                        .filter_output
+                        .compact_offset_ids
+                        .clone(),
+                },
+                ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
+            ),
+        };
+        vec![(task, Some(Span::current()))]
     }
 
     fn queue_size(&self) -> usize {
@@ -190,6 +235,44 @@ impl Orchestrator for RankOrchestrator {
 }
 
 #[async_trait]
+impl Handler<TaskResult<LimitOutput, LimitError>> for RankOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<LimitOutput, LimitError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        let task = wrap(
+            Box::new(self.select.clone()),
+            SelectInput {
+                records: output
+                    .offset_ids
+                    .iter()
+                    .enumerate()
+                    .map(|(ordinal, offset_id)| RecordMeasure {
+                        offset_id,
+                        measure: ordinal as f32,
+                    })
+                    .collect(),
+                logs: self.knn_filter_output.logs.clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
+                record_segment: self.collection_and_segments.record_segment.clone(),
+            },
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+
+        self.send(task, ctx, Some(Span::current())).await;
+    }
+}
+
+#[async_trait]
 impl Handler<TaskResult<RankOutput, RankError>> for RankOrchestrator {
     type Result = ();
 
@@ -203,7 +286,8 @@ impl Handler<TaskResult<RankOutput, RankError>> for RankOrchestrator {
             None => return,
         };
 
-        // Apply limit directly on the sorted ranks
+        // Apply limit (offset and limit) directly on the ranked results
+        // This slices the ranked records instead of using the Limit operator
         let offset = self.limit.offset as usize;
         let limit = self.limit.limit.unwrap_or(u32::MAX) as usize;
 
@@ -214,12 +298,11 @@ impl Handler<TaskResult<RankOutput, RankError>> for RankOrchestrator {
             .take(limit)
             .collect::<Vec<_>>();
 
-        // Create and dispatch Select operator
-        let select_task = wrap(
+        let task = wrap(
             Box::new(self.select.clone()),
             SelectInput {
                 records: sliced_records,
-                logs: self.logs.clone(),
+                logs: self.knn_filter_output.logs.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
             },
@@ -227,7 +310,7 @@ impl Handler<TaskResult<RankOutput, RankError>> for RankOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
 
-        self.send(select_task, ctx, Some(Span::current())).await;
+        self.send(task, ctx, Some(Span::current())).await;
     }
 }
 
@@ -246,7 +329,12 @@ impl Handler<TaskResult<SelectOutput, SelectError>> for RankOrchestrator {
         };
 
         // Terminate with final result
-        let pulled_log_bytes = self.logs.iter().map(|(l, _)| l.size_bytes()).sum();
+        let pulled_log_bytes = self
+            .knn_filter_output
+            .logs
+            .iter()
+            .map(|(l, _)| l.size_bytes())
+            .sum();
 
         let result = RankOrchestratorOutput {
             result: output,
