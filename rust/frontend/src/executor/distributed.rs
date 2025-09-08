@@ -247,6 +247,7 @@ impl DistributedExecutor {
     }
 
     pub async fn is_ready(&self) -> bool {
+        println!("client assigner: {:?}", self.client_assigner);
         !self.client_assigner.is_empty()
     }
 }
