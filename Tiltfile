@@ -2,6 +2,10 @@ update_settings(max_parallel_updates=6)
 
 # *:ci images are defined in .github/actions/tilt/docker-bake.hcl and used for .github/actions/tilt/action.yaml.
 
+# Echo CLUSTERDOMAIN value for debugging during CI
+if config.tilt_subcommand == "ci":
+  local('echo "CLUSTERDOMAIN: $CLUSTERDOMAIN"')
+
 if config.tilt_subcommand == "ci":
   custom_build(
     'chroma-postgres',
