@@ -67,20 +67,59 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (config, system) = config;
-        let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
-        let log = Log::try_from_config(&(config.log.clone(), system.clone()), registry).await?;
-        let storage = Storage::try_from_config(&config.storage, registry).await?;
-        let blockfile_provider = BlockfileProvider::try_from_config(
+        let sysdb = match SysDb::try_from_config(&config.sysdb, registry).await {
+            Ok(sysdb) => sysdb,
+            Err(err) => {
+                println!("Failed to create SysDb for WorkerServer: {:?}", err);
+                return Err(err);
+            }
+        };
+        let log = match Log::try_from_config(&(config.log.clone(), system.clone()), registry).await
+        {
+            Ok(log) => log,
+            Err(err) => {
+                println!("Failed to create Log for WorkerServer: {:?}", err);
+                return Err(err);
+            }
+        };
+        let storage = match Storage::try_from_config(&config.storage, registry).await {
+            Ok(storage) => storage,
+            Err(err) => {
+                println!("Failed to create Storage for WorkerServer: {:?}", err);
+                return Err(err);
+            }
+        };
+        let blockfile_provider = match BlockfileProvider::try_from_config(
             &(config.blockfile_provider.clone(), storage.clone()),
             registry,
         )
-        .await?;
-        let hnsw_index_provider = HnswIndexProvider::try_from_config(
+        .await
+        {
+            Ok(provider) => provider,
+            Err(err) => {
+                println!(
+                    "Failed to create BlockfileProvider for WorkerServer: {:?}",
+                    err
+                );
+                return Err(err);
+            }
+        };
+        let hnsw_index_provider = match HnswIndexProvider::try_from_config(
             &(config.hnsw_provider.clone(), storage.clone()),
             registry,
         )
-        .await?;
-        let spann_provider = SpannProvider::try_from_config(
+        .await
+        {
+            Ok(provider) => provider,
+            Err(err) => {
+                println!(
+                    "Failed to create HnswIndexProvider for WorkerServer: {:?}",
+                    err
+                );
+                return Err(err);
+            }
+        };
+        let spann_provider = match SpannProvider::try_from_config(
             &(
                 hnsw_index_provider.clone(),
                 blockfile_provider.clone(),
@@ -88,7 +127,14 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             ),
             registry,
         )
-        .await?;
+        .await
+        {
+            Ok(provider) => provider,
+            Err(err) => {
+                println!("Failed to create SpannProvider for WorkerServer: {:?}", err);
+                return Err(err);
+            }
+        };
         Ok(WorkerServer {
             dispatcher: None,
             system: system.clone(),

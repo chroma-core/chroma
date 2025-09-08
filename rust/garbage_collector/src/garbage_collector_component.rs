@@ -525,14 +525,43 @@ impl Configurable<(GarbageCollectorConfig, System)> for GarbageCollector {
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_config = SysDbConfig::Grpc(config.sysdb_config.clone());
-        let sysdb_client = SysDb::try_from_config(&sysdb_config, registry).await?;
-        let storage = Storage::try_from_config(&config.storage_config, registry).await?;
+        let sysdb_client = match SysDb::try_from_config(&sysdb_config, registry).await {
+            Ok(sysdb) => sysdb,
+            Err(err) => {
+                println!("Failed to create SysDb for GarbageCollector: {:?}", err);
+                return Err(err);
+            }
+        };
+        let storage = match Storage::try_from_config(&config.storage_config, registry).await {
+            Ok(storage) => storage,
+            Err(err) => {
+                println!("Failed to create Storage for GarbageCollector: {:?}", err);
+                return Err(err);
+            }
+        };
 
         let assignment_policy =
-            Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment_policy, registry)
-                .await?;
+            match Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment_policy, registry)
+                .await
+            {
+                Ok(policy) => policy,
+                Err(err) => {
+                    println!(
+                        "Failed to create Box<dyn AssignmentPolicy> for GarbageCollector: {:?}",
+                        err
+                    );
+                    return Err(err);
+                }
+            };
 
-        let logs = Log::try_from_config(&(config.log.clone(), system.clone()), registry).await?;
+        let logs = match Log::try_from_config(&(config.log.clone(), system.clone()), registry).await
+        {
+            Ok(log) => log,
+            Err(err) => {
+                println!("Failed to create Log for GarbageCollector: {:?}", err);
+                return Err(err);
+            }
+        };
 
         let root_manager_cache =
             chroma_cache::from_config_persistent(&config.root_cache_config).await?;
