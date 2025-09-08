@@ -24,7 +24,7 @@ collections_with_segments_provider:
     max_retries: 3
 log:
   grpc:
-    host: "logservice.chroma"
+    host: "rust-log-service.chroma"
     port: 50051
     connect_timeout_ms: 5000
     request_timeout_ms: 5000

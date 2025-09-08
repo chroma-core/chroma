@@ -1748,11 +1748,15 @@ impl ServiceBasedFrontend {
     }
 
     pub async fn healthcheck(&self) -> HealthCheckResponse {
-        println!("is_executor_ready: {:?}", self.executor.is_ready().await);
-        println!("is_executor_ready: {:?}", self.log_client.is_ready());
+        let executor_ready = self.executor.is_ready().await;
+        let log_client_ready = self.log_client.is_ready();
+        
+        println!("is_executor_ready: {:?}", executor_ready);
+        println!("is_log_client_ready: {:?}", log_client_ready);
+        
         HealthCheckResponse {
-            is_executor_ready: self.executor.is_ready().await,
-            is_log_client_ready: self.log_client.is_ready(),
+            is_executor_ready: executor_ready,
+            is_log_client_ready: log_client_ready,
         }
     }
 }
