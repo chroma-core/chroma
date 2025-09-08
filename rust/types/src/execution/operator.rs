@@ -702,20 +702,29 @@ pub struct KnnQuery {
     pub limit: u32,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct Rank {
+    pub expr: Option<RankExpr>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum Rank {
+pub enum RankExpr {
     #[serde(rename = "$abs")]
-    Absolute(Box<Rank>),
+    Absolute(Box<RankExpr>),
     #[serde(rename = "$div")]
-    Division { left: Box<Rank>, right: Box<Rank> },
+    Division {
+        left: Box<RankExpr>,
+        right: Box<RankExpr>,
+    },
     #[serde(rename = "$exp")]
-    Exponentiation(Box<Rank>),
+    Exponentiation(Box<RankExpr>),
     #[serde(rename = "$knn")]
     Knn {
         embedding: QueryVector,
-        #[serde(default = "Rank::default_knn_key")]
+        #[serde(default = "RankExpr::default_knn_key")]
         key: String,
-        #[serde(default = "Rank::default_knn_limit")]
+        #[serde(default = "RankExpr::default_knn_limit")]
         limit: u32,
         #[serde(default)]
         default: Option<f32>,
@@ -723,22 +732,25 @@ pub enum Rank {
         ordinal: bool,
     },
     #[serde(rename = "$log")]
-    Logarithm(Box<Rank>),
+    Logarithm(Box<RankExpr>),
     #[serde(rename = "$max")]
-    Maximum(Vec<Rank>),
+    Maximum(Vec<RankExpr>),
     #[serde(rename = "$min")]
-    Minimum(Vec<Rank>),
+    Minimum(Vec<RankExpr>),
     #[serde(rename = "$mul")]
-    Multiplication(Vec<Rank>),
+    Multiplication(Vec<RankExpr>),
     #[serde(rename = "$sub")]
-    Subtraction { left: Box<Rank>, right: Box<Rank> },
+    Subtraction {
+        left: Box<RankExpr>,
+        right: Box<RankExpr>,
+    },
     #[serde(rename = "$sum")]
-    Summation(Vec<Rank>),
+    Summation(Vec<RankExpr>),
     #[serde(rename = "$val")]
     Value(f32),
 }
 
-impl Rank {
+impl RankExpr {
     pub fn default_knn_key() -> String {
         "#embedding".to_string()
     }
@@ -749,20 +761,20 @@ impl Rank {
 
     pub fn knn_queries(&self) -> Vec<KnnQuery> {
         match self {
-            Rank::Absolute(rank) | Rank::Exponentiation(rank) | Rank::Logarithm(rank) => {
-                rank.knn_queries()
-            }
-            Rank::Division { left, right } | Rank::Subtraction { left, right } => left
+            RankExpr::Absolute(expr)
+            | RankExpr::Exponentiation(expr)
+            | RankExpr::Logarithm(expr) => expr.knn_queries(),
+            RankExpr::Division { left, right } | RankExpr::Subtraction { left, right } => left
                 .knn_queries()
                 .into_iter()
                 .chain(right.knn_queries())
                 .collect(),
-            Rank::Maximum(ranks)
-            | Rank::Minimum(ranks)
-            | Rank::Multiplication(ranks)
-            | Rank::Summation(ranks) => ranks.iter().flat_map(Rank::knn_queries).collect(),
-            Rank::Value(_) => Vec::new(),
-            Rank::Knn {
+            RankExpr::Maximum(exprs)
+            | RankExpr::Minimum(exprs)
+            | RankExpr::Multiplication(exprs)
+            | RankExpr::Summation(exprs) => exprs.iter().flat_map(RankExpr::knn_queries).collect(),
+            RankExpr::Value(_) => Vec::new(),
+            RankExpr::Knn {
                 embedding,
                 key,
                 limit,
@@ -781,27 +793,37 @@ impl TryFrom<chroma_proto::Rank> for Rank {
     type Error = QueryConversionError;
 
     fn try_from(proto_rank: chroma_proto::Rank) -> Result<Self, Self::Error> {
+        // Convert proto to RankExpr, then wrap in Rank struct
+        let expr = RankExpr::try_from(proto_rank)?;
+        Ok(Rank { expr: Some(expr) })
+    }
+}
+
+impl TryFrom<chroma_proto::Rank> for RankExpr {
+    type Error = QueryConversionError;
+
+    fn try_from(proto_rank: chroma_proto::Rank) -> Result<Self, Self::Error> {
         match proto_rank.rank {
-            Some(chroma_proto::rank::Rank::Absolute(abs)) => {
-                Ok(Rank::Absolute(Box::new(Rank::try_from(*abs)?)))
+            Some(chroma_proto::rank::Rank::Absolute(expr)) => {
+                Ok(RankExpr::Absolute(Box::new(RankExpr::try_from(*expr)?)))
             }
             Some(chroma_proto::rank::Rank::Division(div)) => {
                 let left = div.left.ok_or(QueryConversionError::field("left"))?;
                 let right = div.right.ok_or(QueryConversionError::field("right"))?;
-                Ok(Rank::Division {
-                    left: Box::new(Rank::try_from(*left)?),
-                    right: Box::new(Rank::try_from(*right)?),
+                Ok(RankExpr::Division {
+                    left: Box::new(RankExpr::try_from(*left)?),
+                    right: Box::new(RankExpr::try_from(*right)?),
                 })
             }
-            Some(chroma_proto::rank::Rank::Exponentiation(exp)) => {
-                Ok(Rank::Exponentiation(Box::new(Rank::try_from(*exp)?)))
-            }
+            Some(chroma_proto::rank::Rank::Exponentiation(expr)) => Ok(RankExpr::Exponentiation(
+                Box::new(RankExpr::try_from(*expr)?),
+            )),
             Some(chroma_proto::rank::Rank::Knn(knn)) => {
                 let embedding = knn
                     .embedding
                     .ok_or(QueryConversionError::field("embedding"))?
                     .try_into()?;
-                Ok(Rank::Knn {
+                Ok(RankExpr::Knn {
                     embedding,
                     key: knn.key,
                     limit: knn.limit,
@@ -809,50 +831,50 @@ impl TryFrom<chroma_proto::Rank> for Rank {
                     ordinal: knn.ordinal,
                 })
             }
-            Some(chroma_proto::rank::Rank::Logarithm(log)) => {
-                Ok(Rank::Logarithm(Box::new(Rank::try_from(*log)?)))
+            Some(chroma_proto::rank::Rank::Logarithm(expr)) => {
+                Ok(RankExpr::Logarithm(Box::new(RankExpr::try_from(*expr)?)))
             }
             Some(chroma_proto::rank::Rank::Maximum(max)) => {
-                let ranks = max
+                let exprs = max
                     .ranks
                     .into_iter()
-                    .map(Rank::try_from)
+                    .map(RankExpr::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(Rank::Maximum(ranks))
+                Ok(RankExpr::Maximum(exprs))
             }
             Some(chroma_proto::rank::Rank::Minimum(min)) => {
-                let ranks = min
+                let exprs = min
                     .ranks
                     .into_iter()
-                    .map(Rank::try_from)
+                    .map(RankExpr::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(Rank::Minimum(ranks))
+                Ok(RankExpr::Minimum(exprs))
             }
             Some(chroma_proto::rank::Rank::Multiplication(mul)) => {
-                let ranks = mul
+                let exprs = mul
                     .ranks
                     .into_iter()
-                    .map(Rank::try_from)
+                    .map(RankExpr::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(Rank::Multiplication(ranks))
+                Ok(RankExpr::Multiplication(exprs))
             }
             Some(chroma_proto::rank::Rank::Subtraction(sub)) => {
                 let left = sub.left.ok_or(QueryConversionError::field("left"))?;
                 let right = sub.right.ok_or(QueryConversionError::field("right"))?;
-                Ok(Rank::Subtraction {
-                    left: Box::new(Rank::try_from(*left)?),
-                    right: Box::new(Rank::try_from(*right)?),
+                Ok(RankExpr::Subtraction {
+                    left: Box::new(RankExpr::try_from(*left)?),
+                    right: Box::new(RankExpr::try_from(*right)?),
                 })
             }
             Some(chroma_proto::rank::Rank::Summation(sum)) => {
-                let ranks = sum
+                let exprs = sum
                     .ranks
                     .into_iter()
-                    .map(Rank::try_from)
+                    .map(RankExpr::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(Rank::Summation(ranks))
+                Ok(RankExpr::Summation(exprs))
             }
-            Some(chroma_proto::rank::Rank::Value(value)) => Ok(Rank::Value(value)),
+            Some(chroma_proto::rank::Rank::Value(value)) => Ok(RankExpr::Value(value)),
             None => Err(QueryConversionError::field("rank")),
         }
     }
@@ -862,20 +884,33 @@ impl TryFrom<Rank> for chroma_proto::Rank {
     type Error = QueryConversionError;
 
     fn try_from(rank: Rank) -> Result<Self, Self::Error> {
-        let proto_rank = match rank {
-            Rank::Absolute(rank) => {
-                chroma_proto::rank::Rank::Absolute(Box::new(chroma_proto::Rank::try_from(*rank)?))
+        // If expr is None, we need to handle this case appropriately
+        // For now, we'll return an error since the protobuf expects a rank
+        match rank.expr {
+            Some(expr) => expr.try_into(),
+            None => Err(QueryConversionError::field("rank")),
+        }
+    }
+}
+
+impl TryFrom<RankExpr> for chroma_proto::Rank {
+    type Error = QueryConversionError;
+
+    fn try_from(rank_expr: RankExpr) -> Result<Self, Self::Error> {
+        let proto_rank = match rank_expr {
+            RankExpr::Absolute(expr) => {
+                chroma_proto::rank::Rank::Absolute(Box::new(chroma_proto::Rank::try_from(*expr)?))
             }
-            Rank::Division { left, right } => {
+            RankExpr::Division { left, right } => {
                 chroma_proto::rank::Rank::Division(Box::new(chroma_proto::rank::Division {
                     left: Some(Box::new(chroma_proto::Rank::try_from(*left)?)),
                     right: Some(Box::new(chroma_proto::Rank::try_from(*right)?)),
                 }))
             }
-            Rank::Exponentiation(rank) => chroma_proto::rank::Rank::Exponentiation(Box::new(
-                chroma_proto::Rank::try_from(*rank)?,
+            RankExpr::Exponentiation(expr) => chroma_proto::rank::Rank::Exponentiation(Box::new(
+                chroma_proto::Rank::try_from(*expr)?,
             )),
-            Rank::Knn {
+            RankExpr::Knn {
                 embedding,
                 key,
                 limit,
@@ -888,11 +923,11 @@ impl TryFrom<Rank> for chroma_proto::Rank {
                 default,
                 ordinal,
             }),
-            Rank::Logarithm(rank) => {
-                chroma_proto::rank::Rank::Logarithm(Box::new(chroma_proto::Rank::try_from(*rank)?))
+            RankExpr::Logarithm(expr) => {
+                chroma_proto::rank::Rank::Logarithm(Box::new(chroma_proto::Rank::try_from(*expr)?))
             }
-            Rank::Maximum(ranks) => {
-                let proto_ranks = ranks
+            RankExpr::Maximum(exprs) => {
+                let proto_ranks = exprs
                     .into_iter()
                     .map(chroma_proto::Rank::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
@@ -900,8 +935,8 @@ impl TryFrom<Rank> for chroma_proto::Rank {
                     ranks: proto_ranks,
                 })
             }
-            Rank::Minimum(ranks) => {
-                let proto_ranks = ranks
+            RankExpr::Minimum(exprs) => {
+                let proto_ranks = exprs
                     .into_iter()
                     .map(chroma_proto::Rank::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
@@ -909,8 +944,8 @@ impl TryFrom<Rank> for chroma_proto::Rank {
                     ranks: proto_ranks,
                 })
             }
-            Rank::Multiplication(ranks) => {
-                let proto_ranks = ranks
+            RankExpr::Multiplication(exprs) => {
+                let proto_ranks = exprs
                     .into_iter()
                     .map(chroma_proto::Rank::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
@@ -918,14 +953,14 @@ impl TryFrom<Rank> for chroma_proto::Rank {
                     ranks: proto_ranks,
                 })
             }
-            Rank::Subtraction { left, right } => {
+            RankExpr::Subtraction { left, right } => {
                 chroma_proto::rank::Rank::Subtraction(Box::new(chroma_proto::rank::Subtraction {
                     left: Some(Box::new(chroma_proto::Rank::try_from(*left)?)),
                     right: Some(Box::new(chroma_proto::Rank::try_from(*right)?)),
                 }))
             }
-            Rank::Summation(ranks) => {
-                let proto_ranks = ranks
+            RankExpr::Summation(exprs) => {
+                let proto_ranks = exprs
                     .into_iter()
                     .map(chroma_proto::Rank::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
@@ -933,7 +968,7 @@ impl TryFrom<Rank> for chroma_proto::Rank {
                     ranks: proto_ranks,
                 })
             }
-            Rank::Value(value) => chroma_proto::rank::Rank::Value(value),
+            RankExpr::Value(value) => chroma_proto::rank::Rank::Value(value),
         };
 
         Ok(chroma_proto::Rank {
