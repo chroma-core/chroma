@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use super::config;
 use async_trait::async_trait;
 use backon::ExponentialBuilder;
@@ -247,9 +249,25 @@ impl DistributedExecutor {
     }
 
     pub async fn is_ready(&self) -> bool {
-        // Simply check if we have clients available right now
-        // Let Kubernetes handle the retry logic via readiness probe
-        !self.client_assigner.is_empty()
+        // If we already have clients, we're ready
+        if !self.client_assigner.is_empty() {
+            return true;
+        }
+
+        // Wait up to 30 seconds for clients to be discovered
+        let timeout_duration = Duration::from_secs(30);
+        let poll_interval = Duration::from_millis(100);
+
+        tokio::time::timeout(timeout_duration, async {
+            loop {
+                if !self.client_assigner.is_empty() {
+                    return true;
+                }
+                tokio::time::sleep(poll_interval).await;
+            }
+        })
+        .await
+        .unwrap_or(false) // Return false if timeout occurs
     }
 }
 
