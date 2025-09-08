@@ -35,8 +35,6 @@ spec:
           image: "{{ .Values.rustFrontendService.image.repository }}:{{ .Values.rustFrontendService.image.tag }}"
           imagePullPolicy: IfNotPresent
           readinessProbe:
-            periodSeconds: 1
-            failureThreshold: 30 # 30 seconds to allow for initial startup
             httpGet:
               port: 8000
               path: /api/v2/healthcheck

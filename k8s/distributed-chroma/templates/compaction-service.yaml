@@ -46,8 +46,6 @@ spec:
           image: "{{ .Values.compactionService.image.repository }}:{{ .Values.compactionService.image.tag }}"
           imagePullPolicy: IfNotPresent
           readinessProbe:
-            periodSeconds: 1
-            failureThreshold: 30 # 30 seconds to allow for initial startup
             grpc:
               port: 50051
           volumeMounts:
