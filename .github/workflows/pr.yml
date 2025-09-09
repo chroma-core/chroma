@@ -9,7 +9,7 @@ jobs:
   # This job detects what changed and determines which tests to run
   change-detection:
     name: Detect changes and determine tests
-    runs-on: blacksmith-4vcpu-ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       # Component changes
       docs-only: ${{ steps.determine-tests.outputs.docs-only }}
