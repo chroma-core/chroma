@@ -3458,7 +3458,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verify_returns_true_when_manifest_etag_matches() {
+    async fn test_k8s_integration_verify_returns_true_when_manifest_etag_matches() {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "test-prefix".to_string();
         let options = LogReaderOptions::default();
@@ -3489,7 +3489,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verify_returns_false_when_manifest_etag_does_not_match() {
+    async fn test_k8s_integration_verify_returns_false_when_manifest_etag_does_not_match() {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "test-prefix".to_string();
         let options = LogReaderOptions::default();
@@ -3516,7 +3516,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verify_handles_storage_errors_gracefully() {
+    async fn test_k8s_integration_verify_handles_storage_errors_gracefully() {
         use chroma_storage::local::LocalStorage;
 
         let storage = Arc::new(chroma_storage::Storage::Local(LocalStorage::new(
@@ -3548,7 +3548,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manifest_and_e_tag_returns_both_manifest_and_etag() {
+    async fn test_k8s_integration_manifest_and_e_tag_returns_both_manifest_and_etag() {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "test-prefix".to_string();
         let options = LogReaderOptions::default();
@@ -3579,7 +3579,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manifest_and_e_tag_returns_none_when_no_manifest() {
+    async fn test_k8s_integration_manifest_and_e_tag_returns_none_when_no_manifest() {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "nonexistent-prefix".to_string();
         let options = LogReaderOptions::default();
