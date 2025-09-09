@@ -16,14 +16,14 @@ rustFrontendService:
     - name: RUST_BACKTRACE
       value: 'value: "1"'
     - name: CONFIG_PATH
-      value: "tilt_config.yaml"
+      value: "distributed.yaml"
 
 queryService:
   env:
     - name: RUST_BACKTRACE
       value: 'value: "1"'
     - name: CONFIG_PATH
-      value: 'value: "/tilt_config.yaml"'
+      value: 'value: "/chroma_config.yaml"'
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
 
 compactionService:
@@ -31,7 +31,7 @@ compactionService:
     - name: RUST_BACKTRACE
       value: 'value: "1"'
     - name: CONFIG_PATH
-      value: 'value: "/tilt_config.yaml"'
+      value: 'value: "/chroma_config.yaml"'
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
 
 rustLogService:

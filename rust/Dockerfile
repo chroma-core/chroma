@@ -64,7 +64,7 @@ RUN apt-get update && apt-get install -y dumb-init libssl-dev ca-certificates &&
 FROM runner AS cli
 
 COPY --from=builder /chroma/rust/frontend/sample_configs/docker_single_node.yaml /config.yaml
-COPY --from=builder /chroma/rust/frontend/sample_configs/tilt_config.yaml /tilt_config.yaml
+COPY --from=builder /chroma/rust/frontend/sample_configs/chroma_config.yaml /chroma_config.yaml
 COPY --from=builder /chroma/chroma /usr/local/bin/chroma
 
 EXPOSE 8000
@@ -87,14 +87,10 @@ ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./log_service" ]
 
 FROM runner AS query_service
 COPY --from=builder /chroma/rust/worker/chroma_config.yaml .
-# NOTE(rescrv): We need the tilt config in the docker file.  This is temporary.
-COPY --from=builder /chroma/rust/worker/tilt_config.yaml .
 COPY --from=builder /chroma/query_service .
 ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./query_service" ]
 
 FROM runner AS compaction_service
 COPY --from=builder /chroma/rust/worker/chroma_config.yaml .
-# NOTE(rescrv): We need the tilt config in the docker file.  This is temporary.
-COPY --from=builder /chroma/rust/worker/tilt_config.yaml .
 COPY --from=builder /chroma/compaction_service .
 ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./compaction_service" ]
