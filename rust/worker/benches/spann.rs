@@ -80,6 +80,7 @@ fn add_to_index_and_get_reader<'a>(
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 128;
