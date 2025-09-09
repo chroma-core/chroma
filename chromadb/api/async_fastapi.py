@@ -40,6 +40,7 @@ from chromadb.api.types import (
     QueryResult,
     SearchResult,
     CollectionMetadata,
+    optional_embeddings_to_base64_strings,
     validate_batch,
     convert_np_embeddings_to_list,
     IncludeMetadataDocuments,
@@ -551,7 +552,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         supports_base64_encoding = await self.supports_base64_encoding()
         data = {
             "ids": batch[0],
-            "embeddings": batch[1]  # optional_embeddings_to_base64_strings(batch[1])
+            "embeddings": optional_embeddings_to_base64_strings(batch[1])
             if supports_base64_encoding
             else batch[1],
             "metadatas": batch[2],

@@ -100,29 +100,27 @@ def _to_f32(value: float) -> float:
     return value
 
 
-def pack_embedding_safely(pyEmbedding: PyEmbedding) -> str:
+def pack_embedding_safely(embedding: Embedding) -> str:
     try:
         return pybase64.b64encode_as_string(  # type: ignore
-            _get_struct(len(pyEmbedding)).pack(*pyEmbedding)
+            _get_struct(len(embedding)).pack(*embedding)
         )
     except OverflowError:
         return pybase64.b64encode_as_string(  # type: ignore
-            _get_struct(len(pyEmbedding)).pack(
-                *[_to_f32(value) for value in pyEmbedding]
-            )
+            _get_struct(len(embedding)).pack(*[_to_f32(value) for value in embedding])
         )
 
 
 # returns base64 encoded embeddings or None if the embedding is None
 # currently, PyEmbeddings can't have None, but this is to future proof, we want to be able to handle None embeddings
 def optional_embeddings_to_base64_strings(
-    pyEmbeddings: Optional[PyEmbeddings],
+    embeddings: Optional[Embeddings],
 ) -> Optional[list[Union[str, None]]]:
-    if pyEmbeddings is None:
+    if embeddings is None:
         return None
     return [
-        pack_embedding_safely(pyEmbedding) if pyEmbedding is not None else None
-        for pyEmbedding in pyEmbeddings
+        pack_embedding_safely(embedding) if embedding is not None else None
+        for embedding in embeddings
     ]
 
 

@@ -22,7 +22,6 @@ from chromadb.execution.expression.plan import Search
 from chromadb.api.types import (
     Documents,
     Embeddings,
-    PyEmbeddings,
     IDs,
     Include,
     Metadatas,
@@ -503,7 +502,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self,
         batch: Tuple[
             IDs,
-            Optional[PyEmbeddings],
+            Optional[Embeddings],
             Optional[Metadatas],
             Optional[Documents],
             Optional[URIs],
@@ -544,7 +543,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings),
+            embeddings,
             metadatas,
             documents,
             uris,
@@ -575,9 +574,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings)
-            if embeddings is not None
-            else None,
+            embeddings if embeddings is not None else None,
             metadatas,
             documents,
             uris,
@@ -608,7 +605,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings),
+            embeddings,
             metadatas,
             documents,
             uris,
