@@ -25,7 +25,6 @@ from chromadb.telemetry.opentelemetry import (
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.utils.async_to_sync import async_to_sync
 from chromadb.types import Database, Tenant, Collection as CollectionModel
-from chromadb.api.types import optional_embeddings_to_base64_strings
 from chromadb.execution.expression.plan import Search
 
 from chromadb.api.types import (
@@ -40,7 +39,6 @@ from chromadb.api.types import (
     GetResult,
     QueryResult,
     SearchResult,
-    SearchRecord,
     CollectionMetadata,
     validate_batch,
     convert_np_embeddings_to_list,
@@ -419,22 +417,15 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             json=payload,
         )
 
-        # Parse response into SearchResult
-        results = []
-        for batch_results in resp_json.get("results", []):
-            batch = []
-            for record in batch_results:
-                batch.append(
-                    SearchRecord(
-                        id=record["id"],
-                        document=record.get("document"),
-                        embedding=record.get("embedding"),
-                        metadata=record.get("metadata"),
-                        score=record.get("score"),
-                    )
-                )
-            results.append(batch)
-        return results
+        # Return the column-major format directly
+        return SearchResult(
+            ids=resp_json.get("ids", []),
+            documents=resp_json.get("documents", []),
+            embeddings=resp_json.get("embeddings", []),
+            metadatas=resp_json.get("metadatas", []),
+            scores=resp_json.get("scores", []),
+            select=resp_json.get("select", []),
+        )
 
     @trace_method("AsyncFastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -560,7 +551,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         supports_base64_encoding = await self.supports_base64_encoding()
         data = {
             "ids": batch[0],
-            "embeddings": optional_embeddings_to_base64_strings(batch[1])
+            "embeddings": batch[1]  # optional_embeddings_to_base64_strings(batch[1])
             if supports_base64_encoding
             else batch[1],
             "metadatas": batch[2],

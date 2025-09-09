@@ -2143,11 +2143,10 @@ async fn collection_search(
     TracedJson(payload): TracedJson<SearchRequestPayload>,
 ) -> Result<Json<SearchResponse>, ServerError> {
     server.metrics.collection_search.add(1, &[]);
-    // TODO: Maybe add AuthzAction:Search
     let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
-            AuthzAction::Query,
+            AuthzAction::Search,
             AuthzResource {
                 tenant: Some(tenant.clone()),
                 database: Some(database.clone()),
@@ -2174,14 +2173,13 @@ async fn collection_search(
         format!("requester:{}", requester_identity.tenant).as_str(),
     ])?;
 
-    // TODO: Maybe add ReadAction::Search
     // Create a metering context
     let metering_context_container = if requester_identity.tenant == tenant {
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
             requester_identity.tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
-            ReadAction::Query,
+            ReadAction::Search,
         ))
     } else {
         chroma_metering::create::<ExternalCollectionReadContext>(
@@ -2189,7 +2187,7 @@ async fn collection_search(
                 requester_identity.tenant.clone(),
                 database.clone(),
                 collection_id.0.to_string(),
-                ReadAction::Query,
+                ReadAction::Search,
             ),
         )
     };

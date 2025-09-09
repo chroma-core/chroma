@@ -28,6 +28,7 @@ Most quotas can be increased upon request. If your application requires higher l
 | Maximum number of collections | 1,000,000 |
 | Maximum number of records per collection | 5,000,000 |
 | Maximum fork edges from root | 4,096 |
+| Maximum number of records per write | 300 |
 
 These limits apply per request or per collection as appropriate. For example, concurrent read/write limits are tracked independently per collection, and full-text query limits apply to the length of the input string, not the number of documents searched.
 

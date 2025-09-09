@@ -1,4 +1,4 @@
-use std::{cmp::Reverse, collections::BinaryHeap};
+use std::collections::BinaryHeap;
 
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
@@ -78,7 +78,9 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
 
         let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None).await?;
 
-        let mut min_heap = BinaryHeap::with_capacity(self.limit as usize);
+        // We need the smallest results, so we keep a max heap to track the largest of them
+        // so that it can be replaced if we found a smaller one
+        let mut max_heap = BinaryHeap::with_capacity(self.limit as usize);
         for log in &logs {
             if !matches!(
                 log.get_operation(),
@@ -96,32 +98,29 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
                     continue;
                 };
                 let log_sparse_vector: CsVec<f32> = sparse_vector.into();
-                let score = query_sparse_vector.dot(&log_sparse_vector);
-                if (min_heap.len() as u32) < self.limit {
-                    min_heap.push(Reverse(RecordMeasure {
+                // NOTE: We use `1 - query · document` as similarity metrics
+                let score = 1.0 - query_sparse_vector.dot(&log_sparse_vector);
+                if (max_heap.len() as u32) < self.limit {
+                    max_heap.push(RecordMeasure {
                         offset_id: log.get_offset_id(),
                         measure: score,
-                    }));
-                } else if min_heap
-                    .peek()
-                    .map(|Reverse(record)| record.measure)
-                    .unwrap_or(f32::MIN)
-                    < score
+                    });
+                } else if score
+                    < max_heap
+                        .peek()
+                        .map(|record| record.measure)
+                        .unwrap_or(f32::MAX)
                 {
-                    min_heap.pop();
-                    min_heap.push(Reverse(RecordMeasure {
+                    max_heap.pop();
+                    max_heap.push(RecordMeasure {
                         offset_id: log.get_offset_id(),
                         measure: score,
-                    }))
+                    })
                 }
             }
         }
         Ok(SparseLogKnnOutput {
-            records: min_heap
-                .into_sorted_vec()
-                .into_iter()
-                .map(|Reverse(record)| record)
-                .collect(),
+            records: max_heap.into_sorted_vec(),
         })
     }
 }
@@ -205,9 +204,10 @@ mod tests {
 
         // Compute expected scores manually for verification
         // Record i has values [0.1*i, 0.2*i, 0.3*i], dot product with [1, 1, 1] = 0.6*i
+        // With new similarity metric: 1.0 - dot_product = 1.0 - 0.6*i
         let mut expected_scores: Vec<(u32, f32)> =
-            (1..=10).map(|i| (i as u32, 0.6 * i as f32)).collect();
-        expected_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            (1..=10).map(|i| (i as u32, 1.0 - 0.6 * i as f32)).collect();
+        expected_scores.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
         let output = sparse_knn_operator
             .run(&input)
@@ -217,7 +217,7 @@ mod tests {
         // Should return top 5 records
         assert_eq!(output.records.len(), 5);
 
-        // Verify the top 5 records are correct (should be records 10, 9, 8, 7, 6)
+        // Verify the top 5 records are correct (should be records 10, 9, 8, 7, 6 with lowest 1-dot_product scores)
         for (i, record) in output.records.iter().enumerate() {
             let expected = &expected_scores[i];
             assert_eq!(record.offset_id, expected.0);
@@ -252,8 +252,9 @@ mod tests {
 
         assert_eq!(output.records.len(), 3);
 
-        // Should only return odd offset IDs, in descending order of score
-        // Records 19, 17, 15 should be the top 3 odd records
+        // Should only return odd offset IDs, in ascending order of (1 - dot_product)
+        // With 1 - dot_product, smaller values are better
+        // Records 19, 17, 15 should be the top 3 odd records with most negative (1 - dot_product) scores
         assert_eq!(output.records[0].offset_id, 19);
         assert_eq!(output.records[1].offset_id, 17);
         assert_eq!(output.records[2].offset_id, 15);
@@ -284,12 +285,14 @@ mod tests {
 
         // Scores should be based only on index 0 overlap
         // Record i has value 0.1*i at index 0, multiplied by 2.0 from query = 0.2*i
+        // With new similarity metric: 1.0 - 0.2*i
+        // Record 5: 1.0 - 1.0 = 0.0 (most similar)
         assert_eq!(output.records[0].offset_id, 5);
-        assert!((output.records[0].measure - 1.0).abs() < 0.001); // 0.5 * 2.0
+        assert!((output.records[0].measure - 0.0).abs() < 0.001);
         assert_eq!(output.records[1].offset_id, 4);
-        assert!((output.records[1].measure - 0.8).abs() < 0.001); // 0.4 * 2.0
+        assert!((output.records[1].measure - 0.2).abs() < 0.001);
         assert_eq!(output.records[2].offset_id, 3);
-        assert!((output.records[2].measure - 0.6).abs() < 0.001); // 0.3 * 2.0
+        assert!((output.records[2].measure - 0.4).abs() < 0.001);
     }
 
     #[tokio::test]
@@ -315,7 +318,8 @@ mod tests {
         // Should only return 3 records even though we asked for 10
         assert_eq!(output.records.len(), 3);
 
-        // Verify they're in the correct order
+        // Verify they're in ascending order of similarity measure
+        // With new metric, record 3 has the most negative score (most similar)
         assert_eq!(output.records[0].offset_id, 3);
         assert_eq!(output.records[1].offset_id, 2);
         assert_eq!(output.records[2].offset_id, 1);
@@ -342,11 +346,11 @@ mod tests {
             .await
             .expect("SparseLogKnn should succeed");
 
-        // Should return 3 records but all with score 0
+        // Should return 3 records but all with score 1.0 (1.0 - 0.0)
         assert_eq!(output.records.len(), 3);
 
         for record in &output.records {
-            assert_eq!(record.measure, 0.0);
+            assert_eq!(record.measure, 1.0);
         }
     }
 }

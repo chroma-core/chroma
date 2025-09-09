@@ -1641,6 +1641,8 @@ impl ServiceBasedFrontend {
         }
 
         // Create a single Search plan with one scan and the payloads from the request
+        // Clone the searches to use them later for aggregating select fields
+        let searches_for_select = request.searches.clone();
         let search_plan = Search {
             scan: Scan {
                 collection_and_segments,
@@ -1691,13 +1693,7 @@ impl ServiceBasedFrontend {
             },
         }
 
-        Ok(SearchResponse {
-            results: result
-                .results
-                .into_iter()
-                .map(|result| result.records)
-                .collect(),
-        })
+        Ok((result, searches_for_select).into())
     }
 
     pub async fn search(&mut self, request: SearchRequest) -> Result<SearchResponse, QueryError> {

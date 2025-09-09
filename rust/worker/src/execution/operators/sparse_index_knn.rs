@@ -68,7 +68,8 @@ impl Operator<SparseIndexKnnInput, SparseIndexKnnOutput> for SparseIndexKnn {
                 .into_iter()
                 .map(|score| RecordMeasure {
                     offset_id: score.offset,
-                    measure: score.score,
+                    // NOTE: We use `1 - query · document` as similarity metrics
+                    measure: 1.0 - score.score,
                 })
                 .collect(),
         })

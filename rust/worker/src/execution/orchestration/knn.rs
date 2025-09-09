@@ -156,7 +156,7 @@ impl KnnOrchestrator {
             let task = wrap(
                 Box::new(self.merge.clone()),
                 KnnMergeInput {
-                    batch_distances: self.batch_distances.drain(..).collect(),
+                    batch_measures: self.batch_distances.drain(..).collect(),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
@@ -283,6 +283,6 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
             None => return,
         };
 
-        self.terminate_with_result(Ok(output.distances), ctx).await;
+        self.terminate_with_result(Ok(output.measures), ctx).await;
     }
 }

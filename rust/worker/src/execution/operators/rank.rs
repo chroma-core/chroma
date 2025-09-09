@@ -6,12 +6,8 @@ use std::{
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::Operator;
-use chroma_types::operator::{KnnQuery, Rank, RecordMeasure};
+use chroma_types::operator::{Rank, RecordMeasure};
 use thiserror::Error;
-
-struct RankProvider<'me> {
-    knn_results: &'me HashMap<KnnQuery, Vec<RecordMeasure>>,
-}
 
 // NOTE: `RankDomain` represents evaluated scores for records
 // - `support`: scores of specific records
@@ -101,8 +97,15 @@ impl RankDomain {
     }
 }
 
-impl RankProvider<'_> {
-    fn eval(&self, rank: Rank) -> RankDomain {
+struct RankProvider<R> {
+    knn_result_iter: R,
+}
+
+impl<R> RankProvider<R>
+where
+    R: Iterator<Item = Vec<RecordMeasure>>,
+{
+    fn eval(&mut self, rank: Rank) -> RankDomain {
         match rank {
             Rank::Absolute(rank) => self.eval(*rank).map(f32::abs),
             Rank::Division { left, right } => {
@@ -129,30 +132,22 @@ impl RankProvider<'_> {
                     RankDomain::merge(accumulate_domain, domain, f32::mul)
                 }),
             Rank::Knn {
-                embedding,
-                key,
-                limit,
+                embedding: _,
+                key: _,
+                limit: _,
                 default,
                 ordinal,
             } => {
-                let knn_query = KnnQuery {
-                    embedding,
-                    key,
-                    limit,
-                };
                 let support = self
-                    .knn_results
-                    .get(&knn_query)
-                    .map(|records| {
-                        records
-                            .iter()
-                            .enumerate()
-                            .map(|(index, &RecordMeasure { offset_id, measure })| {
-                                (offset_id, if ordinal { index as f32 } else { measure })
-                            })
-                            .collect()
+                    .knn_result_iter
+                    .next()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, RecordMeasure { offset_id, measure })| {
+                        (offset_id, if ordinal { index as f32 } else { measure })
                     })
-                    .unwrap_or_default();
+                    .collect();
                 RankDomain { support, default }
             }
             Rank::Subtraction { left, right } => {
@@ -169,9 +164,10 @@ impl RankProvider<'_> {
     }
 }
 
+// NOTE: We assume that the provided vector of knn results are in the DFS order of Rank expression.
 #[derive(Clone, Debug)]
 pub struct RankInput {
-    pub knn_results: HashMap<KnnQuery, Vec<RecordMeasure>>,
+    pub knn_results: Vec<Vec<RecordMeasure>>,
 }
 
 #[derive(Clone, Debug)]
@@ -194,8 +190,9 @@ impl Operator<RankInput, RankOutput> for Rank {
     type Error = RankError;
 
     async fn run(&self, input: &RankInput) -> Result<RankOutput, RankError> {
-        let rank_provider = RankProvider {
-            knn_results: &input.knn_results,
+        let knn_results = input.knn_results.clone();
+        let mut rank_provider = RankProvider {
+            knn_result_iter: knn_results.into_iter(),
         };
         let rank_domain = rank_provider.eval(self.clone());
         let mut ranks = rank_domain
@@ -204,41 +201,37 @@ impl Operator<RankInput, RankOutput> for Rank {
             .map(|(offset_id, measure)| RecordMeasure { offset_id, measure })
             .collect::<Vec<_>>();
         ranks.sort_unstable();
-        ranks.reverse();
         Ok(RankOutput { ranks })
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use chroma_types::operator::KnnQuery;
+
     use super::*;
 
     #[tokio::test]
     async fn test_rank_with_knn_results() {
-        // Setup KNN results
-        let mut knn_results = HashMap::new();
         let query = KnnQuery {
             embedding: chroma_types::operator::QueryVector::Dense(vec![0.1, 0.2, 0.3]),
             key: String::new(),
             limit: 3,
         };
-        knn_results.insert(
-            query.clone(),
-            vec![
-                RecordMeasure {
-                    offset_id: 1,
-                    measure: 0.9,
-                },
-                RecordMeasure {
-                    offset_id: 2,
-                    measure: 0.7,
-                },
-                RecordMeasure {
-                    offset_id: 3,
-                    measure: 0.5,
-                },
-            ],
-        );
+        let knn_results = vec![vec![
+            RecordMeasure {
+                offset_id: 1,
+                measure: 0.9,
+            },
+            RecordMeasure {
+                offset_id: 2,
+                measure: 0.7,
+            },
+            RecordMeasure {
+                offset_id: 3,
+                measure: 0.5,
+            },
+        ]];
 
         // Test simple KNN rank
         let rank = Rank::Knn {
@@ -252,14 +245,13 @@ mod tests {
 
         let output = rank.run(&input).await.expect("Rank should succeed");
         assert_eq!(output.ranks.len(), 3);
-        assert_eq!(output.ranks[0].offset_id, 1);
-        assert_eq!(output.ranks[0].measure, 0.9);
+        // After removing .reverse(), results are in ascending order by measure
+        assert_eq!(output.ranks[0].offset_id, 3);
+        assert_eq!(output.ranks[0].measure, 0.5);
     }
 
     #[tokio::test]
     async fn test_rank_arithmetic_operations() {
-        // Setup two KNN queries
-        let mut knn_results = HashMap::new();
         let query1 = KnnQuery {
             embedding: chroma_types::operator::QueryVector::Dense(vec![0.1]),
             key: String::new(),
@@ -273,9 +265,7 @@ mod tests {
             key: "sparse".to_string(),
             limit: 2,
         };
-
-        knn_results.insert(
-            query1.clone(),
+        let mut knn_results = vec![
             vec![
                 RecordMeasure {
                     offset_id: 1,
@@ -286,9 +276,6 @@ mod tests {
                     measure: 0.6,
                 },
             ],
-        );
-        knn_results.insert(
-            query2.clone(),
             vec![
                 RecordMeasure {
                     offset_id: 1,
@@ -299,7 +286,7 @@ mod tests {
                     measure: 0.2,
                 },
             ],
-        );
+        ];
 
         // Test summation
         let rank = Rank::Summation(vec![
@@ -323,11 +310,16 @@ mod tests {
         };
 
         let output = rank.run(&input).await.expect("Rank should succeed");
-        // Record 1 appears in both: 0.8 + 0.4 = 1.2
+        // Summation results:
+        // Only Record 1 appears in both lists: 0.8 + 0.4 = 1.2
+        // Records 2 and 3 are filtered out since they don't appear in both lists
+        // and both Knn operations have default: None
+        assert_eq!(output.ranks.len(), 1);
         assert_eq!(output.ranks[0].offset_id, 1);
         assert_eq!(output.ranks[0].measure, 1.2);
 
         // Test multiplication with constant
+        knn_results.pop();
         let rank = Rank::Multiplication(vec![
             Rank::Knn {
                 embedding: query1.embedding.clone(),
@@ -341,32 +333,29 @@ mod tests {
         let input = RankInput { knn_results };
 
         let output = rank.run(&input).await.expect("Rank should succeed");
-        assert_eq!(output.ranks[0].offset_id, 1);
-        assert_eq!(output.ranks[0].measure, 0.4); // 0.8 * 0.5
+        // Results are in ascending order, so the record with the lowest measure comes first
+        // After multiplication by 0.5: record 1 = 0.8 * 0.5 = 0.4, record 2 = 0.6 * 0.5 = 0.3
+        assert_eq!(output.ranks[0].offset_id, 2);
+        assert_eq!(output.ranks[0].measure, 0.3); // 0.6 * 0.5
     }
 
     #[tokio::test]
     async fn test_rank_min_max_functions() {
-        let mut knn_results = HashMap::new();
         let query = KnnQuery {
             embedding: chroma_types::operator::QueryVector::Dense(vec![0.1]),
             key: String::new(),
             limit: 2,
         };
-
-        knn_results.insert(
-            query.clone(),
-            vec![
-                RecordMeasure {
-                    offset_id: 1,
-                    measure: 0.8,
-                },
-                RecordMeasure {
-                    offset_id: 2,
-                    measure: 0.3,
-                },
-            ],
-        );
+        let knn_results = vec![vec![
+            RecordMeasure {
+                offset_id: 1,
+                measure: 0.8,
+            },
+            RecordMeasure {
+                offset_id: 2,
+                measure: 0.3,
+            },
+        ]];
 
         // Test max
         let rank = Rank::Maximum(vec![
@@ -384,10 +373,11 @@ mod tests {
         };
 
         let output = rank.run(&input).await.expect("Rank should succeed");
-        assert_eq!(output.ranks[0].offset_id, 1);
-        assert_eq!(output.ranks[0].measure, 0.8); // max(0.8, 0.5) = 0.8
-        assert_eq!(output.ranks[1].offset_id, 2);
-        assert_eq!(output.ranks[1].measure, 0.5); // max(0.3, 0.5) = 0.5
+        // Results are in ascending order
+        assert_eq!(output.ranks[0].offset_id, 2);
+        assert_eq!(output.ranks[0].measure, 0.5); // max(0.3, 0.5) = 0.5
+        assert_eq!(output.ranks[1].offset_id, 1);
+        assert_eq!(output.ranks[1].measure, 0.8); // max(0.8, 0.5) = 0.8
 
         // Test min
         let rank = Rank::Minimum(vec![
@@ -403,9 +393,10 @@ mod tests {
         let input = RankInput { knn_results };
 
         let output = rank.run(&input).await.expect("Rank should succeed");
-        assert_eq!(output.ranks[0].offset_id, 1);
-        assert_eq!(output.ranks[0].measure, 0.5); // min(0.8, 0.5) = 0.5
-        assert_eq!(output.ranks[1].offset_id, 2);
-        assert_eq!(output.ranks[1].measure, 0.3); // min(0.3, 0.5) = 0.3
+        // Results are in ascending order
+        assert_eq!(output.ranks[0].offset_id, 2);
+        assert_eq!(output.ranks[0].measure, 0.3); // min(0.3, 0.5) = 0.3
+        assert_eq!(output.ranks[1].offset_id, 1);
+        assert_eq!(output.ranks[1].measure, 0.5); // min(0.8, 0.5) = 0.5
     }
 }

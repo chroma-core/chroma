@@ -6,10 +6,9 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    operator::{KnnQuery, Limit, Rank, RecordMeasure, SearchPayloadResult, Select},
+    operator::{Limit, Rank, RecordMeasure, SearchPayloadResult, Select},
     CollectionAndSegments,
 };
-use std::collections::HashMap;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
@@ -101,7 +100,7 @@ pub struct RankOrchestrator {
     queue: usize,
 
     // Input data
-    knn_results: HashMap<KnnQuery, Vec<RecordMeasure>>,
+    knn_results: Vec<Vec<RecordMeasure>>,
     rank: Rank,
     limit: Limit,
     select: Select,
@@ -120,7 +119,7 @@ impl RankOrchestrator {
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
-        knn_results: HashMap<KnnQuery, Vec<RecordMeasure>>,
+        knn_results: Vec<Vec<RecordMeasure>>,
         rank: Rank,
         limit: Limit,
         select: Select,
