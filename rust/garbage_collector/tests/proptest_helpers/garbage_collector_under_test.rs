@@ -117,12 +117,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                 .await
                 .unwrap();
             let system = System::new();
-            let log_config = LogConfig::Grpc(GrpcLogConfig {
-                host: "localhost".to_string(),
-                port: 50054,
-                alt_host: Some("localhost".to_string()),
-                ..Default::default()
-            });
+            let log_config = LogConfig::Grpc(GrpcLogConfig::default());
             let logs = Log::try_from_config(&(log_config, system), &registry)
                 .await
                 .unwrap();
