@@ -32,8 +32,6 @@ use guacamole::{Guacamole, Zipf};
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use opentelemetry::{Key, KeyValue, Value};
-use tokio::signal::unix::signal;
-use tokio::signal::unix::SignalKind;
 use tokio::sync::Mutex as TokioMutex;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
@@ -1741,20 +1739,7 @@ pub async fn entrypoint() {
         .await
         .unwrap();
     let runner = tokio::task::spawn(async move { load.run().await });
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            match signal(SignalKind::terminate()) {
-                Ok(mut sigterm) => {
-                    sigterm.recv().await;
-                    tracing::info!("Received SIGTERM, shutting down service");
-                }
-                Err(err) => {
-                    tracing::error!("Failed to create SIGTERM handler: {err}")
-                }
-            }
-        })
-        .await
-        .unwrap();
+    axum::serve(listener, app).await.unwrap();
     runner.abort();
 }
 
