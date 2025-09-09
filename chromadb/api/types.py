@@ -1086,7 +1086,13 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
                 f"Expected each embedding in the embeddings to be a 1-dimensional numpy array with at least 1 int/float value. Got a 1-dimensional numpy array with no values at pos {i}"
             )
 
-        if embedding.dtype not in [np.float32, np.float64, np.int32, np.int64]:
+        if embedding.dtype not in [
+            np.float16,
+            np.float32,
+            np.float64,
+            np.int32,
+            np.int64,
+        ]:
             raise ValueError(
                 "Expected each value in the embedding to be a int or float, got an embedding with "
                 f"{embedding.dtype} - {embedding}"
