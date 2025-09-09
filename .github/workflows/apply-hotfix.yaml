@@ -10,7 +10,7 @@ on:
 
 jobs:
   resolve-branch:
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       branch_name: ${{ steps.resolve_branch.outputs.branch_name }}
       branch_type: ${{ steps.resolve_branch.outputs.branch_type }}
@@ -40,7 +40,7 @@ jobs:
           echo "branch_type=$branch_type" >> $GITHUB_OUTPUT
 
   create-hotfix-pr:
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs:
       - resolve-branch
     steps:

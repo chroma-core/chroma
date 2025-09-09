@@ -13,7 +13,7 @@ on:
 jobs:
   build-linux:
     name: Build Linux binary
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -122,7 +122,7 @@ jobs:
 
   release:
     name: Create GitHub Release and Attach Assets
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [ build-linux, build-windows, build-macos ]
     steps:
       - name: Checkout repository
