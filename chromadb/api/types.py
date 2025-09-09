@@ -291,8 +291,7 @@ def validate_base_record_set(record_set: BaseRecordSet) -> None:
     _validate_record_set_length_consistency(record_set)
 
     if record_set["embeddings"] is not None:
-        # validate_embeddings(embeddings=record_set["embeddings"])
-        pass
+        validate_embeddings(embeddings=record_set["embeddings"])
     if record_set["documents"] is not None:
         validate_documents(
             documents=record_set["documents"],
@@ -1074,16 +1073,11 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
             raise ValueError(
                 f"Expected each embedding in the embeddings to be a 1-dimensional numpy array with at least 1 int/float value. Got a 1-dimensional numpy array with no values at pos {i}"
             )
-        if not all(
-            [
-                isinstance(value, (np.integer, float, np.floating))
-                and not isinstance(value, bool)
-                for value in embedding
-            ]
-        ):
+
+        if embedding.dtype not in [np.float32, np.float64, np.int32, np.int64]:
             raise ValueError(
                 "Expected each value in the embedding to be a int or float, got an embedding with "
-                f"{list(set([type(value).__name__ for value in embedding]))} - {embedding}"
+                f"{embedding.dtype} - {embedding}"
             )
     return embeddings
 
