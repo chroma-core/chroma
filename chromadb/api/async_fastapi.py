@@ -143,7 +143,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         # remove it from kwargs, and add it to the content parameter
         # This is because httpx uses a slower json serializer
         if "json" in kwargs:
-            data = orjson.dumps(kwargs.pop("json"))
+            data = orjson.dumps(kwargs.pop("json"), option=orjson.OPT_SERIALIZE_NUMPY)
             kwargs["content"] = data
 
         # Unlike requests, httpx does not automatically escape the path
