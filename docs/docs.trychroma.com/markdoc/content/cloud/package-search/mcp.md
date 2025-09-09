@@ -40,7 +40,7 @@ In the Setting's menu, click on the {% ImageHoverText src="code-collections-api-
 {% Step %}
 Add the Chroma MCP server to Claude Code with your Chroma API key
 ```terminal
-claude mcp add --transport http chroma-code-mcp https://mcp.trychroma.com/package-search/v1 --header "x-chroma-token: <YOUR_CHROMA_API_KEY>"
+claude mcp add --transport http package-search https://mcp.trychroma.com/package-search/v1 --header "x-chroma-token: <YOUR_CHROMA_API_KEY>"
 ```
 {% /Step %}
 {% /ComboboxEntry %}
@@ -207,13 +207,25 @@ asyncio.run(run())
 
 {% /ComboboxEntry %}
 
+{% ComboboxEntry value="codex" label="Codex" %}
+{% Step %}
+Add the following to your `~/.codex/config.toml` file with your Chroma Cloud API key:
+```TOML
+[mcp_servers.server-name]
+command = "npx"
+args = ["mcp-remote", "https://mcp.trychroma.com/package-search/v1", "--header", "x-chroma-token: ${X_CHROMA_TOKEN}"]
+env = { "X_CHROMA_TOKEN" = "<your-key>" }
+```
+{% /Step %}
+{% /ComboboxEntry %}
+
 {% ComboboxEntry value="cursor" label="Cursor" %}
 {% Step %}
 In Cursor's settings, search for "MCP" and add the following configuration with your Chroma Cloud API key:
 ```JSON
 {
   "mcpServers": {
-    "code-collections": {
+    "package-search": {
       "transport": "streamable_http",
       "url": "https://mcp.trychroma.com/package-search/v1",
       "headers": {
@@ -232,7 +244,7 @@ In Windsurf's settings, search for "MCP" and add the following configuration wit
 ```JSON
 {
   "mcpServers": {
-    "code-collections": {
+    "package-search": {
       "serverUrl": "https://mcp.trychroma.com/package-search/v1",
       "headers": {
         "x-chroma-token": "<YOUR_CHROMA_API_KEY>"
