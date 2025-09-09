@@ -182,25 +182,25 @@ export type SearchPayload = {
     /**
      * Filter criteria for search
      */
-    filter: {
+    filter?: {
         query_ids?: Array<string>;
         where_clause?: {
             [key: string]: unknown;
         };
     };
-    limit: {
+    limit?: {
         fetch?: number;
         skip: number;
     };
     /**
      * Ranking expression for hybrid search
      */
-    rank: {
+    rank?: {
         [key: string]: {
             [key: string]: unknown;
         };
     };
-    select: {
+    select?: {
         fields: Array<string>;
     };
 };
