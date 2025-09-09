@@ -1,20 +1,12 @@
 # Package Search MCP Server
 
-The Package Search MCP Server is a [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http) MCP server implemented according to the `2025-06-18` MCP specification. It requires a custom authorization header, `x-chroma-token`, to authenticate incoming requests. Since custom authorization headers were introduced in the latest version of the MCP specification, you'll need to use [mcp-remote](https://github.com/geelen/mcp-remote) if your environment runs an older version of the spec. Using `mcp-remote` requires no additional steps beyond ensuring the `npx` executable is available on your system.
+The Package Search MCP Server is an [MCP](https://modelcontextprotocol.io/docs/getting-started/intro) server designed to add ground truth context about code packages to AI agents. Our research demonstrates that by exposing dependency source code, model performance is enhanced across all tasks and reduces the potential for hallucinations. The server does this by exposing tools to allow the model to retrieve necessary context:
 
-You can continue using your existing system for connecting to MCP servers (remote or local) to access Chroma's Package Search server. Simply provide these details in your MCP configuration parameters:
-
-| Parameter | Value                                      |
+| Tool Name | Usage                                      |
 |-----------|--------------------------------------------|
-| URL       | `https://mcp.trychroma.com/package-search/v1` |
-| Headers   | `x-chroma-token: <YOUR_CHROMA_API_KEY>`    |
-| Type      | `streamable-http`                           |
-
-{% Banner type="note" %}
-
-Different platforms have different conventions for naming transports. We recommend referring to your platform’s documentation for the exact specification, but common names include `http`, `streamble-http`, or `streamble_http`.
-
-{% /Banner %}
+| `package_search_grep`       | Use regex pattern matching to retrieve relevant lines from dependency |
+| `package_search_hybrid`   | Use semantic search and/or regex to execute semantically meaningful queries across code     |
+| `package_search_read_file`      | Reads specific lines from a single file in the code package   |
 
 ## Getting started
 
@@ -47,7 +39,7 @@ claude mcp add --transport http package-search https://mcp.trychroma.com/package
 
 {% ComboboxEntry value="mcp-sdk" label="MCP SDK" %}
 {% Step %}
-Connect to the Chroma MCP server to search code packages. In this example, we search for class definitions in the `colorlog` package from PyPI using the `code_package_search` tool.
+Connect to the Chroma MCP server to search code packages. In this example, we search for class definitions in the `colorlog` package from PyPI using the `package_search_grep` tool.
 ```python
 import asyncio
 
@@ -71,11 +63,11 @@ async def main():
 
             tools = await session.list_tools()
             result = await session.call_tool(
-                name="code_package_search",
+                name="package_search_grep",
                 arguments={
                     "package_name": "colorlog",
                     "registry_name": "py_pi",
-                    "grep": "\bclass\b",
+                    "pattern": "\bclass\b",
                 },
             )
             print(f"Got result: {result}")
@@ -211,7 +203,7 @@ asyncio.run(run())
 {% Step %}
 Add the following to your `~/.codex/config.toml` file with your Chroma Cloud API key:
 ```TOML
-[mcp_servers.server-name]
+[mcp_servers.package-search]
 command = "npx"
 args = ["mcp-remote", "https://mcp.trychroma.com/package-search/v1", "--header", "x-chroma-token: ${X_CHROMA_TOKEN}"]
 env = { "X_CHROMA_TOKEN" = "<your-key>" }
@@ -260,13 +252,8 @@ In Windsurf's settings, search for "MCP" and add the following configuration wit
 
 ## Direct Queries
 
-To quickly test Chroma's Package Search, simply ask your model a question about a specific package. For instance, if you're wondering about the implementation of `join_set` in Rust's `tokio` crate, just ask: "How is join_set implemented in `tokio`?" Unless you specify a particular version, the MCP server will default to the latest version of `tokio` available in Chroma's index.
+To quickly test Chroma's Package Search, simply ask your model a question about a specific package, and add `use package search` to your prompt. For instance, if you're wondering about the implementation of `join_set` in Rust's `tokio` crate, just ask: "How is join_set implemented in `tokio`? Use package search". By default, the server will route to the latest package version indexed, but specific versions can also be queried if prompted or if the model is aware of the version in the given environment.
 
 ## Automatic Queries
 
 Developers don't always think to directly ask about implementation details in dependencies. It's more valuable when your model knows when to use the Package Search MCP server automatically when encountering uncertainty about third-party libraries. We've carefully crafted our tool descriptions to make this happen naturally, so you don't need to take any additional steps beyond following the Setup Guide above. If your model isn't using the Package Search tools when you think it should, please share this feedback with us through your shared Slack channel or via support@trychroma.com.
-
-## Known Issues
-
-1. **Over-querying:** Models often fall into loops of repeatedly using grep/hybrid search functions, gathering more information than needed. This issue will be addressed in a future prompt upgrade. Enabling the "thinking" feature provides another solution, giving the model more time to reason before making tool calls.
-2. **Lack of parameter utilization:** Models frequently fail to use available non-required arguments (such as a, b, c in grep) that could help them find necessary context more efficiently. Instead, they create unnecessarily complex regex patterns.
