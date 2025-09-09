@@ -18,7 +18,7 @@ jobs:
       tests-to-run: ${{ steps.determine-tests.outputs.tests-to-run }}
       # Helm version check
       helm-version-changed: ${{ steps.helm-version.outputs.version_changed }}
-    steps:
+    steps:    
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2

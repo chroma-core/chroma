@@ -5,6 +5,10 @@ runs:
   steps:
     - name: Tilt Setup & Pre-Build
       uses: ./.github/actions/tilt-setup-prebuild
+    - name: Setup upterm session
+      uses: owenthereal/action-upterm@v1
+      with:
+        limit-access-to-users: c-gamble,rescrv,jasonvigil
     - name: Start Tilt
       shell: bash
       run: tilt ci
