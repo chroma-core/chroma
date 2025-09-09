@@ -391,9 +391,6 @@ impl LogWriter {
                         }
                     }
                 }
-                Err(Error::Backoff) => {
-                    return Err(Error::Backoff);
-                }
                 Err(err) => {
                     let mut inner = self.inner.lock().unwrap();
                     if inner.epoch == epoch {

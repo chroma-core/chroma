@@ -145,10 +145,6 @@ pub enum StorageError {
         /// The configuration key used
         key: String,
     },
-
-    // Back off and retry---usually indicates an explicit 429/SlowDown.
-    #[error("Back off and retry---usually indicates an explicit 429/SlowDown.")]
-    Backoff,
 }
 
 impl ChromaError for StorageError {
@@ -167,7 +163,6 @@ impl ChromaError for StorageError {
             StorageError::PermissionDenied { .. } => ErrorCodes::PermissionDenied,
             StorageError::Unauthenticated { .. } => ErrorCodes::Unauthenticated,
             StorageError::UnknownConfigurationKey { .. } => ErrorCodes::InvalidArgument,
-            StorageError::Backoff { .. } => ErrorCodes::ResourceExhausted,
         }
     }
 }

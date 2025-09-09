@@ -1150,7 +1150,7 @@ impl ChromaError for AddCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             AddCollectionRecordsError::Collection(err) => err.code(),
-            AddCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            AddCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
             AddCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1212,7 +1212,7 @@ pub enum UpdateCollectionRecordsError {
 impl ChromaError for UpdateCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpdateCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            UpdateCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
             UpdateCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1275,7 +1275,7 @@ pub enum UpsertCollectionRecordsError {
 impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpsertCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            UpsertCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
             UpsertCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1338,7 +1338,7 @@ impl ChromaError for DeleteCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             DeleteCollectionRecordsError::Get(err) => err.code(),
-            DeleteCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            DeleteCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
             DeleteCollectionRecordsError::Internal(err) => err.code(),
         }
     }
