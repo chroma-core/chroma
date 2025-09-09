@@ -5,7 +5,8 @@ use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
-use crate::operator::SearchRecord;
+use crate::operator::SearchResult;
+use crate::operator::SelectField;
 use crate::plan::PlanToProtoError;
 use crate::plan::SearchPayload;
 use crate::validators::{
@@ -1869,7 +1870,84 @@ impl SearchRequest {
 
 #[derive(Clone, Deserialize, Serialize, ToSchema, Debug)]
 pub struct SearchResponse {
-    pub results: Vec<Vec<SearchRecord>>,
+    pub ids: Vec<Vec<String>>,
+    pub documents: Vec<Option<Vec<Option<String>>>>,
+    pub embeddings: Vec<Option<Vec<Option<Vec<f32>>>>>,
+    pub metadatas: Vec<Option<Vec<Option<Metadata>>>>,
+    pub scores: Vec<Option<Vec<Option<f32>>>>,
+    pub select: Vec<Vec<SelectField>>,
+}
+
+impl From<(SearchResult, Vec<SearchPayload>)> for SearchResponse {
+    fn from((result, payloads): (SearchResult, Vec<SearchPayload>)) -> Self {
+        let num_payloads = payloads.len();
+        let mut res = Self {
+            ids: Vec::with_capacity(num_payloads),
+            documents: Vec::with_capacity(num_payloads),
+            embeddings: Vec::with_capacity(num_payloads),
+            metadatas: Vec::with_capacity(num_payloads),
+            scores: Vec::with_capacity(num_payloads),
+            select: Vec::with_capacity(num_payloads),
+        };
+
+        for (payload_result, payload) in result.results.into_iter().zip(payloads) {
+            // Get the sorted select fields for this payload
+            let mut payload_select = Vec::from_iter(payload.select.fields.iter().cloned());
+            payload_select.sort();
+
+            let num_records = payload_result.records.len();
+            let mut ids = Vec::with_capacity(num_records);
+            let mut documents = Vec::with_capacity(num_records);
+            let mut embeddings = Vec::with_capacity(num_records);
+            let mut metadatas = Vec::with_capacity(num_records);
+            let mut scores = Vec::with_capacity(num_records);
+
+            for record in payload_result.records {
+                ids.push(record.id);
+                documents.push(record.document);
+                embeddings.push(record.embedding);
+                metadatas.push(record.metadata);
+                scores.push(record.score);
+            }
+
+            res.ids.push(ids);
+            res.select.push(payload_select.clone());
+
+            // Push documents if requested by this payload, otherwise None
+            res.documents.push(
+                payload_select
+                    .binary_search(&SelectField::Document)
+                    .is_ok()
+                    .then_some(documents),
+            );
+
+            // Push embeddings if requested by this payload, otherwise None
+            res.embeddings.push(
+                payload_select
+                    .binary_search(&SelectField::Embedding)
+                    .is_ok()
+                    .then_some(embeddings),
+            );
+
+            // Push metadatas if requested by this payload, otherwise None
+            // Include if either SelectField::Metadata is present or any SelectField::MetadataField(_)
+            let has_metadata = payload_select.binary_search(&SelectField::Metadata).is_ok()
+                || payload_select
+                    .last()
+                    .is_some_and(|field| matches!(field, SelectField::MetadataField(_)));
+            res.metadatas.push(has_metadata.then_some(metadatas));
+
+            // Push scores if requested by this payload, otherwise None
+            res.scores.push(
+                payload_select
+                    .binary_search(&SelectField::Score)
+                    .is_ok()
+                    .then_some(scores),
+            );
+        }
+
+        res
+    }
 }
 
 #[derive(Error, Debug)]

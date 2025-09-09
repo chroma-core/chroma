@@ -309,8 +309,13 @@ class Collection(CollectionCommon["ServerAPI"]):
                 - select: Select configuration for fields to return (defaults to empty)
         
         Returns:
-            SearchResult: List of search results for each search payload.
-                         Each result is a list of SearchRecord objects.
+            SearchResult: Column-major format response with:
+                - ids: List of result IDs for each search payload
+                - documents: Optional documents for each payload
+                - embeddings: Optional embeddings for each payload
+                - metadatas: Optional metadata for each payload
+                - scores: Optional scores for each payload
+                - select: List of selected fields for each payload
         
         Raises:
             NotImplementedError: For local/segment API implementations
