@@ -29,17 +29,6 @@ sysdb:
       cpu: '1000m'
       memory: '512Mi'
   flags:
-logService:
-  image:
-    repository: 'logservice'
-    tag: 'latest'
-  env:
-    - name: OPTL_TRACING_ENDPOINT
-      value: 'value: "otel-collector:4317"'
-    - name: SYSDB_CONN
-      value: 'value: "sysdb.chroma:50051"'
-  flags:
-  replicaCount: 1
 rustLogService:
   image:
     repository: 'rust-log-service'
@@ -75,13 +64,6 @@ sysdbMigration:
   port: 5432
   dbName: sysdb
   sslmode: disable
-logServiceMigration:
-  image:
-    repository: 'logservice-migration'
-    tag: 'latest'
-  env:
-    - name: CHROMA_DB_LOG_URL
-      value: 'value: "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log?sslmode=disable"'
 # Add the garbage collector configuration
 garbageCollector:
   image:

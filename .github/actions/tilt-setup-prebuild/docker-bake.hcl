@@ -1,15 +1,3 @@
-target "log-service" {
-  dockerfile = "go/Dockerfile"
-  target = "logservice"
-  tags = [ "log-service:ci" ]
-}
-
-target "log-service-migration" {
-  dockerfile = "go/Dockerfile.migration"
-  target = "logservice-migration"
-  tags = [ "log-service-migration:ci" ]
-}
-
 target "rust-log-service" {
   dockerfile = "rust/Dockerfile"
   target = "log_service"
@@ -61,8 +49,6 @@ target "load-service" {
 
 group "default" {
   targets = [
-    "log-service",
-    "log-service-migration",
     "rust-log-service",
     "sysdb",
     "sysdb-migration",
