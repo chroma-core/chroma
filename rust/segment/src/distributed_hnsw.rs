@@ -265,7 +265,7 @@ impl DistributedHNSWSegmentWriter {
         };
         match self
             .hnsw_index_provider
-            .flush(&prefix_path, &hnsw_index_id)
+            .flush(&prefix_path, &hnsw_index_id, &self.index)
             .await
         {
             Ok(_) => {}

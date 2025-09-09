@@ -2304,7 +2304,7 @@ impl SpannIndexWriter {
                         let index_guard = self.hnsw_index.inner.read();
                         (index_guard.hnsw_index.id, index_guard.prefix_path.clone())
                     };
-                    (id, prefix_path, self.hnsw_index)
+                    (id, prefix_path, self.hnsw_index.clone())
                 }
             };
             self.hnsw_provider.commit(hnsw_index).map_err(|e| {
@@ -2326,6 +2326,7 @@ impl SpannIndexWriter {
                 provider: self.hnsw_provider,
                 prefix_path,
                 index_id: hnsw_id,
+                hnsw_index: self.hnsw_index,
             },
             collection_id: self.collection_id,
             metrics: SpannIndexFlusherMetrics {
@@ -2442,7 +2443,11 @@ impl SpannIndexFlusher {
             );
             self.hnsw_flusher
                 .provider
-                .flush(&self.hnsw_flusher.prefix_path, &self.hnsw_flusher.index_id)
+                .flush(
+                    &self.hnsw_flusher.prefix_path,
+                    &self.hnsw_flusher.index_id,
+                    &self.hnsw_flusher.hnsw_index,
+                )
                 .await
                 .map_err(|e| {
                     tracing::error!("Error flushing hnsw index {}: {}", res.hnsw_id, e);
