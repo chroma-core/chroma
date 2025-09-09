@@ -15,7 +15,7 @@ on:
       runner:
         description: 'Runner to test on (string)'
         required: false
-        default: 'blacksmith-8vcpu-ubuntu-2204'
+        default: 'blacksmith-8vcpu-ubuntu-2404'
         type: string
 
 jobs:
@@ -146,7 +146,7 @@ jobs:
             parallelized: false
           - test-glob: "chromadb/test/property/test_embeddings.py"
             parallelized: true
-    runs-on: blacksmith-8vcpu-ubuntu-2204
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     # OIDC token auth for AWS
     permissions:
       contents: read
@@ -184,7 +184,7 @@ jobs:
 
   merge-cluster-logs:
     if: ${{ contains(inputs.runner, 'ubuntu') }}
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: test-cluster-rust-frontend
     steps:
       - name: Merge
