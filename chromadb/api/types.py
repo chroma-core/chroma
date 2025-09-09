@@ -160,14 +160,14 @@ def normalize_embeddings(
     elif isinstance(target, list):
         # One PyEmbedding
         if isinstance(target[0], (int, float)) and not isinstance(target[0], bool):
-            return cast(Embeddings, np.array([target], dtype=np.float32))
+            return [np.array(target, dtype=np.float32)]
         elif isinstance(target[0], np.ndarray):
             return cast(Embeddings, target)
         elif isinstance(target[0], list):
             if isinstance(target[0][0], (int, float)) and not isinstance(
                 target[0][0], bool
             ):
-                return cast(Embeddings, np.array(target, dtype=np.float32))
+                return [np.array(row, dtype=np.float32) for row in target]
 
     raise ValueError(
         f"Expected embeddings to be a list of floats or ints, a list of lists, a numpy array, or a list of numpy arrays, got {target}"
