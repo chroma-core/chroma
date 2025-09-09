@@ -97,10 +97,10 @@ def _to_f32(value: float) -> float:
     return value
 
 
-def pack_embedding_safely(embedding: Embedding) -> str:
+def pack_embedding_safely(pyEmbedding: PyEmbedding) -> str:
     # try:
     return pybase64.b64encode_as_string(  # type: ignore
-        _get_struct(len(embedding)).pack(*embedding)
+        _get_struct(len(pyEmbedding)).pack(*pyEmbedding)
     )
 
 
@@ -115,13 +115,13 @@ def pack_embedding_safely(embedding: Embedding) -> str:
 # returns base64 encoded embeddings or None if the embedding is None
 # currently, PyEmbeddings can't have None, but this is to future proof, we want to be able to handle None embeddings
 def optional_embeddings_to_base64_strings(
-    embeddings: Optional[Embeddings],
+    pyEmbeddings: Optional[PyEmbeddings],
 ) -> Optional[list[Union[str, None]]]:
-    if embeddings is None:
+    if pyEmbeddings is None:
         return None
     return [
-        pack_embedding_safely(embedding) if embedding is not None else None
-        for embedding in embeddings
+        pack_embedding_safely(pyEmbedding) if pyEmbedding is not None else None
+        for pyEmbedding in pyEmbeddings
     ]
 
 
@@ -156,19 +156,15 @@ def normalize_embeddings(
 
     if isinstance(target, np.ndarray):
         if target.ndim == 1:
-            return cast(Embeddings, target.reshape(1, -1))
-        if target.ndim == 2:
-            return cast(Embeddings, target)
-        else:
-            raise ValueError(
-                f"Expected Embeddings to be a 1-D or 2-D numpy array, got {target.ndim}-D array"
-            )
+            return [target]
+        elif target.ndim == 2:
+            return [row for row in target]
     elif isinstance(target, list):
         # One PyEmbedding
         if isinstance(target[0], (int, float)) and not isinstance(target[0], bool):
             return cast(Embeddings, np.array([target], dtype=np.float32))
         elif isinstance(target[0], np.ndarray):
-            return cast(Embeddings, np.array(target, dtype=np.float32))
+            return cast(Embeddings, target)
         elif isinstance(target[0], list):
             if isinstance(target[0][0], (int, float)) and not isinstance(
                 target[0][0], bool
@@ -176,7 +172,7 @@ def normalize_embeddings(
                 return cast(Embeddings, np.array(target, dtype=np.float32))
 
     raise ValueError(
-        f"Expected Embeddings to be a list of floats or ints, a list of lists, a numpy array, or a list of numpy arrays, got {target}"
+        f"Expected embeddings to be a list of floats or ints, a list of lists, a numpy array, or a list of numpy arrays, got {target}"
     )
 
 
