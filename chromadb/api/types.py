@@ -78,7 +78,7 @@ IDs = List[ID]
 PyEmbedding = PyVector
 PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
-Embeddings = List[Embedding]  # todo: update
+Embeddings = List[Embedding]
 
 Space = Literal["cosine", "l2", "ip"]
 
