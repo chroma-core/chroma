@@ -15,10 +15,10 @@ use tracing::Span;
 
 use crate::execution::{
     operators::{
+        knn_merge::{KnnMergeError, KnnMergeInput, KnnMergeOutput},
         sparse_index_knn::{
             SparseIndexKnn, SparseIndexKnnError, SparseIndexKnnInput, SparseIndexKnnOutput,
         },
-        sparse_knn_merge::{SparseKnnMergeError, SparseKnnMergeInput, SparseKnnMergeOutput},
         sparse_log_knn::{SparseLogKnn, SparseLogKnnError, SparseLogKnnInput, SparseLogKnnOutput},
     },
     orchestration::knn_filter::KnnFilterOutput,
@@ -30,12 +30,12 @@ pub enum SparseKnnError {
     Aborted,
     #[error("Error sending message through channel: {0}")]
     Channel(#[from] ChannelError),
+    #[error("Error running KnnMerge operator: {0}")]
+    KnnMerge(#[from] KnnMergeError),
     #[error("Panic: {0}")]
     Panic(#[from] PanicError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
-    #[error("Error running SparseKnnMerge operator: {0}")]
-    SparseKnnMerge(#[from] SparseKnnMergeError),
     #[error("Error running SparseIndexKnn operator: {0}")]
     SparseIndexKnn(#[from] SparseIndexKnnError),
     #[error("Error running SparseLogKnn operator: {0}")]
@@ -47,9 +47,9 @@ impl ChromaError for SparseKnnError {
         match self {
             SparseKnnError::Aborted => ErrorCodes::ResourceExhausted,
             SparseKnnError::Channel(err) => err.code(),
+            SparseKnnError::KnnMerge(err) => err.code(),
             SparseKnnError::Panic(_) => ErrorCodes::Aborted,
             SparseKnnError::Result(_) => ErrorCodes::Internal,
-            SparseKnnError::SparseKnnMerge(err) => err.code(),
             SparseKnnError::SparseIndexKnn(err) => err.code(),
             SparseKnnError::SparseLogKnn(err) => err.code(),
         }
@@ -129,7 +129,7 @@ impl SparseKnnOrchestrator {
         if self.batch_measures.len() == 2 {
             let task = wrap(
                 Box::new(self.merge.clone()),
-                SparseKnnMergeInput {
+                KnnMergeInput {
                     batch_measures: self.batch_measures.drain(..).collect(),
                 },
                 ctx.receiver(),
@@ -250,12 +250,12 @@ impl Handler<TaskResult<SparseIndexKnnOutput, SparseIndexKnnError>> for SparseKn
 }
 
 #[async_trait]
-impl Handler<TaskResult<SparseKnnMergeOutput, SparseKnnMergeError>> for SparseKnnOrchestrator {
+impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for SparseKnnOrchestrator {
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<SparseKnnMergeOutput, SparseKnnMergeError>,
+        message: TaskResult<KnnMergeOutput, KnnMergeError>,
         ctx: &ComponentContext<Self>,
     ) {
         let output = match self.ok_or_terminate(message.into_inner(), ctx).await {

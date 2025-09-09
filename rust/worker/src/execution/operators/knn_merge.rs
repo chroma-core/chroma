@@ -21,12 +21,12 @@ use thiserror::Error;
 
 #[derive(Debug)]
 pub struct KnnMergeInput {
-    pub batch_distances: Vec<Vec<RecordMeasure>>,
+    pub batch_measures: Vec<Vec<RecordMeasure>>,
 }
 
 #[derive(Debug, Default)]
 pub struct KnnMergeOutput {
-    pub distances: Vec<RecordMeasure>,
+    pub measures: Vec<RecordMeasure>,
 }
 
 #[derive(Error, Debug)]
@@ -47,12 +47,12 @@ impl Operator<KnnMergeInput, KnnMergeOutput> for Merge {
         // Reversing because similarity is in ascending order,
         // while Merge takes element in descending order
         let reversed_distances = input
-            .batch_distances
+            .batch_measures
             .iter()
             .map(|batch| batch.iter().map(|m| Reverse(m.clone())).collect())
             .collect();
         Ok(KnnMergeOutput {
-            distances: self
+            measures: self
                 .merge(reversed_distances)
                 .into_iter()
                 .map(|Reverse(distance)| distance)
@@ -74,7 +74,7 @@ mod tests {
     /// - Second: 1, 3, ..., 99
     fn setup_knn_merge_input() -> KnnMergeInput {
         KnnMergeInput {
-            batch_distances: vec![
+            batch_measures: vec![
                 (1..=100)
                     .filter_map(|offset_id| {
                         (offset_id % 3 == 1).then_some(RecordMeasure {
@@ -116,7 +116,7 @@ mod tests {
 
         assert_eq!(
             knn_merge_output
-                .distances
+                .measures
                 .iter()
                 .map(|record| record.offset_id)
                 .collect::<Vec<_>>(),
