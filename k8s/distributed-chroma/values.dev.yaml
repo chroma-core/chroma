@@ -16,7 +16,7 @@ rustFrontendService:
     - name: RUST_BACKTRACE
       value: 'value: "1"'
     - name: CONFIG_PATH
-      value: "distributed.yaml"
+      value: "chroma_config.yaml"
 
 queryService:
   env:
