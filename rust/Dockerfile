@@ -64,7 +64,7 @@ RUN apt-get update && apt-get install -y dumb-init libssl-dev ca-certificates &&
 FROM runner AS cli
 
 COPY --from=builder /chroma/rust/frontend/sample_configs/docker_single_node.yaml /config.yaml
-COPY --from=builder /chroma/rust/frontend/sample_configs/chroma_config.yaml /chroma_config.yaml
+COPY --from=builder /chroma/rust/frontend/sample_configs/distributed.yaml /chroma_config.yaml
 COPY --from=builder /chroma/chroma /usr/local/bin/chroma
 
 EXPOSE 8000
