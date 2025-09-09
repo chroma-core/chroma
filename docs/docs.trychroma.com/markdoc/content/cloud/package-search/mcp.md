@@ -12,6 +12,12 @@ The Package Search MCP Server is an [MCP](https://modelcontextprotocol.io/docs/g
 
 Visit the [Package Search installation page](https://trychroma.com/package-search) for quick setup in most clients.
 
+{% Banner type="note" %}
+
+To guarantee the model uses package search when desired, add `use package search` to the prompt.
+
+{% /Banner %}
+
 ## Configuration
 
 {% ComboboxSteps defaultValue="claude-code" %}
@@ -80,6 +86,145 @@ if __name__ == "__main__":
 {% /Step %}
 {% /ComboboxEntry %}
 
+
+{% ComboboxEntry value="openai-sdk" label="OpenAI SDK" %}
+{% Step %}
+Connect to the Chroma MCP server to search code packages. In this example, we search for class definitions in the `colorlog` package from PyPI.
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="<YOUR_OPENAI_API_KEY>"
+)
+
+resp = client.responses.create(
+    model="gpt-5-chat-latest",
+    input="Explain how colorlog implements testing in python",
+    tools=[
+        {
+            "type": "mcp",
+            "server_label": "package-search",
+            "server_url": "https://mcp.trychroma.com/package-search/v1",
+            "headers": {
+                "x-chroma-token": "<YOUR_CHROMA_API_KEY>"
+            },
+            "require_approval": "never",
+        }
+    ],
+)
+
+print(resp)
+```
+{% /Step %}
+{% /ComboboxEntry %}
+
+{% ComboboxEntry value="anthropic-sdk" label="Anthropic SDK" %}
+{% Step %}
+Connect to the Chroma MCP server to search code packages. In this example, we search for class definitions in the `colorlog` package from PyPI.
+
+{% TabbedCodeBlock %}
+{% Tab label="python" %}
+```python
+import anthropic
+
+client = anthropic.Anthropic(
+    api_key="<YOUR_ANTHROPIC_API_KEY>"
+)
+
+response = client.beta.messages.create(
+    model="claude-sonnet-4-20250514",
+    max_tokens=1000,
+    messages=[
+        {
+            "role": "user",
+            "content": "Explain how colorlog implements testing in python",
+        }
+    ],
+    mcp_servers=[
+        {
+            "type": "url",
+            "url": "https://mcp.trychroma.com/package-search/v1",
+            "name": "code-collections",
+            "authorization_token": "<YOUR_CHROMA_API_KEY>",
+        }
+    ],
+    betas=["mcp-client-2025-04-04"],
+)
+
+print(response)
+```
+{% /Tab %}
+{% Tab label="Go" %}
+```Go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
+)
+
+func main() {
+	// Init client (supply API key via env or here explicitly)
+	client := anthropic.NewClient(
+		option.WithAPIKey("<YOUR_ANTHROPIC_API_KEY>"),
+		option.WithHeader("anthropic-beta", anthropic.AnthropicBetaMCPClient2025_04_04),
+	)
+
+	// User message
+	content := "Explain how colorlog implements testing in python"
+	fmt.Println("[user]:", content)
+
+	// Build messages
+	messages := []anthropic.BetaMessageParam{
+		anthropic.NewBetaUserMessage(
+			anthropic.NewBetaTextBlock(content),
+		),
+	}
+
+	// MCP server configuration
+	mcpServers := []anthropic.BetaRequestMCPServerURLDefinitionParam{
+		{
+			URL:                "https://mcp.trychroma.com/package-search/v1",
+			Name:               "code-collections",
+			AuthorizationToken: param.NewOpt("<YOUR_CHROMA_API_KEY>"),
+			ToolConfiguration: anthropic.BetaRequestMCPServerToolConfigurationParam{
+				Enabled:      anthropic.Bool(true),
+			},
+		},
+	}
+
+	// Make a single non-streaming request
+	message, err := client.Beta.Messages.New(
+		context.TODO(),
+		anthropic.BetaMessageNewParams{
+			MaxTokens:  1024,
+			Messages:   messages,
+			Model:      anthropic.ModelClaudeSonnet4_20250514,
+			MCPServers: mcpServers,
+		},
+	)
+	if err != nil {
+		log.Fatalf("request failed: %v", err)
+	}
+
+	// Print result content
+	for _, block := range message.Content {
+		textBlock := block.AsText()
+		fmt.Println("[assistant]:", textBlock.Text)
+	}
+}
+```
+{% /Tab %}
+{% /TabbedCodeBlock %}
+
+{% /Step %}
+{% /ComboboxEntry %}
+
 {% ComboboxEntry value="open-code" label="Open Code" %}
 {% Step %}
 Add the following to your `~/.config/opencode/opencode.json` file with your Chroma Cloud API key:
@@ -135,7 +280,7 @@ ollmcp --servers-json <path/to/mcp_config.json> --model qwen2.5
 
 {% /ComboboxEntry %}
 
-{% ComboboxEntry value="google-gemini" label="Google Gemini" %}
+{% ComboboxEntry value="google-gemini-sdk" label="Google Gemini SDK" %}
 
 {% Step %}
 Get a Gemini API key in [Google's AI Studio](https://aistudio.google.com/app/apikey)
@@ -249,11 +394,3 @@ In Windsurf's settings, search for "MCP" and add the following configuration wit
 {% /ComboboxEntry %}
 
 {% /ComboboxSteps %}
-
-## Direct Queries
-
-To quickly test Chroma's Package Search, simply ask your model a question about a specific package, and add `use package search` to your prompt. For instance, if you're wondering about the implementation of `join_set` in Rust's `tokio` crate, just ask: "How is join_set implemented in `tokio`? Use package search". By default, the server will route to the latest package version indexed, but specific versions can also be queried if prompted or if the model is aware of the version in the given environment.
-
-## Automatic Queries
-
-Developers don't always think to directly ask about implementation details in dependencies. It's more valuable when your model knows when to use the Package Search MCP server automatically when encountering uncertainty about third-party libraries. We've carefully crafted our tool descriptions to make this happen naturally, so you don't need to take any additional steps beyond following the Setup Guide above. If your model isn't using the Package Search tools when you think it should, please share this feedback with us through your shared Slack channel or via support@trychroma.com.
