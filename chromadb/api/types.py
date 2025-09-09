@@ -98,18 +98,16 @@ def _to_f32(value: float) -> float:
 
 
 def pack_embedding_safely(pyEmbedding: PyEmbedding) -> str:
-    # try:
-    return pybase64.b64encode_as_string(  # type: ignore
-        _get_struct(len(pyEmbedding)).pack(*pyEmbedding)
-    )
-
-
-# except OverflowError:
-#     return pybase64.b64encode_as_string(  # type: ignore
-#         _get_struct(len(embedding)).pack(
-#             *[_to_f32(value) for value in embedding]
-#         )
-#     )
+    try:
+        return pybase64.b64encode_as_string(  # type: ignore
+            _get_struct(len(pyEmbedding)).pack(*pyEmbedding)
+        )
+    except OverflowError:
+        return pybase64.b64encode_as_string(  # type: ignore
+            _get_struct(len(pyEmbedding)).pack(
+                *[_to_f32(value) for value in pyEmbedding]
+            )
+        )
 
 
 # returns base64 encoded embeddings or None if the embedding is None
