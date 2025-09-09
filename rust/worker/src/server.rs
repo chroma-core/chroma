@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
@@ -510,7 +510,7 @@ impl WorkerServer {
             let spann_provider = self.spann_provider.clone();
 
             knn_futures.push(async move {
-                let result = match &knn_query.embedding {
+                let result = match knn_query.embedding {
                     QueryVector::Dense(embedding) => {
                         // Check segment type to decide between HNSW and SPANN
                         let vector_segment_type =
@@ -525,7 +525,7 @@ impl WorkerServer {
                                 collection_and_segments_clone,
                                 matching_records_clone,
                                 knn_query.limit as usize,
-                                embedding.clone(),
+                                embedding,
                             );
 
                             spann_orchestrator
@@ -535,7 +535,7 @@ impl WorkerServer {
                         } else {
                             // Use HNSW KNN orchestrator
                             let knn = Knn {
-                                embedding: embedding.clone(),
+                                embedding,
                                 fetch: knn_query.limit,
                             };
 
@@ -562,7 +562,7 @@ impl WorkerServer {
                             1000,
                             collection_and_segments_clone,
                             matching_records_clone,
-                            embedding.clone(),
+                            embedding,
                             knn_query.key.clone(),
                             knn_query.limit,
                         );
@@ -574,13 +574,13 @@ impl WorkerServer {
                     }
                 };
 
-                Ok::<_, Status>((knn_query, result))
+                Ok::<_, Status>(result)
             });
         }
 
-        let knn_results_map = stream::iter(knn_futures)
+        let knn_results = stream::iter(knn_futures)
             .buffered(32)
-            .try_collect::<HashMap<_, _>>()
+            .try_collect::<Vec<_>>()
             .await?;
 
         // Run RankOrchestrator to evaluate ranks and select results
@@ -588,7 +588,7 @@ impl WorkerServer {
             self.blockfile_provider.clone(),
             self.clone_dispatcher()?,
             1000, // TODO: Make this configurable
-            knn_results_map,
+            knn_results,
             search_payload.rank,
             search_payload.limit,
             search_payload.select,
