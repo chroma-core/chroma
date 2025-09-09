@@ -75,7 +75,7 @@ IDs = List[ID]
 PyEmbedding = PyVector
 PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
-Embeddings = List[Embedding]
+Embeddings = List[Embedding]  # todo: update
 
 Space = Literal["cosine", "l2", "ip"]
 
@@ -154,34 +154,30 @@ def normalize_embeddings(
             f"Expected Embeddings to be non-empty list or numpy array, got {target}"
         )
 
-    return target  # type: ignore
+    if isinstance(target, np.ndarray):
+        if target.ndim == 1:
+            return cast(Embeddings, target.reshape(1, -1))
+        if target.ndim == 2:
+            return cast(Embeddings, target)
+        else:
+            raise ValueError(
+                f"Expected Embeddings to be a 1-D or 2-D numpy array, got {target.ndim}-D array"
+            )
+    elif isinstance(target, list):
+        # One PyEmbedding
+        if isinstance(target[0], (int, float)) and not isinstance(target[0], bool):
+            return cast(Embeddings, np.array([target], dtype=np.float32))
+        elif isinstance(target[0], np.ndarray):
+            return cast(Embeddings, np.array(target, dtype=np.float32))
+        elif isinstance(target[0], list):
+            if isinstance(target[0][0], (int, float)) and not isinstance(
+                target[0][0], bool
+            ):
+                return cast(Embeddings, np.array(target, dtype=np.float32))
 
-    # if isinstance(target, list):
-    #     # One PyEmbedding
-    #     if isinstance(target[0], (int, float)) and not isinstance(target[0], bool):
-    #         return [np.array(target, dtype=np.float32)]
-    #     # List of PyEmbeddings
-    #     if isinstance(target[0], list):
-    #         if isinstance(target[0][0], (int, float)) and not isinstance(
-    #             target[0][0], bool
-    #         ):
-    #             return [np.array(embedding, dtype=np.float32) for embedding in target]
-    #     # List of np.ndarrays
-    #     if isinstance(target[0], np.ndarray):
-    #         return cast(Embeddings, target)
-
-    # elif isinstance(target, np.ndarray):
-    #     # A single embedding as a numpy array
-    #     if target.ndim == 1:
-    #         return cast(Embeddings, [target])
-    #     # 2-D numpy array (comes out of embedding models)
-    #     # TODO: Enforce this at the embedding function level
-    #     if target.ndim == 2:
-    #         return list(target)
-
-    # raise ValueError(
-    #     f"Expected embeddings to be a list of floats or ints, a list of lists, a numpy array, or a list of numpy arrays, got {target}"
-    # )
+    raise ValueError(
+        f"Expected Embeddings to be a list of floats or ints, a list of lists, a numpy array, or a list of numpy arrays, got {target}"
+    )
 
 
 # Metadatas
