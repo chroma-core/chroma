@@ -286,7 +286,6 @@ impl Configurable<(GrpcLogConfig, System)> for GrpcLog {
 impl GrpcLog {
     fn client_for(
         &mut self,
-        _tenant: &str,
         collection_id: CollectionUuid,
     ) -> Result<
         LogServiceClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>,
@@ -308,12 +307,11 @@ impl GrpcLog {
     // ScoutLogs returns the offset of the next record to be inserted into the log.
     pub(super) async fn scout_logs(
         &mut self,
-        tenant: &str,
         collection_id: CollectionUuid,
         _start_from: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
         let mut client = self
-            .client_for(tenant, collection_id)
+            .client_for(collection_id)
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         let request = client.scout_logs(chroma_proto::ScoutLogsRequest {
             collection_id: collection_id.0.to_string(),
@@ -332,7 +330,6 @@ impl GrpcLog {
 
     pub(super) async fn read(
         &mut self,
-        tenant: &str,
         collection_id: CollectionUuid,
         offset: i64,
         batch_size: i32,
@@ -342,7 +339,7 @@ impl GrpcLog {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,
         };
-        let mut client = self.client_for(tenant, collection_id)?;
+        let mut client = self.client_for(collection_id)?;
         let request = client.pull_logs(chroma_proto::PullLogsRequest {
             // NOTE(rescrv):  Use the untyped string representation of the collection ID.
             collection_id: collection_id.0.to_string(),
@@ -384,7 +381,6 @@ impl GrpcLog {
 
     pub(super) async fn push_logs(
         &mut self,
-        tenant: &str,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
     ) -> Result<(), GrpcPushLogsError> {
@@ -400,7 +396,7 @@ impl GrpcLog {
         };
 
         let resp = self
-            .client_for(tenant, collection_id)?
+            .client_for(collection_id)?
             .push_logs(request)
             .await
             .map_err(|err| {
@@ -428,12 +424,11 @@ impl GrpcLog {
 
     pub(super) async fn fork_logs(
         &mut self,
-        tenant: &str,
         source_collection_id: CollectionUuid,
         target_collection_id: CollectionUuid,
     ) -> Result<ForkLogsResponse, GrpcForkLogsError> {
         let response = self
-            .client_for(tenant, source_collection_id)?
+            .client_for(source_collection_id)?
             .fork_logs(chroma_proto::ForkLogsRequest {
                 source_collection_id: source_collection_id.to_string(),
                 target_collection_id: target_collection_id.to_string(),
@@ -530,11 +525,10 @@ impl GrpcLog {
 
     pub(super) async fn update_collection_log_offset(
         &mut self,
-        tenant: &str,
         collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), GrpcUpdateCollectionLogOffsetError> {
-        let mut client = self.client_for(tenant, collection_id)?;
+        let mut client = self.client_for(collection_id)?;
         let request =
             client.update_collection_log_offset(chroma_proto::UpdateCollectionLogOffsetRequest {
                 // NOTE(rescrv):  Use the untyped string representation of the collection ID.
