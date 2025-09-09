@@ -9,15 +9,16 @@ use chroma_types::{
     operator::{Filter, GetResult, Limit, Projection, ProjectionOutput},
     CollectionAndSegments,
 };
+use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
     filter::{FilterError, FilterInput, FilterOutput},
     limit::{LimitError, LimitInput, LimitOutput},
-    prefetch_record::{PrefetchRecordError, PrefetchRecordOperator, PrefetchRecordOutput},
     prefetch_segment::{
         PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
     },
@@ -201,6 +202,7 @@ impl Orchestrator for GetOrchestrator {
         );
         // Prefetch task is detached from the orchestrator
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.collection_and_segments.record_segment.id);
+        Span::current().add_link(prefetch_span.context().span().span_context().clone());
         tasks.push((prefetch_record_segment_task, Some(prefetch_span)));
 
         // Prefetch metadata segment.
@@ -214,7 +216,8 @@ impl Orchestrator for GetOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch metadata segment", segment_id = %self.collection_and_segments.metadata_segment.id);
-        tasks.push((prefetch_metadata_task, Some(prefetch_span)));
+        Span::current().add_link(prefetch_span.context().span().span_context().clone());
+        tasks.push((prefetch_metadata_task, Some(prefetch_span.clone())));
 
         // Fetch log task.
         let fetch_log_task = wrap(
@@ -343,18 +346,6 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
             offset_ids: output.offset_ids.iter().collect(),
         };
 
-        // Prefetch records before projection
-        let prefetch_task = wrap(
-            Box::new(PrefetchRecordOperator {}),
-            input.clone(),
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-
-        if !self.send(prefetch_task, ctx, Some(Span::current())).await {
-            return;
-        }
-
         let task = wrap(
             Box::new(self.projection.clone()),
             input,
@@ -362,19 +353,6 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
         self.send(task, ctx, Some(Span::current())).await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<PrefetchRecordOutput, PrefetchRecordError>> for GetOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        _message: TaskResult<PrefetchRecordOutput, PrefetchRecordError>,
-        _ctx: &ComponentContext<Self>,
-    ) {
-        // The output and error from `PrefetchRecordOperator` are ignored
     }
 }
 

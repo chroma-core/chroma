@@ -22,6 +22,7 @@ use futures::future;
 use opentelemetry::{global, KeyValue};
 use rand::seq::SliceRandom;
 use thiserror::Error;
+use tracing::{Instrument, Span};
 use uuid::Uuid;
 
 use crate::{
@@ -2303,7 +2304,7 @@ impl SpannIndexWriter {
                         let index_guard = self.hnsw_index.inner.read();
                         (index_guard.hnsw_index.id, index_guard.prefix_path.clone())
                     };
-                    (id, prefix_path, self.hnsw_index)
+                    (id, prefix_path, self.hnsw_index.clone())
                 }
             };
             self.hnsw_provider.commit(hnsw_index).map_err(|e| {
@@ -2325,6 +2326,7 @@ impl SpannIndexWriter {
                 provider: self.hnsw_provider,
                 prefix_path,
                 index_id: hnsw_id,
+                hnsw_index: self.hnsw_index,
             },
             collection_id: self.collection_id,
             metrics: SpannIndexFlusherMetrics {
@@ -2441,7 +2443,11 @@ impl SpannIndexFlusher {
             );
             self.hnsw_flusher
                 .provider
-                .flush(&self.hnsw_flusher.prefix_path, &self.hnsw_flusher.index_id)
+                .flush(
+                    &self.hnsw_flusher.prefix_path,
+                    &self.hnsw_flusher.index_id,
+                    &self.hnsw_flusher.hnsw_index,
+                )
                 .await
                 .map_err(|e| {
                     tracing::error!("Error flushing hnsw index {}: {}", res.hnsw_id, e);
@@ -2620,12 +2626,14 @@ impl<'me> SpannIndexReader<'me> {
             match (pl_blockfile_id, versions_map_blockfile_id) {
                 (Some(pl_id), Some(versions_id)) => {
                     let (pl_result, vm_result) = tokio::join!(
-                        Self::posting_list_reader_from_id(pl_id, blockfile_provider, prefix_path),
+                        Self::posting_list_reader_from_id(pl_id, blockfile_provider, prefix_path)
+                            .instrument(Span::current()),
                         Self::versions_map_reader_from_id(
                             versions_id,
                             blockfile_provider,
                             prefix_path
                         )
+                        .instrument(Span::current())
                     );
                     (pl_result?, vm_result?)
                 }
@@ -2896,6 +2904,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3109,6 +3118,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3373,6 +3383,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3609,6 +3620,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3872,6 +3884,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -4171,6 +4184,7 @@ mod tests {
             PathBuf::from(temp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         )
     }
 

@@ -1243,7 +1243,10 @@ mod tests {
                 1,
                 Arc::new([SegmentFlushInfo {
                     segment_id,
-                    file_paths: HashMap::from([("foo".to_string(), vec!["bar".to_string()])]),
+                    file_paths: HashMap::from([(
+                        "foo".to_string(),
+                        vec![uuid::Uuid::new_v4().to_string()],
+                    )]),
                 }]),
                 0,
                 0,

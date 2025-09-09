@@ -5,7 +5,10 @@ use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
+use crate::operator::SearchResult;
+use crate::operator::SelectField;
 use crate::plan::PlanToProtoError;
+use crate::plan::SearchPayload;
 use crate::validators::{
     validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
 };
@@ -92,6 +95,14 @@ impl ChromaError for GetCollectionWithSegmentsError {
             }
             GetCollectionWithSegmentsError::NotFound(_) => ErrorCodes::NotFound,
             GetCollectionWithSegmentsError::Internal(err) => err.code(),
+        }
+    }
+
+    fn should_trace_error(&self) -> bool {
+        if let Self::Grpc(status) = self {
+            status.code() != ErrorCodes::NotFound.into()
+        } else {
+            true
         }
     }
 }
@@ -1140,7 +1151,7 @@ impl ChromaError for AddCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             AddCollectionRecordsError::Collection(err) => err.code(),
-            AddCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
+            AddCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
             AddCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1202,7 +1213,7 @@ pub enum UpdateCollectionRecordsError {
 impl ChromaError for UpdateCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpdateCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
+            UpdateCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
             UpdateCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1265,7 +1276,7 @@ pub enum UpsertCollectionRecordsError {
 impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpsertCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
+            UpsertCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
             UpsertCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1328,7 +1339,7 @@ impl ChromaError for DeleteCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             DeleteCollectionRecordsError::Get(err) => err.code(),
-            DeleteCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
+            DeleteCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
             DeleteCollectionRecordsError::Internal(err) => err.code(),
         }
     }
@@ -1830,6 +1841,115 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
     }
 }
 
+#[non_exhaustive]
+#[derive(Clone, Debug, Serialize, ToSchema, Validate)]
+pub struct SearchRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: CollectionUuid,
+    pub searches: Vec<SearchPayload>,
+}
+
+impl SearchRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        collection_id: CollectionUuid,
+        searches: Vec<SearchPayload>,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            collection_id,
+            searches,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize, ToSchema, Debug)]
+pub struct SearchResponse {
+    pub ids: Vec<Vec<String>>,
+    pub documents: Vec<Option<Vec<Option<String>>>>,
+    pub embeddings: Vec<Option<Vec<Option<Vec<f32>>>>>,
+    pub metadatas: Vec<Option<Vec<Option<Metadata>>>>,
+    pub scores: Vec<Option<Vec<Option<f32>>>>,
+    pub select: Vec<Vec<SelectField>>,
+}
+
+impl From<(SearchResult, Vec<SearchPayload>)> for SearchResponse {
+    fn from((result, payloads): (SearchResult, Vec<SearchPayload>)) -> Self {
+        let num_payloads = payloads.len();
+        let mut res = Self {
+            ids: Vec::with_capacity(num_payloads),
+            documents: Vec::with_capacity(num_payloads),
+            embeddings: Vec::with_capacity(num_payloads),
+            metadatas: Vec::with_capacity(num_payloads),
+            scores: Vec::with_capacity(num_payloads),
+            select: Vec::with_capacity(num_payloads),
+        };
+
+        for (payload_result, payload) in result.results.into_iter().zip(payloads) {
+            // Get the sorted select fields for this payload
+            let mut payload_select = Vec::from_iter(payload.select.fields.iter().cloned());
+            payload_select.sort();
+
+            let num_records = payload_result.records.len();
+            let mut ids = Vec::with_capacity(num_records);
+            let mut documents = Vec::with_capacity(num_records);
+            let mut embeddings = Vec::with_capacity(num_records);
+            let mut metadatas = Vec::with_capacity(num_records);
+            let mut scores = Vec::with_capacity(num_records);
+
+            for record in payload_result.records {
+                ids.push(record.id);
+                documents.push(record.document);
+                embeddings.push(record.embedding);
+                metadatas.push(record.metadata);
+                scores.push(record.score);
+            }
+
+            res.ids.push(ids);
+            res.select.push(payload_select.clone());
+
+            // Push documents if requested by this payload, otherwise None
+            res.documents.push(
+                payload_select
+                    .binary_search(&SelectField::Document)
+                    .is_ok()
+                    .then_some(documents),
+            );
+
+            // Push embeddings if requested by this payload, otherwise None
+            res.embeddings.push(
+                payload_select
+                    .binary_search(&SelectField::Embedding)
+                    .is_ok()
+                    .then_some(embeddings),
+            );
+
+            // Push metadatas if requested by this payload, otherwise None
+            // Include if either SelectField::Metadata is present or any SelectField::MetadataField(_)
+            let has_metadata = payload_select.binary_search(&SelectField::Metadata).is_ok()
+                || payload_select
+                    .last()
+                    .is_some_and(|field| matches!(field, SelectField::MetadataField(_)));
+            res.metadatas.push(has_metadata.then_some(metadatas));
+
+            // Push scores if requested by this payload, otherwise None
+            res.scores.push(
+                payload_select
+                    .binary_search(&SelectField::Score)
+                    .is_ok()
+                    .then_some(scores),
+            );
+        }
+
+        res
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum QueryError {
     #[error("Error executing plan: {0}")]
@@ -1879,6 +1999,8 @@ pub enum ExecutorError {
     Internal(Box<dyn ChromaError>),
     #[error("Error sending backfill request to compactor: {0}")]
     BackfillError(Box<dyn ChromaError>),
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
 }
 
 impl ChromaError for ExecutorError {
@@ -1891,6 +2013,7 @@ impl ChromaError for ExecutorError {
             ExecutorError::CollectionMissingHnswConfiguration => ErrorCodes::Internal,
             ExecutorError::Internal(e) => e.code(),
             ExecutorError::BackfillError(e) => e.code(),
+            ExecutorError::NotImplemented(_) => ErrorCodes::Unimplemented,
         }
     }
 }

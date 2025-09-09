@@ -4,6 +4,7 @@ resolver = "2"
 members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/metering-macros", "rust/metering", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server"]
 
 [workspace.dependencies]
+anyhow = "1.0"
 arrow = "55.1"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["macros"] }
@@ -38,6 +39,7 @@ serde = { version = "1.0.215", features = ["derive", "rc"] }
 serde_json = "1.0.133"
 serde_bytes = "0.11.17"
 setsum = "0.7"
+sprs = "0.11"
 tantivy = "0.22.0"
 thiserror = "1.0.69"
 tokio = { version = "1.41", features = ["fs", "macros", "rt-multi-thread", "time", "io-util"] }
@@ -62,7 +64,7 @@ bytemuck = "1.21.0"
 rayon = "1.10.0"
 validator = { version = "0.19", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
-hnswlib = { version = "0.8.1", git = "https://github.com/chroma-core/hnswlib.git" }
+hnswlib = { version = "0.8.1", git = "https://github.com/chroma-core/hnswlib.git", branch = "master" }
 reqwest = { version = "0.12.9", features = ["rustls-tls-native-roots", "http2"], default-features = false }
 random-port = "0.1.1"
 ndarray = { version = "0.16.1", features = ["approx"] }

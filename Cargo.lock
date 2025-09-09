@@ -58,6 +58,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "alga"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f823d037a7ec6ea2197046bafd4ae150e6bc36f9ca347404f46a46823fa84f2"
+dependencies = [
+ "approx 0.3.2",
+ "num-complex 0.2.4",
+ "num-traits",
+]
+
+[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -153,6 +164,15 @@ name = "anyhow"
 version = "1.0.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c95c10ba0b00a02636238b814946408b1322d5ac4760326e6fb8ec956d85775"
+
+[[package]]
+name = "approx"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0e60b75072ecd4168020818c0107f2857bb6c4e64252d8d3983f6263b40a5c3"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "approx"
@@ -1621,6 +1641,7 @@ dependencies = [
  "anyhow",
  "arrow",
  "async-trait",
+ "base64 0.22.1",
  "chroma-benchmark",
  "chroma-blockstore",
  "chroma-cache",
@@ -1630,6 +1651,7 @@ dependencies = [
  "chroma-storage",
  "chroma-tracing",
  "chroma-types",
+ "clap",
  "criterion",
  "futures",
  "hnswlib",
@@ -1643,6 +1665,7 @@ dependencies = [
  "rayon",
  "roaring",
  "serde",
+ "sprs",
  "tantivy",
  "tempfile",
  "thiserror 1.0.69",
@@ -1658,6 +1681,7 @@ version = "0.1.0"
 dependencies = [
  "axum 0.8.1",
  "jemalloc_pprof",
+ "mappings",
  "tokio",
 ]
 
@@ -1704,6 +1728,7 @@ dependencies = [
  "chroma-tracing",
  "chroma-types",
  "futures",
+ "opentelemetry",
  "proptest",
  "rand 0.8.5",
  "serde",
@@ -1821,6 +1846,7 @@ dependencies = [
  "chroma-storage",
  "chroma-types",
  "futures",
+ "opentelemetry",
  "proptest",
  "rayon",
  "regex",
@@ -1971,6 +1997,7 @@ dependencies = [
  "roaring",
  "serde",
  "serde_json",
+ "sprs",
  "thiserror 1.0.69",
  "tokio",
  "tonic",
@@ -3466,6 +3493,7 @@ dependencies = [
  "tonic",
  "tonic-health",
  "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber",
  "tracing-test",
  "uuid",
@@ -3776,7 +3804,7 @@ dependencies = [
 [[package]]
 name = "hnswlib"
 version = "0.8.1"
-source = "git+https://github.com/chroma-core/hnswlib.git#340a6fff21f0ba2db2bc720636eba4d7736b9534"
+source = "git+https://github.com/chroma-core/hnswlib.git?branch=master#7cb7befea40d8cf858580eb06f06cf76467755f9"
 dependencies = [
  "cc",
  "thiserror 1.0.69",
@@ -4419,9 +4447,9 @@ checksum = "d75a2a4b1b190afb6f5425f10f6a8f959d2ea0b9c2b1d79553551850539e4674"
 
 [[package]]
 name = "jemalloc_pprof"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5622af6d21ff86ed7797ef98e11b8f302da25ec69a7db9f6cde8e2e1c8df9992"
+checksum = "9770dc31e3b7797ce9ec1184c23021eae0ee50d8cac2f3c706a9cae1fb664e41"
 dependencies = [
  "anyhow",
  "libc",
@@ -5229,9 +5257,9 @@ version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "882ed72dce9365842bf196bdeedf5055305f11fc8c03dee7bb0194a6cad34841"
 dependencies = [
- "approx",
+ "approx 0.5.1",
  "matrixmultiply",
- "num-complex",
+ "num-complex 0.4.6",
  "num-integer",
  "num-traits",
  "portable-atomic",
@@ -5284,7 +5312,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35bd024e8b2ff75562e5f34e7f4905839deb4b22955ef5e73d2fea1b9813cb23"
 dependencies = [
  "num-bigint",
- "num-complex",
+ "num-complex 0.4.6",
  "num-integer",
  "num-iter",
  "num-rational",
@@ -5316,6 +5344,16 @@ dependencies = [
  "rand 0.8.5",
  "smallvec",
  "zeroize",
+]
+
+[[package]]
+name = "num-complex"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6b19411a9719e753aff12e5187b74d60d3dc449ec3f4dc21e3989c3f554bc95"
+dependencies = [
+ "autocfg",
+ "num-traits",
 ]
 
 [[package]]
@@ -7681,6 +7719,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "sprs"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bff8419009a08f6cb7519a602c5590241fbff1446bcc823c07af15386eb801b"
+dependencies = [
+ "alga",
+ "ndarray",
+ "num-complex 0.4.6",
+ "num-traits",
+ "num_cpus",
+ "rayon",
+ "smallvec",
+]
+
+[[package]]
 name = "sqlx"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9208,6 +9261,7 @@ dependencies = [
  "chroma-storage",
  "futures",
  "guacamole",
+ "opentelemetry",
  "parquet",
  "proptest",
  "rand 0.8.5",
@@ -9217,6 +9271,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "tracing-opentelemetry",
 ]
 
 [[package]]
@@ -9903,6 +9958,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "shuttle",
+ "sprs",
  "tantivy",
  "tempfile",
  "thiserror 1.0.69",
@@ -9912,6 +9968,7 @@ dependencies = [
  "tonic",
  "tonic-health",
  "tracing",
+ "tracing-opentelemetry",
  "uuid",
 ]
 

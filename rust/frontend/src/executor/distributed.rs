@@ -15,8 +15,8 @@ use chroma_system::System;
 use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
 use chroma_types::SegmentType;
 use chroma_types::{
-    operator::{CountResult, GetResult, KnnBatchResult},
-    plan::{Count, Get, Knn},
+    operator::{CountResult, GetResult, KnnBatchResult, SearchResult},
+    plan::{Count, Get, Knn, Search},
     ExecutorError,
 };
 
@@ -24,7 +24,8 @@ use rand::distributions::Distribution;
 use tonic::Request;
 
 // Convenience type alias for the gRPC query client used by the DistributedExecutor
-type QueryClient = QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>;
+type QueryClient =
+    QueryExecutorClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>;
 
 /// A distributed executor that routes requests to the appropriate node based on the assignment policy
 /// # Fields
@@ -200,6 +201,42 @@ impl DistributedExecutor {
                 let is_retry = current_attempt > 0;
                 choose_query_client_weighted(&clients, &config, is_retry)?
                     .knn(Request::new(plan.clone().try_into()?))
+                    .await
+            })
+            .retry(self.backoff)
+            .when(is_retryable_error)
+            .await?
+        };
+        Ok(res.into_inner().try_into()?)
+    }
+
+    pub async fn search(&mut self, plan: Search) -> Result<SearchResult, ExecutorError> {
+        // Get the collection ID from the plan
+        let collection_id = &plan
+            .scan
+            .collection_and_segments
+            .collection
+            .collection_id
+            .to_string();
+
+        let clients = self
+            .client_assigner
+            .clients(collection_id)
+            .map_err(|e| ExecutorError::Internal(e.boxed()))?;
+
+        // Convert plan to proto
+        let request: chroma_types::chroma_proto::SearchPlan = plan.try_into()?;
+
+        let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let config = self.client_selection_config.clone();
+        let res = {
+            let attempt_count = attempt_count.clone();
+            (|| async {
+                let current_attempt =
+                    attempt_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let is_retry = current_attempt > 0;
+                choose_query_client_weighted(&clients, &config, is_retry)?
+                    .search(Request::new(request.clone()))
                     .await
             })
             .retry(self.backoff)

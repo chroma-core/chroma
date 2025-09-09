@@ -10,6 +10,7 @@ from typing import (
     cast,
     Literal,
     get_args,
+    TYPE_CHECKING,
 )
 from numpy.typing import NDArray
 import numpy as np
@@ -27,7 +28,11 @@ from chromadb.base_types import (
     Where,
     WhereDocumentOperator,
     WhereDocument,
+    SparseVector,
 )
+
+if TYPE_CHECKING:
+    from chromadb.execution.expression.operator import SelectField
 from inspect import signature
 from tenacity import retry
 from abc import abstractmethod
@@ -43,6 +48,10 @@ __all__ = [
     "WhereDocument",
     "UpdateCollectionMetadata",
     "UpdateMetadata",
+    "SearchResult",
+    "SparseVector",
+    "is_valid_sparse_vector",
+    "validate_sparse_vector",
 ]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
@@ -484,6 +493,28 @@ class QueryResult(TypedDict):
     included: Include
 
 
+class SearchResult(TypedDict):
+    """Column-major response from the search API matching Rust SearchResponse structure.
+    
+    This is the format returned to users:
+    - ids: Always present, list of result IDs for each search payload
+    - documents: Optional per payload, None if not requested
+    - embeddings: Optional per payload, None if not requested
+    - metadatas: Optional per payload, None if not requested
+    - scores: Optional per payload, None if not requested
+    - select: List of selected fields for each payload (sorted)
+    
+    Each top-level list index corresponds to a search payload.
+    Within each payload, the inner lists are aligned by record index.
+    """
+    ids: List[List[str]]
+    documents: List[Optional[List[Optional[str]]]]
+    embeddings: List[Optional[List[Optional[List[float]]]]]
+    metadatas: List[Optional[List[Optional[Dict[str, Any]]]]]
+    scores: List[Optional[List[Optional[float]]]]
+    select: List[List[Union["SelectField", str]]]  # List of SelectField enums or string field names for each payload
+
+
 class UpdateRequest(TypedDict):
     ids: IDs
     embeddings: Optional[Embeddings]
@@ -729,8 +760,69 @@ def validate_ids(ids: IDs) -> IDs:
     return ids
 
 
+def is_valid_sparse_vector(value: Any) -> bool:
+    """Check if a value looks like a SparseVector (has indices and values keys)."""
+    return isinstance(value, dict) and "indices" in value and "values" in value
+
+
+def validate_sparse_vector(value: Any) -> None:
+    """Validate that a value is a properly formed SparseVector.
+    
+    Args:
+        value: The value to validate as a SparseVector
+        
+    Raises:
+        ValueError: If the value is not a valid SparseVector
+    """
+    if not isinstance(value, dict):
+        raise ValueError(f"Expected SparseVector to be a dict, got {type(value).__name__}")
+    
+    if "indices" not in value or "values" not in value:
+        raise ValueError("SparseVector must have 'indices' and 'values' keys")
+    
+    indices = value.get("indices")
+    values = value.get("values")
+    
+    # Validate indices
+    if not isinstance(indices, list):
+        raise ValueError(
+            f"Expected SparseVector indices to be a list, got {type(indices).__name__}"
+        )
+    
+    # Validate values
+    if not isinstance(values, list):
+        raise ValueError(
+            f"Expected SparseVector values to be a list, got {type(values).__name__}"
+        )
+    
+    # Check lengths match
+    if len(indices) != len(values):
+        raise ValueError(
+            f"SparseVector indices and values must have the same length, "
+            f"got {len(indices)} indices and {len(values)} values"
+        )
+    
+    # Validate each index
+    for i, idx in enumerate(indices):
+        if not isinstance(idx, int):
+            raise ValueError(
+                f"SparseVector indices must be integers, got {type(idx).__name__} at position {i}"
+            )
+        if idx < 0:
+            raise ValueError(
+                f"SparseVector indices must be non-negative, got {idx} at position {i}"
+            )
+    
+    # Validate each value
+    for i, val in enumerate(values):
+        if not isinstance(val, (int, float)):
+            raise ValueError(
+                f"SparseVector values must be numbers, got {type(val).__name__} at position {i}"
+            )
+
+
 def validate_metadata(metadata: Metadata) -> Metadata:
-    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats or bools"""
+    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats, bools, or SparseVectors"""
     if not isinstance(metadata, dict) and metadata is not None:
         raise ValueError(
             f"Expected metadata to be a dict or None, got {type(metadata).__name__} as metadata"
@@ -750,18 +842,24 @@ def validate_metadata(metadata: Metadata) -> Metadata:
             raise TypeError(
                 f"Expected metadata key to be a str, got {key} which is a {type(key).__name__}"
             )
+        # Check if value is a SparseVector
+        if is_valid_sparse_vector(value):
+            try:
+                validate_sparse_vector(value)
+            except ValueError as e:
+                raise ValueError(f"Invalid SparseVector for key '{key}': {e}")
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
-        if not isinstance(value, bool) and not isinstance(
+        elif not isinstance(value, bool) and not isinstance(
             value, (str, int, float, type(None))
         ):
             raise ValueError(
-                f"Expected metadata value to be a str, int, float, bool, or None, got {value} which is a {type(value).__name__}"
+                f"Expected metadata value to be a str, int, float, bool, SparseVector, or None, got {value} which is a {type(value).__name__}"
             )
     return metadata
 
 
 def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
-    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats or bools"""
+    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats, bools, or SparseVectors"""
     if not isinstance(metadata, dict) and metadata is not None:
         raise ValueError(
             f"Expected metadata to be a dict or None, got {type(metadata)}"
@@ -773,12 +871,18 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
     for key, value in metadata.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
+        # Check if value is a SparseVector
+        if is_valid_sparse_vector(value):
+            try:
+                validate_sparse_vector(value)
+            except ValueError as e:
+                raise ValueError(f"Invalid SparseVector for key '{key}': {e}")
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
-        if not isinstance(value, bool) and not isinstance(
+        elif not isinstance(value, bool) and not isinstance(
             value, (str, int, float, type(None))
         ):
             raise ValueError(
-                f"Expected metadata value to be a str, int, or float, got {value}"
+                f"Expected metadata value to be a str, int, float, bool, SparseVector, or None, got {value}"
             )
     return metadata
 

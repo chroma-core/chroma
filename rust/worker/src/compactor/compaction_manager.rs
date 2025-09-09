@@ -35,6 +35,7 @@ use chroma_types::CollectionUuid;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::StreamExt;
+use opentelemetry::trace::TraceContextExt;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
@@ -51,6 +52,7 @@ use tracing::instrument;
 use tracing::span;
 use tracing::Span;
 use tracing::{Instrument, Level};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
 type CompactionOutput = Result<CompactionResponse, Box<dyn ChromaError>>;
@@ -184,7 +186,8 @@ impl CompactionManager {
                 "Compacting job",
                 collection_id = ?job.collection_id
             );
-            instrumented_span.follows_from(Span::current());
+            Span::current().add_link(instrumented_span.context().span().span_context().clone());
+
             let future = self
                 .context
                 .clone()
@@ -917,6 +920,7 @@ mod tests {
             PathBuf::from(tmpdir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let spann_provider = SpannProvider {
             hnsw_provider: hnsw_provider.clone(),

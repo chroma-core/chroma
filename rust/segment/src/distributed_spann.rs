@@ -630,6 +630,7 @@ mod test {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let segment_id = SegmentUuid::new();
@@ -754,6 +755,7 @@ mod test {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
@@ -868,6 +870,7 @@ mod test {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let segment_id = SegmentUuid::new();
@@ -974,6 +977,7 @@ mod test {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let spann_reader = SpannSegmentReader::from_segment(
             &collection,
@@ -1046,6 +1050,7 @@ mod test {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
 
@@ -1156,6 +1161,7 @@ mod test {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let gc_context = GarbageCollectionContext::try_from_config(
             &(

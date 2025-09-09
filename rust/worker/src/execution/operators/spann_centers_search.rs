@@ -39,7 +39,7 @@ impl ChromaError for SpannCentersSearchError {
 pub(crate) struct SpannCentersSearchOperator {}
 
 #[async_trait]
-impl<'referred_data> Operator<SpannCentersSearchInput<'referred_data>, SpannCentersSearchOutput>
+impl Operator<SpannCentersSearchInput<'_>, SpannCentersSearchOutput>
     for SpannCentersSearchOperator
 {
     type Error = SpannCentersSearchError;

@@ -2,7 +2,7 @@ import asyncio
 from uuid import UUID
 import urllib.parse
 import orjson
-from typing import Any, Optional, cast, Tuple, Sequence, Dict
+from typing import Any, Optional, cast, Tuple, Sequence, Dict, List
 import logging
 import httpx
 from overrides import override
@@ -26,6 +26,7 @@ from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.utils.async_to_sync import async_to_sync
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api.types import optional_embeddings_to_base64_strings
+from chromadb.execution.expression.plan import Search
 
 from chromadb.api.types import (
     Documents,
@@ -39,11 +40,15 @@ from chromadb.api.types import (
     WhereDocument,
     GetResult,
     QueryResult,
+    SearchResult,
     CollectionMetadata,
     validate_batch,
     convert_np_embeddings_to_list,
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
+)
+
+from chromadb.api.types import (
     IncludeMetadataDocumentsEmbeddings,
 )
 
@@ -394,6 +399,35 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         )
         model = CollectionModel.from_json(resp_json)
         return model
+
+    @trace_method("AsyncFastAPI._search", OpenTelemetryGranularity.OPERATION)
+    @override
+    async def _search(
+        self,
+        collection_id: UUID,
+        searches: List[Search],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> SearchResult:
+        """Performs hybrid search on a collection"""
+        # Convert Search objects to dictionaries
+        payload = {"searches": [s.to_dict() for s in searches]}
+        
+        resp_json = await self._make_request(
+            "post",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
+            json=payload,
+        )
+        
+        # Return the column-major format directly
+        return SearchResult(
+            ids=resp_json.get("ids", []),
+            documents=resp_json.get("documents", []),
+            embeddings=resp_json.get("embeddings", []),
+            metadatas=resp_json.get("metadatas", []),
+            scores=resp_json.get("scores", []),
+            select=resp_json.get("select", [])
+        )
 
     @trace_method("AsyncFastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override

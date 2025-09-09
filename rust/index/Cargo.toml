@@ -6,6 +6,10 @@ edition = "2021"
 [lib]
 path = "src/lib.rs"
 
+[[example]]
+name = "sparse_wand_benchmark"
+path = "examples/sparse_wand_benchmark.rs"
+
 [dependencies]
 rand = { workspace = true }
 thiserror = { workspace = true }
@@ -21,6 +25,7 @@ roaring = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
 tempfile = { workspace = true }
+base64 = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-types = { workspace = true }
@@ -34,13 +39,17 @@ itertools = { workspace = true }
 hnswlib = { workspace = true }
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 
+# Dependencies for examples
+indicatif = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+sprs = { workspace = true }
+
 [dev-dependencies]
 rayon = { workspace = true }
 criterion = { workspace = true }
 chroma-benchmark = { workspace = true }
 proptest = { workspace = true }
-indicatif = { workspace = true }
-anyhow = "1.0.93"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { workspace = true }
 

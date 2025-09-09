@@ -1,9 +1,11 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
+use sprs::CsVec;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
+    mem::size_of_val,
 };
 use thiserror::Error;
 use utoipa::ToSchema;
@@ -11,12 +13,127 @@ use utoipa::ToSchema;
 use crate::chroma_proto;
 
 #[cfg(feature = "pyo3")]
-use pyo3::{types::PyAnyMethods, FromPyObject, IntoPyObject};
+use pyo3::types::PyAnyMethods;
 
 #[cfg(feature = "testing")]
 use proptest::prelude::*;
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize, ToSchema)]
+/// Represents a sparse vector using parallel arrays for indices and values.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, ToSchema)]
+pub struct SparseVector {
+    /// Dimension indices
+    pub indices: Vec<u32>,
+    /// Values corresponding to each index
+    pub values: Vec<f32>,
+}
+
+impl SparseVector {
+    /// Create a new sparse vector from parallel arrays.
+    pub fn new(indices: Vec<u32>, values: Vec<f32>) -> Self {
+        Self { indices, values }
+    }
+
+    /// Create a sparse vector from an iterator of (index, value) pairs.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (u32, f32)>) -> Self {
+        let (indices, values) = pairs.into_iter().unzip();
+        Self { indices, values }
+    }
+
+    /// Iterate over (index, value) pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (u32, f32)> + '_ {
+        self.indices
+            .iter()
+            .copied()
+            .zip(self.values.iter().copied())
+    }
+}
+
+impl Eq for SparseVector {}
+
+impl Ord for SparseVector {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.indices.cmp(&other.indices).then_with(|| {
+            for (a, b) in self.values.iter().zip(other.values.iter()) {
+                match a.total_cmp(b) {
+                    Ordering::Equal => continue,
+                    other => return other,
+                }
+            }
+            self.values.len().cmp(&other.values.len())
+        })
+    }
+}
+
+impl PartialOrd for SparseVector {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl From<chroma_proto::SparseVector> for SparseVector {
+    fn from(proto: chroma_proto::SparseVector) -> Self {
+        SparseVector::new(proto.indices, proto.values)
+    }
+}
+
+impl From<SparseVector> for chroma_proto::SparseVector {
+    fn from(sparse: SparseVector) -> Self {
+        chroma_proto::SparseVector {
+            indices: sparse.indices,
+            values: sparse.values,
+        }
+    }
+}
+
+/// Convert SparseVector to sprs::CsVec for efficient sparse operations
+impl From<&SparseVector> for CsVec<f32> {
+    fn from(sparse: &SparseVector) -> Self {
+        let (indices, values) = sparse
+            .iter()
+            .map(|(index, value)| (index as usize, value))
+            .unzip();
+        CsVec::new(u32::MAX as usize, indices, values)
+    }
+}
+
+impl From<SparseVector> for CsVec<f32> {
+    fn from(sparse: SparseVector) -> Self {
+        (&sparse).into()
+    }
+}
+
+#[cfg(feature = "pyo3")]
+impl<'py> pyo3::IntoPyObject<'py> for SparseVector {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        use pyo3::types::PyDict;
+        let dict = PyDict::new(py);
+        dict.set_item("indices", self.indices)?;
+        dict.set_item("values", self.values)?;
+        Ok(dict.into_any())
+    }
+}
+
+#[cfg(feature = "pyo3")]
+impl<'py> pyo3::FromPyObject<'py> for SparseVector {
+    fn extract_bound(ob: &pyo3::Bound<'py, pyo3::PyAny>) -> pyo3::PyResult<Self> {
+        use pyo3::types::PyDict;
+
+        let dict = ob.downcast::<PyDict>()?;
+        let indices_obj = dict.get_item("indices")?;
+        let values_obj = dict.get_item("values")?;
+
+        let indices: Vec<u32> = indices_obj.extract()?;
+        let values: Vec<f32> = values_obj.extract()?;
+
+        Ok(SparseVector::new(indices, values))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, ToSchema)]
 #[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 #[serde(untagged)]
 pub enum UpdateMetadataValue {
@@ -30,13 +147,17 @@ pub enum UpdateMetadataValue {
     )]
     Float(f64),
     Str(String),
+    #[cfg_attr(feature = "testing", proptest(skip))]
+    SparseVector(SparseVector),
     None,
 }
 
 #[cfg(feature = "pyo3")]
-impl FromPyObject<'_> for UpdateMetadataValue {
-    fn extract_bound(ob: &pyo3::Bound<'_, pyo3::PyAny>) -> pyo3::PyResult<Self> {
-        if let Ok(value) = ob.extract::<bool>() {
+impl<'py> pyo3::FromPyObject<'py> for UpdateMetadataValue {
+    fn extract_bound(ob: &pyo3::Bound<'py, pyo3::PyAny>) -> pyo3::PyResult<Self> {
+        if ob.is_none() {
+            Ok(UpdateMetadataValue::None)
+        } else if let Ok(value) = ob.extract::<bool>() {
             Ok(UpdateMetadataValue::Bool(value))
         } else if let Ok(value) = ob.extract::<i64>() {
             Ok(UpdateMetadataValue::Int(value))
@@ -44,8 +165,12 @@ impl FromPyObject<'_> for UpdateMetadataValue {
             Ok(UpdateMetadataValue::Float(value))
         } else if let Ok(value) = ob.extract::<String>() {
             Ok(UpdateMetadataValue::Str(value))
+        } else if let Ok(value) = ob.extract::<SparseVector>() {
+            Ok(UpdateMetadataValue::SparseVector(value))
         } else {
-            Ok(UpdateMetadataValue::None)
+            Err(pyo3::exceptions::PyTypeError::new_err(
+                "Cannot convert Python object to UpdateMetadataValue",
+            ))
         }
     }
 }
@@ -81,6 +206,9 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
             Some(chroma_proto::update_metadata_value::Value::StringValue(value)) => {
                 Ok(UpdateMetadataValue::Str(value.clone()))
             }
+            Some(chroma_proto::update_metadata_value::Value::SparseVectorValue(value)) => {
+                Ok(UpdateMetadataValue::SparseVector(value.clone().into()))
+            }
             // Used to communicate that the user wants to delete this key.
             None => Ok(UpdateMetadataValue::None),
         }
@@ -106,6 +234,13 @@ impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
                     value,
                 )),
             },
+            UpdateMetadataValue::SparseVector(sparse_vec) => chroma_proto::UpdateMetadataValue {
+                value: Some(
+                    chroma_proto::update_metadata_value::Value::SparseVectorValue(
+                        sparse_vec.into(),
+                    ),
+                ),
+            },
             UpdateMetadataValue::None => chroma_proto::UpdateMetadataValue { value: None },
         }
     }
@@ -120,6 +255,9 @@ impl TryFrom<&UpdateMetadataValue> for MetadataValue {
             UpdateMetadataValue::Int(value) => Ok(MetadataValue::Int(*value)),
             UpdateMetadataValue::Float(value) => Ok(MetadataValue::Float(*value)),
             UpdateMetadataValue::Str(value) => Ok(MetadataValue::Str(value.clone())),
+            UpdateMetadataValue::SparseVector(value) => {
+                Ok(MetadataValue::SparseVector(value.clone()))
+            }
             UpdateMetadataValue::None => Err(MetadataValueConversionError::InvalidValue),
         }
     }
@@ -131,9 +269,9 @@ MetadataValue
 ===========================================
 */
 
-#[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize, ToSchema)]
-#[cfg_attr(feature = "pyo3", derive(FromPyObject, IntoPyObject))]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
 #[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
+#[cfg_attr(feature = "pyo3", derive(pyo3::FromPyObject, pyo3::IntoPyObject))]
 #[serde(untagged)]
 pub enum MetadataValue {
     Bool(bool),
@@ -146,16 +284,49 @@ pub enum MetadataValue {
     )]
     Float(f64),
     Str(String),
+    #[cfg_attr(feature = "testing", proptest(skip))]
+    SparseVector(SparseVector),
 }
 
 impl Eq for MetadataValue {}
 
 /// We need `Eq` and `Ord` since we want to use this as a key in `BTreeMap`
-/// We are not planning to support `f64::NaN`s anyway, so the `PartialOrd` and `Ord` should be identical
+///
+/// For cross-type comparisons, we define a consistent ordering based on variant position:
+/// Bool < Int < Float < Str < SparseVector
 #[allow(clippy::derive_ord_xor_partial_ord)]
 impl Ord for MetadataValue {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap_or(Ordering::Equal)
+        // Define type ordering based on variant position
+        fn type_order(val: &MetadataValue) -> u8 {
+            match val {
+                MetadataValue::Bool(_) => 0,
+                MetadataValue::Int(_) => 1,
+                MetadataValue::Float(_) => 2,
+                MetadataValue::Str(_) => 3,
+                MetadataValue::SparseVector(_) => 4,
+            }
+        }
+
+        // Chain type ordering with value ordering
+        type_order(self).cmp(&type_order(other)).then_with(|| {
+            match (self, other) {
+                (MetadataValue::Bool(left), MetadataValue::Bool(right)) => left.cmp(right),
+                (MetadataValue::Int(left), MetadataValue::Int(right)) => left.cmp(right),
+                (MetadataValue::Float(left), MetadataValue::Float(right)) => left.total_cmp(right),
+                (MetadataValue::Str(left), MetadataValue::Str(right)) => left.cmp(right),
+                (MetadataValue::SparseVector(left), MetadataValue::SparseVector(right)) => {
+                    left.cmp(right)
+                }
+                _ => Ordering::Equal, // Different types, but type_order already handled this
+            }
+        })
+    }
+}
+
+impl PartialOrd for MetadataValue {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -210,6 +381,7 @@ impl From<MetadataValue> for UpdateMetadataValue {
             MetadataValue::Int(v) => UpdateMetadataValue::Int(v),
             MetadataValue::Float(v) => UpdateMetadataValue::Float(v),
             MetadataValue::Str(v) => UpdateMetadataValue::Str(v),
+            MetadataValue::SparseVector(v) => UpdateMetadataValue::SparseVector(v),
         }
     }
 }
@@ -225,6 +397,33 @@ impl From<MetadataValue> for Value {
                 Number::from_f64(val).expect("Inf and NaN should not be present in MetadataValue"),
             ),
             MetadataValue::Str(val) => Self::String(val),
+            MetadataValue::SparseVector(val) => {
+                let mut map = serde_json::Map::new();
+                map.insert(
+                    "indices".to_string(),
+                    Value::Array(
+                        val.indices
+                            .iter()
+                            .map(|&i| Value::Number(i.into()))
+                            .collect(),
+                    ),
+                );
+                map.insert(
+                    "values".to_string(),
+                    Value::Array(
+                        val.values
+                            .iter()
+                            .map(|&v| {
+                                Value::Number(
+                                    Number::from_f64(v as f64)
+                                        .expect("Float number should not be NaN or infinite"),
+                                )
+                            })
+                            .collect(),
+                    ),
+                );
+                Self::Object(map)
+            }
         }
     }
 }
@@ -260,6 +459,9 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for MetadataValue {
             Some(chroma_proto::update_metadata_value::Value::StringValue(value)) => {
                 Ok(MetadataValue::Str(value.clone()))
             }
+            Some(chroma_proto::update_metadata_value::Value::SparseVectorValue(value)) => {
+                Ok(MetadataValue::SparseVector(value.clone().into()))
+            }
             _ => Err(MetadataValueConversionError::InvalidValue),
         }
     }
@@ -283,6 +485,13 @@ impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
             },
             MetadataValue::Bool(value) => chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
+            },
+            MetadataValue::SparseVector(sparse_vec) => chroma_proto::UpdateMetadataValue {
+                value: Some(
+                    chroma_proto::update_metadata_value::Value::SparseVectorValue(
+                        sparse_vec.into(),
+                    ),
+                ),
             },
         }
     }
@@ -396,6 +605,9 @@ pub fn logical_size_of_metadata(metadata: &Metadata) -> usize {
                     MetadataValue::Int(i) => size_of_val(i),
                     MetadataValue::Float(f) => size_of_val(f),
                     MetadataValue::Str(s) => s.len(),
+                    MetadataValue::SparseVector(v) => {
+                        size_of_val(&v.indices[..]) + size_of_val(&v.values[..])
+                    }
                 }
         })
         .sum()
@@ -825,14 +1037,15 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
             MetadataComparison::Primitive(primitive_operator, metadata_value) => match metadata_value {
                 MetadataValue::Bool(value) => chroma_proto::direct_comparison::Comparison::SingleBoolOperand(chroma_proto::SingleBoolComparison { value, comparator: chroma_proto::GenericComparator::try_from(primitive_operator)? as i32 }),
                 MetadataValue::Int(value) => chroma_proto::direct_comparison::Comparison::SingleIntOperand(chroma_proto::SingleIntComparison { value, comparator: Some(match primitive_operator {
-                    generic_operator @ PrimitiveOperator::Equal | generic_operator @ PrimitiveOperator::NotEqual => chroma_proto::single_int_comparison::Comparator::GenericComparator(chroma_proto::GenericComparator::try_from(generic_operator)? as i32),
-                    numeric => chroma_proto::single_int_comparison::Comparator::NumberComparator(chroma_proto::NumberComparator::try_from(numeric)? as i32) }),
-                }),
+                                generic_operator @ PrimitiveOperator::Equal | generic_operator @ PrimitiveOperator::NotEqual => chroma_proto::single_int_comparison::Comparator::GenericComparator(chroma_proto::GenericComparator::try_from(generic_operator)? as i32),
+                                numeric => chroma_proto::single_int_comparison::Comparator::NumberComparator(chroma_proto::NumberComparator::try_from(numeric)? as i32) }),
+                            }),
                 MetadataValue::Float(value) => chroma_proto::direct_comparison::Comparison::SingleDoubleOperand(chroma_proto::SingleDoubleComparison { value, comparator: Some(match primitive_operator {
-                    generic_operator @ PrimitiveOperator::Equal | generic_operator @ PrimitiveOperator::NotEqual => chroma_proto::single_double_comparison::Comparator::GenericComparator(chroma_proto::GenericComparator::try_from(generic_operator)? as i32),
-                    numeric => chroma_proto::single_double_comparison::Comparator::NumberComparator(chroma_proto::NumberComparator::try_from(numeric)? as i32) }),
-                }),
+                                generic_operator @ PrimitiveOperator::Equal | generic_operator @ PrimitiveOperator::NotEqual => chroma_proto::single_double_comparison::Comparator::GenericComparator(chroma_proto::GenericComparator::try_from(generic_operator)? as i32),
+                                numeric => chroma_proto::single_double_comparison::Comparator::NumberComparator(chroma_proto::NumberComparator::try_from(numeric)? as i32) }),
+                            }),
                 MetadataValue::Str(value) => chroma_proto::direct_comparison::Comparison::SingleStringOperand(chroma_proto::SingleStringComparison { value, comparator: chroma_proto::GenericComparator::try_from(primitive_operator)? as i32 }),
+                MetadataValue::SparseVector(_) => return Err(WhereConversionError::Cause("Comparison with sparse vector is not supported".to_string())),
             },
             MetadataComparison::Set(set_operator, metadata_set_value) => match metadata_set_value {
                 MetadataSetValue::Bool(vec) => chroma_proto::direct_comparison::Comparison::BoolListOperand(chroma_proto::BoolListComparison { values: vec, list_operator: chroma_proto::ListOperator::from(set_operator) as i32 }),
@@ -947,17 +1160,6 @@ pub enum MetadataSetValue {
     Str(Vec<String>),
 }
 
-impl From<MetadataValue> for MetadataSetValue {
-    fn from(value: MetadataValue) -> Self {
-        match value {
-            MetadataValue::Bool(value) => Self::Bool(vec![value]),
-            MetadataValue::Int(value) => Self::Int(vec![value]),
-            MetadataValue::Float(value) => Self::Float(vec![value]),
-            MetadataValue::Str(value) => Self::Str(vec![value]),
-        }
-    }
-}
-
 // TODO: Deprecate where_document
 impl TryFrom<chroma_proto::WhereDocument> for Where {
     type Error = WhereConversionError;
@@ -1036,8 +1238,22 @@ mod tests {
                 )),
             },
         );
+        // Add sparse vector test
+        proto_metadata.metadata.insert(
+            "sparse".to_string(),
+            chroma_proto::UpdateMetadataValue {
+                value: Some(
+                    chroma_proto::update_metadata_value::Value::SparseVectorValue(
+                        chroma_proto::SparseVector {
+                            indices: vec![0, 5, 10],
+                            values: vec![0.1, 0.5, 0.9],
+                        },
+                    ),
+                ),
+            },
+        );
         let converted_metadata: UpdateMetadata = proto_metadata.try_into().unwrap();
-        assert_eq!(converted_metadata.len(), 3);
+        assert_eq!(converted_metadata.len(), 4);
         assert_eq!(
             converted_metadata.get("foo").unwrap(),
             &UpdateMetadataValue::Int(42)
@@ -1049,6 +1265,13 @@ mod tests {
         assert_eq!(
             converted_metadata.get("baz").unwrap(),
             &UpdateMetadataValue::Str("42".to_string())
+        );
+        assert_eq!(
+            converted_metadata.get("sparse").unwrap(),
+            &UpdateMetadataValue::SparseVector(SparseVector::new(
+                vec![0, 5, 10],
+                vec![0.1, 0.5, 0.9]
+            ))
         );
     }
 
@@ -1077,8 +1300,22 @@ mod tests {
                 )),
             },
         );
+        // Add sparse vector test
+        proto_metadata.metadata.insert(
+            "sparse".to_string(),
+            chroma_proto::UpdateMetadataValue {
+                value: Some(
+                    chroma_proto::update_metadata_value::Value::SparseVectorValue(
+                        chroma_proto::SparseVector {
+                            indices: vec![1, 10, 100],
+                            values: vec![0.2, 0.4, 0.6],
+                        },
+                    ),
+                ),
+            },
+        );
         let converted_metadata: Metadata = proto_metadata.try_into().unwrap();
-        assert_eq!(converted_metadata.len(), 3);
+        assert_eq!(converted_metadata.len(), 4);
         assert_eq!(
             converted_metadata.get("foo").unwrap(),
             &MetadataValue::Int(42)
@@ -1090,6 +1327,10 @@ mod tests {
         assert_eq!(
             converted_metadata.get("baz").unwrap(),
             &MetadataValue::Str("42".to_string())
+        );
+        assert_eq!(
+            converted_metadata.get("sparse").unwrap(),
+            &MetadataValue::SparseVector(SparseVector::new(vec![1, 10, 100], vec![0.2, 0.4, 0.6]))
         );
     }
 
@@ -1237,5 +1478,68 @@ mod tests {
             }
             _ => panic!("Invalid where document type"),
         }
+    }
+
+    #[test]
+    fn test_sparse_vector_new() {
+        let indices = vec![0, 5, 10];
+        let values = vec![0.1, 0.5, 0.9];
+        let sparse = SparseVector::new(indices.clone(), values.clone());
+        assert_eq!(sparse.indices, indices);
+        assert_eq!(sparse.values, values);
+    }
+
+    #[test]
+    fn test_sparse_vector_from_pairs() {
+        let pairs = vec![(0, 0.1), (5, 0.5), (10, 0.9)];
+        let sparse = SparseVector::from_pairs(pairs.clone());
+        assert_eq!(sparse.indices, vec![0, 5, 10]);
+        assert_eq!(sparse.values, vec![0.1, 0.5, 0.9]);
+    }
+
+    #[test]
+    fn test_sparse_vector_iter() {
+        let sparse = SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]);
+        let collected: Vec<(u32, f32)> = sparse.iter().collect();
+        assert_eq!(collected, vec![(0, 0.1), (5, 0.5), (10, 0.9)]);
+    }
+
+    #[test]
+    fn test_sparse_vector_ordering() {
+        let sparse1 = SparseVector::new(vec![0, 5], vec![0.1, 0.5]);
+        let sparse2 = SparseVector::new(vec![0, 5], vec![0.1, 0.5]);
+        let sparse3 = SparseVector::new(vec![0, 6], vec![0.1, 0.5]);
+        let sparse4 = SparseVector::new(vec![0, 5], vec![0.1, 0.6]);
+
+        assert_eq!(sparse1, sparse2);
+        assert!(sparse1 < sparse3);
+        assert!(sparse1 < sparse4);
+    }
+
+    #[test]
+    fn test_sparse_vector_proto_conversion() {
+        let sparse = SparseVector::new(vec![1, 10, 100], vec![0.2, 0.4, 0.6]);
+        let proto: chroma_proto::SparseVector = sparse.clone().into();
+        assert_eq!(proto.indices, vec![1, 10, 100]);
+        assert_eq!(proto.values, vec![0.2, 0.4, 0.6]);
+
+        let converted: SparseVector = proto.into();
+        assert_eq!(converted, sparse);
+    }
+
+    #[test]
+    fn test_sparse_vector_logical_size() {
+        let metadata = Metadata::from([(
+            "sparse".to_string(),
+            MetadataValue::SparseVector(SparseVector::new(
+                vec![0, 1, 2, 3, 4],
+                vec![0.1, 0.2, 0.3, 0.4, 0.5],
+            )),
+        )]);
+
+        let size = logical_size_of_metadata(&metadata);
+        // Size should include the key string length and the sparse vector data
+        // "sparse" = 6 bytes + 5 * 4 bytes (u32 indices) + 5 * 4 bytes (f32 values) = 46 bytes
+        assert_eq!(size, 46);
     }
 }

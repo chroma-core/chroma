@@ -15,7 +15,7 @@ use chroma_memberlist::memberlist_provider::{
     CustomResourceMemberlistProvider, MemberlistProvider,
 };
 use chroma_system::System;
-use chroma_tracing::GrpcTraceService;
+use chroma_tracing::GrpcClientTraceService;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse};
 use chroma_types::{
@@ -194,13 +194,32 @@ impl ChromaError for GrpcMigrateLogError {
     }
 }
 
-type LogClient = LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>;
+type LogClient =
+    LogServiceClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>;
+
+#[derive(Clone, Debug)]
+struct GrpcLogMetrics {
+    total_logs_pushed: opentelemetry::metrics::Counter<u64>,
+}
+
+impl Default for GrpcLogMetrics {
+    fn default() -> Self {
+        let meter = opentelemetry::global::meter("chroma.log_client");
+        Self {
+            total_logs_pushed: meter
+                .u64_counter("total_logs_pushed")
+                .with_description("The total number of log records pushed")
+                .build(),
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct GrpcLog {
     config: GrpcLogConfig,
     client: LogClient,
     alt_client_assigner: Option<ClientAssigner<LogClient>>,
+    metrics: GrpcLogMetrics,
 }
 
 impl GrpcLog {
@@ -214,6 +233,7 @@ impl GrpcLog {
             config,
             client,
             alt_client_assigner,
+            metrics: GrpcLogMetrics::default(),
         }
     }
 }
@@ -283,7 +303,7 @@ impl Configurable<(GrpcLogConfig, System)> for GrpcLog {
 async fn client_for_conn_str(
     connection_string: String,
     my_config: GrpcLogConfig,
-) -> Result<LogServiceClient<GrpcTraceService<Channel>>, tonic::transport::Error> {
+) -> Result<LogServiceClient<GrpcClientTraceService<Channel>>, tonic::transport::Error> {
     tracing::info!("Connecting to log service at {}", connection_string);
     let endpoint_res = Endpoint::from_shared(connection_string)?;
     let endpoint_res = endpoint_res
@@ -291,7 +311,7 @@ async fn client_for_conn_str(
         .timeout(Duration::from_millis(my_config.request_timeout_ms));
     let channel = endpoint_res.connect().await?;
     let channel = ServiceBuilder::new()
-        .layer(chroma_tracing::GrpcTraceLayer)
+        .layer(chroma_tracing::GrpcClientTraceLayer)
         .service(channel);
     let client = LogServiceClient::new(channel)
         .max_encoding_message_size(my_config.max_encoding_message_size)
@@ -304,7 +324,7 @@ impl GrpcLog {
     pub async fn primary_client_from_config(
         my_config: &GrpcLogConfig,
     ) -> Result<
-        LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
+        LogServiceClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>,
         Box<dyn ChromaError>,
     > {
         let host = &my_config.host;
@@ -334,7 +354,7 @@ impl GrpcLog {
         tenant: &str,
         collection_id: CollectionUuid,
     ) -> Result<
-        LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
+        LogServiceClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>,
         ClientAssignmentError,
     > {
         if let Some(client_assigner) = self.alt_client_assigner.as_mut() {
@@ -427,6 +447,7 @@ impl GrpcLog {
                         }
                     }
                 }
+
                 Ok(result)
             }
             Err(e) => {
@@ -448,6 +469,7 @@ impl GrpcLog {
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
     ) -> Result<(), GrpcPushLogsError> {
+        let num_records = records.len();
         let request = chroma_proto::PushLogsRequest {
             collection_id: collection_id.0.to_string(),
 
@@ -479,6 +501,8 @@ impl GrpcLog {
         if resp.log_is_sealed {
             Err(GrpcPushLogsError::Sealed)
         } else {
+            self.metrics.total_logs_pushed.add(num_records as u64, &[]);
+
             Ok(())
         }
     }
@@ -843,7 +867,7 @@ impl GrpcLog {
             ))
         })?;
         let channel = ServiceBuilder::new()
-            .layer(chroma_tracing::GrpcTraceLayer)
+            .layer(chroma_tracing::GrpcClientTraceLayer)
             .service(channel);
         let mut log = LogServiceClient::new(channel);
         log.garbage_collect_phase2(chroma_proto::GarbageCollectPhase2Request {

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
@@ -9,27 +11,32 @@ use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
-use chroma_tracing::util::wrap_span_with_parent_context;
 use chroma_types::{
     chroma_proto::{
         self,
         query_executor_server::{QueryExecutor, QueryExecutorServer},
     },
-    operator::{GetResult, KnnBatch, KnnBatchResult, KnnProjection, Scan},
+    operator::{GetResult, Knn, KnnBatch, KnnBatchResult, KnnProjection, QueryVector, Scan},
+    plan::SearchPayload,
     CollectionAndSegments, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
-use tracing::{trace_span, Instrument};
 
 use crate::{
     config::QueryServiceConfig,
     execution::{
         operators::fetch_log::FetchLogOperator,
         orchestration::{
-            get::GetOrchestrator, knn::KnnOrchestrator, knn_filter::KnnFilterOrchestrator,
-            spann_knn::SpannKnnOrchestrator, CountOrchestrator,
+            get::GetOrchestrator,
+            knn::KnnOrchestrator,
+            knn_filter::KnnFilterOrchestrator,
+            projection::ProjectionOrchestrator,
+            rank::{RankOrchestrator, RankOrchestratorOutput},
+            spann_knn::SpannKnnOrchestrator,
+            sparse_knn::SparseKnnOrchestrator,
+            CountOrchestrator,
         },
     },
 };
@@ -50,6 +57,7 @@ pub struct WorkerServer {
     jemalloc_pprof_server_port: Option<u16>,
     // config
     fetch_log_batch_size: u32,
+    shutdown_grace_period: Duration,
 }
 
 #[async_trait]
@@ -92,6 +100,7 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             port: config.my_port,
             jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
             fetch_log_batch_size: config.fetch_log_batch_size,
+            shutdown_grace_period: config.grpc_shutdown_grace_period,
         })
     }
 }
@@ -104,6 +113,7 @@ impl WorkerServer {
         let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
 
         let server = Server::builder()
+            .layer(chroma_tracing::GrpcServerTraceLayer)
             .add_service(health_service)
             .add_service(QueryExecutorServer::new(worker.clone()));
 
@@ -121,6 +131,7 @@ impl WorkerServer {
             chroma_types::chroma_proto::debug_server::DebugServer::new(worker.clone()),
         );
 
+        let shutdown_grace_period = worker.shutdown_grace_period;
         let server = server.serve_with_shutdown(addr, async {
             let mut sigterm = match signal(SignalKind::terminate()) {
                 Ok(sigterm) => sigterm,
@@ -130,7 +141,10 @@ impl WorkerServer {
                 }
             };
             sigterm.recv().await;
-            tracing::info!("Received SIGTERM, shutting down");
+            tracing::info!("Received SIGTERM, waiting for grace period...");
+            // Note: gRPC calls can still be successfully made during this period. We rely on the memberlist updating to stop clients from sending new requests. Ideally there would be a Tower layer that rejected new requests during this period with UNAVAILABLE or similar.
+            tokio::time::sleep(shutdown_grace_period).await;
+            tracing::info!("Grace period ended, shutting down server...");
         });
 
         tokio::spawn(async move {
@@ -339,22 +353,51 @@ impl WorkerServer {
 
         if vector_segment_type == SegmentType::Spann {
             tracing::debug!("Running KNN on SPANN segment");
-            let knn_orchestrator_futures = Vec::from(KnnBatch::try_from(knn)?)
-                .into_iter()
-                .map(|knn| {
-                    SpannKnnOrchestrator::new(
-                        self.spann_provider.clone(),
-                        dispatcher.clone(),
-                        1000,
-                        collection_and_segments.collection.clone(),
-                        matching_records.clone(),
-                        knn.fetch as usize,
-                        knn.embedding,
-                        knn_projection.clone(),
-                    )
-                })
-                .map(|knner| knner.run(system.clone()));
-            match stream::iter(knn_orchestrator_futures)
+            // Create unified futures that run KNN then projection
+            let knn_with_projection_futures =
+                Vec::from(KnnBatch::try_from(knn)?).into_iter().map(|knn| {
+                    let spann_provider = self.spann_provider.clone();
+                    let dispatcher = dispatcher.clone();
+                    let collection_and_segments = collection_and_segments.clone();
+                    let matching_records = matching_records.clone();
+                    let system = system.clone();
+                    let blockfile_provider = self.blockfile_provider.clone();
+                    let knn_projection = knn_projection.clone();
+
+                    async move {
+                        // Run KNN orchestrator
+                        let knn_orchestrator = SpannKnnOrchestrator::new(
+                            spann_provider,
+                            dispatcher.clone(),
+                            1000,
+                            collection_and_segments.clone(),
+                            matching_records.clone(),
+                            knn.fetch as usize,
+                            knn.embedding,
+                        );
+                        let record_distances = knn_orchestrator
+                            .run(system.clone())
+                            .await
+                            .map_err(|e| Status::new(e.code().into(), e.to_string()))?;
+
+                        // Run projection orchestrator
+                        let projection_orchestrator = ProjectionOrchestrator::new(
+                            dispatcher,
+                            1000,
+                            blockfile_provider,
+                            matching_records.logs.clone(),
+                            collection_and_segments.record_segment.clone(),
+                            record_distances,
+                            knn_projection,
+                        );
+                        projection_orchestrator
+                            .run(system)
+                            .await
+                            .map_err(|e| Status::new(e.code().into(), e.to_string()))
+                    }
+                });
+
+            match stream::iter(knn_with_projection_futures)
                 .buffered(32)
                 .try_collect::<Vec<_>>()
                 .await
@@ -366,25 +409,53 @@ impl WorkerServer {
                     }
                     .try_into()?,
                 )),
-                Err(err) => Err(Status::new(err.code().into(), err.to_string())),
+                Err(err) => Err(err),
             }
         } else {
-            let knn_orchestrator_futures = Vec::from(KnnBatch::try_from(knn)?)
-                .into_iter()
-                .map(|knn| {
-                    KnnOrchestrator::new(
-                        self.blockfile_provider.clone(),
-                        dispatcher.clone(),
-                        // TODO: Make this configurable
-                        1000,
-                        matching_records.clone(),
-                        knn,
-                        knn_projection.clone(),
-                    )
-                })
-                .map(|knner| knner.run(system.clone()));
+            // Create unified futures that run KNN then projection
+            let knn_with_projection_futures =
+                Vec::from(KnnBatch::try_from(knn)?).into_iter().map(|knn| {
+                    let blockfile_provider = self.blockfile_provider.clone();
+                    let dispatcher = dispatcher.clone();
+                    let collection_and_segments = collection_and_segments.clone();
+                    let matching_records = matching_records.clone();
+                    let system = system.clone();
+                    let knn_projection = knn_projection.clone();
 
-            match stream::iter(knn_orchestrator_futures)
+                    async move {
+                        // Run KNN orchestrator
+                        let knn_orchestrator = KnnOrchestrator::new(
+                            blockfile_provider.clone(),
+                            dispatcher.clone(),
+                            // TODO: Make this configurable
+                            1000,
+                            collection_and_segments.clone(),
+                            matching_records.clone(),
+                            knn,
+                        );
+                        let record_distances = knn_orchestrator
+                            .run(system.clone())
+                            .await
+                            .map_err(|e| Status::new(e.code().into(), e.to_string()))?;
+
+                        // Run projection orchestrator
+                        let projection_orchestrator = ProjectionOrchestrator::new(
+                            dispatcher,
+                            1000,
+                            blockfile_provider,
+                            matching_records.logs.clone(),
+                            collection_and_segments.record_segment.clone(),
+                            record_distances,
+                            knn_projection,
+                        );
+                        projection_orchestrator
+                            .run(system)
+                            .await
+                            .map_err(|e| Status::new(e.code().into(), e.to_string()))
+                    }
+                });
+
+            match stream::iter(knn_with_projection_futures)
                 .buffered(32)
                 .try_collect::<Vec<_>>()
                 .await
@@ -396,9 +467,171 @@ impl WorkerServer {
                     }
                     .try_into()?,
                 )),
-                Err(err) => Err(Status::new(err.code().into(), err.to_string())),
+                Err(err) => Err(err),
             }
         }
+    }
+
+    async fn orchestrate_search(
+        &self,
+        scan: chroma_proto::ScanOperator,
+        payload: chroma_proto::SearchPayload,
+    ) -> Result<RankOrchestratorOutput, Status> {
+        let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
+        let search_payload = SearchPayload::try_from(payload)?;
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
+
+        let knn_filter_orchestrator = KnnFilterOrchestrator::new(
+            self.blockfile_provider.clone(),
+            self.clone_dispatcher()?,
+            self.hnsw_index_provider.clone(),
+            1000, // TODO: Make this configurable
+            collection_and_segments.clone(),
+            fetch_log,
+            search_payload.filter.clone(),
+        );
+
+        let matching_records = match knn_filter_orchestrator.run(self.system.clone()).await {
+            Ok(output) => output,
+            Err(e) => {
+                return Err(Status::new(e.code().into(), e.to_string()));
+            }
+        };
+
+        let knn_queries = search_payload.rank.knn_queries();
+        let mut knn_futures = Vec::with_capacity(knn_queries.len());
+
+        for knn_query in knn_queries {
+            let matching_records_clone = matching_records.clone();
+            let collection_and_segments_clone = collection_and_segments.clone();
+            let system_clone = self.system.clone();
+            let dispatcher = self.clone_dispatcher()?;
+            let blockfile_provider = self.blockfile_provider.clone();
+            let spann_provider = self.spann_provider.clone();
+
+            knn_futures.push(async move {
+                let result = match knn_query.embedding {
+                    QueryVector::Dense(embedding) => {
+                        // Check segment type to decide between HNSW and SPANN
+                        let vector_segment_type =
+                            collection_and_segments_clone.vector_segment.r#type;
+
+                        if vector_segment_type == SegmentType::Spann {
+                            // Use SPANN KNN orchestrator
+                            let spann_orchestrator = SpannKnnOrchestrator::new(
+                                spann_provider,
+                                dispatcher,
+                                1000,
+                                collection_and_segments_clone,
+                                matching_records_clone,
+                                knn_query.limit as usize,
+                                embedding,
+                            );
+
+                            spann_orchestrator
+                                .run(system_clone)
+                                .await
+                                .map_err(|e| Status::new(e.code().into(), e.to_string()))?
+                        } else {
+                            // Use HNSW KNN orchestrator
+                            let knn = Knn {
+                                embedding,
+                                fetch: knn_query.limit,
+                            };
+
+                            let knn_orchestrator = KnnOrchestrator::new(
+                                blockfile_provider,
+                                dispatcher,
+                                1000,
+                                collection_and_segments_clone,
+                                matching_records_clone,
+                                knn,
+                            );
+
+                            knn_orchestrator
+                                .run(system_clone)
+                                .await
+                                .map_err(|e| Status::new(e.code().into(), e.to_string()))?
+                        }
+                    }
+                    QueryVector::Sparse(embedding) => {
+                        // Use Sparse KNN orchestrator
+                        let sparse_orchestrator = SparseKnnOrchestrator::new(
+                            blockfile_provider,
+                            dispatcher,
+                            1000,
+                            collection_and_segments_clone,
+                            matching_records_clone,
+                            embedding,
+                            knn_query.key.clone(),
+                            knn_query.limit,
+                        );
+
+                        sparse_orchestrator
+                            .run(system_clone)
+                            .await
+                            .map_err(|e| Status::new(e.code().into(), e.to_string()))?
+                    }
+                };
+
+                Ok::<_, Status>(result)
+            });
+        }
+
+        let knn_results = stream::iter(knn_futures)
+            .buffered(32)
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        // Run RankOrchestrator to evaluate ranks and select results
+        let rank_orchestrator = RankOrchestrator::new(
+            self.blockfile_provider.clone(),
+            self.clone_dispatcher()?,
+            1000, // TODO: Make this configurable
+            knn_results,
+            search_payload.rank,
+            search_payload.limit,
+            search_payload.select,
+            collection_and_segments,
+            matching_records.logs,
+        );
+
+        rank_orchestrator
+            .run(self.system.clone())
+            .await
+            .map_err(|err| Status::new(err.code().into(), err.to_string()))
+    }
+
+    async fn orchestrate_search_batch(
+        &self,
+        search: Request<chroma_proto::SearchPlan>,
+    ) -> Result<Response<chroma_proto::SearchResult>, Status> {
+        let search_plan = search.into_inner();
+        let scan = search_plan
+            .scan
+            .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
+
+        let futures = search_plan
+            .payloads
+            .into_iter()
+            .map(|payload| self.orchestrate_search(scan.clone(), payload));
+
+        let orchestrator_results = stream::iter(futures)
+            .buffered(32) // Process up to 32 payloads concurrently
+            .try_collect::<Vec<_>>()
+            .await?;
+        let (results, pulled_log_bytes) = orchestrator_results
+            .into_iter()
+            .map(|output| (output.result, output.pulled_log_bytes))
+            .unzip::<_, _, Vec<_>, Vec<_>>();
+
+        Ok(Response::new(chroma_proto::SearchResult {
+            results: results
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+            pulled_log_bytes: pulled_log_bytes.into_iter().max().unwrap_or_default(),
+        }))
     }
 
     fn clone_dispatcher(&self) -> Result<ComponentHandle<Dispatcher>, Status> {
@@ -415,39 +648,28 @@ impl QueryExecutor for WorkerServer {
         &self,
         count: Request<chroma_proto::CountPlan>,
     ) -> Result<Response<chroma_proto::CountResult>, Status> {
-        // Note: We cannot write a middleware that instruments every service rpc
-        // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let count_span = trace_span!("CountPlan",);
-        let instrumented_span = wrap_span_with_parent_context(count_span, count.metadata());
-        self.orchestrate_count(count)
-            .instrument(instrumented_span)
-            .await
+        self.orchestrate_count(count).await
     }
 
     async fn get(
         &self,
         get: Request<chroma_proto::GetPlan>,
     ) -> Result<Response<chroma_proto::GetResult>, Status> {
-        // Note: We cannot write a middleware that instruments every service rpc
-        // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let get_span = trace_span!("GetPlan",);
-        let instrumented_span = wrap_span_with_parent_context(get_span, get.metadata());
-        self.orchestrate_get(get)
-            .instrument(instrumented_span)
-            .await
+        self.orchestrate_get(get).await
     }
 
     async fn knn(
         &self,
         knn: Request<chroma_proto::KnnPlan>,
     ) -> Result<Response<chroma_proto::KnnBatchResult>, Status> {
-        // Note: We cannot write a middleware that instruments every service rpc
-        // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let knn_span = trace_span!("KnnPlan",);
-        let instrumented_span = wrap_span_with_parent_context(knn_span, knn.metadata());
-        self.orchestrate_knn(knn)
-            .instrument(instrumented_span)
-            .await
+        self.orchestrate_knn(knn).await
+    }
+
+    async fn search(
+        &self,
+        request: Request<chroma_proto::SearchPlan>,
+    ) -> Result<Response<chroma_proto::SearchResult>, Status> {
+        self.orchestrate_search_batch(request).await
     }
 }
 
@@ -456,30 +678,18 @@ impl QueryExecutor for WorkerServer {
 impl chroma_types::chroma_proto::debug_server::Debug for WorkerServer {
     async fn get_info(
         &self,
-        request: Request<()>,
+        _request: Request<()>,
     ) -> Result<Response<chroma_types::chroma_proto::GetInfoResponse>, Status> {
-        // Note: We cannot write a middleware that instruments every service rpc
-        // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let request_span = trace_span!("Get info");
-
-        wrap_span_with_parent_context(request_span, request.metadata()).in_scope(|| {
-            let response = chroma_types::chroma_proto::GetInfoResponse {
-                version: option_env!("CARGO_PKG_VERSION")
-                    .unwrap_or("unknown")
-                    .to_string(),
-            };
-            Ok(Response::new(response))
-        })
+        let response = chroma_types::chroma_proto::GetInfoResponse {
+            version: option_env!("CARGO_PKG_VERSION")
+                .unwrap_or("unknown")
+                .to_string(),
+        };
+        Ok(Response::new(response))
     }
 
-    async fn trigger_panic(&self, request: Request<()>) -> Result<Response<()>, Status> {
-        // Note: We cannot write a middleware that instruments every service rpc
-        // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let request_span = trace_span!("Trigger panic");
-
-        wrap_span_with_parent_context(request_span, request.metadata()).in_scope(|| {
-            panic!("Intentional panic triggered");
-        })
+    async fn trigger_panic(&self, _request: Request<()>) -> Result<Response<()>, Status> {
+        panic!("Intentional panic triggered");
     }
 }
 
@@ -516,6 +726,7 @@ mod tests {
             port,
             jemalloc_pprof_server_port: None,
             fetch_log_batch_size: 100,
+            shutdown_grace_period: Duration::from_secs(1),
         };
 
         let dispatcher = Dispatcher::new(DispatcherConfig {
@@ -630,8 +841,8 @@ mod tests {
             scan: Some(scan_operator.clone()),
             filter: None,
             limit: Some(chroma_proto::LimitOperator {
-                skip: 0,
-                fetch: None,
+                offset: 0,
+                limit: None,
             }),
             projection: Some(chroma_proto::ProjectionOperator {
                 document: false,
@@ -663,8 +874,8 @@ mod tests {
                 where_document: None,
             }),
             limit: Some(chroma_proto::LimitOperator {
-                skip: 0,
-                fetch: None,
+                offset: 0,
+                limit: None,
             }),
             projection: Some(chroma_proto::ProjectionOperator {
                 document: false,

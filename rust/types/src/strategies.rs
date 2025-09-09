@@ -1,8 +1,8 @@
 use crate::{
     regex::hir::ChromaHir, Collection, CollectionAndSegments, CollectionUuid, DocumentExpression,
     DocumentOperator, IncludeList, LogRecord, Metadata, MetadataComparison, MetadataExpression,
-    MetadataValue, Operation, OperationRecord, PrimitiveOperator, ScalarEncoding, Segment,
-    SegmentType, SegmentUuid, SetOperator, UpdateMetadata, UpdateMetadataValue, Where,
+    MetadataSetValue, MetadataValue, Operation, OperationRecord, PrimitiveOperator, ScalarEncoding,
+    Segment, SegmentType, SegmentUuid, SetOperator, UpdateMetadata, UpdateMetadataValue, Where,
 };
 use proptest::{collection, prelude::*, sample::SizeRange, string::string_regex};
 use regex_syntax::hir::{ClassUnicode, ClassUnicodeRange};
@@ -355,7 +355,18 @@ impl Arbitrary for TestWhereFilter {
                 any::<SetOperator>().prop_map(move |op| {
                     Where::Metadata(MetadataExpression {
                         key: key.to_string(),
-                        comparison: MetadataComparison::Set(op, value.clone().into()),
+                        comparison: MetadataComparison::Set(
+                            op,
+                            match value.clone() {
+                                MetadataValue::Bool(v) => MetadataSetValue::Bool(vec![v]),
+                                MetadataValue::Int(v) => MetadataSetValue::Int(vec![v]),
+                                MetadataValue::Float(v) => MetadataSetValue::Float(vec![v]),
+                                MetadataValue::Str(v) => MetadataSetValue::Str(vec![v]),
+                                MetadataValue::SparseVector(_) => {
+                                    unreachable!("Metadata expression should not use sparse vector")
+                                }
+                            },
+                        ),
                     })
                 }),
             ]

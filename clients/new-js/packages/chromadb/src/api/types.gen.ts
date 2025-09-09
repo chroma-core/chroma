@@ -131,7 +131,7 @@ export type GetUserIdentityResponse = {
 };
 
 export type HashMap = {
-  [key: string]: boolean | number | string | null;
+  [key: string]: boolean | number | string | SparseVector | null;
 };
 
 export type HeartbeatResponse = {
@@ -175,6 +175,53 @@ export type RawWhereFields = {
     where_document?: unknown;
 };
 
+/**
+ * Payload for hybrid search
+ */
+export type SearchPayload = {
+    /**
+     * Filter criteria for search
+     */
+    filter: {
+        query_ids?: Array<string>;
+        where_clause?: {
+            [key: string]: unknown;
+        };
+    };
+    limit: {
+        fetch?: number;
+        skip: number;
+    };
+    /**
+     * Ranking expression for hybrid search
+     */
+    rank: {
+        [key: string]: {
+            [key: string]: unknown;
+        };
+    };
+    select: {
+        fields: Array<string>;
+    };
+};
+
+export type SearchRequestPayload = {
+    searches: Array<SearchPayload>;
+};
+
+export type SearchResponse = {
+    documents: Array<Array<string | null> | null>;
+    embeddings: Array<Array<Array<number> | null> | null>;
+    ids: Array<Array<string>>;
+    metadatas: Array<Array<null | HashMap> | null>;
+    scores: Array<Array<number | null> | null>;
+    select: Array<Array<SelectField>>;
+};
+
+export type SelectField = 'Document' | 'Embedding' | 'Metadata' | 'Score' | {
+    MetadataField: string;
+};
+
 export type SpannConfiguration = {
     ef_construction?: number | null;
     ef_search?: number | null;
@@ -185,6 +232,20 @@ export type SpannConfiguration = {
     space?: null | HnswSpace;
     split_threshold?: number | null;
     write_nprobe?: number | null;
+};
+
+/**
+ * Represents a sparse vector using parallel arrays for indices and values.
+ */
+export type SparseVector = {
+    /**
+     * Dimension indices
+     */
+    indices: Array<number>;
+    /**
+     * Values corresponding to each index
+     */
+    values: Array<number>;
 };
 
 export type UpdateCollectionConfiguration = {
@@ -1190,6 +1251,52 @@ export type CollectionQueryResponses = {
 };
 
 export type CollectionQueryResponse = CollectionQueryResponses[keyof CollectionQueryResponses];
+
+export type CollectionSearchData = {
+    body: SearchRequestPayload;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name for the collection
+         */
+        database: string;
+        /**
+         * Collection ID to search records from
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search';
+};
+
+export type CollectionSearchErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Collection not found
+     */
+    404: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type CollectionSearchError = CollectionSearchErrors[keyof CollectionSearchErrors];
+
+export type CollectionSearchResponses = {
+    /**
+     * Records searched from the collection
+     */
+    200: SearchResponse;
+};
+
+export type CollectionSearchResponse = CollectionSearchResponses[keyof CollectionSearchResponses];
 
 export type CollectionUpdateData = {
     body: UpdateCollectionRecordsPayload;

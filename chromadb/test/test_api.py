@@ -1831,3 +1831,277 @@ def test_query_id_filtering_e2e(client):
             include=includes,
         )
     assert "Error finding id" in str(error.value)
+
+
+def test_validate_sparse_vector():
+    """Test the validate_sparse_vector function with various inputs."""
+    from chromadb.api.types import validate_sparse_vector
+    
+    # Test 1: Valid sparse vector
+    valid_sparse = {
+        "indices": [0, 2, 5],
+        "values": [0.1, 0.5, 0.9]
+    }
+    # Should not raise
+    validate_sparse_vector(valid_sparse)
+    
+    # Test 2: Valid sparse vector with empty lists
+    valid_empty = {
+        "indices": [],
+        "values": []
+    }
+    # Should not raise
+    validate_sparse_vector(valid_empty)
+    
+    # Test 3: Invalid - not a dict
+    with pytest.raises(ValueError, match="Expected SparseVector to be a dict"):
+        validate_sparse_vector([1, 2, 3])
+    
+    # Test 4: Invalid - missing 'indices' key
+    with pytest.raises(ValueError, match="SparseVector must have 'indices' and 'values' keys"):
+        validate_sparse_vector({"values": [0.1, 0.2]})
+    
+    # Test 5: Invalid - missing 'values' key
+    with pytest.raises(ValueError, match="SparseVector must have 'indices' and 'values' keys"):
+        validate_sparse_vector({"indices": [0, 1]})
+    
+    # Test 6: Invalid - indices not a list
+    with pytest.raises(ValueError, match="Expected SparseVector indices to be a list"):
+        validate_sparse_vector({
+            "indices": "not_a_list",
+            "values": [0.1, 0.2]
+        })
+    
+    # Test 7: Invalid - values not a list
+    with pytest.raises(ValueError, match="Expected SparseVector values to be a list"):
+        validate_sparse_vector({
+            "indices": [0, 1],
+            "values": "not_a_list"
+        })
+    
+    # Test 8: Invalid - mismatched lengths
+    with pytest.raises(ValueError, match="indices and values must have the same length"):
+        validate_sparse_vector({
+            "indices": [0, 1, 2],
+            "values": [0.1, 0.2]
+        })
+    
+    # Test 9: Invalid - non-integer index
+    with pytest.raises(ValueError, match="SparseVector indices must be integers"):
+        validate_sparse_vector({
+            "indices": [0, "not_int", 2],
+            "values": [0.1, 0.2, 0.3]
+        })
+    
+    # Test 10: Invalid - negative index
+    with pytest.raises(ValueError, match="SparseVector indices must be non-negative"):
+        validate_sparse_vector({
+            "indices": [0, -1, 2],
+            "values": [0.1, 0.2, 0.3]
+        })
+    
+    # Test 11: Invalid - non-numeric value
+    with pytest.raises(ValueError, match="SparseVector values must be numbers"):
+        validate_sparse_vector({
+            "indices": [0, 1, 2],
+            "values": [0.1, "not_number", 0.3]
+        })
+    
+    # Test 12: Valid - float indices get converted to int in practice
+    with pytest.raises(ValueError, match="SparseVector indices must be integers"):
+        validate_sparse_vector({
+            "indices": [0.0, 1.0, 2.0],
+            "values": [0.1, 0.2, 0.3]
+        })
+    
+    # Test 13: Valid - integer values (not just floats)
+    valid_int_values = {
+        "indices": [0, 1, 2],
+        "values": [1, 2, 3]
+    }
+    # Should not raise
+    validate_sparse_vector(valid_int_values)
+    
+    # Test 14: Valid - mixed int and float values
+    valid_mixed = {
+        "indices": [0, 1, 2],
+        "values": [1, 2.5, 3]
+    }
+    # Should not raise
+    validate_sparse_vector(valid_mixed)
+    
+    # Test 15: Valid - large indices
+    valid_large = {
+        "indices": [100, 1000, 10000],
+        "values": [0.1, 0.2, 0.3]
+    }
+    # Should not raise
+    validate_sparse_vector(valid_large)
+    
+    # Test 16: Invalid - None as value
+    with pytest.raises(ValueError, match="SparseVector values must be numbers"):
+        validate_sparse_vector({
+            "indices": [0, 1],
+            "values": [0.1, None]
+        })
+    
+    # Test 17: Invalid - None as index
+    with pytest.raises(ValueError, match="SparseVector indices must be integers"):
+        validate_sparse_vector({
+            "indices": [0, None],
+            "values": [0.1, 0.2]
+        })
+    
+    # Test 18: Valid - single element
+    valid_single = {
+        "indices": [42],
+        "values": [3.14]
+    }
+    # Should not raise
+    validate_sparse_vector(valid_single)
+    
+    # Test 19: Invalid - extra keys (should still be valid as long as required keys exist)
+    valid_extra_keys = {
+        "indices": [0, 1],
+        "values": [0.1, 0.2],
+        "extra": "ignored"
+    }
+    # Should not raise - extra keys are ignored
+    validate_sparse_vector(valid_extra_keys)
+    
+    # Test 20: Boolean values are actually valid (bool is subclass of int in Python)
+    valid_bool = {
+        "indices": [0, 1],
+        "values": [True, False]  # True=1, False=0
+    }
+    # Should not raise - booleans are treated as integers
+    validate_sparse_vector(valid_bool)
+
+
+def test_sparse_vector_in_metadata_validation():
+    """Test that sparse vectors are properly validated in metadata."""
+    from chromadb.api.types import validate_metadata
+    
+    # Test 1: Valid metadata with sparse vectors
+    sparse_vector_1 = {
+        "indices": [0, 2, 5],
+        "values": [0.1, 0.5, 0.9]
+    }
+    sparse_vector_2 = {
+        "indices": [1, 3, 4],
+        "values": [0.2, 0.4, 0.6]
+    }
+    
+    # Validate metadata with sparse vectors
+    metadata_1 = {
+        "text": "document 1",
+        "sparse_embedding": sparse_vector_1,
+        "score": 0.5
+    }
+    metadata_2 = {
+        "text": "document 2", 
+        "sparse_embedding": sparse_vector_2,
+        "score": 0.8
+    }
+    
+    # Should not raise
+    validate_metadata(metadata_1)
+    validate_metadata(metadata_2)
+    
+    # Test 2: Valid metadata with empty sparse vector
+    metadata_empty = {
+        "text": "empty sparse",
+        "sparse_vec": {
+            "indices": [],
+            "values": []
+        }
+    }
+    # Should not raise
+    validate_metadata(metadata_empty)
+    
+    # Test 3: Invalid sparse vector in metadata should raise
+    invalid_metadata = {
+        "text": "invalid",
+        "sparse_embedding": {
+            "indices": [0, 1],
+            "values": [0.1]  # Mismatched length
+        }
+    }
+    
+    with pytest.raises(ValueError, match="indices and values must have the same length"):
+        validate_metadata(invalid_metadata)
+    
+    # Test 4: Invalid dict in metadata (not a sparse vector - missing indices)
+    # This will be rejected as an invalid metadata type, not as an invalid sparse vector
+    invalid_metadata_2 = {
+        "text": "missing indices",
+        "sparse_embedding": {
+            "values": [0.1, 0.2]
+        }
+    }
+    
+    with pytest.raises(ValueError, match="Expected metadata value to be a str, int, float, bool, SparseVector, or None"):
+        validate_metadata(invalid_metadata_2)
+    
+    # Test 5: Invalid sparse vector - negative index
+    invalid_metadata_3 = {
+        "text": "negative index",
+        "sparse_embedding": {
+            "indices": [0, -1, 2],
+            "values": [0.1, 0.2, 0.3]
+        }
+    }
+    
+    with pytest.raises(ValueError, match="SparseVector indices must be non-negative"):
+        validate_metadata(invalid_metadata_3)
+    
+    # Test 6: Invalid sparse vector - non-numeric value
+    invalid_metadata_4 = {
+        "text": "non-numeric value",
+        "sparse_embedding": {
+            "indices": [0, 1],
+            "values": [0.1, "not_a_number"]
+        }
+    }
+    
+    with pytest.raises(ValueError, match="SparseVector values must be numbers"):
+        validate_metadata(invalid_metadata_4)
+    
+    # Test 7: Multiple sparse vectors in metadata
+    metadata_multiple = {
+        "text": "multiple sparse vectors",
+        "sparse_1": {
+            "indices": [0, 1],
+            "values": [0.1, 0.2]
+        },
+        "sparse_2": {
+            "indices": [2, 3, 4],
+            "values": [0.3, 0.4, 0.5]
+        },
+        "regular_field": 42
+    }
+    # Should not raise
+    validate_metadata(metadata_multiple)
+    
+    # Test 8: Nested structure that looks like sparse vector but isn't in metadata value position
+    metadata_nested = {
+        "config": "some_config",
+        "sparse_vector": {
+            "indices": [0, 1, 2],
+            "values": [1.0, 2.0, 3.0]
+        }
+    }
+    # Should not raise
+    validate_metadata(metadata_nested)
+    
+    # Test 9: Large sparse vector
+    large_sparse = {
+        "indices": list(range(1000)),
+        "values": [float(i) * 0.001 for i in range(1000)]
+    }
+    metadata_large = {
+        "text": "large sparse",
+        "large_sparse_vec": large_sparse
+    }
+    # Should not raise
+    validate_metadata(metadata_large)

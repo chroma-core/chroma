@@ -335,12 +335,12 @@ impl TestReferenceSegment {
                 plan.filter
                     .query_ids
                     .as_ref()
-                    .map_or(true, |ids| ids.contains(k))
+                    .is_none_or(|ids| ids.contains(k))
                     && plan
                         .filter
                         .where_clause
                         .as_ref()
-                        .map_or(true, |w| w.eval(rec))
+                        .is_none_or(|w| w.eval(rec))
             })
             .map(|(_, v)| v.clone())
             .collect::<Vec<_>>();
@@ -352,8 +352,8 @@ impl TestReferenceSegment {
             result: ProjectionOutput {
                 records: records
                     .into_iter()
-                    .skip(plan.limit.skip as usize)
-                    .take(plan.limit.fetch.unwrap_or(u32::MAX) as usize)
+                    .skip(plan.limit.offset as usize)
+                    .take(plan.limit.limit.unwrap_or(u32::MAX) as usize)
                     .map(|(_, mut rec)| {
                         let Projection {
                             document,
@@ -393,12 +393,12 @@ impl TestReferenceSegment {
                 plan.filter
                     .query_ids
                     .as_ref()
-                    .map_or(true, |ids| ids.contains(k))
+                    .is_none_or(|ids| ids.contains(k))
                     && plan
                         .filter
                         .where_clause
                         .as_ref()
-                        .map_or(true, |w| w.eval(rec))
+                        .is_none_or(|w| w.eval(rec))
             })
             .map(|(_, v)| v.clone())
             .collect::<Vec<_>>();
