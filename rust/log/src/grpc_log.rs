@@ -301,7 +301,7 @@ impl GrpcLog {
             .drain(..)
             .next()
             .ok_or(ClientAssignmentError::NoClientFound(
-                "Impossible state: no client found for collection".to_string(),
+                "Improbable state: no client found for collection".to_string(),
             ))
     }
 
@@ -627,7 +627,7 @@ impl GrpcLog {
             .drain(..)
             .next()
             .ok_or(ClientAssignmentError::NoClientFound(
-                "Impossible state: no client found for collection".to_string(),
+                "Improbable state: no client found for collection".to_string(),
             ))?;
         client
             .garbage_collect_phase2(chroma_proto::GarbageCollectPhase2Request {
