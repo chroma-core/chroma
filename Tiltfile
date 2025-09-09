@@ -187,12 +187,11 @@ k8s_yaml(
 # We manually call helm template so we can call set-file
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=rust/frontend/sample_configs/tilt_config.yaml,rustLogService.configuration=rust/worker/tilt_config.yaml,compactionService.configuration=rust/worker/tilt_config.yaml,queryService.configuration=rust/worker/tilt_config.yaml,garbageCollector.configuration=rust/worker/tilt_config.yaml --values k8s/distributed-chroma/values.yaml,k8s/distributed-chroma/values.dev.yaml k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=rust/frontend/sample_configs/distributed.yaml,rustLogService.configuration=rust/worker/chroma_config.yaml,compactionService.configuration=rust/worker/chroma_config.yaml,queryService.configuration=rust/worker/chroma_config.yaml,garbageCollector.configuration=rust/worker/chroma_config.yaml --values k8s/distributed-chroma/values.yaml,k8s/distributed-chroma/values.dev.yaml k8s/distributed-chroma'
   ),
 )
 watch_file('rust/frontend/sample_configs/distributed.yaml')
 watch_file('rust/worker/chroma_config.yaml')
-watch_file('rust/worker/tilt_config.yaml')
 watch_file('k8s/distributed-chroma/values.yaml')
 watch_file('k8s/distributed-chroma/values.dev.yaml')
 watch_file('k8s/distributed-chroma/*.yaml')
