@@ -5,7 +5,7 @@ name: Package Search MCP
 
 # Package Search MCP Server
 
-The Package Search MCP Server is an [MCP](https://modelcontextprotocol.io/docs/getting-started/intro) server designed to add ground truth context about code packages to AI agents. Our research demonstrates that by exposing the source code of a project's dependencies to an agentic model, we improve its performance on coding tasks and reduce its potential for hallucination. Chroma's Package Search MCP server achieves this by exposing tools to allow the model to retrieve necessary context:
+The Package Search MCP Server is an [MCP](https://modelcontextprotocol.io/docs/getting-started/intro) server designed to add ground truth context about code packages to AI agents. Our research demonstrates that by exposing the source code of a project's dependencies to an model, we improve its performance on coding tasks and reduce its potential for hallucination. Chroma's Package Search MCP server achieves this by exposing tools to allow the model to retrieve necessary context:
 
 | Tool Name                  | Usage                                                                                                                |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------- |
@@ -101,7 +101,7 @@ client = OpenAI(
 
 resp = client.responses.create(
     model="gpt-5-chat-latest",
-    input="Explain how numpy implements its FFT",
+    input="Explain how numpy implements its FFT. Use package search.",
     tools=[
         {
             "type": "mcp",
@@ -141,7 +141,7 @@ response = client.beta.messages.create(
     messages=[
         {
             "role": "user",
-            "content": "Explain how numpy implements its FFT",
+            "content": "Explain how numpy implements its FFT. Use package search.",
         }
     ],
     mcp_servers=[
@@ -180,7 +180,7 @@ func main() {
 		option.WithHeader("anthropic-beta", anthropic.AnthropicBetaMCPClient2025_04_04),
 	)
 
-	content := "Explain how numpy implements its FFT"
+	content := "Explain how numpy implements its FFT. Use package search."
 	fmt.Println("[user]:", content)
 
 	messages := []anthropic.BetaMessageParam{
@@ -294,7 +294,7 @@ Get a Gemini API key in [Google's AI Studio](https://aistudio.google.com/app/api
 {% /Step %}
 
 {% Step %}
-Connect the Chroma MCP server with Gemini to enable AI-powered code searches. In this example, we ask Gemini to explain how the Fast Fourier Transform algorithm is implemented in numpy, using the Chroma MCP tools to search and analyze the code.
+Connect the Chroma MCP server with Gemini to enable AI-powered code searches. In this example, we ask Gemini to explain how the Fast Fourier Transform algorithm is implemented in `numpy`, using the Chroma MCP tools to search and analyze the code.
 
 ```python
 import asyncio
@@ -312,7 +312,7 @@ async def run():
         async with ClientSession(read, write) as session:
             await session.initialize()
             try:
-                prompt = f"Explain how numpy implements its FFT"
+                prompt = f"Explain how numpy implements its FFT. Use package search."
                 response = await client.aio.models.generate_content(
                     model="gemini-2.5-flash",
                     contents=prompt,
@@ -402,7 +402,7 @@ Add the following to your `~/Library/Application Support/Claude/claude_desktop_c
 ```JSON
 {
     "mcpServers": {
-      "code-collections": {
+      "package-search": {
         "command": "npx",
         "args": ["mcp-remote", "https://mcp.trychroma.com/package-search/v1", "--header", "x-chroma-token: ${X_CHROMA_TOKEN}"],
         "env": {
