@@ -402,7 +402,6 @@ func (_m *ICollectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint
 	return r0, r1
 }
 
-
 // LockCollection provides a mock function with given fields: collectionID
 func (_m *ICollectionDb) LockCollection(collectionID string) (*bool, error) {
 	ret := _m.Called(collectionID)

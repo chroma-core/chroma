@@ -349,7 +349,7 @@ impl Handler<ManualGarbageCollectionRequest> for GarbageCollector {
         _: &ComponentContext<GarbageCollector>,
     ) {
         if let Err(err) = self.manual_garbage_collection_request(req.collection_id) {
-            tracing::event!(Level::ERROR, name = "manual compaction failed", error =? err);
+            tracing::event!(Level::ERROR, name = "manual collection failed", error =? err);
         }
     }
 }
@@ -418,9 +418,19 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         // Append to collections_to_gc any manual collections iff they aren't already in there.
         let mut manual = vec![];
         {
-            let manual_collections = self.manual_collections.lock();
-            for collection_id in manual_collections.iter() {
-                manual.push(*collection_id);
+            let mut manual_collections = self.manual_collections.lock();
+            // NOTE(rescrv):  We do this dance so that we can remove the collection here so it
+            // isn't enqueued endlessly and so that it won't be thrown away immediately down below.
+            while collections_to_gc.len() + manual.len()
+                < self.config.max_collections_to_gc as usize
+            {
+                let popped = manual_collections.iter().next().cloned();
+                if let Some(c) = popped {
+                    manual.push(c);
+                    manual_collections.remove(&c);
+                } else {
+                    break;
+                }
             }
         }
         for collection_id in manual {
