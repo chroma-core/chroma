@@ -183,28 +183,24 @@ impl PartialSchema for SearchPayload {
                     ObjectBuilder::new()
                         .schema_type(SchemaType::Type(Type::Object))
                         .description(Some("Ranking expression for hybrid search"))
-                        .additional_properties(Some(Schema::Object(Object::with_type(
-                            SchemaType::Type(Type::Object),
-                        )))),
+                        .property("expr", Object::with_type(SchemaType::Type(Type::Object))),
                 )
                 .property(
                     "limit",
                     ObjectBuilder::new()
                         .schema_type(SchemaType::Type(Type::Object))
-                        .property("skip", Object::with_type(SchemaType::Type(Type::Integer)))
-                        .property("fetch", Object::with_type(SchemaType::Type(Type::Integer)))
-                        .required("skip"),
+                        .property("offset", Object::with_type(SchemaType::Type(Type::Integer)))
+                        .property("limit", Object::with_type(SchemaType::Type(Type::Integer))),
                 )
                 .property(
                     "select",
                     ObjectBuilder::new()
                         .schema_type(SchemaType::Type(Type::Object))
                         .property(
-                            "fields",
+                            "keys",
                             ArrayBuilder::new()
                                 .items(Object::with_type(SchemaType::Type(Type::String))),
-                        )
-                        .required("fields"),
+                        ),
                 )
                 .build(),
         ))
