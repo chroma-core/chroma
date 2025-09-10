@@ -13,9 +13,7 @@ The Package Search MCP Server is an [MCP](https://modelcontextprotocol.io/docs/g
 | `package_search_hybrid`    | Use semantic search with optional regex filtering to explore source code without existing knowledge of its structure |
 | `package_search_read_file` | Reads specific lines from a single file in the code package                                                          |
 
-## Getting started
-
-Visit the [Package Search installation page](https://trychroma.com/package-search) for quick setup in most clients.
+## Getting Started
 
 {% Banner type="note" %}
 
@@ -23,9 +21,7 @@ To guarantee that your model uses package search when desired, add `use package 
 
 {% /Banner %}
 
-## Configuration
-
-{% ComboboxSteps defaultValue="claude-code" itemType="environment" %}
+{% ComboboxSteps defaultValue="anthropic-sdk" itemType="environment" %}
 
 {% Step %}
 Visit the Chroma's [Package Search](http://trychroma.com/package-search) page.
@@ -38,88 +34,6 @@ Click "Get API Key" to create or log into your Chroma account and issue an API k
 {% Step %}
 After issuing your API key, click the "Other" tab and copy your API key.
 {% /Step %}
-
-{% ComboboxEntry value="claude-code" label="Claude Code" %}
-{% Step %}
-Add the Chroma MCP server to Claude Code with your Chroma API key
-
-```terminal
-claude mcp add --transport http package-search https://mcp.trychroma.com/package-search/v1 --header "x-chroma-token: <YOUR_CHROMA_API_KEY>"
-```
-
-{% /Step %}
-{% /ComboboxEntry %}
-
-{% ComboboxEntry value="mcp-sdk" label="MCP SDK" %}
-{% Step %}
-Connect to the Chroma MCP server to search code packages. In this example, we search for the Fast Fourier Transform function in the `numpy` package from PyPI using the `package_search_grep` tool.
-
-```python
-import asyncio
-from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
-
-async def main():
-    async with streamablehttp_client(
-        "https://mcp.trychroma.com/package-search/v1",
-        headers={"x-chroma-token": "<YOUR_CHROMA_API_KEY>"},
-    ) as (
-        read_stream,
-        write_stream,
-        _,
-    ):
-        async with ClientSession(read_stream, write_stream) as session:
-            await session.initialize()
-            tools = await session.list_tools()
-            result = await session.call_tool(
-                name="package_search_grep",
-                arguments={
-                    "package_name": "numpy",
-                    "registry_name": "py_pi",
-                    "pattern": "\bdef fft\b",
-                },
-            )
-            print(f"Got result: {result}")
-            print(f"Available tools: {[tool.name for tool in tools.tools]}")
-
-asyncio.run(main())
-```
-
-{% /Step %}
-{% /ComboboxEntry %}
-
-{% ComboboxEntry value="openai-sdk" label="OpenAI SDK" %}
-{% Step %}
-Connect to the Chroma MCP server to search code packages. In this example, we search for class definitions in the `numpy` package from PyPI.
-
-```python
-from openai import OpenAI
-
-client = OpenAI(
-    api_key="<YOUR_OPENAI_API_KEY>"
-)
-
-resp = client.responses.create(
-    model="gpt-5-chat-latest",
-    input="Explain how numpy implements its FFT. Use package search.",
-    tools=[
-        {
-            "type": "mcp",
-            "server_label": "package-search",
-            "server_url": "https://mcp.trychroma.com/package-search/v1",
-            "headers": {
-                "x-chroma-token": "<YOUR_CHROMA_API_KEY>"
-            },
-            "require_approval": "never",
-        }
-    ],
-)
-
-print(resp)
-```
-
-{% /Step %}
-{% /ComboboxEntry %}
 
 {% ComboboxEntry value="anthropic-sdk" label="Anthropic SDK" %}
 {% Step %}
@@ -226,65 +140,37 @@ func main() {
 {% /Step %}
 {% /ComboboxEntry %}
 
-{% ComboboxEntry value="open-code" label="Open Code" %}
+{% ComboboxEntry value="openai-sdk" label="OpenAI SDK" %}
 {% Step %}
-Add the following to your `~/.config/opencode/opencode.json` file with your Chroma Cloud API key:
+Connect to the Chroma MCP server to search code packages. In this example, we search for class definitions in the `numpy` package from PyPI.
 
-```JSON
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "code-packages": {
-      "type": "remote",
-      "url": "https://mcp.trychroma.com/package-search/v1",
-      "enabled": true,
-      "headers": {
-        "x-chroma-token": "<YOUR_CHROMA_API_KEY>"
-      }
-    }
-  }
-}
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="<YOUR_OPENAI_API_KEY>"
+)
+
+resp = client.responses.create(
+    model="gpt-5-chat-latest",
+    input="Explain how numpy implements its FFT. Use package search.",
+    tools=[
+        {
+            "type": "mcp",
+            "server_label": "package-search",
+            "server_url": "https://mcp.trychroma.com/package-search/v1",
+            "headers": {
+                "x-chroma-token": "<YOUR_CHROMA_API_KEY>"
+            },
+            "require_approval": "never",
+        }
+    ],
+)
+
+print(resp)
 ```
 
 {% /Step %}
-{% /ComboboxEntry %}
-
-{% ComboboxEntry value="ollama" label="Ollama" %}
-
-{% Step %}
-Install the `ollmcp` package:
-{% PythonInstallation packages="ollmcp" / %}
-{% /Step %}
-
-{% Step %}
-Create an `mcp_config.json` file with the following content and your Chroma Cloud API key:
-
-```JSON
-{
-	"mcpServers": {
-		"code-packages": {
-			"type": "streamable_http",
-			"url": "https://mcp.trychroma.com/package-search/v1",
-			"headers": {
-				"x-chroma-token": "<YOUR_CHROMA_API_KEY>"
-			},
-			"disabled": false
-		}
-	}
-}
-```
-
-{% /Step %}
-
-{% Step %}
-Start an Ollama MCP session with the path to your `mcp_config.json` file and model of choice:
-
-```terminal
-ollmcp --servers-json <path/to/mcp_config.json> --model <model>
-```
-
-{% /Step %}
-
 {% /ComboboxEntry %}
 
 {% ComboboxEntry value="google-gemini-sdk" label="Google Gemini SDK" %}
@@ -338,6 +224,17 @@ asyncio.run(run())
 
 {% /Step %}
 
+{% /ComboboxEntry %}
+
+{% ComboboxEntry value="claude-code" label="Claude Code" %}
+{% Step %}
+Add the Chroma MCP server to Claude Code with your Chroma API key
+
+```terminal
+claude mcp add --transport http package-search https://mcp.trychroma.com/package-search/v1 --header "x-chroma-token: <YOUR_CHROMA_API_KEY>"
+```
+
+{% /Step %}
 {% /ComboboxEntry %}
 
 {% ComboboxEntry value="codex" label="Codex" %}
@@ -411,6 +308,105 @@ Add the following to your `~/Library/Application Support/Claude/claude_desktop_c
       }
     }
 }
+```
+
+{% /Step %}
+{% /ComboboxEntry %}
+
+{% ComboboxEntry value="open-code" label="Open Code" %}
+{% Step %}
+Add the following to your `~/.config/opencode/opencode.json` file with your Chroma Cloud API key:
+
+```JSON
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "code-packages": {
+      "type": "remote",
+      "url": "https://mcp.trychroma.com/package-search/v1",
+      "enabled": true,
+      "headers": {
+        "x-chroma-token": "<YOUR_CHROMA_API_KEY>"
+      }
+    }
+  }
+}
+```
+
+{% /Step %}
+{% /ComboboxEntry %}
+
+{% ComboboxEntry value="ollama" label="Ollama" %}
+
+{% Step %}
+Install the `ollmcp` package:
+{% PythonInstallation packages="ollmcp" / %}
+{% /Step %}
+
+{% Step %}
+Create an `mcp_config.json` file with the following content and your Chroma Cloud API key:
+
+```JSON
+{
+	"mcpServers": {
+		"code-packages": {
+			"type": "streamable_http",
+			"url": "https://mcp.trychroma.com/package-search/v1",
+			"headers": {
+				"x-chroma-token": "<YOUR_CHROMA_API_KEY>"
+			},
+			"disabled": false
+		}
+	}
+}
+```
+
+{% /Step %}
+
+{% Step %}
+Start an Ollama MCP session with the path to your `mcp_config.json` file and model of choice:
+
+```terminal
+ollmcp --servers-json <path/to/mcp_config.json> --model <model>
+```
+
+{% /Step %}
+
+{% /ComboboxEntry %}
+
+{% ComboboxEntry value="mcp-sdk" label="MCP SDK" %}
+{% Step %}
+Connect to the Chroma MCP server to search code packages. In this example, we search for the Fast Fourier Transform function in the `numpy` package from PyPI using the `package_search_grep` tool.
+
+```python
+import asyncio
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async def main():
+    async with streamablehttp_client(
+        "https://mcp.trychroma.com/package-search/v1",
+        headers={"x-chroma-token": "<YOUR_CHROMA_API_KEY>"},
+    ) as (
+        read_stream,
+        write_stream,
+        _,
+    ):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+            result = await session.call_tool(
+                name="package_search_grep",
+                arguments={
+                    "package_name": "numpy",
+                    "registry_name": "py_pi",
+                    "pattern": "\bdef fft\b",
+                },
+            )
+            print(f"Got result: {result}")
+            print(f"Available tools: {[tool.name for tool in tools.tools]}")
+
+asyncio.run(main())
 ```
 
 {% /Step %}

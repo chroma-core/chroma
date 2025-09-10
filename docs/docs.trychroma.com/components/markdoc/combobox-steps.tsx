@@ -38,8 +38,7 @@ const ComboboxSteps: React.FC<{
     .map((entry) => ({
       value: entry.props.value,
       label: entry.props.label,
-    }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+    }));
 
   const [activeValue, setActiveValue] = useState<string>(
     defaultValue || (options.length > 0 && options[0].value) || "",
