@@ -228,7 +228,7 @@ asyncio.run(run())
 
 {% ComboboxEntry value="claude-code" label="Claude Code" %}
 {% Step %}
-Add the Chroma MCP server to Claude Code with your Chroma API key
+Add the Chroma MCP server to Claude Code with your Chroma API key:
 
 ```terminal
 claude mcp add --transport http package-search https://mcp.trychroma.com/package-search/v1 --header "x-chroma-token: <YOUR_CHROMA_API_KEY>"
