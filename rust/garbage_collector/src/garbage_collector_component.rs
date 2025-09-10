@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::operators::truncate_dirty_log::{
     TruncateDirtyLogError, TruncateDirtyLogOperator, TruncateDirtyLogOutput,
 };
@@ -17,16 +19,18 @@ use chroma_system::{
     wrap, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, System,
     TaskResult,
 };
+use chroma_types::CollectionUuid;
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::trace::TraceContextExt;
+use parking_lot::Mutex;
 use std::{
     fmt::{Debug, Formatter},
     time::{Duration, SystemTime},
 };
 use thiserror::Error;
-use tracing::{span, Instrument, Span};
+use tracing::{span, Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[allow(dead_code)]
@@ -44,6 +48,7 @@ pub(crate) struct GarbageCollector {
     job_duration_ms_metric: Histogram<u64>,
     total_files_deleted_metric: Counter<u64>,
     total_versions_deleted_metric: Counter<u64>,
+    manual_collections: Mutex<HashSet<CollectionUuid>>,
 }
 
 impl Debug for GarbageCollector {
@@ -101,6 +106,7 @@ impl GarbageCollector {
                 .u64_counter("garbage_collector.total_versions_deleted")
                 .with_description("Total number of versions deleted during garbage collection")
                 .build(),
+            manual_collections: Mutex::new(HashSet::default()),
         }
     }
 
@@ -307,6 +313,16 @@ impl GarbageCollector {
             })
             .collect()
     }
+
+    fn manual_garbage_collection_request(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), GarbageCollectCollectionError> {
+        tracing::event!(Level::INFO, name = "manual garbage collection", collection_id =? collection_id);
+        let mut manual_collections = self.manual_collections.lock();
+        manual_collections.insert(collection_id);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -315,6 +331,26 @@ impl Handler<Memberlist> for GarbageCollector {
 
     async fn handle(&mut self, message: Memberlist, _ctx: &ComponentContext<GarbageCollector>) {
         self.memberlist = message;
+    }
+}
+
+#[derive(Debug)]
+pub struct ManualGarbageCollectionRequest {
+    pub collection_id: CollectionUuid,
+}
+
+#[async_trait]
+impl Handler<ManualGarbageCollectionRequest> for GarbageCollector {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        req: ManualGarbageCollectionRequest,
+        _: &ComponentContext<GarbageCollector>,
+    ) {
+        if let Err(err) = self.manual_garbage_collection_request(req.collection_id) {
+            tracing::event!(Level::ERROR, name = "manual compaction failed", error =? err);
+        }
     }
 }
 
@@ -377,7 +413,39 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             .await
             .expect("Failed to get collections to gc");
         tracing::info!("Got {} total collections", collections_to_gc.len());
-        let collections_to_gc = self.filter_collections(collections_to_gc);
+        let mut collections_to_gc = self.filter_collections(collections_to_gc);
+
+        // Append to collections_to_gc any manual collections iff they aren't already in there.
+        let mut manual = vec![];
+        {
+            let manual_collections = self.manual_collections.lock();
+            for collection_id in manual_collections.iter() {
+                manual.push(*collection_id);
+            }
+        }
+        for collection_id in manual {
+            if collections_to_gc.iter().any(|c| c.id == collection_id) {
+                continue;
+            }
+            match self.sysdb_client.get_collection_to_gc(collection_id).await {
+                Ok(collection_info) => {
+                    tracing::event!(
+                        Level::INFO,
+                        name = "manually collecting",
+                        collection_id = collection_id.to_string()
+                    );
+                    collections_to_gc.push(collection_info);
+                }
+                Err(err) => {
+                    tracing::event!(
+                        Level::ERROR,
+                        name = "cannot perform manual collection",
+                        collection_id = collection_id.to_string(),
+                        error = err.to_string(),
+                    );
+                }
+            }
+        }
 
         let mut num_skipped_jobs = 0;
         let collections_to_gc = collections_to_gc.into_iter().map(|collection| {
@@ -443,6 +511,10 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         while let Some(job_result) = jobs_stream.next().await {
             match job_result {
                 Ok(result) => {
+                    {
+                        let mut manual_collections = self.manual_collections.lock();
+                        manual_collections.remove(&result.collection_id);
+                    }
                     tracing::info!("Garbage collection completed. Deleted {} files over {} versions for collection {}.", result.num_files_deleted, result.num_versions_deleted, result.collection_id);
                     num_completed_jobs += 1;
                 }
