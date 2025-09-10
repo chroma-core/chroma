@@ -26,7 +26,7 @@ Integrating LLMs into software applications is as simple as calling an API. Whil
 - Calls to the API typically consist of parameters including a `model` identifier, and a list of `messages`.
 - Each `message` has a `role` and `content`.
 - The `system` role can be thought of as the _instructions_ to the model.
-- The `user` tole can be thought of as the _data_ to process.
+- The `user` role can be thought of as the _data_ to process.
 
 For example, we can use AI to write a general purpose function that extracts names from input text.
 
