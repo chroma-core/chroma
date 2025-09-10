@@ -16,7 +16,7 @@ import { MorphEmbeddingFunction } from '@chroma-core/morph';
 // Initialize the embedding function
 const morphEmbedding = new MorphEmbeddingFunction({
   api_key: 'your-morph-api-key', // or set MORPH_API_KEY env var
-  model_name: 'morph-embedding-v2', // default
+  model_name: 'morph-embedding-v3', // default
   api_base: 'https://api.morphllm.com/v1', // default
   encoding_format: 'float' // default
 });
@@ -36,7 +36,7 @@ console.log(embeddings);
 The `MorphEmbeddingFunction` constructor accepts the following options:
 
 - `api_key` (optional): Your Morph API key. If not provided, it will read from the environment variable specified by `api_key_env_var`.
-- `model_name` (optional): The Morph model to use. Defaults to `'morph-embedding-v2'`.
+- `model_name` (optional): The Morph model to use. Defaults to `'morph-embedding-v3'`.
 - `api_base` (optional): The base URL for the Morph API. Defaults to `'https://api.morphllm.com/v1'`.
 - `encoding_format` (optional): The format for embeddings ('float' or 'base64'). Defaults to `'float'`.
 - `api_key_env_var` (optional): The environment variable name for the API key. Defaults to `'MORPH_API_KEY'`.
