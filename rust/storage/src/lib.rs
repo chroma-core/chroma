@@ -145,6 +145,13 @@ pub enum StorageError {
         key: String,
     },
 
+    /// Error when a callback returning a ChromaError fails
+    #[error("Storage callback error: {info}")]
+    CallbackError {
+        /// The wrapped error
+        info: String,
+    },
+
     // Back off and retry---usually indicates an explicit 429/SlowDown.
     #[error("Back off and retry---usually indicates an explicit 429/SlowDown.")]
     Backoff,
@@ -167,6 +174,7 @@ impl ChromaError for StorageError {
             StorageError::Unauthenticated { .. } => ErrorCodes::Unauthenticated,
             StorageError::UnknownConfigurationKey { .. } => ErrorCodes::InvalidArgument,
             StorageError::Backoff { .. } => ErrorCodes::ResourceExhausted,
+            StorageError::CallbackError { .. } => ErrorCodes::Internal,
         }
     }
 }
@@ -258,6 +266,53 @@ impl Storage {
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage
                     .fetch(key, options, fetch_fn)
+                    .await
+            }
+        }
+    }
+
+    async fn fetch_batch_generic<FetchReturn, FetchFn, FetchFut>(
+        &self,
+        keys: Vec<&str>,
+        options: GetOptions,
+        fetch_fn: FetchFn,
+    ) -> Result<(FetchReturn, Vec<Option<ETag>>), StorageError>
+    where
+        FetchFn: FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut + Send + 'static,
+        FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
+        FetchReturn: Clone + Any + Sync + Send,
+    {
+        let mut results = Vec::new();
+        for key in keys {
+            let result = self.get_with_e_tag(key, options.clone()).await?;
+            results.push(result);
+        }
+        let bufs = results
+            .iter()
+            .map(|res| Ok(res.0.clone()))
+            .collect::<Vec<_>>();
+        let e_tags = results.iter().map(|res| res.1.clone()).collect();
+        let fetch_result = fetch_fn(bufs).await?;
+        Ok((fetch_result, e_tags))
+    }
+
+    pub async fn fetch_batch<FetchReturn, FetchFn, FetchFut>(
+        &self,
+        keys: Vec<&str>,
+        options: GetOptions,
+        fetch_fn: FetchFn,
+    ) -> Result<(FetchReturn, Vec<Option<ETag>>), StorageError>
+    where
+        FetchFn: FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut + Send + 'static,
+        FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
+        FetchReturn: Clone + Any + Sync + Send,
+    {
+        match self {
+            Storage::S3(_) => self.fetch_batch_generic(keys, options, fetch_fn).await,
+            Storage::Local(_) => self.fetch_batch_generic(keys, options, fetch_fn).await,
+            Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                admission_controlled_storage
+                    .fetch_batch(keys, options, fetch_fn)
                     .await
             }
         }

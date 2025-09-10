@@ -26,6 +26,9 @@ use std::{
     },
 };
 use std::{ops::Range, sync::atomic::AtomicUsize};
+
+type BatchFetchResult = Result<(Arc<Vec<u8>>, Option<ETag>), StorageError>;
+
 use tokio::{
     io::AsyncReadExt,
     select,
@@ -110,7 +113,7 @@ impl Default for AdmissionControlledS3StorageMetrics {
 #[derive(Clone)]
 struct InflightRequestContext {
     priority_holder: Arc<PriorityHolder>,
-    priority_upgrade_channel: Option<tokio::sync::mpsc::Sender<()>>,
+    priority_upgrade_channel: Option<tokio::sync::broadcast::Sender<()>>,
     finished: Arc<AtomicBool>,
 }
 
@@ -133,7 +136,7 @@ impl InflightRequestContext {
                 // as we just need some signal in this channel to unblock the receiver
                 // on the other end. If there is no receiver on the other end that
                 // means the task is done and we don't need to signal anything.
-                let _ = channel.try_send(());
+                let _ = channel.send(());
             }
         }
     }
@@ -164,7 +167,7 @@ impl InflightRequestContext {
                 update_priority_counter.add(1, hostname);
                 // Ignore send errors since it can happen that the receiver is dropped
                 // and the task is busy reading the data from s3.
-                let _ = channel.send(()).await;
+                let _ = channel.send(());
             }
         }
         guard
@@ -176,7 +179,7 @@ struct InflightRequest {
     #[allow(clippy::type_complexity)]
     senders: Vec<
         tokio::sync::oneshot::Sender<
-            Result<(Arc<dyn Any + Send + Sync>, Option<ETag>), StorageError>,
+            Result<(Arc<dyn Any + Send + Sync>, Vec<Option<ETag>>), StorageError>,
         >,
     >,
 }
@@ -185,10 +188,10 @@ impl InflightRequest {
     #[allow(clippy::type_complexity)]
     pub fn new(
         priority_holder: Arc<PriorityHolder>,
-        priority_upgrade_channel: Option<tokio::sync::mpsc::Sender<()>>,
+        priority_upgrade_channel: Option<tokio::sync::broadcast::Sender<()>>,
         senders: Vec<
             tokio::sync::oneshot::Sender<
-                Result<(Arc<dyn Any + Send + Sync>, Option<ETag>), StorageError>,
+                Result<(Arc<dyn Any + Send + Sync>, Vec<Option<ETag>>), StorageError>,
             >,
         >,
     ) -> Self {
@@ -411,7 +414,7 @@ impl AdmissionControlledS3Storage {
         rate_limiter: Arc<RateLimitPolicy>,
         key: String,
         priority: Arc<PriorityHolder>,
-        channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
+        channel_receiver: Option<tokio::sync::broadcast::Receiver<()>>,
         outstanding_read_request_counter: Arc<AtomicUsize>,
         outstanding_read_request_metric: opentelemetry::metrics::Histogram<u64>,
         hostname_attribute: [KeyValue; 1],
@@ -446,7 +449,31 @@ impl AdmissionControlledS3Storage {
         FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
         FetchReturn: Clone + Any + Sync + Send,
     {
-        self.get_with_e_tag_internal(key, options, fetch_fn).await
+        let batch_fetch_fn = |batch_results: Vec<Result<Arc<Vec<u8>>, StorageError>>| async move {
+            let single_result = batch_results.into_iter().next().unwrap();
+            fetch_fn(single_result).await
+        };
+        let (result, e_tags) = self
+            .get_with_e_tag_internal(vec![key], options, batch_fetch_fn)
+            .await?;
+        Ok((result, e_tags.into_iter().next().unwrap()))
+    }
+
+    pub async fn fetch_batch<FetchReturn, FetchFn, FetchFut>(
+        &self,
+        keys: Vec<&str>,
+        options: GetOptions,
+        batch_fetch_fn: FetchFn,
+    ) -> Result<(FetchReturn, Vec<Option<ETag>>), StorageError>
+    where
+        FetchFn: FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut + Send + 'static,
+        FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
+        FetchReturn: Clone + Any + Sync + Send,
+    {
+        let (result, e_tags) = self
+            .get_with_e_tag_internal(keys, options, batch_fetch_fn)
+            .await?;
+        Ok((result, e_tags))
     }
 
     pub async fn get_with_e_tag(
@@ -454,8 +481,13 @@ impl AdmissionControlledS3Storage {
         key: &str,
         options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        self.get_with_e_tag_internal::<_, _, _>(key, options, |r| async move { r })
-            .await
+        let batch_fetch_fn = |batch_results: Vec<Result<Arc<Vec<u8>>, StorageError>>| async move {
+            batch_results.into_iter().next().unwrap()
+        };
+        let (result, e_tags) = self
+            .get_with_e_tag_internal(vec![key], options, batch_fetch_fn)
+            .await?;
+        Ok((result, e_tags.into_iter().next().unwrap()))
     }
 
     pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
@@ -474,36 +506,45 @@ impl AdmissionControlledS3Storage {
             .fetch_sub(1, Ordering::Relaxed);
         res
     }
-
-    async fn execute_fetch<FetchReturn, FetchFn, FetchFut>(
+    async fn execute_batch_fetch<FetchReturn, FetchFn, FetchFut>(
         fetch_fn: FetchFn,
-        input: Result<(Arc<Vec<u8>>, Option<ETag>), StorageError>,
-    ) -> Result<(FetchReturn, Option<ETag>), StorageError>
+        inputs: Vec<BatchFetchResult>,
+    ) -> Result<(FetchReturn, Vec<Option<ETag>>), StorageError>
     where
-        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut,
+        FetchFn: FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut,
         FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
         FetchReturn: Clone + Any + Sync + Send,
     {
-        match input {
-            Ok((bytes, e_tag)) => {
-                let ret = fetch_fn(Ok(bytes)).await;
-                ret.map(|r| (r, e_tag))
-            }
-            Err(e) => {
-                let ret = fetch_fn(Err(e)).await;
-                ret.map(|r| (r, None))
-            }
-        }
+        let byte_results: Vec<Result<Arc<Vec<u8>>, StorageError>> = inputs
+            .iter()
+            .map(|input| match input {
+                Ok((bytes, _)) => Ok(bytes.clone()),
+                Err(e) => Err(e.clone()),
+            })
+            .collect();
+
+        let fetch_result = fetch_fn(byte_results).await?;
+
+        // Collect all ETags from the inputs
+        let e_tags: Vec<Option<ETag>> = inputs
+            .iter()
+            .map(|input| match input {
+                Ok((_, e_tag)) => e_tag.clone(),
+                Err(_) => None,
+            })
+            .collect();
+
+        Ok((fetch_result, e_tags))
     }
 
     async fn get_with_e_tag_internal<FetchReturn, FetchFn, FetchFut>(
         &self,
-        key: &str,
+        keys: Vec<&str>,
         options: GetOptions,
         fetch_fn: FetchFn,
-    ) -> Result<(FetchReturn, Option<ETag>), StorageError>
+    ) -> Result<(FetchReturn, Vec<Option<ETag>>), StorageError>
     where
-        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut + Send + 'static,
+        FetchFn: FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut + Send + 'static,
         FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
         FetchReturn: Clone + Any + Sync + Send,
     {
@@ -515,20 +556,24 @@ impl AdmissionControlledS3Storage {
         );
         self.metrics
             .outstanding_read_requests
-            .fetch_add(1, Ordering::Relaxed);
+            .fetch_add(keys.len(), Ordering::Relaxed);
 
         if options.requires_strong_consistency {
-            let res = self.strongly_consistent_get_with_e_tag(key, options).await;
+            let futures: Vec<_> = keys
+                .iter()
+                .map(|key| self.strongly_consistent_get_with_e_tag(key, options.clone()))
+                .collect();
+            let results = futures::future::join_all(futures).await;
             self.metrics
                 .outstanding_read_requests
-                .fetch_sub(1, Ordering::Relaxed);
-            return Self::execute_fetch(fetch_fn, res).await;
+                .fetch_sub(keys.len(), Ordering::Relaxed);
+            return Self::execute_batch_fetch(fetch_fn, results).await;
         }
         let is_parallel = options.request_parallelism;
 
-        // If there is a duplicate request and the original request finishes
-        // before we look it up in the map below then we will end up with another
-        // request to S3.
+        // Create a dedup key
+        let composite_key = keys.join("|");
+
         let (any_res, _guard);
         {
             let lock_held_duration = Stopwatch::new(
@@ -537,7 +582,7 @@ impl AdmissionControlledS3Storage {
                 chroma_tracing::util::StopWatchUnit::Micros,
             );
             let mut requests = self.outstanding_read_requests.lock().await;
-            any_res = match requests.get_mut(key) {
+            any_res = match requests.get_mut(&composite_key) {
                 Some(inflight_req) => {
                     self.metrics
                         .nac_dedup_count
@@ -566,16 +611,23 @@ impl AdmissionControlledS3Storage {
                 }
                 None => {
                     let priority_holder = Arc::new(PriorityHolder::new(options.priority));
-                    let (priority_tx, priority_rx) = tokio::sync::mpsc::channel(100);
+                    let (priority_tx, priority_rx) = tokio::sync::broadcast::channel(100);
                     let (output_tx, output_rx) = tokio::sync::oneshot::channel();
-                    requests.insert(
-                        key.to_string(),
-                        InflightRequest::new(
-                            priority_holder.clone(),
-                            Some(priority_tx),
-                            vec![output_tx],
-                        ),
+
+                    let request = InflightRequest::new(
+                        priority_holder.clone(),
+                        Some(priority_tx),
+                        vec![output_tx],
                     );
+                    _guard = RollbackPriorityOnDrop {
+                        request: InflightRequestContext {
+                            priority_holder: priority_holder.clone(),
+                            priority_upgrade_channel: None,
+                            finished: Arc::new(AtomicBool::new(false)),
+                        },
+                        entry_priority: options.priority,
+                    };
+                    requests.insert(composite_key.clone(), request);
                     // Release the lock before spawning the network request task
                     drop(requests);
                     drop(lock_held_duration);
@@ -589,45 +641,73 @@ impl AdmissionControlledS3Storage {
                     let storage_clone = self.storage.clone();
                     let rate_limiter_clone = self.rate_limiter.clone();
                     let outstanding_read_requests = self.outstanding_read_requests.clone();
-                    let key_clone = key.to_string();
+                    let composite_key_clone = composite_key.clone();
+                    let keys_clone: Vec<String> = keys.iter().map(|s| s.to_string()).collect();
 
                     // NOTE(hammadb): If the upstream request gets cancelled, we still
                     // finish the request once it has been spawned, if its cancelled
                     // before it has been spawned, then the task will never run.
                     tokio::spawn(async move {
-                        let res = if is_parallel {
-                            AdmissionControlledS3Storage::parallel_fetch(
-                                storage_clone,
-                                rate_limiter_clone,
-                                key_clone.clone(),
-                                priority_holder,
-                                read_requests_waiting_for_token,
-                                nac_read_requests_waiting_for_token,
-                                hostname_attr,
-                            )
-                            .await
-                        } else {
-                            AdmissionControlledS3Storage::read_from_storage(
-                                storage_clone,
-                                rate_limiter_clone,
-                                key_clone.clone(),
-                                priority_holder,
-                                Some(priority_rx),
-                                read_requests_waiting_for_token,
-                                nac_read_requests_waiting_for_token,
-                                hostname_attr,
-                            )
-                            .await
-                        };
-                        let fetched = AdmissionControlledS3Storage::execute_fetch(fetch_fn, res)
-                            .await
-                            .map(|(r, e_tag)| (Arc::new(r) as Arc<dyn Any + Send + Sync>, e_tag));
+                        // Fetch all keys in parallel
+                        let fetch_futures: Vec<_> = keys_clone
+                            .iter()
+                            .map(|key| {
+                                let storage_clone = storage_clone.clone();
+                                let rate_limiter_clone = rate_limiter_clone.clone();
+                                let key_clone = key.clone();
+                                let priority_holder = priority_holder.clone();
+                                let read_requests_waiting_for_token =
+                                    read_requests_waiting_for_token.clone();
+                                let nac_read_requests_waiting_for_token =
+                                    nac_read_requests_waiting_for_token.clone();
+                                let hostname_attr = hostname_attr.clone();
+
+                                async {
+                                    if is_parallel {
+                                        AdmissionControlledS3Storage::parallel_fetch(
+                                            storage_clone,
+                                            rate_limiter_clone,
+                                            key_clone,
+                                            priority_holder,
+                                            read_requests_waiting_for_token,
+                                            nac_read_requests_waiting_for_token,
+                                            hostname_attr,
+                                        )
+                                        .await
+                                    } else {
+                                        AdmissionControlledS3Storage::read_from_storage(
+                                            storage_clone,
+                                            rate_limiter_clone,
+                                            key_clone,
+                                            priority_holder,
+                                            Some(priority_rx.resubscribe()),
+                                            read_requests_waiting_for_token,
+                                            nac_read_requests_waiting_for_token,
+                                            hostname_attr,
+                                        )
+                                        .await
+                                    }
+                                }
+                            })
+                            .collect();
+
+                        let fetch_results = futures::future::join_all(fetch_futures).await;
+
+                        // Call fetch_fn once with all the results
+                        let fetched = AdmissionControlledS3Storage::execute_batch_fetch(
+                            fetch_fn,
+                            fetch_results,
+                        )
+                        .await
+                        .map(|(r, e_tags)| (Arc::new(r) as Arc<dyn Any + Send + Sync>, e_tags));
 
                         // Clean up the requests map entry.
                         // SAFETY(hammadb): We just created this entry above, and only this task remove it,
                         // so it must exist.
                         let mut requests = outstanding_read_requests.lock().await;
-                        let mut inflight = requests.remove(&key_clone).expect("Key must exist");
+                        let mut inflight = requests
+                            .remove(&composite_key_clone)
+                            .expect("Key must exist");
                         inflight.context.complete();
                         drop(requests);
                         for output_tx in inflight.senders.drain(..) {
@@ -651,7 +731,7 @@ impl AdmissionControlledS3Storage {
 
         self.metrics
             .outstanding_read_requests
-            .fetch_sub(1, Ordering::Relaxed);
+            .fetch_sub(keys.len(), Ordering::Relaxed);
 
         Ok((
             any_res
@@ -907,7 +987,7 @@ impl RateLimitPolicy {
     async fn enter(
         &self,
         priority: Arc<PriorityHolder>,
-        channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
+        channel_receiver: Option<tokio::sync::broadcast::Receiver<()>>,
     ) -> SemaphorePermit<'_> {
         match self {
             RateLimitPolicy::CountBasedPolicy(policy) => {
@@ -979,7 +1059,7 @@ impl CountBasedPolicy {
     async fn acquire(
         &self,
         priority: Arc<PriorityHolder>,
-        mut channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
+        mut channel_receiver: Option<tokio::sync::broadcast::Receiver<()>>,
     ) -> SemaphorePermit<'_> {
         let priority_and_hostname_attr = [
             KeyValue::new("priority", priority.get_priority().as_usize().to_string()),
@@ -1015,18 +1095,23 @@ impl CountBasedPolicy {
             match &mut channel_receiver {
                 Some(rx) => {
                     select! {
-                        did_recv = rx.recv() => {
+                        recv_result = rx.recv() => {
                             // Reevaluate priority if we got a notification.
-                            match did_recv {
-                                Some(_) => {
+                            match recv_result {
+                                Ok(_) => {
                                     self.metrics.nac_priority_increase_received.add(1, &self.metrics.hostname_attribute);
                                     // If we got a notification, continue to acquire.
                                     continue;
                                 }
-                                None => {
+                                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                                     self.metrics.nac_receive_channel_closed_count.add(1, &self.metrics.hostname_attribute);
                                     // If the channel was closed, break out of the loop.
                                     channel_receiver = None;
+                                    continue;
+                                }
+                                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                    // If we got an error, log it and continue.
+                                    tracing::warn!("Priority receiver dropped {} messages", n);
                                     continue;
                                 }
                             }
@@ -1162,6 +1247,73 @@ mod tests {
 
         let buf = String::from_utf8(Arc::unwrap_or_clone(buf)).unwrap();
         assert_eq!(buf, test_data_value_string);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_fetch_batch() {
+        let client = get_s3_client();
+
+        let storage = S3Storage {
+            bucket: format!("test-batch-{}", rand::thread_rng().gen::<u64>()),
+            client,
+            upload_part_size_bytes: 1024 * 1024 * 8,
+            download_part_size_bytes: 1024 * 1024 * 8,
+            metrics: Default::default(),
+        };
+        storage.create_bucket().await.unwrap();
+        let admission_controlled_storage =
+            AdmissionControlledS3Storage::new_with_default_policy(storage);
+
+        // Create test data for multiple keys
+        let test_keys = vec!["test-key-1", "test-key-2", "test-key-3"];
+        let test_values = [
+            "test-value-1-content",
+            "test-value-2-content",
+            "test-value-3-content",
+        ];
+
+        // Put all test data
+        for (key, value) in test_keys.iter().zip(test_values.iter()) {
+            admission_controlled_storage
+                .put_bytes(key, value.as_bytes().to_vec(), crate::PutOptions::default())
+                .await
+                .unwrap();
+        }
+
+        // Test fetch_batch
+        let batch_fetch_fn = |batch_results: Vec<Result<Arc<Vec<u8>>, crate::StorageError>>| async move {
+            // Verify we got the expected number of results
+            assert_eq!(batch_results.len(), 3);
+
+            // Convert all results to strings and collect them
+            let mut contents = Vec::new();
+            for result in batch_results {
+                let bytes = result.unwrap();
+                let content = String::from_utf8(Arc::unwrap_or_clone(bytes)).unwrap();
+                contents.push(content);
+            }
+
+            Ok::<Vec<String>, crate::StorageError>(contents)
+        };
+
+        let (result, e_tags) = admission_controlled_storage
+            .fetch_batch(test_keys, GetOptions::default(), batch_fetch_fn)
+            .await
+            .unwrap();
+
+        // Verify results
+        assert_eq!(result.len(), 3);
+        assert_eq!(e_tags.len(), 3);
+
+        // Verify content matches (order should be preserved)
+        for (i, expected_value) in test_values.iter().enumerate() {
+            assert_eq!(result[i], *expected_value);
+        }
+
+        // Verify all ETags are present
+        for e_tag in e_tags {
+            assert!(e_tag.is_some());
+        }
     }
 
     #[tokio::test]
