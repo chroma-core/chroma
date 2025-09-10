@@ -5,7 +5,7 @@ name: Package Search MCP
 
 # Package Search MCP Server
 
-The Package Search MCP Server is an [MCP](https://modelcontextprotocol.io/docs/getting-started/intro) server designed to add ground truth context about code packages to AI agents. Our research demonstrates that by exposing the source code of a project's dependencies to an model, we improve its performance on coding tasks and reduce its potential for hallucination. Chroma's Package Search MCP server achieves this by exposing tools to allow the model to retrieve necessary context:
+The Package Search MCP Server is an [MCP](https://modelcontextprotocol.io/docs/getting-started/intro) server designed to add ground truth context about code packages to AI agents. Our research demonstrates that by exposing the source code of a project's dependencies to a model, we improve its performance on coding tasks and reduce its potential for hallucination. Chroma's Package Search MCP server achieves this by exposing tools to allow the model to retrieve necessary context:
 
 | Tool Name                  | Usage                                                                                                                |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------- |
