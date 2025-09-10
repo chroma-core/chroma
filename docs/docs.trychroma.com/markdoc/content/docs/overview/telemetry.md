@@ -1,3 +1,8 @@
+---
+id: telemetry
+name: Telemetry
+---
+
 # Telemetry
 
 Chroma contains a telemetry feature that collects **anonymous** usage information.
@@ -53,11 +58,11 @@ We will only track usage details that help us make product decisions, specifical
 - Usage of embedding functions that ship with Chroma and aggregated usage of custom embeddings (we collect no information about the custom embeddings themselves)
 - Client interactions with our hosted Chroma Cloud service.
 - Collection commands. We track the anonymized uuid of a collection as well as the number of items
-    - `add`
-    - `update`
-    - `query`
-    - `get`
-    - `delete`
+  - `add`
+  - `update`
+  - `query`
+  - `get`
+  - `delete`
 
 We **do not** collect personally-identifiable or sensitive information, such as: usernames, hostnames, file names, environment variables, or hostnames of systems being tested.
 

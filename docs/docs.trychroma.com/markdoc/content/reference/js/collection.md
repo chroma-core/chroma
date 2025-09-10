@@ -1,23 +1,28 @@
+---
+id: collection-js-ts
+name: Collection (JS/TS)
+---
+
 # Class: Collection
 
 ## Properties
 
-* `id: string`
-* `metadata: CollectionMetadata`
-* `name: string`
+- `id: string`
+- `metadata: CollectionMetadata`
+- `name: string`
 
 ## Methods
 
 ### add
 
-* `add(params): Promise<void>`
+- `add(params): Promise<void>`
 
 Add items to the collection
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
+| Name     | Type               | Description                   |
+| :------- | :----------------- | :---------------------------- |
 | `params` | `AddRecordsParams` | The parameters for the query. |
 
 #### Returns
@@ -31,15 +36,18 @@ Add items to the collection
 ```typescript
 const response = await collection.add({
   ids: ["id1", "id2"],
-  embeddings: [[1, 2, 3], [4, 5, 6]],
-  metadatas: [{ "key": "value" }, { "key": "value" }],
-  documents: ["document1", "document2"]
+  embeddings: [
+    [1, 2, 3],
+    [4, 5, 6],
+  ],
+  metadatas: [{ key: "value" }, { key: "value" }],
+  documents: ["document1", "document2"],
 });
 ```
 
 ### count
 
-* `count(): Promise<number>`
+- `count(): Promise<number>`
 
 Count the number of items in the collection
 
@@ -57,14 +65,14 @@ const count = await collection.count();
 
 ### delete
 
-* `delete(params?): Promise<string[]>`
+- `delete(params?): Promise<string[]>`
 
 Deletes items from the collection.
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
+| Name     | Type           | Description                                            |
+| :------- | :------------- | :----------------------------------------------------- |
 | `params` | `DeleteParams` | The parameters for deleting items from the collection. |
 
 #### Returns
@@ -82,21 +90,21 @@ If there is an issue deleting items from the collection.
 ```typescript
 const results = await collection.delete({
   ids: "some_id",
-  where: {"name": {"$eq": "John Doe"}},
-  whereDocument: {"$contains":"search_string"}
+  where: { name: { $eq: "John Doe" } },
+  whereDocument: { $contains: "search_string" },
 });
 ```
 
 ### get
 
-* `get(params?): Promise<MultiGetResponse>`
+- `get(params?): Promise<MultiGetResponse>`
 
 Get items from the collection
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
+| Name     | Type            | Description                   |
+| :------- | :-------------- | :---------------------------- |
 | `params` | `BaseGetParams` | The parameters for the query. |
 
 #### Returns
@@ -110,27 +118,27 @@ The response from the server.
 ```typescript
 const response = await collection.get({
   ids: ["id1", "id2"],
-  where: { "key": "value" },
+  where: { key: "value" },
   limit: 10,
   offset: 0,
   include: ["embeddings", "metadatas", "documents"],
-  whereDocument: { "$contains": "value" },
+  whereDocument: { $contains: "value" },
 });
 ```
 
 ### modify
 
-* `modify(params): Promise<CollectionParams>`
+- `modify(params): Promise<CollectionParams>`
 
 Modify the collection name or metadata
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
-| `params` | `Object` | The parameters for the query. |
+| Name               | Type                 | Description                               |
+| :----------------- | :------------------- | :---------------------------------------- |
+| `params`           | `Object`             | The parameters for the query.             |
 | `params.metadata?` | `CollectionMetadata` | Optional new metadata for the collection. |
-| `params.name?` | `string` | Optional new name for the collection. |
+| `params.name?`     | `string`             | Optional new name for the collection.     |
 
 #### Returns
 
@@ -143,20 +151,20 @@ The response from the API.
 ```typescript
 const response = await client.updateCollection({
   name: "new name",
-  metadata: { "key": "value" },
+  metadata: { key: "value" },
 });
 ```
 
 ### peek
 
-* `peek(params?): Promise<MultiGetResponse>`
+- `peek(params?): Promise<MultiGetResponse>`
 
 Peek inside the collection
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
+| Name     | Type         | Description                   |
+| :------- | :----------- | :---------------------------- |
 | `params` | `PeekParams` | The parameters for the query. |
 
 #### Returns
@@ -173,20 +181,20 @@ If there is an issue executing the query.
 
 ```typescript
 const results = await collection.peek({
-  limit: 10
+  limit: 10,
 });
 ```
 
 ### query
 
-* `query(params): Promise<MultiQueryResponse>`
+- `query(params): Promise<MultiQueryResponse>`
 
 Performs a query on the collection using the specified parameters.
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
+| Name     | Type                 | Description                   |
+| :------- | :------------------- | :---------------------------- |
 | `params` | `QueryRecordsParams` | The parameters for the query. |
 
 #### Returns
@@ -223,14 +231,14 @@ const textResults = await collection.query({
 
 ### update
 
-* `update(params): Promise<void>`
+- `update(params): Promise<void>`
 
 Update items in the collection
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
+| Name     | Type                  | Description                   |
+| :------- | :-------------------- | :---------------------------- |
 | `params` | `UpdateRecordsParams` | The parameters for the query. |
 
 #### Returns
@@ -242,22 +250,25 @@ Update items in the collection
 ```typescript
 const response = await collection.update({
   ids: ["id1", "id2"],
-  embeddings: [[1, 2, 3], [4, 5, 6]],
-  metadatas: [{ "key": "value" }, { "key": "value" }],
+  embeddings: [
+    [1, 2, 3],
+    [4, 5, 6],
+  ],
+  metadatas: [{ key: "value" }, { key: "value" }],
   documents: ["document1", "document2"],
 });
 ```
 
 ### upsert
 
-* `upsert(params): Promise<void>`
+- `upsert(params): Promise<void>`
 
 Upsert items to the collection
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
+| Name     | Type               | Description                   |
+| :------- | :----------------- | :---------------------------- |
 | `params` | `AddRecordsParams` | The parameters for the query. |
 
 #### Returns
@@ -269,8 +280,11 @@ Upsert items to the collection
 ```typescript
 const response = await collection.upsert({
   ids: ["id1", "id2"],
-  embeddings: [[1, 2, 3], [4, 5, 6]],
-  metadatas: [{ "key": "value" }, { "key": "value" }],
+  embeddings: [
+    [1, 2, 3],
+    [4, 5, 6],
+  ],
+  metadatas: [{ key: "value" }, { key: "value" }],
   documents: ["document1", "document2"],
 });
 ```

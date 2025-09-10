@@ -30,7 +30,8 @@ const isComboboxEntry = (
 const ComboboxSteps: React.FC<{
   children: React.ReactNode;
   defaultValue?: string;
-}> = ({ children, defaultValue }) => {
+  itemType: string;
+}> = ({ children, defaultValue, itemType }) => {
   const allChildren = React.Children.toArray(children);
   const comboboxEntries = allChildren.filter(isComboboxEntry);
   const options = comboboxEntries
@@ -50,6 +51,7 @@ const ComboboxSteps: React.FC<{
         options={options}
         onSelect={(value: string) => setActiveValue(value)}
         activeValue={activeValue}
+        itemType={itemType}
       />
       <Steps>
         {allChildren

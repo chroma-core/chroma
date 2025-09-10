@@ -1,3 +1,8 @@
+---
+id: intro-to-retrieval
+name: Intro to Retrieval
+---
+
 # Introduction to Retrieval
 
 Large language models like GPT-4, Claude, or Llama can write code, answer questions, generate content, and solve complex problems with remarkable sophistication. You can build chatbots, content generators, code assistants, and analysis tools by crafting good prompts and calling AI APIs.
@@ -9,15 +14,19 @@ However, as you start to build more sophisticated applications, especially those
 Imagine you're building an AI assistant for a company's customer support team. You want the AI to answer questions about your products, policies, and procedures.
 
 Given a simple prompt
+
 > What is your return policy for tooth brushes?
 
 The AI is likely to return a generic answer, because it doesn't know about your company's specific policies:
+
 > I'm not a retailer or company that sells toothbrushes - I'm Claude, an AI assistant created by Anthropic. I don't have products or a return policy. If you're looking for information about a toothbrush return policy, you'd need to check with the specific store or company where you purchased or are planning to purchase the toothbrush. Most retailers have their return policies listed on their websites or you can contact their customer service directly.
 
 We can get around this problem, by providing useful information or context for the AI. This often called "context engineering":
+
 > What is your return policy for tooth brushes? Use the following information for context: Tooth brushes can be returned up to 360 days after purchase if unopened.
 
 Now the AI has the information it needs to answer the user question correctly:
+
 > Based on the information provided, our return policy for toothbrushes allows returns up to 360 days after purchase, as long as the toothbrush remains unopened and in its original packaging. This gives you nearly a full year to return an unopened toothbrush if needed. Once a toothbrush has been opened, it would not be eligible for return under this policy.
 
 But what happens if we want our AI chatbot to be able to answer questions about shipping, product specifications, troubleshooting, or any other topic? We will have to include our entire knowledge base in our context, which leads to several technical problems.
@@ -39,6 +48,7 @@ Retrieval solves these fundamental challenges by creating a bridge between AI mo
 When a retrieval system returns the results from your knowledge base relevant to the user's question, you can use them to provide context for the AI model to help it generate an accurate response.
 
 Here's how a typical retrieval pipeline is built:
+
 1. **Converting information into searchable formats** - this is done by using **embedding models**. They create mathematical representations of your data, called "embeddings", that capture the semantic meaning of text, not just keywords.
 2. **Storing these representations** in a retrieval system, optimized for quickly finding similar embeddings for an input query.
 3. **Processing user queries** into embeddings, so they can be used as inputs to your retrieval system.
@@ -57,21 +67,27 @@ Install Chroma:
 {% TabbedUseCaseCodeBlock language="Terminal" %}
 
 {% Tab label="pip" %}
+
 ```terminal
 pip install chromadb
 ```
+
 {% /Tab %}
 
 {% Tab label="poetry" %}
+
 ```terminal
 poetry add chromadb
 ```
+
 {% /Tab %}
 
 {% Tab label="uv" %}
+
 ```terminal
 uv pip install chromadb
 ```
+
 {% /Tab %}
 
 {% /TabbedUseCaseCodeBlock %}
@@ -105,27 +121,35 @@ Install Chroma:
 {% TabbedUseCaseCodeBlock language="Terminal" %}
 
 {% Tab label="npm" %}
+
 ```terminal
 npm install chromadb @chroma-core/default-embed
 ```
+
 {% /Tab %}
 
 {% Tab label="pnpm" %}
+
 ```terminal
 pnpm add chromadb @chroma-core/default-embed
 ```
+
 {% /Tab %}
 
 {% Tab label="yarn" %}
+
 ```terminal
 yarn add chromadb @chroma-core/default-embed
 ```
+
 {% /Tab %}
 
 {% Tab label="bun" %}
+
 ```terminal
 bun add chromadb @chroma-core/default-embed
 ```
+
 {% /Tab %}
 
 {% /TabbedUseCaseCodeBlock %}
@@ -143,23 +167,22 @@ import { ChromaClient } from "chromadb";
 
 const client = new ChromaClient();
 const customer_support_collection = await client.createCollection({
-    name: "customer support"
+  name: "customer support",
 });
 
 await customer_support_collection.add({
-    ids: ["1", "2", "3"],
-    documents: [
-        "Toothbrushes can be returned up to 360 days after purchase if unopened.",
-        "Shipping is free of charge for all orders.",
-        "Shipping normally takes 2-3 business days"
-    ]
-})
+  ids: ["1", "2", "3"],
+  documents: [
+    "Toothbrushes can be returned up to 360 days after purchase if unopened.",
+    "Shipping is free of charge for all orders.",
+    "Shipping normally takes 2-3 business days",
+  ],
+});
 ```
 
 {% /Tab %}
 
 {% /Tabs %}
-
 
 ### Step 2: Process the User's Query
 
@@ -168,6 +191,7 @@ Similarly, Chroma handles the embedding of queries for you out-of-the-box.
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 user_query = "What is your return policy for tooth brushes?"
 
@@ -178,19 +202,24 @@ context = customer_support_collection.query(
 
 print(context) # Toothbrushes can be returned up to 360 days after purchase if unopened.
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 const user_query = "What is your return policy for tooth brushes?";
 
-const context = (await customer_support_collection.query({
+const context = (
+  await customer_support_collection.query({
     queryTexts: [user_query],
-    n_results: 1
-})).documents[0];
+    n_results: 1,
+  })
+).documents[0];
 
 console.log(context); // Toothbrushes can be returned up to 360 days after purchase if unopened.
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -206,6 +235,7 @@ With the result from Chroma, we can build the correct context for an AI model.
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 import os
 import openai
@@ -222,9 +252,11 @@ response = openai.ChatCompletion.create(
     ]
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 import OpenAI from "openai";
 
@@ -232,17 +264,17 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-
 const prompt = `${userQuery}. Use this as context for answering: ${context}`;
 
 const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    messages: [
-      { role: "system", content: "You are a helpful assistant" },
-      { role: "user", content: prompt },
-    ],
+  model: "gpt-4o",
+  messages: [
+    { role: "system", content: "You are a helpful assistant" },
+    { role: "user", content: prompt },
+  ],
 });
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -254,6 +286,7 @@ const response = await openai.chat.completions.create({
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 import os
 import anthropic
@@ -272,29 +305,32 @@ response = client.messages.create(
     ]
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
-import Anthropic from '@anthropic-ai/sdk';
+import Anthropic from "@anthropic-ai/sdk";
 
 const client = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
+  apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
 const prompt = `${userQuery}. Use this as context for answering: ${context}`;
 
 const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 1024,
-    messages: [
-        {
-            role: 'user',
-            content: prompt,
-        },
-    ],
+  model: "claude-sonnet-4-20250514",
+  max_tokens: 1024,
+  messages: [
+    {
+      role: "user",
+      content: prompt,
+    },
+  ],
 });
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}

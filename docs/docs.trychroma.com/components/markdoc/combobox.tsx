@@ -20,10 +20,11 @@ import {
 } from "@/components/ui/popover";
 
 const Combobox: React.FC<{
-  options: { value: string; label: string }[];
+  options: { value: string; label: string  }[];
   onSelect: (value: string) => void;
   activeValue: string;
-}> = ({ options, onSelect, activeValue }) => {
+  itemType: string;
+}> = ({ options, onSelect, activeValue, itemType }) => {
   const [open, setOpen] = React.useState(false);
 
   return (
@@ -37,15 +38,15 @@ const Combobox: React.FC<{
         >
           {activeValue
             ? options.find((option) => option.value === activeValue)?.label
-            : "Select integration..."}
+            : `Select ${itemType}...`}
           <ChevronsUpDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[200px] p-0">
         <Command>
-          <CommandInput placeholder="Search integration..." />
+          <CommandInput placeholder={`Search ${itemType}...`} />
           <CommandList>
-            <CommandEmpty>No integration found.</CommandEmpty>
+            <CommandEmpty>No {itemType} found.</CommandEmpty>
             <CommandGroup>
               {options.map((option) => (
                 <CommandItem

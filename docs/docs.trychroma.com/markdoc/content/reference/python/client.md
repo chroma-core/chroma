@@ -1,3 +1,8 @@
+---
+id: client-python
+name: Client (Python)
+---
+
 # Python Client
 
 ## configure
@@ -127,8 +132,8 @@ Return a running `chroma.API` instance
 
 **Arguments**:
 
-* `tenant`: The tenant to use for this client. Defaults to the `default` tenant.
-* `database`: The database to use for this client. Defaults to the `default` database.
+- `tenant`: The tenant to use for this client. Defaults to the `default` tenant.
+- `database`: The database to use for this client. Defaults to the `default` database.
 
 ## AdminClient
 
@@ -138,7 +143,7 @@ def AdminClient(settings: Settings = Settings()) -> AdminAPI
 
 Creates an admin client that can be used to create tenants and databases.
 
-***
+---
 
 # BaseClient Methods
 
@@ -159,7 +164,7 @@ Used to check if the server is alive.
 
 - `int` - The current time in nanoseconds since epoch
 
-## count\_collections
+## count_collections
 
 ```python
 def count_collections() -> int
@@ -171,7 +176,6 @@ Count the number of collections.
 
 - `int` - The number of collections.
 
-
 **Examples**:
 
 ```python
@@ -179,7 +183,7 @@ client.count_collections()
 # 1
 ```
 
-## delete\_collection
+## delete_collection
 
 ```python
 def delete_collection(name: str) -> None
@@ -191,11 +195,9 @@ Delete a collection with the given name.
 
 - `name` - The name of the collection to delete.
 
-
 **Raises**:
 
 - `chromadb.errors.NotFoundError` - If the collection does not exist.
-
 
 **Examples**:
 
@@ -215,7 +217,7 @@ Resets the database. This will delete all collections and entries.
 
 - `bool` - True if the database was reset successfully.
 
-## get\_version
+## get_version
 
 ```python
 def get_version() -> str
@@ -227,7 +229,7 @@ Get the version of Chroma.
 
 - `str` - The version of Chroma
 
-## get\_settings
+## get_settings
 
 ```python
 def get_settings() -> Settings
@@ -239,7 +241,7 @@ Get the settings used to initialize.
 
 - `Settings` - The settings used to initialize.
 
-## get\_max\_batch\_size
+## get_max_batch_size
 
 ```python
 def get_max_batch_size() -> int
@@ -247,7 +249,7 @@ def get_max_batch_size() -> int
 
 Return the maximum number of records that can be created or mutated in a single call.
 
-***
+---
 
 # ClientClient Methods
 
@@ -255,7 +257,7 @@ Return the maximum number of records that can be created or mutated in a single 
 class ClientAPI(BaseAPI, ABC)
 ```
 
-## list\_collections
+## list_collections
 
 ```python
 def list_collections(limit: Optional[int] = None,
@@ -269,11 +271,9 @@ List all collections.
 - `limit` - The maximum number of entries to return. Defaults to None.
 - `offset` - The number of entries to skip before returning. Defaults to None.
 
-
 **Returns**:
 
 - `Sequence[Collection]` - A list of collection objects.
-
 
 **Examples**:
 
@@ -305,17 +305,14 @@ Create a new collection with the given name and metadata.
 - `get_or_create` - If True, return the existing collection if it exists.
 - `data_loader` - Optional function to use to load records (documents, images, etc.)
 
-
 **Returns**:
 
 - `Collection` - The newly created collection.
-
 
 **Raises**:
 
 - `ValueError` - If the collection already exists and get_or_create is False.
 - `ValueError` - If the collection name is invalid.
-
 
 **Examples**:
 
@@ -348,25 +345,22 @@ Get a collection with the given name.
   Uses the default embedding function if not provided.
 - `data_loader` - Optional function to use to load records (documents, images, etc.)
 
-
 **Returns**:
 
 - `Collection` - The collection
-
 
 **Raises**:
 
 - `chromadb.errors.NotFoundError` - If the collection does not exist
 
-
 **Examples**:
 
-  ```python
-  client.get_collection("my_collection")
-  # collection(name="my_collection", metadata={})
-  ```
+```python
+client.get_collection("my_collection")
+# collection(name="my_collection", metadata={})
+```
 
-## get\_or\_create\_collection
+## get_or_create_collection
 
 ```python
 def get_or_create_collection(
@@ -389,18 +383,16 @@ Get or create a collection with the given name and metadata.
 - `embedding_function` - Optional function to use to embed documents
 - `data_loader` - Optional function to use to load records (documents, images, etc.)
 
-
 **Returns**:
 
-  The collection
-
+The collection
 
 **Examples**:
 
-  ```python
-  client.get_or_create_collection("my_collection")
-  # collection(name="my_collection", metadata={})
-  ```
+```python
+client.get_or_create_collection("my_collection")
+# collection(name="my_collection", metadata={})
+```
 
 ## set_tenant
 
@@ -438,7 +430,7 @@ def clear_system_cache() -> None
 Clear the system cache so that new systems can be created for an existing path.
 This should only be used for testing purposes.
 
-***
+---
 
 # AdminClient Methods
 
@@ -522,7 +514,7 @@ Get a tenant. Raises an error if the tenant does not exist.
 
 - `tenant` - The name of the tenant to get.
 
-***
+---
 
 # ServerClient Methods
 

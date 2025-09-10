@@ -1,3 +1,8 @@
+---
+id: collections-manage
+name: Manage Collections
+---
+
 # Managing Chroma Collections
 
 Chroma lets you manage collections of embeddings, using the **collection** primitive. Collections are the fundamental unit of storage and querying in Chroma.
@@ -14,17 +19,21 @@ Chroma collections are created with a name. Collection names are used in the url
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection = client.create_collection(name="my_collection")
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 const collection = await client.createCollection({
-    name: "my_collection",
+  name: "my_collection",
 });
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -46,21 +55,27 @@ Install the `openai` package:
 {% TabbedUseCaseCodeBlock language="Terminal" %}
 
 {% Tab label="pip" %}
+
 ```terminal
 pip install openai
 ```
+
 {% /Tab %}
 
 {% Tab label="poetry" %}
+
 ```terminal
 poetry add openai
 ```
+
 {% /Tab %}
 
 {% Tab label="uv" %}
+
 ```terminal
 uv pip install openai
 ```
+
 {% /Tab %}
 
 {% /TabbedUseCaseCodeBlock %}
@@ -98,27 +113,35 @@ Install the `@chroma-core/openai` package to get access to the `OpenAIEmbeddingF
 {% TabbedUseCaseCodeBlock language="Terminal" %}
 
 {% Tab label="npm" %}
+
 ```terminal
 npm install @chroma-core/openai
 ```
+
 {% /Tab %}
 
 {% Tab label="pnpm" %}
+
 ```terminal
 pnpm add @chroma-core/openai
 ```
+
 {% /Tab %}
 
 {% Tab label="yarn" %}
+
 ```terminal
 yarn add @chroma-core/openai
 ```
+
 {% /Tab %}
 
 {% Tab label="bun" %}
+
 ```terminal
 bun add @chroma-core/openai
 ```
+
 {% /Tab %}
 
 {% /TabbedUseCaseCodeBlock %}
@@ -129,11 +152,11 @@ Create your collection with the `OpenAIEmbeddingFunction`:
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 
 const collection = await client.createCollection({
-    name: "my_collection",
-    embeddingFunction: new OpenAIEmbeddingFunction({
-        apiKey: process.env.OPENAI_API_KEY,
-        modelName: "text-embedding-3-small"
-    })
+  name: "my_collection",
+  embeddingFunction: new OpenAIEmbeddingFunction({
+    apiKey: process.env.OPENAI_API_KEY,
+    modelName: "text-embedding-3-small",
+  }),
 });
 ```
 
@@ -141,9 +164,9 @@ Instead of having Chroma embed documents, you can also provide embeddings direct
 
 ```typescript
 const collection = await client.createCollection({
-    name: "my_collection",
-    embeddingFunction: null
-})
+  name: "my_collection",
+  embeddingFunction: null,
+});
 ```
 
 {% /Tab %}
@@ -157,6 +180,7 @@ When creating collections, you can pass the optional `metadata` argument to add 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 from datetime import datetime
 
@@ -169,19 +193,22 @@ collection = client.create_collection(
     }
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 let collection = await client.createCollection({
-    name: "my_collection",
-    embeddingFunction: emb_fn,
-    metadata: {
-        description: "my first Chroma collection",
-        created: (new Date()).toString()
-    }
+  name: "my_collection",
+  embeddingFunction: emb_fn,
+  metadata: {
+    description: "my first Chroma collection",
+    created: new Date().toString(),
+  },
 });
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -239,15 +266,15 @@ There are several ways to get a collection after it was created.
 The `getCollection` function will get a collection from Chroma by name. It returns a collection object with `name`, `metadata`, `configuration`, and `embeddingFunction`. If you did not provide an embedding function to `createCollection`, you can provide it to `getCollection`.
 
 ```typescript
-const collection = await client.getCollection({ name: 'my-collection '})
+const collection = await client.getCollection({ name: "my-collection " });
 ```
 
 The `getOrCreate` function behaves similarly, but will create the collection if it doesn't exist. You can pass to it the same arguments `createCollection` expects, and the client will ignore them if the collection already exists.
 
 ```typescript
 const collection = await client.getOrCreateCollection({
-    name: 'my-collection',
-    metadata: { 'description': '...' }
+  name: "my-collection",
+  metadata: { description: "..." },
 });
 ```
 
@@ -260,28 +287,34 @@ const [col1, col2] = client.getCollections(["col1", "col2"]);
 The `listCollections` function returns all the collections you have in your Chroma database. The collections will be ordered by creation time from oldest to newest.
 
 ```typescript
-const collections = await client.listCollections()
+const collections = await client.listCollections();
 ```
 
 By default, `listCollections` returns up to 100 collections. If you have more than 100 collections, or need to get only a subset of your collections, you can use the `limit` and `offset` arguments:
 
 ```typescript
-const firstCollectionsBatch = await client.listCollections({ limit: 100 }) // get the first 100 collections
-const secondCollectionsBatch = await client.listCollections({ limit: 100, offset: 100 }) // get the next 100 collections
-const collectionsSubset = await client.listCollections({ limit: 20, offset: 50 }) // get 20 collections starting from the 50th
+const firstCollectionsBatch = await client.listCollections({ limit: 100 }); // get the first 100 collections
+const secondCollectionsBatch = await client.listCollections({
+  limit: 100,
+  offset: 100,
+}); // get the next 100 collections
+const collectionsSubset = await client.listCollections({
+  limit: 20,
+  offset: 50,
+}); // get 20 collections starting from the 50th
 ```
 
 Current versions of Chroma store the embedding function you used to create a collection on the server, so the client can resolve it for you on subsequent "get" operations. If you are running an older version of the Chroma JS/TS client (<3.04) or server (<1.1.13), you will need to provide the same embedding function you used to create a collection when using `getCollection` and `getCollections`:
 
 ```typescript
 const collection = await client.getCollection({
-    name: 'my-collection',
-    embeddingFunction: ef
-})
+  name: "my-collection",
+  embeddingFunction: ef,
+});
 
 const [col1, col2] = client.getCollections([
-    { name: 'col1', embeddingFunction: openaiEF },
-    { name: 'col2', embeddingFunction: defaultEF },
+  { name: "col1", embeddingFunction: openaiEF },
+  { name: "col2", embeddingFunction: defaultEF },
 ]);
 ```
 
@@ -296,21 +329,25 @@ After a collection is created, you can modify its name, metadata and elements of
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.modify(
    name="new-name",
    metadata={"description": "new description"}
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.modify({
-    name: "new-name",
-    metadata: {description: "new description"}
-})
+  name: "new-name",
+  metadata: { description: "new description" },
+});
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -326,15 +363,19 @@ Deleting collections is destructive and not reversible
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 client.delete_collection(name="my-collection")
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await client.deleteCollection({ name: "my-collection" });
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -342,23 +383,28 @@ await client.deleteCollection({ name: "my-collection" });
 ## Convenience Methods
 
 Collections also offer a few useful convenience methods:
-* `count` - returns the number of records in the collection.
-* `peek` - returns the first 10 records in the collection.
+
+- `count` - returns the number of records in the collection.
+- `peek` - returns the first 10 records in the collection.
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.count()
 collection.peek()
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.count();
 await collection.peek();
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}

@@ -1,10 +1,15 @@
+---
+id: persistent-client
+name: Persistent Client
+---
+
 # Persistent Client
 
 {% Tabs %}
 
 {% Tab label="python" %}
 
-You can configure Chroma to save and load the database from your local machine, using the `PersistentClient`. 
+You can configure Chroma to save and load the database from your local machine, using the `PersistentClient`.
 
 Data will be persisted automatically and loaded on start (if it exists).
 
@@ -20,7 +25,7 @@ The `path` is where Chroma will store its database files on disk, and load them 
 
 {% Tab label="typescript" %}
 
-To connect with the JS/TS client, you must connect to a Chroma server. 
+To connect with the JS/TS client, you must connect to a Chroma server.
 
 To run a Chroma server locally that will persist your data, install Chroma via `pip`:
 
@@ -31,7 +36,7 @@ pip install chromadb
 And run the server using our CLI:
 
 ```terminal
-chroma run --path ./getting-started 
+chroma run --path ./getting-started
 ```
 
 The `path` is where Chroma will store its database files on disk, and load them on start. The default is `.chroma`.
@@ -55,11 +60,11 @@ By default, the `ChromaClient` is wired to connect to a Chroma server at `http:/
 
 ```typescript
 const client = new ChromaClient({
-    ssl: false,
-    host: 'localhost',
-    port: 9000,
-    database: 'my-db',
-    headers: {}
+  ssl: false,
+  host: "localhost",
+  port: 9000,
+  database: "my-db",
+  headers: {},
 });
 ```
 
@@ -71,24 +76,27 @@ See [Running Chroma in client-server mode](../client-server-mode) for more.
 
 The client object has a few useful convenience methods.
 
-* `heartbeat()` - returns a nanosecond heartbeat. Useful for making sure the client remains connected.
-* `reset()` - empties and completely resets the database. ⚠️ This is destructive and not reversible.
+- `heartbeat()` - returns a nanosecond heartbeat. Useful for making sure the client remains connected.
+- `reset()` - empties and completely resets the database. ⚠️ This is destructive and not reversible.
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 client.heartbeat()
 client.reset()
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await client.heartbeat();
 await client.reset();
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
-
