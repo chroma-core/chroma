@@ -610,7 +610,7 @@ class Knn(Rank):
     Args:
         query: The query vector for KNN search (dense, sparse, or numpy array)
         key: The embedding key to search against (default: "#embedding")
-        limit: Maximum number of results to consider (default: 1024)
+        limit: Maximum number of results to consider (default: 128)
         default: Default score for records not in KNN results (default: None)
         return_rank: If True, return the rank position (0, 1, 2, ...) instead of distance (default: False)
     """
