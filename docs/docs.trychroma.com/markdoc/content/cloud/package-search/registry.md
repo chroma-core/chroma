@@ -30,7 +30,7 @@ Chroma supports these registries and identifiers:
 
 ## Indexed versions
 
-Version discovery is driven by the package’s tag_formats and the underlying registry. The indexer resolves published versions to git tags (annotated or lightweight) using the configured formats. Historical indexing is bounded by sentinel_timestamp so versions published before that time are ignored.
+Version discovery is driven by the package’s tag formats and the underlying registry. The indexer resolves published versions to git tags (annotated or lightweight) using the configured formats. Historical indexing is bounded by sentinel_timestamp so versions published before that time are ignored.
 
 ## How to add a package
 

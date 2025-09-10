@@ -416,4 +416,25 @@ Add the following to your `~/Library/Application Support/Claude/claude_desktop_c
 {% /Step %}
 {% /ComboboxEntry %}
 
+{% ComboboxEntry value="roo-code" label="Roo Code" %}
+{% Step %}
+Add this to your Roo Code MCP server configuration:
+
+```JSON
+{
+  "mcpServers": {
+    "code-collections": {
+      "type": "streamable-http",
+      "url": "https://mcp.trychroma.com/package-search/v1",
+      "headers": {
+        "x-chroma-token": "<YOUR_CHROMA_API_KEY>"
+      }
+    }
+  }
+}
+```
+
+{% /Step %}
+{% /ComboboxEntry %}
+
 {% /ComboboxSteps %}
