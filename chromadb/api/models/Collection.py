@@ -455,7 +455,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         Args:
             ids: The ids of the embeddings to delete
-            where: A Where type dict used to filter the delection by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}]}}`. Optional.
+            where: A Where type dict used to filter the deletion by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}]}}`. Optional.
             where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. `{"$contains": "hello"}`. Optional.
 
         Returns:
