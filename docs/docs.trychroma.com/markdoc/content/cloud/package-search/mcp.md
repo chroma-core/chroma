@@ -24,7 +24,7 @@ To guarantee that your model uses package search when desired, add `use package 
 {% ComboboxSteps defaultValue="anthropic-sdk" itemType="environment" %}
 
 {% Step %}
-Visit the Chroma's [Package Search](http://trychroma.com/package-search) page.
+Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
 {% /Step %}
 
 {% Step %}
