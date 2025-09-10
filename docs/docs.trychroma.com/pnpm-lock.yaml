@@ -146,6 +146,9 @@ importers:
       unified:
         specifier: ^11.0.5
         version: 11.0.5
+      unist-util-visit:
+        specifier: ^5.0.0
+        version: 5.0.0
       vaul:
         specifier: ^1.1.1
         version: 1.1.2(@types/react-dom@19.1.9(@types/react@19.1.12))(@types/react@19.1.12)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)

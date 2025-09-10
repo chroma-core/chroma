@@ -24,7 +24,7 @@ To guarantee that your model uses package search when desired, add `use package 
 {% ComboboxSteps defaultValue="anthropic-sdk" itemType="environment" %}
 
 {% Step %}
-Visit the Chroma's [Package Search](http://trychroma.com/package-search) page.
+Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
 {% /Step %}
 
 {% Step %}
@@ -228,7 +228,7 @@ asyncio.run(run())
 
 {% ComboboxEntry value="claude-code" label="Claude Code" %}
 {% Step %}
-Add the Chroma MCP server to Claude Code with your Chroma API key
+Add the Chroma MCP server to Claude Code with your Chroma API key:
 
 ```terminal
 claude mcp add --transport http package-search https://mcp.trychroma.com/package-search/v1 --header "x-chroma-token: <YOUR_CHROMA_API_KEY>"
