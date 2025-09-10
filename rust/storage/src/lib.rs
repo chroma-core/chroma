@@ -146,6 +146,13 @@ pub enum StorageError {
         key: String,
     },
 
+    /// Error when a callback returning a ChromaError fails
+    #[error("Storage callback error: {info}")]
+    CallbackError {
+        /// The wrapped error
+        info: String,
+    },
+
     // Back off and retry---usually indicates an explicit 429/SlowDown.
     #[error("Back off and retry---usually indicates an explicit 429/SlowDown.")]
     Backoff,
@@ -168,6 +175,7 @@ impl ChromaError for StorageError {
             StorageError::Unauthenticated { .. } => ErrorCodes::Unauthenticated,
             StorageError::UnknownConfigurationKey { .. } => ErrorCodes::InvalidArgument,
             StorageError::Backoff { .. } => ErrorCodes::ResourceExhausted,
+            StorageError::CallbackError { .. } => ErrorCodes::Internal,
         }
     }
 }
