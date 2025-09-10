@@ -20,11 +20,13 @@ const isComboboxEntry = (
 ): node is React.ReactElement<ComboboxEntryProps> => {
   if (!React.isValidElement(node)) return false;
 
-  return (
+  const hasRequiredProps = Boolean(
     node.props &&
-    typeof node.props.value === "string" &&
-    typeof node.props.label === "string"
+    typeof (node.props as any).value === "string" &&
+    typeof (node.props as any).label === "string"
   );
+  
+  return hasRequiredProps;
 };
 
 const ComboboxSteps: React.FC<{
