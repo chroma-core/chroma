@@ -224,15 +224,13 @@ def _search_with_filter(
     query_embedding: Optional[Embedding] = None,
     n_results: int = 10
 ) -> List[str]:
-    """Use the search API to retrieve results with filters."""
+    """Use the search API to retrieve results with filters - test helper function."""
     # Build Search object
     search = Search()
     
     # Add KNN if embedding provided
     if query_embedding is not None:
-        # Convert numpy array to list for Knn
-        embedding_list = query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding)
-        search = search.rank(Knn(query=embedding_list))
+        search = search.rank(Knn(query=query_embedding))  # type: ignore[arg-type]
     
     # Add filters using the LegacyWhereWrapper
     if filter.get("where") or filter.get("where_document") or filter.get("ids"):
@@ -242,7 +240,6 @@ def _search_with_filter(
             ids_val = [ids_val]
         
         # LegacyWhereWrapper handles the conversion from legacy format
-        # It extends WhereExpr so can be used directly as the where_clause
         wrapper = LegacyWhereWrapper(
             where=filter.get("where"),
             where_document=filter.get("where_document"),
@@ -255,33 +252,11 @@ def _search_with_filter(
         if ids_val:
             search = search.filter_by_ids(ids_val)
     
-    # Set limit and offset
-    limit = filter.get("limit", n_results)
-    offset = filter.get("offset", 0)
-    search = search.limit(limit, offset)
+    # Set limit and select only IDs
+    search = search.limit(n_results).select("id")
     
-    # Select all keys to include metadata
-    search = search.select_all()
-    
-    # Call _search - using proper tenant/database access
-    # Get tenant and database from the collection's client
-    client = collection._client
-    tenant = "default_tenant"  # Default tenant
-    database = "default_database"  # Default database
-    
-    # Try to get actual tenant/database if available
-    if hasattr(client, "_tenant"):
-        tenant = client._tenant
-    if hasattr(client, "_database"):  
-        database = client._database
-    
-    result = client._search(
-        collection_id=collection.id,
-        searches=[search],
-        tenant=tenant,
-        database=database
-    )
-    
+    # Execute search and return IDs
+    result = collection.search(search)
     return result["ids"][0] if result["ids"] else []
 
 

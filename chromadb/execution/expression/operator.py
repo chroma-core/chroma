@@ -1,17 +1,15 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, List, Dict, Set, Any, Union, TYPE_CHECKING
+from typing import Optional, List, Dict, Set, Any, Union
 
+import numpy as np
+from numpy.typing import NDArray
 from chromadb.api.types import Embeddings, IDs, Include, SparseVector
 from chromadb.types import (
     Collection,
     RequestVersionContext,
     Segment,
 )
-
-if TYPE_CHECKING:
-    import numpy as np
-    from numpy.typing import NDArray
 
 
 @dataclass
@@ -616,7 +614,7 @@ class Knn(Rank):
         default: Default score for records not in KNN results (default: None)
         return_rank: If True, return the rank position (0, 1, 2, ...) instead of distance (default: False)
     """
-    query: Union[List[float], SparseVector, "NDArray[np.float32]", "NDArray[np.float64]"]
+    query: Union[List[float], SparseVector, "NDArray[np.float32]", "NDArray[np.float64]", "NDArray[np.int32]"]
     key: str = "#embedding"
     limit: int = 128
     default: Optional[float] = None
@@ -625,13 +623,8 @@ class Knn(Rank):
     def to_dict(self) -> Dict[str, Any]:
         # Convert numpy array to list if needed
         query_value = self.query
-        try:
-            import numpy as np
-            if isinstance(query_value, np.ndarray):
-                query_value = query_value.tolist()
-        except ImportError:
-            # numpy not installed, just use as-is
-            pass
+        if isinstance(query_value, np.ndarray):
+            query_value = query_value.tolist()
         
         # Build result dict - only include non-default values to keep JSON clean
         result = {

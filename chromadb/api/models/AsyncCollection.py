@@ -299,7 +299,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         This is an experimental API that only works for Hosted Chroma for now.
 
         Args:
-            searches: List of Search objects, each containing:
+            searches: A single Search object or a list of Search objects, each containing:
                 - filter: SearchFilter with query_ids and where_clause
                 - rank: Ranking expression for hybrid search (defaults to Val(0.0))
                 - limit: Limit configuration for pagination (defaults to no limit)
@@ -344,7 +344,15 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
                 select=Select(keys={Key.DOCUMENT, Key.SCORE, "title"})  # Key.DOCUMENT is equivalent to Key("#document")
             )
 
-            results = await collection.search([search])
+            # Single search
+            result = await collection.search(search)
+            
+            # Multiple searches at once
+            searches = [
+                Search().where(K("type") == "article").rank(Knn(query=[0.1, 0.2])),
+                Search().where(K("type") == "paper").rank(Knn(query=[0.3, 0.4]))
+            ]
+            results = await collection.search(searches)
         """
         # Convert single search to list for consistent handling
         searches_list = maybe_cast_one_to_many(searches)
