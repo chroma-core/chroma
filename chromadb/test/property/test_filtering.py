@@ -21,7 +21,7 @@ from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 from chromadb.execution.expression.plan import Search, SearchFilter
-from chromadb.execution.expression.operator import Knn, In, Key, Eq, And, Or, Contains, NotContains, Doc
+from chromadb.execution.expression.operator import Knn, In, Key, Eq, And, Or, Contains, NotContains
 import logging
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 import numpy as np
@@ -232,7 +232,7 @@ def _search_with_filter(
     if query_embedding is not None:
         # Convert numpy array to list for Knn
         embedding_list = query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding)
-        search = search.rank(Knn(embedding=embedding_list))
+        search = search.rank(Knn(query=embedding_list))
     
     # Add filters using the LegacyWhereWrapper
     if filter.get("where") or filter.get("where_document") or filter.get("ids"):
@@ -260,7 +260,7 @@ def _search_with_filter(
     offset = filter.get("offset", 0)
     search = search.limit(limit, offset)
     
-    # Select all fields to include metadata
+    # Select all keys to include metadata
     search = search.select_all()
     
     # Call _search - using proper tenant/database access

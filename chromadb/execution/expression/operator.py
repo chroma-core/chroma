@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, List, Dict, Set, Any, Union
+from typing import Optional, List, Dict, Set, Any, Union, TYPE_CHECKING
 
 from chromadb.api.types import Embeddings, IDs, Include, SparseVector
 from chromadb.types import (
@@ -8,6 +8,10 @@ from chromadb.types import (
     RequestVersionContext,
     Segment,
 )
+
+if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
 
 
 @dataclass
@@ -224,33 +228,50 @@ class NotRegex(Where):
 class Key:
     """Field proxy for building Where conditions with operator overloading.
     
+    Predefined field constants:
+        Key.DOCUMENT - Document field (equivalent to Key("#document"))
+        Key.EMBEDDING - Embedding field (equivalent to Key("#embedding"))
+        Key.METADATA - Metadata field (equivalent to Key("#metadata"))
+        Key.SCORE - Score field (equivalent to Key("#score"))
+    
+    Note: K is an alias for Key, so you can use K.DOCUMENT or Key.DOCUMENT interchangeably.
+    
     Examples:
-        # Equality
-        Key("status") == "active"
+        # Using predefined keys with K alias
+        from chromadb.execution.expression import K
+        K.DOCUMENT.contains("search text")
+        K.SCORE > 0.5
         
-        # Comparison
-        Key("score") > 0.5
-        Key("age") >= 18
-        
-        # Membership
-        Key("category").is_in(["science", "tech"])
-        
-        # Pattern matching
-        Key("email").regex(r".*@example\.com")
+        # Custom field names
+        K("status") == "active"
+        K("category").is_in(["science", "tech"])
         
         # Combining conditions
-        (Key("status") == "active") & (Key("score") > 0.5)
-        (Key("category") == "science") | (Key("category") == "tech")
+        (K("status") == "active") & (K.SCORE > 0.5)
     """
+    
+    # Predefined key constants (initialized after class definition)
+    DOCUMENT: 'Key'
+    EMBEDDING: 'Key'  
+    METADATA: 'Key'
+    SCORE: 'Key'
     
     def __init__(self, name: str):
         self.name = name
     
-    # Comparison operators
-    def __eq__(self, value: Any) -> Eq: # type: ignore[override]
-        """Equality: Key('field') == value"""
-        return Eq(self.name, value)
+    def __eq__(self, other: Any) -> Union[Eq, bool]: # type: ignore[override]
+        """Equality operator - can be used for Key comparison or Where condition creation"""
+        if isinstance(other, Key):
+            return self.name == other.name
+        else:
+            # Create Where condition
+            return Eq(self.name, other)
     
+    def __hash__(self) -> int:
+        """Make Key hashable for use in sets"""
+        return hash(self.name)
+    
+    # Comparison operators  
     def __ne__(self, value: Any) -> Ne: # type: ignore[override]
         """Not equal: Key('field') != value"""
         return Ne(self.name, value)
@@ -296,6 +317,12 @@ class Key:
         """Check if field doesn't contain text: Key('field').not_contains('text')"""
         return NotContains(self.name, content)
 
+
+# Initialize predefined key constants
+Key.DOCUMENT = Key("#document")
+Key.EMBEDDING = Key("#embedding")
+Key.METADATA = Key("#metadata")
+Key.SCORE = Key("#score")
 
 # Alias for Key
 K = Key
@@ -406,13 +433,13 @@ class Rank:
     
     Examples:
         # Weighted combination
-        Knn(embedding=[0.1, 0.2]) * 0.8 + Val(0.5) * 0.2
+        Knn(query=[0.1, 0.2]) * 0.8 + Val(0.5) * 0.2
         
         # Normalization
-        Knn(embedding=[0.1, 0.2]) / Val(10.0)
+        Knn(query=[0.1, 0.2]) / Val(10.0)
         
         # Clamping
-        Knn(embedding=[0.1, 0.2]).min(1.0).max(0.0)
+        Knn(query=[0.1, 0.2]).min(1.0).max(0.0)
     """
     
     def to_dict(self) -> Dict[str, Any]:
@@ -580,26 +607,44 @@ class Mul(Rank):
 
 @dataclass
 class Knn(Rank):
-    """KNN-based ranking"""
-    embedding: Union[List[float], SparseVector]
-    key: str = "$chroma_embedding"
-    limit: int = 1024
+    """KNN-based ranking
+    
+    Args:
+        query: The query vector for KNN search (dense, sparse, or numpy array)
+        key: The embedding key to search against (default: "#embedding")
+        limit: Maximum number of results to consider (default: 1024)
+        default: Default score for records not in KNN results (default: None)
+        return_rank: If True, return the rank position (0, 1, 2, ...) instead of distance (default: False)
+    """
+    query: Union[List[float], SparseVector, "NDArray[np.float32]", "NDArray[np.float64]"]
+    key: str = "#embedding"
+    limit: int = 128
     default: Optional[float] = None
-    ordinal: bool = False
+    return_rank: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
-        # With untagged enum, embedding is serialized directly
-        # (as a list for dense, or as a dict with indices/values for sparse)
+        # Convert numpy array to list if needed
+        query_value = self.query
+        try:
+            import numpy as np
+            if isinstance(query_value, np.ndarray):
+                query_value = query_value.tolist()
+        except ImportError:
+            # numpy not installed, just use as-is
+            pass
+        
+        # Build result dict - only include non-default values to keep JSON clean
         result = {
-            "embedding": self.embedding,
+            "query": query_value,
             "key": self.key,
             "limit": self.limit
         }
         
+        # Only include optional fields if they're set to non-default values
         if self.default is not None:
             result["default"] = self.default # type: ignore[assignment]
-        if self.ordinal:
-            result["ordinal"] = self.ordinal
+        if self.return_rank:  # Only include if True (non-default)
+            result["return_rank"] = self.return_rank
         
         return {"$knn": result}
 
@@ -632,47 +677,39 @@ class Val(Rank):
         return {"$val": self.value}
 
 
-class SelectField(Enum):
-    """Predefined field types for Select"""
-    DOCUMENT = "#document"
-    EMBEDDING = "#embedding"
-    METADATA = "#metadata"
-    SCORE = "#score"
-
-
-# Static variable for document field
-# Usage: Doc.contains("search text") for document content filtering
-Doc = Key(SelectField.DOCUMENT.value)
-
-
 @dataclass
 class Select:
     """Selection configuration for search results.
     
     Fields can be:
-    - SelectField.DOCUMENT - Select document field
-    - SelectField.EMBEDDING - Select embedding field  
-    - SelectField.METADATA - Select all metadata
-    - SelectField.SCORE - Select score field
+    - Key.DOCUMENT - Select document key (equivalent to Key("#document"))
+    - Key.EMBEDDING - Select embedding key (equivalent to Key("#embedding"))
+    - Key.SCORE - Select score key (equivalent to Key("#score"))
     - Any other string - Select specific metadata property
     
+    Note: You can use K as an alias for Key for more concise code.
+    
     Examples:
-        # Select predefined fields
-        Select(fields={SelectField.DOCUMENT, SelectField.SCORE})
+        # Select predefined keys using K alias (K is shorthand for Key)
+        from chromadb.execution.expression import K
+        Select(keys={K.DOCUMENT, K.SCORE})
         
         # Select specific metadata properties
-        Select(fields={"title", "author", "date"})
+        Select(keys={"title", "author", "date"})
         
         # Mixed selection
-        Select(fields={SelectField.DOCUMENT, "title", "author"})
+        Select(keys={K.DOCUMENT, "title", "author"})
     """
-    fields: Set[Union[SelectField, str]] = field(default_factory=set)
+    keys: Set[Union[Key, str]] = field(default_factory=set)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert the Select to a dictionary for JSON serialization"""
-        # Convert SelectField enums to their string values
-        field_strings = {
-            f.value if isinstance(f, SelectField) else f 
-            for f in self.fields
-        }
-        return {"fields": list(field_strings)}
+        # Convert Key objects to their string values
+        key_strings = []
+        for k in self.keys:
+            if isinstance(k, Key):
+                key_strings.append(k.name)
+            else:
+                key_strings.append(k)
+        # Remove duplicates while preserving order
+        return {"keys": list(dict.fromkeys(key_strings))}

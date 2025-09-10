@@ -26,7 +26,7 @@ use crate::execution::operators::fetch_log::FetchLogOutput;
 
 #[derive(Debug)]
 pub struct Idf {
-    pub embedding: SparseVector,
+    pub query: SparseVector,
     pub key: String,
 }
 
@@ -41,7 +41,7 @@ pub struct IdfInput {
 
 #[derive(Clone, Debug)]
 pub struct IdfOutput {
-    pub scaled_embedding: SparseVector,
+    pub scaled_query: SparseVector,
 }
 
 #[derive(Debug, Error)]
@@ -100,7 +100,7 @@ impl Operator<IdfInput, IdfOutput> for Idf {
                 .await?;
 
         if let Some(sparse_index_reader) = metadata_segment_reader.sparse_index_reader.as_ref() {
-            for &dimension_id in &self.embedding.indices {
+            for &dimension_id in &self.query.indices {
                 let encoded_dimension_id = encode_u32(dimension_id);
                 let nt = sparse_index_reader
                     .get_dimension_offset_rank(&encoded_dimension_id, u32::MAX)
@@ -162,14 +162,13 @@ impl Operator<IdfInput, IdfOutput> for Idf {
             };
         }
 
-        let scaled_embedding =
-            SparseVector::from_pairs(self.embedding.iter().map(|(index, value)| {
-                let nt = nts.get(&index).cloned().unwrap_or_default() as f32;
-                let scale = ((n as f32 - nt + 0.5) / (nt + 0.5)).ln_1p();
-                (index, scale * value)
-            }));
+        let scaled_query = SparseVector::from_pairs(self.query.iter().map(|(index, value)| {
+            let nt = nts.get(&index).cloned().unwrap_or_default() as f32;
+            let scale = ((n as f32 - nt + 0.5) / (nt + 0.5)).ln_1p();
+            (index, scale * value)
+        }));
 
-        Ok(IdfOutput { scaled_embedding })
+        Ok(IdfOutput { scaled_query })
     }
 }
 

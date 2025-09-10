@@ -73,7 +73,7 @@ pub struct RankOrchestratorOutput {
     pub pulled_log_bytes: u64,
 }
 
-/// The `RankOrchestrator` chains operators to evaluate ranks, apply limits, and select fields
+/// The `RankOrchestrator` chains operators to evaluate ranks, apply limits, and select keys
 /// for search results from multiple KNN orchestrators.
 ///
 /// # Pipeline
@@ -255,9 +255,9 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for RankOrchestrator {
                     .offset_ids
                     .iter()
                     .enumerate()
-                    .map(|(ordinal, offset_id)| RecordMeasure {
+                    .map(|(rank_position, offset_id)| RecordMeasure {
                         offset_id,
-                        measure: ordinal as f32,
+                        measure: rank_position as f32,
                     })
                     .collect(),
                 logs: self.knn_filter_output.logs.clone(),

@@ -38,7 +38,7 @@ impl ChromaError for SparseIndexKnnError {
 
 #[derive(Clone, Debug)]
 pub struct SparseIndexKnn {
-    pub embedding: SparseVector,
+    pub query: SparseVector,
     pub key: String,
     pub limit: u32,
 }
@@ -65,7 +65,7 @@ impl Operator<SparseIndexKnnInput, SparseIndexKnnOutput> for SparseIndexKnn {
 
         Ok(SparseIndexKnnOutput {
             records: sparse_reader
-                .wand(self.embedding.iter(), self.limit, input.mask.clone())
+                .wand(self.query.iter(), self.limit, input.mask.clone())
                 .await?
                 .into_iter()
                 .map(|score| RecordMeasure {

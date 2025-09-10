@@ -1640,7 +1640,7 @@ impl ServiceBasedFrontend {
         }
 
         // Create a single Search plan with one scan and the payloads from the request
-        // Clone the searches to use them later for aggregating select fields
+        // Clone the searches to use them later for aggregating select keys
         let searches_for_select = request.searches.clone();
         let search_plan = Search {
             scan: Scan {

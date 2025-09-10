@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Union, Set, Optional
 
 from chromadb.execution.expression.operator import (
     KNN, Filter, Limit, Projection, Scan, Rank, Select, Val, SearchFilter,
-    SelectField, Where
+    Where, Key
 )
 
 
@@ -36,17 +36,17 @@ class Search:
     Direct construction:
         Search(
             filter=SearchFilter(where_clause=Eq("status", "active")),
-            rank=Knn(embedding=[0.1, 0.2]),
+            rank=Knn(query=[0.1, 0.2]),
             limit=Limit(limit=10),
-            select=Select(fields={SelectField.DOCUMENT})
+            select=Select(keys={Key.DOCUMENT})  # Use Key.DOCUMENT instead of Key("#document")
         )
     
     Builder pattern:
         (Search()
             .where(Key("status") == "active")
-            .rank(Knn(embedding=[0.1, 0.2]))
+            .rank(Knn(query=[0.1, 0.2]))
             .limit(10)
-            .select(SelectField.DOCUMENT))
+            .select(Key.DOCUMENT))  # Cleaner than Key("#document")
     
     Empty Search() is valid and will use defaults:
         - filter: Empty SearchFilter (no filtering)
@@ -68,7 +68,7 @@ class Search:
             filter: SearchFilter for filtering results (defaults to empty filter)
             rank: Rank expression for scoring (defaults to None - no ranking)
             limit: Limit configuration for pagination (defaults to no limit)
-            select: Select configuration for fields (defaults to empty selection)
+            select: Select configuration for keys (defaults to empty selection)
         """
         self._filter = filter if filter is not None else SearchFilter()
         self._rank = rank  # Keep as None if not provided
@@ -86,12 +86,12 @@ class Search:
     
     # Builder methods for chaining
     def select_all(self) -> 'Search':
-        """Select all predefined fields (document, embedding, metadata, score)"""
-        new_select = Select(fields={
-            SelectField.DOCUMENT,
-            SelectField.EMBEDDING,
-            SelectField.METADATA,
-            SelectField.SCORE
+        """Select all predefined keys (document, embedding, metadata, score)"""
+        new_select = Select(keys={
+            Key.DOCUMENT,
+            Key.EMBEDDING,
+            Key.METADATA,
+            Key.SCORE
         })
         return Search(
             filter=self._filter,
@@ -100,16 +100,16 @@ class Search:
             select=new_select
         )
     
-    def select(self, *fields: Union[SelectField, str]) -> 'Search':
-        """Select specific fields
+    def select(self, *keys: Union[Key, str]) -> 'Search':
+        """Select specific keys
         
         Args:
-            *fields: Variable number of SelectField enums or string field names
+            *keys: Variable number of Key objects or string key names
             
-        Example:
-            search.select(SelectField.DOCUMENT, SelectField.SCORE, "title", "author")
+        Returns:
+            New Search object with updated select configuration
         """
-        new_select = Select(fields=set(fields))
+        new_select = Select(keys=set(keys))
         return Search(
             filter=self._filter,
             rank=self._rank,
@@ -164,7 +164,7 @@ class Search:
             rank_expr: A Rank expression for scoring
             
         Example:
-            search.rank(Knn(embedding=[0.1, 0.2]) * 0.8 + Val(0.5) * 0.2)
+            search.rank(Knn(query=[0.1, 0.2]) * 0.8 + Val(0.5) * 0.2)
         """
         return Search(
             filter=self._filter,

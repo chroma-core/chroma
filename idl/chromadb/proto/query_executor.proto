@@ -104,11 +104,11 @@ message RankExpr {
     }
 
     message Knn {
-        QueryVector embedding = 1;
+        QueryVector query = 1;
         string key = 2;
         uint32 limit = 3;
         optional float default = 4;
-        bool ordinal = 5;
+        bool return_rank = 5;
     }
     
     message Subtraction {
@@ -140,7 +140,7 @@ message RankOperator {
 }
 
 message SelectOperator {
-    repeated string fields = 1;
+    repeated string keys = 1;
 }
 
 message SearchPayload {

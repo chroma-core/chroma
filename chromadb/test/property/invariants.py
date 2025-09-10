@@ -28,7 +28,7 @@ from pypika import Table, functions
 
 from chromadb.utils import distance_functions
 from chromadb.execution.expression.plan import Search
-from chromadb.execution.expression.operator import Knn, Select, Limit, SelectField
+from chromadb.execution.expression.operator import Knn, Select, Limit, Key
 
 T = TypeVar("T")
 
@@ -344,7 +344,7 @@ def ann_accuracy(
             else:
                 query_embedding_list = query_embedding
             search = Search(
-                rank=Knn(embedding=query_embedding_list),
+                rank=Knn(query=query_embedding_list),
                 limit=Limit(limit=n_results),
             ).select_all()
             search_requests.append(search)

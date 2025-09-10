@@ -49,7 +49,7 @@ impl ChromaError for SparseLogKnnError {
 
 #[derive(Clone, Debug)]
 pub struct SparseLogKnn {
-    pub embedding: SparseVector,
+    pub query: SparseVector,
     pub key: String,
     pub limit: u32,
 }
@@ -62,7 +62,7 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
         &self,
         input: &SparseLogKnnInput,
     ) -> Result<SparseLogKnnOutput, SparseLogKnnError> {
-        let query_sparse_vector: CsVec<f32> = (&self.embedding).into();
+        let query_sparse_vector: CsVec<f32> = (&self.query).into();
         let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
@@ -197,7 +197,7 @@ mod tests {
         };
 
         let sparse_knn_operator = SparseLogKnn {
-            embedding: query_vector,
+            query: query_vector,
             key: "sparse_embedding".to_string(),
             limit: 5,
         };
@@ -240,7 +240,7 @@ mod tests {
         };
 
         let sparse_knn_operator = SparseLogKnn {
-            embedding: query_vector,
+            query: query_vector,
             key: "sparse_embedding".to_string(),
             limit: 3,
         };
@@ -271,7 +271,7 @@ mod tests {
         };
 
         let sparse_knn_operator = SparseLogKnn {
-            embedding: query_vector,
+            query: query_vector,
             key: "sparse_embedding".to_string(),
             limit: 3,
         };
@@ -305,7 +305,7 @@ mod tests {
         };
 
         let sparse_knn_operator = SparseLogKnn {
-            embedding: query_vector,
+            query: query_vector,
             key: "sparse_embedding".to_string(),
             limit: 10, // Requesting more than available
         };
@@ -336,7 +336,7 @@ mod tests {
         };
 
         let sparse_knn_operator = SparseLogKnn {
-            embedding: query_vector,
+            query: query_vector,
             key: "sparse_embedding".to_string(),
             limit: 3,
         };
