@@ -56,6 +56,7 @@
     "tailwind-merge": "^2.2.1",
     "tailwindcss-animate": "^1.0.7",
     "unified": "^11.0.5",
+    "unist-util-visit": "^5.0.0",
     "vaul": "^1.1.1"
   },
   "devDependencies": {
