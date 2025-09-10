@@ -1,3 +1,8 @@
+---
+id: embedding-functions
+name: Embedding Functions
+---
+
 # Embedding Functions
 
 Embeddings are the way to represent any kind of data, making them the perfect fit for working with all kinds of AI-powered tools and algorithms. They can represent text, images, and soon audio and video. Chroma collections index embeddings to enable efficient similarity search on the data they represent. There are many options for creating embeddings, whether locally using an installed library, or by calling an API.
@@ -5,7 +10,7 @@ Embeddings are the way to represent any kind of data, making them the perfect fi
 Chroma provides lightweight wrappers around popular embedding providers, making it easy to use them in your apps. You can set an embedding function when you [create](../collections/manage-collections) a Chroma collection, to be automatically used when adding and querying data, or you can call them directly yourself.
 
 |                                                                                          | Python | Typescript |
-|------------------------------------------------------------------------------------------|--------|------------|
+| ---------------------------------------------------------------------------------------- | ------ | ---------- |
 | [OpenAI](../../integrations/embedding-models/openai)                                     | ✓      | ✓          |
 | [Google Generative AI](../../integrations/embedding-models/google-gemini)                | ✓      | ✓          |
 | [Cohere](../../integrations/embedding-models/cohere)                                     | ✓      | ✓          |
@@ -13,14 +18,14 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Instructor](../../integrations/embedding-models/instructor)                             | ✓      | -          |
 | [Hugging Face Embedding Server](../../integrations/embedding-models/hugging-face-server) | ✓      | ✓          |
 | [Jina AI](../../integrations/embedding-models/jina-ai)                                   | ✓      | ✓          |
-| [Cloudflare Workers AI](../../integrations/embedding-models/cloudflare-workers-ai)    | ✓      | ✓          |
-| [Together AI](../../integrations/embedding-models/together-ai)                        | ✓      | ✓          |
-| [Mistral](../../integrations/embedding-models/mistral)                                | ✓      | ✓          |
-| [Morph](../../integrations/embedding-models/morph)                                    | ✓      | ✓          |
+| [Cloudflare Workers AI](../../integrations/embedding-models/cloudflare-workers-ai)       | ✓      | ✓          |
+| [Together AI](../../integrations/embedding-models/together-ai)                           | ✓      | ✓          |
+| [Mistral](../../integrations/embedding-models/mistral)                                   | ✓      | ✓          |
+| [Morph](../../integrations/embedding-models/morph)                                       | ✓      | ✓          |
 
 We welcome pull requests to add new Embedding Functions to the community.
 
-***
+---
 
 ## Default: all-MiniLM-L6-v2
 
@@ -31,9 +36,11 @@ If you don't specify an embedding function when creating a collection, Chroma wi
 {% Tabs %}
 
 {% Tab label="python" %}
+
 ```python
 collection = client.create_collection(name="my_collection")
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
@@ -42,27 +49,35 @@ Install the `@chroma-core/default-embed` package:
 {% TabbedUseCaseCodeBlock language="Terminal" %}
 
 {% Tab label="npm" %}
+
 ```terminal
 npm install @chroma-core/default-embed
 ```
+
 {% /Tab %}
 
 {% Tab label="pnpm" %}
+
 ```terminal
 pnpm add @chroma-core/default-embed
 ```
+
 {% /Tab %}
 
 {% Tab label="yarn" %}
+
 ```terminal
 yarn add @chroma-core/default-embed
 ```
+
 {% /Tab %}
 
 {% Tab label="bun" %}
+
 ```terminal
 bun add @chroma-core/default-embed
 ```
+
 {% /Tab %}
 
 {% /TabbedUseCaseCodeBlock %}
@@ -84,6 +99,7 @@ Embedding functions can be linked to a collection and used whenever you call `ad
 {% Tabs %}
 
 {% Tab label="python" %}
+
 ```python
 # Set your OPENAI_API_KEY environment variable
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
@@ -101,6 +117,7 @@ collection.add(
     documents=["doc1", "doc2"]
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
@@ -109,27 +126,35 @@ Install the `@chroma-core/openai` package:
 {% TabbedUseCaseCodeBlock language="Terminal" %}
 
 {% Tab label="npm" %}
+
 ```terminal
 npm install @chroma-core/openai
 ```
+
 {% /Tab %}
 
 {% Tab label="pnpm" %}
+
 ```terminal
 pnpm add @chroma-core/openai
 ```
+
 {% /Tab %}
 
 {% Tab label="yarn" %}
+
 ```terminal
 yarn add @chroma-core/openai
 ```
+
 {% /Tab %}
 
 {% Tab label="bun" %}
+
 ```terminal
 bun add @chroma-core/openai
 ```
+
 {% /Tab %}
 
 {% /TabbedUseCaseCodeBlock %}
@@ -141,18 +166,19 @@ Create a collection with the `OpenAIEmbeddingFunction`:
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 
 collection = await client.createCollection({
-    name: "my_collection",
-    embedding_function: new OpenAIEmbeddingFunction({
-        model_name: "text-embedding-3-small"
-    })
+  name: "my_collection",
+  embedding_function: new OpenAIEmbeddingFunction({
+    model_name: "text-embedding-3-small",
+  }),
 });
 
 // Chroma will use OpenAIEmbeddingFunction to embed your documents
 await collection.add({
-    ids: ["id1", "id2"],
-    documents: ["doc1", "doc2"]
-})
+  ids: ["id1", "id2"],
+  documents: ["doc1", "doc2"],
+});
 ```
+
 {% /Tab %}
 
 {% /Tabs %}
@@ -162,6 +188,7 @@ You can also use embedding functions directly which can be handy for debugging.
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 
@@ -171,9 +198,11 @@ print(embeddings) # [[0.05035809800028801, 0.0626462921500206, -0.06182732060551
 
 collection.query(query_embeddings=embeddings)
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
 
@@ -181,8 +210,9 @@ const defaultEF = new DefaultEmbeddingFunction();
 const embeddings = await defaultEF.generate(["foo"]);
 console.log(embeddings); // [[0.05035809800028801, 0.0626462921500206, -0.061827320605516434...]]
 
-await collection.query({ queryEmbeddings: embeddings })
+await collection.query({ queryEmbeddings: embeddings });
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -194,6 +224,7 @@ You can create your own embedding function to use with Chroma; it just needs to 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 from chromadb import Documents, EmbeddingFunction, Embeddings
 
@@ -202,25 +233,28 @@ class MyEmbeddingFunction(EmbeddingFunction):
         # embed the documents somehow
         return embeddings
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
-import { EmbeddingFunction } from  "chromadb";
+import { EmbeddingFunction } from "chromadb";
 
 class MyEmbeddingFunction implements EmbeddingFunction {
-    private api_key: string;
+  private api_key: string;
 
-    constructor(api_key: string) {
-        this.api_key = api_key;
-    }
+  constructor(api_key: string) {
+    this.api_key = api_key;
+  }
 
-    public async generate(texts: string[]): Promise<number[][]> {
-        // do things to turn texts into embeddings with an api_key perhaps
-        return embeddings;
-    }
+  public async generate(texts: string[]): Promise<number[][]> {
+    // do things to turn texts into embeddings with an api_key perhaps
+    return embeddings;
+  }
 }
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}

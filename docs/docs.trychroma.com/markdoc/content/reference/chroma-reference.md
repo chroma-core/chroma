@@ -1,3 +1,8 @@
+---
+id: reference
+name: Reference
+---
+
 # Chroma Reference
 
 ## Client APIs
@@ -8,16 +13,15 @@ Chroma currently maintains 1st party clients for Python and Javascript. For othe
 
 `Collection` - is the object that wraps a collection
 
-
 {% special_table %}
 {% /special_table %}
 
-|              | Client                | Collection                        |
-|--------------|-----------------------|-----------------------------------|
-| Python | [Client](./python/client) | [Collection](./python/collection) |
-| Javascript | [Client](./js/client) | [Collection](./js/collection)  |
+|            | Client                    | Collection                        |
+| ---------- | ------------------------- | --------------------------------- |
+| Python     | [Client](./python/client) | [Collection](./python/collection) |
+| Javascript | [Client](./js/client)     | [Collection](./js/collection)     |
 
-***
+---
 
 ## Backend API
 

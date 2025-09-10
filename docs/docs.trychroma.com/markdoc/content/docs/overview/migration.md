@@ -1,3 +1,8 @@
+---
+id: migration
+name: Migration
+---
+
 # Migration
 
 Schema and data format changes are a necessary evil of evolving software. We take changes seriously and make them infrequently and only when necessary.
@@ -61,7 +66,6 @@ chroma run --config ./config.yaml
 
 Check out a full sample configuration file [here](https://github.com/chroma-core/chroma/blob/main/rust/frontend/sample_configs/single_node_full.yaml).
 
-
 **Chroma in Docker changes**
 
 This section is applicable to you if you run Chroma using a Docker container.
@@ -79,7 +83,6 @@ you should now start it with:
 ```terminal
 docker run -p 8000:8000 -v ./chroma:/data chroma-core/chroma
 ```
-
 
 ### v0.6.0
 
@@ -120,18 +123,21 @@ collection.get(ids=["id1", "id2", "id3", ...])
 ### v0.5.12
 
 The operators `$ne` (not equal) and `$nin` (not in) in `where` clauses have been updated:
-* Previously: They only matched records that had the specified key.
-* Now: They also match records that don't have the specified key at all.
+
+- Previously: They only matched records that had the specified key.
+- Now: They also match records that don't have the specified key at all.
 
 In other words, `$ne` and `$nin` now match the complement set of records (the exact opposite) that `$eq` (equals) and `$in` (in) would match, respectively.
 
 The `$not_contains` operator in the `where_document` clause has also been updated:
-* Previously: It only matched records that had a document field.
-* Now: It also matches records that don't have a document field at all.
+
+- Previously: It only matched records that had a document field.
+- Now: It also matches records that don't have a document field at all.
 
 In other words, `$not_contains` now matches the exact opposite set of records that `$contains` would match.
 
 `RateLimitingProvider` is now deprecated and replaced by `RateLimitEnforcer`. This new interface allows you to wrap server calls with rate limiting logic. The default `SimpleRateLimitEnforcer` implementation allows all requests, but you can create custom implementations for more advanced rate limiting strategies.
+
 ### v0.5.11
 
 The results returned by `collection.get()` is now ordered by internal ids. Whereas previously, the results were ordered by user provided ids, although this behavior was not explicitly documented. We would like to make the change because using user provided ids may not be ideal for performance in hosted Chroma, and we hope to propagate the change to local Chroma for consistency of behavior. In general, newer documents in Chroma has larger internal ids.
@@ -270,22 +276,22 @@ CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="AUTHORIZATION"
 #### Reference of changed configuration values
 
 - Overall config
-    - `chroma_client_auth_token_transport_header`: renamed to `chroma_auth_token_transport_header`.
-    - `chroma_server_auth_token_transport_header`: renamed to `chroma_auth_token_transport_header`.
+  - `chroma_client_auth_token_transport_header`: renamed to `chroma_auth_token_transport_header`.
+  - `chroma_server_auth_token_transport_header`: renamed to `chroma_auth_token_transport_header`.
 - Client config
-    - `chroma_client_auth_credentials_provider`: deleted. Functionality is now in `chroma_client_auth_provider`.
-    - `chroma_client_auth_protocol_adapter`: deleted. Functionality is now in `chroma_client_auth_provider`.
-    - `chroma_client_auth_credentials_file`: deleted. Functionality is now in `chroma_client_auth_credentials`.
-    - These changes also apply to the Typescript client.
+  - `chroma_client_auth_credentials_provider`: deleted. Functionality is now in `chroma_client_auth_provider`.
+  - `chroma_client_auth_protocol_adapter`: deleted. Functionality is now in `chroma_client_auth_provider`.
+  - `chroma_client_auth_credentials_file`: deleted. Functionality is now in `chroma_client_auth_credentials`.
+  - These changes also apply to the Typescript client.
 - Server authn
-    - `chroma_server_auth_provider`: Renamed to `chroma_server_authn_provider`.
-    - `chroma_server_auth_configuration_provider`: deleted. Functionality is now in `chroma_server_authn_provider`.
-    - `chroma_server_auth_credentials_provider`: deleted. Functionality is now in `chroma_server_authn_provider`.
-    - `chroma_server_auth_credentials_file`: renamed to `chroma_server_authn_credentials_file`.
-    - `chroma_server_auth_credentials`: renamed to `chroma_server_authn_credentials`.
-    - `chroma_server_auth_configuration_file`: renamed to `chroma_server_authn_configuration_file`.
+  - `chroma_server_auth_provider`: Renamed to `chroma_server_authn_provider`.
+  - `chroma_server_auth_configuration_provider`: deleted. Functionality is now in `chroma_server_authn_provider`.
+  - `chroma_server_auth_credentials_provider`: deleted. Functionality is now in `chroma_server_authn_provider`.
+  - `chroma_server_auth_credentials_file`: renamed to `chroma_server_authn_credentials_file`.
+  - `chroma_server_auth_credentials`: renamed to `chroma_server_authn_credentials`.
+  - `chroma_server_auth_configuration_file`: renamed to `chroma_server_authn_configuration_file`.
 - Server authz
-    - `chroma_server_authz_ignore_paths`: deleted. Functionality is now in `chroma_server_auth_ignore_paths`.
+  - `chroma_server_authz_ignore_paths`: deleted. Functionality is now in `chroma_server_auth_ignore_paths`.
 
 To see the full changes, you can read the [PR](https://github.com/chroma-core/chroma/pull/1970/files) or reach out to the Chroma team on [Discord](https://discord.gg/MMeYNTmh3x).
 

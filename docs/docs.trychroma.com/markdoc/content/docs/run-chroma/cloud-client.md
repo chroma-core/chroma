@@ -1,3 +1,8 @@
+---
+id: cloud-client
+name: Cloud Client
+---
+
 # Cloud Client
 
 You can use the `CloudClient` to create a client connecting to Chroma Cloud.
@@ -5,6 +10,7 @@ You can use the `CloudClient` to create a client connecting to Chroma Cloud.
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 client = CloudClient(
     tenant='Tenant ID',
@@ -12,15 +18,16 @@ client = CloudClient(
     api_key='Chroma Cloud API key'
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
 
 ```typescript
 const client = new CloudClient({
-    tenant: 'Tenant ID',
-    database: 'Database name',
-    apiKey: 'Chroma Cloud API key',
+  tenant: "Tenant ID",
+  database: "Database name",
+  apiKey: "Chroma Cloud API key",
 });
 ```
 
@@ -35,9 +42,11 @@ If you set the `CHROMA_API_KEY`, `CHROMA_TENANT`, and the `CHROMA_DATABASE` envi
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 client = CloudClient()
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
