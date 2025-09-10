@@ -22,7 +22,6 @@ from chromadb.execution.expression.plan import Search
 from chromadb.api.types import (
     Documents,
     Embeddings,
-    PyEmbeddings,
     IDs,
     Include,
     Metadatas,
@@ -102,7 +101,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         # remove it from kwargs, and add it to the content parameter
         # This is because httpx uses a slower json serializer
         if "json" in kwargs:
-            data = orjson.dumps(kwargs.pop("json"))
+            data = orjson.dumps(kwargs.pop("json"), option=orjson.OPT_SERIALIZE_NUMPY)
             kwargs["content"] = data
 
         # Unlike requests, httpx does not automatically escape the path
@@ -369,13 +368,13 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """Performs hybrid search on a collection"""
         # Convert Search objects to dictionaries
         payload = {"searches": [s.to_dict() for s in searches]}
-        
+
         resp_json = self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
             json=payload,
         )
-        
+
         # Return the column-major format directly
         return SearchResult(
             ids=resp_json.get("ids", []),
@@ -383,7 +382,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             embeddings=resp_json.get("embeddings", []),
             metadatas=resp_json.get("metadatas", []),
             scores=resp_json.get("scores", []),
-            select=resp_json.get("select", [])
+            select=resp_json.get("select", []),
         )
 
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
@@ -503,7 +502,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self,
         batch: Tuple[
             IDs,
-            Optional[PyEmbeddings],
+            Optional[Embeddings],
             Optional[Metadatas],
             Optional[Documents],
             Optional[URIs],
@@ -544,7 +543,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings),
+            embeddings,
             metadatas,
             documents,
             uris,
@@ -575,9 +574,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings)
-            if embeddings is not None
-            else None,
+            embeddings if embeddings is not None else None,
             metadatas,
             documents,
             uris,
@@ -608,7 +605,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings),
+            embeddings,
             metadatas,
             documents,
             uris,
