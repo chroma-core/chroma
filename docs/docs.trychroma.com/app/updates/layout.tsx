@@ -17,7 +17,6 @@ const UpdatesLayout: React.FC<{ children: React.ReactNode }> = ({
   return (
     <Dialog open={true}>
       <DialogContent
-        hideClose
         className="flex flex-col overflow-hidden w-full mt-1 gap-4 pb-4 sm:rounded-none outline-none max-w-4xl xl:max-w-5xl h-[90%] border-black p-0"
       >
         <Header84 title="CHROMA UPDATES">
