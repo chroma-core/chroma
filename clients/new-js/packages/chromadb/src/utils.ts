@@ -234,7 +234,9 @@ export const validateSparseVector = (v: any) => {
     "indices" in v &&
     "values" in v &&
     Array.isArray(v.indices) &&
-    Array.isArray(v.values)
+    v.indices.every((e: any) => typeof e === "number") &&
+    Array.isArray(v.values) &&
+    v.values.every((e: any) => typeof e === "number")
   );
 };
 
