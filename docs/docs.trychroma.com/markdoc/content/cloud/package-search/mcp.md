@@ -28,15 +28,15 @@ To guarantee that your model uses package search when desired, add `use package 
 {% ComboboxSteps defaultValue="claude-code" itemType="environment" %}
 
 {% Step %}
-[Sign up](https://trychroma.com/signup) for a Chroma Cloud account.
+Visit the Chroma's [Package Search](http://trychroma.com/package-search) page.
 {% /Step %}
 
 {% Step %}
-On the dashboard's homepage, click on the {% ImageHoverText src="package-search-settings.png" %}Settings button{% /ImageHoverText %}.
+Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.
 {% /Step %}
 
 {% Step %}
-In the Settings menu, click on the {% ImageHoverText src="package-search-api-keys.png" %}API Keys tab{% /ImageHoverText %}, and then on the {% ImageHoverText src="package-search-api-keys.png" %}Create button{% /ImageHoverText %} to generate a key. Copy your API key, as you will need it to connect to the MCP server.
+After issuing your API key, click the "Other" tab and copy your API key.
 {% /Step %}
 
 {% ComboboxEntry value="claude-code" label="Claude Code" %}
