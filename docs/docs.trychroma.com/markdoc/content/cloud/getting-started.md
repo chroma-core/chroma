@@ -1,3 +1,8 @@
+---
+id: getting-started
+name: Getting Started
+---
+
 # Chroma Cloud
 
 Our fully managed hosted service, **Chroma Cloud** is here. [Sign up for free](https://trychroma.com/signup).

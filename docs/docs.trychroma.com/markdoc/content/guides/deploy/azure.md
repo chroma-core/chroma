@@ -1,3 +1,8 @@
+---
+id: azure
+name: Azure
+---
+
 # Azure Deployment
 
 {% Banner type="tip" %}
@@ -54,21 +59,25 @@ machine_type        = "Standard_B1s"
 Download our [Azure Terraform configuration](https://github.com/chroma-core/chroma/blob/main/deployments/azure/main.tf) to the same directory as your `chroma.tfvars` file. Then run the following commands to deploy your Chroma stack.
 
 Initialize Terraform:
+
 ```terminal
 terraform init
 ```
 
 Plan the deployment, and review it to ensure it matches your expectations:
+
 ```terminal
 terraform plan -var-file chroma.tfvars
 ```
 
 Finally, apply the deployment:
+
 ```terminal
 terraform apply -var-file chroma.tfvars
 ```
 
 After a few minutes, you can get the IP address of your instance with
+
 ```terminal
 terraform output -raw public_ip_address
 ```
@@ -91,6 +100,7 @@ chroma_client = chromadb.HttpClient(
 )
 chroma_client.heartbeat()
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
@@ -102,11 +112,12 @@ you need to do is configure your `ChromaClient` to use the server's IP address a
 import { ChromaClient } from "chromadb";
 
 const chromaClient = new ChromaClient({
-    host: "<Your Chroma instance IP>",
-    port: 8000
-})
-chromaClient.heartbeat()
+  host: "<Your Chroma instance IP>",
+  port: 8000,
+});
+chromaClient.heartbeat();
 ```
+
 {% /Tab %}
 
 {% /Tabs %}

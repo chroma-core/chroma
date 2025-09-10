@@ -1,3 +1,8 @@
+---
+id: architecture
+name: Architecture
+---
+
 # Architecture
 
 Chroma is designed with a modular architecture that prioritizes performance and ease of use. It scales seamlessly from local development to large-scale production, while exposing a consistent API across all deployment modes.
@@ -36,7 +41,6 @@ Chroma’s write-ahead log.
 - Ensures atomicity across multi-record writes.
 - Provides durability and replay in distributed deployments.
 
-
 ### The Query Executor
 
 Responsible for **all read operations.**
@@ -66,9 +70,9 @@ These components operate differently depending on the deployment mode, particula
 
 - In Local and Single Node mode, all components share a process and use the local filesystem for durability.
 - In **Distributed** mode, components are deployed as independent services.
-    - The log and built indexes are stored in cloud object storage.
-    - The system catalog is backed by a SQL database.
-    - All services use local SSDs as caches to reduce object storage latency and cost.
+  - The log and built indexes are stored in cloud object storage.
+  - The system catalog is backed by a SQL database.
+  - All services use local SSDs as caches to reduce object storage latency and cost.
 
 ## Request Sequences
 
