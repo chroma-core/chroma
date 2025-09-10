@@ -13,23 +13,23 @@ use chroma_cache::CacheConfig;
 use chroma_config::helpers::{deserialize_duration_from_seconds, serialize_duration_to_seconds};
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
-use chroma_log::{config::GrpcLogConfig, grpc_log::GrpcLog};
+use chroma_log::config::GrpcLogConfig;
 use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
 use chroma_tracing::OtelFilter;
 use chroma_tracing::OtelFilterLevel;
 use chroma_types::chroma_proto::{
-    garbage_collect_phase2_request::LogToCollect, log_service_client::LogServiceClient,
-    log_service_server::LogService, purge_from_cache_request::EntryToEvict,
-    scrub_log_request::LogToScrub, CollectionInfo, GarbageCollectPhase2Request,
-    GarbageCollectPhase2Response, GetAllCollectionInfoToCompactRequest,
-    GetAllCollectionInfoToCompactResponse, InspectDirtyLogRequest, InspectDirtyLogResponse,
-    InspectLogStateRequest, InspectLogStateResponse, LogRecord, MigrateLogRequest,
-    MigrateLogResponse, OperationRecord, PullLogsRequest, PullLogsResponse,
-    PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse, PurgeFromCacheRequest,
-    PurgeFromCacheResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
-    ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
-    UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
+    garbage_collect_phase2_request::LogToCollect, log_service_server::LogService,
+    purge_from_cache_request::EntryToEvict, scrub_log_request::LogToScrub, CollectionInfo,
+    GarbageCollectPhase2Request, GarbageCollectPhase2Response,
+    GetAllCollectionInfoToCompactRequest, GetAllCollectionInfoToCompactResponse,
+    InspectDirtyLogRequest, InspectDirtyLogResponse, InspectLogStateRequest,
+    InspectLogStateResponse, LogRecord, MigrateLogRequest, MigrateLogResponse, OperationRecord,
+    PullLogsRequest, PullLogsResponse, PurgeDirtyForCollectionRequest,
+    PurgeDirtyForCollectionResponse, PurgeFromCacheRequest, PurgeFromCacheResponse,
+    PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse, ScrubLogRequest,
+    ScrubLogResponse, SealLogRequest, SealLogResponse, UpdateCollectionLogOffsetRequest,
+    UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::CollectionUuid;
@@ -41,7 +41,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use tokio::signal::unix::{signal, SignalKind};
-use tonic::{transport::Server, Code, Request, Response, Status};
+use tonic::{transport::Server, Request, Response, Status};
 use tracing::{Instrument, Level};
 use uuid::Uuid;
 use wal3::{
@@ -248,7 +248,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
             _phantom: std::marker::PhantomData,
         });
     }
-    let opened = LogWriter::open(
+    let opened = LogWriter::open_or_initialize(
         options.clone(),
         Arc::clone(storage),
         prefix,
@@ -563,9 +563,6 @@ pub struct LogServer {
     storage: Arc<Storage>,
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
     dirty_log: Arc<LogWriter>,
-    #[allow(clippy::type_complexity)]
-    proxy:
-        Option<LogServiceClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>>,
     rolling_up: tokio::sync::Mutex<()>,
     backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
     need_to_compact: Mutex<HashMap<CollectionUuid, RollupPerCollection>>,
@@ -589,249 +586,6 @@ impl LogServer {
             return Err(Status::resource_exhausted("log needs compaction; too full"));
         }
         Ok(())
-    }
-
-    #[tracing::instrument(skip(self, proxy))]
-    async fn effectuate_log_transfer(
-        &self,
-        collection_id: CollectionUuid,
-        mut proxy: LogServiceClient<
-            chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>,
-        >,
-        ttl: usize,
-    ) -> Result<(), Status> {
-        if ttl == 0 {
-            tracing::error!("effectuate log transfer hit its recursion limit");
-            return Err(Status::new(
-                Code::Unavailable,
-                "effectuate log transfer hit its recursion limit",
-            ));
-        }
-
-        // Grab a lock on the state for this key, so that a racing initialize won't do anything.
-        let key = LogKey { collection_id };
-        let handle = self.open_logs.get_or_create_state(key);
-        let active = handle.active.lock().await;
-
-        // Someone already initialized the log on a prior call.
-        if active.log.is_some() {
-            return Ok(());
-        }
-
-        tracing::info!("log transfer to {collection_id}");
-        let scout_request = Request::new(ScoutLogsRequest {
-            collection_id: collection_id.to_string(),
-        });
-        let scout_resp = proxy.clone().scout_logs(scout_request).await?.into_inner();
-        let start = scout_resp.first_uncompacted_record_offset as u64;
-        let limit = scout_resp.first_uninserted_record_offset as u64;
-        if start == 0 || limit == 0 {
-            tracing::error!("scout logs returned {start}->{limit}");
-            return Err(Status::new(
-                Code::FailedPrecondition,
-                "effectuate logs saw invalid offset",
-            ));
-        }
-        tracing::info!("scouted {collection_id} start={start} limit={limit}");
-        const STEP: u64 = 100;
-        let num_steps = limit.saturating_sub(start).div_ceil(STEP);
-        let actual_steps = (0..num_steps)
-            .map(|x| {
-                (
-                    start + x * STEP,
-                    std::cmp::min(start + x * STEP + STEP, limit),
-                )
-            })
-            .collect::<Vec<_>>();
-        let pull_logs_reqs = actual_steps
-            .iter()
-            .cloned()
-            .map(|(start, limit)| PullLogsRequest {
-                collection_id: collection_id.to_string(),
-                start_from_offset: start as i64,
-                // SAFETY(rescrv):  STEP fits a i32.
-                batch_size: (limit - start) as i32,
-                end_timestamp: i64::MAX,
-            });
-        let mut responses = vec![];
-        for req in pull_logs_reqs {
-            let resp = match proxy.pull_logs(Request::new(req)).await {
-                Ok(resp) => resp.into_inner(),
-                Err(err) => {
-                    if err.code() == Code::NotFound {
-                        // We have no logs found, but we saw sealed.  We will converge, so call
-                        // again.
-                        tracing::warn!("pulling logs again: {err:?}");
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        return Box::pin(self.effectuate_log_transfer(
-                            collection_id,
-                            proxy,
-                            ttl.saturating_sub(1),
-                        ))
-                        .await;
-                    } else {
-                        return Err(err);
-                    }
-                }
-            };
-            responses.push(resp);
-        }
-        let mut records = vec![];
-        for ((start, limit), resp) in
-            std::iter::zip(actual_steps.into_iter(), responses.into_iter())
-        {
-            for (expect, (idx, record)) in
-                std::iter::zip(start..limit, resp.records.into_iter().enumerate())
-            {
-                if expect != start + idx as u64 {
-                    return Err(Status::data_loss(format!(
-                        "expected log position {expect} but got {} (1)",
-                        start + idx as u64
-                    )));
-                }
-                if (record.log_offset as u64) != expect {
-                    return Err(Status::data_loss(format!(
-                        "expected log position {expect} but got {} (2)",
-                        (record.log_offset as u64)
-                    )));
-                }
-                records.push(record);
-            }
-        }
-        let record_bytes = records
-            .into_iter()
-            .map(|record| -> Result<Vec<u8>, Status> {
-                let mut buf = vec![];
-                if let Some(r) = record.record.as_ref() {
-                    r.encode(&mut buf)
-                        .map_err(|err| Status::internal(err.to_string()))?;
-                    Ok(buf)
-                } else {
-                    Err(Status::data_loss("missing a record"))
-                }
-            })
-            .collect::<Result<Vec<_>, Status>>()?;
-        let prefix = collection_id.storage_prefix_for_log();
-        let mark_dirty = MarkDirty {
-            collection_id,
-            dirty_log: Arc::clone(&self.dirty_log),
-        };
-        LogWriter::bootstrap(
-            &self.config.writer,
-            &self.storage,
-            &prefix,
-            "effectuate log transfer",
-            mark_dirty,
-            LogPosition::from_offset(start),
-            record_bytes,
-        )
-        .await
-        .map_err(|err| {
-            Status::new(
-                err.code().into(),
-                format!("failed to effectuate log transfer: {err:?}"),
-            )
-        })?;
-
-        self._update_collection_log_offset(
-            Request::new(UpdateCollectionLogOffsetRequest {
-                collection_id: collection_id.to_string(),
-                log_offset: start as i64 - 1,
-            }),
-            false,
-        )
-        .await?;
-        // Set it up so that once we release the mutex, the next person won't do I/O and will
-        // immediately be able to push logs.
-        let storage_prefix = collection_id.storage_prefix_for_log();
-        let mark_dirty = MarkDirty {
-            collection_id,
-            dirty_log: Arc::clone(&self.dirty_log),
-        };
-        // If this fails, the next writer will load manifest and continue unimpeded.
-        let _ = get_log_from_handle_with_mutex_held(
-            &handle,
-            active,
-            &self.config.writer,
-            &self.storage,
-            &storage_prefix,
-            mark_dirty,
-        )
-        .await;
-        Ok(())
-    }
-
-    #[tracing::instrument(skip(self, request))]
-    async fn forward_push_logs(
-        &self,
-        collection_id: CollectionUuid,
-        request: Request<PushLogsRequest>,
-    ) -> Result<Response<PushLogsResponse>, Status> {
-        let request = request.into_inner();
-        if let Some(proxy) = self.proxy.as_ref() {
-            let resp = proxy
-                .clone()
-                .push_logs(Request::new(request.clone()))
-                .await?
-                .into_inner();
-            if resp.log_is_sealed {
-                self.effectuate_log_transfer(collection_id, proxy.clone(), 3)
-                    .await?;
-                Box::pin(self.push_logs(Request::new(request))).await
-            } else {
-                Ok(Response::new(resp))
-            }
-        } else {
-            Err(Status::failed_precondition("proxy not initialized"))
-        }
-    }
-
-    #[tracing::instrument(skip(self, request))]
-    async fn forward_scout_logs(
-        &self,
-        request: Request<ScoutLogsRequest>,
-    ) -> Result<Response<ScoutLogsResponse>, Status> {
-        if let Some(proxy) = self.proxy.as_ref() {
-            proxy.clone().scout_logs(request).await
-        } else {
-            Err(Status::failed_precondition("proxy not initialized"))
-        }
-    }
-
-    #[tracing::instrument(skip(self, request))]
-    async fn forward_pull_logs(
-        &self,
-        request: Request<PullLogsRequest>,
-    ) -> Result<Response<PullLogsResponse>, Status> {
-        if let Some(proxy) = self.proxy.as_ref() {
-            proxy.clone().pull_logs(request).await
-        } else {
-            Err(Status::failed_precondition("proxy not initialized"))
-        }
-    }
-
-    #[tracing::instrument(skip(self, request))]
-    async fn forward_update_collection_log_offset(
-        &self,
-        request: Request<UpdateCollectionLogOffsetRequest>,
-    ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
-        if let Some(proxy) = self.proxy.as_ref() {
-            proxy.clone().update_collection_log_offset(request).await
-        } else {
-            Err(Status::failed_precondition("proxy not initialized"))
-        }
-    }
-
-    #[tracing::instrument(skip(self, request))]
-    async fn forward_fork_logs(
-        &self,
-        request: Request<ForkLogsRequest>,
-    ) -> Result<Response<ForkLogsResponse>, Status> {
-        if let Some(proxy) = self.proxy.as_ref() {
-            proxy.clone().fork_logs(request).await
-        } else {
-            Err(Status::failed_precondition("proxy not initialized"))
-        }
     }
 
     #[tracing::instrument(skip(self, request), err(Display))]
@@ -859,9 +613,9 @@ impl LogServer {
 
         let res = log_reader.next_write_timestamp().await;
         if let Err(wal3::Error::UninitializedLog) = res {
-            return self
-                .forward_update_collection_log_offset(Request::new(request))
-                .await;
+            return Err(Status::not_found(format!(
+                "collection {collection_id} not found"
+            )));
         }
         res.map_err(|err| Status::unknown(err.to_string()))?;
 
@@ -1323,10 +1077,9 @@ impl LogServer {
         {
             Ok(log) => log,
             Err(wal3::Error::UninitializedLog) => {
-                tracing::info!("forwarding because log uninitialized");
-                return self
-                    .forward_push_logs(collection_id, Request::new(push_logs))
-                    .await;
+                return Err(Status::not_found(format!(
+                    "collection {collection_id} not found"
+                )));
             }
             Err(err) => {
                 return Err(Status::unknown(err.to_string()));
@@ -1385,9 +1138,11 @@ impl LogServer {
         );
         let (start_position, limit_position) = match log_reader.manifest().await {
             Ok(Some(manifest)) => (manifest.oldest_timestamp(), manifest.next_write_timestamp()),
-            Ok(None) | Err(wal3::Error::UninitializedLog) => {
-                tracing::info!("Log is uninitialized on rust log service. Forwarding ScoutLog request to legacy log service");
-                return self.forward_scout_logs(Request::new(scout_logs)).await;
+            Ok(None) => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
+            Err(wal3::Error::UninitializedLog) => {
+                return Err(Status::not_found(format!(
+                    "collection {collection_id} not found"
+                )));
             }
             Err(err) => {
                 return Err(Status::new(
@@ -1488,9 +1243,7 @@ impl LogServer {
 
         let fragments = match self.read_fragments(collection_id, &pull_logs).await {
             Ok(fragments) => fragments,
-            Err(wal3::Error::UninitializedLog) => {
-                return self.forward_pull_logs(Request::new(pull_logs)).await;
-            }
+            Err(wal3::Error::UninitializedLog) => vec![],
             Err(err) => {
                 return Err(Status::new(err.code().into(), err.to_string()));
             }
@@ -1574,19 +1327,6 @@ impl LogServer {
             Arc::clone(&storage),
             source_prefix.clone(),
         );
-        if let Err(err) = log_reader.next_write_timestamp().await {
-            match err {
-                wal3::Error::UninitializedLog => {
-                    return self.forward_fork_logs(Request::new(request)).await;
-                }
-                _ => {
-                    return Err(Status::new(
-                        err.code().into(),
-                        format!("Failed to load log: {}", err),
-                    ));
-                }
-            }
-        }
         let cursors = CursorStore::new(
             CursorStoreOptions::default(),
             Arc::clone(&storage),
@@ -1789,64 +1529,9 @@ impl LogServer {
 
     async fn migrate_log(
         &self,
-        request: Request<MigrateLogRequest>,
+        _request: Request<MigrateLogRequest>,
     ) -> Result<Response<MigrateLogResponse>, Status> {
-        let migrate_log = request.into_inner();
-        let collection_id = Uuid::parse_str(&migrate_log.collection_id)
-            .map(CollectionUuid)
-            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-
-        tracing::info!(
-            "Migrating log for collection {} to new log service",
-            collection_id
-        );
-        let prefix = collection_id.storage_prefix_for_log();
-        let key = LogKey { collection_id };
-        let handle = self.open_logs.get_or_create_state(key);
-        let mark_dirty = MarkDirty {
-            collection_id,
-            dirty_log: Arc::clone(&self.dirty_log),
-        };
-        match get_log_from_handle(
-            &handle,
-            &self.config.writer,
-            &self.storage,
-            &prefix,
-            mark_dirty,
-        )
-        .await
-        {
-            Ok(_) => {
-                tracing::info!("{collection_id} already migrated");
-                Ok(Response::new(MigrateLogResponse {}))
-            }
-            Err(wal3::Error::UninitializedLog) => {
-                if let Some(mut proxy) = self.proxy.as_ref().cloned() {
-                    if proxy
-                        .scout_logs(ScoutLogsRequest {
-                            collection_id: collection_id.to_string(),
-                        })
-                        .await?
-                        .into_inner()
-                        .is_sealed
-                    {
-                        tracing::info!("effectuating transfer of {collection_id}");
-                        self.effectuate_log_transfer(collection_id, proxy, 3)
-                            .await?;
-                        Ok(Response::new(MigrateLogResponse {}))
-                    } else {
-                        tracing::info!(
-                            "not effectuating transfer of {collection_id} (log not sealed)"
-                        );
-                        Err(Status::failed_precondition("log not sealed"))
-                    }
-                } else {
-                    tracing::info!("not effectuating transfer of {collection_id} (no proxy)");
-                    Err(Status::failed_precondition("proxy not initialized"))
-                }
-            }
-            Err(err) => Err(Status::unknown(err.to_string())),
-        }
+        Err(Status::failed_precondition("migration removed"))
     }
 
     async fn inspect_log_state(
@@ -2522,16 +2207,6 @@ impl Configurable<LogServerConfig> for LogServer {
         .await
         .map_err(|err| -> Box<dyn ChromaError> { Box::new(err) as _ })?;
         let dirty_log = Arc::new(dirty_log);
-        let proxy = if let Some(proxy_to) = config.proxy_to.as_ref() {
-            match GrpcLog::primary_client_from_config(proxy_to).await {
-                Ok(log) => Some(log),
-                Err(err) => {
-                    return Err(err);
-                }
-            }
-        } else {
-            None
-        };
         let rolling_up = tokio::sync::Mutex::new(());
         let metrics = Metrics::new(opentelemetry::global::meter("chroma"));
         let backpressure = Mutex::new(Arc::new(HashSet::default()));
@@ -2541,7 +2216,6 @@ impl Configurable<LogServerConfig> for LogServer {
             open_logs: Arc::new(StateHashTable::default()),
             storage,
             dirty_log,
-            proxy,
             rolling_up,
             backpressure,
             need_to_compact,
@@ -2599,11 +2273,10 @@ mod tests {
 
     use chroma_storage::s3_client_for_test_with_new_bucket;
     use chroma_types::{are_update_metadatas_close_to_equal, Operation, OperationRecord};
-    use futures::{stream, StreamExt};
     use opentelemetry::global::meter;
     use proptest::prelude::*;
     use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel, time::sleep};
-    use tonic::IntoRequest;
+    use tonic::{Code, IntoRequest};
     use wal3::{GarbageCollector, SnapshotOptions, ThrottleOptions};
 
     #[test]
@@ -3720,13 +3393,6 @@ mod tests {
     }
 
     async fn setup_log_server() -> LogServer {
-        let legacy_log_client = GrpcLog::primary_client_from_config(&GrpcLogConfig {
-            host: "localhost".to_string(),
-            port: 50052,
-            ..Default::default()
-        })
-        .await
-        .expect("Legacy log service should be present");
         let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
         let writer_options = LogWriterOptions {
             snapshot_manifest: SnapshotOptions {
@@ -3760,7 +3426,6 @@ mod tests {
         LogServer {
             storage,
             dirty_log,
-            proxy: Some(legacy_log_client),
             metrics: Metrics::new(meter("test-rust-log-service")),
             config,
             open_logs: Default::default(),
@@ -3769,18 +3434,6 @@ mod tests {
             need_to_compact: Default::default(),
             cache: Default::default(),
         }
-    }
-
-    async fn seal_collection_on_server(server: &LogServer, collection_id: CollectionUuid) {
-        server
-            .proxy
-            .clone()
-            .expect("Legacy log service should be present")
-            .seal_log(Request::new(SealLogRequest {
-                collection_id: collection_id.to_string(),
-            }))
-            .await
-            .expect("Seal log should not fail");
     }
 
     async fn push_log_to_server(
@@ -3800,6 +3453,9 @@ mod tests {
                     .expect("Logs should be valid"),
             });
             if let Err(err) = server.push_logs(proto_push_log_req).await {
+                if err.code() == Code::Unavailable {
+                    sleep(Duration::from_millis(500)).await;
+                }
                 println!("Failed to push log: {err}");
             } else {
                 break;
@@ -3989,7 +3645,6 @@ mod tests {
             validate_dirty_log_on_server(&log_server, &[]).await;
 
             let collection_id = CollectionUuid::new();
-            seal_collection_on_server(&log_server, collection_id).await;
 
             for chunk in operations.chunks(100) {
                 push_log_to_server(&log_server, collection_id, chunk).await;
@@ -4021,7 +3676,6 @@ mod tests {
             for (index, operation) in operations {
                 let collection_id = CollectionUuid::new();
                 collection_id_with_ord.push((index, collection_id));
-                seal_collection_on_server(&log_server, collection_id).await;
                 push_log_to_server(&log_server, collection_id, &[operation]).await;
                 let enum_offset = get_enum_offset_on_server(&log_server, collection_id).await;
                 assert_eq!(enum_offset, 1);
@@ -4053,8 +3707,6 @@ mod tests {
 
             let source_collection_id = CollectionUuid::new();
             let fork_collection_id = CollectionUuid::new();
-
-            seal_collection_on_server(&log_server, source_collection_id).await;
 
             if !initial_operations.is_empty() {
                 push_log_to_server(&log_server, source_collection_id, &initial_operations).await;
@@ -4117,67 +3769,6 @@ mod tests {
         });
     }
 
-    fn test_seal_and_migrate_logs(
-        operations_before_seal: Vec<OperationRecord>,
-        operations_after_migrate: Vec<OperationRecord>,
-    ) {
-        let runtime = Runtime::new().unwrap();
-        runtime.block_on(async move {
-            let log_server = setup_log_server().await;
-            validate_dirty_log_on_server(&log_server, &[]).await;
-
-            let collection_id = CollectionUuid::new();
-            if !operations_before_seal.is_empty() {
-                push_log_to_server(&log_server, collection_id, &operations_before_seal).await;
-            }
-            let old_enum_offset = get_enum_offset_on_server(&log_server, collection_id).await;
-            assert_eq!(old_enum_offset, operations_before_seal.len() as i64);
-            let compact_offset = old_enum_offset / 2;
-            if compact_offset > 1 {
-                update_compact_offset_on_server(&log_server, collection_id, compact_offset).await;
-            }
-            validate_dirty_log_on_server(&log_server, &[]).await;
-
-            seal_collection_on_server(&log_server, collection_id).await;
-            log_server
-                .migrate_log(Request::new(MigrateLogRequest {
-                    collection_id: collection_id.to_string(),
-                }))
-                .await
-                .expect("Migrate Logs should not fail");
-            let first_uncompacted_offset = compact_offset.saturating_add(1) as usize;
-            if operations_before_seal.is_empty() {
-                validate_dirty_log_on_server(&log_server, &[]).await;
-            } else {
-                validate_dirty_log_on_server(&log_server, &[collection_id]).await;
-            }
-            validate_log_on_server(
-                &log_server,
-                collection_id,
-                &operations_before_seal,
-                first_uncompacted_offset,
-                1000,
-            )
-            .await;
-            push_log_to_server(&log_server, collection_id, &operations_after_migrate).await;
-            let mut combined_logs = operations_before_seal.clone();
-            combined_logs.extend(operations_after_migrate);
-            validate_dirty_log_on_server(&log_server, &[collection_id]).await;
-            validate_log_on_server(
-                &log_server,
-                collection_id,
-                &combined_logs,
-                first_uncompacted_offset,
-                1000,
-            )
-            .await;
-            let new_enum_offset = get_enum_offset_on_server(&log_server, collection_id).await;
-            assert_eq!(new_enum_offset, combined_logs.len() as i64);
-            update_compact_offset_on_server(&log_server, collection_id, new_enum_offset).await;
-            validate_dirty_log_on_server(&log_server, &[]).await;
-        });
-    }
-
     fn test_garbage_collect_unused_logs(operations: Vec<OperationRecord>) {
         let runtime = Runtime::new().unwrap();
         let collection_id = CollectionUuid::new();
@@ -4203,8 +3794,6 @@ mod tests {
         });
 
         runtime.block_on(async move {
-            seal_collection_on_server(&log_server, collection_id).await;
-
             for (offset, log) in operations.iter().enumerate() {
                 push_log_to_server(&log_server, collection_id, &[log.clone()]).await;
                 tx.send(offset as i64 + 1)
@@ -4231,68 +3820,11 @@ mod tests {
         });
     }
 
-    async fn test_stress_seal_and_migrate() {
-        let log_server = setup_log_server().await;
-        let collection_id = CollectionUuid::new();
-        let mut logs = (0..1000)
-            .map(|index| OperationRecord {
-                id: index.to_string(),
-                embedding: None,
-                encoding: None,
-                metadata: None,
-                document: None,
-                operation: Operation::Delete,
-            })
-            .collect::<Vec<_>>();
-
-        push_log_to_server(&log_server, collection_id, &logs[..=0]).await;
-
-        stream::iter(logs.iter().skip(1).map(|log| async {
-            push_log_to_server(&log_server, collection_id, &[log.clone()]).await;
-            if log.id.parse::<usize>().expect("Log id should be usize") == 500 {
-                seal_collection_on_server(&log_server, collection_id).await;
-                log_server
-                    .migrate_log(Request::new(MigrateLogRequest {
-                        collection_id: collection_id.to_string(),
-                    }))
-                    .await
-                    .expect("Migrate Logs should not fail");
-            }
-        }))
-        .buffer_unordered(6)
-        .collect::<Vec<_>>()
-        .await;
-
-        let mut inserted_logs = log_server
-            .pull_logs(Request::new(PullLogsRequest {
-                collection_id: collection_id.to_string(),
-                start_from_offset: 1,
-                batch_size: 1000,
-                end_timestamp: i64::MAX,
-            }))
-            .await
-            .expect("Pull Logs should not fail")
-            .into_inner()
-            .records
-            .into_iter()
-            .map(chroma_types::LogRecord::try_from)
-            .collect::<Result<Vec<_>, _>>()
-            .expect("Logs should be valid");
-        assert_eq!(inserted_logs.len(), logs.len());
-        logs.sort_by_key(|rec| rec.id.clone());
-        inserted_logs.sort_by_key(|log| log.record.id.clone());
-        for (got_op, ref_op) in inserted_logs.into_iter().map(|l| l.record).zip(logs) {
-            assert_eq!(got_op.id, ref_op.id);
-            assert_eq!(got_op.operation, ref_op.operation);
-        }
-    }
-
     async fn test_rollup_snapshot_after_gc() {
         // NOTE: This tests the specific case where the first snapshot decreased depth after garbage collection
         // Manifest branching factor 3
         let log_server = setup_log_server().await;
         let collection_id = CollectionUuid::new();
-        seal_collection_on_server(&log_server, collection_id).await;
         let logs = (1..=42)
             .map(|index| OperationRecord {
                 id: index.to_string(),
@@ -4354,18 +3886,6 @@ mod tests {
     }
 
     #[test]
-    fn test_k8s_integration_rust_log_service_stress_seal_and_migrate() {
-        let runtime = Runtime::new().unwrap();
-        // NOTE: Somehow it overflow the stack under default stack limit
-        std::thread::Builder::new()
-            .stack_size(1 << 22)
-            .spawn(move || runtime.block_on(test_stress_seal_and_migrate()))
-            .expect("Thread should be spawnable")
-            .join()
-            .expect("Spawned thread should not fail to join");
-    }
-
-    #[test]
     fn test_k8s_integration_rust_log_service_rollup_snapshot_after_gc() {
         let runtime = Runtime::new().unwrap();
         // NOTE: Somehow it overflow the stack under default stack limit
@@ -4416,18 +3936,6 @@ mod tests {
         }
 
         #[test]
-        fn test_k8s_integration_rust_log_service_seal_and_migrate_logs(
-            operations_before_seal in proptest::collection::vec(any::<OperationRecord>(), 0..=36),
-            operations_after_migrate in proptest::collection::vec(any::<OperationRecord>(), 1..=12),
-        ) {
-            // NOTE: Somehow it overflow the stack under default stack limit
-            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_seal_and_migrate_logs(operations_before_seal, operations_after_migrate))
-            .expect("Thread should be spawnable")
-            .join()
-            .expect("Spawned thread should not fail to join");
-        }
-
-        #[test]
         fn test_k8s_integration_rust_log_service_garbage_collect_unused_logs(
             operations in proptest::collection::vec(any::<OperationRecord>(), 1..=36),
         ) {
@@ -4469,7 +3977,6 @@ mod tests {
             open_logs: Arc::new(StateHashTable::default()),
             storage,
             dirty_log,
-            proxy: None,
             rolling_up: tokio::sync::Mutex::new(()),
             backpressure: Mutex::new(Arc::new(HashSet::default())),
             need_to_compact: Mutex::new(HashMap::default()),

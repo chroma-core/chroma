@@ -254,10 +254,7 @@ impl MetadataProvider<'_> {
                                         Ok::<(u32, Option<DataRecord>), Box<dyn ChromaError>>((
                                             id, data,
                                         ))
-                                    }.instrument(tracing::trace_span!(parent: Span::current(),
-                                        "DataRecord fetch for offset id",
-                                        offset_id = %id
-                                    ))
+                                    }.instrument(Span::current())
                                         })
                                         .collect();
                                 let data_results = try_join_all(fetch_futures).await?;
@@ -336,6 +333,9 @@ impl MetadataProvider<'_> {
                             .as_ref(),
                         &s.as_str().into(),
                     ),
+                    MetadataValue::SparseVector(_) => {
+                        unimplemented!("Comparison with sparse vector is not supported")
+                    }
                 };
                 if let Some(reader) = metadata_index_reader {
                     match op {

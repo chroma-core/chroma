@@ -1,12 +1,16 @@
+use serde::{de::Error, Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use std::{
-    cmp::{Ordering, Reverse},
-    collections::BinaryHeap,
+    cmp::Ordering,
+    collections::{BinaryHeap, HashSet},
+    hash::Hash,
 };
 use thiserror::Error;
+use utoipa::ToSchema;
 
 use crate::{
-    chroma_proto, logical_size_of_metadata, CollectionAndSegments, CollectionUuid, Metadata,
-    ScalarEncoding, Where,
+    chroma_proto, logical_size_of_metadata, parse_where, CollectionAndSegments, CollectionUuid,
+    Metadata, ScalarEncoding, SparseVector, Where,
 };
 
 use super::error::QueryConversionError;
@@ -116,10 +120,27 @@ pub struct FetchLog {
 /// # Parameters
 /// - `query_ids`: The user provided ids, which specifies the domain of the filter if provided
 /// - `where_clause`: The predicate on individual record
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Filter {
+    #[serde(default)]
     pub query_ids: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "Filter::deserialize_where")]
     pub where_clause: Option<Where>,
+}
+
+impl Filter {
+    fn deserialize_where<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Where>, D::Error> {
+        let where_json = Value::deserialize(deserializer)?;
+        if where_json.is_null() {
+            Ok(None)
+        } else {
+            Ok(Some(
+                parse_where(&where_json).map_err(|e| D::Error::custom(e.to_string()))?,
+            ))
+        }
+    }
 }
 
 impl TryFrom<chroma_proto::FilterOperator> for Filter {
@@ -226,17 +247,19 @@ impl TryFrom<KnnBatch> for chroma_proto::KnnOperator {
 /// # Parameters
 /// - `skip`: The number of records to skip in the beginning
 /// - `fetch`: The number of records to fetch after `skip`
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Limit {
-    pub skip: u32,
-    pub fetch: Option<u32>,
+    #[serde(default)]
+    pub offset: u32,
+    #[serde(default)]
+    pub limit: Option<u32>,
 }
 
 impl From<chroma_proto::LimitOperator> for Limit {
     fn from(value: chroma_proto::LimitOperator) -> Self {
         Self {
-            skip: value.skip,
-            fetch: value.fetch,
+            offset: value.offset,
+            limit: value.limit,
         }
     }
 }
@@ -244,34 +267,34 @@ impl From<chroma_proto::LimitOperator> for Limit {
 impl From<Limit> for chroma_proto::LimitOperator {
     fn from(value: Limit) -> Self {
         Self {
-            skip: value.skip,
-            fetch: value.fetch,
+            offset: value.offset,
+            limit: value.limit,
         }
     }
 }
 
-/// The `RecordDistance` represents how far the embedding (identified by `offset_id`) is to the query embedding
+/// The `RecordDistance` represents a measure of embedding (identified by `offset_id`) with respect to query embedding
 #[derive(Clone, Debug)]
-pub struct RecordDistance {
+pub struct RecordMeasure {
     pub offset_id: u32,
     pub measure: f32,
 }
 
-impl PartialEq for RecordDistance {
+impl PartialEq for RecordMeasure {
     fn eq(&self, other: &Self) -> bool {
-        self.measure.eq(&other.measure)
+        self.offset_id.eq(&other.offset_id)
     }
 }
 
-impl Eq for RecordDistance {}
+impl Eq for RecordMeasure {}
 
-impl Ord for RecordDistance {
+impl Ord for RecordMeasure {
     fn cmp(&self, other: &Self) -> Ordering {
         self.measure.total_cmp(&other.measure)
     }
 }
 
-impl PartialOrd for RecordDistance {
+impl PartialOrd for RecordMeasure {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -279,56 +302,47 @@ impl PartialOrd for RecordDistance {
 
 #[derive(Debug, Default)]
 pub struct KnnOutput {
-    pub distances: Vec<RecordDistance>,
+    pub distances: Vec<RecordMeasure>,
 }
 
-/// The `KnnMerge` operator selects the records nearest to target from the batch vectors of records
-/// which are all sorted by distance in ascending order. If the same record occurs multiple times
+/// The `Merge` operator selects the top records from the batch vectors of records
+/// which are all sorted in descending order. If the same record occurs multiple times
 /// only one copy will remain in the final result.
 ///
 /// # Parameters
-/// - `fetch`: The total number of records to fetch
+/// - `k`: The total number of records to take after merge
 ///
 /// # Usage
 /// It can be used to merge the query results from different operators
 #[derive(Clone, Debug)]
-pub struct KnnMerge {
-    pub fetch: u32,
+pub struct Merge {
+    pub k: u32,
 }
 
-impl KnnMerge {
-    pub fn merge(&self, input: Vec<Vec<RecordDistance>>) -> Vec<RecordDistance> {
+impl Merge {
+    pub fn merge<M: Eq + Ord>(&self, input: Vec<Vec<M>>) -> Vec<M> {
         let mut batch_iters = input.into_iter().map(Vec::into_iter).collect::<Vec<_>>();
 
-        // NOTE: `BinaryHeap<_>` is a max-heap, so we use `Reverse` to convert it into a min-heap
-        let mut heap_dist = batch_iters
+        let mut max_heap = batch_iters
             .iter_mut()
             .enumerate()
-            .filter_map(|(idx, itr)| itr.next().map(|rec| Reverse((rec, idx))))
+            .filter_map(|(idx, itr)| itr.next().map(|rec| (rec, idx)))
             .collect::<BinaryHeap<_>>();
 
-        let mut distances = Vec::<RecordDistance>::with_capacity(self.fetch as usize);
-        while distances.len() < self.fetch as usize {
-            if let Some(Reverse((rec, idx))) = heap_dist.pop() {
-                if distances.last().is_none()
-                    || distances
-                        .last()
-                        .is_some_and(|last_rec| last_rec.offset_id != rec.offset_id)
-                {
-                    distances.push(rec);
-                }
-                if let Some(next_rec) = batch_iters
-                    .get_mut(idx)
-                    .expect("Enumerated index should be valid")
-                    .next()
-                {
-                    heap_dist.push(Reverse((next_rec, idx)));
-                }
-            } else {
+        let mut fusion = Vec::with_capacity(self.k as usize);
+        while let Some((m, idx)) = max_heap.pop() {
+            if self.k <= fusion.len() as u32 {
                 break;
             }
+            if let Some(next_m) = batch_iters[idx].next() {
+                max_heap.push((next_m, idx));
+            }
+            if fusion.last().is_some_and(|tail| tail == &m) {
+                continue;
+            }
+            fusion.push(m);
         }
-        distances
+        fusion
     }
 }
 
@@ -635,5 +649,1118 @@ impl TryFrom<KnnBatchResult> for chroma_proto::KnnBatchResult {
                 .map(TryInto::try_into)
                 .collect::<Result<_, _>>()?,
         })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum QueryVector {
+    Dense(Vec<f32>),
+    Sparse(SparseVector),
+}
+
+impl TryFrom<chroma_proto::QueryVector> for QueryVector {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::QueryVector) -> Result<Self, Self::Error> {
+        let vector = value.vector.ok_or(QueryConversionError::field("vector"))?;
+        match vector {
+            chroma_proto::query_vector::Vector::Dense(dense) => {
+                Ok(QueryVector::Dense(dense.try_into().map(|(v, _)| v)?))
+            }
+            chroma_proto::query_vector::Vector::Sparse(sparse) => {
+                Ok(QueryVector::Sparse(sparse.into()))
+            }
+        }
+    }
+}
+
+impl TryFrom<QueryVector> for chroma_proto::QueryVector {
+    type Error = QueryConversionError;
+
+    fn try_from(value: QueryVector) -> Result<Self, Self::Error> {
+        match value {
+            QueryVector::Dense(vec) => {
+                let dim = vec.len();
+                Ok(chroma_proto::QueryVector {
+                    vector: Some(chroma_proto::query_vector::Vector::Dense(
+                        chroma_proto::Vector::try_from((vec, ScalarEncoding::FLOAT32, dim))?,
+                    )),
+                })
+            }
+            QueryVector::Sparse(sparse) => Ok(chroma_proto::QueryVector {
+                vector: Some(chroma_proto::query_vector::Vector::Sparse(sparse.into())),
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct KnnQuery {
+    pub embedding: QueryVector,
+    pub key: String,
+    pub limit: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum Rank {
+    #[serde(rename = "$abs")]
+    Absolute(Box<Rank>),
+    #[serde(rename = "$div")]
+    Division { left: Box<Rank>, right: Box<Rank> },
+    #[serde(rename = "$exp")]
+    Exponentiation(Box<Rank>),
+    #[serde(rename = "$knn")]
+    Knn {
+        embedding: QueryVector,
+        #[serde(default = "Rank::default_knn_key")]
+        key: String,
+        #[serde(default = "Rank::default_knn_limit")]
+        limit: u32,
+        #[serde(default)]
+        default: Option<f32>,
+        #[serde(default)]
+        ordinal: bool,
+    },
+    #[serde(rename = "$log")]
+    Logarithm(Box<Rank>),
+    #[serde(rename = "$max")]
+    Maximum(Vec<Rank>),
+    #[serde(rename = "$min")]
+    Minimum(Vec<Rank>),
+    #[serde(rename = "$mul")]
+    Multiplication(Vec<Rank>),
+    #[serde(rename = "$sub")]
+    Subtraction { left: Box<Rank>, right: Box<Rank> },
+    #[serde(rename = "$sum")]
+    Summation(Vec<Rank>),
+    #[serde(rename = "$val")]
+    Value(f32),
+}
+
+impl Rank {
+    pub fn default_knn_key() -> String {
+        "#embedding".to_string()
+    }
+
+    pub fn default_knn_limit() -> u32 {
+        128
+    }
+
+    pub fn knn_queries(&self) -> Vec<KnnQuery> {
+        match self {
+            Rank::Absolute(rank) | Rank::Exponentiation(rank) | Rank::Logarithm(rank) => {
+                rank.knn_queries()
+            }
+            Rank::Division { left, right } | Rank::Subtraction { left, right } => left
+                .knn_queries()
+                .into_iter()
+                .chain(right.knn_queries())
+                .collect(),
+            Rank::Maximum(ranks)
+            | Rank::Minimum(ranks)
+            | Rank::Multiplication(ranks)
+            | Rank::Summation(ranks) => ranks.iter().flat_map(Rank::knn_queries).collect(),
+            Rank::Value(_) => Vec::new(),
+            Rank::Knn {
+                embedding,
+                key,
+                limit,
+                default: _,
+                ordinal: _,
+            } => vec![KnnQuery {
+                embedding: embedding.clone(),
+                key: key.clone(),
+                limit: *limit,
+            }],
+        }
+    }
+}
+
+impl TryFrom<chroma_proto::Rank> for Rank {
+    type Error = QueryConversionError;
+
+    fn try_from(proto_rank: chroma_proto::Rank) -> Result<Self, Self::Error> {
+        match proto_rank.rank {
+            Some(chroma_proto::rank::Rank::Absolute(abs)) => {
+                Ok(Rank::Absolute(Box::new(Rank::try_from(*abs)?)))
+            }
+            Some(chroma_proto::rank::Rank::Division(div)) => {
+                let left = div.left.ok_or(QueryConversionError::field("left"))?;
+                let right = div.right.ok_or(QueryConversionError::field("right"))?;
+                Ok(Rank::Division {
+                    left: Box::new(Rank::try_from(*left)?),
+                    right: Box::new(Rank::try_from(*right)?),
+                })
+            }
+            Some(chroma_proto::rank::Rank::Exponentiation(exp)) => {
+                Ok(Rank::Exponentiation(Box::new(Rank::try_from(*exp)?)))
+            }
+            Some(chroma_proto::rank::Rank::Knn(knn)) => {
+                let embedding = knn
+                    .embedding
+                    .ok_or(QueryConversionError::field("embedding"))?
+                    .try_into()?;
+                Ok(Rank::Knn {
+                    embedding,
+                    key: knn.key,
+                    limit: knn.limit,
+                    default: knn.default,
+                    ordinal: knn.ordinal,
+                })
+            }
+            Some(chroma_proto::rank::Rank::Logarithm(log)) => {
+                Ok(Rank::Logarithm(Box::new(Rank::try_from(*log)?)))
+            }
+            Some(chroma_proto::rank::Rank::Maximum(max)) => {
+                let ranks = max
+                    .ranks
+                    .into_iter()
+                    .map(Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Rank::Maximum(ranks))
+            }
+            Some(chroma_proto::rank::Rank::Minimum(min)) => {
+                let ranks = min
+                    .ranks
+                    .into_iter()
+                    .map(Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Rank::Minimum(ranks))
+            }
+            Some(chroma_proto::rank::Rank::Multiplication(mul)) => {
+                let ranks = mul
+                    .ranks
+                    .into_iter()
+                    .map(Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Rank::Multiplication(ranks))
+            }
+            Some(chroma_proto::rank::Rank::Subtraction(sub)) => {
+                let left = sub.left.ok_or(QueryConversionError::field("left"))?;
+                let right = sub.right.ok_or(QueryConversionError::field("right"))?;
+                Ok(Rank::Subtraction {
+                    left: Box::new(Rank::try_from(*left)?),
+                    right: Box::new(Rank::try_from(*right)?),
+                })
+            }
+            Some(chroma_proto::rank::Rank::Summation(sum)) => {
+                let ranks = sum
+                    .ranks
+                    .into_iter()
+                    .map(Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Rank::Summation(ranks))
+            }
+            Some(chroma_proto::rank::Rank::Value(value)) => Ok(Rank::Value(value)),
+            None => Err(QueryConversionError::field("rank")),
+        }
+    }
+}
+
+impl TryFrom<Rank> for chroma_proto::Rank {
+    type Error = QueryConversionError;
+
+    fn try_from(rank: Rank) -> Result<Self, Self::Error> {
+        let proto_rank = match rank {
+            Rank::Absolute(rank) => {
+                chroma_proto::rank::Rank::Absolute(Box::new(chroma_proto::Rank::try_from(*rank)?))
+            }
+            Rank::Division { left, right } => {
+                chroma_proto::rank::Rank::Division(Box::new(chroma_proto::rank::Division {
+                    left: Some(Box::new(chroma_proto::Rank::try_from(*left)?)),
+                    right: Some(Box::new(chroma_proto::Rank::try_from(*right)?)),
+                }))
+            }
+            Rank::Exponentiation(rank) => chroma_proto::rank::Rank::Exponentiation(Box::new(
+                chroma_proto::Rank::try_from(*rank)?,
+            )),
+            Rank::Knn {
+                embedding,
+                key,
+                limit,
+                default,
+                ordinal,
+            } => chroma_proto::rank::Rank::Knn(chroma_proto::rank::Knn {
+                embedding: Some(embedding.try_into()?),
+                key,
+                limit,
+                default,
+                ordinal,
+            }),
+            Rank::Logarithm(rank) => {
+                chroma_proto::rank::Rank::Logarithm(Box::new(chroma_proto::Rank::try_from(*rank)?))
+            }
+            Rank::Maximum(ranks) => {
+                let proto_ranks = ranks
+                    .into_iter()
+                    .map(chroma_proto::Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                chroma_proto::rank::Rank::Maximum(chroma_proto::rank::RankList {
+                    ranks: proto_ranks,
+                })
+            }
+            Rank::Minimum(ranks) => {
+                let proto_ranks = ranks
+                    .into_iter()
+                    .map(chroma_proto::Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                chroma_proto::rank::Rank::Minimum(chroma_proto::rank::RankList {
+                    ranks: proto_ranks,
+                })
+            }
+            Rank::Multiplication(ranks) => {
+                let proto_ranks = ranks
+                    .into_iter()
+                    .map(chroma_proto::Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                chroma_proto::rank::Rank::Multiplication(chroma_proto::rank::RankList {
+                    ranks: proto_ranks,
+                })
+            }
+            Rank::Subtraction { left, right } => {
+                chroma_proto::rank::Rank::Subtraction(Box::new(chroma_proto::rank::Subtraction {
+                    left: Some(Box::new(chroma_proto::Rank::try_from(*left)?)),
+                    right: Some(Box::new(chroma_proto::Rank::try_from(*right)?)),
+                }))
+            }
+            Rank::Summation(ranks) => {
+                let proto_ranks = ranks
+                    .into_iter()
+                    .map(chroma_proto::Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                chroma_proto::rank::Rank::Summation(chroma_proto::rank::RankList {
+                    ranks: proto_ranks,
+                })
+            }
+            Rank::Value(value) => chroma_proto::rank::Rank::Value(value),
+        };
+
+        Ok(chroma_proto::Rank {
+            rank: Some(proto_rank),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ToSchema)]
+pub enum SelectField {
+    // Predefined fields
+    Document,
+    Embedding,
+    Metadata,
+    Score,
+    MetadataField(String),
+}
+
+impl Serialize for SelectField {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            SelectField::Document => serializer.serialize_str("#document"),
+            SelectField::Embedding => serializer.serialize_str("#embedding"),
+            SelectField::Metadata => serializer.serialize_str("#metadata"),
+            SelectField::Score => serializer.serialize_str("#score"),
+            SelectField::MetadataField(field) => serializer.serialize_str(field),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SelectField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(match s.as_str() {
+            "#document" => SelectField::Document,
+            "#embedding" => SelectField::Embedding,
+            "#metadata" => SelectField::Metadata,
+            "#score" => SelectField::Score,
+            // Any other string is treated as a metadata field key
+            field => SelectField::MetadataField(field.to_string()),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct Select {
+    #[serde(default)]
+    pub fields: HashSet<SelectField>,
+}
+
+impl TryFrom<chroma_proto::SelectOperator> for Select {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::SelectOperator) -> Result<Self, Self::Error> {
+        let fields = value
+            .fields
+            .into_iter()
+            .map(|field| {
+                // Try to deserialize each string as a SelectField
+                serde_json::from_value(serde_json::Value::String(field))
+                    .map_err(|_| QueryConversionError::field("fields"))
+            })
+            .collect::<Result<HashSet<_>, _>>()?;
+
+        Ok(Self { fields })
+    }
+}
+
+impl TryFrom<Select> for chroma_proto::SelectOperator {
+    type Error = QueryConversionError;
+
+    fn try_from(value: Select) -> Result<Self, Self::Error> {
+        let fields = value
+            .fields
+            .into_iter()
+            .map(|field| {
+                // Serialize each SelectField back to string
+                serde_json::to_value(&field)
+                    .ok()
+                    .and_then(|v| v.as_str().map(String::from))
+                    .ok_or(QueryConversionError::field("fields"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self { fields })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct SearchRecord {
+    pub id: String,
+    pub document: Option<String>,
+    pub embedding: Option<Vec<f32>>,
+    pub metadata: Option<Metadata>,
+    pub score: Option<f32>,
+}
+
+impl TryFrom<chroma_proto::SearchRecord> for SearchRecord {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::SearchRecord) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: value.id,
+            document: value.document,
+            embedding: value
+                .embedding
+                .map(|vec| vec.try_into().map(|(v, _)| v))
+                .transpose()?,
+            metadata: value.metadata.map(TryInto::try_into).transpose()?,
+            score: value.score,
+        })
+    }
+}
+
+impl TryFrom<SearchRecord> for chroma_proto::SearchRecord {
+    type Error = QueryConversionError;
+
+    fn try_from(value: SearchRecord) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: value.id,
+            document: value.document,
+            embedding: value
+                .embedding
+                .map(|embedding| {
+                    let embedding_dimension = embedding.len();
+                    chroma_proto::Vector::try_from((
+                        embedding,
+                        ScalarEncoding::FLOAT32,
+                        embedding_dimension,
+                    ))
+                })
+                .transpose()?,
+            metadata: value.metadata.map(Into::into),
+            score: value.score,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SearchPayloadResult {
+    pub records: Vec<SearchRecord>,
+}
+
+impl TryFrom<chroma_proto::SearchPayloadResult> for SearchPayloadResult {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::SearchPayloadResult) -> Result<Self, Self::Error> {
+        Ok(Self {
+            records: value
+                .records
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+        })
+    }
+}
+
+impl TryFrom<SearchPayloadResult> for chroma_proto::SearchPayloadResult {
+    type Error = QueryConversionError;
+
+    fn try_from(value: SearchPayloadResult) -> Result<Self, Self::Error> {
+        Ok(Self {
+            records: value
+                .records
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()?,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SearchResult {
+    pub results: Vec<SearchPayloadResult>,
+    pub pulled_log_bytes: u64,
+}
+
+impl SearchResult {
+    pub fn size_bytes(&self) -> u64 {
+        self.results
+            .iter()
+            .flat_map(|result| {
+                result.records.iter().map(|record| {
+                    (record.id.len()
+                        + record
+                            .document
+                            .as_ref()
+                            .map(|doc| doc.len())
+                            .unwrap_or_default()
+                        + record
+                            .embedding
+                            .as_ref()
+                            .map(|emb| size_of_val(&emb[..]))
+                            .unwrap_or_default()
+                        + record
+                            .metadata
+                            .as_ref()
+                            .map(logical_size_of_metadata)
+                            .unwrap_or_default()
+                        + record.score.as_ref().map(size_of_val).unwrap_or_default())
+                        as u64
+                })
+            })
+            .sum()
+    }
+}
+
+impl TryFrom<chroma_proto::SearchResult> for SearchResult {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::SearchResult) -> Result<Self, Self::Error> {
+        Ok(Self {
+            results: value
+                .results
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+            pulled_log_bytes: value.pulled_log_bytes,
+        })
+    }
+}
+
+impl TryFrom<SearchResult> for chroma_proto::SearchResult {
+    type Error = QueryConversionError;
+
+    fn try_from(value: SearchResult) -> Result<Self, Self::Error> {
+        Ok(Self {
+            results: value
+                .results
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()?,
+            pulled_log_bytes: value.pulled_log_bytes,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_query_vector_dense_proto_conversion() {
+        let dense_vec = vec![0.1, 0.2, 0.3, 0.4, 0.5];
+        let query_vector = QueryVector::Dense(dense_vec.clone());
+
+        // Convert to proto
+        let proto: chroma_proto::QueryVector = query_vector.clone().try_into().unwrap();
+
+        // Convert back
+        let converted: QueryVector = proto.try_into().unwrap();
+
+        assert_eq!(converted, query_vector);
+        if let QueryVector::Dense(v) = converted {
+            assert_eq!(v, dense_vec);
+        } else {
+            panic!("Expected dense vector");
+        }
+    }
+
+    #[test]
+    fn test_query_vector_sparse_proto_conversion() {
+        let sparse = SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]);
+        let query_vector = QueryVector::Sparse(sparse.clone());
+
+        // Convert to proto
+        let proto: chroma_proto::QueryVector = query_vector.clone().try_into().unwrap();
+
+        // Convert back
+        let converted: QueryVector = proto.try_into().unwrap();
+
+        assert_eq!(converted, query_vector);
+        if let QueryVector::Sparse(s) = converted {
+            assert_eq!(s, sparse);
+        } else {
+            panic!("Expected sparse vector");
+        }
+    }
+
+    #[test]
+    fn test_filter_json_serialization() {
+        // Test basic filter serialization
+        let filter = Filter {
+            query_ids: Some(vec!["id1".to_string(), "id2".to_string()]),
+            where_clause: None,
+        };
+
+        let json = serde_json::to_string(&filter).unwrap();
+        let deserialized: Filter = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.query_ids, filter.query_ids);
+        assert_eq!(deserialized.where_clause, filter.where_clause);
+
+        // Test filter deserialization from JSON with composite where clause
+        // This includes both document filters ($contains, $regex) and metadata filters ($gte, $eq)
+        let json_str = r#"{
+            "query_ids": ["doc1", "doc2", "doc3"],
+            "where_clause": {
+                "$and": [
+                    {
+                        "content": {
+                            "$contains": "machine learning"
+                        }
+                    },
+                    {
+                        "author": "John Doe"
+                    },
+                    {
+                        "year": {
+                            "$gte": 2020
+                        }
+                    },
+                    {
+                        "description": {
+                            "$regex": "^[A-Z].*learning.*"
+                        }
+                    },
+                    {
+                        "tags": {
+                            "$in": ["AI", "ML", "Deep Learning"]
+                        }
+                    }
+                ]
+            }
+        }"#;
+
+        let filter: Filter = serde_json::from_str(json_str).unwrap();
+
+        // Verify query_ids
+        assert_eq!(
+            filter.query_ids,
+            Some(vec![
+                "doc1".to_string(),
+                "doc2".to_string(),
+                "doc3".to_string()
+            ])
+        );
+
+        // Verify where_clause structure
+        assert!(filter.where_clause.is_some());
+        let where_clause = filter.where_clause.unwrap();
+
+        // Should be a composite AND expression
+        if let crate::metadata::Where::Composite(composite) = where_clause {
+            assert_eq!(composite.operator, crate::metadata::BooleanOperator::And);
+            assert_eq!(composite.children.len(), 5);
+
+            // Check first child - document $contains filter
+            if let crate::metadata::Where::Document(doc) = &composite.children[0] {
+                assert_eq!(doc.operator, crate::metadata::DocumentOperator::Contains);
+                assert_eq!(doc.pattern, "machine learning");
+            } else {
+                panic!("Expected document filter as first child");
+            }
+
+            // Check second child - metadata equality filter (direct form)
+            if let crate::metadata::Where::Metadata(meta) = &composite.children[1] {
+                assert_eq!(meta.key, "author");
+                if let crate::metadata::MetadataComparison::Primitive(op, val) = &meta.comparison {
+                    assert_eq!(*op, crate::metadata::PrimitiveOperator::Equal);
+                    assert_eq!(
+                        *val,
+                        crate::metadata::MetadataValue::Str("John Doe".to_string())
+                    );
+                } else {
+                    panic!("Expected primitive comparison for author");
+                }
+            } else {
+                panic!("Expected metadata filter as second child");
+            }
+
+            // Check third child - metadata $gte filter
+            if let crate::metadata::Where::Metadata(meta) = &composite.children[2] {
+                assert_eq!(meta.key, "year");
+                if let crate::metadata::MetadataComparison::Primitive(op, val) = &meta.comparison {
+                    assert_eq!(*op, crate::metadata::PrimitiveOperator::GreaterThanOrEqual);
+                    assert_eq!(*val, crate::metadata::MetadataValue::Int(2020));
+                } else {
+                    panic!("Expected primitive comparison for year");
+                }
+            } else {
+                panic!("Expected metadata filter as third child");
+            }
+
+            // Check fourth child - document $regex filter
+            if let crate::metadata::Where::Document(doc) = &composite.children[3] {
+                assert_eq!(doc.operator, crate::metadata::DocumentOperator::Regex);
+                assert_eq!(doc.pattern, "^[A-Z].*learning.*");
+            } else {
+                panic!("Expected document regex filter as fourth child");
+            }
+
+            // Check fifth child - metadata $in filter
+            if let crate::metadata::Where::Metadata(meta) = &composite.children[4] {
+                assert_eq!(meta.key, "tags");
+                if let crate::metadata::MetadataComparison::Set(op, val) = &meta.comparison {
+                    assert_eq!(*op, crate::metadata::SetOperator::In);
+                    if let crate::metadata::MetadataSetValue::Str(tags) = val {
+                        assert_eq!(tags.len(), 3);
+                        assert!(tags.contains(&"AI".to_string()));
+                        assert!(tags.contains(&"ML".to_string()));
+                        assert!(tags.contains(&"Deep Learning".to_string()));
+                    } else {
+                        panic!("Expected string set for tags");
+                    }
+                } else {
+                    panic!("Expected set comparison for tags");
+                }
+            } else {
+                panic!("Expected metadata filter as fifth child");
+            }
+        } else {
+            panic!("Expected composite where clause");
+        }
+
+        // Test filter with empty query_ids
+        let json_str = r#"{
+            "query_ids": [],
+            "where_clause": null
+        }"#;
+
+        let filter: Filter = serde_json::from_str(json_str).unwrap();
+        assert_eq!(filter.query_ids, Some(vec![]));
+        assert_eq!(filter.where_clause, None);
+
+        // Test filter with null query_ids
+        let json_str = r#"{
+            "query_ids": null,
+            "where_clause": null
+        }"#;
+
+        let filter: Filter = serde_json::from_str(json_str).unwrap();
+        assert_eq!(filter.query_ids, None);
+        assert_eq!(filter.where_clause, None);
+    }
+
+    #[test]
+    fn test_limit_json_serialization() {
+        let limit = Limit {
+            offset: 10,
+            limit: Some(20),
+        };
+
+        let json = serde_json::to_string(&limit).unwrap();
+        let deserialized: Limit = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.offset, limit.offset);
+        assert_eq!(deserialized.limit, limit.limit);
+    }
+
+    #[test]
+    fn test_query_vector_json_serialization() {
+        // Test dense vector
+        let dense = QueryVector::Dense(vec![0.1, 0.2, 0.3]);
+        let json = serde_json::to_string(&dense).unwrap();
+        let deserialized: QueryVector = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, dense);
+
+        // Test sparse vector
+        let sparse = QueryVector::Sparse(SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]));
+        let json = serde_json::to_string(&sparse).unwrap();
+        let deserialized: QueryVector = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, sparse);
+    }
+
+    #[test]
+    fn test_select_field_json_serialization() {
+        use std::collections::HashSet;
+
+        // Test predefined fields
+        let doc_field = SelectField::Document;
+        assert_eq!(serde_json::to_string(&doc_field).unwrap(), "\"#document\"");
+
+        let embed_field = SelectField::Embedding;
+        assert_eq!(
+            serde_json::to_string(&embed_field).unwrap(),
+            "\"#embedding\""
+        );
+
+        let meta_field = SelectField::Metadata;
+        assert_eq!(serde_json::to_string(&meta_field).unwrap(), "\"#metadata\"");
+
+        let score_field = SelectField::Score;
+        assert_eq!(serde_json::to_string(&score_field).unwrap(), "\"#score\"");
+
+        // Test metadata field
+        let custom_field = SelectField::MetadataField("custom_key".to_string());
+        assert_eq!(
+            serde_json::to_string(&custom_field).unwrap(),
+            "\"custom_key\""
+        );
+
+        // Test deserialization
+        let deserialized: SelectField = serde_json::from_str("\"#document\"").unwrap();
+        assert!(matches!(deserialized, SelectField::Document));
+
+        let deserialized: SelectField = serde_json::from_str("\"custom_field\"").unwrap();
+        assert!(matches!(deserialized, SelectField::MetadataField(s) if s == "custom_field"));
+
+        // Test Select struct with multiple fields
+        let mut fields = HashSet::new();
+        fields.insert(SelectField::Document);
+        fields.insert(SelectField::Embedding);
+        fields.insert(SelectField::MetadataField("author".to_string()));
+
+        let select = Select { fields };
+        let json = serde_json::to_string(&select).unwrap();
+        let deserialized: Select = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.fields.len(), 3);
+        assert!(deserialized.fields.contains(&SelectField::Document));
+        assert!(deserialized.fields.contains(&SelectField::Embedding));
+        assert!(deserialized
+            .fields
+            .contains(&SelectField::MetadataField("author".to_string())));
+    }
+
+    #[test]
+    fn test_merge_basic_integers() {
+        use std::cmp::Reverse;
+
+        let merge = Merge { k: 5 };
+
+        // Input: sorted vectors of Reverse(u32) - ascending order of inner values
+        let input = vec![
+            vec![Reverse(1), Reverse(4), Reverse(7), Reverse(10)],
+            vec![Reverse(2), Reverse(5), Reverse(8)],
+            vec![Reverse(3), Reverse(6), Reverse(9), Reverse(11), Reverse(12)],
+        ];
+
+        let result = merge.merge(input);
+
+        // Should get top-5 smallest values (largest Reverse values)
+        assert_eq!(result.len(), 5);
+        assert_eq!(
+            result,
+            vec![Reverse(1), Reverse(2), Reverse(3), Reverse(4), Reverse(5)]
+        );
+    }
+
+    #[test]
+    fn test_merge_u32_descending() {
+        let merge = Merge { k: 6 };
+
+        // Regular u32 in descending order (largest first)
+        let input = vec![
+            vec![100u32, 75, 50, 25],
+            vec![90, 60, 30],
+            vec![95, 85, 70, 40, 10],
+        ];
+
+        let result = merge.merge(input);
+
+        // Should get top-6 largest u32 values
+        assert_eq!(result.len(), 6);
+        assert_eq!(result, vec![100, 95, 90, 85, 75, 70]);
+    }
+
+    #[test]
+    fn test_merge_i32_descending() {
+        let merge = Merge { k: 5 };
+
+        // i32 values in descending order (including negatives)
+        let input = vec![
+            vec![50i32, 10, -10, -50],
+            vec![30, 0, -30],
+            vec![40, 20, -20, -40],
+        ];
+
+        let result = merge.merge(input);
+
+        // Should get top-5 largest i32 values
+        assert_eq!(result.len(), 5);
+        assert_eq!(result, vec![50, 40, 30, 20, 10]);
+    }
+
+    #[test]
+    fn test_merge_with_duplicates() {
+        let merge = Merge { k: 10 };
+
+        // Input with duplicates using regular u32 in descending order
+        let input = vec![
+            vec![100u32, 80, 80, 60, 40],
+            vec![90, 80, 50, 30],
+            vec![100, 70, 60, 20],
+        ];
+
+        let result = merge.merge(input);
+
+        // Duplicates should be removed
+        assert_eq!(result, vec![100, 90, 80, 70, 60, 50, 40, 30, 20]);
+    }
+
+    #[test]
+    fn test_merge_empty_vectors() {
+        let merge = Merge { k: 5 };
+
+        // All empty with u32
+        let input: Vec<Vec<u32>> = vec![vec![], vec![], vec![]];
+        let result = merge.merge(input);
+        assert_eq!(result.len(), 0);
+
+        // Some empty, some with data (u64)
+        let input = vec![vec![], vec![1000u64, 750, 500], vec![], vec![850, 600]];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![1000, 850, 750, 600, 500]);
+
+        // Single non-empty vector (i32)
+        let input = vec![vec![], vec![100i32, 50, 25], vec![]];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![100, 50, 25]);
+    }
+
+    #[test]
+    fn test_merge_k_boundary_conditions() {
+        // k = 0 with u32
+        let merge = Merge { k: 0 };
+        let input = vec![vec![100u32, 50], vec![75, 25]];
+        let result = merge.merge(input);
+        assert_eq!(result.len(), 0);
+
+        // k = 1 with i64
+        let merge = Merge { k: 1 };
+        let input = vec![vec![1000i64, 500], vec![750, 250], vec![900, 100]];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![1000]);
+
+        // k larger than total unique elements with u128
+        let merge = Merge { k: 100 };
+        let input = vec![vec![10000u128, 5000], vec![8000, 3000]];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![10000, 8000, 5000, 3000]);
+    }
+
+    #[test]
+    fn test_merge_with_strings() {
+        let merge = Merge { k: 4 };
+
+        // Strings must be sorted in descending order (largest first) for the max heap merge
+        let input = vec![
+            vec!["zebra".to_string(), "dog".to_string(), "apple".to_string()],
+            vec!["elephant".to_string(), "banana".to_string()],
+            vec!["fish".to_string(), "cat".to_string()],
+        ];
+
+        let result = merge.merge(input);
+
+        // Should get top-4 lexicographically largest strings
+        assert_eq!(
+            result,
+            vec![
+                "zebra".to_string(),
+                "fish".to_string(),
+                "elephant".to_string(),
+                "dog".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_merge_with_custom_struct() {
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+        struct Score {
+            value: i32,
+            id: String,
+        }
+
+        let merge = Merge { k: 3 };
+
+        // Custom structs sorted by value (descending), then by id
+        let input = vec![
+            vec![
+                Score {
+                    value: 100,
+                    id: "a".to_string(),
+                },
+                Score {
+                    value: 80,
+                    id: "b".to_string(),
+                },
+                Score {
+                    value: 60,
+                    id: "c".to_string(),
+                },
+            ],
+            vec![
+                Score {
+                    value: 90,
+                    id: "d".to_string(),
+                },
+                Score {
+                    value: 70,
+                    id: "e".to_string(),
+                },
+            ],
+            vec![
+                Score {
+                    value: 95,
+                    id: "f".to_string(),
+                },
+                Score {
+                    value: 85,
+                    id: "g".to_string(),
+                },
+            ],
+        ];
+
+        let result = merge.merge(input);
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(
+            result[0],
+            Score {
+                value: 100,
+                id: "a".to_string()
+            }
+        );
+        assert_eq!(
+            result[1],
+            Score {
+                value: 95,
+                id: "f".to_string()
+            }
+        );
+        assert_eq!(
+            result[2],
+            Score {
+                value: 90,
+                id: "d".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_merge_preserves_order() {
+        use std::cmp::Reverse;
+
+        let merge = Merge { k: 10 };
+
+        // For Reverse, smaller inner values are "larger" in ordering
+        // So vectors should be sorted with smallest inner values first
+        let input = vec![
+            vec![Reverse(2), Reverse(6), Reverse(10), Reverse(14)],
+            vec![Reverse(4), Reverse(8), Reverse(12), Reverse(16)],
+            vec![Reverse(1), Reverse(3), Reverse(5), Reverse(7), Reverse(9)],
+        ];
+
+        let result = merge.merge(input);
+
+        // Verify output maintains order - should be sorted by Reverse ordering
+        // which means ascending inner values
+        for i in 1..result.len() {
+            assert!(
+                result[i - 1] >= result[i],
+                "Output should be in descending Reverse order"
+            );
+            assert!(
+                result[i - 1].0 <= result[i].0,
+                "Inner values should be in ascending order"
+            );
+        }
+
+        // Check we got the right elements
+        assert_eq!(
+            result,
+            vec![
+                Reverse(1),
+                Reverse(2),
+                Reverse(3),
+                Reverse(4),
+                Reverse(5),
+                Reverse(6),
+                Reverse(7),
+                Reverse(8),
+                Reverse(9),
+                Reverse(10)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_merge_single_vector() {
+        let merge = Merge { k: 3 };
+
+        // Single vector input with u64
+        let input = vec![vec![1000u64, 800, 600, 400, 200]];
+
+        let result = merge.merge(input);
+
+        assert_eq!(result, vec![1000, 800, 600]);
+    }
+
+    #[test]
+    fn test_merge_all_same_values() {
+        let merge = Merge { k: 5 };
+
+        // All vectors contain the same value (using i16)
+        let input = vec![vec![42i16, 42, 42], vec![42, 42], vec![42, 42, 42, 42]];
+
+        let result = merge.merge(input);
+
+        // Should deduplicate to single value
+        assert_eq!(result, vec![42]);
+    }
+
+    #[test]
+    fn test_merge_mixed_types_sizes() {
+        // Test with usize (common in real usage)
+        let merge = Merge { k: 4 };
+        let input = vec![
+            vec![1000usize, 500, 100],
+            vec![800, 300],
+            vec![900, 600, 200],
+        ];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![1000, 900, 800, 600]);
+
+        // Test with negative integers (i32)
+        let merge = Merge { k: 5 };
+        let input = vec![vec![10i32, 0, -10, -20], vec![5, -5, -15], vec![15, -25]];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![15, 10, 5, 0, -5]);
     }
 }

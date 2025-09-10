@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Sequence, Optional
+from typing import Sequence, Optional, List
 from uuid import UUID
 
 from overrides import override
@@ -28,7 +28,9 @@ from chromadb.api.types import (
     WhereDocument,
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
+    SearchResult,
 )
+from chromadb.execution.expression.plan import Search
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 import chromadb.utils.embedding_functions as ef
@@ -639,6 +641,16 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        pass
+
+    @abstractmethod
+    async def _search(
+        self,
+        collection_id: UUID,
+        searches: List[Search],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> SearchResult:
         pass
 
     @abstractmethod

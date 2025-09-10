@@ -23,7 +23,7 @@ use chroma_index::{
 };
 use chroma_storage::{local::LocalStorage, Storage};
 use chroma_system::Operator;
-use chroma_types::{operator::KnnMerge, CollectionUuid, InternalSpannConfiguration};
+use chroma_types::{operator::Merge, CollectionUuid, InternalSpannConfiguration};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::StreamExt;
 use rand::seq::SliceRandom;
@@ -80,6 +80,7 @@ fn add_to_index_and_get_reader<'a>(
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 128;
@@ -212,9 +213,9 @@ fn calculate_recall<'a>(
             }
             // Now merge.
             let knn_input = KnnMergeInput {
-                batch_distances: merge_list,
+                batch_measures: merge_list,
             };
-            let knn_operator = KnnMerge { fetch: k as u32 };
+            let knn_operator = Merge { k: k as u32 };
             let knn_output = knn_operator
                 .run(&knn_input)
                 .await
@@ -245,7 +246,7 @@ fn calculate_recall<'a>(
                 .expect("Error running operator");
             let mut recall = 0;
             for bf_record in bf_output.records.iter() {
-                for spann_record in knn_output.distances.iter() {
+                for spann_record in knn_output.measures.iter() {
                     if bf_record.offset_id == spann_record.offset_id {
                         recall += 1;
                     }

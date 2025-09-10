@@ -2,7 +2,7 @@ use chroma_system::ReceiverForMessage;
 use std::sync::OnceLock;
 use tracing::Span;
 
-use crate::core::MeterEvent;
+use crate::{core::MeterEvent, MeteringError};
 
 pub static METER_EVENT_RECEIVER: OnceLock<Box<dyn ReceiverForMessage<MeterEvent>>> =
     OnceLock::new();
@@ -14,12 +14,17 @@ impl MeterEvent {
         }
     }
 
-    pub async fn submit(self) {
+    pub async fn submit(self) -> Result<(), MeteringError> {
         if let Some(handler) = METER_EVENT_RECEIVER.get() {
-            if let Err(err) = handler.send(self, Some(Span::current())).await {
-                tracing::error!("Unable to send meter event: {err}")
+            match handler.send(self, Some(Span::current())).await {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    tracing::error!("Unable to send meter event: {error}");
+                    return Err(MeteringError::SendError(error.to_string()));
+                }
             }
         }
+        Ok(())
     }
 }
 
@@ -91,7 +96,7 @@ mod tests {
 
         async fn helper() {
             if let Ok(metering_context) = crate::core::close::<CollectionForkContext>() {
-                MeterEvent::CollectionFork(metering_context).submit().await;
+                let _ = MeterEvent::CollectionFork(metering_context).submit().await;
             }
         }
 

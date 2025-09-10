@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::spann::types::SpannPosting;
-use chroma_types::{operator::RecordDistance, SignedRoaringBitmap};
+use chroma_types::{operator::RecordMeasure, SignedRoaringBitmap};
 use thiserror::Error;
 
 use chroma_system::Operator;
@@ -28,7 +28,7 @@ pub struct SpannBfPlInput {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct SpannBfPlOutput {
-    pub records: Vec<RecordDistance>,
+    pub records: Vec<RecordMeasure>,
 }
 
 #[derive(Error, Debug)]
@@ -68,7 +68,7 @@ impl Operator<SpannBfPlInput, SpannBfPlOutput> for SpannBfPlOperator {
             let dist = input
                 .distance_function
                 .distance(&posting.doc_embedding, &input.query);
-            let record = RecordDistance {
+            let record = RecordMeasure {
                 offset_id: posting.doc_offset_id,
                 measure: dist,
             };

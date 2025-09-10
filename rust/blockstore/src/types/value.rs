@@ -3,7 +3,7 @@ use std::mem::size_of;
 use chroma_types::{DataRecord, SpannPostingList};
 use roaring::RoaringBitmap;
 
-pub trait Value: Clone {
+pub trait Value: Clone + Send + Sync {
     fn get_size(&self) -> usize;
 }
 
@@ -28,6 +28,12 @@ impl Value for &str {
 impl Value for String {
     fn get_size(&self) -> usize {
         self.len()
+    }
+}
+
+impl Value for f32 {
+    fn get_size(&self) -> usize {
+        4
     }
 }
 

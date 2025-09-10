@@ -625,9 +625,7 @@ pub async fn materialize_logs(
             }
             Ok(())
         }
-        .instrument(
-            tracing::info_span!(parent: Span::current(), "Materialization read from storage"),
-        )
+        .instrument(Span::current())
         .await?;
     }
     // Populate updates to these and fresh records that are being
@@ -895,7 +893,7 @@ pub async fn materialize_logs(
             }
         }
         Ok(())
-    }.instrument(tracing::info_span!(parent: Span::current(), "Materialization main iteration")).await?;
+    }.instrument(Span::current()).await?;
     let mut res = vec![];
     for (_key, value) in existing_id_to_materialized {
         // Ignore records that only had invalid ADDS on the log.

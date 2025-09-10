@@ -1298,8 +1298,8 @@ mod tests {
             ])),
         };
         let limit = Limit {
-            skip: 0,
-            fetch: None,
+            offset: 0,
+            limit: None,
         };
         let project = Projection {
             document: true,
