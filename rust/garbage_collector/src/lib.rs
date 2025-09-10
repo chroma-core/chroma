@@ -8,7 +8,6 @@ use chroma_tracing::{
     init_global_filter_layer, init_otel_layer, init_panic_tracing_hook, init_stdout_layer,
     init_tracing,
 };
-use chroma_types::chroma_proto::garbage_collector_server::GarbageCollectorServer;
 use chroma_types::chroma_proto::{
     KickoffGarbageCollectionRequest, KickoffGarbageCollectionResponse,
 };
@@ -64,7 +63,7 @@ impl chroma_types::chroma_proto::garbage_collector_server::GarbageCollector
 }
 
 pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::error::Error>> {
-    let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+    let (_health_reporter, health_service) = tonic_health::server::health_reporter();
 
     debug!("Loading configuration from environment");
     // Parse configuration. Configuration includes sysdb connection details, and
