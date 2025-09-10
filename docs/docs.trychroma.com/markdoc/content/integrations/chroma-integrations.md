@@ -1,3 +1,8 @@
+---
+id: integrations
+name: Integrations
+---
+
 # Integrations
 
 ### Embedding Integrations

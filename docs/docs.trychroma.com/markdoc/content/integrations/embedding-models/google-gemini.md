@@ -1,6 +1,6 @@
 ---
 id: google-gemini
-name: "Google Gemini"
+name: Google Gemini
 ---
 
 # Google Gemini

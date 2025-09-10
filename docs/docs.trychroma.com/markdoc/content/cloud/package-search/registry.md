@@ -1,3 +1,8 @@
+---
+id: package-search-registry
+name: Package Search Registry
+---
+
 # Package Search Registry
 
 [Chroma Code Collections](https://github.com/chroma-core/code-collections) is the index of public code packages that powers the [Package Search MCP server](/cloud/package-search/mcp). It is the source of truth for which packages and versions Chroma indexes for code search and retrieval.
@@ -14,6 +19,7 @@ The registry is maintained in the [Code Collections repository](https://github.c
 Chroma’s indexer reads these files, resolves each version to a git tag according to the package’s `tag_formats`, fetches the source, and indexes only files matching the package’s `include` globs.
 
 ## Supported registries
+
 Chroma supports these registries and identifiers:
 
 - [`npm`](https://www.npmjs.com/) — JavaScript + TypeScript packages

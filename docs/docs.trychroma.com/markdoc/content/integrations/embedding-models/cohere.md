@@ -1,6 +1,6 @@
 ---
-id: 'cohere'
-name: 'Cohere'
+id: cohere
+name: Cohere
 ---
 
 # Cohere
@@ -25,16 +25,22 @@ cohere_ef(input=["document1","document2"])
 ```typescript
 // npm install @chroma-core/cohere
 
-import { CohereEmbeddingFunction } from '@chroma-core/cohere';
+import { CohereEmbeddingFunction } from "@chroma-core/cohere";
 
-const embedder = new CohereEmbeddingFunction({ apiKey: "apiKey" })
+const embedder = new CohereEmbeddingFunction({ apiKey: "apiKey" });
 
 // use directly
-const embeddings = embedder.generate(["document1","document2"])
+const embeddings = embedder.generate(["document1", "document2"]);
 
 // pass documents to query for .add and .query
-const collection = await client.createCollection({name: "name", embeddingFunction: embedder})
-const collectionGet = await client.getCollection({name:"name", embeddingFunction: embedder})
+const collection = await client.createCollection({
+  name: "name",
+  embeddingFunction: embedder,
+});
+const collectionGet = await client.getCollection({
+  name: "name",
+  embeddingFunction: embedder,
+});
 ```
 
 {% /Tab %}
@@ -69,18 +75,23 @@ cohere_ef(input=multilingual_texts)
 {% Tab label="typescript" %}
 
 ```typescript
-import { CohereEmbeddingFunction } from 'chromadb';
+import { CohereEmbeddingFunction } from "chromadb";
 
-const embedder = new CohereEmbeddingFunction("apiKey")
+const embedder = new CohereEmbeddingFunction("apiKey");
 
-multilingual_texts  = [ 'Hello from Cohere!', 'مرحبًا من كوهير!',
-        'Hallo von Cohere!', 'Bonjour de Cohere!',
-        '¡Hola desde Cohere!', 'Olá do Cohere!',
-        'Ciao da Cohere!', '您好，来自 Cohere！',
-        'कोहिअर से नमस्ते!'  ]
+multilingual_texts = [
+  "Hello from Cohere!",
+  "مرحبًا من كوهير!",
+  "Hallo von Cohere!",
+  "Bonjour de Cohere!",
+  "¡Hola desde Cohere!",
+  "Olá do Cohere!",
+  "Ciao da Cohere!",
+  "您好，来自 Cohere！",
+  "कोहिअर से नमस्ते!",
+];
 
-const embeddings = embedder.generate(multilingual_texts)
-
+const embeddings = embedder.generate(multilingual_texts);
 ```
 
 {% /Tab %}
@@ -88,7 +99,6 @@ const embeddings = embedder.generate(multilingual_texts)
 {% /TabbedCodeBlock %}
 
 For more information on multilingual model you can read [here](https://docs.cohere.ai/docs/multilingual-language-models).
-
 
 ### Multimodal model example
 

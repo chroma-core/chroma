@@ -184,6 +184,16 @@ const markdocConfig: MarkDocConfig = {
     ComboboxSteps: {
       render: "ComboboxSteps",
       selfClosing: false,
+      attributes: {
+        defaultValue: {
+          type: String,
+          required: false,
+        },
+        itemType: {
+          type: String,
+          required: false,
+        },
+      },
     },
     ComboboxEntry: {
       render: "ComboboxEntry",

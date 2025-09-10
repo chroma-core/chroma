@@ -5,7 +5,7 @@ import CodeBlock from "@/components/markdoc/code-block";
 
 const PythonInstallation: React.FC<{ packages: string }> = ({ packages }) => {
   return (
-    <TabbedUseCaseCodeBlock language="python">
+    <TabbedUseCaseCodeBlock language="Terminal">
       <Tab label="pip">
         <CodeBlock
           content={`pip install ${packages}`}
