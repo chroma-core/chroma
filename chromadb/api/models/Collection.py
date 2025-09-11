@@ -300,14 +300,14 @@ class Collection(CollectionCommon["ServerAPI"]):
     ) -> SearchResult:
         """Perform hybrid search on the collection.
         This is an experimental API that only works for Hosted Chroma for now.
-
+        
         Args:
             searches: List of Search objects, each containing:
                 - filter: SearchFilter with query_ids and where_clause
                 - rank: Ranking expression for hybrid search (defaults to Val(0.0))
                 - limit: Limit configuration for pagination (defaults to no limit)
                 - select: Select configuration for fields to return (defaults to empty)
-
+        
         Returns:
             SearchResult: Column-major format response with:
                 - ids: List of result IDs for each search payload
@@ -316,27 +316,27 @@ class Collection(CollectionCommon["ServerAPI"]):
                 - metadatas: Optional metadata for each payload
                 - scores: Optional scores for each payload
                 - select: List of selected fields for each payload
-
+        
         Raises:
             NotImplementedError: For local/segment API implementations
-
+        
         Examples:
             # Using builder pattern
             from chromadb.execution.expression import (
                 Search, Key, K, Knn, Val, SelectField
             )
-
+            
             search = (Search()
                 .where((Key("category") == "science") & (Key("score") > 0.5))
                 .rank(Knn(embedding=[0.1, 0.2, 0.3]) * 0.8 + Val(0.5) * 0.2)
                 .limit(10, offset=0)
                 .select(SelectField.DOCUMENT, SelectField.SCORE, "title"))
-
+            
             # Direct construction
             from chromadb.execution.expression import (
                 Search, SearchFilter, Eq, And, Gt, Knn, Limit, Select, SelectField
             )
-
+            
             search = Search(
                 filter=SearchFilter(
                     where_clause=And([Eq("category", "science"), Gt("score", 0.5)])
@@ -345,10 +345,15 @@ class Collection(CollectionCommon["ServerAPI"]):
                 limit=Limit(offset=0, limit=10),
                 select=Select(fields={SelectField.DOCUMENT, SelectField.SCORE})
             )
-
+            
             results = collection.search([search])
         """
-        raise NotImplementedError("This API is not yet available")
+        return self._client._search(
+            collection_id=self.id,
+            searches=searches,
+            tenant=self.tenant,
+            database=self.database,
+        )
 
     def update(
         self,
