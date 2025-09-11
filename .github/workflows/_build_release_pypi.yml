@@ -41,7 +41,7 @@ permissions:
 jobs:
   version:
     name: Resolve version
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       version: ${{ steps.resolve_version.outputs.version }}
     steps:
@@ -65,8 +65,8 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - { os: linux, runner: blacksmith-4vcpu-ubuntu-2204, target: x86_64 }
-          - { os: linux, runner: blacksmith-4vcpu-ubuntu-2204-arm, target: aarch64 }
+          - { os: linux, runner: blacksmith-4vcpu-ubuntu-2404, target: x86_64 }
+          - { os: linux, runner: blacksmith-4vcpu-ubuntu-2404-arm, target: aarch64 }
           - { os: windows, runner: 8core-32gb-windows-latest, target: x64 }
           - { os: macos, runner: macos-14, target: x86_64 }
           - { os: macos, runner: macos-14, target: aarch64 }
@@ -117,7 +117,7 @@ jobs:
 
   sdist:
     name: build-sdist
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: version
     steps:
       - uses: actions/checkout@v4
@@ -160,7 +160,7 @@ jobs:
 
   release:
     name: Release
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: ${{ inputs.publish_to_pypi || inputs.publish_to_test_pypi }}
     needs: [build, sdist]
     permissions:

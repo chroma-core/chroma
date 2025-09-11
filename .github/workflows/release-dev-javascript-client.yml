@@ -13,7 +13,7 @@ jobs:
     strategy:
       matrix:
         registry: [ "https://npm.pkg.github.com" ]
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: ${{ github.ref == 'refs/heads/main' }}
     permissions: write-all
     steps:
@@ -108,7 +108,7 @@ jobs:
     name: Notify Slack on Release Failure
     if: failure()
     needs: [release-dev]
-    runs-on: blacksmith-2vcpu-ubuntu-2204
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Notify Slack
         uses: slackapi/slack-github-action@v2.0.0

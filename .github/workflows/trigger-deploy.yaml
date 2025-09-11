@@ -30,7 +30,7 @@ jobs:
     name: Notify Slack on Deploy Failure
     if: failure()
     needs: [deploy-control-plane, deploy-data-plane]
-    runs-on: blacksmith-2vcpu-ubuntu-2204
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Notify Slack
         uses: slackapi/slack-github-action@v2.0.0

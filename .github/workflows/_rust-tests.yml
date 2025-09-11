@@ -7,7 +7,7 @@ jobs:
   test:
     strategy:
       matrix:
-        platform: [blacksmith-8vcpu-ubuntu-2204]
+        platform: [blacksmith-8vcpu-ubuntu-2404]
     runs-on: ${{ matrix.platform }}
     env:
       CARGO_TERM_COLOR: always
@@ -24,7 +24,7 @@ jobs:
       - name: Test
         run: cargo nextest run --profile ci
   test-long:
-    runs-on: blacksmith-8vcpu-ubuntu-2204
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
@@ -41,7 +41,7 @@ jobs:
   test-integration:
     strategy:
       matrix:
-        platform: [blacksmith-16vcpu-ubuntu-2204]
+        platform: [blacksmith-16vcpu-ubuntu-2404]
         nextest_profile: [ci_k8s_integration, ci_k8s_integration_slow]
         partition: [1, 2]
         include:
@@ -83,7 +83,7 @@ jobs:
   test-benches:
     strategy:
       matrix:
-        platform: [blacksmith-16vcpu-ubuntu-2204]
+        platform: [blacksmith-16vcpu-ubuntu-2404]
         bench-command:
           - "--bench blockfile_writer -- --sample-size 10"
           - "--bench distance_metrics"
@@ -106,7 +106,7 @@ jobs:
         run: cargo bench ${{ matrix.bench-command }}
 
   can-build-release:
-    runs-on: blacksmith-16vcpu-ubuntu-2204
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     env:
       CARGO_TERM_COLOR: always
     steps:
