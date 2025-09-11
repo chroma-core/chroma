@@ -428,6 +428,17 @@ impl SysDb {
         }
     }
 
+    pub async fn get_collection_to_gc(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<CollectionToGcInfo, GetCollectionsToGcError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_collection_to_gc(collection_id).await,
+            SysDb::Sqlite(_) => unimplemented!("Garbage collection does not work for local chroma"),
+            SysDb::Test(_) => todo!(),
+        }
+    }
+
     pub async fn get_segments(
         &mut self,
         id: Option<SegmentUuid>,
@@ -668,17 +679,23 @@ pub struct CollectionToGcInfo {
 
 #[derive(Debug, Error)]
 pub enum GetCollectionsToGcError {
+    #[error("No such collection")]
+    NoSuchCollection,
     #[error("Failed to parse uuid")]
     ParsingError(#[from] Error),
     #[error("Grpc request failed")]
     RequestFailed(#[from] tonic::Status),
+    #[error("Internal error: {0}")]
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for GetCollectionsToGcError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GetCollectionsToGcError::NoSuchCollection => ErrorCodes::NotFound,
             GetCollectionsToGcError::ParsingError(_) => ErrorCodes::Internal,
             GetCollectionsToGcError::RequestFailed(_) => ErrorCodes::Internal,
+            GetCollectionsToGcError::Internal(e) => e.code(),
         }
     }
 }
@@ -1221,6 +1238,46 @@ impl GrpcSysDb {
         }
     }
 
+    pub async fn get_collection_to_gc(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<CollectionToGcInfo, GetCollectionsToGcError> {
+        let mut collections = self
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| {
+                if e.code() == ErrorCodes::NotFound {
+                    GetCollectionsToGcError::NoSuchCollection
+                } else {
+                    GetCollectionsToGcError::Internal(e.boxed())
+                }
+            })?;
+
+        if collections.is_empty() {
+            return Err(GetCollectionsToGcError::NoSuchCollection);
+        }
+        if collections.len() > 1 {
+            tracing::error!(
+                "Multiple collections returned when querying for ID: {}",
+                collection_id
+            );
+            return Err(GetCollectionsToGcError::NoSuchCollection);
+        }
+
+        let collection = collections.remove(0);
+
+        Ok(CollectionToGcInfo {
+            id: collection.collection_id,
+            tenant: collection.tenant,
+            name: collection.name,
+            version_file_path: collection.version_file_path.unwrap_or_default(),
+            lineage_file_path: collection.lineage_file_path,
+        })
+    }
+
     async fn get_segments(
         &mut self,
         id: Option<SegmentUuid>,
@@ -1574,5 +1631,18 @@ mod tests {
             "collection soft deleted",
         ));
         assert!(!fce.should_trace_error());
+    }
+
+    #[test]
+    fn get_collections_to_gc_error_internal_propagation() {
+        // Test that Internal errors are properly propagated with their original error code
+        let internal_error = GetCollectionsToGcError::Internal(Box::new(chroma_error::TonicError(
+            Status::internal("database error"),
+        )));
+        assert_eq!(internal_error.code(), ErrorCodes::Internal);
+
+        // Test that NoSuchCollection returns NotFound
+        let not_found_error = GetCollectionsToGcError::NoSuchCollection;
+        assert_eq!(not_found_error.code(), ErrorCodes::NotFound);
     }
 }

@@ -19,8 +19,8 @@ type IMemberlistStore interface {
 }
 
 type Member struct {
-	id string
-	ip string
+	id   string
+	ip   string
 	node string
 }
 
@@ -127,8 +127,8 @@ func (list Memberlist) toCr(namespace string, memberlistName string, resourceVer
 	members := make([]interface{}, len(list))
 	for i, member := range list {
 		members[i] = map[string]interface{}{
-			"member_id": member.id,
-			"member_ip": member.ip,
+			"member_id":        member.id,
+			"member_ip":        member.ip,
 			"member_node_name": member.node,
 		}
 	}

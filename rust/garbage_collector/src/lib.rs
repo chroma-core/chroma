@@ -2,17 +2,24 @@ use chroma_config::Configurable;
 use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_memberlist::memberlist_provider::CustomResourceMemberlistProvider;
 use chroma_memberlist::memberlist_provider::MemberlistProvider;
+use chroma_system::ComponentHandle;
 use chroma_system::{Dispatcher, System};
 use chroma_tracing::{
     init_global_filter_layer, init_otel_layer, init_panic_tracing_hook, init_stdout_layer,
     init_tracing,
 };
 use chroma_types::chroma_proto::garbage_collector_server::GarbageCollectorServer;
+use chroma_types::chroma_proto::{
+    KickoffGarbageCollectionRequest, KickoffGarbageCollectionResponse,
+};
+use chroma_types::CollectionUuid;
 use config::GarbageCollectorConfig;
 use garbage_collector_component::GarbageCollector;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::transport::Server;
-use tracing::{debug, error, info};
+use tonic::{Request, Response, Status};
+use tracing::{debug, error, info, Level, Span};
+use uuid::Uuid;
 
 pub mod config;
 mod construct_version_graph_orchestrator;
@@ -27,12 +34,33 @@ pub mod types;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
-// This is a placeholder service so that we can expose a health service
-struct GarbageCollectorService {}
+struct GarbageCollectorService {
+    handle: ComponentHandle<GarbageCollector>,
+}
 
+#[async_trait::async_trait]
 impl chroma_types::chroma_proto::garbage_collector_server::GarbageCollector
     for GarbageCollectorService
 {
+    async fn kickoff_garbage_collection(
+        &self,
+        request: Request<KickoffGarbageCollectionRequest>,
+    ) -> Result<Response<KickoffGarbageCollectionResponse>, Status> {
+        let request = request.into_inner();
+        let collection_id = Uuid::parse_str(&request.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        tracing::event!(Level::INFO, name = "manual garbage collection", collection_id =? collection_id);
+        self.handle
+            .clone()
+            .send(
+                garbage_collector_component::ManualGarbageCollectionRequest { collection_id },
+                Some(Span::current()),
+            )
+            .await
+            .map_err(|err| Status::internal(err.to_string()))?;
+        Ok(Response::new(KickoffGarbageCollectionResponse {}))
+    }
 }
 
 pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::error::Error>> {
@@ -74,27 +102,6 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
 
     info!("Loaded configuration successfully: {:#?}", config);
 
-    let addr = format!("[::]:{}", config.port)
-        .parse()
-        .expect("Invalid address format");
-    let server_join_handle = tokio::spawn(async move {
-        let server = Server::builder().add_service(health_service);
-        server
-            .serve_with_shutdown(addr, async {
-                match signal(SignalKind::terminate()) {
-                    Ok(mut sigterm) => {
-                        sigterm.recv().await;
-                        tracing::info!("Received SIGTERM, shutting down gRPC server");
-                    }
-                    Err(err) => {
-                        tracing::error!("Failed to create SIGTERM handler: {err}")
-                    }
-                }
-            })
-            .await
-            .expect("Failed to start gRPC server");
-    });
-
     let registry = chroma_config::registry::Registry::new();
     let system = System::new();
 
@@ -112,7 +119,7 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
     // Garbage collector is a component that gets notified every
     // gc_interval_mins to check for garbage.
     let mut garbage_collector_component =
-        GarbageCollector::try_from_config(&(config, system.clone()), &registry)
+        GarbageCollector::try_from_config(&(config.clone(), system.clone()), &registry)
             .await
             .map_err(|e| {
                 error!("Failed to create garbage collector component: {:?}", e);
@@ -129,6 +136,36 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
     health_reporter
         .set_serving::<GarbageCollectorServer<GarbageCollectorService>>()
         .await;
+    let addr = format!("[::]:{}", config.port)
+        .parse()
+        .expect("Invalid address format");
+    let garbage_collector_handle_clone = garbage_collector_handle.clone();
+    let server_join_handle = tokio::spawn(async move {
+        let server = Server::builder()
+            .layer(chroma_tracing::GrpcServerTraceLayer)
+            .add_service(health_service)
+            .add_service(
+                chroma_types::chroma_proto::garbage_collector_server::GarbageCollectorServer::new(
+                    GarbageCollectorService {
+                        handle: garbage_collector_handle_clone,
+                    },
+                ),
+            );
+        server
+            .serve_with_shutdown(addr, async {
+                match signal(SignalKind::terminate()) {
+                    Ok(mut sigterm) => {
+                        sigterm.recv().await;
+                        tracing::info!("Received SIGTERM, shutting down gRPC server");
+                    }
+                    Err(err) => {
+                        tracing::error!("Failed to create SIGTERM handler: {err}")
+                    }
+                }
+            })
+            .await
+            .expect("Failed to start gRPC server");
+    });
 
     // Keep the service running and handle shutdown signals
     let mut sigterm = signal(SignalKind::terminate())?;

@@ -11,7 +11,7 @@ func NewPgConnection(ctx context.Context, config *configuration.LogServiceConfig
 	var conf *pgxpool.Config
 	conf, err = pgxpool.ParseConfig(config.DATABASE_URL)
 	if err != nil {
-	    return
+		return
 	}
 	conf.MaxConns = config.MAX_CONNS
 	conn, err = pgxpool.NewWithConfig(ctx, conf)
