@@ -761,15 +761,9 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
-            log: LogConfig::Grpc(GrpcLogConfig {
-                host: "localhost".to_string(),
-                port: 50054,
-                alt_host: Some("localhost".to_string()),
-                ..Default::default()
-            }),
+            log: LogConfig::Grpc(GrpcLogConfig::default()),
             enable_log_gc_for_tenant: Vec::new(),
-            enable_log_gc_for_tenant_threshold: "tenant-ffffffff-ffff-ffff-ffff-ffffffffffff"
-                .to_string(),
+            enable_log_gc_for_tenant_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff".to_string(),
             enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
         };
         let registry = Registry::new();
@@ -901,12 +895,7 @@ mod tests {
             jemalloc_pprof_server_port: None,
             enable_log_gc_for_tenant: Vec::new(),
             enable_log_gc_for_tenant_threshold: "tenant-threshold".to_string(),
-            log: LogConfig::Grpc(GrpcLogConfig {
-                host: "localhost".to_string(),
-                port: 50054,
-                alt_host: Some("localhost".to_string()),
-                ..Default::default()
-            }),
+            log: LogConfig::Grpc(GrpcLogConfig::default()),
             enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
         };
         let registry = Registry::new();
@@ -1108,14 +1097,8 @@ mod tests {
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
             enable_log_gc_for_tenant: Vec::new(),
-            enable_log_gc_for_tenant_threshold:
-                "tenant-delete-mode-ffffffff-ffff-ffff-ffff-ffffffffffff".to_string(),
-            log: LogConfig::Grpc(GrpcLogConfig {
-                host: "localhost".to_string(),
-                port: 50054,
-                alt_host: Some("localhost".to_string()),
-                ..Default::default()
-            }),
+            enable_log_gc_for_tenant_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff".to_string(),
+            log: LogConfig::Grpc(GrpcLogConfig::default()),
             ..Default::default()
         };
         let registry = Registry::new();

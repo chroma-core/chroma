@@ -243,13 +243,9 @@ impl Log {
         }
     }
 
-    pub async fn seal_log(
-        &mut self,
-        _: &str,
-        collection_id: CollectionUuid,
-    ) -> Result<(), GrpcSealLogError> {
+    pub async fn seal_log(&mut self, _: &str, _: CollectionUuid) -> Result<(), GrpcSealLogError> {
         match self {
-            Log::Grpc(log) => log.seal_log(collection_id).await,
+            Log::Grpc(_) => Err(GrpcSealLogError::NoMoreSeal),
             Log::Sqlite(_) => unimplemented!(),
             Log::InMemory(_) => unimplemented!(),
         }
