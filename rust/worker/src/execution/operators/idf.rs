@@ -95,11 +95,11 @@ impl Operator<IdfInput, IdfOutput> for Idf {
 
         let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None).await?;
 
-        let metadata_segement_reader =
+        let metadata_segment_reader =
             MetadataSegmentReader::from_segment(&input.metadata_segment, &input.blockfile_provider)
                 .await?;
 
-        if let Some(sparse_index_reader) = metadata_segement_reader.sparse_index_reader.as_ref() {
+        if let Some(sparse_index_reader) = metadata_segment_reader.sparse_index_reader.as_ref() {
             for &dimension_id in &self.embedding.indices {
                 let encoded_dimension_id = encode_u32(dimension_id);
                 let nt = sparse_index_reader
