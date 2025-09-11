@@ -276,7 +276,7 @@ mod tests {
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
             let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &in_memory_provider).await
+                match Box::pin(RecordSegmentReader::from_segment(&record_segment, &in_memory_provider)).await
                 {
                     Ok(reader) => Some(reader),
                     Err(e) => {
@@ -312,11 +312,11 @@ mod tests {
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materializated log failed");
-            let flusher = segment_writer
-                .commit()
+            let flusher = Box::pin(segment_writer
+                .commit())
                 .await
                 .expect("Commit for segment writer failed");
-            record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
+            record_segment.file_path = Box::pin(flusher.flush()).await.expect("Flush segment writer failed");
         }
         let data = vec![
             LogRecord {

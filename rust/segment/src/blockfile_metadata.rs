@@ -1150,7 +1150,7 @@ mod test {
                 // Create a new tokio runtime within the thread
                 let runtime = tokio::runtime::Runtime::new().unwrap();
                 runtime.block_on(async {
-                    empty_blocks_impl().await;
+                    Box::pin(empty_blocks_impl()).await;
                 });
             })
             .expect("Failed to spawn thread");
@@ -1244,7 +1244,7 @@ mod test {
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
             let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                match Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)).await
                 {
                     Ok(reader) => Some(reader),
                     Err(e) => {
@@ -1285,20 +1285,20 @@ mod test {
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log to record segment failed");
-            let record_flusher = segment_writer
-                .commit()
+            let record_flusher = Box::pin(segment_writer
+                .commit())
                 .await
                 .expect("Commit for segment writer failed");
-            let metadata_flusher = metadata_writer
-                .commit()
+            let metadata_flusher = Box::pin(metadata_writer
+                .commit())
                 .await
                 .expect("Commit for metadata writer failed");
-            record_segment.file_path = record_flusher
-                .flush()
+            record_segment.file_path = Box::pin(record_flusher
+                .flush())
                 .await
                 .expect("Flush record segment writer failed");
-            metadata_segment.file_path = metadata_flusher
-                .flush()
+            metadata_segment.file_path = Box::pin(metadata_flusher
+                .flush())
                 .await
                 .expect("Flush metadata segment writer failed");
         }
@@ -1329,7 +1329,7 @@ mod test {
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
         let record_segment_reader =
-            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
                 .await
                 .expect("Reader should be initialized by now");
         let segment_writer = RecordSegmentWriter::from_segment(
@@ -1364,25 +1364,25 @@ mod test {
             .apply_materialized_log_chunk(&some_reader, &mat_records)
             .await
             .expect("Apply materialized log to record segment failed");
-        let record_flusher = segment_writer
-            .commit()
+        let record_flusher = Box::pin(segment_writer
+            .commit())
             .await
             .expect("Commit for segment writer failed");
-        let metadata_flusher = metadata_writer
-            .commit()
+        let metadata_flusher = Box::pin(metadata_writer
+            .commit())
             .await
             .expect("Commit for metadata writer failed");
-        record_segment.file_path = record_flusher
-            .flush()
+        record_segment.file_path = Box::pin(record_flusher
+            .flush())
             .await
             .expect("Flush record segment writer failed");
-        metadata_segment.file_path = metadata_flusher
-            .flush()
+        metadata_segment.file_path = Box::pin(metadata_flusher
+            .flush())
             .await
             .expect("Flush metadata segment writer failed");
         // No data should be present.
         let record_segment_reader =
-            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
                 .await
                 .expect("Record segment reader should be initialized by now");
         let res = record_segment_reader
@@ -1419,7 +1419,7 @@ mod test {
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
         let record_segment_reader =
-            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
                 .await
                 .expect("Reader should be initialized by now");
         let segment_writer = RecordSegmentWriter::from_segment(
@@ -1454,27 +1454,27 @@ mod test {
             .apply_materialized_log_chunk(&some_reader, &mat_records)
             .await
             .expect("Apply materialized log to record segment failed");
-        let record_flusher = segment_writer
-            .commit()
+        let record_flusher = Box::pin(segment_writer
+            .commit())
             .await
             .expect("Commit for segment writer failed");
         let count = record_flusher.count();
         assert_eq!(count, 2_u64);
-        let metadata_flusher = metadata_writer
-            .commit()
+        let metadata_flusher = Box::pin(metadata_writer
+            .commit())
             .await
             .expect("Commit for metadata writer failed");
-        record_segment.file_path = record_flusher
-            .flush()
+        record_segment.file_path = Box::pin(record_flusher
+            .flush())
             .await
             .expect("Flush record segment writer failed");
-        metadata_segment.file_path = metadata_flusher
-            .flush()
+        metadata_segment.file_path = Box::pin(metadata_flusher
+            .flush())
             .await
             .expect("Flush metadata segment writer failed");
         // No data should be present.
         let record_segment_reader =
-            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
                 .await
                 .expect("Record segment reader should be initialized by now");
         let res = record_segment_reader
@@ -1568,7 +1568,7 @@ mod test {
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
             let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                match Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)).await
                 {
                     Ok(reader) => Some(reader),
                     Err(e) => {
@@ -1609,20 +1609,20 @@ mod test {
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log to record segment failed");
-            let record_flusher = segment_writer
-                .commit()
+            let record_flusher = Box::pin(segment_writer
+                .commit())
                 .await
                 .expect("Commit for segment writer failed");
-            let metadata_flusher = metadata_writer
-                .commit()
+            let metadata_flusher = Box::pin(metadata_writer
+                .commit())
                 .await
                 .expect("Commit for metadata writer failed");
-            record_segment.file_path = record_flusher
-                .flush()
+            record_segment.file_path = Box::pin(record_flusher
+                .flush())
                 .await
                 .expect("Flush record segment writer failed");
-            metadata_segment.file_path = metadata_flusher
-                .flush()
+            metadata_segment.file_path = Box::pin(metadata_flusher
+                .flush())
                 .await
                 .expect("Flush metadata segment writer failed");
         }
@@ -1660,7 +1660,7 @@ mod test {
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
         let record_segment_reader =
-            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
                 .await
                 .expect("Reader should be initialized by now");
         let segment_writer = RecordSegmentWriter::from_segment(
@@ -1695,25 +1695,25 @@ mod test {
             .apply_materialized_log_chunk(&some_reader, &mat_records)
             .await
             .expect("Apply materialized log to record segment failed");
-        let record_flusher = segment_writer
-            .commit()
+        let record_flusher = Box::pin(segment_writer
+            .commit())
             .await
             .expect("Commit for segment writer failed");
-        let metadata_flusher = metadata_writer
-            .commit()
+        let metadata_flusher = Box::pin(metadata_writer
+            .commit())
             .await
             .expect("Commit for metadata writer failed");
-        record_segment.file_path = record_flusher
-            .flush()
+        record_segment.file_path = Box::pin(record_flusher
+            .flush())
             .await
             .expect("Flush record segment writer failed");
-        metadata_segment.file_path = metadata_flusher
-            .flush()
+        metadata_segment.file_path = Box::pin(metadata_flusher
+            .flush())
             .await
             .expect("Flush metadata segment writer failed");
         // Search by f32 metadata value first.
         let metadata_segment_reader =
-            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+            Box::pin(MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider))
                 .await
                 .expect("Metadata segment reader construction failed");
         let res = metadata_segment_reader
@@ -1736,7 +1736,7 @@ mod test {
         assert_eq!(res.min(), Some(1));
         // Record segment should also have the updated values.
         let record_segment_reader =
-            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
                 .await
                 .expect("Reader should be initialized by now");
         let mut res = record_segment_reader
@@ -1831,7 +1831,7 @@ mod test {
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
             let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                match Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)).await
                 {
                     Ok(reader) => Some(reader),
                     Err(e) => {
@@ -1872,20 +1872,20 @@ mod test {
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log to record segment failed");
-            let record_flusher = segment_writer
-                .commit()
+            let record_flusher = Box::pin(segment_writer
+                .commit())
                 .await
                 .expect("Commit for segment writer failed");
-            let metadata_flusher = metadata_writer
-                .commit()
+            let metadata_flusher = Box::pin(metadata_writer
+                .commit())
                 .await
                 .expect("Commit for metadata writer failed");
-            record_segment.file_path = record_flusher
-                .flush()
+            record_segment.file_path = Box::pin(record_flusher
+                .flush())
                 .await
                 .expect("Flush record segment writer failed");
-            metadata_segment.file_path = metadata_flusher
-                .flush()
+            metadata_segment.file_path = Box::pin(metadata_flusher
+                .flush())
                 .await
                 .expect("Flush metadata segment writer failed");
         }
@@ -1905,7 +1905,7 @@ mod test {
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
         let record_segment_reader =
-            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
                 .await
                 .expect("Reader should be initialized by now");
         let segment_writer = RecordSegmentWriter::from_segment(
@@ -1940,25 +1940,25 @@ mod test {
             .apply_materialized_log_chunk(&some_reader, &mat_records)
             .await
             .expect("Apply materialized log to record segment failed");
-        let record_flusher = segment_writer
-            .commit()
+        let record_flusher = Box::pin(segment_writer
+            .commit())
             .await
             .expect("Commit for segment writer failed");
-        let metadata_flusher = metadata_writer
-            .commit()
+        let metadata_flusher = Box::pin(metadata_writer
+            .commit())
             .await
             .expect("Commit for metadata writer failed");
-        record_segment.file_path = record_flusher
-            .flush()
+        record_segment.file_path = Box::pin(record_flusher
+            .flush())
             .await
             .expect("Flush record segment writer failed");
-        metadata_segment.file_path = metadata_flusher
-            .flush()
+        metadata_segment.file_path = Box::pin(metadata_flusher
+            .flush())
             .await
             .expect("Flush metadata segment writer failed");
         // Only one key should be present.
         let metadata_segment_reader =
-            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+            Box::pin(MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider))
                 .await
                 .expect("Metadata segment reader construction failed");
         let res = metadata_segment_reader
@@ -1980,7 +1980,7 @@ mod test {
         assert_eq!(res.min(), Some(1));
         // Record segment should also have the updated values.
         let record_segment_reader =
-            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
                 .await
                 .expect("Reader should be initialized by now");
         let mut res = record_segment_reader
@@ -2063,7 +2063,7 @@ mod test {
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
             let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                match Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)).await
                 {
                     Ok(reader) => Some(reader),
                     Err(e) => {
@@ -2104,20 +2104,20 @@ mod test {
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log to record segment failed");
-            let record_flusher = segment_writer
-                .commit()
+            let record_flusher = Box::pin(segment_writer
+                .commit())
                 .await
                 .expect("Commit for segment writer failed");
-            let metadata_flusher = metadata_writer
-                .commit()
+            let metadata_flusher = Box::pin(metadata_writer
+                .commit())
                 .await
                 .expect("Commit for metadata writer failed");
-            record_segment.file_path = record_flusher
-                .flush()
+            record_segment.file_path = Box::pin(record_flusher
+                .flush())
                 .await
                 .expect("Flush record segment writer failed");
-            metadata_segment.file_path = metadata_flusher
-                .flush()
+            metadata_segment.file_path = Box::pin(metadata_flusher
+                .flush())
                 .await
                 .expect("Flush metadata segment writer failed");
         }
@@ -2135,7 +2135,7 @@ mod test {
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
         let record_segment_reader =
-            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
                 .await
                 .expect("Reader should be initialized by now");
         let segment_writer = RecordSegmentWriter::from_segment(
@@ -2170,25 +2170,25 @@ mod test {
             .apply_materialized_log_chunk(&some_reader, &mat_records)
             .await
             .expect("Apply materialized log to record segment failed");
-        let record_flusher = segment_writer
-            .commit()
+        let record_flusher = Box::pin(segment_writer
+            .commit())
             .await
             .expect("Commit for segment writer failed");
-        let metadata_flusher = metadata_writer
-            .commit()
+        let metadata_flusher = Box::pin(metadata_writer
+            .commit())
             .await
             .expect("Commit for metadata writer failed");
-        record_segment.file_path = record_flusher
-            .flush()
+        record_segment.file_path = Box::pin(record_flusher
+            .flush())
             .await
             .expect("Flush record segment writer failed");
-        metadata_segment.file_path = metadata_flusher
-            .flush()
+        metadata_segment.file_path = Box::pin(metadata_flusher
+            .flush())
             .await
             .expect("Flush metadata segment writer failed");
         // FTS for hello should return empty.
         let metadata_segment_reader =
-            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+            Box::pin(MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider))
                 .await
                 .expect("Metadata segment reader construction failed");
         let res = metadata_segment_reader
@@ -2211,7 +2211,7 @@ mod test {
         assert_eq!(res.min(), Some(1));
         // Record segment should also have the updated values.
         let record_segment_reader =
-            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
                 .await
                 .expect("Reader should be initialized by now");
         let mut res = record_segment_reader
@@ -2305,7 +2305,7 @@ mod test {
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
             let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                match Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)).await
                 {
                     Ok(reader) => Some(reader),
                     Err(e) => {
@@ -2346,20 +2346,20 @@ mod test {
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log to record segment failed");
-            let record_flusher = segment_writer
-                .commit()
+            let record_flusher = Box::pin(segment_writer
+                .commit())
                 .await
                 .expect("Commit for segment writer failed");
-            let metadata_flusher = metadata_writer
-                .commit()
+            let metadata_flusher = Box::pin(metadata_writer
+                .commit())
                 .await
                 .expect("Commit for metadata writer failed");
-            record_segment.file_path = record_flusher
-                .flush()
+            record_segment.file_path = Box::pin(record_flusher
+                .flush())
                 .await
                 .expect("Flush record segment writer failed");
-            metadata_segment.file_path = metadata_flusher
-                .flush()
+            metadata_segment.file_path = Box::pin(metadata_flusher
+                .flush())
                 .await
                 .expect("Flush metadata segment writer failed");
         }
@@ -2389,7 +2389,7 @@ mod test {
         }
         // FTS for hello should return 1 document
         let metadata_segment_reader =
-            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+            Box::pin(MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider))
                 .await
                 .expect("Metadata segment reader construction failed");
         let res = metadata_segment_reader
@@ -2413,7 +2413,7 @@ mod test {
         assert_eq!(res.min(), Some(2));
         // Record segment should also have the updated values.
         let record_segment_reader =
-            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
                 .await
                 .expect("Reader should be initialized by now");
         let mut res = record_segment_reader
@@ -2459,11 +2459,11 @@ mod test {
             })
             .collect::<Vec<_>>();
         let mut segments = TestDistributedSegment::new_with_dimension(2).await;
-        segments.compact_log(Chunk::new(logs.into()), 0).await;
-        let metadata_segment_reader = MetadataSegmentReader::from_segment(
+        Box::pin(segments.compact_log(Chunk::new(logs.into()), 0)).await;
+        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
             &segments.metadata_segment,
             &segments.blockfile_provider,
-        )
+        ))
         .await
         .expect("Metadata segment reader should be constructable");
         let fts_reader = metadata_segment_reader
@@ -2490,7 +2490,7 @@ mod test {
         ) {
             let runtime = Runtime::new().unwrap();
             runtime.block_on(async {
-                run_regex_test(test_case).await
+                Box::pin(run_regex_test(test_case)).await
             });
         }
 
@@ -2503,7 +2503,7 @@ mod test {
         ) {
             let runtime = Runtime::new().unwrap();
             runtime.block_on(async {
-                run_regex_test(test_case).await
+                Box::pin(run_regex_test(test_case)).await
             });
         }
     }
@@ -2600,7 +2600,7 @@ mod test {
 
             let data: Chunk<LogRecord> = Chunk::new(data.into());
             let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                match Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)).await
                 {
                     Ok(reader) => Some(reader),
                     Err(e) => match *e {
@@ -2623,21 +2623,21 @@ mod test {
                 .await
                 .expect("Error applying materialized log chunk");
 
-            let record_flusher = segment_writer
-                .commit()
+            let record_flusher = Box::pin(segment_writer
+                .commit())
                 .await
                 .expect("Commit record segment writer failed");
-            let metadata_flusher = metadata_writer
-                .commit()
+            let metadata_flusher = Box::pin(metadata_writer
+                .commit())
                 .await
                 .expect("Commit metadata segment writer failed");
 
-            record_segment.file_path = record_flusher
-                .flush()
+            record_segment.file_path = Box::pin(record_flusher
+                .flush())
                 .await
                 .expect("Flush record segment writer failed");
-            metadata_segment.file_path = metadata_flusher
-                .flush()
+            metadata_segment.file_path = Box::pin(metadata_flusher
+                .flush())
                 .await
                 .expect("Flush metadata segment writer failed");
 
@@ -2655,7 +2655,7 @@ mod test {
         // Verify we can read the segment back
         {
             let metadata_segment_reader =
-                MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                Box::pin(MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider))
                     .await
                     .expect("Error creating metadata segment reader");
 
@@ -2714,13 +2714,13 @@ mod test {
             .await
             .expect("Error creating metadata writer");
 
-            let metadata_flusher = metadata_writer
-                .commit()
+            let metadata_flusher = Box::pin(metadata_writer
+                .commit())
                 .await
                 .expect("Error committing metadata");
 
-            metadata_segment.file_path = metadata_flusher
-                .flush()
+            metadata_segment.file_path = Box::pin(metadata_flusher
+                .flush())
                 .await
                 .expect("Error flushing metadata");
         }
@@ -2764,13 +2764,13 @@ mod test {
             .await
             .expect("Error creating metadata writer");
 
-            let metadata_flusher = metadata_writer
-                .commit()
+            let metadata_flusher = Box::pin(metadata_writer
+                .commit())
                 .await
                 .expect("Error committing metadata");
 
-            metadata_segment.file_path = metadata_flusher
-                .flush()
+            metadata_segment.file_path = Box::pin(metadata_flusher
+                .flush())
                 .await
                 .expect("Error flushing metadata");
         }
@@ -2810,7 +2810,7 @@ mod test {
         // Verify we can read from the segment with recreated sparse indices
         {
             let metadata_reader =
-                MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                Box::pin(MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider))
                     .await
                     .expect("Should be able to read from segment with recreated sparse indices");
 
@@ -2843,13 +2843,13 @@ mod test {
             .await
             .expect("Error creating metadata writer");
 
-            let metadata_flusher = metadata_writer
-                .commit()
+            let metadata_flusher = Box::pin(metadata_writer
+                .commit())
                 .await
                 .expect("Error committing metadata");
 
-            metadata_segment.file_path = metadata_flusher
-                .flush()
+            metadata_segment.file_path = Box::pin(metadata_flusher
+                .flush())
                 .await
                 .expect("Error flushing metadata");
         }
@@ -2881,7 +2881,7 @@ mod test {
         // Verify we can read from the segment with recreated sparse indices
         {
             let metadata_reader =
-                MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                Box::pin(MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider))
                     .await
                     .expect("Should be able to read from segment with recreated sparse indices");
 

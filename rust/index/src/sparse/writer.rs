@@ -221,7 +221,7 @@ mod tests {
         writer.delete(2, vec![100]).await;
 
         // Commit and verify blockfile contents
-        let flusher = writer.commit().await.unwrap();
+        let flusher = Box::pin(writer.commit()).await.unwrap();
         let max_id = flusher.max_id();
         let offset_value_id = flusher.offset_value_id();
         flusher.flush().await.unwrap();
@@ -345,7 +345,7 @@ mod tests {
         writer2.set(10, vec![(1, 0.2), (50, 0.6)]).await;
         writer2.set(11, vec![(1, 0.3), (100, 0.7)]).await;
 
-        let flusher2 = writer2.commit().await.unwrap();
+        let flusher2 = Box::pin(writer2.commit()).await.unwrap();
         let _max_id2 = flusher2.max_id();
         let offset_value_id2 = flusher2.offset_value_id();
         flusher2.flush().await.unwrap();

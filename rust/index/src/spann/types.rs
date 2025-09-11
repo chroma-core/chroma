@@ -4257,12 +4257,12 @@ mod tests {
                 doc_offset_ids[i - 1] = i as u32;
                 doc_embeddings.push(embedding);
             }
-            let flusher = writer
-                .commit()
+            let flusher = Box::pin(writer
+                .commit())
                 .await
                 .expect("Error committing spann index writer");
-            let paths = flusher
-                .flush()
+            let paths = Box::pin(flusher
+                .flush())
                 .await
                 .expect("Error flushing spann index writer");
             println!("Wrote 10k records of 1000 dimensions each");
@@ -4271,7 +4271,7 @@ mod tests {
             let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
-            let reader = SpannIndexReader::from_id(
+            let reader = Box::pin(SpannIndexReader::from_id(
                 Some(&paths.hnsw_id),
                 &hnsw_provider,
                 &collection_id,
@@ -4284,7 +4284,7 @@ mod tests {
                 prefix_path,
                 true,
                 params,
-            )
+            ))
             .await
             .expect("Error creating spann index reader");
             // Scan the reader and verify the data.
@@ -4397,12 +4397,12 @@ mod tests {
                 .for_each(|result| {
                     result.expect("Error in tokio task");
                 });
-            let flusher = writer
-                .commit()
+            let flusher = Box::pin(writer
+                .commit())
                 .await
                 .expect("Error committing spann index writer");
-            let paths = flusher
-                .flush()
+            let paths = Box::pin(flusher
+                .flush())
                 .await
                 .expect("Error flushing spann index writer");
             println!("Wrote 10k records of 1000 dimensions each");
@@ -4411,7 +4411,7 @@ mod tests {
             let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
-            let reader = SpannIndexReader::from_id(
+            let reader = Box::pin(SpannIndexReader::from_id(
                 Some(&paths.hnsw_id),
                 &hnsw_provider,
                 &collection_id,
@@ -4424,7 +4424,7 @@ mod tests {
                 prefix_path,
                 true,
                 params,
-            )
+            ))
             .await
             .expect("Error creating spann index reader");
             // Scan the reader and verify the data.
@@ -4516,12 +4516,12 @@ mod tests {
                     doc_offset_ids[id - 1] = id as u32;
                     doc_embeddings.push(embedding);
                 }
-                let flusher = writer
-                    .commit()
+                let flusher = Box::pin(writer
+                    .commit())
                     .await
                     .expect("Error committing spann index writer");
-                let paths = flusher
-                    .flush()
+                let paths = Box::pin(flusher
+                    .flush())
                     .await
                     .expect("Error flushing spann index writer");
                 println!(
@@ -4539,7 +4539,7 @@ mod tests {
             let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
-            let reader = SpannIndexReader::from_id(
+            let reader = Box::pin(SpannIndexReader::from_id(
                 hnsw_path.as_ref(),
                 &hnsw_provider,
                 &collection_id,
@@ -4552,7 +4552,7 @@ mod tests {
                 prefix_path,
                 true,
                 params.clone(),
-            )
+            ))
             .await
             .expect("Error creating spann index reader");
             // Scan the reader and verify the data.
@@ -4671,12 +4671,12 @@ mod tests {
                 for res in r {
                     res.expect("Error adding to spann index writer");
                 }
-                let flusher = writer
-                    .commit()
+                let flusher = Box::pin(writer
+                    .commit())
                     .await
                     .expect("Error committing spann index writer");
-                let paths = flusher
-                    .flush()
+                let paths = Box::pin(flusher
+                    .flush())
                     .await
                     .expect("Error flushing spann index writer");
                 println!(
@@ -4694,7 +4694,7 @@ mod tests {
             let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
-            let reader = SpannIndexReader::from_id(
+            let reader = Box::pin(SpannIndexReader::from_id(
                 hnsw_path.as_ref(),
                 &hnsw_provider,
                 &collection_id,
@@ -4707,7 +4707,7 @@ mod tests {
                 prefix_path,
                 true,
                 params.clone(),
-            )
+            ))
             .await
             .expect("Error creating spann index reader");
             // Scan the reader and verify the data.
@@ -4840,12 +4840,12 @@ mod tests {
                 for res in r {
                     res.expect("Error adding to spann index writer");
                 }
-                let flusher = writer
-                    .commit()
+                let flusher = Box::pin(writer
+                    .commit())
                     .await
                     .expect("Error committing spann index writer");
-                let paths = flusher
-                    .flush()
+                let paths = Box::pin(flusher
+                    .flush())
                     .await
                     .expect("Error flushing spann index writer");
                 println!(
@@ -4977,12 +4977,12 @@ mod tests {
             }
 
             // Commit and flush.
-            let flusher = writer
-                .commit()
+            let flusher = Box::pin(writer
+                .commit())
                 .await
                 .expect("Error committing spann index writer");
-            let paths = flusher
-                .flush()
+            let paths = Box::pin(flusher
+                .flush())
                 .await
                 .expect("Error flushing spann index writer");
             hnsw_path = Some(paths.hnsw_id);
@@ -4995,7 +4995,7 @@ mod tests {
             let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
-            let reader = SpannIndexReader::from_id(
+            let reader = Box::pin(SpannIndexReader::from_id(
                 hnsw_path.as_ref(),
                 &hnsw_provider,
                 &collection_id,
@@ -5008,7 +5008,7 @@ mod tests {
                 prefix_path,
                 true,
                 params.clone(),
-            )
+            ))
             .await
             .expect("Error creating spann index reader");
             // Scan the reader and verify the data.
@@ -5062,18 +5062,18 @@ mod tests {
                 .garbage_collect()
                 .await
                 .expect("Error garbage collecting");
-            let flusher = writer
-                .commit()
+            let flusher = Box::pin(writer
+                .commit())
                 .await
                 .expect("Error committing spann index writer");
-            let paths = flusher
-                .flush()
+            let paths = Box::pin(flusher
+                .flush())
                 .await
                 .expect("Error flushing spann index writer");
             hnsw_path = Some(paths.hnsw_id);
             versions_map_path = Some(paths.versions_map_id);
             pl_path = Some(paths.pl_id);
-            let reader = SpannIndexReader::from_id(
+            let reader = Box::pin(SpannIndexReader::from_id(
                 hnsw_path.as_ref(),
                 &hnsw_provider,
                 &collection_id,
@@ -5086,7 +5086,7 @@ mod tests {
                 prefix_path,
                 true,
                 params,
-            )
+            ))
             .await
             .expect("Error creating spann index reader");
             let mut results = reader

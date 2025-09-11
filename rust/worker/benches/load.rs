@@ -42,8 +42,8 @@ pub async fn sift1m_segments() -> TestDistributedSegment {
                 },
             })
             .collect::<Vec<_>>();
-        segments
-            .compact_log(Chunk::new(log_records.into()), chunk_start)
+        Box::pin(segments
+            .compact_log(Chunk::new(log_records.into()), chunk_start))
             .await;
     }
     segments

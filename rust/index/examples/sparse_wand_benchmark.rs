@@ -553,8 +553,8 @@ async fn build_sparse_index(
         }
 
         // Commit
-        let flusher = sparse_writer
-            .commit()
+        let flusher = Box::pin(sparse_writer
+            .commit())
             .await
             .map_err(|e| anyhow::anyhow!("Failed to commit sparse writer: {:?}", e))?;
 
@@ -933,7 +933,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Build sparse index
     let (temp_dir, provider, max_reader_id, offset_value_reader_id) =
-        build_sparse_index(&documents, args.block_size, args.sort_by_url).await?;
+        Box::pin(build_sparse_index(&documents, args.block_size, args.sort_by_url)).await?;
 
     // Create mask based on filter percentage
     let mask = if args.filter_percentage > 0 {
