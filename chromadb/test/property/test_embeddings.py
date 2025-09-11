@@ -91,9 +91,10 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
     embedding_ids: Bundle[ID] = Bundle("embedding_ids")
     has_collection_mutated = False
 
-    def __init__(self, client: ClientAPI):
+    def __init__(self, client: ClientAPI, use_search: bool = False):
         super().__init__()
         self.client = client
+        self.use_search = use_search  # New flag to use search API instead of query
         self._rules_strategy = hypothesis.stateful.RuleStrategy(self)  # type: ignore
 
     @initialize(collection=collection_st)  # type: ignore
@@ -219,6 +220,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             record_set=cast(strategies.RecordSet, self.record_set_state),
             min_recall=0.95,
             embedding_function=self.embedding_function,
+            use_search=self.use_search,  # Pass the use_search flag to invariants
         )
 
     @invariant()
@@ -341,8 +343,8 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 class EmbeddingStateMachine(EmbeddingStateMachineBase):
     embedding_ids: Bundle[ID] = Bundle("embedding_ids")
 
-    def __init__(self, client: ClientAPI):
-        super().__init__(client)
+    def __init__(self, client: ClientAPI, use_search: bool = False):
+        super().__init__(client, use_search)
 
     @initialize(collection=collection_st)  # type: ignore
     def initialize(self, collection: strategies.Collection):
@@ -472,6 +474,23 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
         lambda: EmbeddingStateMachine(client),
+        settings=settings(
+            deadline=90000, suppress_health_check=[HealthCheck.filter_too_much]
+        ),
+    )  # type: ignore
+    print_traces()
+
+
+@pytest.mark.skipif(
+    NOT_CLUSTER_ONLY,
+    reason="Search API only available in distributed mode"
+)
+def test_embeddings_state_with_search(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
+    """Test embeddings state machine using search API instead of query."""
+    create_isolated_database(client)
+    caplog.set_level(logging.ERROR)
+    run_state_machine_as_test(
+        lambda: EmbeddingStateMachine(client, use_search=True),
         settings=settings(
             deadline=90000, suppress_health_check=[HealthCheck.filter_too_much]
         ),
