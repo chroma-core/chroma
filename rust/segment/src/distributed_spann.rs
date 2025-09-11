@@ -313,7 +313,7 @@ impl SpannSegmentWriter {
 
     pub async fn commit(self) -> Result<SpannSegmentFlusher, Box<dyn ChromaError>> {
         tracing::info!("Committing spann segment writer {}", self.id);
-        let index_flusher = self.index.commit().await.map_err(|e| {
+        let index_flusher = Box::pin(self.index.commit()).await.map_err(|e| {
             tracing::error!("Error committing spann index writer {:?}", e);
             SpannSegmentWriterError::SpannSegmentWriterCommitError(e)
         });
@@ -345,7 +345,7 @@ impl Debug for SpannSegmentFlusher {
 impl SpannSegmentFlusher {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         tracing::info!("Flushing spann segment flusher {}", self.id);
-        let index_flusher_res = self.index_flusher.flush().await.map_err(|e| {
+        let index_flusher_res = Box::pin(self.index_flusher.flush()).await.map_err(|e| {
             tracing::error!("Error flushing spann index segment {}: {:?}", self.id, e);
             SpannSegmentWriterError::SpannSegmentWriterFlushError(e)
         });
@@ -512,7 +512,7 @@ impl<'me> SpannSegmentReader<'me> {
             None => segment.construct_prefix_path(&collection.tenant, &collection.database_id),
         };
 
-        let index_reader = match SpannIndexReader::from_id(
+        let index_reader = match Box::pin(SpannIndexReader::from_id(
             hnsw_id.as_ref(),
             hnsw_provider,
             &segment.collection,
@@ -525,7 +525,7 @@ impl<'me> SpannSegmentReader<'me> {
             &prefix_path,
             adaptive_search_nprobe,
             params,
-        )
+        ))
         .await
         {
             Ok(index_writer) => index_writer,

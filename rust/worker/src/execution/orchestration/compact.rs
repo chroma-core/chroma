@@ -711,10 +711,10 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
 
         let record_reader = match self
             .ok_or_terminate(
-                match RecordSegmentReader::from_segment(
+                match Box::pin(RecordSegmentReader::from_segment(
                     &output.record_segment,
                     &self.blockfile_provider,
-                )
+                ))
                 .await
                 {
                     Ok(reader) => Ok(Some(reader)),
@@ -1046,8 +1046,7 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
             }
         } else {
             self.collection_logical_size_delta_bytes += output.collection_logical_size_delta;
-            self.dispatch_apply_log_to_segment_writer_tasks(output.result, ctx)
-                .await;
+            Box::pin(self.dispatch_apply_log_to_segment_writer_tasks(output.result, ctx)).await;
         }
 
         self.num_uncompleted_materialization_tasks -= 1;

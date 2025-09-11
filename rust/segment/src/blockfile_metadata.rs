@@ -851,7 +851,7 @@ impl<'me> MetadataSegmentWriter<'me> {
         };
 
         let sparse_index_flusher = match self.sparse_index_writer {
-            Some(sparse_index_writer) => match sparse_index_writer.commit().await {
+            Some(sparse_index_writer) => match Box::pin(sparse_index_writer.commit()).await {
                 Ok(flusher) => flusher,
                 Err(e) => return Err(Box::new(e)),
             },

@@ -973,8 +973,7 @@ impl VectorSegmentWriter {
             VectorSegmentWriter::Hnsw(writer) => writer.commit().await.map(|w| {
                 ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusher::Hnsw(Box::new(w)))
             }),
-            VectorSegmentWriter::Spann(writer) => writer
-                .commit()
+            VectorSegmentWriter::Spann(writer) => Box::pin(writer.commit())
                 .await
                 .map(|w| ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusher::Spann(w))),
         }
@@ -1039,15 +1038,13 @@ impl ChromaSegmentWriter<'_> {
 
     pub async fn commit(self) -> Result<ChromaSegmentFlusher, Box<dyn ChromaError>> {
         match self {
-            ChromaSegmentWriter::RecordSegment(writer) => writer
-                .commit()
+            ChromaSegmentWriter::RecordSegment(writer) => Box::pin(writer.commit())
                 .await
                 .map(ChromaSegmentFlusher::RecordSegment),
-            ChromaSegmentWriter::MetadataSegment(writer) => writer
-                .commit()
+            ChromaSegmentWriter::MetadataSegment(writer) => Box::pin(writer.commit())
                 .await
                 .map(ChromaSegmentFlusher::MetadataSegment),
-            ChromaSegmentWriter::VectorSegment(writer) => writer.commit().await,
+            ChromaSegmentWriter::VectorSegment(writer) => Box::pin(writer.commit()).await,
         }
     }
 }
@@ -1097,11 +1094,11 @@ impl ChromaSegmentFlusher {
 
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         match self {
-            ChromaSegmentFlusher::RecordSegment(flusher) => flusher.flush().await,
-            ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.flush().await,
+            ChromaSegmentFlusher::RecordSegment(flusher) => Box::pin(flusher.flush()).await,
+            ChromaSegmentFlusher::MetadataSegment(flusher) => Box::pin(flusher.flush()).await,
             ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
                 VectorSegmentFlusher::Hnsw(flusher) => flusher.flush().await,
-                VectorSegmentFlusher::Spann(flusher) => flusher.flush().await,
+                VectorSegmentFlusher::Spann(flusher) => Box::pin(flusher.flush()).await,
             },
         }
     }

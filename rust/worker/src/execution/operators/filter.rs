@@ -512,10 +512,10 @@ impl Operator<FilterInput, FilterOutput> for Filter {
             input.logs.len(),
         );
 
-        let record_segment_reader = match RecordSegmentReader::from_segment(
+        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
-        )
+        ))
         .await
         {
             Ok(reader) => Ok(Some(reader)),
@@ -545,9 +545,11 @@ impl Operator<FilterInput, FilterOutput> for Filter {
 
         let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
 
-        let metadata_segement_reader =
-            MetadataSegmentReader::from_segment(&input.metadata_segment, &input.blockfile_provider)
-                .await?;
+        let metadata_segement_reader = Box::pin(MetadataSegmentReader::from_segment(
+            &input.metadata_segment,
+            &input.blockfile_provider,
+        ))
+        .await?;
         let compact_metadata_provider =
             MetadataProvider::CompactData(&metadata_segement_reader, &record_segment_reader);
 

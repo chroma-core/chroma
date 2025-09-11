@@ -71,10 +71,10 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         &self,
         input: &CountRecordsInput,
     ) -> Result<CountRecordsOutput, CountRecordsError> {
-        let segment_reader = RecordSegmentReader::from_segment(
+        let segment_reader = Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment_definition,
             &input.blockfile_provider,
-        )
+        ))
         .await;
         let reader = match segment_reader {
             Ok(r) => r,
