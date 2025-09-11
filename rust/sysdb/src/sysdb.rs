@@ -685,6 +685,8 @@ pub enum GetCollectionsToGcError {
     ParsingError(#[from] Error),
     #[error("Grpc request failed")]
     RequestFailed(#[from] tonic::Status),
+    #[error("Internal error: {0}")]
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for GetCollectionsToGcError {
@@ -693,6 +695,7 @@ impl ChromaError for GetCollectionsToGcError {
             GetCollectionsToGcError::NoSuchCollection => ErrorCodes::NotFound,
             GetCollectionsToGcError::ParsingError(_) => ErrorCodes::Internal,
             GetCollectionsToGcError::RequestFailed(_) => ErrorCodes::Internal,
+            GetCollectionsToGcError::Internal(e) => e.code(),
         }
     }
 }
@@ -1245,7 +1248,13 @@ impl GrpcSysDb {
                 ..Default::default()
             })
             .await
-            .map_err(|_| GetCollectionsToGcError::NoSuchCollection)?;
+            .map_err(|e| {
+                if e.code() == ErrorCodes::NotFound {
+                    GetCollectionsToGcError::NoSuchCollection
+                } else {
+                    GetCollectionsToGcError::Internal(e.boxed())
+                }
+            })?;
 
         if collections.is_empty() {
             return Err(GetCollectionsToGcError::NoSuchCollection);
@@ -1622,5 +1631,18 @@ mod tests {
             "collection soft deleted",
         ));
         assert!(!fce.should_trace_error());
+    }
+
+    #[test]
+    fn get_collections_to_gc_error_internal_propagation() {
+        // Test that Internal errors are properly propagated with their original error code
+        let internal_error = GetCollectionsToGcError::Internal(Box::new(chroma_error::TonicError(
+            Status::internal("database error"),
+        )));
+        assert_eq!(internal_error.code(), ErrorCodes::Internal);
+
+        // Test that NoSuchCollection returns NotFound
+        let not_found_error = GetCollectionsToGcError::NoSuchCollection;
+        assert_eq!(not_found_error.code(), ErrorCodes::NotFound);
     }
 }
