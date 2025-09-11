@@ -162,12 +162,10 @@ impl PartialSchema for SearchPayload {
         RefOr::T(Schema::Object(
             ObjectBuilder::new()
                 .schema_type(SchemaType::Type(Type::Object))
-                .description(Some("Payload for hybrid search"))
                 .property(
                     "filter",
                     ObjectBuilder::new()
                         .schema_type(SchemaType::Type(Type::Object))
-                        .description(Some("Filter criteria for search"))
                         .property(
                             "query_ids",
                             ArrayBuilder::new()
@@ -178,13 +176,7 @@ impl PartialSchema for SearchPayload {
                             Object::with_type(SchemaType::Type(Type::Object)),
                         ),
                 )
-                .property(
-                    "rank",
-                    ObjectBuilder::new()
-                        .schema_type(SchemaType::Type(Type::Object))
-                        .description(Some("Ranking expression for hybrid search"))
-                        .property("expr", Object::with_type(SchemaType::Type(Type::Object))),
-                )
+                .property("rank", Object::with_type(SchemaType::Type(Type::Object)))
                 .property(
                     "limit",
                     ObjectBuilder::new()

@@ -908,7 +908,7 @@ impl TryFrom<RankExpr> for chroma_proto::RankExpr {
                 chroma_proto::RankExpr::try_from(*expr)?,
             )),
             RankExpr::Division { left, right } => chroma_proto::rank_expr::Rank::Division(
-                Box::new(chroma_proto::rank_expr::Division {
+                Box::new(chroma_proto::rank_expr::RankPair {
                     left: Some(Box::new(chroma_proto::RankExpr::try_from(*left)?)),
                     right: Some(Box::new(chroma_proto::RankExpr::try_from(*right)?)),
                 }),
@@ -960,7 +960,7 @@ impl TryFrom<RankExpr> for chroma_proto::RankExpr {
                 })
             }
             RankExpr::Subtraction { left, right } => chroma_proto::rank_expr::Rank::Subtraction(
-                Box::new(chroma_proto::rank_expr::Subtraction {
+                Box::new(chroma_proto::rank_expr::RankPair {
                     left: Some(Box::new(chroma_proto::RankExpr::try_from(*left)?)),
                     right: Some(Box::new(chroma_proto::RankExpr::try_from(*right)?)),
                 }),

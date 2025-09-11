@@ -98,11 +98,6 @@ message QueryVector {
 
 // RankExpr represents a ranking expression
 message RankExpr {
-    message Division {
-        RankExpr left = 1;
-        RankExpr right = 2;
-    }
-
     message Knn {
         QueryVector query = 1;
         string key = 2;
@@ -111,7 +106,7 @@ message RankExpr {
         bool return_rank = 5;
     }
     
-    message Subtraction {
+    message RankPair {
         RankExpr left = 1;
         RankExpr right = 2;
     }
@@ -122,14 +117,14 @@ message RankExpr {
 
     oneof rank {
         RankExpr absolute = 1;
-        Division division = 2;
+        RankPair division = 2;
         RankExpr exponentiation = 3;
         Knn knn = 4;
         RankExpr logarithm = 5;
         RankList maximum = 6;
         RankList minimum = 7;
         RankList multiplication = 8;
-        Subtraction subtraction = 9;
+        RankPair subtraction = 9;
         RankList summation = 10;
         float value = 11;
     }

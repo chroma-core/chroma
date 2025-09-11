@@ -350,14 +350,14 @@ class Collection(CollectionCommon["ServerAPI"]):
             )
             
             # Single search
-            result = await collection.search(search)
+            result = collection.search(search)
             
             # Multiple searches at once
             searches = [
                 Search().where(K("type") == "article").rank(Knn(query=[0.1, 0.2])),
                 Search().where(K("type") == "paper").rank(Knn(query=[0.3, 0.4]))
             ]
-            results = await collection.search(searches)
+            results = collection.search(searches)
         """
         # Convert single search to list for consistent handling
         searches_list = maybe_cast_one_to_many(searches)

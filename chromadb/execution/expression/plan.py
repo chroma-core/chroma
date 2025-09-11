@@ -38,7 +38,7 @@ class Search:
             filter=SearchFilter(where_clause=Eq("status", "active")),
             rank=Knn(query=[0.1, 0.2]),
             limit=Limit(limit=10),
-            select=Select(keys={Key.DOCUMENT})  # Use Key.DOCUMENT instead of Key("#document")
+            select=Select(keys={Key.DOCUMENT})
         )
     
     Builder pattern:
@@ -46,7 +46,7 @@ class Search:
             .where(Key("status") == "active")
             .rank(Knn(query=[0.1, 0.2]))
             .limit(10)
-            .select(Key.DOCUMENT))  # Cleaner than Key("#document")
+            .select(Key.DOCUMENT))
     
     Empty Search() is valid and will use defaults:
         - filter: Empty SearchFilter (no filtering)

@@ -179,13 +179,7 @@ export type RawWhereFields = {
     where_document?: unknown;
 };
 
-/**
- * Payload for hybrid search
- */
 export type SearchPayload = {
-    /**
-     * Filter criteria for search
-     */
     filter?: {
         query_ids?: Array<string>;
         where_clause?: {
@@ -196,13 +190,8 @@ export type SearchPayload = {
         limit?: number;
         offset?: number;
     };
-    /**
-     * Ranking expression for hybrid search
-     */
     rank?: {
-        expr?: {
-            [key: string]: unknown;
-        };
+        [key: string]: unknown;
     };
     select?: {
         keys?: Array<string>;
