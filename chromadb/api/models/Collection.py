@@ -323,24 +323,41 @@ class Collection(CollectionCommon["ServerAPI"]):
             NotImplementedError: For local/segment API implementations
 
         Examples:
-            # Single search using builder pattern
-            from chromadb import Search, K, Knn
+            # Using builder pattern with Key constants
+            from chromadb.execution.expression import (
+                Search, Key, K, Knn, Val
+            )
             
+            # Note: K is an alias for Key, so K.DOCUMENT == Key.DOCUMENT
             search = (Search()
                 .where((K("category") == "science") & (K("score") > 0.5))
-                .rank(Knn(query=[0.1, 0.2, 0.3]))
-                .limit(10)
-                .select(K.DOCUMENT, K.SCORE))
+                .rank(Knn(query=[0.1, 0.2, 0.3]) * 0.8 + Val(0.5) * 0.2)
+                .limit(10, offset=0)
+                .select(K.DOCUMENT, K.SCORE, "title"))  # Key.DOCUMENT is equivalent to Key("#document")
+            
+            # Direct construction
+            from chromadb.execution.expression import (
+                Search, SearchFilter, Eq, And, Gt, Knn, Limit, Select, Key
+            )
+            
+            search = Search(
+                filter=SearchFilter(
+                    where_clause=And([Eq("category", "science"), Gt("score", 0.5)])
+                ),
+                rank=Knn(query=[0.1, 0.2, 0.3]),
+                limit=Limit(offset=0, limit=10),
+                select=Select(keys={Key.DOCUMENT, Key.SCORE, "title"})
+            )
             
             # Single search
-            result = collection.search(search)
+            result = await collection.search(search)
             
             # Multiple searches at once
             searches = [
                 Search().where(K("type") == "article").rank(Knn(query=[0.1, 0.2])),
                 Search().where(K("type") == "paper").rank(Knn(query=[0.3, 0.4]))
             ]
-            results = collection.search(searches)
+            results = await collection.search(searches)
         """
         # Convert single search to list for consistent handling
         searches_list = maybe_cast_one_to_many(searches)

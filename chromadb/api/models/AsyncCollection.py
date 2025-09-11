@@ -328,7 +328,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
                 .where((K("category") == "science") & (K("score") > 0.5))
                 .rank(Knn(query=[0.1, 0.2, 0.3]) * 0.8 + Val(0.5) * 0.2)
                 .limit(10, offset=0)
-                .select(K.DOCUMENT, K.SCORE, "title"))  # Use K.DOCUMENT instead of Key("#document")
+                .select(K.DOCUMENT, K.SCORE, "title"))  # Key.DOCUMENT is equivalent to Key("#document")
 
             # Direct construction
             from chromadb.execution.expression import (
@@ -341,7 +341,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
                 ),
                 rank=Knn(query=[0.1, 0.2, 0.3]),
                 limit=Limit(offset=0, limit=10),
-                select=Select(keys={Key.DOCUMENT, Key.SCORE, "title"})  # Key.DOCUMENT is equivalent to Key("#document")
+                select=Select(keys={Key.DOCUMENT, Key.SCORE, "title"})
             )
 
             # Single search
