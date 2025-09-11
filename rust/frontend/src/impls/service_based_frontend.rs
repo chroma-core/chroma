@@ -1636,8 +1636,7 @@ impl ServiceBasedFrontend {
 
             // Count embeddings from the score expression
             // Each rank in the score expression contains one embedding
-            let knn_queries = payload.rank.knn_queries();
-            total_search_embedding_count += knn_queries.len() as u64;
+            total_search_embedding_count += payload.rank.knn_queries().len() as u64;
         }
 
         // Create a single Search plan with one scan and the payloads from the request

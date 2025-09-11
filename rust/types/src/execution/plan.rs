@@ -149,6 +149,7 @@ impl TryFrom<Knn> for chroma_proto::KnnPlan {
 pub struct SearchPayload {
     #[serde(default)]
     pub filter: Filter,
+    #[serde(default)]
     pub rank: Rank,
     #[serde(default)]
     pub limit: Limit,
@@ -205,10 +206,6 @@ impl PartialSchema for SearchPayload {
                         )
                         .required("fields"),
                 )
-                .required("filter")
-                .required("rank")
-                .required("limit")
-                .required("select")
                 .build(),
         ))
     }

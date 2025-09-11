@@ -50,7 +50,7 @@ class Search:
     
     Empty Search() is valid and will use defaults:
         - filter: Empty SearchFilter (no filtering)
-        - rank: Val(0.0) (constant score of 0)
+        - rank: None (no ranking - results ordered by default order)
         - limit: No limit
         - select: Empty selection
     """
@@ -66,12 +66,12 @@ class Search:
         
         Args:
             filter: SearchFilter for filtering results (defaults to empty filter)
-            rank: Rank expression for scoring (defaults to Val(0.0))
+            rank: Rank expression for scoring (defaults to None - no ranking)
             limit: Limit configuration for pagination (defaults to no limit)
             select: Select configuration for fields (defaults to empty selection)
         """
         self._filter = filter if filter is not None else SearchFilter()
-        self._rank = rank if rank is not None else Val(value=0.0)
+        self._rank = rank  # Keep as None if not provided
         self._limit = limit if limit is not None else Limit()
         self._select = select if select is not None else Select()
     
@@ -79,7 +79,7 @@ class Search:
         """Convert the Search to a dictionary for JSON serialization"""
         return {
             "filter": self._filter.to_dict(),
-            "rank": self._rank.to_dict(),
+            "rank": self._rank.to_dict() if self._rank is not None else None,
             "limit": self._limit.to_dict(),
             "select": self._select.to_dict()
         }
