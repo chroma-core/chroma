@@ -15,6 +15,7 @@ use tracing::Span;
 
 use crate::execution::{
     operators::{
+        idf::{Idf, IdfError, IdfInput, IdfOutput},
         knn_merge::{KnnMergeError, KnnMergeInput, KnnMergeOutput},
         sparse_index_knn::{
             SparseIndexKnn, SparseIndexKnnError, SparseIndexKnnInput, SparseIndexKnnOutput,
@@ -30,6 +31,8 @@ pub enum SparseKnnError {
     Aborted,
     #[error("Error sending message through channel: {0}")]
     Channel(#[from] ChannelError),
+    #[error("Error running Idf operator: {0}")]
+    Idf(#[from] IdfError),
     #[error("Error running KnnMerge operator: {0}")]
     KnnMerge(#[from] KnnMergeError),
     #[error("Panic: {0}")]
@@ -47,6 +50,7 @@ impl ChromaError for SparseKnnError {
         match self {
             SparseKnnError::Aborted => ErrorCodes::ResourceExhausted,
             SparseKnnError::Channel(err) => err.code(),
+            SparseKnnError::Idf(err) => err.code(),
             SparseKnnError::KnnMerge(err) => err.code(),
             SparseKnnError::Panic(_) => ErrorCodes::Aborted,
             SparseKnnError::Result(_) => ErrorCodes::Internal,
@@ -125,6 +129,48 @@ impl SparseKnnOrchestrator {
         }
     }
 
+    fn sparse_knn_tasks(
+        &mut self,
+        embedding: SparseVector,
+        ctx: &ComponentContext<Self>,
+    ) -> Vec<TaskMessage> {
+        let sparse_log_knn_task = wrap(
+            Box::new(SparseLogKnn {
+                embedding: embedding.clone(),
+                key: self.key.clone(),
+                limit: self.limit,
+            }),
+            SparseLogKnnInput {
+                blockfile_provider: self.blockfile_provider.clone(),
+                logs: self.knn_filter_output.logs.clone(),
+                mask: self.knn_filter_output.filter_output.log_offset_ids.clone(),
+                record_segment: self.collection_and_segments.record_segment.clone(),
+            },
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+
+        let sparse_index_knn_task = wrap(
+            Box::new(SparseIndexKnn {
+                embedding,
+                key: self.key.clone(),
+                limit: self.limit,
+            }),
+            SparseIndexKnnInput {
+                blockfile_provider: self.blockfile_provider.clone(),
+                mask: self
+                    .knn_filter_output
+                    .filter_output
+                    .compact_offset_ids
+                    .clone(),
+                metadata_segment: self.collection_and_segments.metadata_segment.clone(),
+            },
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        vec![sparse_log_knn_task, sparse_index_knn_task]
+    }
+
     async fn try_start_merge_operator(&mut self, ctx: &ComponentContext<Self>) {
         if self.batch_measures.len() == 2 {
             let task = wrap(
@@ -157,45 +203,33 @@ impl Orchestrator for SparseKnnOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        let sparse_log_knn_task = wrap(
-            Box::new(SparseLogKnn {
-                embedding: self.embedding.clone(),
-                key: self.key.clone(),
-                limit: self.limit,
-            }),
-            SparseLogKnnInput {
-                blockfile_provider: self.blockfile_provider.clone(),
-                logs: self.knn_filter_output.logs.clone(),
-                mask: self.knn_filter_output.filter_output.log_offset_ids.clone(),
-                record_segment: self.collection_and_segments.record_segment.clone(),
-            },
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-
-        let sparse_index_knn_task = wrap(
-            Box::new(SparseIndexKnn {
-                embedding: self.embedding.clone(),
-                key: self.key.clone(),
-                limit: self.limit,
-            }),
-            SparseIndexKnnInput {
-                blockfile_provider: self.blockfile_provider.clone(),
-                mask: self
-                    .knn_filter_output
-                    .filter_output
-                    .compact_offset_ids
-                    .clone(),
-                metadata_segment: self.collection_and_segments.metadata_segment.clone(),
-            },
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-
-        vec![
-            (sparse_log_knn_task, Some(Span::current())),
-            (sparse_index_knn_task, Some(Span::current())),
-        ]
+        // TODO: Decide whether to use IDF based on collection schema
+        if matches!(
+            self.collection_and_segments.metadata_segment.scope,
+            chroma_types::SegmentScope::METADATA
+        ) {
+            self.sparse_knn_tasks(self.embedding.clone(), ctx)
+                .into_iter()
+                .map(|task| (task, Some(Span::current())))
+                .collect()
+        } else {
+            let idf_task = wrap(
+                Box::new(Idf {
+                    embedding: self.embedding.clone(),
+                    key: self.key.clone(),
+                }),
+                IdfInput {
+                    blockfile_provider: self.blockfile_provider.clone(),
+                    logs: self.knn_filter_output.logs.clone(),
+                    mask: self.knn_filter_output.filter_output.log_offset_ids.clone(),
+                    metadata_segment: self.collection_and_segments.metadata_segment.clone(),
+                    record_segment: self.collection_and_segments.record_segment.clone(),
+                },
+                ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
+            );
+            vec![(idf_task, Some(Span::current()))]
+        }
     }
 
     fn queue_size(&self) -> usize {
@@ -210,6 +244,25 @@ impl Orchestrator for SparseKnnOrchestrator {
         &mut self,
     ) -> Option<Sender<Result<Vec<RecordMeasure>, SparseKnnError>>> {
         self.result_channel.take()
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<IdfOutput, IdfError>> for SparseKnnOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<IdfOutput, IdfError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+        for task in self.sparse_knn_tasks(output.scaled_embedding, ctx) {
+            self.send(task, ctx, Some(Span::current())).await;
+        }
     }
 }
 

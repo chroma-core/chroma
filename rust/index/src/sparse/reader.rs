@@ -120,6 +120,17 @@ impl<'me> SparseReader<'me> {
             .collect())
     }
 
+    pub async fn get_dimension_offset_rank(
+        &'me self,
+        encoded_dimension_id: &'me str,
+        offset: u32,
+    ) -> Result<u32, SparseReaderError> {
+        Ok(self
+            .offset_value_reader
+            .rank(encoded_dimension_id, offset)
+            .await? as u32)
+    }
+
     pub async fn get_blocks(
         &'me self,
         encoded_dimension_id: &'me str,
