@@ -185,10 +185,10 @@ impl Operator<LimitInput, LimitOutput> for Limit {
     type Error = LimitError;
 
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
-        let record_segment_reader = match RecordSegmentReader::from_segment(
+        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
-        )
+        ))
         .await
         {
             Ok(reader) => Ok(Some(reader)),

@@ -164,14 +164,14 @@ impl Orchestrator for SpannKnnOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
         tasks.push((knn_log_task, Some(Span::current())));
-        let reader_res = SpannSegmentReader::from_segment(
+        let reader_res = Box::pin(SpannSegmentReader::from_segment(
             &self.collection_and_segments.collection,
             &self.collection_and_segments.vector_segment,
             &self.blockfile_provider,
             &self.spann_provider.hnsw_provider,
             self.knn_filter_output.dimension,
             self.spann_provider.adaptive_search_nprobe,
-        )
+        ))
         .await;
         match reader_res {
             Ok(reader) => {

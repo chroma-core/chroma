@@ -51,9 +51,11 @@ impl Operator<SparseIndexKnnInput, SparseIndexKnnOutput> for SparseIndexKnn {
         &self,
         input: &SparseIndexKnnInput,
     ) -> Result<SparseIndexKnnOutput, SparseIndexKnnError> {
-        let metadata_segement_reader =
-            MetadataSegmentReader::from_segment(&input.metadata_segment, &input.blockfile_provider)
-                .await?;
+        let metadata_segement_reader = Box::pin(MetadataSegmentReader::from_segment(
+            &input.metadata_segment,
+            &input.blockfile_provider,
+        ))
+        .await?;
 
         let Some(sparse_reader) = metadata_segement_reader.sparse_index_reader else {
             return Ok(SparseIndexKnnOutput {

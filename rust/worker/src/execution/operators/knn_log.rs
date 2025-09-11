@@ -51,10 +51,10 @@ impl Operator<KnnLogInput, KnnOutput> for Knn {
     type Error = KnnLogError;
 
     async fn run(&self, input: &KnnLogInput) -> Result<KnnOutput, KnnLogError> {
-        let record_segment_reader = match RecordSegmentReader::from_segment(
+        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
-        )
+        ))
         .await
         {
             Ok(reader) => Ok(Some(reader)),

@@ -346,7 +346,7 @@ mod tests {
             writer.set(offset, vector).await;
         }
 
-        let flusher = writer.commit().await.unwrap();
+        let flusher = Box::pin(writer.commit()).await.unwrap();
         let max_id = flusher.max_id();
         let offset_value_id = flusher.offset_value_id();
         flusher.flush().await.unwrap();
@@ -375,7 +375,7 @@ mod tests {
             (4, vec![(4, 1.0), (5, 1.0)]),           // dot product with query: 0.0 (no overlap)
         ];
 
-        let reader = setup_reader_with_data(vectors).await;
+        let reader = Box::pin(setup_reader_with_data(vectors)).await;
 
         // Test 1: Basic top-k query
         let query = vec![(0, 1.0), (1, 1.0)];
@@ -435,7 +435,7 @@ mod tests {
             vectors.push((i, dims));
         }
 
-        let reader = setup_reader_with_data(vectors).await;
+        let reader = Box::pin(setup_reader_with_data(vectors)).await;
 
         // Query and verify we get top-k
         let query = vec![(0, 1.0), (1, 1.0), (2, 1.0)];
@@ -456,7 +456,7 @@ mod tests {
         // Test querying empty index
         // Note: We need to write at least one vector and then delete it to create valid blockfiles
         let vectors = vec![(0, vec![(0, 1.0)])]; // Add one vector
-        let reader = setup_reader_with_data(vectors).await;
+        let reader = Box::pin(setup_reader_with_data(vectors)).await;
 
         // Now test with a query that won't match
         let query = vec![(99, 1.0)]; // Query for dimension that doesn't exist
@@ -477,7 +477,7 @@ mod tests {
             (2, vec![(0, 1.0)]),
         ];
 
-        let reader = setup_reader_with_data(vectors).await;
+        let reader = Box::pin(setup_reader_with_data(vectors)).await;
 
         let query = vec![(0, 1.0)];
         let results = reader
@@ -502,7 +502,7 @@ mod tests {
             (4, vec![(2, 0.9), (4, 0.3), (5, 0.7)]),
         ];
 
-        let reader = setup_reader_with_data(vectors.clone()).await;
+        let reader = Box::pin(setup_reader_with_data(vectors.clone())).await;
 
         let query = vec![(0, 0.4), (2, 0.6), (4, 0.5), (5, 0.3)];
 

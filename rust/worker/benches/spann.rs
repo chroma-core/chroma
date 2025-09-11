@@ -140,10 +140,14 @@ fn add_to_index_and_get_reader<'a>(
                 .expect("Error garbage collecting records");
         }
 
-        let flusher = writer.commit().await.expect("Error committing writer");
-        let paths = flusher.flush().await.expect("Error flushing writer");
+        let flusher = Box::pin(writer.commit())
+            .await
+            .expect("Error committing writer");
+        let paths = Box::pin(flusher.flush())
+            .await
+            .expect("Error flushing writer");
         (
-            SpannIndexReader::from_id(
+            Box::pin(SpannIndexReader::from_id(
                 Some(&paths.hnsw_id),
                 &hnsw_provider,
                 &collection_id,
@@ -156,7 +160,7 @@ fn add_to_index_and_get_reader<'a>(
                 prefix_path,
                 true,
                 params,
-            )
+            ))
             .await
             .expect("Error creating spann index reader"),
             deleted_set,

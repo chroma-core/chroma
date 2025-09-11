@@ -69,10 +69,10 @@ impl Operator<SelectInput, SelectOutput> for Select {
             });
         }
 
-        let record_segment_reader = match RecordSegmentReader::from_segment(
+        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
-        )
+        ))
         .await
         {
             Ok(reader) => Ok(Some(reader)),
