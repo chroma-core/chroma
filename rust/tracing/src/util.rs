@@ -29,6 +29,17 @@ impl<'a> Stopwatch<'a> {
     pub fn elapsed_micros(&self) -> u64 {
         self.2.elapsed().as_micros() as u64
     }
+
+    pub fn finish(self) -> std::time::Duration {
+        let duration = self.2.elapsed();
+        let elapsed = match self.3 {
+            StopWatchUnit::Micros => duration.as_micros() as u64,
+            StopWatchUnit::Millis => duration.as_millis() as u64,
+            StopWatchUnit::Seconds => duration.as_secs(),
+        };
+        self.0.record(elapsed, self.1);
+        duration
+    }
 }
 
 impl Drop for Stopwatch<'_> {
