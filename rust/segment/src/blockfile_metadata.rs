@@ -1243,33 +1243,35 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            _ => {
-                                panic!("Unexpected error creating record segment reader: {:?}", e);
-                            }
+            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
+                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider),
+            )
+            .await
+            {
+                Ok(reader) => Some(reader),
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        _ => {
+                            panic!("Unexpected error creating record segment reader: {:?}", e);
                         }
                     }
-                };
+                }
+            };
             let mat_records = materialize_logs(&record_segment_reader, data, None)
                 .await
                 .expect("Log materialization failed");
@@ -1285,20 +1287,16 @@ mod test {
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log to record segment failed");
-            let record_flusher = Box::pin(segment_writer
-                .commit())
+            let record_flusher = Box::pin(segment_writer.commit())
                 .await
                 .expect("Commit for segment writer failed");
-            let metadata_flusher = Box::pin(metadata_writer
-                .commit())
+            let metadata_flusher = Box::pin(metadata_writer.commit())
                 .await
                 .expect("Commit for metadata writer failed");
-            record_segment.file_path = Box::pin(record_flusher
-                .flush())
+            record_segment.file_path = Box::pin(record_flusher.flush())
                 .await
                 .expect("Flush record segment writer failed");
-            metadata_segment.file_path = Box::pin(metadata_flusher
-                .flush())
+            metadata_segment.file_path = Box::pin(metadata_flusher.flush())
                 .await
                 .expect("Flush metadata segment writer failed");
         }
@@ -1328,10 +1326,12 @@ mod test {
         ];
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_reader =
-            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
-                .await
-                .expect("Reader should be initialized by now");
+        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+            &record_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Reader should be initialized by now");
         let segment_writer = RecordSegmentWriter::from_segment(
             &tenant,
             &database_id,
@@ -1364,27 +1364,25 @@ mod test {
             .apply_materialized_log_chunk(&some_reader, &mat_records)
             .await
             .expect("Apply materialized log to record segment failed");
-        let record_flusher = Box::pin(segment_writer
-            .commit())
+        let record_flusher = Box::pin(segment_writer.commit())
             .await
             .expect("Commit for segment writer failed");
-        let metadata_flusher = Box::pin(metadata_writer
-            .commit())
+        let metadata_flusher = Box::pin(metadata_writer.commit())
             .await
             .expect("Commit for metadata writer failed");
-        record_segment.file_path = Box::pin(record_flusher
-            .flush())
+        record_segment.file_path = Box::pin(record_flusher.flush())
             .await
             .expect("Flush record segment writer failed");
-        metadata_segment.file_path = Box::pin(metadata_flusher
-            .flush())
+        metadata_segment.file_path = Box::pin(metadata_flusher.flush())
             .await
             .expect("Flush metadata segment writer failed");
         // No data should be present.
-        let record_segment_reader =
-            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
-                .await
-                .expect("Record segment reader should be initialized by now");
+        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+            &record_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Record segment reader should be initialized by now");
         let res = record_segment_reader
             .get_all_data()
             .await
@@ -1418,10 +1416,12 @@ mod test {
         ];
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_reader =
-            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
-                .await
-                .expect("Reader should be initialized by now");
+        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+            &record_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Reader should be initialized by now");
         let segment_writer = RecordSegmentWriter::from_segment(
             &tenant,
             &database_id,
@@ -1454,29 +1454,27 @@ mod test {
             .apply_materialized_log_chunk(&some_reader, &mat_records)
             .await
             .expect("Apply materialized log to record segment failed");
-        let record_flusher = Box::pin(segment_writer
-            .commit())
+        let record_flusher = Box::pin(segment_writer.commit())
             .await
             .expect("Commit for segment writer failed");
         let count = record_flusher.count();
         assert_eq!(count, 2_u64);
-        let metadata_flusher = Box::pin(metadata_writer
-            .commit())
+        let metadata_flusher = Box::pin(metadata_writer.commit())
             .await
             .expect("Commit for metadata writer failed");
-        record_segment.file_path = Box::pin(record_flusher
-            .flush())
+        record_segment.file_path = Box::pin(record_flusher.flush())
             .await
             .expect("Flush record segment writer failed");
-        metadata_segment.file_path = Box::pin(metadata_flusher
-            .flush())
+        metadata_segment.file_path = Box::pin(metadata_flusher.flush())
             .await
             .expect("Flush metadata segment writer failed");
         // No data should be present.
-        let record_segment_reader =
-            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
-                .await
-                .expect("Record segment reader should be initialized by now");
+        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+            &record_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Record segment reader should be initialized by now");
         let res = record_segment_reader
             .get_all_data()
             .await
@@ -1567,33 +1565,35 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            _ => {
-                                panic!("Unexpected error creating record segment reader: {:?}", e);
-                            }
+            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
+                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider),
+            )
+            .await
+            {
+                Ok(reader) => Some(reader),
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        _ => {
+                            panic!("Unexpected error creating record segment reader: {:?}", e);
                         }
                     }
-                };
+                }
+            };
             let mat_records = materialize_logs(&record_segment_reader, data, None)
                 .await
                 .expect("Log materialization failed");
@@ -1609,20 +1609,16 @@ mod test {
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log to record segment failed");
-            let record_flusher = Box::pin(segment_writer
-                .commit())
+            let record_flusher = Box::pin(segment_writer.commit())
                 .await
                 .expect("Commit for segment writer failed");
-            let metadata_flusher = Box::pin(metadata_writer
-                .commit())
+            let metadata_flusher = Box::pin(metadata_writer.commit())
                 .await
                 .expect("Commit for metadata writer failed");
-            record_segment.file_path = Box::pin(record_flusher
-                .flush())
+            record_segment.file_path = Box::pin(record_flusher.flush())
                 .await
                 .expect("Flush record segment writer failed");
-            metadata_segment.file_path = Box::pin(metadata_flusher
-                .flush())
+            metadata_segment.file_path = Box::pin(metadata_flusher.flush())
                 .await
                 .expect("Flush metadata segment writer failed");
         }
@@ -1659,10 +1655,12 @@ mod test {
         ];
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_reader =
-            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
-                .await
-                .expect("Reader should be initialized by now");
+        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+            &record_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Reader should be initialized by now");
         let segment_writer = RecordSegmentWriter::from_segment(
             &tenant,
             &database_id,
@@ -1695,27 +1693,25 @@ mod test {
             .apply_materialized_log_chunk(&some_reader, &mat_records)
             .await
             .expect("Apply materialized log to record segment failed");
-        let record_flusher = Box::pin(segment_writer
-            .commit())
+        let record_flusher = Box::pin(segment_writer.commit())
             .await
             .expect("Commit for segment writer failed");
-        let metadata_flusher = Box::pin(metadata_writer
-            .commit())
+        let metadata_flusher = Box::pin(metadata_writer.commit())
             .await
             .expect("Commit for metadata writer failed");
-        record_segment.file_path = Box::pin(record_flusher
-            .flush())
+        record_segment.file_path = Box::pin(record_flusher.flush())
             .await
             .expect("Flush record segment writer failed");
-        metadata_segment.file_path = Box::pin(metadata_flusher
-            .flush())
+        metadata_segment.file_path = Box::pin(metadata_flusher.flush())
             .await
             .expect("Flush metadata segment writer failed");
         // Search by f32 metadata value first.
-        let metadata_segment_reader =
-            Box::pin(MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider))
-                .await
-                .expect("Metadata segment reader construction failed");
+        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+            &metadata_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Metadata segment reader construction failed");
         let res = metadata_segment_reader
             .f32_metadata_index_reader
             .as_ref()
@@ -1735,10 +1731,12 @@ mod test {
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(1));
         // Record segment should also have the updated values.
-        let record_segment_reader =
-            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
-                .await
-                .expect("Reader should be initialized by now");
+        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+            &record_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Reader should be initialized by now");
         let mut res = record_segment_reader
             .get_all_data()
             .await
@@ -1830,33 +1828,35 @@ mod test {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            _ => {
-                                panic!("Unexpected error creating record segment reader: {:?}", e);
-                            }
+            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
+                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider),
+            )
+            .await
+            {
+                Ok(reader) => Some(reader),
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        _ => {
+                            panic!("Unexpected error creating record segment reader: {:?}", e);
                         }
                     }
-                };
+                }
+            };
             let mat_records = materialize_logs(&record_segment_reader, data, None)
                 .await
                 .expect("Log materialization failed");
@@ -1872,20 +1872,16 @@ mod test {
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log to record segment failed");
-            let record_flusher = Box::pin(segment_writer
-                .commit())
+            let record_flusher = Box::pin(segment_writer.commit())
                 .await
                 .expect("Commit for segment writer failed");
-            let metadata_flusher = Box::pin(metadata_writer
-                .commit())
+            let metadata_flusher = Box::pin(metadata_writer.commit())
                 .await
                 .expect("Commit for metadata writer failed");
-            record_segment.file_path = Box::pin(record_flusher
-                .flush())
+            record_segment.file_path = Box::pin(record_flusher.flush())
                 .await
                 .expect("Flush record segment writer failed");
-            metadata_segment.file_path = Box::pin(metadata_flusher
-                .flush())
+            metadata_segment.file_path = Box::pin(metadata_flusher.flush())
                 .await
                 .expect("Flush metadata segment writer failed");
         }
@@ -1904,10 +1900,12 @@ mod test {
         }];
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_reader =
-            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
-                .await
-                .expect("Reader should be initialized by now");
+        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+            &record_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Reader should be initialized by now");
         let segment_writer = RecordSegmentWriter::from_segment(
             &tenant,
             &database_id,
@@ -1940,27 +1938,25 @@ mod test {
             .apply_materialized_log_chunk(&some_reader, &mat_records)
             .await
             .expect("Apply materialized log to record segment failed");
-        let record_flusher = Box::pin(segment_writer
-            .commit())
+        let record_flusher = Box::pin(segment_writer.commit())
             .await
             .expect("Commit for segment writer failed");
-        let metadata_flusher = Box::pin(metadata_writer
-            .commit())
+        let metadata_flusher = Box::pin(metadata_writer.commit())
             .await
             .expect("Commit for metadata writer failed");
-        record_segment.file_path = Box::pin(record_flusher
-            .flush())
+        record_segment.file_path = Box::pin(record_flusher.flush())
             .await
             .expect("Flush record segment writer failed");
-        metadata_segment.file_path = Box::pin(metadata_flusher
-            .flush())
+        metadata_segment.file_path = Box::pin(metadata_flusher.flush())
             .await
             .expect("Flush metadata segment writer failed");
         // Only one key should be present.
-        let metadata_segment_reader =
-            Box::pin(MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider))
-                .await
-                .expect("Metadata segment reader construction failed");
+        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+            &metadata_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Metadata segment reader construction failed");
         let res = metadata_segment_reader
             .string_metadata_index_reader
             .as_ref()
@@ -1979,10 +1975,12 @@ mod test {
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(1));
         // Record segment should also have the updated values.
-        let record_segment_reader =
-            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
-                .await
-                .expect("Reader should be initialized by now");
+        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+            &record_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Reader should be initialized by now");
         let mut res = record_segment_reader
             .get_all_data()
             .await
@@ -2062,33 +2060,35 @@ mod test {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            _ => {
-                                panic!("Unexpected error creating record segment reader: {:?}", e);
-                            }
+            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
+                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider),
+            )
+            .await
+            {
+                Ok(reader) => Some(reader),
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        _ => {
+                            panic!("Unexpected error creating record segment reader: {:?}", e);
                         }
                     }
-                };
+                }
+            };
             let mat_records = materialize_logs(&record_segment_reader, data, None)
                 .await
                 .expect("Log materialization failed");
@@ -2104,20 +2104,16 @@ mod test {
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log to record segment failed");
-            let record_flusher = Box::pin(segment_writer
-                .commit())
+            let record_flusher = Box::pin(segment_writer.commit())
                 .await
                 .expect("Commit for segment writer failed");
-            let metadata_flusher = Box::pin(metadata_writer
-                .commit())
+            let metadata_flusher = Box::pin(metadata_writer.commit())
                 .await
                 .expect("Commit for metadata writer failed");
-            record_segment.file_path = Box::pin(record_flusher
-                .flush())
+            record_segment.file_path = Box::pin(record_flusher.flush())
                 .await
                 .expect("Flush record segment writer failed");
-            metadata_segment.file_path = Box::pin(metadata_flusher
-                .flush())
+            metadata_segment.file_path = Box::pin(metadata_flusher.flush())
                 .await
                 .expect("Flush metadata segment writer failed");
         }
@@ -2134,10 +2130,12 @@ mod test {
         }];
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_reader =
-            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
-                .await
-                .expect("Reader should be initialized by now");
+        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+            &record_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Reader should be initialized by now");
         let segment_writer = RecordSegmentWriter::from_segment(
             &tenant,
             &database_id,
@@ -2170,27 +2168,25 @@ mod test {
             .apply_materialized_log_chunk(&some_reader, &mat_records)
             .await
             .expect("Apply materialized log to record segment failed");
-        let record_flusher = Box::pin(segment_writer
-            .commit())
+        let record_flusher = Box::pin(segment_writer.commit())
             .await
             .expect("Commit for segment writer failed");
-        let metadata_flusher = Box::pin(metadata_writer
-            .commit())
+        let metadata_flusher = Box::pin(metadata_writer.commit())
             .await
             .expect("Commit for metadata writer failed");
-        record_segment.file_path = Box::pin(record_flusher
-            .flush())
+        record_segment.file_path = Box::pin(record_flusher.flush())
             .await
             .expect("Flush record segment writer failed");
-        metadata_segment.file_path = Box::pin(metadata_flusher
-            .flush())
+        metadata_segment.file_path = Box::pin(metadata_flusher.flush())
             .await
             .expect("Flush metadata segment writer failed");
         // FTS for hello should return empty.
-        let metadata_segment_reader =
-            Box::pin(MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider))
-                .await
-                .expect("Metadata segment reader construction failed");
+        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+            &metadata_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Metadata segment reader construction failed");
         let res = metadata_segment_reader
             .full_text_index_reader
             .as_ref()
@@ -2210,10 +2206,12 @@ mod test {
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(1));
         // Record segment should also have the updated values.
-        let record_segment_reader =
-            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
-                .await
-                .expect("Reader should be initialized by now");
+        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+            &record_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Reader should be initialized by now");
         let mut res = record_segment_reader
             .get_all_data()
             .await
@@ -2304,33 +2302,35 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            _ => {
-                                panic!("Unexpected error creating record segment reader: {:?}", e);
-                            }
+            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
+                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider),
+            )
+            .await
+            {
+                Ok(reader) => Some(reader),
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        _ => {
+                            panic!("Unexpected error creating record segment reader: {:?}", e);
                         }
                     }
-                };
+                }
+            };
             let mat_records = materialize_logs(&record_segment_reader, data, None)
                 .await
                 .expect("Log materialization failed");
@@ -2346,20 +2346,16 @@ mod test {
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log to record segment failed");
-            let record_flusher = Box::pin(segment_writer
-                .commit())
+            let record_flusher = Box::pin(segment_writer.commit())
                 .await
                 .expect("Commit for segment writer failed");
-            let metadata_flusher = Box::pin(metadata_writer
-                .commit())
+            let metadata_flusher = Box::pin(metadata_writer.commit())
                 .await
                 .expect("Commit for metadata writer failed");
-            record_segment.file_path = Box::pin(record_flusher
-                .flush())
+            record_segment.file_path = Box::pin(record_flusher.flush())
                 .await
                 .expect("Flush record segment writer failed");
-            metadata_segment.file_path = Box::pin(metadata_flusher
-                .flush())
+            metadata_segment.file_path = Box::pin(metadata_flusher.flush())
                 .await
                 .expect("Flush metadata segment writer failed");
         }
@@ -2388,10 +2384,12 @@ mod test {
                 .starts_with(&prefix));
         }
         // FTS for hello should return 1 document
-        let metadata_segment_reader =
-            Box::pin(MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider))
-                .await
-                .expect("Metadata segment reader construction failed");
+        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+            &metadata_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Metadata segment reader construction failed");
         let res = metadata_segment_reader
             .full_text_index_reader
             .as_ref()
@@ -2412,10 +2410,12 @@ mod test {
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(2));
         // Record segment should also have the updated values.
-        let record_segment_reader =
-            Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider))
-                .await
-                .expect("Reader should be initialized by now");
+        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+            &record_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Reader should be initialized by now");
         let mut res = record_segment_reader
             .get_all_data()
             .await
@@ -2599,15 +2599,17 @@ mod test {
             }];
 
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match Box::pin(RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => match *e {
-                        RecordSegmentReaderCreationError::UninitializedSegment => None,
-                        _ => panic!("Error creating record segment reader"),
-                    },
-                };
+            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
+                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider),
+            )
+            .await
+            {
+                Ok(reader) => Some(reader),
+                Err(e) => match *e {
+                    RecordSegmentReaderCreationError::UninitializedSegment => None,
+                    _ => panic!("Error creating record segment reader"),
+                },
+            };
 
             let materialized_logs = materialize_logs(&record_segment_reader, data, None)
                 .await
@@ -2623,21 +2625,17 @@ mod test {
                 .await
                 .expect("Error applying materialized log chunk");
 
-            let record_flusher = Box::pin(segment_writer
-                .commit())
+            let record_flusher = Box::pin(segment_writer.commit())
                 .await
                 .expect("Commit record segment writer failed");
-            let metadata_flusher = Box::pin(metadata_writer
-                .commit())
+            let metadata_flusher = Box::pin(metadata_writer.commit())
                 .await
                 .expect("Commit metadata segment writer failed");
 
-            record_segment.file_path = Box::pin(record_flusher
-                .flush())
+            record_segment.file_path = Box::pin(record_flusher.flush())
                 .await
                 .expect("Flush record segment writer failed");
-            metadata_segment.file_path = Box::pin(metadata_flusher
-                .flush())
+            metadata_segment.file_path = Box::pin(metadata_flusher.flush())
                 .await
                 .expect("Flush metadata segment writer failed");
 
@@ -2654,10 +2652,12 @@ mod test {
 
         // Verify we can read the segment back
         {
-            let metadata_segment_reader =
-                Box::pin(MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider))
-                    .await
-                    .expect("Error creating metadata segment reader");
+            let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+                &metadata_segment,
+                &blockfile_provider,
+            ))
+            .await
+            .expect("Error creating metadata segment reader");
 
             // Verify sparse index reader is created
             assert!(
@@ -2714,13 +2714,11 @@ mod test {
             .await
             .expect("Error creating metadata writer");
 
-            let metadata_flusher = Box::pin(metadata_writer
-                .commit())
+            let metadata_flusher = Box::pin(metadata_writer.commit())
                 .await
                 .expect("Error committing metadata");
 
-            metadata_segment.file_path = Box::pin(metadata_flusher
-                .flush())
+            metadata_segment.file_path = Box::pin(metadata_flusher.flush())
                 .await
                 .expect("Error flushing metadata");
         }
@@ -2764,13 +2762,11 @@ mod test {
             .await
             .expect("Error creating metadata writer");
 
-            let metadata_flusher = Box::pin(metadata_writer
-                .commit())
+            let metadata_flusher = Box::pin(metadata_writer.commit())
                 .await
                 .expect("Error committing metadata");
 
-            metadata_segment.file_path = Box::pin(metadata_flusher
-                .flush())
+            metadata_segment.file_path = Box::pin(metadata_flusher.flush())
                 .await
                 .expect("Error flushing metadata");
         }
@@ -2809,10 +2805,12 @@ mod test {
 
         // Verify we can read from the segment with recreated sparse indices
         {
-            let metadata_reader =
-                Box::pin(MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider))
-                    .await
-                    .expect("Should be able to read from segment with recreated sparse indices");
+            let metadata_reader = Box::pin(MetadataSegmentReader::from_segment(
+                &metadata_segment,
+                &blockfile_provider,
+            ))
+            .await
+            .expect("Should be able to read from segment with recreated sparse indices");
 
             assert!(
                 metadata_reader.sparse_index_reader.is_some(),
@@ -2843,13 +2841,11 @@ mod test {
             .await
             .expect("Error creating metadata writer");
 
-            let metadata_flusher = Box::pin(metadata_writer
-                .commit())
+            let metadata_flusher = Box::pin(metadata_writer.commit())
                 .await
                 .expect("Error committing metadata");
 
-            metadata_segment.file_path = Box::pin(metadata_flusher
-                .flush())
+            metadata_segment.file_path = Box::pin(metadata_flusher.flush())
                 .await
                 .expect("Error flushing metadata");
         }
@@ -2880,10 +2876,12 @@ mod test {
 
         // Verify we can read from the segment with recreated sparse indices
         {
-            let metadata_reader =
-                Box::pin(MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider))
-                    .await
-                    .expect("Should be able to read from segment with recreated sparse indices");
+            let metadata_reader = Box::pin(MetadataSegmentReader::from_segment(
+                &metadata_segment,
+                &blockfile_provider,
+            ))
+            .await
+            .expect("Should be able to read from segment with recreated sparse indices");
 
             assert!(
                 metadata_reader.sparse_index_reader.is_some(),

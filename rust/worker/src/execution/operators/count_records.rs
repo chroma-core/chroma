@@ -275,35 +275,37 @@ mod tests {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match Box::pin(RecordSegmentReader::from_segment(&record_segment, &in_memory_provider)).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!(
-                                    "Error creating record segment reader. Blockfile open error."
-                                );
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader. Invalid number of files.");
-                            }
-                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            _ => {
-                                panic!("Error creating record segment reader");
-                            }
+            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
+                RecordSegmentReader::from_segment(&record_segment, &in_memory_provider),
+            )
+            .await
+            {
+                Ok(reader) => Some(reader),
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader. Blockfile open error.");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!(
+                                "Error creating record segment reader. Invalid number of files."
+                            );
+                        }
+                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        _ => {
+                            panic!("Error creating record segment reader");
                         }
                     }
-                };
+                }
+            };
             let mat_records = materialize_logs(&record_segment_reader, data, None)
                 .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
                 .await
@@ -312,11 +314,12 @@ mod tests {
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materializated log failed");
-            let flusher = Box::pin(segment_writer
-                .commit())
+            let flusher = Box::pin(segment_writer.commit())
                 .await
                 .expect("Commit for segment writer failed");
-            record_segment.file_path = Box::pin(flusher.flush()).await.expect("Flush segment writer failed");
+            record_segment.file_path = Box::pin(flusher.flush())
+                .await
+                .expect("Flush segment writer failed");
         }
         let data = vec![
             LogRecord {

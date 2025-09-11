@@ -4257,12 +4257,10 @@ mod tests {
                 doc_offset_ids[i - 1] = i as u32;
                 doc_embeddings.push(embedding);
             }
-            let flusher = Box::pin(writer
-                .commit())
+            let flusher = Box::pin(writer.commit())
                 .await
                 .expect("Error committing spann index writer");
-            let paths = Box::pin(flusher
-                .flush())
+            let paths = Box::pin(flusher.flush())
                 .await
                 .expect("Error flushing spann index writer");
             println!("Wrote 10k records of 1000 dimensions each");
@@ -4397,12 +4395,10 @@ mod tests {
                 .for_each(|result| {
                     result.expect("Error in tokio task");
                 });
-            let flusher = Box::pin(writer
-                .commit())
+            let flusher = Box::pin(writer.commit())
                 .await
                 .expect("Error committing spann index writer");
-            let paths = Box::pin(flusher
-                .flush())
+            let paths = Box::pin(flusher.flush())
                 .await
                 .expect("Error flushing spann index writer");
             println!("Wrote 10k records of 1000 dimensions each");
@@ -4516,12 +4512,10 @@ mod tests {
                     doc_offset_ids[id - 1] = id as u32;
                     doc_embeddings.push(embedding);
                 }
-                let flusher = Box::pin(writer
-                    .commit())
+                let flusher = Box::pin(writer.commit())
                     .await
                     .expect("Error committing spann index writer");
-                let paths = Box::pin(flusher
-                    .flush())
+                let paths = Box::pin(flusher.flush())
                     .await
                     .expect("Error flushing spann index writer");
                 println!(
@@ -4671,12 +4665,10 @@ mod tests {
                 for res in r {
                     res.expect("Error adding to spann index writer");
                 }
-                let flusher = Box::pin(writer
-                    .commit())
+                let flusher = Box::pin(writer.commit())
                     .await
                     .expect("Error committing spann index writer");
-                let paths = Box::pin(flusher
-                    .flush())
+                let paths = Box::pin(flusher.flush())
                     .await
                     .expect("Error flushing spann index writer");
                 println!(
@@ -4840,12 +4832,10 @@ mod tests {
                 for res in r {
                     res.expect("Error adding to spann index writer");
                 }
-                let flusher = Box::pin(writer
-                    .commit())
+                let flusher = Box::pin(writer.commit())
                     .await
                     .expect("Error committing spann index writer");
-                let paths = Box::pin(flusher
-                    .flush())
+                let paths = Box::pin(flusher.flush())
                     .await
                     .expect("Error flushing spann index writer");
                 println!(
@@ -4977,12 +4967,10 @@ mod tests {
             }
 
             // Commit and flush.
-            let flusher = Box::pin(writer
-                .commit())
+            let flusher = Box::pin(writer.commit())
                 .await
                 .expect("Error committing spann index writer");
-            let paths = Box::pin(flusher
-                .flush())
+            let paths = Box::pin(flusher.flush())
                 .await
                 .expect("Error flushing spann index writer");
             hnsw_path = Some(paths.hnsw_id);
@@ -5062,12 +5050,10 @@ mod tests {
                 .garbage_collect()
                 .await
                 .expect("Error garbage collecting");
-            let flusher = Box::pin(writer
-                .commit())
+            let flusher = Box::pin(writer.commit())
                 .await
                 .expect("Error committing spann index writer");
-            let paths = Box::pin(flusher
-                .flush())
+            let paths = Box::pin(flusher.flush())
                 .await
                 .expect("Error flushing spann index writer");
             hnsw_path = Some(paths.hnsw_id);

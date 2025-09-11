@@ -190,11 +190,12 @@ mod tests {
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log failed");
-            let flusher = Box::pin(segment_writer
-                .commit())
+            let flusher = Box::pin(segment_writer.commit())
                 .await
                 .expect("Commit for segment writer failed");
-            record_segment.file_path = Box::pin(flusher.flush()).await.expect("Flush segment writer failed");
+            record_segment.file_path = Box::pin(flusher.flush())
+                .await
+                .expect("Flush segment writer failed");
         }
 
         // Since our cache is write-through, this should have no effect
