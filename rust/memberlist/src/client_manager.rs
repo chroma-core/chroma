@@ -102,7 +102,7 @@ where
         Ok((clients, assigned))
     }
 
-    /// return current node names present in the map
+    /// Returns the names of all nodes currently managed by the assigner.
     pub fn node_names(&self) -> Vec<String> {
         self.node_name_to_client.read().keys().cloned().collect()
     }
