@@ -107,7 +107,11 @@ where
         self.node_name_to_client.read().keys().cloned().collect()
     }
 
-    /// return the client for a specific node if present
+    /// Returns the client for a specific node, if it exists.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_name` - The name of the node to get the client for.
     pub fn client_for_node(&self, node_name: &str) -> Option<T> {
         self.node_name_to_client.read().get(node_name).cloned()
     }
