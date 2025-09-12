@@ -2158,12 +2158,14 @@ async fn collection_search(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
-    let _api_token = headers
+    let api_token = headers
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
 
-    // TODO: Add quota enforcement for search
+    let quota_payload = QuotaPayload::new(Action::Search, tenant.clone(), api_token)
+        .with_search_payloads(payload.searches.as_slice());
+    let quota_override = server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         // TODO: Make this a read operation once we stablize this
         // "op:read",
@@ -2203,7 +2205,19 @@ async fn collection_search(
         num_queries = payload.searches.len(),
     );
 
-    let request = SearchRequest::try_new(tenant, database, collection_id, payload.searches)?;
+    // Override limit by quota
+    let mut searches = payload.searches;
+    if let Some(quota_override) = quota_override {
+        for payload in &mut searches {
+            let override_limit = match payload.limit.limit {
+                Some(limit) => quota_override.limit.min(limit),
+                None => quota_override.limit,
+            };
+            payload.limit.limit = Some(override_limit);
+        }
+    }
+
+    let request = SearchRequest::try_new(tenant, database, collection_id, searches)?;
     let res = server
         .frontend
         .search(request)
