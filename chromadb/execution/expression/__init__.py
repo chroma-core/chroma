@@ -3,9 +3,6 @@ Chromadb execution expression module for search operations.
 """
 
 from chromadb.execution.expression.operator import (
-    # Core filter components
-    SearchFilter,
-    
     # Field proxy for building Where conditions
     Key,
     K,
@@ -53,9 +50,6 @@ from chromadb.execution.expression.plan import (
 __all__ = [
     # Main search class
     "Search",
-    
-    # Filter components
-    "SearchFilter",
     
     # Field proxy
     "Key",

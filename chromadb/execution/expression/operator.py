@@ -227,6 +227,7 @@ class Key:
     """Field proxy for building Where conditions with operator overloading.
     
     Predefined field constants:
+        Key.ID - ID field (equivalent to Key("#id"))
         Key.DOCUMENT - Document field (equivalent to Key("#document"))
         Key.EMBEDDING - Embedding field (equivalent to Key("#embedding"))
         Key.METADATA - Metadata field (equivalent to Key("#metadata"))
@@ -238,7 +239,6 @@ class Key:
         # Using predefined keys with K alias
         from chromadb.execution.expression import K
         K.DOCUMENT.contains("search text")
-        K.SCORE > 0.5
         
         # Custom field names
         K("status") == "active"
@@ -249,6 +249,7 @@ class Key:
     """
     
     # Predefined key constants (initialized after class definition)
+    ID: 'Key'
     DOCUMENT: 'Key'
     EMBEDDING: 'Key'  
     METADATA: 'Key'
@@ -317,6 +318,7 @@ class Key:
 
 
 # Initialize predefined key constants
+Key.ID = Key("#id")
 Key.DOCUMENT = Key("#document")
 Key.EMBEDDING = Key("#embedding")
 Key.METADATA = Key("#metadata")
@@ -332,40 +334,6 @@ class Filter:
     where: Optional[Any] = None  # Old Where type from chromadb.types
     where_document: Optional[Any] = None  # Old WhereDocument type
     
-
-@dataclass
-class SearchFilter:
-    """Filter configuration for the search endpoint.
-    
-    Attributes:
-        query_ids: Optional list of IDs to filter by
-        where_clause: Optional Where expression for metadata filtering
-    
-    Examples:
-        # Filter by IDs
-        SearchFilter(query_ids=["id1", "id2"])
-        
-        # Filter by metadata
-        SearchFilter(where_clause=Key("status") == "active")
-        
-        # Combined filtering
-        SearchFilter(
-            query_ids=["id1", "id2"],
-            where_clause=(Key("status") == "active") & (Key("score") > 0.5)
-        )
-    """
-    query_ids: Optional[IDs] = None
-    where_clause: Optional[Where] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert the SearchFilter to a dictionary for JSON serialization"""
-        result = {}
-        if self.query_ids is not None:
-            result["query_ids"] = self.query_ids
-        if self.where_clause is not None:
-            result["where_clause"] = self.where_clause.to_dict() # type: ignore[assignment]
-        return result
-
 
 @dataclass
 class KNN:

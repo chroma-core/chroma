@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Union, Set, Optional
 
 from chromadb.execution.expression.operator import (
-    KNN, Filter, Limit, Projection, Scan, Rank, Select, Val, SearchFilter,
+    KNN, Filter, Limit, Projection, Scan, Rank, Select, Val,
     Where, Key
 )
 
@@ -35,7 +35,7 @@ class Search:
     
     Direct construction:
         Search(
-            filter=SearchFilter(where_clause=Eq("status", "active")),
+            where=Key("status") == "active",
             rank=Knn(query=[0.1, 0.2]),
             limit=Limit(limit=10),
             select=Select(keys={Key.DOCUMENT})
@@ -48,8 +48,14 @@ class Search:
             .limit(10)
             .select(Key.DOCUMENT))
     
+    Filter by IDs:
+        Search().where(Key.ID.is_in(["id1", "id2", "id3"]))
+    
+    Combined with metadata filtering:
+        Search().where((Key.ID.is_in(["id1", "id2"])) & (Key("status") == "active"))
+    
     Empty Search() is valid and will use defaults:
-        - filter: Empty SearchFilter (no filtering)
+        - where: None (no filtering)
         - rank: None (no ranking - results ordered by default order)
         - limit: No limit
         - select: Empty selection
@@ -57,7 +63,7 @@ class Search:
     
     def __init__(
         self,
-        filter: Optional[SearchFilter] = None,
+        where: Optional[Where] = None,
         rank: Optional[Rank] = None,
         limit: Optional[Limit] = None,
         select: Optional[Select] = None
@@ -65,12 +71,12 @@ class Search:
         """Initialize a Search with optional parameters.
         
         Args:
-            filter: SearchFilter for filtering results (defaults to empty filter)
+            where: Where expression for filtering results (defaults to None - no filtering)
             rank: Rank expression for scoring (defaults to None - no ranking)
             limit: Limit configuration for pagination (defaults to no limit)
             select: Select configuration for keys (defaults to empty selection)
         """
-        self._filter = filter if filter is not None else SearchFilter()
+        self._where = where  # Keep as None if not provided
         self._rank = rank  # Keep as None if not provided
         self._limit = limit if limit is not None else Limit()
         self._select = select if select is not None else Select()
@@ -78,7 +84,7 @@ class Search:
     def to_dict(self) -> Dict[str, Any]:
         """Convert the Search to a dictionary for JSON serialization"""
         return {
-            "filter": self._filter.to_dict(),
+            "filter": self._where.to_dict() if self._where is not None else None,
             "rank": self._rank.to_dict() if self._rank is not None else None,
             "limit": self._limit.to_dict(),
             "select": self._select.to_dict()
@@ -94,7 +100,7 @@ class Search:
             Key.SCORE
         })
         return Search(
-            filter=self._filter,
+            where=self._where,
             rank=self._rank,
             limit=self._limit,
             select=new_select
@@ -111,51 +117,29 @@ class Search:
         """
         new_select = Select(keys=set(keys))
         return Search(
-            filter=self._filter,
+            where=self._where,
             rank=self._rank,
             limit=self._limit,
             select=new_select
         )
     
-    def where(self, where_clause: Where) -> 'Search':
+    def where(self, where: Where) -> 'Search':
         """Set the where clause for filtering
         
         Args:
-            where_clause: A Where expression for filtering
+            where: A Where expression for filtering
             
         Example:
             search.where((Key("status") == "active") & (Key("score") > 0.5))
         """
-        new_filter = SearchFilter(
-            query_ids=self._filter.query_ids,
-            where_clause=where_clause
-        )
         return Search(
-            filter=new_filter,
+            where=where,
             rank=self._rank,
             limit=self._limit,
             select=self._select
         )
     
-    def filter_by_ids(self, query_ids: List[str]) -> 'Search':
-        """Filter results by specific IDs
-        
-        Args:
-            query_ids: List of IDs to filter by
-            
-        Example:
-            search.filter_by_ids(["id1", "id2", "id3"])
-        """
-        new_filter = SearchFilter(
-            query_ids=query_ids,
-            where_clause=self._filter.where_clause
-        )
-        return Search(
-            filter=new_filter,
-            rank=self._rank,
-            limit=self._limit,
-            select=self._select
-        )
+
     
     def rank(self, rank_expr: Rank) -> 'Search':
         """Set the ranking expression
@@ -167,7 +151,7 @@ class Search:
             search.rank(Knn(query=[0.1, 0.2]) * 0.8 + Val(0.5) * 0.2)
         """
         return Search(
-            filter=self._filter,
+            where=self._where,
             rank=rank_expr,
             limit=self._limit,
             select=self._select
@@ -185,7 +169,7 @@ class Search:
         """
         new_limit = Limit(offset=offset, limit=limit)
         return Search(
-            filter=self._filter,
+            where=self._where,
             rank=self._rank,
             limit=new_limit,
             select=self._select

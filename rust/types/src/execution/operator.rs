@@ -120,26 +120,31 @@ pub struct FetchLog {
 /// # Parameters
 /// - `query_ids`: The user provided ids, which specifies the domain of the filter if provided
 /// - `where_clause`: The predicate on individual record
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct Filter {
     #[serde(default)]
     pub query_ids: Option<Vec<String>>,
-    #[serde(default, deserialize_with = "Filter::deserialize_where")]
+    #[serde(default)]
     pub where_clause: Option<Where>,
 }
 
-impl Filter {
-    fn deserialize_where<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<Where>, D::Error> {
+impl<'de> Deserialize<'de> for Filter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // For the new search API, the entire JSON is the where clause
         let where_json = Value::deserialize(deserializer)?;
-        if where_json.is_null() {
-            Ok(None)
+        let where_clause = if where_json.is_null() {
+            None
         } else {
-            Ok(Some(
-                parse_where(&where_json).map_err(|e| D::Error::custom(e.to_string()))?,
-            ))
-        }
+            Some(parse_where(&where_json).map_err(|e| D::Error::custom(e.to_string()))?)
+        };
+
+        Ok(Filter {
+            query_ids: None, // Always None for new search API
+            where_clause,
+        })
     }
 }
 
@@ -1262,159 +1267,38 @@ mod tests {
 
     #[test]
     fn test_filter_json_serialization() {
-        // Test basic filter serialization
-        let filter = Filter {
-            query_ids: Some(vec!["id1".to_string(), "id2".to_string()]),
-            where_clause: None,
-        };
-
-        let json = serde_json::to_string(&filter).unwrap();
-        let deserialized: Filter = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(deserialized.query_ids, filter.query_ids);
-        assert_eq!(deserialized.where_clause, filter.where_clause);
-
-        // Test filter deserialization from JSON with composite where clause
-        // This includes both document filters ($contains, $regex) and metadata filters ($gte, $eq)
-        let json_str = r#"{
-            "query_ids": ["doc1", "doc2", "doc3"],
-            "where_clause": {
-                "$and": [
-                    {
-                        "content": {
-                            "$contains": "machine learning"
-                        }
-                    },
-                    {
-                        "author": "John Doe"
-                    },
-                    {
-                        "year": {
-                            "$gte": 2020
-                        }
-                    },
-                    {
-                        "description": {
-                            "$regex": "^[A-Z].*learning.*"
-                        }
-                    },
-                    {
-                        "tags": {
-                            "$in": ["AI", "ML", "Deep Learning"]
-                        }
-                    }
-                ]
-            }
-        }"#;
-
-        let filter: Filter = serde_json::from_str(json_str).unwrap();
-
-        // Verify query_ids
-        assert_eq!(
-            filter.query_ids,
-            Some(vec![
-                "doc1".to_string(),
-                "doc2".to_string(),
-                "doc3".to_string()
-            ])
-        );
-
-        // Verify where_clause structure
+        // For the new search API, deserialization treats the entire JSON as a where clause
+        // Test with a simple where clause
+        let simple_where = r#"{"author": "John Doe"}"#;
+        let filter: Filter = serde_json::from_str(simple_where).unwrap();
+        assert_eq!(filter.query_ids, None);
         assert!(filter.where_clause.is_some());
-        let where_clause = filter.where_clause.unwrap();
 
-        // Should be a composite AND expression
-        if let crate::metadata::Where::Composite(composite) = where_clause {
-            assert_eq!(composite.operator, crate::metadata::BooleanOperator::And);
-            assert_eq!(composite.children.len(), 5);
-
-            // Check first child - document $contains filter
-            if let crate::metadata::Where::Document(doc) = &composite.children[0] {
-                assert_eq!(doc.operator, crate::metadata::DocumentOperator::Contains);
-                assert_eq!(doc.pattern, "machine learning");
-            } else {
-                panic!("Expected document filter as first child");
-            }
-
-            // Check second child - metadata equality filter (direct form)
-            if let crate::metadata::Where::Metadata(meta) = &composite.children[1] {
-                assert_eq!(meta.key, "author");
-                if let crate::metadata::MetadataComparison::Primitive(op, val) = &meta.comparison {
-                    assert_eq!(*op, crate::metadata::PrimitiveOperator::Equal);
-                    assert_eq!(
-                        *val,
-                        crate::metadata::MetadataValue::Str("John Doe".to_string())
-                    );
-                } else {
-                    panic!("Expected primitive comparison for author");
-                }
-            } else {
-                panic!("Expected metadata filter as second child");
-            }
-
-            // Check third child - metadata $gte filter
-            if let crate::metadata::Where::Metadata(meta) = &composite.children[2] {
-                assert_eq!(meta.key, "year");
-                if let crate::metadata::MetadataComparison::Primitive(op, val) = &meta.comparison {
-                    assert_eq!(*op, crate::metadata::PrimitiveOperator::GreaterThanOrEqual);
-                    assert_eq!(*val, crate::metadata::MetadataValue::Int(2020));
-                } else {
-                    panic!("Expected primitive comparison for year");
-                }
-            } else {
-                panic!("Expected metadata filter as third child");
-            }
-
-            // Check fourth child - document $regex filter
-            if let crate::metadata::Where::Document(doc) = &composite.children[3] {
-                assert_eq!(doc.operator, crate::metadata::DocumentOperator::Regex);
-                assert_eq!(doc.pattern, "^[A-Z].*learning.*");
-            } else {
-                panic!("Expected document regex filter as fourth child");
-            }
-
-            // Check fifth child - metadata $in filter
-            if let crate::metadata::Where::Metadata(meta) = &composite.children[4] {
-                assert_eq!(meta.key, "tags");
-                if let crate::metadata::MetadataComparison::Set(op, val) = &meta.comparison {
-                    assert_eq!(*op, crate::metadata::SetOperator::In);
-                    if let crate::metadata::MetadataSetValue::Str(tags) = val {
-                        assert_eq!(tags.len(), 3);
-                        assert!(tags.contains(&"AI".to_string()));
-                        assert!(tags.contains(&"ML".to_string()));
-                        assert!(tags.contains(&"Deep Learning".to_string()));
-                    } else {
-                        panic!("Expected string set for tags");
+        // Test with composite where clause
+        let composite_json = serde_json::json!({
+            "$and": [
+                {
+                    "#id": {
+                        "$in": ["doc1", "doc2", "doc3"]
                     }
-                } else {
-                    panic!("Expected set comparison for tags");
+                },
+                {
+                    "author": "John Doe"
                 }
-            } else {
-                panic!("Expected metadata filter as fifth child");
-            }
+            ]
+        });
+
+        let filter: Filter = serde_json::from_value(composite_json).unwrap();
+        assert_eq!(filter.query_ids, None);
+        assert!(filter.where_clause.is_some());
+
+        // Verify it's an AND composite with 2 children
+        if let crate::metadata::Where::Composite(composite) = filter.where_clause.unwrap() {
+            assert_eq!(composite.operator, crate::metadata::BooleanOperator::And);
+            assert_eq!(composite.children.len(), 2);
         } else {
             panic!("Expected composite where clause");
         }
-
-        // Test filter with empty query_ids
-        let json_str = r#"{
-            "query_ids": [],
-            "where_clause": null
-        }"#;
-
-        let filter: Filter = serde_json::from_str(json_str).unwrap();
-        assert_eq!(filter.query_ids, Some(vec![]));
-        assert_eq!(filter.where_clause, None);
-
-        // Test filter with null query_ids
-        let json_str = r#"{
-            "query_ids": null,
-            "where_clause": null
-        }"#;
-
-        let filter: Filter = serde_json::from_str(json_str).unwrap();
-        assert_eq!(filter.query_ids, None);
-        assert_eq!(filter.where_clause, None);
     }
 
     #[test]

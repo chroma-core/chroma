@@ -20,7 +20,7 @@ from chromadb.api.types import (
 from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
-from chromadb.execution.expression.plan import Search, SearchFilter
+from chromadb.execution.expression.plan import Search
 from chromadb.execution.expression.operator import Knn, In, Key, Eq, And, Or, Contains, NotContains
 import logging
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
@@ -244,14 +244,13 @@ def _search_with_filter(
             where=filter.get("where"),
             where_document=filter.get("where_document"),
         )
+
+        if ids_val:
+            wrapper = wrapper & Key.ID.is_in(ids_val) # type: ignore[assignment]
         
         if wrapper.to_dict():
             search = search.where(wrapper)
         
-        # Handle IDs separately if present
-        if ids_val:
-            search = search.filter_by_ids(ids_val)
-    
     # Set limit and select only IDs
     search = search.limit(n_results).select("id")
     

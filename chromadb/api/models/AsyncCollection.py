@@ -300,7 +300,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         Args:
             searches: A single Search object or a list of Search objects, each containing:
-                - filter: SearchFilter with query_ids and where_clause
+                - where: Where expression for filtering
                 - rank: Ranking expression for hybrid search (defaults to Val(0.0))
                 - limit: Limit configuration for pagination (defaults to no limit)
                 - select: Select configuration for keys to return (defaults to empty)
@@ -332,13 +332,11 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
             # Direct construction
             from chromadb.execution.expression import (
-                Search, SearchFilter, Eq, And, Gt, Knn, Limit, Select, Key
+                Search, Eq, And, Gt, Knn, Limit, Select, Key
             )
 
             search = Search(
-                filter=SearchFilter(
-                    where_clause=And([Eq("category", "science"), Gt("score", 0.5)])
-                ),
+                where=And([Eq("category", "science"), Gt("score", 0.5)]),
                 rank=Knn(query=[0.1, 0.2, 0.3]),
                 limit=Limit(offset=0, limit=10),
                 select=Select(keys={Key.DOCUMENT, Key.SCORE, "title"})
