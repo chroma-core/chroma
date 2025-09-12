@@ -558,8 +558,7 @@ async fn build_sparse_index(
             .map_err(|e| anyhow::anyhow!("Failed to commit sparse writer: {:?}", e))?;
 
         // Flush
-        flusher
-            .flush()
+        Box::pin(flusher.flush())
             .await
             .map_err(|e| anyhow::anyhow!("Failed to flush sparse writer: {:?}", e))?;
 

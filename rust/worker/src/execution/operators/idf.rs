@@ -77,10 +77,10 @@ impl Operator<IdfInput, IdfOutput> for Idf {
     async fn run(&self, input: &IdfInput) -> Result<IdfOutput, IdfError> {
         let mut n = 0;
         let mut nts = HashMap::new();
-        let record_segment_reader = match RecordSegmentReader::from_segment(
+        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
-        )
+        ))
         .await
         {
             Ok(reader) => {
@@ -95,9 +95,11 @@ impl Operator<IdfInput, IdfOutput> for Idf {
 
         let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None).await?;
 
-        let metadata_segment_reader =
-            MetadataSegmentReader::from_segment(&input.metadata_segment, &input.blockfile_provider)
-                .await?;
+        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+            &input.metadata_segment,
+            &input.blockfile_provider,
+        ))
+        .await?;
 
         if let Some(sparse_index_reader) = metadata_segment_reader.sparse_index_reader.as_ref() {
             for &dimension_id in &self.embedding.indices {
@@ -225,9 +227,7 @@ mod tests {
         // Generate initial records and compact them into the segment
         if num_records > 0 {
             let initial_logs = sparse_term_generator.generate_chunk(1..=num_records);
-            test_segment
-                .compact_log(initial_logs, num_records + 1)
-                .await;
+            Box::pin(test_segment.compact_log(initial_logs, num_records + 1)).await;
         }
 
         // Convert additional operation records to log records
@@ -253,7 +253,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_idf_basic_scaling() {
-        let (_test_segment, input) = setup_idf_input(10, vec![]).await;
+        let (_test_segment, input) = Box::pin(setup_idf_input(10, vec![])).await;
 
         // Query vector with terms that have different frequencies
         let query_vector = SparseVector {
@@ -324,7 +324,7 @@ mod tests {
             },
         ];
 
-        let (_test_segment, input) = setup_idf_input(10, delete_logs).await;
+        let (_test_segment, input) = Box::pin(setup_idf_input(10, delete_logs)).await;
 
         let query_vector = SparseVector {
             indices: vec![0, 1, 2],
@@ -405,7 +405,7 @@ mod tests {
             },
         ];
 
-        let (_test_segment, input) = setup_idf_input(10, update_logs).await;
+        let (_test_segment, input) = Box::pin(setup_idf_input(10, update_logs)).await;
 
         let query_vector = SparseVector {
             indices: vec![0, 1, 2, 3],
@@ -478,7 +478,7 @@ mod tests {
             },
         ];
 
-        let (_test_segment, input) = setup_idf_input(10, add_logs).await;
+        let (_test_segment, input) = Box::pin(setup_idf_input(10, add_logs)).await;
 
         let query_vector = SparseVector {
             indices: vec![0, 5],
@@ -519,7 +519,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_idf_empty_query() {
-        let (_test_segment, input) = setup_idf_input(10, vec![]).await;
+        let (_test_segment, input) = Box::pin(setup_idf_input(10, vec![])).await;
 
         // Empty query vector
         let query_vector = SparseVector {
@@ -544,7 +544,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_idf_missing_terms() {
-        let (_test_segment, input) = setup_idf_input(10, vec![]).await;
+        let (_test_segment, input) = Box::pin(setup_idf_input(10, vec![])).await;
 
         // Query with terms that don't exist in any document
         let query_vector = SparseVector {

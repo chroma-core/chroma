@@ -59,6 +59,7 @@ pub struct StorageMetrics {
     s3_get_latency_ms: Histogram<u64>,
     s3_put_latency_ms: Histogram<u64>,
     s3_put_bytes: Histogram<u64>,
+    s3_put_bytes_slow: Histogram<u64>,
     s3_multipart_upload_parts: Histogram<u64>,
     s3_upload_part_bytes: Histogram<u64>,
     s3_put_error_count: Counter<u64>,
@@ -102,6 +103,11 @@ impl Default for StorageMetrics {
             s3_put_bytes: opentelemetry::global::meter("chroma.storage")
                 .u64_histogram("s3_put_bytes")
                 .with_description("Bytes written per S3 put operation")
+                .with_unit("bytes")
+                .build(),
+            s3_put_bytes_slow: opentelemetry::global::meter("chroma.storage")
+                .u64_histogram("s3_put_bytes_slow")
+                .with_description("Bytes written per S3 put operation that took more than 1 second")
                 .with_unit("bytes")
                 .build(),
             s3_multipart_upload_parts: opentelemetry::global::meter("chroma.storage")
@@ -546,22 +552,32 @@ impl S3Storage {
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
-        self.metrics.s3_put_count.add(1, &[]);
-        self.metrics
-            .s3_put_bytes
-            .record(total_size_bytes as u64, &[]);
-
         let result = if self.is_oneshot_upload(total_size_bytes) {
             self.oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
                 .await
         } else {
-            let _stopwatch = Stopwatch::new(
+            self.metrics.s3_put_count.add(1, &[]);
+            self.metrics
+                .s3_put_bytes
+                .record(total_size_bytes as u64, &[]);
+            let stopwatch = Stopwatch::new(
                 &self.metrics.s3_put_latency_ms,
                 &[],
                 chroma_tracing::util::StopWatchUnit::Millis,
             );
-            self.multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
-                .await
+            let result = self
+                .multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
+                .await;
+
+            // Finish the stopwatch and check if request took more than 1 second
+            let duration = stopwatch.finish();
+            if duration > Duration::from_secs(1) {
+                self.metrics
+                    .s3_put_bytes_slow
+                    .record(total_size_bytes as u64, &[]);
+            }
+
+            result
         };
 
         if result.is_err() {
@@ -581,7 +597,11 @@ impl S3Storage {
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
-        let _stopwatch = Stopwatch::new(
+        self.metrics.s3_put_count.add(1, &[]);
+        self.metrics
+            .s3_put_bytes
+            .record(total_size_bytes as u64, &[]);
+        let stopwatch = Stopwatch::new(
             &self.metrics.s3_put_latency_ms,
             &[],
             chroma_tracing::util::StopWatchUnit::Millis,
@@ -618,6 +638,15 @@ impl S3Storage {
                 }
             }
         })?;
+
+        // Finish the stopwatch and check if request took more than 1 second
+        let duration = stopwatch.finish();
+        if duration > Duration::from_secs(1) {
+            self.metrics
+                .s3_put_bytes_slow
+                .record(total_size_bytes as u64, &[]);
+        }
+
         Ok(resp.e_tag.map(ETag))
     }
 

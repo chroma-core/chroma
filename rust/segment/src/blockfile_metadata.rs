@@ -961,7 +961,7 @@ impl MetadataSegmentFlusher {
 
         let max_id = self.sparse_index_flusher.max_id();
         let offset_value_id = self.sparse_index_flusher.offset_value_id();
-        match self.sparse_index_flusher.flush().await {
+        match Box::pin(self.sparse_index_flusher.flush()).await {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }

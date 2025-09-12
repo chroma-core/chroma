@@ -224,7 +224,7 @@ mod tests {
         let flusher = Box::pin(writer.commit()).await.unwrap();
         let max_id = flusher.max_id();
         let offset_value_id = flusher.offset_value_id();
-        flusher.flush().await.unwrap();
+        Box::pin(flusher.flush()).await.unwrap();
 
         // Create readers to verify final state
         let max_reader = provider
@@ -348,7 +348,7 @@ mod tests {
         let flusher2 = Box::pin(writer2.commit()).await.unwrap();
         let _max_id2 = flusher2.max_id();
         let offset_value_id2 = flusher2.offset_value_id();
-        flusher2.flush().await.unwrap();
+        Box::pin(flusher2.flush()).await.unwrap();
 
         let final_offset_value_reader = provider
             .read::<u32, f32>(BlockfileReaderOptions::new(
