@@ -207,24 +207,12 @@ jobs:
           removeArtifacts: true
           prerelease: true
 
-  release-hosted-control-plane:
-    name: Release to Chroma Cloud control plane
+  deploy-staging:
+    name: Deploy to staging
     # depends on release-github because it updates the tag to latest, which is what will get deployed
     needs:
       - release-github
     uses: ./.github/workflows/_deploy.yml
-    with:
-      plane: control
-    secrets: inherit
-
-  release-hosted-data-plane:
-    name: Release to Chroma Cloud data plane
-    # depends on release-github because it updates the tag to latest, which is what will get deployed
-    needs:
-      - release-github
-    uses: ./.github/workflows/_deploy.yml
-    with:
-      plane: data
     secrets: inherit
 
   release-docs:
@@ -257,8 +245,7 @@ jobs:
       - release-pypi
       - release-thin-pypi
       - release-github
-      - release-hosted-control-plane
-      - release-hosted-data-plane
+      - deploy-staging
       - release-docs
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
