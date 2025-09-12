@@ -4,7 +4,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use chroma_blockstore::provider::BlockfileProvider;
+use chroma_blockstore::{key::KeyWrapper, provider::BlockfileProvider};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::metadata::types::MetadataIndexError;
 use chroma_segment::{
@@ -151,6 +151,15 @@ impl<'me> MetadataLogReader<'me> {
         val: &MetadataValue,
         op: &PrimitiveOperator,
     ) -> Result<RoaringBitmap, FilterError> {
+        if matches!(op, PrimitiveOperator::Equal) && key == "#id" {
+            if let MetadataValue::Str(user_id) = val {
+                return Ok(self
+                    .user_id_to_offset_id
+                    .get(user_id.as_str())
+                    .into_iter()
+                    .collect());
+            }
+        }
         if let Some(metadata_value_to_offset_ids) = self.compact_metadata.get(key) {
             let bounds = match op {
                 PrimitiveOperator::Equal => (Bound::Included(val), Bound::Included(val)),
@@ -313,7 +322,7 @@ impl MetadataProvider<'_> {
         op: &PrimitiveOperator,
     ) -> Result<RoaringBitmap, FilterError> {
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader, _) => {
+            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader) => {
                 let (metadata_index_reader, kw) = match val {
                     MetadataValue::Bool(b) => (
                         metadata_segment_reader.bool_metadata_index_reader.as_ref(),
@@ -339,7 +348,21 @@ impl MetadataProvider<'_> {
                 };
                 if let Some(reader) = metadata_index_reader {
                     match op {
-                        PrimitiveOperator::Equal => Ok(reader.get(key, kw).await?),
+                        PrimitiveOperator::Equal => {
+                            if key == "#id" {
+                                if let KeyWrapper::String(user_id) = kw {
+                                    return Ok(match record_segment_reader {
+                                        Some(reader) => reader
+                                            .get_offset_id_for_user_id(user_id)
+                                            .await?
+                                            .iter()
+                                            .collect(),
+                                        None => RoaringBitmap::new(),
+                                    });
+                                }
+                            }
+                            Ok(reader.get(key, kw).await?)
+                        }
                         PrimitiveOperator::GreaterThan => Ok(reader.gt(key, kw).await?),
                         PrimitiveOperator::GreaterThanOrEqual => Ok(reader.gte(key, kw).await?),
                         PrimitiveOperator::LessThan => Ok(reader.lt(key, kw).await?),
@@ -1094,6 +1117,105 @@ mod tests {
         assert_eq!(
             filter_output.compact_offset_ids,
             SignedRoaringBitmap::Include((21..=50).filter(|offset| offset % 5 != 0).collect())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_id_filter_with_in_operator() {
+        let (_test_segment, filter_input) = setup_filter_input().await;
+
+        // Test with #id using $in operator
+        // This simulates: {"#id": {"$in": ["id_25", "id_35", "id_55", "id_75", "id_95"]}}
+        let where_clause = Where::Metadata(MetadataExpression {
+            key: "#id".to_string(),
+            comparison: MetadataComparison::Set(
+                SetOperator::In,
+                MetadataSetValue::Str(vec![
+                    "id_25".to_string(),  // In compact segment
+                    "id_35".to_string(),  // In compact segment  
+                    "id_55".to_string(),  // In log (added)
+                    "id_75".to_string(),  // In log (added)
+                    "id_95".to_string(),  // In log (added)
+                ]),
+            ),
+        });
+
+        let filter_operator = Filter {
+            query_ids: None,
+            where_clause: Some(where_clause),
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("Filter should not fail");
+
+        // The log contains offset IDs 51-100 (after deletions of 11-20)
+        // So id_55 -> offset 55, id_75 -> offset 75, id_95 -> offset 95
+        assert_eq!(
+            filter_output.log_offset_ids,
+            SignedRoaringBitmap::Include(vec![55, 75, 95].into_iter().collect())
+        );
+        
+        // The compact segment contains offset IDs 21-50 (11-20 were deleted in log)
+        // So id_25 -> offset 25, id_35 -> offset 35
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::Include(vec![25, 35].into_iter().collect())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_id_filter_with_metadata_combination() {
+        let (_test_segment, filter_input) = setup_filter_input().await;
+
+        // Test combining #id filter with regular metadata filter
+        // This simulates: {"#id": {"$in": ["id_30", "id_40", "id_60", "id_80"]}, "is_even": true}
+        let id_clause = Where::Metadata(MetadataExpression {
+            key: "#id".to_string(),
+            comparison: MetadataComparison::Set(
+                SetOperator::In,
+                MetadataSetValue::Str(vec![
+                    "id_30".to_string(),  // offset 30, is_even=true, in compact
+                    "id_40".to_string(),  // offset 40, is_even=true, in compact
+                    "id_60".to_string(),  // offset 60, is_even=true, in log
+                    "id_80".to_string(),  // offset 80, is_even=true, in log
+                ]),
+            ),
+        });
+
+        let even_clause = Where::Metadata(MetadataExpression {
+            key: "is_even".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Bool(true),
+            ),
+        });
+
+        let where_clause = Where::Composite(CompositeExpression {
+            operator: BooleanOperator::And,
+            children: vec![id_clause, even_clause],
+        });
+
+        let filter_operator = Filter {
+            query_ids: None,
+            where_clause: Some(where_clause),
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("Filter should not fail");
+
+        // All selected IDs have even offsets, so they should all pass the is_even filter
+        assert_eq!(
+            filter_output.log_offset_ids,
+            SignedRoaringBitmap::Include(vec![60, 80].into_iter().collect())
+        );
+        
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::Include(vec![30, 40].into_iter().collect())
         );
     }
 
