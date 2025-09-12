@@ -101,7 +101,7 @@ pub fn validate_update_metadata(metadata: &UpdateMetadata) -> Result<(), Validat
 }
 
 /// Validate optional vector of optional metadata
-pub fn validate_metadata_vec(metadatas: &Vec<Option<Metadata>>) -> Result<(), ValidationError> {
+pub fn validate_metadata_vec(metadatas: &[Option<Metadata>]) -> Result<(), ValidationError> {
     for (i, metadata_opt) in metadatas.iter().enumerate() {
         if let Some(metadata) = metadata_opt {
             validate_metadata(metadata).map_err(|_| {
@@ -115,7 +115,7 @@ pub fn validate_metadata_vec(metadatas: &Vec<Option<Metadata>>) -> Result<(), Va
 
 /// Validate optional vector of optional update metadata
 pub fn validate_update_metadata_vec(
-    metadatas: &Vec<Option<UpdateMetadata>>,
+    metadatas: &[Option<UpdateMetadata>],
 ) -> Result<(), ValidationError> {
     for (i, metadata_opt) in metadatas.iter().enumerate() {
         if let Some(metadata) = metadata_opt {

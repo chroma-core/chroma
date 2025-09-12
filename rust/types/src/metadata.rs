@@ -1243,6 +1243,30 @@ impl TryFrom<chroma_proto::WhereDocument> for Where {
     }
 }
 
+/*
+===========================================
+Metadata Normalization Helpers
+===========================================
+*/
+
+/// Normalize metadata by sorting sparse vectors
+pub fn normalize_metadata(metadata: &mut Metadata) {
+    for (_, value) in metadata.iter_mut() {
+        if let MetadataValue::SparseVector(sv) = value {
+            *sv = sv.normalize();
+        }
+    }
+}
+
+/// Normalize update metadata by sorting sparse vectors
+pub fn normalize_update_metadata(metadata: &mut UpdateMetadata) {
+    for (_, value) in metadata.iter_mut() {
+        if let UpdateMetadataValue::SparseVector(sv) = value {
+            *sv = sv.normalize();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1615,29 +1639,5 @@ mod tests {
         let normalized = sparse.normalize();
         assert_eq!(normalized.indices, vec![1, 2, 3]);
         assert_eq!(normalized.values, vec![0.1, 0.2, 0.3]);
-    }
-}
-
-/*
-===========================================
-Metadata Normalization Helpers
-===========================================
-*/
-
-/// Normalize metadata by sorting sparse vectors
-pub fn normalize_metadata(metadata: &mut Metadata) {
-    for (_, value) in metadata.iter_mut() {
-        if let MetadataValue::SparseVector(sv) = value {
-            *sv = sv.normalize();
-        }
-    }
-}
-
-/// Normalize update metadata by sorting sparse vectors
-pub fn normalize_update_metadata(metadata: &mut UpdateMetadata) {
-    for (_, value) in metadata.iter_mut() {
-        if let UpdateMetadataValue::SparseVector(sv) = value {
-            *sv = sv.normalize();
-        }
     }
 }
