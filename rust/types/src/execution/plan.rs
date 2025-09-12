@@ -4,7 +4,7 @@ use super::{
         Filter, KnnBatch, KnnProjection, Limit, Projection, Rank, Scan, ScanToProtoError, Select,
     },
 };
-use crate::chroma_proto;
+use crate::{chroma_proto, validators::validate_rank};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::{
@@ -150,6 +150,7 @@ pub struct SearchPayload {
     #[serde(default)]
     pub filter: Filter,
     #[serde(default)]
+    #[validate(custom(function = "validate_rank"))]
     pub rank: Rank,
     #[serde(default)]
     pub limit: Limit,
@@ -275,5 +276,14 @@ impl TryFrom<Search> for chroma_proto::SearchPlan {
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()?,
         })
+    }
+}
+
+impl SearchPayload {
+    /// Normalize the search payload by sorting sparse vectors in KNN queries
+    pub fn normalize(&mut self) {
+        if let Some(expr) = &mut self.rank.expr {
+            expr.normalize_sparse_vectors();
+        }
     }
 }

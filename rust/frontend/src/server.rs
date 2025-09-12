@@ -2203,7 +2203,11 @@ async fn collection_search(
         num_queries = payload.searches.len(),
     );
 
-    let request = SearchRequest::try_new(tenant, database, collection_id, payload.searches)?;
+    // Normalize sparse vectors in the searches
+    let mut searches = payload.searches;
+    searches.iter_mut().for_each(SearchPayload::normalize);
+
+    let request = SearchRequest::try_new(tenant, database, collection_id, searches)?;
     let res = server
         .frontend
         .search(request)

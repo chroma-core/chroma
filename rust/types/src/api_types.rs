@@ -10,7 +10,8 @@ use crate::operator::SearchResult;
 use crate::plan::PlanToProtoError;
 use crate::plan::SearchPayload;
 use crate::validators::{
-    validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
+    validate_metadata_vec, validate_name, validate_non_empty_collection_update_metadata,
+    validate_optional_metadata, validate_update_metadata_vec,
 };
 use crate::Collection;
 use crate::CollectionConfigurationToInternalConfigurationError;
@@ -659,7 +660,7 @@ pub struct CreateCollectionRequest {
     pub database_name: String,
     #[validate(custom(function = "validate_name"))]
     pub name: String,
-    #[validate(custom(function = "validate_non_empty_metadata"))]
+    #[validate(custom(function = "validate_optional_metadata"))]
     pub metadata: Option<Metadata>,
     pub configuration: Option<InternalCollectionConfiguration>,
     pub get_or_create: bool,
@@ -1096,6 +1097,7 @@ pub struct AddCollectionRecordsRequest {
     pub embeddings: Vec<Vec<f32>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
+    #[validate(custom(function = "validate_metadata_vec"))]
     pub metadatas: Option<Vec<Option<Metadata>>>,
 }
 
@@ -1169,6 +1171,7 @@ pub struct UpdateCollectionRecordsRequest {
     pub embeddings: Option<Vec<Option<Vec<f32>>>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
+    #[validate(custom(function = "validate_update_metadata_vec"))]
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
@@ -1232,6 +1235,7 @@ pub struct UpsertCollectionRecordsRequest {
     pub embeddings: Vec<Vec<f32>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
+    #[validate(custom(function = "validate_update_metadata_vec"))]
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
