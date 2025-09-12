@@ -62,7 +62,10 @@ pub(crate) fn validate_name(name: impl AsRef<str>) -> Result<(), ValidationError
 
 /// Validate a single metadata key
 fn validate_metadata_key(key: &str) -> Result<(), ValidationError> {
-    if key.starts_with('#') || key.starts_with('$') {
+    if key.is_empty() {
+        Err(ValidationError::new("metadata_key")
+            .with_message("Metadata key cannot be empty".into()))
+    } else if key.starts_with('#') || key.starts_with('$') {
         Err(ValidationError::new("metadata_key")
             .with_message(format!("Metadata key cannot start with '#' or '$': {}", key).into()))
     } else {
@@ -192,6 +195,16 @@ mod tests {
         // Invalid key starting with #
         let mut metadata = Metadata::new();
         metadata.insert("#invalid".to_string(), MetadataValue::Int(42));
+        assert!(validate_metadata(&metadata).is_err());
+
+        // Invalid key starting with $
+        let mut metadata = Metadata::new();
+        metadata.insert("$invalid".to_string(), MetadataValue::Int(42));
+        assert!(validate_metadata(&metadata).is_err());
+
+        // Invalid empty key
+        let mut metadata = Metadata::new();
+        metadata.insert("".to_string(), MetadataValue::Int(42));
         assert!(validate_metadata(&metadata).is_err());
 
         // Invalid sparse vector (length mismatch)

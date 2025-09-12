@@ -8,13 +8,22 @@ use proptest::{collection, prelude::*, sample::SizeRange, string::string_regex};
 use regex_syntax::hir::{ClassUnicode, ClassUnicodeRange};
 
 /**
+ * Strategy for valid metadata keys.
+ * Keys cannot be empty and cannot start with '#' or '$'.
+ */
+fn valid_metadata_key() -> impl Strategy<Value = String> {
+    // Regex: at least one character, first character cannot be # or $
+    string_regex("[^#$].{0,99}").unwrap()
+}
+
+/**
  * Strategy for metadata.
  */
 pub fn arbitrary_update_metadata(
     num_pairs: impl Into<SizeRange>,
 ) -> impl Strategy<Value = UpdateMetadata> {
     proptest::collection::hash_map(
-        proptest::arbitrary::any::<String>(),
+        valid_metadata_key(),
         proptest::arbitrary::any::<UpdateMetadataValue>(),
         num_pairs,
     )
@@ -22,7 +31,7 @@ pub fn arbitrary_update_metadata(
 
 pub fn arbitrary_metadata(num_pairs: impl Into<SizeRange>) -> impl Strategy<Value = Metadata> {
     proptest::collection::hash_map(
-        proptest::arbitrary::any::<String>(),
+        valid_metadata_key(),
         proptest::arbitrary::any::<MetadataValue>(),
         num_pairs,
     )

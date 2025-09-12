@@ -1031,115 +1031,6 @@ impl ChromaError for ForkCollectionError {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{MetadataValue, SparseVector, UpdateMetadataValue};
-    use std::collections::HashMap;
-
-    #[test]
-    fn test_add_request_normalizes_sparse_vectors() {
-        let mut metadata = HashMap::new();
-        // Add unsorted sparse vector
-        metadata.insert(
-            "sparse".to_string(),
-            MetadataValue::SparseVector(SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2])),
-        );
-
-        let request = AddCollectionRecordsRequest::try_new(
-            "tenant".to_string(),
-            "database".to_string(),
-            CollectionUuid(uuid::Uuid::new_v4()),
-            vec!["id1".to_string()],
-            vec![vec![0.1, 0.2]],
-            None,
-            None,
-            Some(vec![Some(metadata)]),
-        )
-        .unwrap();
-
-        // Check that sparse vector was normalized (sorted)
-        if let Some(metadatas) = request.metadatas {
-            if let Some(Some(meta)) = metadatas.first() {
-                if let Some(MetadataValue::SparseVector(sv)) = meta.get("sparse") {
-                    assert_eq!(sv.indices, vec![1, 2, 3]);
-                    assert_eq!(sv.values, vec![0.1, 0.2, 0.3]);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_update_request_normalizes_sparse_vectors() {
-        let mut metadata = HashMap::new();
-        // Add unsorted sparse vector
-        metadata.insert(
-            "sparse".to_string(),
-            UpdateMetadataValue::SparseVector(SparseVector::new(
-                vec![3, 1, 2],
-                vec![0.3, 0.1, 0.2],
-            )),
-        );
-
-        let request = UpdateCollectionRecordsRequest::try_new(
-            "tenant".to_string(),
-            "database".to_string(),
-            CollectionUuid(uuid::Uuid::new_v4()),
-            vec!["id1".to_string()],
-            None,
-            None,
-            None,
-            Some(vec![Some(metadata)]),
-        )
-        .unwrap();
-
-        // Check that sparse vector was normalized (sorted)
-        if let Some(metadatas) = request.metadatas {
-            if let Some(Some(meta)) = metadatas.first() {
-                if let Some(UpdateMetadataValue::SparseVector(sv)) = meta.get("sparse") {
-                    assert_eq!(sv.indices, vec![1, 2, 3]);
-                    assert_eq!(sv.values, vec![0.1, 0.2, 0.3]);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_upsert_request_normalizes_sparse_vectors() {
-        let mut metadata = HashMap::new();
-        // Add unsorted sparse vector
-        metadata.insert(
-            "sparse".to_string(),
-            UpdateMetadataValue::SparseVector(SparseVector::new(
-                vec![3, 1, 2],
-                vec![0.3, 0.1, 0.2],
-            )),
-        );
-
-        let request = UpsertCollectionRecordsRequest::try_new(
-            "tenant".to_string(),
-            "database".to_string(),
-            CollectionUuid(uuid::Uuid::new_v4()),
-            vec!["id1".to_string()],
-            vec![vec![0.1, 0.2]],
-            None,
-            None,
-            Some(vec![Some(metadata)]),
-        )
-        .unwrap();
-
-        // Check that sparse vector was normalized (sorted)
-        if let Some(metadatas) = request.metadatas {
-            if let Some(Some(meta)) = metadatas.first() {
-                if let Some(UpdateMetadataValue::SparseVector(sv)) = meta.get("sparse") {
-                    assert_eq!(sv.indices, vec![1, 2, 3]);
-                    assert_eq!(sv.values, vec![0.1, 0.2, 0.3]);
-                }
-            }
-        }
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum CountForksError {
     #[error("Collection [{0}] does not exist")]
@@ -2175,5 +2066,107 @@ mod test {
     fn test_create_tenant_min_length() {
         let request = CreateTenantRequest::try_new("a".to_string());
         assert!(request.is_err());
+    }
+
+    #[test]
+    fn test_add_request_normalizes_sparse_vectors() {
+        let mut metadata = HashMap::new();
+        // Add unsorted sparse vector
+        metadata.insert(
+            "sparse".to_string(),
+            MetadataValue::SparseVector(SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2])),
+        );
+
+        let request = AddCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            vec![vec![0.1, 0.2]],
+            None,
+            None,
+            Some(vec![Some(metadata)]),
+        )
+        .unwrap();
+
+        // Check that sparse vector was normalized (sorted)
+        if let Some(metadatas) = request.metadatas {
+            if let Some(Some(meta)) = metadatas.first() {
+                if let Some(MetadataValue::SparseVector(sv)) = meta.get("sparse") {
+                    assert_eq!(sv.indices, vec![1, 2, 3]);
+                    assert_eq!(sv.values, vec![0.1, 0.2, 0.3]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_update_request_normalizes_sparse_vectors() {
+        let mut metadata = HashMap::new();
+        // Add unsorted sparse vector
+        metadata.insert(
+            "sparse".to_string(),
+            UpdateMetadataValue::SparseVector(SparseVector::new(
+                vec![3, 1, 2],
+                vec![0.3, 0.1, 0.2],
+            )),
+        );
+
+        let request = UpdateCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            None,
+            None,
+            None,
+            Some(vec![Some(metadata)]),
+        )
+        .unwrap();
+
+        // Check that sparse vector was normalized (sorted)
+        if let Some(metadatas) = request.metadatas {
+            if let Some(Some(meta)) = metadatas.first() {
+                if let Some(UpdateMetadataValue::SparseVector(sv)) = meta.get("sparse") {
+                    assert_eq!(sv.indices, vec![1, 2, 3]);
+                    assert_eq!(sv.values, vec![0.1, 0.2, 0.3]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_upsert_request_normalizes_sparse_vectors() {
+        let mut metadata = HashMap::new();
+        // Add unsorted sparse vector
+        metadata.insert(
+            "sparse".to_string(),
+            UpdateMetadataValue::SparseVector(SparseVector::new(
+                vec![3, 1, 2],
+                vec![0.3, 0.1, 0.2],
+            )),
+        );
+
+        let request = UpsertCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            vec![vec![0.1, 0.2]],
+            None,
+            None,
+            Some(vec![Some(metadata)]),
+        )
+        .unwrap();
+
+        // Check that sparse vector was normalized (sorted)
+        if let Some(metadatas) = request.metadatas {
+            if let Some(Some(meta)) = metadatas.first() {
+                if let Some(UpdateMetadataValue::SparseVector(sv)) = meta.get("sparse") {
+                    assert_eq!(sv.indices, vec![1, 2, 3]);
+                    assert_eq!(sv.values, vec![0.1, 0.2, 0.3]);
+                }
+            }
+        }
     }
 }
