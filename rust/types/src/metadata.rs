@@ -54,20 +54,14 @@ impl SparseVector {
             return Err(MetadataValueConversionError::SparseVectorLengthMismatch);
         }
 
-        // Check for duplicate indices
-        if HashSet::<u32>::from_iter(self.indices.iter().cloned()).len() < self.indices.len() {
-            return Err(MetadataValueConversionError::SparseVectorDuplicateIndices);
+        // Check that indices are sorted in strictly ascending order (no duplicates)
+        for i in 1..self.indices.len() {
+            if self.indices[i] <= self.indices[i - 1] {
+                return Err(MetadataValueConversionError::SparseVectorIndicesNotSorted);
+            }
         }
 
         Ok(())
-    }
-
-    /// Create a normalized (sorted by indices) version of this sparse vector
-    pub fn normalize(&self) -> Self {
-        let mut pairs = self.iter().collect::<Vec<_>>();
-        pairs.sort_by_key(|(idx, _)| *idx);
-        let (indices, values) = pairs.into_iter().unzip();
-        Self { indices, values }
     }
 }
 
@@ -459,8 +453,8 @@ pub enum MetadataValueConversionError {
     InvalidKey(String),
     #[error("Sparse vector indices and values must have the same length")]
     SparseVectorLengthMismatch,
-    #[error("Sparse vector contains duplicate indices")]
-    SparseVectorDuplicateIndices,
+    #[error("Sparse vector indices must be sorted in strictly ascending order (no duplicates)")]
+    SparseVectorIndicesNotSorted,
 }
 
 impl ChromaError for MetadataValueConversionError {
@@ -469,7 +463,7 @@ impl ChromaError for MetadataValueConversionError {
             MetadataValueConversionError::InvalidValue => ErrorCodes::InvalidArgument,
             MetadataValueConversionError::InvalidKey(_) => ErrorCodes::InvalidArgument,
             MetadataValueConversionError::SparseVectorLengthMismatch => ErrorCodes::InvalidArgument,
-            MetadataValueConversionError::SparseVectorDuplicateIndices => {
+            MetadataValueConversionError::SparseVectorIndicesNotSorted => {
                 ErrorCodes::InvalidArgument
             }
         }
@@ -1243,30 +1237,6 @@ impl TryFrom<chroma_proto::WhereDocument> for Where {
     }
 }
 
-/*
-===========================================
-Metadata Normalization Helpers
-===========================================
-*/
-
-/// Normalize metadata by sorting sparse vectors
-pub fn normalize_metadata(metadata: &mut Metadata) {
-    for (_, value) in metadata.iter_mut() {
-        if let MetadataValue::SparseVector(sv) = value {
-            *sv = sv.normalize();
-        }
-    }
-}
-
-/// Normalize update metadata by sorting sparse vectors
-pub fn normalize_update_metadata(metadata: &mut UpdateMetadata) {
-    for (_, value) in metadata.iter_mut() {
-        if let UpdateMetadataValue::SparseVector(sv) = value {
-            *sv = sv.normalize();
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1616,28 +1586,31 @@ mod tests {
             MetadataValueConversionError::SparseVectorLengthMismatch
         ));
 
-        // Duplicate indices
+        // Unsorted indices (descending order)
+        let sparse = SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2]);
+        let result = sparse.validate();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            MetadataValueConversionError::SparseVectorIndicesNotSorted
+        ));
+
+        // Duplicate indices (not strictly ascending)
         let sparse = SparseVector::new(vec![1, 2, 2, 3], vec![0.1, 0.2, 0.3, 0.4]);
         let result = sparse.validate();
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            MetadataValueConversionError::SparseVectorDuplicateIndices
+            MetadataValueConversionError::SparseVectorIndicesNotSorted
         ));
-    }
 
-    #[test]
-    fn test_sparse_vector_normalization() {
-        // Unsorted vector gets sorted
-        let sparse = SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2]);
-        let normalized = sparse.normalize();
-        assert_eq!(normalized.indices, vec![1, 2, 3]);
-        assert_eq!(normalized.values, vec![0.1, 0.2, 0.3]);
-
-        // Already sorted vector stays the same
-        let sparse = SparseVector::new(vec![1, 2, 3], vec![0.1, 0.2, 0.3]);
-        let normalized = sparse.normalize();
-        assert_eq!(normalized.indices, vec![1, 2, 3]);
-        assert_eq!(normalized.values, vec![0.1, 0.2, 0.3]);
+        // Descending at one point
+        let sparse = SparseVector::new(vec![1, 3, 2], vec![0.1, 0.3, 0.2]);
+        let result = sparse.validate();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            MetadataValueConversionError::SparseVectorIndicesNotSorted
+        ));
     }
 }

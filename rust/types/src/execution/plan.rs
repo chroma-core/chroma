@@ -278,12 +278,3 @@ impl TryFrom<Search> for chroma_proto::SearchPlan {
         })
     }
 }
-
-impl SearchPayload {
-    /// Normalize the search payload by sorting sparse vectors in KNN queries
-    pub fn normalize(&mut self) {
-        if let Some(expr) = &mut self.rank.expr {
-            expr.normalize_sparse_vectors();
-        }
-    }
-}
