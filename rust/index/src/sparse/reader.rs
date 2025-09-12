@@ -349,7 +349,7 @@ mod tests {
         let flusher = Box::pin(writer.commit()).await.unwrap();
         let max_id = flusher.max_id();
         let offset_value_id = flusher.offset_value_id();
-        flusher.flush().await.unwrap();
+        Box::pin(flusher.flush()).await.unwrap();
 
         // Create and return reader
         let max_reader = provider
