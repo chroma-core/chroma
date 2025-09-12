@@ -1131,11 +1131,11 @@ mod tests {
             comparison: MetadataComparison::Set(
                 SetOperator::In,
                 MetadataSetValue::Str(vec![
-                    "id_25".to_string(),  // In compact segment
-                    "id_35".to_string(),  // In compact segment  
-                    "id_55".to_string(),  // In log (added)
-                    "id_75".to_string(),  // In log (added)
-                    "id_95".to_string(),  // In log (added)
+                    "id_25".to_string(), // In compact segment
+                    "id_35".to_string(), // In compact segment
+                    "id_55".to_string(), // In log (added)
+                    "id_75".to_string(), // In log (added)
+                    "id_95".to_string(), // In log (added)
                 ]),
             ),
         });
@@ -1154,14 +1154,14 @@ mod tests {
         // So id_55 -> offset 55, id_75 -> offset 75, id_95 -> offset 95
         assert_eq!(
             filter_output.log_offset_ids,
-            SignedRoaringBitmap::Include(vec![55, 75, 95].into_iter().collect())
+            SignedRoaringBitmap::Include([55, 75, 95].iter().collect())
         );
-        
+
         // The compact segment contains offset IDs 21-50 (11-20 were deleted in log)
         // So id_25 -> offset 25, id_35 -> offset 35
         assert_eq!(
             filter_output.compact_offset_ids,
-            SignedRoaringBitmap::Include(vec![25, 35].into_iter().collect())
+            SignedRoaringBitmap::Include([25, 35].iter().collect())
         );
     }
 
@@ -1176,10 +1176,10 @@ mod tests {
             comparison: MetadataComparison::Set(
                 SetOperator::In,
                 MetadataSetValue::Str(vec![
-                    "id_30".to_string(),  // offset 30, is_even=true, in compact
-                    "id_40".to_string(),  // offset 40, is_even=true, in compact
-                    "id_60".to_string(),  // offset 60, is_even=true, in log
-                    "id_80".to_string(),  // offset 80, is_even=true, in log
+                    "id_30".to_string(), // offset 30, is_even=true, in compact
+                    "id_40".to_string(), // offset 40, is_even=true, in compact
+                    "id_60".to_string(), // offset 60, is_even=true, in log
+                    "id_80".to_string(), // offset 80, is_even=true, in log
                 ]),
             ),
         });
@@ -1210,12 +1210,12 @@ mod tests {
         // All selected IDs have even offsets, so they should all pass the is_even filter
         assert_eq!(
             filter_output.log_offset_ids,
-            SignedRoaringBitmap::Include(vec![60, 80].into_iter().collect())
+            SignedRoaringBitmap::Include([60, 80].iter().collect())
         );
-        
+
         assert_eq!(
             filter_output.compact_offset_ids,
-            SignedRoaringBitmap::Include(vec![30, 40].into_iter().collect())
+            SignedRoaringBitmap::Include([30, 40].iter().collect())
         );
     }
 
