@@ -313,6 +313,25 @@ Add the following to your `~/Library/Application Support/Claude/claude_desktop_c
 {% /Step %}
 {% /ComboboxEntry %}
 
+{% ComboboxEntry value="warp" label="Warp" %}
+{% Step %}
+Add the following to your Warp MCP config. Make sure to click "Start" on the server after adding.
+
+```JSON
+{
+    "package-search": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://mcp.trychroma.com/package-search/v1", "--header", "x-chroma-token: ${X_CHROMA_TOKEN}"],
+      "env": {
+        "X_CHROMA_TOKEN": "<YOUR_CHROMA_API_KEY>"
+      }
+    }
+}
+```
+
+{% /Step %}
+{% /ComboboxEntry %}
+
 {% ComboboxEntry value="open-code" label="Open Code" %}
 {% Step %}
 Add the following to your `~/.config/opencode/opencode.json` file with your Chroma Cloud API key:
