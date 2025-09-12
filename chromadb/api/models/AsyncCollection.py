@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Union, List
+from typing import TYPE_CHECKING, Optional, Union, List, cast
 
 from chromadb.api.types import (
     URI,
@@ -17,6 +17,7 @@ from chromadb.api.types import (
     OneOrMany,
     WhereDocument,
     SearchResult,
+    maybe_cast_one_to_many,
 )
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
@@ -292,18 +293,18 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
     async def search(
         self,
-        searches: List[Search],
+        searches: OneOrMany[Search],
     ) -> SearchResult:
         """Perform hybrid search on the collection.
         This is an experimental API that only works for Hosted Chroma for now.
-        
+
         Args:
-            searches: List of Search objects, each containing:
+            searches: A single Search object or a list of Search objects, each containing:
                 - filter: SearchFilter with query_ids and where_clause
                 - rank: Ranking expression for hybrid search (defaults to Val(0.0))
                 - limit: Limit configuration for pagination (defaults to no limit)
-                - select: Select configuration for fields to return (defaults to empty)
-        
+                - select: Select configuration for keys to return (defaults to empty)
+
         Returns:
             SearchResult: Column-major format response with:
                 - ids: List of result IDs for each search payload
@@ -311,42 +312,56 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
                 - embeddings: Optional embeddings for each payload
                 - metadatas: Optional metadata for each payload
                 - scores: Optional scores for each payload
-                - select: List of selected fields for each payload
-        
+                - select: List of selected keys for each payload
+
         Raises:
             NotImplementedError: For local/segment API implementations
-        
+
         Examples:
-            # Using builder pattern
+            # Using builder pattern with Key constants
             from chromadb.execution.expression import (
-                Search, Key, K, Knn, Val, SelectField
+                Search, Key, K, Knn, Val
             )
-            
+
+            # Note: K is an alias for Key, so K.DOCUMENT == Key.DOCUMENT
             search = (Search()
-                .where((Key("category") == "science") & (Key("score") > 0.5))
-                .rank(Knn(embedding=[0.1, 0.2, 0.3]) * 0.8 + Val(0.5) * 0.2)
+                .where((K("category") == "science") & (K("score") > 0.5))
+                .rank(Knn(query=[0.1, 0.2, 0.3]) * 0.8 + Val(0.5) * 0.2)
                 .limit(10, offset=0)
-                .select(SelectField.DOCUMENT, SelectField.SCORE, "title"))
-            
+                .select(K.DOCUMENT, K.SCORE, "title"))
+
             # Direct construction
             from chromadb.execution.expression import (
-                Search, SearchFilter, Eq, And, Gt, Knn, Limit, Select, SelectField
+                Search, SearchFilter, Eq, And, Gt, Knn, Limit, Select, Key
             )
-            
+
             search = Search(
                 filter=SearchFilter(
                     where_clause=And([Eq("category", "science"), Gt("score", 0.5)])
                 ),
-                rank=Knn(embedding=[0.1, 0.2, 0.3]),
+                rank=Knn(query=[0.1, 0.2, 0.3]),
                 limit=Limit(offset=0, limit=10),
-                select=Select(fields={SelectField.DOCUMENT, SelectField.SCORE})
+                select=Select(keys={Key.DOCUMENT, Key.SCORE, "title"})
             )
+
+            # Single search
+            result = await collection.search(search)
             
-            results = await collection.search([search])
+            # Multiple searches at once
+            searches = [
+                Search().where(K("type") == "article").rank(Knn(query=[0.1, 0.2])),
+                Search().where(K("type") == "paper").rank(Knn(query=[0.3, 0.4]))
+            ]
+            results = await collection.search(searches)
         """
+        # Convert single search to list for consistent handling
+        searches_list = maybe_cast_one_to_many(searches)
+        if searches_list is None:
+            searches_list = []
+
         return await self._client._search(
             collection_id=self.id,
-            searches=searches,
+            searches=cast(List[Search], searches_list),
             tenant=self.tenant,
             database=self.database,
         )

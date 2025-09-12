@@ -32,7 +32,7 @@ from chromadb.base_types import (
 )
 
 if TYPE_CHECKING:
-    from chromadb.execution.expression.operator import SelectField
+    pass
 from inspect import signature
 from tenacity import retry
 from abc import abstractmethod
@@ -505,9 +505,7 @@ class SearchResult(TypedDict):
     embeddings: List[Optional[List[Optional[List[float]]]]]
     metadatas: List[Optional[List[Optional[Dict[str, Any]]]]]
     scores: List[Optional[List[Optional[float]]]]
-    select: List[
-        List[Union["SelectField", str]]
-    ]  # List of SelectField enums or string field names for each payload
+    select: List[List[str]]  # List of string key names for each payload
 
 
 class UpdateRequest(TypedDict):

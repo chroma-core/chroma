@@ -510,8 +510,8 @@ impl WorkerServer {
             let spann_provider = self.spann_provider.clone();
 
             knn_futures.push(async move {
-                let result = match knn_query.embedding {
-                    QueryVector::Dense(embedding) => {
+                let result = match knn_query.query {
+                    QueryVector::Dense(query) => {
                         // Check segment type to decide between HNSW and SPANN
                         let vector_segment_type =
                             collection_and_segments_clone.vector_segment.r#type;
@@ -525,7 +525,7 @@ impl WorkerServer {
                                 collection_and_segments_clone,
                                 knn_filter_output_clone,
                                 knn_query.limit as usize,
-                                embedding,
+                                query,
                             );
 
                             spann_orchestrator
@@ -535,7 +535,7 @@ impl WorkerServer {
                         } else {
                             // Use HNSW KNN orchestrator
                             let knn = Knn {
-                                embedding,
+                                embedding: query,
                                 fetch: knn_query.limit,
                             };
 
@@ -554,7 +554,7 @@ impl WorkerServer {
                                 .map_err(|e| Status::new(e.code().into(), e.to_string()))?
                         }
                     }
-                    QueryVector::Sparse(embedding) => {
+                    QueryVector::Sparse(query) => {
                         // Use Sparse KNN orchestrator
                         let sparse_orchestrator = SparseKnnOrchestrator::new(
                             blockfile_provider,
@@ -562,7 +562,7 @@ impl WorkerServer {
                             1000,
                             collection_and_segments_clone,
                             knn_filter_output_clone,
-                            embedding,
+                            query,
                             knn_query.key.clone(),
                             knn_query.limit,
                         );

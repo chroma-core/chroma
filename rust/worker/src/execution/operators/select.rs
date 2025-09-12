@@ -7,7 +7,7 @@ use chroma_segment::{
 };
 use chroma_system::Operator;
 use chroma_types::{
-    operator::{RecordMeasure, SearchPayloadResult, SearchRecord, Select, SelectField},
+    operator::{Key, RecordMeasure, SearchPayloadResult, SearchRecord, Select},
     Segment,
 };
 use futures::{stream, StreamExt, TryStreamExt};
@@ -102,20 +102,20 @@ impl Operator<SelectInput, SelectOutput> for Select {
             })
             .collect::<HashMap<_, _>>();
 
-        // Determine which fields to select
-        let select_document = self.fields.contains(&SelectField::Document);
-        let select_embedding = self.fields.contains(&SelectField::Embedding);
-        let select_score = self.fields.contains(&SelectField::Score);
+        // Determine which keys to select
+        let select_document = self.keys.contains(&Key::Document);
+        let select_embedding = self.keys.contains(&Key::Embedding);
+        let select_score = self.keys.contains(&Key::Score);
 
         // Check if we need to select any metadata
-        let select_all_metadata = self.fields.contains(&SelectField::Metadata);
+        let select_all_metadata = self.keys.contains(&Key::Metadata);
 
-        // Collect specific metadata fields to select
+        // Collect specific metadata keys to select
         let metadata_fields_to_select = self
-            .fields
+            .keys
             .iter()
             .filter_map(|field| {
-                if let SelectField::MetadataField(key) = field {
+                if let Key::MetadataField(key) = field {
                     Some(key.clone())
                 } else {
                     None
@@ -239,10 +239,10 @@ mod tests {
     async fn test_select_with_score_only() {
         let (_test_segment, input) = setup_select_input().await;
 
-        let mut fields = HashSet::new();
-        fields.insert(SelectField::Score);
+        let mut keys = HashSet::new();
+        keys.insert(Key::Score);
 
-        let select_operator = Select { fields };
+        let select_operator = Select { keys };
 
         let output = select_operator
             .run(&input)
@@ -264,16 +264,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_select_with_all_fields() {
+    async fn test_select_with_all_keys() {
         let (_test_segment, input) = setup_select_input().await;
 
-        let mut fields = HashSet::new();
-        fields.insert(SelectField::Document);
-        fields.insert(SelectField::Embedding);
-        fields.insert(SelectField::Metadata);
-        fields.insert(SelectField::Score);
+        let mut keys = HashSet::new();
+        keys.insert(Key::Document);
+        keys.insert(Key::Embedding);
+        keys.insert(Key::Metadata);
+        keys.insert(Key::Score);
 
-        let select_operator = Select { fields };
+        let select_operator = Select { keys };
 
         let output = select_operator
             .run(&input)
@@ -282,7 +282,7 @@ mod tests {
 
         assert_eq!(output.records.len(), 3);
 
-        // Check all fields are present
+        // Check all keys are present
         for record in &output.records {
             assert!(!record.id.is_empty());
             assert!(record.document.is_some());
@@ -303,10 +303,10 @@ mod tests {
             record_segment: test_segment.record_segment,
         };
 
-        let mut fields = HashSet::new();
-        fields.insert(SelectField::Score);
+        let mut keys = HashSet::new();
+        keys.insert(Key::Score);
 
-        let select_operator = Select { fields };
+        let select_operator = Select { keys };
 
         let output = select_operator
             .run(&input)

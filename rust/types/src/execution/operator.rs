@@ -697,7 +697,7 @@ impl TryFrom<QueryVector> for chroma_proto::QueryVector {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct KnnQuery {
-    pub embedding: QueryVector,
+    pub query: QueryVector,
     pub key: String,
     pub limit: u32,
 }
@@ -750,7 +750,7 @@ pub enum RankExpr {
     Exponentiation(Box<RankExpr>),
     #[serde(rename = "$knn")]
     Knn {
-        embedding: QueryVector,
+        query: QueryVector,
         #[serde(default = "RankExpr::default_knn_key")]
         key: String,
         #[serde(default = "RankExpr::default_knn_limit")]
@@ -758,7 +758,7 @@ pub enum RankExpr {
         #[serde(default)]
         default: Option<f32>,
         #[serde(default)]
-        ordinal: bool,
+        return_rank: bool,
     },
     #[serde(rename = "$log")]
     Logarithm(Box<RankExpr>),
@@ -804,13 +804,13 @@ impl RankExpr {
             | RankExpr::Summation(exprs) => exprs.iter().flat_map(RankExpr::knn_queries).collect(),
             RankExpr::Value(_) => Vec::new(),
             RankExpr::Knn {
-                embedding,
+                query,
                 key,
                 limit,
                 default: _,
-                ordinal: _,
+                return_rank: _,
             } => vec![KnnQuery {
-                embedding: embedding.clone(),
+                query: query.clone(),
                 key: key.clone(),
                 limit: *limit,
             }],
@@ -838,16 +838,16 @@ impl TryFrom<chroma_proto::RankExpr> for RankExpr {
                 RankExpr::Exponentiation(Box::new(RankExpr::try_from(*expr)?)),
             ),
             Some(chroma_proto::rank_expr::Rank::Knn(knn)) => {
-                let embedding = knn
-                    .embedding
-                    .ok_or(QueryConversionError::field("embedding"))?
+                let query = knn
+                    .query
+                    .ok_or(QueryConversionError::field("query"))?
                     .try_into()?;
                 Ok(RankExpr::Knn {
-                    embedding,
+                    query,
                     key: knn.key,
                     limit: knn.limit,
                     default: knn.default,
-                    ordinal: knn.ordinal,
+                    return_rank: knn.return_rank,
                 })
             }
             Some(chroma_proto::rank_expr::Rank::Logarithm(expr)) => {
@@ -908,7 +908,7 @@ impl TryFrom<RankExpr> for chroma_proto::RankExpr {
                 chroma_proto::RankExpr::try_from(*expr)?,
             )),
             RankExpr::Division { left, right } => chroma_proto::rank_expr::Rank::Division(
-                Box::new(chroma_proto::rank_expr::Division {
+                Box::new(chroma_proto::rank_expr::RankPair {
                     left: Some(Box::new(chroma_proto::RankExpr::try_from(*left)?)),
                     right: Some(Box::new(chroma_proto::RankExpr::try_from(*right)?)),
                 }),
@@ -917,17 +917,17 @@ impl TryFrom<RankExpr> for chroma_proto::RankExpr {
                 Box::new(chroma_proto::RankExpr::try_from(*expr)?),
             ),
             RankExpr::Knn {
-                embedding,
+                query,
                 key,
                 limit,
                 default,
-                ordinal,
+                return_rank,
             } => chroma_proto::rank_expr::Rank::Knn(chroma_proto::rank_expr::Knn {
-                embedding: Some(embedding.try_into()?),
+                query: Some(query.try_into()?),
                 key,
                 limit,
                 default,
-                ordinal,
+                return_rank,
             }),
             RankExpr::Logarithm(expr) => chroma_proto::rank_expr::Rank::Logarithm(Box::new(
                 chroma_proto::RankExpr::try_from(*expr)?,
@@ -960,7 +960,7 @@ impl TryFrom<RankExpr> for chroma_proto::RankExpr {
                 })
             }
             RankExpr::Subtraction { left, right } => chroma_proto::rank_expr::Rank::Subtraction(
-                Box::new(chroma_proto::rank_expr::Subtraction {
+                Box::new(chroma_proto::rank_expr::RankPair {
                     left: Some(Box::new(chroma_proto::RankExpr::try_from(*left)?)),
                     right: Some(Box::new(chroma_proto::RankExpr::try_from(*right)?)),
                 }),
@@ -984,8 +984,8 @@ impl TryFrom<RankExpr> for chroma_proto::RankExpr {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ToSchema)]
-pub enum SelectField {
-    // Predefined fields
+pub enum Key {
+    // Predefined keys
     Document,
     Embedding,
     Metadata,
@@ -993,34 +993,34 @@ pub enum SelectField {
     MetadataField(String),
 }
 
-impl Serialize for SelectField {
+impl Serialize for Key {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
         match self {
-            SelectField::Document => serializer.serialize_str("#document"),
-            SelectField::Embedding => serializer.serialize_str("#embedding"),
-            SelectField::Metadata => serializer.serialize_str("#metadata"),
-            SelectField::Score => serializer.serialize_str("#score"),
-            SelectField::MetadataField(field) => serializer.serialize_str(field),
+            Key::Document => serializer.serialize_str("#document"),
+            Key::Embedding => serializer.serialize_str("#embedding"),
+            Key::Metadata => serializer.serialize_str("#metadata"),
+            Key::Score => serializer.serialize_str("#score"),
+            Key::MetadataField(field) => serializer.serialize_str(field),
         }
     }
 }
 
-impl<'de> Deserialize<'de> for SelectField {
+impl<'de> Deserialize<'de> for Key {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
         Ok(match s.as_str() {
-            "#document" => SelectField::Document,
-            "#embedding" => SelectField::Embedding,
-            "#metadata" => SelectField::Metadata,
-            "#score" => SelectField::Score,
+            "#document" => Key::Document,
+            "#embedding" => Key::Embedding,
+            "#metadata" => Key::Metadata,
+            "#score" => Key::Score,
             // Any other string is treated as a metadata field key
-            field => SelectField::MetadataField(field.to_string()),
+            field => Key::MetadataField(field.to_string()),
         })
     }
 }
@@ -1028,24 +1028,24 @@ impl<'de> Deserialize<'de> for SelectField {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Select {
     #[serde(default)]
-    pub fields: HashSet<SelectField>,
+    pub keys: HashSet<Key>,
 }
 
 impl TryFrom<chroma_proto::SelectOperator> for Select {
     type Error = QueryConversionError;
 
     fn try_from(value: chroma_proto::SelectOperator) -> Result<Self, Self::Error> {
-        let fields = value
-            .fields
+        let keys = value
+            .keys
             .into_iter()
-            .map(|field| {
-                // Try to deserialize each string as a SelectField
-                serde_json::from_value(serde_json::Value::String(field))
-                    .map_err(|_| QueryConversionError::field("fields"))
+            .map(|key| {
+                // Try to deserialize each string as a Key
+                serde_json::from_value(serde_json::Value::String(key))
+                    .map_err(|_| QueryConversionError::field("keys"))
             })
             .collect::<Result<HashSet<_>, _>>()?;
 
-        Ok(Self { fields })
+        Ok(Self { keys })
     }
 }
 
@@ -1053,19 +1053,19 @@ impl TryFrom<Select> for chroma_proto::SelectOperator {
     type Error = QueryConversionError;
 
     fn try_from(value: Select) -> Result<Self, Self::Error> {
-        let fields = value
-            .fields
+        let keys = value
+            .keys
             .into_iter()
-            .map(|field| {
-                // Serialize each SelectField back to string
-                serde_json::to_value(&field)
+            .map(|key| {
+                // Serialize each Key back to string
+                serde_json::to_value(&key)
                     .ok()
                     .and_then(|v| v.as_str().map(String::from))
-                    .ok_or(QueryConversionError::field("fields"))
+                    .ok_or(QueryConversionError::field("keys"))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Self { fields })
+        Ok(Self { keys })
     }
 }
 
@@ -1447,55 +1447,52 @@ mod tests {
     }
 
     #[test]
-    fn test_select_field_json_serialization() {
+    fn test_select_key_json_serialization() {
         use std::collections::HashSet;
 
-        // Test predefined fields
-        let doc_field = SelectField::Document;
-        assert_eq!(serde_json::to_string(&doc_field).unwrap(), "\"#document\"");
+        // Test predefined keys
+        let doc_key = Key::Document;
+        assert_eq!(serde_json::to_string(&doc_key).unwrap(), "\"#document\"");
 
-        let embed_field = SelectField::Embedding;
+        let embed_key = Key::Embedding;
+        assert_eq!(serde_json::to_string(&embed_key).unwrap(), "\"#embedding\"");
+
+        let meta_key = Key::Metadata;
+        assert_eq!(serde_json::to_string(&meta_key).unwrap(), "\"#metadata\"");
+
+        let score_key = Key::Score;
+        assert_eq!(serde_json::to_string(&score_key).unwrap(), "\"#score\"");
+
+        // Test metadata key
+        let custom_key = Key::MetadataField("custom_key".to_string());
         assert_eq!(
-            serde_json::to_string(&embed_field).unwrap(),
-            "\"#embedding\""
-        );
-
-        let meta_field = SelectField::Metadata;
-        assert_eq!(serde_json::to_string(&meta_field).unwrap(), "\"#metadata\"");
-
-        let score_field = SelectField::Score;
-        assert_eq!(serde_json::to_string(&score_field).unwrap(), "\"#score\"");
-
-        // Test metadata field
-        let custom_field = SelectField::MetadataField("custom_key".to_string());
-        assert_eq!(
-            serde_json::to_string(&custom_field).unwrap(),
+            serde_json::to_string(&custom_key).unwrap(),
             "\"custom_key\""
         );
 
         // Test deserialization
-        let deserialized: SelectField = serde_json::from_str("\"#document\"").unwrap();
-        assert!(matches!(deserialized, SelectField::Document));
+        let deserialized: Key = serde_json::from_str("\"#document\"").unwrap();
+        assert!(matches!(deserialized, Key::Document));
 
-        let deserialized: SelectField = serde_json::from_str("\"custom_field\"").unwrap();
-        assert!(matches!(deserialized, SelectField::MetadataField(s) if s == "custom_field"));
+        let deserialized: Key = serde_json::from_str("\"custom_field\"").unwrap();
+        assert!(matches!(deserialized, Key::MetadataField(s) if s == "custom_field"));
 
-        // Test Select struct with multiple fields
-        let mut fields = HashSet::new();
-        fields.insert(SelectField::Document);
-        fields.insert(SelectField::Embedding);
-        fields.insert(SelectField::MetadataField("author".to_string()));
+        // Test Select struct with multiple keys
+        let mut keys = HashSet::new();
+        keys.insert(Key::Document);
+        keys.insert(Key::Embedding);
+        keys.insert(Key::MetadataField("author".to_string()));
 
-        let select = Select { fields };
+        let select = Select { keys };
         let json = serde_json::to_string(&select).unwrap();
         let deserialized: Select = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(deserialized.fields.len(), 3);
-        assert!(deserialized.fields.contains(&SelectField::Document));
-        assert!(deserialized.fields.contains(&SelectField::Embedding));
+        assert_eq!(deserialized.keys.len(), 3);
+        assert!(deserialized.keys.contains(&Key::Document));
+        assert!(deserialized.keys.contains(&Key::Embedding));
         assert!(deserialized
-            .fields
-            .contains(&SelectField::MetadataField("author".to_string())));
+            .keys
+            .contains(&Key::MetadataField("author".to_string())));
     }
 
     #[test]

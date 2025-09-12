@@ -28,6 +28,16 @@ from chromadb.api.types import (
     WhereDocument,
     UpdateCollectionMetadata,
 )
+
+# Import Search API components
+from chromadb.execution.expression.plan import Search
+from chromadb.execution.expression.operator import (
+    # Key builder for where conditions and field selection
+    Key,
+    K,  # Alias for Key
+    # KNN-based ranking for hybrid search
+    Knn,
+)
 from pathlib import Path
 import os
 
@@ -51,6 +61,11 @@ __all__ = [
     "QueryResult",
     "GetResult",
     "TokenTransportHeader",
+    # Search API components
+    "Search",
+    "Key",
+    "K",
+    "Knn",
 ]
 
 from chromadb.types import CloudClientArg

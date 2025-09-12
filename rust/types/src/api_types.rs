@@ -2,11 +2,11 @@ use crate::collection_configuration::InternalCollectionConfiguration;
 use crate::collection_configuration::InternalUpdateCollectionConfiguration;
 use crate::error::QueryConversionError;
 use crate::operator::GetResult;
+use crate::operator::Key;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
 use crate::operator::SearchResult;
-use crate::operator::SelectField;
 use crate::plan::PlanToProtoError;
 use crate::plan::SearchPayload;
 use crate::validators::{
@@ -1875,7 +1875,7 @@ pub struct SearchResponse {
     pub embeddings: Vec<Option<Vec<Option<Vec<f32>>>>>,
     pub metadatas: Vec<Option<Vec<Option<Metadata>>>>,
     pub scores: Vec<Option<Vec<Option<f32>>>>,
-    pub select: Vec<Vec<SelectField>>,
+    pub select: Vec<Vec<Key>>,
 }
 
 impl From<(SearchResult, Vec<SearchPayload>)> for SearchResponse {
@@ -1891,8 +1891,8 @@ impl From<(SearchResult, Vec<SearchPayload>)> for SearchResponse {
         };
 
         for (payload_result, payload) in result.results.into_iter().zip(payloads) {
-            // Get the sorted select fields for this payload
-            let mut payload_select = Vec::from_iter(payload.select.fields.iter().cloned());
+            // Get the sorted keys for this payload
+            let mut payload_select = Vec::from_iter(payload.select.keys.iter().cloned());
             payload_select.sort();
 
             let num_records = payload_result.records.len();
@@ -1916,7 +1916,7 @@ impl From<(SearchResult, Vec<SearchPayload>)> for SearchResponse {
             // Push documents if requested by this payload, otherwise None
             res.documents.push(
                 payload_select
-                    .binary_search(&SelectField::Document)
+                    .binary_search(&Key::Document)
                     .is_ok()
                     .then_some(documents),
             );
@@ -1924,23 +1924,23 @@ impl From<(SearchResult, Vec<SearchPayload>)> for SearchResponse {
             // Push embeddings if requested by this payload, otherwise None
             res.embeddings.push(
                 payload_select
-                    .binary_search(&SelectField::Embedding)
+                    .binary_search(&Key::Embedding)
                     .is_ok()
                     .then_some(embeddings),
             );
 
             // Push metadatas if requested by this payload, otherwise None
-            // Include if either SelectField::Metadata is present or any SelectField::MetadataField(_)
-            let has_metadata = payload_select.binary_search(&SelectField::Metadata).is_ok()
+            // Include if either Key::Metadata is present or any Key::MetadataField(_)
+            let has_metadata = payload_select.binary_search(&Key::Metadata).is_ok()
                 || payload_select
                     .last()
-                    .is_some_and(|field| matches!(field, SelectField::MetadataField(_)));
+                    .is_some_and(|field| matches!(field, Key::MetadataField(_)));
             res.metadatas.push(has_metadata.then_some(metadatas));
 
             // Push scores if requested by this payload, otherwise None
             res.scores.push(
                 payload_select
-                    .binary_search(&SelectField::Score)
+                    .binary_search(&Key::Score)
                     .is_ok()
                     .then_some(scores),
             );

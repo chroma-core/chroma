@@ -26,7 +26,7 @@ use crate::execution::operators::fetch_log::FetchLogOutput;
 
 #[derive(Debug)]
 pub struct Idf {
-    pub embedding: SparseVector,
+    pub query: SparseVector,
     pub key: String,
 }
 
@@ -41,7 +41,7 @@ pub struct IdfInput {
 
 #[derive(Clone, Debug)]
 pub struct IdfOutput {
-    pub scaled_embedding: SparseVector,
+    pub scaled_query: SparseVector,
 }
 
 #[derive(Debug, Error)]
@@ -102,7 +102,7 @@ impl Operator<IdfInput, IdfOutput> for Idf {
         .await?;
 
         if let Some(sparse_index_reader) = metadata_segment_reader.sparse_index_reader.as_ref() {
-            for &dimension_id in &self.embedding.indices {
+            for &dimension_id in &self.query.indices {
                 let encoded_dimension_id = encode_u32(dimension_id);
                 let nt = sparse_index_reader
                     .get_dimension_offset_rank(&encoded_dimension_id, u32::MAX)
@@ -164,14 +164,13 @@ impl Operator<IdfInput, IdfOutput> for Idf {
             };
         }
 
-        let scaled_embedding =
-            SparseVector::from_pairs(self.embedding.iter().map(|(index, value)| {
-                let nt = nts.get(&index).cloned().unwrap_or_default() as f32;
-                let scale = ((n as f32 - nt + 0.5) / (nt + 0.5)).ln_1p();
-                (index, scale * value)
-            }));
+        let scaled_query = SparseVector::from_pairs(self.query.iter().map(|(index, value)| {
+            let nt = nts.get(&index).cloned().unwrap_or_default() as f32;
+            let scale = ((n as f32 - nt + 0.5) / (nt + 0.5)).ln_1p();
+            (index, scale * value)
+        }));
 
-        Ok(IdfOutput { scaled_embedding })
+        Ok(IdfOutput { scaled_query })
     }
 }
 
@@ -262,7 +261,7 @@ mod tests {
         };
 
         let idf_operator = Idf {
-            embedding: query_vector,
+            query: query_vector,
             key: "sparse_embedding".to_string(),
         };
 
@@ -278,7 +277,7 @@ mod tests {
         // Term 3: appears in 5/10 docs, IDF = ln((10 - 5 + 0.5) / (5 + 0.5) + 1) = ln(2) ≈ 0.693
         // Term 4: appears in 2/10 docs, IDF = ln((10 - 2 + 0.5) / (2 + 0.5) + 1) = ln(4.4) ≈ 1.482
 
-        let scaled = &output.scaled_embedding;
+        let scaled = &output.scaled_query;
         assert_eq!(scaled.indices.len(), 5);
 
         // Check IDF values with tolerance for floating point
@@ -332,7 +331,7 @@ mod tests {
         };
 
         let idf_operator = Idf {
-            embedding: query_vector,
+            query: query_vector,
             key: "sparse_embedding".to_string(),
         };
 
@@ -347,7 +346,7 @@ mod tests {
         // Term 1: originally in docs 1,2,3 (3 docs), after deleting 1 -> in docs 2,3 (2 docs)
         // Term 2: originally in doc 1 (1 doc), after deleting 1 -> in 0 docs
 
-        let scaled = &output.scaled_embedding;
+        let scaled = &output.scaled_query;
 
         // Term 0: IDF = ln((8 - 3 + 0.5) / (3 + 0.5) + 1) = ln(2.571) ≈ 0.944
         assert!(
@@ -413,7 +412,7 @@ mod tests {
         };
 
         let idf_operator = Idf {
-            embedding: query_vector,
+            query: query_vector,
             key: "sparse_embedding".to_string(),
         };
 
@@ -429,7 +428,7 @@ mod tests {
         // Term 2: now in 2/10 docs (was 1, gained doc 5)
         // Term 3: now in 4/10 docs (was 5, lost doc 6)
 
-        let scaled = &output.scaled_embedding;
+        let scaled = &output.scaled_query;
 
         // Term 0: IDF = ln((10 - 5 + 0.5) / (5 + 0.5) + 1) = ln(2) ≈ 0.693
         assert!((scaled.values[0] - 0.693).abs() < 0.01);
@@ -486,7 +485,7 @@ mod tests {
         };
 
         let idf_operator = Idf {
-            embedding: query_vector,
+            query: query_vector,
             key: "sparse_embedding".to_string(),
         };
 
@@ -500,7 +499,7 @@ mod tests {
         // Term 0: now in 6/12 docs (was 5, added 1)
         // Term 5: now in 2/12 docs (new term)
 
-        let scaled = &output.scaled_embedding;
+        let scaled = &output.scaled_query;
 
         // Term 0: IDF = ln((12 - 6 + 0.5) / (6 + 0.5) + 1) = ln(2) ≈ 0.693
         assert!(
@@ -528,7 +527,7 @@ mod tests {
         };
 
         let idf_operator = Idf {
-            embedding: query_vector,
+            query: query_vector,
             key: "sparse_embedding".to_string(),
         };
 
@@ -538,8 +537,8 @@ mod tests {
             .expect("IDF operator should succeed");
 
         // Should return empty scaled embedding
-        assert_eq!(output.scaled_embedding.indices.len(), 0);
-        assert_eq!(output.scaled_embedding.values.len(), 0);
+        assert_eq!(output.scaled_query.indices.len(), 0);
+        assert_eq!(output.scaled_query.values.len(), 0);
     }
 
     #[tokio::test]
@@ -553,7 +552,7 @@ mod tests {
         };
 
         let idf_operator = Idf {
-            embedding: query_vector,
+            query: query_vector,
             key: "sparse_embedding".to_string(),
         };
 
@@ -564,7 +563,7 @@ mod tests {
 
         // For terms not in any document, n_t = 0
         // IDF = ln((10 - 0 + 0.5) / (0 + 0.5) + 1) = ln(22) ≈ 3.091
-        let scaled = &output.scaled_embedding;
+        let scaled = &output.scaled_query;
         assert_eq!(scaled.indices.len(), 2);
         assert!((scaled.values[0] - 3.091).abs() < 0.01);
         assert!((scaled.values[1] - 6.182).abs() < 0.01); // 2.0 * 3.091

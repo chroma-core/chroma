@@ -78,13 +78,13 @@ impl SpannKnnOrchestrator {
         collection_and_segments: CollectionAndSegments,
         knn_filter_output: KnnFilterOutput,
         k: usize,
-        query_embedding: Vec<f32>,
+        query: Vec<f32>,
     ) -> Self {
         let normalized_query_emb =
             if knn_filter_output.distance_function == DistanceFunction::Cosine {
-                normalize(&query_embedding)
+                normalize(&query)
             } else {
-                query_embedding.clone()
+                query.clone()
             };
         let context = OrchestratorContext::new(dispatcher);
         let blockfile_provider = spann_provider.blockfile_provider.clone();
@@ -98,7 +98,7 @@ impl SpannKnnOrchestrator {
             k,
             normalized_query_emb,
             log_knn: Knn {
-                embedding: query_embedding,
+                embedding: query,
                 fetch: k as u32,
             },
             head_search: SpannCentersSearchOperator {},

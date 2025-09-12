@@ -416,7 +416,7 @@ pub enum WhereMixin {
     /// each of integer, float, and string.  The integer fields are named i1, i2, and i3.  The
     /// float fields are named f1, f2, and f3.  The string fields are named s1, s2, and s3.
     ///
-    /// This mixin selects one of these 6 numeric fields at random and picks a metadata range query
+    /// This mixin selects one of these 6 numeric metadata keys at random and picks a metadata range query
     /// to perform on it that will return data according to the mixin.
     #[serde(rename = "tiny-stories")]
     TinyStories(TinyStoriesMixin),

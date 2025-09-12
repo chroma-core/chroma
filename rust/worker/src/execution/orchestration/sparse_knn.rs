@@ -87,7 +87,7 @@ pub struct SparseKnnOrchestrator {
     knn_filter_output: KnnFilterOutput,
 
     // Sparse Knn params shared between log and segments
-    embedding: SparseVector,
+    query: SparseVector,
     key: String,
     limit: u32,
 
@@ -109,7 +109,7 @@ impl SparseKnnOrchestrator {
         queue: usize,
         collection_and_segments: CollectionAndSegments,
         knn_filter_output: KnnFilterOutput,
-        embedding: SparseVector,
+        query: SparseVector,
         key: String,
         limit: u32,
     ) -> Self {
@@ -120,7 +120,7 @@ impl SparseKnnOrchestrator {
             queue,
             collection_and_segments,
             knn_filter_output,
-            embedding,
+            query,
             key,
             limit,
             batch_measures: Vec::with_capacity(2),
@@ -131,12 +131,12 @@ impl SparseKnnOrchestrator {
 
     fn sparse_knn_tasks(
         &mut self,
-        embedding: SparseVector,
+        query: SparseVector,
         ctx: &ComponentContext<Self>,
     ) -> Vec<TaskMessage> {
         let sparse_log_knn_task = wrap(
             Box::new(SparseLogKnn {
-                embedding: embedding.clone(),
+                query: query.clone(),
                 key: self.key.clone(),
                 limit: self.limit,
             }),
@@ -152,7 +152,7 @@ impl SparseKnnOrchestrator {
 
         let sparse_index_knn_task = wrap(
             Box::new(SparseIndexKnn {
-                embedding,
+                query,
                 key: self.key.clone(),
                 limit: self.limit,
             }),
@@ -208,14 +208,14 @@ impl Orchestrator for SparseKnnOrchestrator {
             self.collection_and_segments.metadata_segment.scope,
             chroma_types::SegmentScope::METADATA
         ) {
-            self.sparse_knn_tasks(self.embedding.clone(), ctx)
+            self.sparse_knn_tasks(self.query.clone(), ctx)
                 .into_iter()
                 .map(|task| (task, Some(Span::current())))
                 .collect()
         } else {
             let idf_task = wrap(
                 Box::new(Idf {
-                    embedding: self.embedding.clone(),
+                    query: self.query.clone(),
                     key: self.key.clone(),
                 }),
                 IdfInput {
@@ -260,7 +260,7 @@ impl Handler<TaskResult<IdfOutput, IdfError>> for SparseKnnOrchestrator {
             Some(output) => output,
             None => return,
         };
-        for task in self.sparse_knn_tasks(output.scaled_embedding, ctx) {
+        for task in self.sparse_knn_tasks(output.scaled_query, ctx) {
             self.send(task, ctx, Some(Span::current())).await;
         }
     }

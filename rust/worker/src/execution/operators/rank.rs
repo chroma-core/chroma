@@ -132,11 +132,11 @@ where
                     RankDomain::merge(accumulate_domain, domain, f32::mul)
                 }),
             RankExpr::Knn {
-                embedding: _,
+                query: _,
                 key: _,
                 limit: _,
                 default,
-                ordinal,
+                return_rank,
             } => {
                 let support = self
                     .knn_result_iter
@@ -145,7 +145,7 @@ where
                     .into_iter()
                     .enumerate()
                     .map(|(index, RecordMeasure { offset_id, measure })| {
-                        (offset_id, if ordinal { index as f32 } else { measure })
+                        (offset_id, if return_rank { index as f32 } else { measure })
                     })
                     .collect();
                 RankDomain { support, default }
@@ -214,7 +214,7 @@ mod tests {
     #[tokio::test]
     async fn test_rank_with_knn_results() {
         let query = KnnQuery {
-            embedding: chroma_types::operator::QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+            query: chroma_types::operator::QueryVector::Dense(vec![0.1, 0.2, 0.3]),
             key: String::new(),
             limit: 3,
         };
@@ -235,11 +235,11 @@ mod tests {
 
         // Test simple KNN rank
         let expr = RankExpr::Knn {
-            embedding: query.embedding.clone(),
+            query: query.query.clone(),
             key: String::new(),
             limit: query.limit,
             default: None,
-            ordinal: false,
+            return_rank: false,
         };
         let input = RankInput { knn_results };
 
@@ -253,12 +253,12 @@ mod tests {
     #[tokio::test]
     async fn test_rank_arithmetic_operations() {
         let query1 = KnnQuery {
-            embedding: chroma_types::operator::QueryVector::Dense(vec![0.1]),
+            query: chroma_types::operator::QueryVector::Dense(vec![0.1]),
             key: String::new(),
             limit: 2,
         };
         let query2 = KnnQuery {
-            embedding: chroma_types::operator::QueryVector::Sparse(chroma_types::SparseVector {
+            query: chroma_types::operator::QueryVector::Sparse(chroma_types::SparseVector {
                 indices: vec![0],
                 values: vec![1.0],
             }),
@@ -291,18 +291,18 @@ mod tests {
         // Test summation
         let expr = RankExpr::Summation(vec![
             RankExpr::Knn {
-                embedding: query1.embedding.clone(),
+                query: query1.query.clone(),
                 key: String::new(),
                 limit: query1.limit,
                 default: None,
-                ordinal: false,
+                return_rank: false,
             },
             RankExpr::Knn {
-                embedding: query2.embedding.clone(),
+                query: query2.query.clone(),
                 key: "sparse".to_string(),
                 limit: query2.limit,
                 default: None,
-                ordinal: false,
+                return_rank: false,
             },
         ]);
         let input = RankInput {
@@ -322,11 +322,11 @@ mod tests {
         knn_results.pop();
         let expr = RankExpr::Multiplication(vec![
             RankExpr::Knn {
-                embedding: query1.embedding.clone(),
+                query: query1.query.clone(),
                 key: String::new(),
                 limit: query1.limit,
                 default: None,
-                ordinal: false,
+                return_rank: false,
             },
             RankExpr::Value(0.5),
         ]);
@@ -342,7 +342,7 @@ mod tests {
     #[tokio::test]
     async fn test_rank_min_max_functions() {
         let query = KnnQuery {
-            embedding: chroma_types::operator::QueryVector::Dense(vec![0.1]),
+            query: chroma_types::operator::QueryVector::Dense(vec![0.1]),
             key: String::new(),
             limit: 2,
         };
@@ -360,11 +360,11 @@ mod tests {
         // Test max
         let expr = RankExpr::Maximum(vec![
             RankExpr::Knn {
-                embedding: query.embedding.clone(),
+                query: query.query.clone(),
                 key: String::new(),
                 limit: query.limit,
                 default: None,
-                ordinal: false,
+                return_rank: false,
             },
             RankExpr::Value(0.5),
         ]);
@@ -382,11 +382,11 @@ mod tests {
         // Test min
         let expr = RankExpr::Minimum(vec![
             RankExpr::Knn {
-                embedding: query.embedding.clone(),
+                query: query.query.clone(),
                 key: String::new(),
                 limit: query.limit,
                 default: None,
-                ordinal: false,
+                return_rank: false,
             },
             RankExpr::Value(0.5),
         ]);
