@@ -249,17 +249,18 @@ pub enum UsageType {
     UriSizeBytes,                    // Max uri size in bytes
     IdSizeBytes,                     // Max id size in bytes
     NameSizeBytes,                   // Max name size in bytes (e.g. collection, database)
-    LimitValue,
-    NumResults,
-    NumQueryEmbeddings,    // Number of query embeddings
-    CollectionSizeRecords, // Number of records in the collection
-    NumCollections,        // Total number of collections for a tenant
-    NumDatabases,          // Total number of databases for a tenant
-    NumQueryIDs,           // Number of IDs to filter by in a query
-    RegexPatternLength,    // Length of regex pattern specified in filter
-    NumForks,              // Number of forks a root collection may have
-    NumSearchPayloads,     // Number of search payloads in a search
-    NumRankKnn,            // Number of knn searches in a rank expression
+    LimitValue,                      // Max number of results to return
+    RankKnnLimit,                    // Max limit in rank knn expresion
+    NumResults,                      // Number of results
+    NumQueryEmbeddings,              // Number of query embeddings
+    CollectionSizeRecords,           // Number of records in the collection
+    NumCollections,                  // Total number of collections for a tenant
+    NumDatabases,                    // Total number of databases for a tenant
+    NumQueryIDs,                     // Number of IDs to filter by in a query
+    RegexPatternLength,              // Length of regex pattern specified in filter
+    NumForks,                        // Number of forks a root collection may have
+    NumSearchPayloads,               // Number of search payloads in a search
+    NumRankKnn,                      // Number of knns in a rank expression
 }
 
 impl fmt::Display for UsageType {
@@ -286,6 +287,7 @@ impl fmt::Display for UsageType {
             UsageType::IdSizeBytes => write!(f, "ID size (bytes)"),
             UsageType::NameSizeBytes => write!(f, "Name size (bytes)"),
             UsageType::LimitValue => write!(f, "Limit value"),
+            UsageType::RankKnnLimit => write!(f, "Limit value in rank expression"),
             UsageType::NumResults => write!(f, "Number of results"),
             UsageType::NumQueryEmbeddings => write!(f, "Number of query embeddings"),
             UsageType::CollectionSizeRecords => write!(f, "Collection size (records)"),
@@ -320,6 +322,7 @@ impl TryFrom<&str> for UsageType {
             "id_size_bytes" => Ok(UsageType::IdSizeBytes),
             "name_size_bytes" => Ok(UsageType::NameSizeBytes),
             "limit_value" => Ok(UsageType::LimitValue),
+            "rank_knn_limit" => Ok(UsageType::RankKnnLimit),
             "num_results" => Ok(UsageType::NumResults),
             "num_query_embeddings" => Ok(UsageType::NumQueryEmbeddings),
             "collection_size_records" => Ok(UsageType::CollectionSizeRecords),
@@ -357,6 +360,7 @@ impl DefaultQuota for UsageType {
             UsageType::IdSizeBytes => 128,
             UsageType::NameSizeBytes => 128,
             UsageType::LimitValue => 1000,
+            UsageType::RankKnnLimit => 1024,
             UsageType::NumResults => 100,
             UsageType::NumQueryEmbeddings => 16,
             UsageType::CollectionSizeRecords => 1_000_000,
