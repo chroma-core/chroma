@@ -65,23 +65,23 @@ where
     /// - If no client is found for the given key
     /// - If the assignment policy fails to assign the key
     pub fn clients(&mut self, assignment_key: &str) -> Result<Vec<T>, ClientAssignmentError> {
-        self.clients_with_assignment(assignment_key)
-            .map(|(clients, _)| clients)
+        self.assigned_clients(assignment_key)
+            .map(|assigned_clients| assigned_clients.into_values().collect())
     }
 
-    /// Get both the assigned nodes and clients for the given key in a single lock acquisition
+    /// Get a map of assigned node names to their clients for the given key in a single lock acquisition
     /// This avoids race conditions between separate calls to assigned_nodes() and clients()
     /// # Arguments
     /// - `assignment_key` - The key for which the client is to be fetched
     /// # Returns
-    /// - A tuple of (clients, assigned_nodes) where clients are the gRPC clients and assigned_nodes are the node names
+    /// - A HashMap<String, T> mapping assigned node names to their corresponding gRPC clients
     /// # Errors
     /// - If no client is found for the given key
     /// - If the assignment policy fails to assign the key
-    pub fn clients_with_assignment(
+    pub fn assigned_clients(
         &mut self,
         assignment_key: &str,
-    ) -> Result<(Vec<T>, Vec<String>), ClientAssignmentError> {
+    ) -> Result<HashMap<String, T>, ClientAssignmentError> {
         let node_name_to_client_guard = self.node_name_to_client.read();
         let members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
         let target_replication_factor = min(self.replication_factor, members.len());
@@ -90,16 +90,17 @@ where
             .assignment_policy
             .assign(assignment_key, target_replication_factor)?;
 
-        let clients = assigned
+        let assigned_clients = assigned
             .iter()
             .map(|node_name| {
-                node_name_to_client_guard
+                let client = node_name_to_client_guard
                     .get(node_name)
-                    .ok_or_else(|| ClientAssignmentError::NoClientFound(node_name.clone()))
-                    .cloned()
+                    .ok_or_else(|| ClientAssignmentError::NoClientFound(node_name.clone()))?
+                    .clone();
+                Ok::<(String, T), ClientAssignmentError>((node_name.clone(), client))
             })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok((clients, assigned))
+            .collect::<Result<HashMap<String, T>, ClientAssignmentError>>()?;
+        Ok(assigned_clients)
     }
 
     /// Returns the names of all nodes currently managed by the assigner.
@@ -116,13 +117,24 @@ where
         self.node_name_to_client.read().get(node_name).cloned()
     }
 
-    /// return assigned node names for a given key
+    /// Returns the assigned node names for a given key.
+    ///
+    /// This method uses the configured assignment policy to determine which nodes
+    /// are responsible for the given key.
+    ///
+    /// # Arguments
+    ///
+    /// * `assignment_key` - The key to assign to nodes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ClientAssignmentError` if the assignment policy fails.
     pub fn assigned_nodes(
         &mut self,
         assignment_key: &str,
     ) -> Result<Vec<String>, ClientAssignmentError> {
-        self.clients_with_assignment(assignment_key)
-            .map(|(_, assigned)| assigned)
+        self.assigned_clients(assignment_key)
+            .map(|assigned_clients| assigned_clients.into_keys().collect())
     }
 
     pub fn all(&self) -> Vec<T> {
