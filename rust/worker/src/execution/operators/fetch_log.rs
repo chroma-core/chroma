@@ -77,100 +77,58 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
         );
 
         let mut log_client = self.log_client.clone();
-        let limit_offset = log_client
+        let mut limit_offset = log_client
             .scout_logs(&self.tenant, self.collection_uuid, self.start_log_offset_id)
-            .await
-            .ok();
+            .await?;
         let mut fetched = Vec::new();
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() as i64;
 
-        if let Some(mut limit_offset) = limit_offset {
-            tracing::debug!(
-                "taking new code path with range [{}, {})",
-                self.start_log_offset_id,
-                limit_offset
+        if let Some(maximum_fetch_count) = self.maximum_fetch_count {
+            limit_offset = std::cmp::min(
+                limit_offset,
+                self.start_log_offset_id + maximum_fetch_count as u64,
             );
-            if let Some(maximum_fetch_count) = self.maximum_fetch_count {
-                limit_offset = std::cmp::min(
-                    limit_offset,
-                    self.start_log_offset_id + maximum_fetch_count as u64,
-                );
-            }
-            let window_size: usize = self.batch_size as usize;
-            let ranges = (self.start_log_offset_id..limit_offset)
-                .step_by(window_size)
-                .map(|x| (x, std::cmp::min(x + window_size as u64, limit_offset)))
-                .collect::<Vec<_>>();
-            let sema = Arc::new(tokio::sync::Semaphore::new(10));
-            let batch_readers = ranges
-                .into_iter()
-                .map(|(start, limit)| {
-                    let mut log_client = log_client.clone();
-                    let collection_uuid = self.collection_uuid;
-                    let num_records = (limit - start) as i32;
-                    let start = start as i64;
-                    let sema = Arc::clone(&sema);
-                    async move {
-                        let _permit = sema.acquire().await.unwrap();
-                        log_client
-                            .read(
-                                &self.tenant,
-                                collection_uuid,
-                                start,
-                                num_records,
-                                Some(timestamp),
-                            )
-                            .await
-                    }
-                })
-                .collect::<Vec<_>>();
-            let batches = futures::future::join_all(batch_readers).await;
-            for batch in batches {
-                match batch {
-                    Ok(batch) => fetched.extend(batch),
-                    Err(err) => {
-                        return Err(FetchLogError::PullLog(Box::new(err)));
-                    }
-                }
-            }
-            fetched.sort_by_key(|f| f.log_offset);
-            Ok(Chunk::new(fetched.into()))
-        } else {
-            // old behavior that we fall back to if the scout is not implemented
-            let mut offset = self.start_log_offset_id as i64;
-            loop {
-                let mut log_batch = log_client
-                    .read(
-                        &self.tenant,
-                        self.collection_uuid,
-                        offset,
-                        self.batch_size as i32,
-                        Some(timestamp),
-                    )
-                    .await?;
-
-                let retrieve_count = log_batch.len();
-
-                if let Some(last_log) = log_batch.last() {
-                    offset = last_log.log_offset + 1;
-                    fetched.append(&mut log_batch);
-                    if let Some(limit) = self.maximum_fetch_count {
-                        if fetched.len() >= limit as usize {
-                            // Enough logs have been fetched
-                            fetched.truncate(limit as usize);
-                            break;
-                        }
-                    }
-                }
-
-                if retrieve_count < self.batch_size as usize {
-                    // No more logs to fetch
-                    break;
-                }
-            }
-            tracing::info!(name: "Fetched log records", num_records = fetched.len());
-            Ok(Chunk::new(fetched.into()))
         }
+
+        let window_size: usize = self.batch_size as usize;
+        let ranges = (self.start_log_offset_id..limit_offset)
+            .step_by(window_size)
+            .map(|x| (x, std::cmp::min(x + window_size as u64, limit_offset)))
+            .collect::<Vec<_>>();
+        let sema = Arc::new(tokio::sync::Semaphore::new(10));
+        let batch_readers = ranges
+            .into_iter()
+            .map(|(start, limit)| {
+                let mut log_client = log_client.clone();
+                let collection_uuid = self.collection_uuid;
+                let num_records = (limit - start) as i32;
+                let start = start as i64;
+                let sema = Arc::clone(&sema);
+                async move {
+                    let _permit = sema.acquire().await.unwrap();
+                    log_client
+                        .read(
+                            &self.tenant,
+                            collection_uuid,
+                            start,
+                            num_records,
+                            Some(timestamp),
+                        )
+                        .await
+                }
+            })
+            .collect::<Vec<_>>();
+        let batches = futures::future::join_all(batch_readers).await;
+        for batch in batches {
+            match batch {
+                Ok(batch) => fetched.extend(batch),
+                Err(err) => {
+                    return Err(FetchLogError::PullLog(Box::new(err)));
+                }
+            }
+        }
+        fetched.sort_by_key(|f| f.log_offset);
+        Ok(Chunk::new(fetched.into()))
     }
 }
 
