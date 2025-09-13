@@ -1,12 +1,10 @@
 from chromadb.api.types import (
-    Documents,
     Embeddings,
-    Images,
     Embeddable,
     EmbeddingFunction,
 )
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
-from typing import List, Dict, Any, Union, cast, Sequence
+from typing import List, Dict, Any, cast, Sequence
 import numpy as np
 
 
@@ -100,7 +98,7 @@ class ChromaLangchainEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 "The provided embedding function does not support image embeddings."
             )
 
-    def __call__(self, input: Union[Documents, Images]) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Get the embeddings for a list of texts or images.
 
@@ -134,7 +132,7 @@ class ChromaLangchainEmbeddingFunction(EmbeddingFunction[Embeddable]):
     @staticmethod
     def build_from_config(
         config: Dict[str, Any]
-    ) -> "EmbeddingFunction[Union[Documents, Images]]":
+    ) -> "EmbeddingFunction[Embeddable]":
         # This is a placeholder implementation since we can't easily serialize and deserialize
         # langchain embedding functions. Users will need to recreate the langchain embedding function
         # and pass it to create_langchain_embedding.

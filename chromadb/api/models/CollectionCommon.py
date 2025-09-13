@@ -117,7 +117,7 @@ class CollectionCommon(Generic[ClientT]):
         model: CollectionModel,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = ef.DefaultEmbeddingFunction(),
         data_loader: Optional[DataLoader[Loadable]] = None,
     ):
         """Initializes a new instance of the Collection class."""

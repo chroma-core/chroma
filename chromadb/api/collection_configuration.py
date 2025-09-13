@@ -1,6 +1,7 @@
-from typing import TypedDict, Dict, Any, Optional, cast, get_args
+from typing import Type, TypedDict, Dict, Any, Optional, cast, get_args
 import json
 from chromadb.api.types import (
+    Embeddable,
     Space,
     CollectionMetadata,
     UpdateMetadata,
@@ -40,7 +41,7 @@ class SpannConfiguration(TypedDict, total=False):
 class CollectionConfiguration(TypedDict, total=True):
     hnsw: Optional[HNSWConfiguration]
     spann: Optional[SpannConfiguration]
-    embedding_function: Optional[EmbeddingFunction]  # type: ignore
+    embedding_function: Optional[EmbeddingFunction[Embeddable]]
 
 
 def load_collection_configuration_from_json_str(
@@ -88,13 +89,13 @@ def load_collection_configuration_from_json(
                     f"Embedding function name not found in config: {ef_config}"
                 )
             try:
-                ef = known_embedding_functions[ef_name]
+                ef_class = known_embedding_functions[ef_name]
             except KeyError:
                 raise ValueError(
                     f"Embedding function {ef_name} not found. Add @register_embedding_function decorator to the class definition."
                 )
             try:
-                ef = ef.build_from_config(ef_config["config"])  # type: ignore
+                ef = ef_class.build_from_config(ef_config["config"])
             except Exception as e:
                 raise ValueError(
                     f"Could not build embedding function {ef_config['name']} from config {ef_config['config']}: {e}"
@@ -106,7 +107,7 @@ def load_collection_configuration_from_json(
     return CollectionConfiguration(
         hnsw=hnsw_config,
         spann=spann_config,
-        embedding_function=ef,  # type: ignore
+        embedding_function=ef,
     )
 
 
@@ -257,7 +258,7 @@ def json_to_create_spann_configuration(
 class CreateCollectionConfiguration(TypedDict, total=False):
     hnsw: Optional[CreateHNSWConfiguration]
     spann: Optional[CreateSpannConfiguration]
-    embedding_function: Optional[EmbeddingFunction]  # type: ignore
+    embedding_function: Optional[EmbeddingFunction[Embeddable]]
 
 
 def load_collection_configuration_from_create_collection_configuration(
@@ -381,7 +382,7 @@ def create_collection_configuration_to_json(
         }
 
     try:
-        ef = cast(EmbeddingFunction, config.get("embedding_function"))  # type: ignore
+        ef = cast(EmbeddingFunction[Embeddable], config.get("embedding_function"))
         if ef.is_legacy():
             ef_config = {"type": "legacy"}
         else:
@@ -456,7 +457,7 @@ def create_collection_configuration_to_json(
 
 
 def populate_create_hnsw_defaults(
-    config: CreateHNSWConfiguration, ef: Optional[EmbeddingFunction] = None  # type: ignore
+    config: CreateHNSWConfiguration, ef: Optional[EmbeddingFunction[Embeddable]] = None
 ) -> CreateHNSWConfiguration:
     """Populate a CreateHNSW configuration with default values"""
     if config.get("space") is None:
@@ -522,7 +523,7 @@ def json_to_update_spann_configuration(
 class UpdateCollectionConfiguration(TypedDict, total=False):
     hnsw: Optional[UpdateHNSWConfiguration]
     spann: Optional[UpdateSpannConfiguration]
-    embedding_function: Optional[EmbeddingFunction]  # type: ignore
+    embedding_function: Optional[EmbeddingFunction[Embeddable]]
 
 
 def update_collection_configuration_from_legacy_collection_metadata(
@@ -697,9 +698,9 @@ def overwrite_spann_configuration(
 
 # TODO: make warnings prettier and add link to migration docs
 def overwrite_embedding_function(
-    existing_embedding_function: EmbeddingFunction,  # type: ignore
-    update_embedding_function: EmbeddingFunction,  # type: ignore
-) -> EmbeddingFunction:  # type: ignore
+    existing_embedding_function: EmbeddingFunction[Embeddable],
+    update_embedding_function: EmbeddingFunction[Embeddable],
+) -> EmbeddingFunction[Embeddable]:
     """Overwrite an EmbeddingFunction with a new configuration"""
     # Check for legacy embedding functions
     if existing_embedding_function.is_legacy() or update_embedding_function.is_legacy():
@@ -768,8 +769,8 @@ def overwrite_collection_configuration(
 
 
 def validate_embedding_function_conflict_on_create(
-    embedding_function: Optional[EmbeddingFunction],  # type: ignore
-    configuration_ef: Optional[EmbeddingFunction],  # type: ignore
+    embedding_function: Optional[EmbeddingFunction[Embeddable]],
+    configuration_ef: Optional[EmbeddingFunction[Embeddable]],
 ) -> None:
     """
     Validates that there are no conflicting embedding functions between function parameter
@@ -800,7 +801,7 @@ def validate_embedding_function_conflict_on_create(
 # if there is an issue with deserializing the config, an error shouldn't be raised
 # at get time. CollectionCommon.py will raise an error at _embed time if there is an issue deserializing.
 def validate_embedding_function_conflict_on_get(
-    embedding_function: Optional[EmbeddingFunction],  # type: ignore
+    embedding_function: Optional[EmbeddingFunction[Embeddable]],
     persisted_ef_config: Optional[Dict[str, Any]],
 ) -> None:
     """

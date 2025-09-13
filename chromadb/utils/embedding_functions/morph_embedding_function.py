@@ -1,12 +1,13 @@
-from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
+from chromadb.api.types import Embeddable, Embeddings, Documents, EmbeddingFunction, Space
 from typing import List, Dict, Any, Optional
 import os
 import numpy as np
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 import warnings
 
 
-class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
+class MorphEmbeddingFunction(EmbeddingFunction[Embeddable]):
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -60,7 +61,7 @@ class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
             base_url=self.api_base,
         )
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
@@ -70,6 +71,8 @@ class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
         Returns:
             Embeddings for the documents.
         """
+        input = text_only_embeddable_check(input, type(self).__name__)
+
         # Handle empty input
         if not input:
             return []
@@ -99,7 +102,7 @@ class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         # Extract parameters from config
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")

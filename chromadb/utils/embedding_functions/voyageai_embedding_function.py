@@ -1,4 +1,5 @@
-from chromadb.api.types import EmbeddingFunction, Space, Embeddings, Documents
+from chromadb.api.types import Embeddable, EmbeddingFunction, Space, Embeddings
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import List, Dict, Any, Optional
 import os
@@ -6,7 +7,7 @@ import numpy as np
 import warnings
 
 
-class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
+class VoyageAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
     """
     This class is used to generate embeddings for a list of texts using the VoyageAI API.
     """
@@ -57,7 +58,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self.truncation = truncation
         self._client = voyageai.Client(api_key=self.api_key)
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
@@ -67,6 +68,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         Returns:
             Embeddings for the documents.
         """
+        input = text_only_embeddable_check(input, "VoyageAI")
         embeddings = self._client.embed(
             texts=input,
             model=self.model_name,
@@ -90,7 +92,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")
         input_type = config.get("input_type")

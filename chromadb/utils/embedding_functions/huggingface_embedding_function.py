@@ -1,12 +1,13 @@
-from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
+from chromadb.api.types import Embeddable, Embeddings, EmbeddingFunction, Space
 from typing import List, Dict, Any, Optional
 import os
 import numpy as np
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 import warnings
 
 
-class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
+class HuggingFaceEmbeddingFunction(EmbeddingFunction[Embeddable]):
     """
     This class is used to get embeddings for a list of texts using the HuggingFace API.
     It requires an API key and a model name. The default model name is "sentence-transformers/all-MiniLM-L6-v2".
@@ -51,12 +52,12 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         self._session = httpx.Client()
         self._session.headers.update({"Authorization": f"Bearer {self.api_key}"})
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Get the embeddings for a list of texts.
 
         Args:
-            input (Documents): A list of texts to get embeddings for.
+            input (Embeddable): A list of texts to get embeddings for.
 
         Returns:
             Embeddings: The embeddings for the texts.
@@ -66,6 +67,8 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> texts = ["Hello, world!", "How are you?"]
             >>> embeddings = hugging_face(texts)
         """
+        input = text_only_embeddable_check(input, "HuggingFace")
+
         # Call HuggingFace Embedding API for each document
         response = self._session.post(
             self._api_url,
@@ -86,7 +89,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")
 
@@ -122,7 +125,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         validate_config_schema(config, "huggingface")
 
 
-class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
+class HuggingFaceEmbeddingServer(EmbeddingFunction[Embeddable]):
     """
     This class is used to get embeddings for a list of texts using the HuggingFace Embedding server
     (https://github.com/huggingface/text-embeddings-inference).
@@ -171,12 +174,12 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         if self.api_key is not None:
             self._session.headers.update({"Authorization": f"Bearer {self.api_key}"})
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Get the embeddings for a list of texts.
 
         Args:
-            input (Documents): A list of texts to get embeddings for.
+            input (Embeddable): A list of texts to get embeddings for.
 
         Returns:
             Embeddings: The embeddings for the texts.
@@ -186,6 +189,9 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
             >>> texts = ["Hello, world!", "How are you?"]
             >>> embeddings = hugging_face(texts)
         """
+
+        input = text_only_embeddable_check(input, "HuggingFace Server")
+
         # Call HuggingFace Embedding Server API for each document
         response = self._session.post(self._api_url, json={"inputs": input}).json()
 
@@ -203,7 +209,7 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         url = config.get("url")
         api_key_env_var = config.get("api_key_env_var")
         if url is None:

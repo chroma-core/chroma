@@ -1,4 +1,5 @@
 from chromadb.api.types import (
+    Embeddable,
     Embeddings,
     Documents,
     EmbeddingFunction,
@@ -6,6 +7,7 @@ from chromadb.api.types import (
 )
 from typing import List, Dict, Any, Optional
 import os
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import cast
 import warnings
@@ -14,7 +16,7 @@ BASE_URL = "https://api.cloudflare.com/client/v4/accounts"
 GATEWAY_BASE_URL = "https://gateway.ai.cloudflare.com/v1"
 
 
-class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
+class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
     """
     This class is used to get embeddings for a list of texts using the Cloudflare Workers AI API.
     It requires an API key and a model name.
@@ -70,7 +72,7 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
             {"Authorization": f"Bearer {self.api_key}", "Accept-Encoding": "identity"}
         )
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
@@ -80,10 +82,7 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
         Returns:
             Embeddings for the documents.
         """
-        if not all(isinstance(item, str) for item in input):
-            raise ValueError(
-                "Cloudflare Workers AI only supports text documents, not images"
-            )
+        input = text_only_embeddable_check(input, "Cloudflare Workers AI")
 
         payload: Dict[str, Any] = {
             "text": input,
@@ -107,7 +106,7 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")
         account_id = config.get("account_id")

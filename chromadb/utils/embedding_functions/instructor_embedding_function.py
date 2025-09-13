@@ -1,10 +1,11 @@
-from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
+from chromadb.api.types import Embeddable, Embeddings, EmbeddingFunction, Space
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import List, Dict, Any, Optional
 import numpy as np
 
 
-class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
+class InstructorEmbeddingFunction(EmbeddingFunction[Embeddable]):
     """
     This class is used to generate embeddings for a list of texts using the Instructor embedding model.
     """
@@ -41,19 +42,18 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self._model = INSTRUCTOR(model_name_or_path=model_name, device=device)
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
         Args:
-            input: Documents or images to generate embeddings for.
+            input: Documents to generate embeddings for.
 
         Returns:
             Embeddings for the documents.
         """
         # Instructor only works with text documents
-        if not all(isinstance(item, str) for item in input):
-            raise ValueError("Instructor only supports text documents, not images")
+        input = text_only_embeddable_check(input, "Instructor")
 
         if self.instruction is None:
             embeddings = self._model.encode(input, convert_to_numpy=True)
@@ -77,7 +77,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         model_name = config.get("model_name")
         device = config.get("device")
         instruction = config.get("instruction")
