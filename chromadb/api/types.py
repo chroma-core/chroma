@@ -11,6 +11,8 @@ from typing import (
     Literal,
     get_args,
     TYPE_CHECKING,
+    Final,
+    ClassVar,
 )
 from numpy.typing import NDArray
 import numpy as np
@@ -52,6 +54,34 @@ __all__ = [
     "SparseVector",
     "is_valid_sparse_vector",
     "validate_sparse_vector",
+    # Index Configuration Types
+    "FtsIndex",
+    "HnswIndex",
+    "SpannIndex",
+    "VectorIndex",
+    "SparseVectorIndex",
+    "StringInvertedIndex",
+    "IntInvertedIndex",
+    "FloatInvertedIndex",
+    "BoolInvertedIndex",
+    "InvertedIndex",
+    # Value Type Constants
+    "STRING_VALUE_NAME",
+    "INT_VALUE_NAME",
+    "BOOL_VALUE_NAME",
+    "FLOAT_VALUE_NAME",
+    "FLOAT_LIST_VALUE_NAME",
+    "SPARSE_VECTOR_VALUE_NAME",
+    # Internal Index Types (with encapsulated names and value types)
+    "InternalFtsIndex",
+    "InternalHnswIndex",
+    "InternalSpannIndex",
+    "InternalVectorIndex",
+    "InternalSparseVectorIndex",
+    "InternalStringInvertedIndex",
+    "InternalIntInvertedIndex",
+    "InternalFloatInvertedIndex",
+    "InternalBoolInvertedIndex",
 ]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
@@ -1266,3 +1296,176 @@ class SparseEmbeddingFunction(Protocol[D]):
         Validate the config.
         """
         return
+
+
+# Index Configuration Types for Collection Schema
+class FtsIndex(TypedDict):
+    """Configuration for Full-Text Search index. No parameters required."""
+    pass
+
+
+class HnswIndex(TypedDict, total=False):
+    """Configuration for HNSW vector index."""
+    ef_construction: int
+    max_neighbors: int
+    ef_search: int
+    num_threads: int
+    batch_size: int
+    sync_threshold: int
+    resize_factor: float
+
+
+class SpannIndex(TypedDict, total=False):
+    """Configuration for SPANN vector index."""
+    search_nprobe: int
+    write_nprobe: int
+    ef_construction: int
+    ef_search: int
+    max_neighbors: int
+    reassign_neighbor_count: int
+    split_threshold: int
+    merge_threshold: int
+
+
+class VectorIndex(TypedDict, total=False):
+    """Configuration for vector index with space, embedding function, and algorithm config."""
+    space: Space
+    embedding_function: EmbeddingFunction  # type: ignore
+    source_key: str  # key to source the vector from
+    hnsw: HnswIndex
+    spann: SpannIndex
+
+
+class SparseVectorIndex(TypedDict, total=False):
+    """Configuration for sparse vector index."""
+    embedding_function: EmbeddingFunction  # type: ignore
+    source_key: Optional[str]  # key to source the sparse vector from
+
+
+class StringInvertedIndex(TypedDict):
+    """Configuration for string inverted index."""
+    pass
+
+
+class IntInvertedIndex(TypedDict):
+    """Configuration for integer inverted index."""
+    pass
+
+
+class FloatInvertedIndex(TypedDict):
+    """Configuration for float inverted index."""
+    pass
+
+
+class BoolInvertedIndex(TypedDict):
+    """Configuration for boolean inverted index."""
+    pass
+
+
+# Value type constants
+STRING_VALUE_NAME: Final[str] = "#string"
+INT_VALUE_NAME: Final[str] = "#int"
+BOOL_VALUE_NAME: Final[str] = "#bool"
+FLOAT_VALUE_NAME: Final[str] = "#float"
+FLOAT_LIST_VALUE_NAME: Final[str] = "#float_list"
+SPARSE_VECTOR_VALUE_NAME: Final[str] = "#sparse_vector"
+
+
+# Internal index types that encapsulate the configuration, name, value type, and enabled status
+class InternalFtsIndex:
+    """Internal wrapper for FTS index with encapsulated name, value type, and enabled status."""
+    NAME: Final[ClassVar[str]] = "$fts_index"
+    VALUE_TYPE_NAME: Final[ClassVar[str]] = STRING_VALUE_NAME
+
+    def __init__(self, config: FtsIndex, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalHnswIndex:
+    """Internal wrapper for HNSW index with encapsulated name, value type, and enabled status."""
+    NAME: Final[ClassVar[str]] = "$hnsw_index"
+    VALUE_TYPE_NAME: Final[ClassVar[str]] = FLOAT_LIST_VALUE_NAME
+
+    def __init__(self, config: HnswIndex, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalSpannIndex:
+    """Internal wrapper for SPANN index with encapsulated name, value type, and enabled status."""
+    NAME: Final[ClassVar[str]] = "$spann_index"
+    VALUE_TYPE_NAME: Final[ClassVar[str]] = FLOAT_LIST_VALUE_NAME
+
+    def __init__(self, config: SpannIndex, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalVectorIndex:
+    """Internal wrapper for vector index with encapsulated name, value type, and enabled status."""
+    NAME: Final[ClassVar[str]] = "$vector_index"
+    VALUE_TYPE_NAME: Final[ClassVar[str]] = FLOAT_LIST_VALUE_NAME
+
+    def __init__(self, config: VectorIndex, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalSparseVectorIndex:
+    """Internal wrapper for sparse vector index with encapsulated name, value type, and enabled status."""
+    NAME: Final[ClassVar[str]] = "$sparse_vector_index"
+    VALUE_TYPE_NAME: Final[ClassVar[str]] = SPARSE_VECTOR_VALUE_NAME
+
+    def __init__(self, config: SparseVectorIndex, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalStringInvertedIndex:
+    """Internal wrapper for string inverted index with encapsulated name, value type, and enabled status."""
+    NAME: Final[ClassVar[str]] = "$string_inverted_index"
+    VALUE_TYPE_NAME: Final[ClassVar[str]] = STRING_VALUE_NAME
+
+    def __init__(self, config: StringInvertedIndex, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalIntInvertedIndex:
+    """Internal wrapper for int inverted index with encapsulated name, value type, and enabled status."""
+    NAME: Final[ClassVar[str]] = "$int_inverted_index"
+    VALUE_TYPE_NAME: Final[ClassVar[str]] = INT_VALUE_NAME
+
+    def __init__(self, config: IntInvertedIndex, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalFloatInvertedIndex:
+    """Internal wrapper for float inverted index with encapsulated name, value type, and enabled status."""
+    NAME: Final[ClassVar[str]] = "$float_inverted_index"
+    VALUE_TYPE_NAME: Final[ClassVar[str]] = FLOAT_VALUE_NAME
+
+    def __init__(self, config: FloatInvertedIndex, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalBoolInvertedIndex:
+    """Internal wrapper for bool inverted index with encapsulated name, value type, and enabled status."""
+    NAME: Final[ClassVar[str]] = "$bool_inverted_index"
+    VALUE_TYPE_NAME: Final[ClassVar[str]] = BOOL_VALUE_NAME
+
+    def __init__(self, config: BoolInvertedIndex, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+# Union type for all inverted index configurations
+InvertedIndex = Union[
+    StringInvertedIndex,
+    IntInvertedIndex,
+    FloatInvertedIndex,
+    BoolInvertedIndex,
+]

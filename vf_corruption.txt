@@ -1,0 +1,597 @@
+collection_info_immutable {
+  tenant_id: "de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce"
+  database_id: "245075ff-59dd-4d68-9c20-ee7805981856"
+  collection_id: "e1b9326b-a5c5-4708-bd66-b0f40298f501"
+  collection_name: "github.com_hyperledger_fabric_1.4.11"
+  collection_creation_secs: 1755824619
+}
+version_history {
+  versions {
+    version: 1
+    segment_info {
+      segment_compaction_info {
+        segment_id: "9d6db61a-8442-40df-83d0-ba9ef983abc6"
+        file_paths {
+          key: "user_id_to_offset_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/f17ecad6-bc61-4c1e-b7a3-c584f966f934"
+          }
+        }
+        file_paths {
+          key: "offset_id_to_user_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/ee70dbc7-6408-4ce8-881f-aec7498691ed"
+          }
+        }
+        file_paths {
+          key: "offset_id_to_data"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/eb9d51ce-cbbe-4ba7-8aef-e9e87c79a7c6"
+          }
+        }
+        file_paths {
+          key: "max_offset_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/371d2ae6-4d07-4d2f-a3ea-af89f27a93a1"
+          }
+        }
+      }
+      segment_compaction_info {
+        segment_id: "0b788309-e2a8-4031-9ca5-5e836636dd5b"
+        file_paths {
+          key: "u32_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/47688301-124e-446a-8d4e-06b50f28387f"
+          }
+        }
+        file_paths {
+          key: "string_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/11060626-e4cf-4c55-9bd7-fe97e23f8414"
+          }
+        }
+        file_paths {
+          key: "full_text_pls"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/4ada8e9f-3fb9-4c17-93fa-e71aacdea977"
+          }
+        }
+        file_paths {
+          key: "f32_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/d73c2624-bbf1-477e-8c9e-87f8388afe59"
+          }
+        }
+        file_paths {
+          key: "bool_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/1c98ac03-8383-4eb7-b669-794452350c4f"
+          }
+        }
+      }
+      segment_compaction_info {
+        segment_id: "92620512-6547-4f01-9704-2bf57d0628b0"
+        file_paths {
+          key: "version_map_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/ba8e2609-075c-4fbf-b658-4cb15844da51"
+          }
+        }
+        file_paths {
+          key: "posting_list_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/2245ca2d-26e3-4d73-9cd7-cef7300fb530"
+          }
+        }
+        file_paths {
+          key: "max_head_id_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/51d16bd6-03b4-41ba-b312-7e30e640a8f7"
+          }
+        }
+        file_paths {
+          key: "hnsw_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/68a0b62c-10b6-40b3-ab3a-0427bedcdc61"
+          }
+        }
+      }
+    }
+    collection_info_mutable {
+      current_log_position: 2000
+      updated_at_secs: 1755824677
+    }
+    created_at_secs: 1755824677
+  }
+  versions {
+    version: 2
+    segment_info {
+      segment_compaction_info {
+        segment_id: "9d6db61a-8442-40df-83d0-ba9ef983abc6"
+        file_paths {
+          key: "user_id_to_offset_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/6601d3f8-3afc-48cc-b3b9-baf92761f664"
+          }
+        }
+        file_paths {
+          key: "offset_id_to_user_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/c9c0b571-159a-4399-94fd-33b4b978727b"
+          }
+        }
+        file_paths {
+          key: "offset_id_to_data"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/426714a0-3bda-498b-b58f-d05c04a93cbc"
+          }
+        }
+        file_paths {
+          key: "max_offset_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/21c743b9-f4d0-401c-a094-5320f6002d9a"
+          }
+        }
+      }
+      segment_compaction_info {
+        segment_id: "0b788309-e2a8-4031-9ca5-5e836636dd5b"
+        file_paths {
+          key: "u32_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/2e72060c-f64c-42c5-b9b9-10304be0b25a"
+          }
+        }
+        file_paths {
+          key: "string_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/43d216f8-4b04-49b7-8da2-7deca82762d8"
+          }
+        }
+        file_paths {
+          key: "full_text_pls"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/222d1924-26df-4614-827d-16f6053e5001"
+          }
+        }
+        file_paths {
+          key: "f32_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/6d163be9-ed22-4a3d-8798-cf78ba043bcd"
+          }
+        }
+        file_paths {
+          key: "bool_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/191934fe-085c-4d98-8ec5-60e248c0e98f"
+          }
+        }
+      }
+      segment_compaction_info {
+        segment_id: "92620512-6547-4f01-9704-2bf57d0628b0"
+        file_paths {
+          key: "version_map_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/ae99beb4-ec8a-4cea-ba66-c57f8b04b512"
+          }
+        }
+        file_paths {
+          key: "posting_list_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/81f412aa-d5c7-46a4-b8df-26fbbd16e3a2"
+          }
+        }
+        file_paths {
+          key: "max_head_id_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/8ab0fbca-ea65-42b1-ab0a-bf778c604139"
+          }
+        }
+        file_paths {
+          key: "hnsw_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/8f7d00e4-098b-4c3c-8520-6a55a629b022"
+          }
+        }
+      }
+    }
+    collection_info_mutable {
+      current_log_position: 9500
+      current_collection_version: 1
+      updated_at_secs: 1755824725
+    }
+    created_at_secs: 1755824725
+  }
+  versions {
+    version: 3
+    segment_info {
+      segment_compaction_info {
+        segment_id: "9d6db61a-8442-40df-83d0-ba9ef983abc6"
+        file_paths {
+          key: "user_id_to_offset_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/9db4aebb-85df-45ec-862b-27669f4f1d27"
+          }
+        }
+        file_paths {
+          key: "offset_id_to_user_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/550dec38-90f2-41a9-9110-cbf5726588d2"
+          }
+        }
+        file_paths {
+          key: "offset_id_to_data"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/a8266fe7-4580-4718-8f38-1fe2f3cb7191"
+          }
+        }
+        file_paths {
+          key: "max_offset_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/92a8fba9-94b1-46c4-88e8-32c115b6fb5a"
+          }
+        }
+      }
+      segment_compaction_info {
+        segment_id: "0b788309-e2a8-4031-9ca5-5e836636dd5b"
+        file_paths {
+          key: "u32_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/4ab0cea8-15dd-42de-9b81-d69ff502a9a4"
+          }
+        }
+        file_paths {
+          key: "string_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/30eb2e12-5f77-4488-9afd-b690b778c3e1"
+          }
+        }
+        file_paths {
+          key: "full_text_pls"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/0d19e0b8-089a-46ec-a689-611272302eed"
+          }
+        }
+        file_paths {
+          key: "f32_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/5340479e-d922-42d9-b198-a8fba49bdaa1"
+          }
+        }
+        file_paths {
+          key: "bool_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/8ab24263-9be1-450b-b25e-63bb17c082b8"
+          }
+        }
+      }
+      segment_compaction_info {
+        segment_id: "92620512-6547-4f01-9704-2bf57d0628b0"
+        file_paths {
+          key: "version_map_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/0090a644-e7b9-4e37-9d54-361146471eb1"
+          }
+        }
+        file_paths {
+          key: "posting_list_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/0fea4d82-af5f-4e08-bd6b-6d9c39fa7f0c"
+          }
+        }
+        file_paths {
+          key: "max_head_id_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/21db79ce-85eb-4cf6-99de-49e56beb3bad"
+          }
+        }
+        file_paths {
+          key: "hnsw_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/c59b8940-4fa7-4b24-9a1c-1ee7e0dd66b0"
+          }
+        }
+      }
+    }
+    collection_info_mutable {
+      current_log_position: 14059
+      current_collection_version: 2
+      updated_at_secs: 1755827078
+    }
+    created_at_secs: 1755827078
+  }
+  versions {
+    version: 4
+    segment_info {
+      segment_compaction_info {
+        segment_id: "0b788309-e2a8-4031-9ca5-5e836636dd5b"
+        file_paths {
+          key: "u32_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/4ab0cea8-15dd-42de-9b81-d69ff502a9a4"
+          }
+        }
+        file_paths {
+          key: "string_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/30eb2e12-5f77-4488-9afd-b690b778c3e1"
+          }
+        }
+        file_paths {
+          key: "full_text_pls"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/0d19e0b8-089a-46ec-a689-611272302eed"
+          }
+        }
+        file_paths {
+          key: "f32_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/5340479e-d922-42d9-b198-a8fba49bdaa1"
+          }
+        }
+        file_paths {
+          key: "bool_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/8ab24263-9be1-450b-b25e-63bb17c082b8"
+          }
+        }
+      }
+      segment_compaction_info {
+        segment_id: "92620512-6547-4f01-9704-2bf57d0628b0"
+        file_paths {
+          key: "version_map_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/0090a644-e7b9-4e37-9d54-361146471eb1"
+          }
+        }
+        file_paths {
+          key: "posting_list_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/0fea4d82-af5f-4e08-bd6b-6d9c39fa7f0c"
+          }
+        }
+        file_paths {
+          key: "max_head_id_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/21db79ce-85eb-4cf6-99de-49e56beb3bad"
+          }
+        }
+        file_paths {
+          key: "hnsw_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/c59b8940-4fa7-4b24-9a1c-1ee7e0dd66b0"
+          }
+        }
+      }
+      segment_compaction_info {
+        segment_id: "9d6db61a-8442-40df-83d0-ba9ef983abc6"
+        file_paths {
+          key: "user_id_to_offset_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/9db4aebb-85df-45ec-862b-27669f4f1d27"
+          }
+        }
+        file_paths {
+          key: "offset_id_to_user_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/550dec38-90f2-41a9-9110-cbf5726588d2"
+          }
+        }
+        file_paths {
+          key: "offset_id_to_data"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/a8266fe7-4580-4718-8f38-1fe2f3cb7191"
+          }
+        }
+        file_paths {
+          key: "max_offset_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/92a8fba9-94b1-46c4-88e8-32c115b6fb5a"
+          }
+        }
+      }
+    }
+    collection_info_mutable {
+      current_log_position: 14559
+      current_collection_version: 3
+      updated_at_secs: 1757729706
+    }
+    created_at_secs: 1757729706
+  }
+  versions {
+    version: 5
+    segment_info {
+      segment_compaction_info {
+        segment_id: "0b788309-e2a8-4031-9ca5-5e836636dd5b"
+        file_paths {
+          key: "u32_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/4ab0cea8-15dd-42de-9b81-d69ff502a9a4"
+          }
+        }
+        file_paths {
+          key: "string_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/30eb2e12-5f77-4488-9afd-b690b778c3e1"
+          }
+        }
+        file_paths {
+          key: "full_text_pls"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/0d19e0b8-089a-46ec-a689-611272302eed"
+          }
+        }
+        file_paths {
+          key: "f32_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/5340479e-d922-42d9-b198-a8fba49bdaa1"
+          }
+        }
+        file_paths {
+          key: "bool_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/8ab24263-9be1-450b-b25e-63bb17c082b8"
+          }
+        }
+      }
+      segment_compaction_info {
+        segment_id: "92620512-6547-4f01-9704-2bf57d0628b0"
+        file_paths {
+          key: "version_map_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/0090a644-e7b9-4e37-9d54-361146471eb1"
+          }
+        }
+        file_paths {
+          key: "posting_list_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/0fea4d82-af5f-4e08-bd6b-6d9c39fa7f0c"
+          }
+        }
+        file_paths {
+          key: "max_head_id_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/21db79ce-85eb-4cf6-99de-49e56beb3bad"
+          }
+        }
+        file_paths {
+          key: "hnsw_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/c59b8940-4fa7-4b24-9a1c-1ee7e0dd66b0"
+          }
+        }
+      }
+      segment_compaction_info {
+        segment_id: "9d6db61a-8442-40df-83d0-ba9ef983abc6"
+        file_paths {
+          key: "user_id_to_offset_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/9db4aebb-85df-45ec-862b-27669f4f1d27"
+          }
+        }
+        file_paths {
+          key: "offset_id_to_user_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/550dec38-90f2-41a9-9110-cbf5726588d2"
+          }
+        }
+        file_paths {
+          key: "offset_id_to_data"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/a8266fe7-4580-4718-8f38-1fe2f3cb7191"
+          }
+        }
+        file_paths {
+          key: "max_offset_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/92a8fba9-94b1-46c4-88e8-32c115b6fb5a"
+          }
+        }
+      }
+    }
+    collection_info_mutable {
+      current_log_position: 15059
+      current_collection_version: 4
+      updated_at_secs: 1757729729
+    }
+    created_at_secs: 1757729729
+  }
+  versions {
+    version: 6
+    segment_info {
+      segment_compaction_info {
+        segment_id: "0b788309-e2a8-4031-9ca5-5e836636dd5b"
+        file_paths {
+          key: "u32_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/4ab0cea8-15dd-42de-9b81-d69ff502a9a4"
+          }
+        }
+        file_paths {
+          key: "string_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/30eb2e12-5f77-4488-9afd-b690b778c3e1"
+          }
+        }
+        file_paths {
+          key: "full_text_pls"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/0d19e0b8-089a-46ec-a689-611272302eed"
+          }
+        }
+        file_paths {
+          key: "f32_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/5340479e-d922-42d9-b198-a8fba49bdaa1"
+          }
+        }
+        file_paths {
+          key: "bool_metadata"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/0b788309-e2a8-4031-9ca5-5e836636dd5b/8ab24263-9be1-450b-b25e-63bb17c082b8"
+          }
+        }
+      }
+      segment_compaction_info {
+        segment_id: "92620512-6547-4f01-9704-2bf57d0628b0"
+        file_paths {
+          key: "version_map_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/0090a644-e7b9-4e37-9d54-361146471eb1"
+          }
+        }
+        file_paths {
+          key: "posting_list_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/0fea4d82-af5f-4e08-bd6b-6d9c39fa7f0c"
+          }
+        }
+        file_paths {
+          key: "max_head_id_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/21db79ce-85eb-4cf6-99de-49e56beb3bad"
+          }
+        }
+        file_paths {
+          key: "hnsw_path"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/92620512-6547-4f01-9704-2bf57d0628b0/c59b8940-4fa7-4b24-9a1c-1ee7e0dd66b0"
+          }
+        }
+      }
+      segment_compaction_info {
+        segment_id: "9d6db61a-8442-40df-83d0-ba9ef983abc6"
+        file_paths {
+          key: "user_id_to_offset_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/9db4aebb-85df-45ec-862b-27669f4f1d27"
+          }
+        }
+        file_paths {
+          key: "offset_id_to_user_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/550dec38-90f2-41a9-9110-cbf5726588d2"
+          }
+        }
+        file_paths {
+          key: "offset_id_to_data"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/a8266fe7-4580-4718-8f38-1fe2f3cb7191"
+          }
+        }
+        file_paths {
+          key: "max_offset_id"
+          value {
+            paths: "tenant/de93f49b-3ace-4cda-bb8b-1ca01d5ee3ce/database/245075ff-59dd-4d68-9c20-ee7805981856/collection/e1b9326b-a5c5-4708-bd66-b0f40298f501/segment/9d6db61a-8442-40df-83d0-ba9ef983abc6/92a8fba9-94b1-46c4-88e8-32c115b6fb5a"
+          }
+        }
+      }
+    }
+    collection_info_mutable {
+      current_log_position: 15559
+      current_collection_version: 5
+      updated_at_secs: 1757729760
+    }
+    created_at_secs: 1757729760
+  }
+}
+

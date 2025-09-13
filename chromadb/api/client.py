@@ -79,13 +79,13 @@ class Client(SharedSystemClient, ClientAPI):
             user_provided_tenant=tenant,
             user_provided_database=database,
         )
-        
+
         # this should not happen unless types are invalidated
         if maybe_tenant is None and tenant is None:
             raise ChromaAuthError("Could not determine a tenant from the current authentication method. Please provide a tenant.")
         if maybe_database is None and database is None:
             raise ChromaAuthError("Could not determine a database name from the current authentication method. Please provide a database name.")
-        
+
         if maybe_tenant:
             self.tenant = maybe_tenant
         if maybe_database:
