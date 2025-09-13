@@ -54,3 +54,4 @@ We welcome pull requests to add new Integrations to the community.
 | [OpenLIT](./frameworks/openlit)             | ✓      | Coming Soon! |
 | [Anthropic MCP](./frameworks/anthropic-mcp) | ✓      | Coming Soon! |
 | [VoltAgent](./frameworks/voltagent)         | -      | ✓            |
+| [Mem0](./frameworks/mem0)                   | ✓      | -            |
