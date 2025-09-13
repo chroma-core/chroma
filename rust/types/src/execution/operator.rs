@@ -135,11 +135,12 @@ impl<'de> Deserialize<'de> for Filter {
     {
         // For the new search API, the entire JSON is the where clause
         let where_json = Value::deserialize(deserializer)?;
-        let where_clause = if where_json.is_null() {
-            None
-        } else {
-            Some(parse_where(&where_json).map_err(|e| D::Error::custom(e.to_string()))?)
-        };
+        let where_clause =
+            if where_json.is_null() || where_json.as_object().is_some_and(|obj| obj.is_empty()) {
+                None
+            } else {
+                Some(parse_where(&where_json).map_err(|e| D::Error::custom(e.to_string()))?)
+            };
 
         Ok(Filter {
             query_ids: None, // Always None for new search API
@@ -1266,16 +1267,27 @@ mod tests {
     }
 
     #[test]
-    fn test_filter_json_serialization() {
+    fn test_filter_json_deserialization() {
         // For the new search API, deserialization treats the entire JSON as a where clause
-        // Test with a simple where clause
+
+        // Test 1: Simple direct metadata comparison
         let simple_where = r#"{"author": "John Doe"}"#;
         let filter: Filter = serde_json::from_str(simple_where).unwrap();
         assert_eq!(filter.query_ids, None);
         assert!(filter.where_clause.is_some());
 
-        // Test with composite where clause
-        let composite_json = serde_json::json!({
+        // Test 2: ID filter using #id with $in operator
+        let id_filter_json = serde_json::json!({
+            "#id": {
+                "$in": ["doc1", "doc2", "doc3"]
+            }
+        });
+        let filter: Filter = serde_json::from_value(id_filter_json).unwrap();
+        assert_eq!(filter.query_ids, None);
+        assert!(filter.where_clause.is_some());
+
+        // Test 3: Complex nested expression with AND, OR, and various operators
+        let complex_json = serde_json::json!({
             "$and": [
                 {
                     "#id": {
@@ -1283,21 +1295,220 @@ mod tests {
                     }
                 },
                 {
-                    "author": "John Doe"
+                    "$or": [
+                        {
+                            "author": {
+                                "$eq": "John Doe"
+                            }
+                        },
+                        {
+                            "author": {
+                                "$eq": "Jane Smith"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "year": {
+                        "$gte": 2020
+                    }
+                },
+                {
+                    "tags": {
+                        "$contains": "machine-learning"
+                    }
                 }
             ]
         });
 
-        let filter: Filter = serde_json::from_value(composite_json).unwrap();
+        let filter: Filter = serde_json::from_value(complex_json.clone()).unwrap();
         assert_eq!(filter.query_ids, None);
         assert!(filter.where_clause.is_some());
 
-        // Verify it's an AND composite with 2 children
+        // Verify the structure
         if let crate::metadata::Where::Composite(composite) = filter.where_clause.unwrap() {
             assert_eq!(composite.operator, crate::metadata::BooleanOperator::And);
-            assert_eq!(composite.children.len(), 2);
+            assert_eq!(composite.children.len(), 4);
+
+            // Check that the second child is an OR
+            if let crate::metadata::Where::Composite(or_composite) = &composite.children[1] {
+                assert_eq!(or_composite.operator, crate::metadata::BooleanOperator::Or);
+                assert_eq!(or_composite.children.len(), 2);
+            } else {
+                panic!("Expected OR composite in second child");
+            }
         } else {
-            panic!("Expected composite where clause");
+            panic!("Expected AND composite where clause");
+        }
+
+        // Test 4: Mixed operators - $ne, $lt, $gt, $lte
+        let mixed_operators_json = serde_json::json!({
+            "$and": [
+                {
+                    "status": {
+                        "$ne": "deleted"
+                    }
+                },
+                {
+                    "score": {
+                        "$gt": 0.5
+                    }
+                },
+                {
+                    "score": {
+                        "$lt": 0.9
+                    }
+                },
+                {
+                    "priority": {
+                        "$lte": 10
+                    }
+                }
+            ]
+        });
+
+        let filter: Filter = serde_json::from_value(mixed_operators_json).unwrap();
+        assert_eq!(filter.query_ids, None);
+        assert!(filter.where_clause.is_some());
+
+        // Test 5: Deeply nested expression
+        let deeply_nested_json = serde_json::json!({
+            "$or": [
+                {
+                    "$and": [
+                        {
+                            "#id": {
+                                "$in": ["id1", "id2"]
+                            }
+                        },
+                        {
+                            "$or": [
+                                {
+                                    "category": "tech"
+                                },
+                                {
+                                    "category": "science"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "$and": [
+                        {
+                            "author": "Admin"
+                        },
+                        {
+                            "published": true
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let filter: Filter = serde_json::from_value(deeply_nested_json).unwrap();
+        assert_eq!(filter.query_ids, None);
+        assert!(filter.where_clause.is_some());
+
+        // Verify it's an OR at the top level
+        if let crate::metadata::Where::Composite(composite) = filter.where_clause.unwrap() {
+            assert_eq!(composite.operator, crate::metadata::BooleanOperator::Or);
+            assert_eq!(composite.children.len(), 2);
+
+            // Both children should be AND composites
+            for child in &composite.children {
+                if let crate::metadata::Where::Composite(and_composite) = child {
+                    assert_eq!(
+                        and_composite.operator,
+                        crate::metadata::BooleanOperator::And
+                    );
+                } else {
+                    panic!("Expected AND composite in OR children");
+                }
+            }
+        } else {
+            panic!("Expected OR composite at top level");
+        }
+
+        // Test 6: Single ID filter (edge case)
+        let single_id_json = serde_json::json!({
+            "#id": {
+                "$eq": "single-doc-id"
+            }
+        });
+
+        let filter: Filter = serde_json::from_value(single_id_json).unwrap();
+        assert_eq!(filter.query_ids, None);
+        assert!(filter.where_clause.is_some());
+
+        // Test 7: Empty object should create empty filter
+        let empty_json = serde_json::json!({});
+        let filter: Filter = serde_json::from_value(empty_json).unwrap();
+        assert_eq!(filter.query_ids, None);
+        // Empty object results in None where_clause
+        assert_eq!(filter.where_clause, None);
+
+        // Test 8: Combining #id filter with $not_contains and numeric comparisons
+        let advanced_json = serde_json::json!({
+            "$and": [
+                {
+                    "#id": {
+                        "$in": ["doc1", "doc2", "doc3", "doc4", "doc5"]
+                    }
+                },
+                {
+                    "tags": {
+                        "$not_contains": "deprecated"
+                    }
+                },
+                {
+                    "$or": [
+                        {
+                            "$and": [
+                                {
+                                    "confidence": {
+                                        "$gte": 0.8
+                                    }
+                                },
+                                {
+                                    "verified": true
+                                }
+                            ]
+                        },
+                        {
+                            "$and": [
+                                {
+                                    "confidence": {
+                                        "$gte": 0.6
+                                    }
+                                },
+                                {
+                                    "confidence": {
+                                        "$lt": 0.8
+                                    }
+                                },
+                                {
+                                    "reviews": {
+                                        "$gte": 5
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let filter: Filter = serde_json::from_value(advanced_json).unwrap();
+        assert_eq!(filter.query_ids, None);
+        assert!(filter.where_clause.is_some());
+
+        // Verify top-level structure
+        if let crate::metadata::Where::Composite(composite) = filter.where_clause.unwrap() {
+            assert_eq!(composite.operator, crate::metadata::BooleanOperator::And);
+            assert_eq!(composite.children.len(), 3);
+        } else {
+            panic!("Expected AND composite at top level");
         }
     }
 
