@@ -4,7 +4,7 @@ use super::{
         Filter, KnnBatch, KnnProjection, Limit, Projection, Rank, Scan, ScanToProtoError, Select,
     },
 };
-use crate::chroma_proto;
+use crate::{chroma_proto, validators::validate_rank};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::{
@@ -150,6 +150,7 @@ pub struct SearchPayload {
     #[serde(default)]
     pub filter: Filter,
     #[serde(default)]
+    #[validate(custom(function = "validate_rank"))]
     pub rank: Rank,
     #[serde(default)]
     pub limit: Limit,

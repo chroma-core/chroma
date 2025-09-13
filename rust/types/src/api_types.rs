@@ -10,7 +10,8 @@ use crate::operator::SearchResult;
 use crate::plan::PlanToProtoError;
 use crate::plan::SearchPayload;
 use crate::validators::{
-    validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
+    validate_metadata_vec, validate_name, validate_non_empty_collection_update_metadata,
+    validate_optional_metadata, validate_update_metadata_vec,
 };
 use crate::Collection;
 use crate::CollectionConfigurationToInternalConfigurationError;
@@ -659,7 +660,7 @@ pub struct CreateCollectionRequest {
     pub database_name: String,
     #[validate(custom(function = "validate_name"))]
     pub name: String,
-    #[validate(custom(function = "validate_non_empty_metadata"))]
+    #[validate(custom(function = "validate_optional_metadata"))]
     pub metadata: Option<Metadata>,
     pub configuration: Option<InternalCollectionConfiguration>,
     pub get_or_create: bool,
@@ -1007,18 +1008,14 @@ pub enum ForkCollectionError {
 impl ChromaError for ForkCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            ForkCollectionError::NotFound(_) => ErrorCodes::NotFound,
             ForkCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
-            ForkCollectionError::CollectionConversionError(collection_conversion_error) => {
-                collection_conversion_error.code()
-            }
+            ForkCollectionError::CollectionConversionError(e) => e.code(),
             ForkCollectionError::DuplicateSegment => ErrorCodes::Internal,
             ForkCollectionError::Field(_) => ErrorCodes::FailedPrecondition,
             ForkCollectionError::Local => ErrorCodes::Unimplemented,
-            ForkCollectionError::Internal(chroma_error) => chroma_error.code(),
-            ForkCollectionError::NotFound(_) => ErrorCodes::NotFound,
-            ForkCollectionError::SegmentConversionError(segment_conversion_error) => {
-                segment_conversion_error.code()
-            }
+            ForkCollectionError::Internal(e) => e.code(),
+            ForkCollectionError::SegmentConversionError(e) => e.code(),
         }
     }
 }
@@ -1096,6 +1093,7 @@ pub struct AddCollectionRecordsRequest {
     pub embeddings: Vec<Vec<f32>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
+    #[validate(custom(function = "validate_metadata_vec"))]
     pub metadatas: Option<Vec<Option<Metadata>>>,
 }
 
@@ -1169,6 +1167,7 @@ pub struct UpdateCollectionRecordsRequest {
     pub embeddings: Option<Vec<Option<Vec<f32>>>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
+    #[validate(custom(function = "validate_update_metadata_vec"))]
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
@@ -1232,6 +1231,7 @@ pub struct UpsertCollectionRecordsRequest {
     pub embeddings: Vec<Vec<f32>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
+    #[validate(custom(function = "validate_update_metadata_vec"))]
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
@@ -2021,6 +2021,8 @@ impl ChromaError for ExecutorError {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::{MetadataValue, SparseVector, UpdateMetadataValue};
+    use std::collections::HashMap;
 
     #[test]
     fn test_create_database_min_length() {
@@ -2032,5 +2034,83 @@ mod test {
     fn test_create_tenant_min_length() {
         let request = CreateTenantRequest::try_new("a".to_string());
         assert!(request.is_err());
+    }
+
+    #[test]
+    fn test_add_request_validates_sparse_vectors() {
+        let mut metadata = HashMap::new();
+        // Add unsorted sparse vector - should fail validation
+        metadata.insert(
+            "sparse".to_string(),
+            MetadataValue::SparseVector(SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2])),
+        );
+
+        let result = AddCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            vec![vec![0.1, 0.2]],
+            None,
+            None,
+            Some(vec![Some(metadata)]),
+        );
+
+        // Should fail because sparse vector is not sorted
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_update_request_validates_sparse_vectors() {
+        let mut metadata = HashMap::new();
+        // Add unsorted sparse vector - should fail validation
+        metadata.insert(
+            "sparse".to_string(),
+            UpdateMetadataValue::SparseVector(SparseVector::new(
+                vec![3, 1, 2],
+                vec![0.3, 0.1, 0.2],
+            )),
+        );
+
+        let result = UpdateCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            None,
+            None,
+            None,
+            Some(vec![Some(metadata)]),
+        );
+
+        // Should fail because sparse vector is not sorted
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_upsert_request_validates_sparse_vectors() {
+        let mut metadata = HashMap::new();
+        // Add unsorted sparse vector - should fail validation
+        metadata.insert(
+            "sparse".to_string(),
+            UpdateMetadataValue::SparseVector(SparseVector::new(
+                vec![3, 1, 2],
+                vec![0.3, 0.1, 0.2],
+            )),
+        );
+
+        let result = UpsertCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            vec![vec![0.1, 0.2]],
+            None,
+            None,
+            Some(vec![Some(metadata)]),
+        );
+
+        // Should fail because sparse vector is not sorted
+        assert!(result.is_err());
     }
 }

@@ -46,6 +46,23 @@ impl SparseVector {
             .copied()
             .zip(self.values.iter().copied())
     }
+
+    /// Validate the sparse vector
+    pub fn validate(&self) -> Result<(), MetadataValueConversionError> {
+        // Check that indices and values have the same length
+        if self.indices.len() != self.values.len() {
+            return Err(MetadataValueConversionError::SparseVectorLengthMismatch);
+        }
+
+        // Check that indices are sorted in strictly ascending order (no duplicates)
+        for i in 1..self.indices.len() {
+            if self.indices[i] <= self.indices[i - 1] {
+                return Err(MetadataValueConversionError::SparseVectorIndicesNotSorted);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Eq for SparseVector {}
@@ -432,12 +449,23 @@ impl From<MetadataValue> for Value {
 pub enum MetadataValueConversionError {
     #[error("Invalid metadata value, valid values are: Int, Float, Str")]
     InvalidValue,
+    #[error("Metadata key cannot start with '#' or '$': {0}")]
+    InvalidKey(String),
+    #[error("Sparse vector indices and values must have the same length")]
+    SparseVectorLengthMismatch,
+    #[error("Sparse vector indices must be sorted in strictly ascending order (no duplicates)")]
+    SparseVectorIndicesNotSorted,
 }
 
 impl ChromaError for MetadataValueConversionError {
     fn code(&self) -> ErrorCodes {
         match self {
             MetadataValueConversionError::InvalidValue => ErrorCodes::InvalidArgument,
+            MetadataValueConversionError::InvalidKey(_) => ErrorCodes::InvalidArgument,
+            MetadataValueConversionError::SparseVectorLengthMismatch => ErrorCodes::InvalidArgument,
+            MetadataValueConversionError::SparseVectorIndicesNotSorted => {
+                ErrorCodes::InvalidArgument
+            }
         }
     }
 }
@@ -1541,5 +1569,48 @@ mod tests {
         // Size should include the key string length and the sparse vector data
         // "sparse" = 6 bytes + 5 * 4 bytes (u32 indices) + 5 * 4 bytes (f32 values) = 46 bytes
         assert_eq!(size, 46);
+    }
+
+    #[test]
+    fn test_sparse_vector_validation() {
+        // Valid sparse vector
+        let sparse = SparseVector::new(vec![1, 2, 3], vec![0.1, 0.2, 0.3]);
+        assert!(sparse.validate().is_ok());
+
+        // Length mismatch
+        let sparse = SparseVector::new(vec![1, 2, 3], vec![0.1, 0.2]);
+        let result = sparse.validate();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            MetadataValueConversionError::SparseVectorLengthMismatch
+        ));
+
+        // Unsorted indices (descending order)
+        let sparse = SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2]);
+        let result = sparse.validate();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            MetadataValueConversionError::SparseVectorIndicesNotSorted
+        ));
+
+        // Duplicate indices (not strictly ascending)
+        let sparse = SparseVector::new(vec![1, 2, 2, 3], vec![0.1, 0.2, 0.3, 0.4]);
+        let result = sparse.validate();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            MetadataValueConversionError::SparseVectorIndicesNotSorted
+        ));
+
+        // Descending at one point
+        let sparse = SparseVector::new(vec![1, 3, 2], vec![0.1, 0.3, 0.2]);
+        let result = sparse.validate();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            MetadataValueConversionError::SparseVectorIndicesNotSorted
+        ));
     }
 }
