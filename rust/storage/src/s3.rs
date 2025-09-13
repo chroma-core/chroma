@@ -218,6 +218,31 @@ impl S3Storage {
     }
 
     #[allow(clippy::type_complexity)]
+    pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
+        let res = self
+            .client
+            .head_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .send()
+            .await;
+        match res {
+            Ok(res) => Ok(res.e_tag() == Some(&e_tag.0)),
+            Err(e) => match e {
+                SdkError::ServiceError(err) => {
+                    let inner = err.into_err();
+                    Err(StorageError::Generic {
+                        source: Arc::new(inner),
+                    })
+                }
+                _ => Err(StorageError::Generic {
+                    source: Arc::new(e),
+                }),
+            },
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
     async fn get_stream_and_e_tag(
         &self,
         key: &str,
@@ -1544,5 +1569,72 @@ mod tests {
 
         eprintln!("Successfully deleted: {:#?}", delete_result.deleted);
         eprintln!("Errors for non-existent files: {:#?}", delete_result.errors);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_confirm_same_with_matching_etag() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+
+        let test_data = "test data for etag validation";
+        let etag = storage
+            .put_bytes(
+                "test-confirm-same",
+                test_data.as_bytes().to_vec(),
+                PutOptions::default(),
+            )
+            .await
+            .unwrap()
+            .expect("put_bytes should return etag");
+
+        let result = storage
+            .confirm_same("test-confirm-same", &etag)
+            .await
+            .unwrap();
+        assert!(result, "confirm_same should return true for matching etag");
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_confirm_same_with_non_matching_etag() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+
+        let test_data = "test data for etag validation";
+        let _etag = storage
+            .put_bytes(
+                "test-confirm-same",
+                test_data.as_bytes().to_vec(),
+                PutOptions::default(),
+            )
+            .await
+            .unwrap()
+            .expect("put_bytes should return etag");
+
+        let fake_etag = ETag("fake-etag-wont-match".to_string());
+        let result = storage
+            .confirm_same("test-confirm-same", &fake_etag)
+            .await
+            .unwrap();
+        assert!(
+            !result,
+            "confirm_same should return false for non-matching etag"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_confirm_same_with_nonexistent_file() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+
+        let fake_etag = ETag("fake-etag".to_string());
+        let result = storage.confirm_same("nonexistent-file", &fake_etag).await;
+
+        assert!(
+            result.is_err(),
+            "confirm_same should return error for nonexistent file"
+        );
+        match result.unwrap_err() {
+            StorageError::Generic { source: _ } => {
+                // This is expected - the head operation will fail on nonexistent file
+            }
+            other => panic!("Expected Generic error, got: {:?}", other),
+        }
     }
 }
