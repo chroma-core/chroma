@@ -289,6 +289,19 @@ impl Storage {
         }
     }
 
+    // NOTE(rescrv):  Returns Ok(true) if the file is definitely the same.  Returns Ok(false) if
+    // the file cannot be confirmed to be the same but it exists.  Returns Err on error.  It is up
+    // to the user to know how they are confirming the same and to react to Ok(false) even if the
+    // file is definitely the same file on storage.
+    pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
+        match self {
+            Storage::ObjectStore(object_store) => object_store.confirm_same(key, e_tag).await,
+            Storage::S3(s3) => s3.confirm_same(key, e_tag).await,
+            Storage::Local(local) => local.confirm_same(key, e_tag).await,
+            Storage::AdmissionControlledS3(as3) => as3.confirm_same(key, e_tag).await,
+        }
+    }
+
     pub async fn put_file(
         &self,
         key: &str,

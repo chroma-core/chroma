@@ -1129,28 +1129,71 @@ impl LogServer {
         let collection_id = Uuid::parse_str(&scout_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-
         let prefix = collection_id.storage_prefix_for_log();
         let log_reader = LogReader::new(
             self.config.reader.clone(),
             Arc::clone(&self.storage),
             prefix,
         );
-        let (start_position, limit_position) = match log_reader.manifest().await {
-            Ok(Some(manifest)) => (manifest.oldest_timestamp(), manifest.next_write_timestamp()),
-            Ok(None) => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
-            Err(wal3::Error::UninitializedLog) => {
-                return Err(Status::not_found(format!(
-                    "collection {collection_id} not found"
-                )));
+        let cache_key = cache_key_for_manifest_and_etag(collection_id);
+        let mut cached_manifest_and_e_tag = None;
+        if let Some(cache) = self.cache.as_ref() {
+            if let Some(cache_bytes) = cache.get(&cache_key).await.ok().flatten() {
+                let met = serde_json::from_slice::<ManifestAndETag>(&cache_bytes.bytes).ok();
+                cached_manifest_and_e_tag = met;
             }
-            Err(err) => {
-                return Err(Status::new(
-                    err.code().into(),
-                    format!("could not scout logs: {err:?}"),
-                ));
+        }
+        // NOTE(rescrv):  We verify and if verification fails, we take the cached manifest to fall
+        // back to the uncached path.
+        if let Some(cached) = cached_manifest_and_e_tag.as_ref() {
+            // Here's the linearization point.  We have a cached manifest and e_tag.
+            //
+            // If we verify (perform a head), then statistically speaking, the manifest and e_tag
+            // we have in hand is identical (barring md5 collision) to the manifest and e_tag on
+            // storage.  We can use the cached manifest and e_tag in this case because it is the
+            // identical flow whether we read the whole manifest from storage or whether we pretend
+            // to read it/verify it with a HEAD and then read out of cache.
+            if !log_reader.verify(cached).await.unwrap_or_default() {
+                cached_manifest_and_e_tag.take();
             }
-        };
+        }
+        let (start_position, limit_position) =
+            if let Some(manifest_and_e_tag) = cached_manifest_and_e_tag {
+                (
+                    manifest_and_e_tag.manifest.oldest_timestamp(),
+                    manifest_and_e_tag.manifest.next_write_timestamp(),
+                )
+            } else {
+                let (start_position, limit_position) = match log_reader.manifest_and_e_tag().await {
+                    Ok(Some(manifest_and_e_tag)) => {
+                        if let Some(cache) = self.cache.as_ref() {
+                            let json = serde_json::to_string(&manifest_and_e_tag)
+                                .map_err(|err| Status::unknown(err.to_string()))?;
+                            let cached_bytes = CachedBytes {
+                                bytes: Vec::from(json),
+                            };
+                            cache.insert(cache_key, cached_bytes).await;
+                        }
+                        (
+                            manifest_and_e_tag.manifest.oldest_timestamp(),
+                            manifest_and_e_tag.manifest.next_write_timestamp(),
+                        )
+                    }
+                    Ok(None) => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
+                    Err(wal3::Error::UninitializedLog) => {
+                        return Err(Status::not_found(format!(
+                            "collection {collection_id} not found"
+                        )));
+                    }
+                    Err(err) => {
+                        return Err(Status::new(
+                            err.code().into(),
+                            format!("could not scout logs: {err:?}"),
+                        ));
+                    }
+                };
+                (start_position, limit_position)
+            };
         let start_offset = start_position.offset() as i64;
         let limit_offset = limit_position.offset() as i64;
         Ok(Response::new(ScoutLogsResponse {
