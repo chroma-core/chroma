@@ -60,6 +60,8 @@ spec:
           ports:
             - containerPort: 4317
               name: grpc-port
+            - containerPort: 4318
+              name: http-port
             - containerPort: 55678
               name: http-debug-port
             - containerPort: 8889
@@ -83,6 +85,8 @@ spec:
   ports:
     - port: 4317
       name: grpc-port
+    - port: 4318
+      name: http-port
     - port: 55679
       name: http-debug-port
     - port: 8889
