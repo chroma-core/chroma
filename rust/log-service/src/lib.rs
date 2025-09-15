@@ -1146,6 +1146,13 @@ impl LogServer {
         // NOTE(rescrv):  We verify and if verification fails, we take the cached manifest to fall
         // back to the uncached path.
         if let Some(cached) = cached_manifest_and_e_tag.as_ref() {
+            // Here's the linearization point.  We have a cached manifest and e_tag.
+            //
+            // If we verify (perform a head), then statistically speaking, the manifest and e_tag
+            // we have in hand is identical (barring md5 collision) to the manifest and e_tag on
+            // storage.  We can use the cached manifest and e_tag in this case because it is the
+            // identical flow whether we read the whole manifest from storage or whether we pretend
+            // to read it/verify it with a HEAD and then read out of cache.
             if !log_reader.verify(cached).await.unwrap_or_default() {
                 cached_manifest_and_e_tag.take();
             }

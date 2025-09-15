@@ -74,6 +74,8 @@ impl LogReader {
         self.cache = Some(cache);
     }
 
+    /// Verify that the reader would read the same manifest as the one provided in
+    /// manifest_and_etag, but do it in a way that doesn't load the whole manifest.
     pub async fn verify(&self, manifest_and_etag: &ManifestAndETag) -> Result<bool, Error> {
         Manifest::head(
             &self.options.throttle,
