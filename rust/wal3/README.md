@@ -13,7 +13,7 @@ This log is designed to provide high throughput with a single writer and multipl
 wal3 is designed to work on object storage.  It is intended to to be lightweight, to allow a single
 machine to multiplex many logs simultaneously over a variety of paths.
 
-At a high level wal3's logged records are in a large number of immutable files on object storage ("fragments"), and wal3 maintains multiple files that track which files compose the log and in which order. Those files are organized in a tree for performance. The root is the "manifest" (mutable) and the interior nodes are the "snapshots" (imutable).
+At a high level wal3's logged records are in a large number of immutable files on object storage ("fragments"), and wal3 maintains multiple files that track which files compose the log and in which order. Those files are organized in a tree for performance. The root is the "manifest" (mutable) and the interior nodes are the "snapshots" (immutable).
 
 ## Interface
 
