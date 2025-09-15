@@ -353,7 +353,7 @@ impl DefaultQuota for UsageType {
             UsageType::NumWhereDocumentPredicates => 8,
             UsageType::WhereDocumentValueLength => 130,
             UsageType::NumRecords => 100,
-            UsageType::EmbeddingDimensions => 3072,
+            UsageType::EmbeddingDimensions => 4096,
             UsageType::SparseVectorPopulatedDimensions => 2048,
             UsageType::DocumentSizeBytes => 5000,
             UsageType::UriSizeBytes => 32,
