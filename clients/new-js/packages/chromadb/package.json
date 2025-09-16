@@ -1,6 +1,6 @@
 {
   "name": "chromadb",
-  "version": "3.0.15",
+  "version": "3.0.16",
   "description": "A JavaScript interface for chroma",
   "keywords": [
     "chroma",
@@ -73,11 +73,11 @@
     "wait-on": "^8.0.3"
   },
   "optionalDependencies": {
-    "chromadb-js-bindings-darwin-arm64": "^1.0.6",
-    "chromadb-js-bindings-darwin-x64": "^1.0.6",
-    "chromadb-js-bindings-linux-arm64-gnu": "^1.0.6",
-    "chromadb-js-bindings-linux-x64-gnu": "^1.0.6",
-    "chromadb-js-bindings-win32-x64-msvc": "^1.0.6"
+    "chromadb-js-bindings-darwin-arm64": "^1.0.7",
+    "chromadb-js-bindings-darwin-x64": "^1.0.7",
+    "chromadb-js-bindings-linux-arm64-gnu": "^1.0.7",
+    "chromadb-js-bindings-linux-x64-gnu": "^1.0.7",
+    "chromadb-js-bindings-win32-x64-msvc": "^1.0.7"
   },
   "engines": {
     "node": ">=20"
