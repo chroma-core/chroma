@@ -72,6 +72,8 @@ pub struct Metrics {
     log_total_uncompacted_records_count: opentelemetry::metrics::Gauge<f64>,
     /// The number of records on the log that are ready for compaction.
     log_ready_uncompacted_records_count: opentelemetry::metrics::Gauge<f64>,
+    /// The number of collections that likely need a purge-dirty call.
+    log_likely_needs_purge_dirty: opentelemetry::metrics::Gauge<f64>,
     /// The rate at which records are read from the dirty log.
     dirty_log_records_read: opentelemetry::metrics::Counter<u64>,
     /// A gauge for the number of dirty log collections as of the last rollup.
@@ -87,6 +89,7 @@ impl Metrics {
             log_ready_uncompacted_records_count: meter
                 .f64_gauge("log_ready_uncompacted_records_count")
                 .build(),
+            log_likely_needs_purge_dirty: meter.f64_gauge("log_likely_needs_purge_dirty").build(),
             dirty_log_records_read: meter.u64_counter("dirty_log_records_read").build(),
             dirty_log_collections: meter.u64_gauge("dirty_log_collections").build(),
         }
@@ -711,21 +714,27 @@ impl LogServer {
         // TODO(rescrv):  Realistically we could make this configurable.
         const MAX_COLLECTION_INFO_NUMBER: usize = 10000;
         let mut selected_rollups = Vec::with_capacity(MAX_COLLECTION_INFO_NUMBER);
+        let mut needs_purge_dirty = 0;
         // Do a non-allocating pass here.
         {
             let need_to_compact = self.need_to_compact.lock();
             for (collection_id, rollup) in need_to_compact.iter() {
+                let time_on_log = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("time never moves to before epoch")
+                    .as_micros()
+                    .saturating_sub(rollup.initial_insertion_epoch_us as u128);
                 if (rollup.limit_log_position >= rollup.start_log_position
                     && rollup.limit_log_position - rollup.start_log_position
                         >= request.min_compaction_size)
                     || rollup.reinsert_count >= self.config.reinsert_threshold
-                    || SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .expect("time never moves to before epoch")
-                        .as_micros()
-                        .saturating_sub(rollup.initial_insertion_epoch_us as u128)
-                        >= self.config.timeout_us as u128
+                    || time_on_log >= self.config.timeout_us as u128
                 {
+                    if rollup.reinsert_count >= self.config.reinsert_threshold * 2
+                        && time_on_log >= self.config.timeout_us as u128 * 2
+                    {
+                        needs_purge_dirty += 1;
+                    }
                     selected_rollups.push((*collection_id, *rollup));
                 }
             }
@@ -737,6 +746,9 @@ impl LogServer {
         self.metrics
             .log_ready_uncompacted_records_count
             .record(ready_uncompacted as f64, &[]);
+        self.metrics
+            .log_likely_needs_purge_dirty
+            .record(needs_purge_dirty as f64, &[]);
         // Then allocate the collection ID strings outside the lock.
         let mut all_collection_info = Vec::with_capacity(selected_rollups.len());
         for (collection_id, rollup) in selected_rollups.into_iter() {
