@@ -5,7 +5,7 @@ use chroma_sysdb::SysDbConfig;
 use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use figment::providers::{Env, Format, Yaml};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
@@ -151,6 +151,8 @@ pub struct QueryServiceConfig {
         default = "QueryServiceConfig::default_grpc_shutdown_grace_period"
     )]
     pub grpc_shutdown_grace_period: Duration,
+    #[serde(default)]
+    pub bm25_tenant: HashSet<String>,
 }
 
 impl QueryServiceConfig {

@@ -83,6 +83,10 @@ pub struct SparseKnnOrchestrator {
     // Collection information
     collection_and_segments: CollectionAndSegments,
 
+    // Temporary flag to enable BM25
+    // TODO: Remove this when we have schema
+    use_bm25: bool,
+
     // Output from KnnFilterOrchestrator
     knn_filter_output: KnnFilterOutput,
 
@@ -108,6 +112,7 @@ impl SparseKnnOrchestrator {
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
         collection_and_segments: CollectionAndSegments,
+        use_bm25: bool,
         knn_filter_output: KnnFilterOutput,
         query: SparseVector,
         key: String,
@@ -119,6 +124,7 @@ impl SparseKnnOrchestrator {
             blockfile_provider,
             queue,
             collection_and_segments,
+            use_bm25,
             knn_filter_output,
             query,
             key,
@@ -203,16 +209,7 @@ impl Orchestrator for SparseKnnOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        // TODO: Decide whether to use IDF based on collection schema
-        if matches!(
-            self.collection_and_segments.metadata_segment.scope,
-            chroma_types::SegmentScope::METADATA
-        ) {
-            self.sparse_knn_tasks(self.query.clone(), ctx)
-                .into_iter()
-                .map(|task| (task, Some(Span::current())))
-                .collect()
-        } else {
+        if self.use_bm25 {
             let idf_task = wrap(
                 Box::new(Idf {
                     query: self.query.clone(),
@@ -229,6 +226,11 @@ impl Orchestrator for SparseKnnOrchestrator {
                 self.context.task_cancellation_token.clone(),
             );
             vec![(idf_task, Some(Span::current()))]
+        } else {
+            self.sparse_knn_tasks(self.query.clone(), ctx)
+                .into_iter()
+                .map(|task| (task, Some(Span::current())))
+                .collect()
         }
     }
 
