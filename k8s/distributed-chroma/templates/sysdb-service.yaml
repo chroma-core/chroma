@@ -56,6 +56,14 @@ spec:
             requests:
               cpu: {{ .Values.sysdb.resources.requests.cpu }}
               memory: {{ .Values.sysdb.resources.requests.memory }}
+      {{if .Values.sysdb.tolerations}}
+      tolerations:
+        {{ toYaml .Values.sysdb.tolerations | nindent 8 }}
+      {{ end }}
+      {{if .Values.sysdb.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.sysdb.nodeSelector | nindent 8 }}
+      {{ end }}
 
 ---
 
