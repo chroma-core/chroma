@@ -9,7 +9,18 @@ Chroma is an AI-native open-source vector database. It comes with everything you
 
 For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
 
+{% Tabs %}
+
+{% Tab label="python" %}
 {% Video link="https://www.youtube.com/embed/yvsmkx-Jaj0" title="Getting Started Video" / %}
+{% /Tab %}
+
+{% Tab label="typescript" %}
+{% Video link="https://www.youtube.com/embed/I1Xr1okBREc" title="Getting Started Video" / %}
+{% /Tab %}
+
+{% /Tabs %}
+
 
 ### 1. Install
 
