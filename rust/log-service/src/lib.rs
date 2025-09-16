@@ -599,6 +599,7 @@ impl LogServer {
     async fn _update_collection_log_offset(
         &self,
         request: Request<UpdateCollectionLogOffsetRequest>,
+        active: tokio::sync::MutexGuard<'_, ActiveLog>,
         allow_rollback: bool,
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
         let request = request.into_inner();
@@ -611,12 +612,35 @@ impl LogServer {
             adjusted_log_offset
         );
         let storage_prefix = collection_id.storage_prefix_for_log();
+        let key = LogKey { collection_id };
+        let handle = self.open_logs.get_or_create_state(key);
+        let mark_dirty = MarkDirty {
+            collection_id,
+            dirty_log: Arc::clone(&self.dirty_log),
+        };
+        // NOTE(rescrv):  We use the writer and fall back to constructing a local reader in order
+        // to force a read-repair of the collection when things partially fail.
+        //
+        // The writer will read the manifest, and try to read the next fragment.  This adds
+        // latency, but improves correctness.
+        let log = get_log_from_handle_with_mutex_held(
+            &handle,
+            active,
+            &self.config.writer,
+            &self.storage,
+            &storage_prefix,
+            mark_dirty,
+        )
+        .await
+        .map_err(|err| Status::unknown(err.to_string()))?;
 
-        let log_reader = LogReader::new(
-            self.config.reader.clone(),
-            Arc::clone(&self.storage),
-            storage_prefix.clone(),
-        );
+        let log_reader = log
+            .reader(self.config.reader.clone())
+            .unwrap_or(LogReader::new(
+                self.config.reader.clone(),
+                Arc::clone(&self.storage),
+                storage_prefix.clone(),
+            ));
 
         let res = log_reader.next_write_timestamp().await;
         if let Err(wal3::Error::UninitializedLog) = res {
@@ -1464,8 +1488,8 @@ impl LogServer {
         // Grab a lock on the state for this key, so that a racing initialize won't do anything.
         let key = LogKey { collection_id };
         let handle = self.open_logs.get_or_create_state(key);
-        let mut _active = handle.active.lock().await;
-        self._update_collection_log_offset(Request::new(request), false)
+        let active = handle.active.lock().await;
+        self._update_collection_log_offset(Request::new(request), active, false)
             .await
     }
 
@@ -1482,8 +1506,8 @@ impl LogServer {
         // Grab a lock on the state for this key, so that a racing initialize won't do anything.
         let key = LogKey { collection_id };
         let handle = self.open_logs.get_or_create_state(key);
-        let mut _active = handle.active.lock().await;
-        self._update_collection_log_offset(Request::new(request), true)
+        let active = handle.active.lock().await;
+        self._update_collection_log_offset(Request::new(request), active, true)
             .await
     }
 
