@@ -31,7 +31,7 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         """Initialize SparseEncoderEmbeddingFunction.
 
         Args:
-            model_name (str, optional): Identifier of the Splade model
+            model_name (str, optional): Identifier of the Huggingface SparseEncoder model
             Some common models: prithivida/Splade_PP_en_v1, naver/splade-cocondenser-ensembledistil, naver/splade-v3
             device (str, optional): Device used for computation
             **kwargs: Additional arguments to pass to the Splade model.
