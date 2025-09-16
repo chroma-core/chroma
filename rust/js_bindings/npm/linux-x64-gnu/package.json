@@ -1,6 +1,6 @@
 {
   "name": "chromadb-js-bindings-linux-x64-gnu",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "os": [
     "linux"
   ],
