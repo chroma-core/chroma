@@ -79,6 +79,8 @@ PyEmbedding = PyVector
 PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
 Embeddings = List[Embedding]
+SparseEmbedding = SparseVector
+SparseEmbeddings = List[SparseEmbedding]
 
 Space = Literal["cosine", "l2", "ip"]
 
@@ -568,6 +570,13 @@ class EmbeddingFunction(Protocol[D]):
     @abstractmethod
     def __call__(self, input: D) -> Embeddings:
         ...
+
+    def embed_query(self, input: D) -> Embeddings:
+        """
+        Get the embeddings for a query input.
+        This method is optional, and if not implemented, the default behavior is to call __call__.
+        """
+        return self.__call__(input)
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
@@ -1096,6 +1105,21 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     return embeddings
 
 
+def validate_sparse_embeddings(embeddings: SparseEmbeddings) -> SparseEmbeddings:
+    """Validates sparse embeddings to ensure it is a list of sparse vectors"""
+    if not isinstance(embeddings, list):
+        raise ValueError(
+            f"Expected sparse embeddings to be a list, got {type(embeddings).__name__}"
+        )
+    if len(embeddings) == 0:
+        raise ValueError(
+            f"Expected sparse embeddings to be a non-empty list, got {len(embeddings)} sparse embeddings"
+        )
+    for embedding in embeddings:
+        validate_sparse_vector(embedding)
+    return embeddings
+
+
 def validate_documents(documents: Documents, nullable: bool = False) -> None:
     """Validates documents to ensure it is a list of strings"""
     if not isinstance(documents, list):
@@ -1150,3 +1174,95 @@ def convert_np_embeddings_to_list(embeddings: Embeddings) -> PyEmbeddings:
 
 def convert_list_embeddings_to_np(embeddings: PyEmbeddings) -> Embeddings:
     return [np.array(embedding) for embedding in embeddings]
+
+
+@runtime_checkable
+class SparseEmbeddingFunction(Protocol[D]):
+    """
+    A protocol for sparse embedding functions. To implement a new sparse embedding function,
+    you need to implement the following methods at minimum:
+    - __call__
+
+    For future compatibility, it is strongly recommended to also implement:
+    - __init__
+    - name
+    - build_from_config
+    - get_config
+    """
+
+    @abstractmethod
+    def __call__(self, input: D) -> SparseEmbeddings:
+        ...
+
+    def embed_query(self, input: D) -> SparseEmbeddings:
+        """
+        Get the embeddings for a query input.
+        This method is optional, and if not implemented, the default behavior is to call __call__.
+        """
+        return self.__call__(input)
+
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        # Raise an exception if __call__ is not defined since it is expected to be defined
+        call = getattr(cls, "__call__")
+
+        def __call__(self: SparseEmbeddingFunction[D], input: D) -> SparseEmbeddings:
+            result = call(self, input)
+            assert result is not None
+            return validate_sparse_embeddings(cast(SparseEmbeddings, result))
+
+        setattr(cls, "__call__", __call__)
+
+    def embed_with_retries(
+        self, input: D, **retry_kwargs: Dict[str, Any]
+    ) -> SparseEmbeddings:
+        return cast(SparseEmbeddings, retry(**retry_kwargs)(self.__call__)(input))
+
+    @abstractmethod
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Initialize the embedding function.
+        Pass any arguments that will be needed to build the embedding function
+        config.
+        """
+        ...
+
+    @staticmethod
+    @abstractmethod
+    def name() -> str:
+        """
+        Return the name of the embedding function.
+        """
+        ...
+
+    @staticmethod
+    @abstractmethod
+    def build_from_config(config: Dict[str, Any]) -> "SparseEmbeddingFunction[D]":
+        """
+        Build the embedding function from a config, which will be used to
+        deserialize the embedding function.
+        """
+        ...
+
+    @abstractmethod
+    def get_config(self) -> Dict[str, Any]:
+        """
+        Return the config for the embedding function, which will be used to
+        serialize the embedding function.
+        """
+        ...
+
+    def validate_config_update(
+        self, old_config: Dict[str, Any], new_config: Dict[str, Any]
+    ) -> None:
+        """
+        Validate the update to the config.
+        """
+        return
+
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
+        """
+        Validate the config.
+        """
+        return

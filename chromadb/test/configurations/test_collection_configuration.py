@@ -25,6 +25,7 @@ from chromadb.utils.embedding_functions import register_embedding_function
 from chromadb.test.conftest import ClientFactories
 from chromadb.test.conftest import is_spann_disabled_mode, skip_reason_spann_disabled
 from chromadb.types import Collection as CollectionModel
+from typing import Optional, TypedDict
 
 
 class LegacyEmbeddingFunction(EmbeddingFunction[Embeddable]):
@@ -1616,3 +1617,125 @@ def test_default_space_custom_embedding_function_with_metadata_and_config(
         spann_config = coll.configuration.get("spann")
         assert spann_config is not None
         assert spann_config.get("space") == "ip"
+
+
+class CustomEmbeddingFunctionQueryConfig(TypedDict):
+    task: str
+
+
+@register_embedding_function
+class CustomEmbeddingFunctionWithQueryConfig(EmbeddingFunction[Embeddable]):
+    def __init__(
+        self,
+        task: str,
+        model_name: str,
+        dim: int = 3,
+        query_config: Optional[CustomEmbeddingFunctionQueryConfig] = None,
+    ):
+        self._dim = dim
+        self._model_name = model_name
+        self._task = task
+        self._query_config = query_config
+
+    def __call__(self, input: Embeddable) -> Embeddings:
+        return cast(Embeddings, np.array([[1.0] * self._dim], dtype=np.float32))
+
+    def embed_query(self, input: Embeddable) -> Embeddings:
+        if self._query_config is not None and self._query_config.get("task") == "query":
+            return cast(Embeddings, np.array([[2.0] * self._dim], dtype=np.float32))
+        else:
+            return self.__call__(input)
+
+    @staticmethod
+    def name() -> str:
+        return "custom_ef_with_query_config"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {
+            "model_name": self._model_name,
+            "dim": self._dim,
+            "task": self._task,
+            "query_config": self._query_config,
+        }
+
+    @staticmethod
+    def build_from_config(
+        config: Dict[str, Any]
+    ) -> "CustomEmbeddingFunctionWithQueryConfig":
+        model_name = config.get("model_name")
+        dim = config.get("dim")
+        task = config.get("task")
+        query_config = config.get("query_config")
+
+        if model_name is None or dim is None:
+            assert False, "This code should not be reached"
+
+        return CustomEmbeddingFunctionWithQueryConfig(
+            model_name=model_name, dim=dim, task=task, query_config=query_config  # type: ignore
+        )
+
+    def default_space(self) -> Space:
+        return "cosine"
+
+    def supported_spaces(self) -> List[Space]:
+        return ["cosine"]
+
+
+def test_custom_embedding_function_with_query_config(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(
+        name="test_custom_embedding_function_with_query_config",
+        embedding_function=CustomEmbeddingFunctionWithQueryConfig(
+            task="document",
+            model_name="i_want_anything",
+            dim=3,
+            query_config={"task": "query"},
+        ),
+    )
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef_with_query_config"
+    assert ef.get_config() == {
+        "model_name": "i_want_anything",
+        "dim": 3,
+        "task": "document",
+        "query_config": {"task": "query"},
+    }
+    assert ef.default_space() == "cosine"
+    assert ef.supported_spaces() == ["cosine"]
+    assert np.array_equal(
+        ef.embed_query(input="How many people in Berlin?"),
+        np.array([[2.0, 2.0, 2.0]], dtype=np.float32),
+    )
+
+
+def test_deserializing_custom_embedding_function_with_query_config_no_query_config(
+    client: ClientAPI,
+) -> None:
+    json_string = """
+    {
+        "embedding_function": {
+            "type": "known",
+            "name": "custom_ef_with_query_config",
+            "config": {"model_name": "i_want_anything", "dim": 3, "task": "document"}
+        }
+    }
+    """
+    config = load_collection_configuration_from_json(json.loads(json_string))
+    assert config is not None
+    assert config.get("embedding_function") is not None
+    ef = config.get("embedding_function")
+    assert ef is not None
+    assert ef.get_config() == {
+        "model_name": "i_want_anything",
+        "dim": 3,
+        "task": "document",
+        "query_config": None,
+    }
+    assert ef.default_space() == "cosine"
+    assert ef.supported_spaces() == ["cosine"]
+    assert np.array_equal(
+        ef.embed_query(input="How many people in Berlin?"),
+        np.array([[1.0, 1.0, 1.0]], dtype=np.float32),
+    )
