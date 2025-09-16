@@ -27,7 +27,7 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release",
+    "build": "napi build --platform --release --strip",
     "build:debug": "napi build --platform",
     "prepublishOnly": "napi prepublish -t npm-scoped",
     "test": "ava",
