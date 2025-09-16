@@ -67,7 +67,11 @@ static COMPACTION: CursorName = unsafe { CursorName::from_string_unchecked("comp
 ////////////////////////////////////////////// Metrics /////////////////////////////////////////////
 
 pub struct Metrics {
+    /// The total number of uncompacted records on the log, including those collections
+    /// not-yet-returned for compaction.
     log_total_uncompacted_records_count: opentelemetry::metrics::Gauge<f64>,
+    /// The number of records on the log that are ready for compaction.
+    log_ready_uncompacted_records_count: opentelemetry::metrics::Gauge<f64>,
     /// The rate at which records are read from the dirty log.
     dirty_log_records_read: opentelemetry::metrics::Counter<u64>,
     /// A gauge for the number of dirty log collections as of the last rollup.
@@ -79,6 +83,9 @@ impl Metrics {
         Self {
             log_total_uncompacted_records_count: meter
                 .f64_gauge("log_total_uncompacted_records_count")
+                .build(),
+            log_ready_uncompacted_records_count: meter
+                .f64_gauge("log_ready_uncompacted_records_count")
                 .build(),
             dirty_log_records_read: meter.u64_counter("dirty_log_records_read").build(),
             dirty_log_collections: meter.u64_gauge("dirty_log_collections").build(),
@@ -723,6 +730,13 @@ impl LogServer {
                 }
             }
         }
+        let ready_uncompacted: u64 = selected_rollups
+            .iter()
+            .map(|(_, x)| x.limit_log_position - x.start_log_position)
+            .sum();
+        self.metrics
+            .log_ready_uncompacted_records_count
+            .record(ready_uncompacted as f64, &[]);
         // Then allocate the collection ID strings outside the lock.
         let mut all_collection_info = Vec::with_capacity(selected_rollups.len());
         for (collection_id, rollup) in selected_rollups.into_iter() {
