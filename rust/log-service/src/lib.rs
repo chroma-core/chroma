@@ -611,6 +611,11 @@ impl LogServer {
             collection_id,
             dirty_log: Arc::clone(&self.dirty_log),
         };
+        // NOTE(rescrv):  We use the writer and fall back to constructing a local reader in order
+        // to force a read-repair of the collection when things partially fail.
+        //
+        // The writer will read the manifest, and try to read the next fragment.  This adds
+        // latency, but improves correctness.
         let log = get_log_from_handle_with_mutex_held(
             &handle,
             active,
