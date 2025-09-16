@@ -83,8 +83,8 @@ pub struct SparseKnnOrchestrator {
     // Collection information
     collection_and_segments: CollectionAndSegments,
 
-    // Temporary flag to enable BM25
-    // TODO: Remove this when we have schema
+    // TODO: This is a temporary config to enable bm25 for certain tenants.
+    // This should be removed once we have collection schema ready.
     use_bm25: bool,
 
     // Output from KnnFilterOrchestrator

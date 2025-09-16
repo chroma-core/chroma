@@ -151,6 +151,8 @@ pub struct QueryServiceConfig {
         default = "QueryServiceConfig::default_grpc_shutdown_grace_period"
     )]
     pub grpc_shutdown_grace_period: Duration,
+    // TODO: This is a temporary config to enable bm25 for certain tenants.
+    // This should be removed once we have collection schema ready.
     #[serde(default)]
     pub bm25_tenant: HashSet<String>,
 }
