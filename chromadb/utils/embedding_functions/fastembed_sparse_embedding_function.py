@@ -6,6 +6,7 @@ from chromadb.api.types import (
 from typing import Dict, Any, TypedDict, Optional
 from typing import cast, Literal
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
+from chromadb.utils.sparse_embedding_utils import _sort_sparse_vectors
 
 TaskType = Literal["document", "query"]
 
@@ -75,6 +76,7 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
                 {"indices": vec.indices.tolist(), "values": vec.values.tolist()}
             )
 
+        _sort_sparse_vectors(sparse_embeddings)
         return sparse_embeddings
 
     def embed_query(self, input: Documents) -> SparseEmbeddings:
@@ -105,6 +107,7 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
                     {"indices": vec.indices.tolist(), "values": vec.values.tolist()}
                 )
 
+            _sort_sparse_vectors(sparse_embeddings)
             return sparse_embeddings
 
         else:
