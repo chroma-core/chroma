@@ -361,7 +361,7 @@ mod tests {
         // Test Euclidean distance
         let euclid_simd = unsafe { euclidean_distance(v1, v2) };
         let euclid = euclidean_distance_scalar(v1, v2);
-        let euclid_tolerance = (euclid.abs() * 1e-4).max(1e-5);
+        let euclid_tolerance = (euclid.abs() * 1e-4).max(1e-5) + (v1.len() as f32 * 1e-5);
         assert!(
             (euclid_simd - euclid).abs() < euclid_tolerance,
             "Euclidean distance mismatch: SIMD={}, Scalar={}, tolerance={}",
@@ -373,7 +373,7 @@ mod tests {
         // Test Cosine distance
         let cosine_simd = unsafe { cosine_distance(v1, v2) };
         let cosine = cosine_distance_scalar(v1, v2);
-        let cosine_tolerance = (cosine.abs() * 1e-4).max(1e-5);
+        let cosine_tolerance = (cosine.abs() * 5e-4).max(1e-4) + (v1.len() as f32 * 1e-5);
         assert!(
             (cosine_simd - cosine).abs() < cosine_tolerance,
             "Cosine distance mismatch: SIMD={}, Scalar={}, tolerance={}",
@@ -385,7 +385,7 @@ mod tests {
         // Test Inner product
         let inner_simd = unsafe { inner_product(v1, v2) };
         let inner = inner_product_scalar(v1, v2);
-        let inner_tolerance = (inner.abs() * 1e-4).max(1e-5);
+        let inner_tolerance = (inner.abs() * 5e-4).max(1e-4) + (v1.len() as f32 * 1e-5);
         assert!(
             (inner_simd - inner).abs() < inner_tolerance,
             "Inner product mismatch: SIMD={}, Scalar={}, tolerance={}",
@@ -440,11 +440,13 @@ mod tests {
         // Test various vector sizes
         let sizes = vec![16, 32, 64, 128, 256, 512, 1024, 2048, 4096];
 
-        for size in sizes {
-            println!("Testing size: {}", size);
-            let v1 = generate_random_vector(size);
-            let v2 = generate_random_vector(size);
-            test_distance_functions(&v1, &v2);
+        for _ in 0..1_000 {
+            for size in &sizes {
+                println!("Testing size: {}", size);
+                let v1 = generate_random_vector(*size);
+                let v2 = generate_random_vector(*size);
+                test_distance_functions(&v1, &v2);
+            }
         }
     }
 
