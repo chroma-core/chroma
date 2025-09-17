@@ -364,6 +364,12 @@ pub struct CollectionAndSegments {
 }
 
 impl CollectionAndSegments {
+    // If dimension is not set and vector segment has no files,
+    // we assume this is an uninitialized collection
+    pub fn is_uninitialized(&self) -> bool {
+        self.collection.dimension.is_none() && self.vector_segment.file_path.is_empty()
+    }
+
     pub fn test(dim: i32) -> Self {
         let collection = Collection::test_collection(dim);
         let collection_uuid = collection.collection_id;

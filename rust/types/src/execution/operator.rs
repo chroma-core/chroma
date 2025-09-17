@@ -1125,7 +1125,7 @@ impl TryFrom<SearchRecord> for chroma_proto::SearchRecord {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SearchPayloadResult {
     pub records: Vec<SearchRecord>,
 }
