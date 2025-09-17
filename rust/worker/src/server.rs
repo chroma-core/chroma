@@ -483,6 +483,14 @@ impl WorkerServer {
         let search_payload = SearchPayload::try_from(payload)?;
         let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
 
+        // If dimension is not set and segment is uninitialized, we assume
+        // this is a query on empty collection, so we return early here
+        if collection_and_segments.collection.dimension.is_none()
+            && collection_and_segments.vector_segment.file_path.is_empty()
+        {
+            return Ok(RankOrchestratorOutput::default());
+        }
+
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
             self.clone_dispatcher()?,
