@@ -67,7 +67,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct RankOrchestratorOutput {
     pub result: SearchPayloadResult,
     pub pulled_log_bytes: u64,

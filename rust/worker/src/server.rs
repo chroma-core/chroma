@@ -318,11 +318,9 @@ impl WorkerServer {
             return Ok(Response::new(KnnBatchResult::default().try_into()?));
         }
 
-        // If dimension is not set and segment is uninitialized, we assume
-        // this is a query on empty collection, so we return early here
-        if collection_and_segments.collection.dimension.is_none()
-            && collection_and_segments.vector_segment.file_path.is_empty()
-        {
+        // We return early on uninitialized collection, otherwise
+        // the downstream will error due to missing dimension
+        if collection_and_segments.is_uninitialized() {
             return Ok(Response::new(
                 KnnBatchResult {
                     pulled_log_bytes: 0,
@@ -482,6 +480,12 @@ impl WorkerServer {
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
         let search_payload = SearchPayload::try_from(payload)?;
         let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
+
+        // We return early on uninitialized collection, otherwise
+        // the downstream will error due to missing dimension
+        if collection_and_segments.is_uninitialized() {
+            return Ok(RankOrchestratorOutput::default());
+        }
 
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
