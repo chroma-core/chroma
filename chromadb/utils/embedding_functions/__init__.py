@@ -74,6 +74,9 @@ from chromadb.utils.embedding_functions.huggingface_sparse_embedding_function im
 from chromadb.utils.embedding_functions.fastembed_sparse_embedding_function import (
     FastembedSparseEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.bm25_embedding_function import (
+    Bm25EmbeddingFunction,
+)
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -108,6 +111,7 @@ _all_classes: Set[str] = {
     "DefaultEmbeddingFunction",
     "HuggingFaceSparseEmbeddingFunction",
     "FastembedSparseEmbeddingFunction",
+    "Bm25EmbeddingFunction",
 }
 
 
@@ -259,6 +263,7 @@ __all__ = [
     "TogetherAIEmbeddingFunction",
     "HuggingFaceSparseEmbeddingFunction",
     "FastembedSparseEmbeddingFunction",
+    "Bm25EmbeddingFunction",
     "register_embedding_function",
     "config_to_embedding_function",
     "known_embedding_functions",
