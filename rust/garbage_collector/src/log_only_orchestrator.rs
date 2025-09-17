@@ -169,7 +169,6 @@ mod tests {
     use chroma_log::config::{GrpcLogConfig, LogConfig};
     use chroma_storage::test_storage;
     use chroma_system::{Dispatcher, System};
-    use tokio::sync::oneshot;
 
     /// Verifies that the orchestrator correctly initializes with all required components.
     ///
