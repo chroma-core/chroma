@@ -49,6 +49,7 @@ __all__ = [
     "UpdateCollectionMetadata",
     "UpdateMetadata",
     "SearchResult",
+    "SearchResultRow",
     "SparseVector",
     "is_valid_sparse_vector",
     "validate_sparse_vector",
@@ -487,27 +488,91 @@ class QueryResult(TypedDict):
     included: Include
 
 
-class SearchResult(TypedDict):
-    """Column-major response from the search API matching Rust SearchResponse structure.
+class SearchResultRow(TypedDict, total=False):
+    """A single row from search results.
 
-    This is the format returned to users:
-    - ids: Always present, list of result IDs for each search payload
-    - documents: Optional per payload, None if not requested
-    - embeddings: Optional per payload, None if not requested
-    - metadatas: Optional per payload, None if not requested
-    - scores: Optional per payload, None if not requested
-    - select: List of selected fields for each payload (sorted)
-
-    Each top-level list index corresponds to a search payload.
-    Within each payload, the inner lists are aligned by record index.
+    Only includes fields that were actually returned in the search.
+    The 'id' field is always present.
     """
 
+    id: str  # Always present
+    document: Optional[str]
+    embedding: Optional[List[float]]
+    metadata: Optional[Dict[str, Any]]
+    score: Optional[float]
+
+
+class SearchResult(dict):
+    """Column-major response from the search API with conversion methods.
+
+    Inherits from dict to maintain backward compatibility with existing code
+    that treats SearchResult as a dictionary.
+
+    Structure:
+        - ids: List[List[str]] - Always present
+        - documents: List[Optional[List[Optional[str]]]] - Optional per payload
+        - embeddings: List[Optional[List[Optional[List[float]]]]] - Optional per payload
+        - metadatas: List[Optional[List[Optional[Dict[str, Any]]]]] - Optional per payload
+        - scores: List[Optional[List[Optional[float]]]] - Optional per payload
+        - select: List[List[str]] - Selected fields for each payload
+    """
+
+    # Type hints for IDE support and documentation
     ids: List[List[str]]
     documents: List[Optional[List[Optional[str]]]]
     embeddings: List[Optional[List[Optional[List[float]]]]]
     metadatas: List[Optional[List[Optional[Dict[str, Any]]]]]
     scores: List[Optional[List[Optional[float]]]]
-    select: List[List[str]]  # List of string key names for each payload
+    select: List[List[str]]
+
+    def rows(self) -> List[List[SearchResultRow]]:
+        """Convert column-major format to row-major format.
+
+        Returns:
+            List of lists where each inner list contains SearchResultRow dicts
+            for one search payload.
+        """
+        result: List[List[SearchResultRow]] = []
+
+        # Get all field data with defaults
+        all_ids = self.get("ids", [])
+        n_payloads = len(all_ids)
+        all_docs = self.get("documents") or [None] * n_payloads
+        all_embs = self.get("embeddings") or [None] * n_payloads
+        all_metas = self.get("metadatas") or [None] * n_payloads
+        all_scores = self.get("scores") or [None] * n_payloads
+
+        # Zip payload-level data together
+        for ids, docs, embs, metas, scores in zip(
+            all_ids, all_docs, all_embs, all_metas, all_scores
+        ):
+            payload_rows: List[SearchResultRow] = []
+
+            # Zip row-level data together (handle None payloads inline)
+            for id_val, doc, emb, meta, score in zip(
+                ids,
+                docs or [None] * len(ids),
+                embs or [None] * len(ids),
+                metas or [None] * len(ids),
+                scores or [None] * len(ids),
+            ):
+                row: SearchResultRow = {"id": id_val}
+
+                # Add fields only if they have values
+                if doc is not None:
+                    row["document"] = doc
+                if emb is not None:
+                    row["embedding"] = emb
+                if meta is not None:
+                    row["metadata"] = meta
+                if score is not None:
+                    row["score"] = score
+
+                payload_rows.append(row)
+
+            result.append(payload_rows)
+
+        return result
 
 
 class UpdateRequest(TypedDict):

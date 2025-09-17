@@ -1836,144 +1836,102 @@ def test_query_id_filtering_e2e(client):
 def test_validate_sparse_vector():
     """Test the validate_sparse_vector function with various inputs."""
     from chromadb.api.types import validate_sparse_vector
-    
+
     # Test 1: Valid sparse vector
-    valid_sparse = {
-        "indices": [0, 2, 5],
-        "values": [0.1, 0.5, 0.9]
-    }
+    valid_sparse = {"indices": [0, 2, 5], "values": [0.1, 0.5, 0.9]}
     # Should not raise
     validate_sparse_vector(valid_sparse)
-    
+
     # Test 2: Valid sparse vector with empty lists
-    valid_empty = {
-        "indices": [],
-        "values": []
-    }
+    valid_empty = {"indices": [], "values": []}
     # Should not raise
     validate_sparse_vector(valid_empty)
-    
+
     # Test 3: Invalid - not a dict
     with pytest.raises(ValueError, match="Expected SparseVector to be a dict"):
         validate_sparse_vector([1, 2, 3])
-    
+
     # Test 4: Invalid - missing 'indices' key
-    with pytest.raises(ValueError, match="SparseVector must have 'indices' and 'values' keys"):
+    with pytest.raises(
+        ValueError, match="SparseVector must have 'indices' and 'values' keys"
+    ):
         validate_sparse_vector({"values": [0.1, 0.2]})
-    
+
     # Test 5: Invalid - missing 'values' key
-    with pytest.raises(ValueError, match="SparseVector must have 'indices' and 'values' keys"):
+    with pytest.raises(
+        ValueError, match="SparseVector must have 'indices' and 'values' keys"
+    ):
         validate_sparse_vector({"indices": [0, 1]})
-    
+
     # Test 6: Invalid - indices not a list
     with pytest.raises(ValueError, match="Expected SparseVector indices to be a list"):
-        validate_sparse_vector({
-            "indices": "not_a_list",
-            "values": [0.1, 0.2]
-        })
-    
+        validate_sparse_vector({"indices": "not_a_list", "values": [0.1, 0.2]})
+
     # Test 7: Invalid - values not a list
     with pytest.raises(ValueError, match="Expected SparseVector values to be a list"):
-        validate_sparse_vector({
-            "indices": [0, 1],
-            "values": "not_a_list"
-        })
-    
+        validate_sparse_vector({"indices": [0, 1], "values": "not_a_list"})
+
     # Test 8: Invalid - mismatched lengths
-    with pytest.raises(ValueError, match="indices and values must have the same length"):
-        validate_sparse_vector({
-            "indices": [0, 1, 2],
-            "values": [0.1, 0.2]
-        })
-    
+    with pytest.raises(
+        ValueError, match="indices and values must have the same length"
+    ):
+        validate_sparse_vector({"indices": [0, 1, 2], "values": [0.1, 0.2]})
+
     # Test 9: Invalid - non-integer index
     with pytest.raises(ValueError, match="SparseVector indices must be integers"):
-        validate_sparse_vector({
-            "indices": [0, "not_int", 2],
-            "values": [0.1, 0.2, 0.3]
-        })
-    
+        validate_sparse_vector(
+            {"indices": [0, "not_int", 2], "values": [0.1, 0.2, 0.3]}
+        )
+
     # Test 10: Invalid - negative index
     with pytest.raises(ValueError, match="SparseVector indices must be non-negative"):
-        validate_sparse_vector({
-            "indices": [0, -1, 2],
-            "values": [0.1, 0.2, 0.3]
-        })
-    
+        validate_sparse_vector({"indices": [0, -1, 2], "values": [0.1, 0.2, 0.3]})
+
     # Test 11: Invalid - non-numeric value
     with pytest.raises(ValueError, match="SparseVector values must be numbers"):
-        validate_sparse_vector({
-            "indices": [0, 1, 2],
-            "values": [0.1, "not_number", 0.3]
-        })
-    
+        validate_sparse_vector(
+            {"indices": [0, 1, 2], "values": [0.1, "not_number", 0.3]}
+        )
+
     # Test 12: Valid - float indices get converted to int in practice
     with pytest.raises(ValueError, match="SparseVector indices must be integers"):
-        validate_sparse_vector({
-            "indices": [0.0, 1.0, 2.0],
-            "values": [0.1, 0.2, 0.3]
-        })
-    
+        validate_sparse_vector({"indices": [0.0, 1.0, 2.0], "values": [0.1, 0.2, 0.3]})
+
     # Test 13: Valid - integer values (not just floats)
-    valid_int_values = {
-        "indices": [0, 1, 2],
-        "values": [1, 2, 3]
-    }
+    valid_int_values = {"indices": [0, 1, 2], "values": [1, 2, 3]}
     # Should not raise
     validate_sparse_vector(valid_int_values)
-    
+
     # Test 14: Valid - mixed int and float values
-    valid_mixed = {
-        "indices": [0, 1, 2],
-        "values": [1, 2.5, 3]
-    }
+    valid_mixed = {"indices": [0, 1, 2], "values": [1, 2.5, 3]}
     # Should not raise
     validate_sparse_vector(valid_mixed)
-    
+
     # Test 15: Valid - large indices
-    valid_large = {
-        "indices": [100, 1000, 10000],
-        "values": [0.1, 0.2, 0.3]
-    }
+    valid_large = {"indices": [100, 1000, 10000], "values": [0.1, 0.2, 0.3]}
     # Should not raise
     validate_sparse_vector(valid_large)
-    
+
     # Test 16: Invalid - None as value
     with pytest.raises(ValueError, match="SparseVector values must be numbers"):
-        validate_sparse_vector({
-            "indices": [0, 1],
-            "values": [0.1, None]
-        })
-    
+        validate_sparse_vector({"indices": [0, 1], "values": [0.1, None]})
+
     # Test 17: Invalid - None as index
     with pytest.raises(ValueError, match="SparseVector indices must be integers"):
-        validate_sparse_vector({
-            "indices": [0, None],
-            "values": [0.1, 0.2]
-        })
-    
+        validate_sparse_vector({"indices": [0, None], "values": [0.1, 0.2]})
+
     # Test 18: Valid - single element
-    valid_single = {
-        "indices": [42],
-        "values": [3.14]
-    }
+    valid_single = {"indices": [42], "values": [3.14]}
     # Should not raise
     validate_sparse_vector(valid_single)
-    
+
     # Test 19: Invalid - extra keys (should still be valid as long as required keys exist)
-    valid_extra_keys = {
-        "indices": [0, 1],
-        "values": [0.1, 0.2],
-        "extra": "ignored"
-    }
+    valid_extra_keys = {"indices": [0, 1], "values": [0.1, 0.2], "extra": "ignored"}
     # Should not raise - extra keys are ignored
     validate_sparse_vector(valid_extra_keys)
-    
+
     # Test 20: Boolean values are actually valid (bool is subclass of int in Python)
-    valid_bool = {
-        "indices": [0, 1],
-        "values": [True, False]  # True=1, False=0
-    }
+    valid_bool = {"indices": [0, 1], "values": [True, False]}  # True=1, False=0
     # Should not raise - booleans are treated as integers
     validate_sparse_vector(valid_bool)
 
@@ -1981,127 +1939,273 @@ def test_validate_sparse_vector():
 def test_sparse_vector_in_metadata_validation():
     """Test that sparse vectors are properly validated in metadata."""
     from chromadb.api.types import validate_metadata
-    
+
     # Test 1: Valid metadata with sparse vectors
-    sparse_vector_1 = {
-        "indices": [0, 2, 5],
-        "values": [0.1, 0.5, 0.9]
-    }
-    sparse_vector_2 = {
-        "indices": [1, 3, 4],
-        "values": [0.2, 0.4, 0.6]
-    }
-    
+    sparse_vector_1 = {"indices": [0, 2, 5], "values": [0.1, 0.5, 0.9]}
+    sparse_vector_2 = {"indices": [1, 3, 4], "values": [0.2, 0.4, 0.6]}
+
     # Validate metadata with sparse vectors
     metadata_1 = {
         "text": "document 1",
         "sparse_embedding": sparse_vector_1,
-        "score": 0.5
+        "score": 0.5,
     }
     metadata_2 = {
-        "text": "document 2", 
+        "text": "document 2",
         "sparse_embedding": sparse_vector_2,
-        "score": 0.8
+        "score": 0.8,
     }
-    
+
     # Should not raise
     validate_metadata(metadata_1)
     validate_metadata(metadata_2)
-    
+
     # Test 2: Valid metadata with empty sparse vector
     metadata_empty = {
         "text": "empty sparse",
-        "sparse_vec": {
-            "indices": [],
-            "values": []
-        }
+        "sparse_vec": {"indices": [], "values": []},
     }
     # Should not raise
     validate_metadata(metadata_empty)
-    
+
     # Test 3: Invalid sparse vector in metadata should raise
     invalid_metadata = {
         "text": "invalid",
-        "sparse_embedding": {
-            "indices": [0, 1],
-            "values": [0.1]  # Mismatched length
-        }
+        "sparse_embedding": {"indices": [0, 1], "values": [0.1]},  # Mismatched length
     }
-    
-    with pytest.raises(ValueError, match="indices and values must have the same length"):
+
+    with pytest.raises(
+        ValueError, match="indices and values must have the same length"
+    ):
         validate_metadata(invalid_metadata)
-    
+
     # Test 4: Invalid dict in metadata (not a sparse vector - missing indices)
     # This will be rejected as an invalid metadata type, not as an invalid sparse vector
     invalid_metadata_2 = {
         "text": "missing indices",
-        "sparse_embedding": {
-            "values": [0.1, 0.2]
-        }
+        "sparse_embedding": {"values": [0.1, 0.2]},
     }
-    
-    with pytest.raises(ValueError, match="Expected metadata value to be a str, int, float, bool, SparseVector, or None"):
+
+    with pytest.raises(
+        ValueError,
+        match="Expected metadata value to be a str, int, float, bool, SparseVector, or None",
+    ):
         validate_metadata(invalid_metadata_2)
-    
+
     # Test 5: Invalid sparse vector - negative index
     invalid_metadata_3 = {
         "text": "negative index",
-        "sparse_embedding": {
-            "indices": [0, -1, 2],
-            "values": [0.1, 0.2, 0.3]
-        }
+        "sparse_embedding": {"indices": [0, -1, 2], "values": [0.1, 0.2, 0.3]},
     }
-    
+
     with pytest.raises(ValueError, match="SparseVector indices must be non-negative"):
         validate_metadata(invalid_metadata_3)
-    
+
     # Test 6: Invalid sparse vector - non-numeric value
     invalid_metadata_4 = {
         "text": "non-numeric value",
-        "sparse_embedding": {
-            "indices": [0, 1],
-            "values": [0.1, "not_a_number"]
-        }
+        "sparse_embedding": {"indices": [0, 1], "values": [0.1, "not_a_number"]},
     }
-    
+
     with pytest.raises(ValueError, match="SparseVector values must be numbers"):
         validate_metadata(invalid_metadata_4)
-    
+
     # Test 7: Multiple sparse vectors in metadata
     metadata_multiple = {
         "text": "multiple sparse vectors",
-        "sparse_1": {
-            "indices": [0, 1],
-            "values": [0.1, 0.2]
-        },
-        "sparse_2": {
-            "indices": [2, 3, 4],
-            "values": [0.3, 0.4, 0.5]
-        },
-        "regular_field": 42
+        "sparse_1": {"indices": [0, 1], "values": [0.1, 0.2]},
+        "sparse_2": {"indices": [2, 3, 4], "values": [0.3, 0.4, 0.5]},
+        "regular_field": 42,
     }
     # Should not raise
     validate_metadata(metadata_multiple)
-    
+
     # Test 8: Nested structure that looks like sparse vector but isn't in metadata value position
     metadata_nested = {
         "config": "some_config",
-        "sparse_vector": {
-            "indices": [0, 1, 2],
-            "values": [1.0, 2.0, 3.0]
-        }
+        "sparse_vector": {"indices": [0, 1, 2], "values": [1.0, 2.0, 3.0]},
     }
     # Should not raise
     validate_metadata(metadata_nested)
-    
+
     # Test 9: Large sparse vector
     large_sparse = {
         "indices": list(range(1000)),
-        "values": [float(i) * 0.001 for i in range(1000)]
+        "values": [float(i) * 0.001 for i in range(1000)],
     }
-    metadata_large = {
-        "text": "large sparse",
-        "large_sparse_vec": large_sparse
-    }
+    metadata_large = {"text": "large sparse", "large_sparse_vec": large_sparse}
     # Should not raise
     validate_metadata(metadata_large)
+
+
+def test_search_result_rows() -> None:
+    """Test the SearchResult.rows() method for converting column-major to row-major format."""
+    from chromadb.api.types import SearchResult
+
+    # Test 1: Basic single payload with all fields
+    result = SearchResult(
+        {
+            "ids": [["id1", "id2", "id3"]],
+            "documents": [["doc1", "doc2", "doc3"]],
+            "embeddings": [[[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]],
+            "metadatas": [[{"key": "a"}, {"key": "b"}, {"key": "c"}]],
+            "scores": [[0.9, 0.8, 0.7]],
+            "select": [["document", "score", "metadata"]],
+        }
+    )
+
+    rows = result.rows()
+    assert len(rows) == 1  # One payload
+    assert len(rows[0]) == 3  # Three results
+
+    # Check first row
+    assert rows[0][0]["id"] == "id1"
+    assert rows[0][0]["document"] == "doc1"
+    assert rows[0][0]["embedding"] == [1.0, 2.0]
+    assert rows[0][0]["metadata"] == {"key": "a"}
+    assert rows[0][0]["score"] == 0.9
+
+    # Check all rows have all fields
+    for row in rows[0]:
+        assert "id" in row
+        assert "document" in row
+        assert "embedding" in row
+        assert "metadata" in row
+        assert "score" in row
+
+    # Test 2: Multiple payloads
+    result = SearchResult(
+        {
+            "ids": [["a1", "a2"], ["b1", "b2", "b3"]],
+            "documents": [["doc_a1", "doc_a2"], ["doc_b1", "doc_b2", "doc_b3"]],
+            "embeddings": [
+                None,
+                [[1.0], [2.0], [3.0]],
+            ],  # First payload has no embeddings
+            "metadatas": [[{"x": 1}, {"x": 2}], None],  # Second payload has no metadata
+            "scores": [[0.5, 0.4], [0.9, 0.8, 0.7]],
+            "select": [["document", "score"], ["embedding", "score"]],
+        }
+    )
+
+    rows = result.rows()
+    assert len(rows) == 2  # Two payloads
+    assert len(rows[0]) == 2  # First payload has 2 results
+    assert len(rows[1]) == 3  # Second payload has 3 results
+
+    # First payload - has docs, metadata, scores but no embeddings
+    assert rows[0][0] == {
+        "id": "a1",
+        "document": "doc_a1",
+        "metadata": {"x": 1},
+        "score": 0.5,
+    }
+    assert rows[0][1] == {
+        "id": "a2",
+        "document": "doc_a2",
+        "metadata": {"x": 2},
+        "score": 0.4,
+    }
+
+    # Second payload - has docs, embeddings, scores but no metadata
+    assert rows[1][0] == {
+        "id": "b1",
+        "document": "doc_b1",
+        "embedding": [1.0],
+        "score": 0.9,
+    }
+    assert rows[1][1] == {
+        "id": "b2",
+        "document": "doc_b2",
+        "embedding": [2.0],
+        "score": 0.8,
+    }
+    assert rows[1][2] == {
+        "id": "b3",
+        "document": "doc_b3",
+        "embedding": [3.0],
+        "score": 0.7,
+    }
+
+    # Test 3: Empty result
+    result = SearchResult(
+        {
+            "ids": [],
+            "documents": [],
+            "embeddings": [],
+            "metadatas": [],
+            "scores": [],
+            "select": [],
+        }
+    )
+
+    rows = result.rows()
+    assert rows == []
+
+    # Test 4: Sparse data with None values in lists
+    result = SearchResult(
+        {
+            "ids": [["id1", "id2", "id3"]],
+            "documents": [[None, "doc2", None]],  # Sparse documents
+            "embeddings": None,  # No embeddings at all
+            "metadatas": [[{"a": 1}, None, {"c": 3}]],  # Sparse metadata
+            "scores": [[0.9, None, 0.7]],  # Sparse scores
+            "select": [["document", "metadata", "score"]],
+        }
+    )
+
+    rows = result.rows()
+    assert len(rows) == 1
+    assert len(rows[0]) == 3
+
+    # First row - only has metadata and score
+    assert rows[0][0] == {"id": "id1", "metadata": {"a": 1}, "score": 0.9}
+
+    # Second row - only has document
+    assert rows[0][1] == {"id": "id2", "document": "doc2"}
+
+    # Third row - has metadata and score
+    assert rows[0][2] == {"id": "id3", "metadata": {"c": 3}, "score": 0.7}
+
+    # Test 5: Only IDs (minimal result)
+    result = SearchResult(
+        {
+            "ids": [["id1", "id2"]],
+            "documents": None,
+            "embeddings": None,
+            "metadatas": None,
+            "scores": None,
+            "select": [[]],
+        }
+    )
+
+    rows = result.rows()
+    assert len(rows) == 1
+    assert len(rows[0]) == 2
+    assert rows[0][0] == {"id": "id1"}
+    assert rows[0][1] == {"id": "id2"}
+
+    # Test 6: SearchResult works as dict (backward compatibility)
+    result = SearchResult(
+        {
+            "ids": [["test"]],
+            "documents": [["test doc"]],
+            "metadatas": [[{"test": True}]],
+            "embeddings": [[[0.1, 0.2]]],
+            "scores": [[0.99]],
+            "select": [["all"]],
+        }
+    )
+
+    # Should work as dict
+    assert result["ids"] == [["test"]]
+    assert result.get("documents") == [["test doc"]]
+    assert "metadatas" in result
+    assert len(result) == 6  # Should have 6 keys
+
+    # Should also have rows() method
+    rows = result.rows()
+    assert len(rows[0]) == 1
+    assert rows[0][0]["id"] == "test"
+
+    print("All SearchResult.rows() tests passed!")
