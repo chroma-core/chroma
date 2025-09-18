@@ -181,7 +181,7 @@ mod tests {
     /// - Collection UUID must match the one provided during construction
     /// - Result channel must be `None` initially (set later by the system)
     #[tokio::test(flavor = "multi_thread")]
-    async fn orchestrator_initialization() {
+    async fn test_k8s_integration_orchestrator_initialization() {
         let (_storage_dir, storage) = test_storage();
         let system = System::new();
         let dispatcher = Dispatcher::new(Default::default());
@@ -224,7 +224,7 @@ mod tests {
     /// `collections_to_destroy` set, while `collections_to_garbage_collect` remains empty
     /// since this orchestrator only handles hard deletion, not soft garbage collection.
     #[tokio::test(flavor = "multi_thread")]
-    async fn delete_operator_params() {
+    async fn test_k8s_integration_delete_operator_params() {
         let (_storage_dir, storage) = test_storage();
         let system = System::new();
         let dispatcher = Dispatcher::new(Default::default());
