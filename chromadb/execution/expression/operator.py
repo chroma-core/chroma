@@ -4,7 +4,15 @@ from typing import Optional, List, Dict, Set, Any, Union
 
 import numpy as np
 from numpy.typing import NDArray
-from chromadb.api.types import Embeddings, IDs, Include, SparseVector
+from chromadb.api.types import (
+    Embeddings,
+    IDs,
+    Include,
+    SparseVector,
+    normalize_embeddings,
+    validate_embeddings,
+    validate_sparse_vector,
+)
 from chromadb.types import (
     Collection,
     RequestVersionContext,
@@ -76,7 +84,25 @@ class Where:
         - {"$and": [conditions]} -> condition1 & condition2 & ...
         - {"$or": [conditions]} -> condition1 | condition2 | ...
         """
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict for Where, got {type(data).__name__}")
+
+        if not data:
+            raise ValueError("Where dict cannot be empty")
+
+        # Handle logical operators
         if "$and" in data:
+            if not isinstance(data["$and"], list):
+                raise TypeError(
+                    f"$and must be a list, got {type(data['$and']).__name__}"
+                )
+            if len(data["$and"]) == 0:
+                raise ValueError("$and requires at least one condition")
+            if len(data) > 1:
+                raise ValueError(
+                    "$and cannot be combined with other fields in the same dict"
+                )
+
             conditions = [Where.from_dict(c) for c in data["$and"]]
             if len(conditions) == 1:
                 return conditions[0]
@@ -84,7 +110,17 @@ class Where:
             for c in conditions[1:]:
                 result = result & c
             return result
+
         elif "$or" in data:
+            if not isinstance(data["$or"], list):
+                raise TypeError(f"$or must be a list, got {type(data['$or']).__name__}")
+            if len(data["$or"]) == 0:
+                raise ValueError("$or requires at least one condition")
+            if len(data) > 1:
+                raise ValueError(
+                    "$or cannot be combined with other fields in the same dict"
+                )
+
             conditions = [Where.from_dict(c) for c in data["$or"]]
             if len(conditions) == 1:
                 return conditions[0]
@@ -92,44 +128,87 @@ class Where:
             for c in conditions[1:]:
                 result = result | c
             return result
+
         else:
             # Single field condition
-            for field, condition in data.items():
-                if isinstance(condition, dict):
-                    # Operator-based condition
-                    for op, value in condition.items():
-                        if op == "$eq":
-                            return Key(field) == value
-                        elif op == "$ne":
-                            return Key(field) != value
-                        elif op == "$gt":
-                            return Key(field) > value
-                        elif op == "$gte":
-                            return Key(field) >= value
-                        elif op == "$lt":
-                            return Key(field) < value
-                        elif op == "$lte":
-                            return Key(field) <= value
-                        elif op == "$in":
-                            return Key(field).is_in(value)
-                        elif op == "$nin":
-                            return Key(field).not_in(value)
-                        elif op == "$contains":
-                            return Key(field).contains(value)
-                        elif op == "$not_contains":
-                            return Key(field).not_contains(value)
-                        elif op == "$regex":
-                            return Key(field).regex(value)
-                        elif op == "$not_regex":
-                            return Key(field).not_regex(value)
-                        else:
-                            raise ValueError(f"Unknown operator: {op}")
-                else:
-                    # Direct value is shorthand for equality
-                    return Key(field) == condition
+            if len(data) != 1:
+                raise ValueError(
+                    f"Where dict must contain exactly one field, got {len(data)}"
+                )
 
-            # Empty dict defaults to no filter
-            raise ValueError("Invalid where dict format")
+            field, condition = next(iter(data.items()))
+
+            if not isinstance(field, str):
+                raise TypeError(
+                    f"Field name must be a string, got {type(field).__name__}"
+                )
+
+            if isinstance(condition, dict):
+                # Operator-based condition
+                if not condition:
+                    raise ValueError(
+                        f"Operator dict for field '{field}' cannot be empty"
+                    )
+                if len(condition) != 1:
+                    raise ValueError(
+                        f"Operator dict for field '{field}' must contain exactly one operator"
+                    )
+
+                op, value = next(iter(condition.items()))
+
+                if op == "$eq":
+                    return Key(field) == value
+                elif op == "$ne":
+                    return Key(field) != value
+                elif op == "$gt":
+                    return Key(field) > value
+                elif op == "$gte":
+                    return Key(field) >= value
+                elif op == "$lt":
+                    return Key(field) < value
+                elif op == "$lte":
+                    return Key(field) <= value
+                elif op == "$in":
+                    if not isinstance(value, list):
+                        raise TypeError(
+                            f"$in requires a list, got {type(value).__name__}"
+                        )
+                    return Key(field).is_in(value)
+                elif op == "$nin":
+                    if not isinstance(value, list):
+                        raise TypeError(
+                            f"$nin requires a list, got {type(value).__name__}"
+                        )
+                    return Key(field).not_in(value)
+                elif op == "$contains":
+                    if not isinstance(value, str):
+                        raise TypeError(
+                            f"$contains requires a string, got {type(value).__name__}"
+                        )
+                    return Key(field).contains(value)
+                elif op == "$not_contains":
+                    if not isinstance(value, str):
+                        raise TypeError(
+                            f"$not_contains requires a string, got {type(value).__name__}"
+                        )
+                    return Key(field).not_contains(value)
+                elif op == "$regex":
+                    if not isinstance(value, str):
+                        raise TypeError(
+                            f"$regex requires a string pattern, got {type(value).__name__}"
+                        )
+                    return Key(field).regex(value)
+                elif op == "$not_regex":
+                    if not isinstance(value, str):
+                        raise TypeError(
+                            f"$not_regex requires a string pattern, got {type(value).__name__}"
+                        )
+                    return Key(field).not_regex(value)
+                else:
+                    raise ValueError(f"Unknown operator: {op}")
+            else:
+                # Direct value is shorthand for equality
+                return Key(field) == condition
 
     def __and__(self, other: "Where") -> "And":
         """Overload & operator for AND"""
@@ -452,7 +531,33 @@ class Limit:
         - {"offset": 10, "limit": 20} -> Limit(offset=10, limit=20)
         - {"limit": 20} -> Limit(offset=0, limit=20)
         """
-        return Limit(offset=data.get("offset", 0), limit=data.get("limit"))
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict for Limit, got {type(data).__name__}")
+
+        offset = data.get("offset", 0)
+        if not isinstance(offset, int):
+            raise TypeError(
+                f"Limit offset must be an integer, got {type(offset).__name__}"
+            )
+        if offset < 0:
+            raise ValueError(f"Limit offset must be non-negative, got {offset}")
+
+        limit = data.get("limit")
+        if limit is not None:
+            if not isinstance(limit, int):
+                raise TypeError(
+                    f"Limit limit must be an integer, got {type(limit).__name__}"
+                )
+            if limit <= 0:
+                raise ValueError(f"Limit limit must be positive, got {limit}")
+
+        # Check for unexpected keys
+        allowed_keys = {"offset", "limit"}
+        unexpected_keys = set(data.keys()) - allowed_keys
+        if unexpected_keys:
+            raise ValueError(f"Unexpected keys in Limit dict: {unexpected_keys}")
+
+        return Limit(offset=offset, limit=limit)
 
 
 @dataclass
@@ -530,67 +635,203 @@ class Rank:
         - {"$max": [ranks]} -> rank1.max(rank2).max(rank3)...
         - {"$min": [ranks]} -> rank1.min(rank2).min(rank3)...
         """
-        if "$val" in data:
-            return Val(data["$val"])
-        elif "$knn" in data:
-            knn_data = data["$knn"]
-            return Knn(
-                query=knn_data["query"],
-                key=knn_data.get("key", "#embedding"),
-                limit=knn_data.get("limit", 128),
-                default=knn_data.get("default"),
-                return_rank=knn_data.get("return_rank", False),
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict for Rank, got {type(data).__name__}")
+
+        if not data:
+            raise ValueError("Rank dict cannot be empty")
+
+        if len(data) != 1:
+            raise ValueError(
+                f"Rank dict must contain exactly one operator, got {len(data)}"
             )
-        elif "$sum" in data:
-            ranks = [Rank.from_dict(r) for r in data["$sum"]]
-            if len(ranks) == 1:
-                return ranks[0]
+
+        op = next(iter(data.keys()))
+
+        if op == "$val":
+            value = data["$val"]
+            if not isinstance(value, (int, float)):
+                raise TypeError(f"$val requires a number, got {type(value).__name__}")
+            return Val(value)
+
+        elif op == "$knn":
+            knn_data = data["$knn"]
+            if not isinstance(knn_data, dict):
+                raise TypeError(f"$knn requires a dict, got {type(knn_data).__name__}")
+
+            if "query" not in knn_data:
+                raise ValueError("$knn requires 'query' field")
+
+            query = knn_data["query"]
+
+            if isinstance(query, dict):
+                # SparseVector case
+                validate_sparse_vector(query)
+
+            elif isinstance(query, (list, tuple, np.ndarray)):
+                # Dense vector case - normalize then validate
+                normalized = normalize_embeddings(query)
+                if not normalized:
+                    raise TypeError(f"$knn query cannot be empty")
+
+                # Validate the normalized version
+                validate_embeddings(normalized)
+
+                # Convert tuple to list if needed (Knn expects List not tuple)
+                if isinstance(query, tuple):
+                    query = list(query)
+
+            else:
+                raise TypeError(
+                    f"$knn query must be a list, numpy array, or SparseVector dict, got {type(query).__name__}"
+                )
+
+            key = knn_data.get("key", "#embedding")
+            if not isinstance(key, str):
+                raise TypeError(f"$knn key must be a string, got {type(key).__name__}")
+
+            limit = knn_data.get("limit", 128)
+            if not isinstance(limit, int):
+                raise TypeError(
+                    f"$knn limit must be an integer, got {type(limit).__name__}"
+                )
+            if limit <= 0:
+                raise ValueError(f"$knn limit must be positive, got {limit}")
+
+            return_rank = knn_data.get("return_rank", False)
+            if not isinstance(return_rank, bool):
+                raise TypeError(
+                    f"$knn return_rank must be a boolean, got {type(return_rank).__name__}"
+                )
+
+            return Knn(
+                query=query,
+                key=key,
+                limit=limit,
+                default=knn_data.get("default"),
+                return_rank=return_rank,
+            )
+
+        elif op == "$sum":
+            ranks_data = data["$sum"]
+            if not isinstance(ranks_data, (list, tuple)):
+                raise TypeError(
+                    f"$sum requires a list, got {type(ranks_data).__name__}"
+                )
+            if len(ranks_data) < 2:
+                raise ValueError(
+                    f"$sum requires at least 2 ranks, got {len(ranks_data)}"
+                )
+
+            ranks = [Rank.from_dict(r) for r in ranks_data]
             result = ranks[0]
             for r in ranks[1:]:
                 result = result + r
             return result
-        elif "$sub" in data:
+
+        elif op == "$sub":
             sub_data = data["$sub"]
+            if not isinstance(sub_data, dict):
+                raise TypeError(
+                    f"$sub requires a dict with 'left' and 'right', got {type(sub_data).__name__}"
+                )
+            if "left" not in sub_data or "right" not in sub_data:
+                raise ValueError("$sub requires 'left' and 'right' fields")
+
             left = Rank.from_dict(sub_data["left"])
             right = Rank.from_dict(sub_data["right"])
             return left - right
-        elif "$mul" in data:
-            ranks = [Rank.from_dict(r) for r in data["$mul"]]
-            if len(ranks) == 1:
-                return ranks[0]
+
+        elif op == "$mul":
+            ranks_data = data["$mul"]
+            if not isinstance(ranks_data, (list, tuple)):
+                raise TypeError(
+                    f"$mul requires a list, got {type(ranks_data).__name__}"
+                )
+            if len(ranks_data) < 2:
+                raise ValueError(
+                    f"$mul requires at least 2 ranks, got {len(ranks_data)}"
+                )
+
+            ranks = [Rank.from_dict(r) for r in ranks_data]
             result = ranks[0]
             for r in ranks[1:]:
                 result = result * r
             return result
-        elif "$div" in data:
+
+        elif op == "$div":
             div_data = data["$div"]
+            if not isinstance(div_data, dict):
+                raise TypeError(
+                    f"$div requires a dict with 'left' and 'right', got {type(div_data).__name__}"
+                )
+            if "left" not in div_data or "right" not in div_data:
+                raise ValueError("$div requires 'left' and 'right' fields")
+
             left = Rank.from_dict(div_data["left"])
             right = Rank.from_dict(div_data["right"])
             return left / right
-        elif "$abs" in data:
-            return abs(Rank.from_dict(data["$abs"]))
-        elif "$exp" in data:
-            return Rank.from_dict(data["$exp"]).exp()
-        elif "$log" in data:
-            return Rank.from_dict(data["$log"]).log()
-        elif "$max" in data:
-            ranks = [Rank.from_dict(r) for r in data["$max"]]
-            if len(ranks) == 1:
-                return ranks[0]
+
+        elif op == "$abs":
+            child_data = data["$abs"]
+            if not isinstance(child_data, dict):
+                raise TypeError(
+                    f"$abs requires a rank dict, got {type(child_data).__name__}"
+                )
+            return abs(Rank.from_dict(child_data))
+
+        elif op == "$exp":
+            child_data = data["$exp"]
+            if not isinstance(child_data, dict):
+                raise TypeError(
+                    f"$exp requires a rank dict, got {type(child_data).__name__}"
+                )
+            return Rank.from_dict(child_data).exp()
+
+        elif op == "$log":
+            child_data = data["$log"]
+            if not isinstance(child_data, dict):
+                raise TypeError(
+                    f"$log requires a rank dict, got {type(child_data).__name__}"
+                )
+            return Rank.from_dict(child_data).log()
+
+        elif op == "$max":
+            ranks_data = data["$max"]
+            if not isinstance(ranks_data, (list, tuple)):
+                raise TypeError(
+                    f"$max requires a list, got {type(ranks_data).__name__}"
+                )
+            if len(ranks_data) < 2:
+                raise ValueError(
+                    f"$max requires at least 2 ranks, got {len(ranks_data)}"
+                )
+
+            ranks = [Rank.from_dict(r) for r in ranks_data]
             result = ranks[0]
             for r in ranks[1:]:
                 result = result.max(r)
             return result
-        elif "$min" in data:
-            ranks = [Rank.from_dict(r) for r in data["$min"]]
-            if len(ranks) == 1:
-                return ranks[0]
+
+        elif op == "$min":
+            ranks_data = data["$min"]
+            if not isinstance(ranks_data, (list, tuple)):
+                raise TypeError(
+                    f"$min requires a list, got {type(ranks_data).__name__}"
+                )
+            if len(ranks_data) < 2:
+                raise ValueError(
+                    f"$min requires at least 2 ranks, got {len(ranks_data)}"
+                )
+
+            ranks = [Rank.from_dict(r) for r in ranks_data]
             result = ranks[0]
             for r in ranks[1:]:
                 result = result.min(r)
             return result
+
         else:
-            raise ValueError(f"Invalid rank dict format: {data}")
+            raise ValueError(f"Unknown rank operator: {op}")
 
     # Arithmetic operators
     def __add__(self, other: Union["Rank", float, int]) -> "Sum":
@@ -971,10 +1212,22 @@ class Select:
         - {"keys": ["#document", "#score"]} -> Select(keys={Key.DOCUMENT, Key.SCORE})
         - {"keys": ["title", "author"]} -> Select(keys={"title", "author"})
         """
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict for Select, got {type(data).__name__}")
+
         keys = data.get("keys", [])
-        # Use a list to preserve order, then convert to set
+        if not isinstance(keys, (list, tuple, set)):
+            raise TypeError(
+                f"Select keys must be a list/tuple/set, got {type(keys).__name__}"
+            )
+
+        # Validate and convert each key
         key_list = []
         for k in keys:
+            if not isinstance(k, str):
+                raise TypeError(f"Select key must be a string, got {type(k).__name__}")
+
+            # Map special keys to Key instances
             if k == "#id":
                 key_list.append(Key.ID)
             elif k == "#document":
@@ -986,6 +1239,14 @@ class Select:
             elif k == "#score":
                 key_list.append(Key.SCORE)
             else:
-                key_list.append(k)
+                # Regular metadata field
+                key_list.append(Key(k))
+
+        # Check for unexpected keys in dict
+        allowed_keys = {"keys"}
+        unexpected_keys = set(data.keys()) - allowed_keys
+        if unexpected_keys:
+            raise ValueError(f"Unexpected keys in Select dict: {unexpected_keys}")
+
         # Convert to set while preserving the Key instances
         return Select(keys=set(key_list))
