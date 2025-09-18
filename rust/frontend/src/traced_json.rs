@@ -3,7 +3,7 @@ use axum::extract::{rejection::JsonRejection, FromRequest, Request};
 use axum::response::IntoResponse;
 use axum::{BoxError, RequestExt};
 use http_body_util::BodyExt;
-use tracing::{Instrument, Level};
+use tracing::Instrument;
 
 /// TracedJson is a thin wrapper around axum::Json that allows us to trace the request body buffering
 /// as well as the JSON parsing.
