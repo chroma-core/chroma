@@ -55,6 +55,82 @@ class Where:
         """Convert the Where expression to a dictionary for JSON serialization"""
         raise NotImplementedError("Subclasses must implement to_dict()")
 
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "Where":
+        """Create Where expression from dictionary.
+
+        Supports MongoDB-style query operators:
+        - {"field": "value"} -> Key("field") == "value" (shorthand for equality)
+        - {"field": {"$eq": value}} -> Key("field") == value
+        - {"field": {"$ne": value}} -> Key("field") != value
+        - {"field": {"$gt": value}} -> Key("field") > value
+        - {"field": {"$gte": value}} -> Key("field") >= value
+        - {"field": {"$lt": value}} -> Key("field") < value
+        - {"field": {"$lte": value}} -> Key("field") <= value
+        - {"field": {"$in": [values]}} -> Key("field").is_in([values])
+        - {"field": {"$nin": [values]}} -> Key("field").not_in([values])
+        - {"field": {"$contains": "text"}} -> Key("field").contains("text")
+        - {"field": {"$not_contains": "text"}} -> Key("field").not_contains("text")
+        - {"field": {"$regex": "pattern"}} -> Key("field").regex("pattern")
+        - {"field": {"$not_regex": "pattern"}} -> Key("field").not_regex("pattern")
+        - {"$and": [conditions]} -> condition1 & condition2 & ...
+        - {"$or": [conditions]} -> condition1 | condition2 | ...
+        """
+        if "$and" in data:
+            conditions = [Where.from_dict(c) for c in data["$and"]]
+            if len(conditions) == 1:
+                return conditions[0]
+            result = conditions[0]
+            for c in conditions[1:]:
+                result = result & c
+            return result
+        elif "$or" in data:
+            conditions = [Where.from_dict(c) for c in data["$or"]]
+            if len(conditions) == 1:
+                return conditions[0]
+            result = conditions[0]
+            for c in conditions[1:]:
+                result = result | c
+            return result
+        else:
+            # Single field condition
+            for field, condition in data.items():
+                if isinstance(condition, dict):
+                    # Operator-based condition
+                    for op, value in condition.items():
+                        if op == "$eq":
+                            return Key(field) == value
+                        elif op == "$ne":
+                            return Key(field) != value
+                        elif op == "$gt":
+                            return Key(field) > value
+                        elif op == "$gte":
+                            return Key(field) >= value
+                        elif op == "$lt":
+                            return Key(field) < value
+                        elif op == "$lte":
+                            return Key(field) <= value
+                        elif op == "$in":
+                            return Key(field).is_in(value)
+                        elif op == "$nin":
+                            return Key(field).not_in(value)
+                        elif op == "$contains":
+                            return Key(field).contains(value)
+                        elif op == "$not_contains":
+                            return Key(field).not_contains(value)
+                        elif op == "$regex":
+                            return Key(field).regex(value)
+                        elif op == "$not_regex":
+                            return Key(field).not_regex(value)
+                        else:
+                            raise ValueError(f"Unknown operator: {op}")
+                else:
+                    # Direct value is shorthand for equality
+                    return Key(field) == condition
+
+            # Empty dict defaults to no filter
+            raise ValueError("Invalid where dict format")
+
     def __and__(self, other: "Where") -> "And":
         """Overload & operator for AND"""
         # If self is already an And, extend it
@@ -367,6 +443,17 @@ class Limit:
             result["limit"] = self.limit
         return result
 
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "Limit":
+        """Create Limit from dictionary.
+
+        Examples:
+        - {"offset": 10} -> Limit(offset=10)
+        - {"offset": 10, "limit": 20} -> Limit(offset=10, limit=20)
+        - {"limit": 20} -> Limit(offset=0, limit=20)
+        """
+        return Limit(offset=data.get("offset", 0), limit=data.get("limit"))
+
 
 @dataclass
 class Projection:
@@ -425,6 +512,85 @@ class Rank:
     def to_dict(self) -> Dict[str, Any]:
         """Convert the Score expression to a dictionary for JSON serialization"""
         raise NotImplementedError("Subclasses must implement to_dict()")
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "Rank":
+        """Create Rank expression from dictionary.
+
+        Supports operators:
+        - {"$val": number} -> Val(number)
+        - {"$knn": {...}} -> Knn(...)
+        - {"$sum": [ranks]} -> rank1 + rank2 + ...
+        - {"$sub": {"left": ..., "right": ...}} -> left - right
+        - {"$mul": [ranks]} -> rank1 * rank2 * ...
+        - {"$div": {"left": ..., "right": ...}} -> left / right
+        - {"$abs": rank} -> abs(rank)
+        - {"$exp": rank} -> rank.exp()
+        - {"$log": rank} -> rank.log()
+        - {"$max": [ranks]} -> rank1.max(rank2).max(rank3)...
+        - {"$min": [ranks]} -> rank1.min(rank2).min(rank3)...
+        """
+        if "$val" in data:
+            return Val(data["$val"])
+        elif "$knn" in data:
+            knn_data = data["$knn"]
+            return Knn(
+                query=knn_data["query"],
+                key=knn_data.get("key", "#embedding"),
+                limit=knn_data.get("limit", 128),
+                default=knn_data.get("default"),
+                return_rank=knn_data.get("return_rank", False),
+            )
+        elif "$sum" in data:
+            ranks = [Rank.from_dict(r) for r in data["$sum"]]
+            if len(ranks) == 1:
+                return ranks[0]
+            result = ranks[0]
+            for r in ranks[1:]:
+                result = result + r
+            return result
+        elif "$sub" in data:
+            sub_data = data["$sub"]
+            left = Rank.from_dict(sub_data["left"])
+            right = Rank.from_dict(sub_data["right"])
+            return left - right
+        elif "$mul" in data:
+            ranks = [Rank.from_dict(r) for r in data["$mul"]]
+            if len(ranks) == 1:
+                return ranks[0]
+            result = ranks[0]
+            for r in ranks[1:]:
+                result = result * r
+            return result
+        elif "$div" in data:
+            div_data = data["$div"]
+            left = Rank.from_dict(div_data["left"])
+            right = Rank.from_dict(div_data["right"])
+            return left / right
+        elif "$abs" in data:
+            return abs(Rank.from_dict(data["$abs"]))
+        elif "$exp" in data:
+            return Rank.from_dict(data["$exp"]).exp()
+        elif "$log" in data:
+            return Rank.from_dict(data["$log"]).log()
+        elif "$max" in data:
+            ranks = [Rank.from_dict(r) for r in data["$max"]]
+            if len(ranks) == 1:
+                return ranks[0]
+            result = ranks[0]
+            for r in ranks[1:]:
+                result = result.max(r)
+            return result
+        elif "$min" in data:
+            ranks = [Rank.from_dict(r) for r in data["$min"]]
+            if len(ranks) == 1:
+                return ranks[0]
+            result = ranks[0]
+            for r in ranks[1:]:
+                result = result.min(r)
+            return result
+        else:
+            raise ValueError(f"Invalid rank dict format: {data}")
 
     # Arithmetic operators
     def __add__(self, other: Union["Rank", float, int]) -> "Sum":
@@ -796,3 +962,30 @@ class Select:
                 key_strings.append(k)
         # Remove duplicates while preserving order
         return {"keys": list(dict.fromkeys(key_strings))}
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "Select":
+        """Create Select from dictionary.
+
+        Examples:
+        - {"keys": ["#document", "#score"]} -> Select(keys={Key.DOCUMENT, Key.SCORE})
+        - {"keys": ["title", "author"]} -> Select(keys={"title", "author"})
+        """
+        keys = data.get("keys", [])
+        # Use a list to preserve order, then convert to set
+        key_list = []
+        for k in keys:
+            if k == "#id":
+                key_list.append(Key.ID)
+            elif k == "#document":
+                key_list.append(Key.DOCUMENT)
+            elif k == "#embedding":
+                key_list.append(Key.EMBEDDING)
+            elif k == "#metadata":
+                key_list.append(Key.METADATA)
+            elif k == "#score":
+                key_list.append(Key.SCORE)
+            else:
+                key_list.append(k)
+        # Convert to set while preserving the Key instances
+        return Select(keys=set(key_list))
