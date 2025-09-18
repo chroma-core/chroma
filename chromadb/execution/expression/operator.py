@@ -674,7 +674,7 @@ class Rrf(Rank):
     but Chroma uses ascending order (lower scores = better results).
 
     Args:
-        ranks: List of Rank expressions to fuse
+        ranks: List of Rank expressions to fuse (must have at least one)
         k: Smoothing constant (default: 60, standard in literature)
         weights: Optional weights for each ranking strategy. If not provided,
                 all ranks are weighted equally (weight=1.0 each).
@@ -707,6 +707,12 @@ class Rrf(Rank):
         Builds: -sum(weight_i / (k + rank_i)) for each rank
         Using Python's overloaded operators for cleaner code.
         """
+        # Validate RRF parameters
+        if not self.ranks:
+            raise ValueError("RRF requires at least one rank")
+        if self.k <= 0:
+            raise ValueError(f"k must be positive, got {self.k}")
+
         # Validate weights if provided
         if self.weights is not None:
             if len(self.weights) != len(self.ranks):
@@ -722,8 +728,10 @@ class Rrf(Rank):
         # Zip weights with ranks and build terms: weight / (k + rank)
         terms = [w / (self.k + rank) for w, rank in zip(weights, self.ranks)]
 
-        # Sum with Val(0) as start
-        rrf_sum = sum(terms, Val(0.0))
+        # Sum all terms - guaranteed to have at least one
+        rrf_sum: Rank = terms[0]
+        for term in terms[1:]:
+            rrf_sum = rrf_sum + term
 
         # Negate (RRF gives higher scores for better, Chroma needs lower for better)
         return (-rrf_sum).to_dict()
