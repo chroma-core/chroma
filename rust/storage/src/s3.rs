@@ -59,6 +59,7 @@ pub struct StorageMetrics {
     s3_get_latency_ms: Histogram<u64>,
     s3_put_latency_ms: Histogram<u64>,
     s3_put_bytes: Histogram<u64>,
+    s3_put_bytes_slow: Histogram<u64>,
     s3_multipart_upload_parts: Histogram<u64>,
     s3_upload_part_bytes: Histogram<u64>,
     s3_put_error_count: Counter<u64>,
@@ -102,6 +103,11 @@ impl Default for StorageMetrics {
             s3_put_bytes: opentelemetry::global::meter("chroma.storage")
                 .u64_histogram("s3_put_bytes")
                 .with_description("Bytes written per S3 put operation")
+                .with_unit("bytes")
+                .build(),
+            s3_put_bytes_slow: opentelemetry::global::meter("chroma.storage")
+                .u64_histogram("s3_put_bytes_slow")
+                .with_description("Bytes written per S3 put operation that took more than 1 second")
                 .with_unit("bytes")
                 .build(),
             s3_multipart_upload_parts: opentelemetry::global::meter("chroma.storage")
@@ -212,6 +218,31 @@ impl S3Storage {
     }
 
     #[allow(clippy::type_complexity)]
+    pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
+        let res = self
+            .client
+            .head_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .send()
+            .await;
+        match res {
+            Ok(res) => Ok(res.e_tag() == Some(&e_tag.0)),
+            Err(e) => match e {
+                SdkError::ServiceError(err) => {
+                    let inner = err.into_err();
+                    Err(StorageError::Generic {
+                        source: Arc::new(inner),
+                    })
+                }
+                _ => Err(StorageError::Generic {
+                    source: Arc::new(e),
+                }),
+            },
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
     async fn get_stream_and_e_tag(
         &self,
         key: &str,
@@ -238,24 +269,28 @@ impl S3Storage {
                     res.e_tag.map(ETag),
                 ))
             }
-            Err(e) => {
-                match e {
-                    SdkError::ServiceError(err) => {
-                        let inner = err.into_err();
-                        match &inner {
-                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
-                                Err(StorageError::NotFound {
-                                    path: key.to_string(),
-                                    source: Arc::new(inner),
-                                })
-                            }
-                            aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
-                                tracing::error!("invalid object state: {}", msg);
-                                Err(StorageError::Generic {
-                                    source: Arc::new(inner),
-                                })
-                            }
-                            _ => {
+            Err(e) => match e {
+                SdkError::ServiceError(err) => {
+                    let inner = err.into_err();
+                    match &inner {
+                        aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
+                            Err(StorageError::NotFound {
+                                path: key.to_string(),
+                                source: Arc::new(inner),
+                            })
+                        }
+                        aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(
+                            msg,
+                        ) => {
+                            tracing::error!("invalid object state: {}", msg);
+                            Err(StorageError::Generic {
+                                source: Arc::new(inner),
+                            })
+                        }
+                        _ => {
+                            if inner.code() == Some("SlowDown") {
+                                Err(StorageError::Backoff)
+                            } else {
                                 tracing::error!("error: {}", inner.to_string());
                                 Err(StorageError::Generic {
                                     source: Arc::new(inner),
@@ -263,11 +298,11 @@ impl S3Storage {
                             }
                         }
                     }
-                    _ => Err(StorageError::Generic {
-                        source: Arc::new(e),
-                    }),
                 }
-            }
+                _ => Err(StorageError::Generic {
+                    source: Arc::new(e),
+                }),
+            },
         }
     }
 
@@ -350,9 +385,13 @@ impl S3Storage {
                                 })
                             }
                             _ => {
-                                Err(StorageError::Generic {
-                                    source: Arc::new(inner),
-                                })
+                                if inner.code() == Some("SlowDown") {
+                                    Err(StorageError::Backoff)
+                                } else {
+                                    Err(StorageError::Generic {
+                                        source: Arc::new(inner),
+                                    })
+                                }
                             }
                         }
                     }
@@ -538,22 +577,32 @@ impl S3Storage {
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
-        self.metrics.s3_put_count.add(1, &[]);
-        self.metrics
-            .s3_put_bytes
-            .record(total_size_bytes as u64, &[]);
-
         let result = if self.is_oneshot_upload(total_size_bytes) {
             self.oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
                 .await
         } else {
-            let _stopwatch = Stopwatch::new(
+            self.metrics.s3_put_count.add(1, &[]);
+            self.metrics
+                .s3_put_bytes
+                .record(total_size_bytes as u64, &[]);
+            let stopwatch = Stopwatch::new(
                 &self.metrics.s3_put_latency_ms,
                 &[],
                 chroma_tracing::util::StopWatchUnit::Millis,
             );
-            self.multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
-                .await
+            let result = self
+                .multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
+                .await;
+
+            // Finish the stopwatch and check if request took more than 1 second
+            let duration = stopwatch.finish();
+            if duration > Duration::from_secs(1) {
+                self.metrics
+                    .s3_put_bytes_slow
+                    .record(total_size_bytes as u64, &[]);
+            }
+
+            result
         };
 
         if result.is_err() {
@@ -573,7 +622,11 @@ impl S3Storage {
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
-        let _stopwatch = Stopwatch::new(
+        self.metrics.s3_put_count.add(1, &[]);
+        self.metrics
+            .s3_put_bytes
+            .record(total_size_bytes as u64, &[]);
+        let stopwatch = Stopwatch::new(
             &self.metrics.s3_put_latency_ms,
             &[],
             chroma_tracing::util::StopWatchUnit::Millis,
@@ -602,12 +655,23 @@ impl S3Storage {
                     path: key.to_string(),
                     source: Arc::new(err),
                 }
+            } else if err.meta().code() == Some("SlowDown") {
+                StorageError::Backoff
             } else {
                 StorageError::Generic {
                     source: Arc::new(err),
                 }
             }
         })?;
+
+        // Finish the stopwatch and check if request took more than 1 second
+        let duration = stopwatch.finish();
+        if duration > Duration::from_secs(1) {
+            self.metrics
+                .s3_put_bytes_slow
+                .record(total_size_bytes as u64, &[]);
+        }
+
         Ok(resp.e_tag.map(ETag))
     }
 
@@ -793,6 +857,7 @@ impl S3Storage {
                             path: key.to_string(),
                             source: Arc::new(inner),
                         }),
+                        Some("SlowDown") => Err(StorageError::Backoff),
                         _ => {
                             tracing::error!(error = %inner, key = %key, "Failed to delete object from S3");
                             Err(StorageError::Generic {
@@ -864,9 +929,15 @@ impl S3Storage {
                 tracing::trace!("Successfully deleted objects from S3");
                 Ok(out)
             }
-            Err(e) => Err(StorageError::Generic {
-                source: Arc::new(e),
-            }),
+            Err(e) => {
+                if e.code() == Some("SlowDown") {
+                    Err(StorageError::Backoff)
+                } else {
+                    Err(StorageError::Generic {
+                        source: Arc::new(e),
+                    })
+                }
+            }
         }
     }
 
@@ -1498,5 +1569,72 @@ mod tests {
 
         eprintln!("Successfully deleted: {:#?}", delete_result.deleted);
         eprintln!("Errors for non-existent files: {:#?}", delete_result.errors);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_confirm_same_with_matching_etag() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+
+        let test_data = "test data for etag validation";
+        let etag = storage
+            .put_bytes(
+                "test-confirm-same",
+                test_data.as_bytes().to_vec(),
+                PutOptions::default(),
+            )
+            .await
+            .unwrap()
+            .expect("put_bytes should return etag");
+
+        let result = storage
+            .confirm_same("test-confirm-same", &etag)
+            .await
+            .unwrap();
+        assert!(result, "confirm_same should return true for matching etag");
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_confirm_same_with_non_matching_etag() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+
+        let test_data = "test data for etag validation";
+        let _etag = storage
+            .put_bytes(
+                "test-confirm-same",
+                test_data.as_bytes().to_vec(),
+                PutOptions::default(),
+            )
+            .await
+            .unwrap()
+            .expect("put_bytes should return etag");
+
+        let fake_etag = ETag("fake-etag-wont-match".to_string());
+        let result = storage
+            .confirm_same("test-confirm-same", &fake_etag)
+            .await
+            .unwrap();
+        assert!(
+            !result,
+            "confirm_same should return false for non-matching etag"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_confirm_same_with_nonexistent_file() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+
+        let fake_etag = ETag("fake-etag".to_string());
+        let result = storage.confirm_same("nonexistent-file", &fake_etag).await;
+
+        assert!(
+            result.is_err(),
+            "confirm_same should return error for nonexistent file"
+        );
+        match result.unwrap_err() {
+            StorageError::Generic { source: _ } => {
+                // This is expected - the head operation will fail on nonexistent file
+            }
+            other => panic!("Expected Generic error, got: {:?}", other),
+        }
     }
 }

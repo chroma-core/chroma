@@ -19,9 +19,10 @@ use chroma_tracing::util::Stopwatch;
 use chroma_types::SpannPostingList;
 use chroma_types::{CollectionUuid, InternalSpannConfiguration};
 use futures::future;
-use opentelemetry::{global, KeyValue};
+use opentelemetry::global;
 use rand::seq::SliceRandom;
 use thiserror::Error;
+use tracing::{Instrument, Span};
 use uuid::Uuid;
 
 use crate::{
@@ -2015,14 +2016,10 @@ impl SpannIndexWriter {
     // Note(Sanket): This has not been tested for running concurrently with
     // other add/update/delete operations.
     pub async fn garbage_collect(&mut self) -> Result<(), SpannIndexWriterError> {
-        let attributes = &[KeyValue::new(
-            "collection_id",
-            self.collection_id.to_string(),
-        )];
         let gc_latency_metric = self.metrics.gc_latency.clone();
         let stopwatch = Stopwatch::new(
             &gc_latency_metric,
-            attributes,
+            &[],
             chroma_tracing::util::StopWatchUnit::Seconds,
         );
         if self.gc_context.pl_context.enabled {
@@ -2053,10 +2050,6 @@ impl SpannIndexWriter {
     }
 
     fn emit_counters(&self) {
-        let attribute = &[KeyValue::new(
-            "collection_id",
-            self.collection_id.to_string(),
-        )];
         tracing::info!(
             "Total number of centers fetched from rng in this compaction run: {}",
             self.stats
@@ -2068,7 +2061,7 @@ impl SpannIndexWriter {
             self.stats
                 .num_centers_fetched_rng
                 .load(std::sync::atomic::Ordering::Relaxed),
-            attribute,
+            &[],
         );
         tracing::info!(
             "Total number of rng calls in this compaction run: {}",
@@ -2080,7 +2073,7 @@ impl SpannIndexWriter {
             self.stats
                 .num_rng_calls
                 .load(std::sync::atomic::Ordering::Relaxed) as u64,
-            attribute,
+            &[],
         );
         tracing::info!(
             "Total number of heads created in this compaction run: {}",
@@ -2092,7 +2085,7 @@ impl SpannIndexWriter {
             self.stats
                 .num_heads_created
                 .load(std::sync::atomic::Ordering::Relaxed) as u64,
-            attribute,
+            &[],
         );
         tracing::info!(
             "Total number of heads deleted in this compaction run: {}",
@@ -2104,7 +2097,7 @@ impl SpannIndexWriter {
             self.stats
                 .num_heads_deleted
                 .load(std::sync::atomic::Ordering::Relaxed) as u64,
-            attribute,
+            &[],
         );
         tracing::info!(
             "Total number of posting lists modified in this compaction run: {}",
@@ -2116,7 +2109,7 @@ impl SpannIndexWriter {
             self.stats
                 .num_pl_modified
                 .load(std::sync::atomic::Ordering::Relaxed) as u64,
-            attribute,
+            &[],
         );
         tracing::info!(
             "Total number of reassigns in this compaction run: {}",
@@ -2128,7 +2121,7 @@ impl SpannIndexWriter {
             self.stats
                 .num_reassigns
                 .load(std::sync::atomic::Ordering::Relaxed) as u64,
-            attribute,
+            &[],
         );
         tracing::info!(
             "Total number of reassigns due to center merges in this compaction run: {}",
@@ -2140,7 +2133,7 @@ impl SpannIndexWriter {
             self.stats
                 .num_reassigns_merged_point
                 .load(std::sync::atomic::Ordering::Relaxed) as u64,
-            attribute,
+            &[],
         );
         tracing::info!(
             "Total number of reassigns of neighbors of split cluster in this compaction run: {}",
@@ -2152,7 +2145,7 @@ impl SpannIndexWriter {
             self.stats
                 .num_reassigns_nbrs
                 .load(std::sync::atomic::Ordering::Relaxed) as u64,
-            attribute,
+            &[],
         );
         tracing::info!(
             "Total number of reassigns of points in split cluster in this compaction run: {}",
@@ -2164,7 +2157,7 @@ impl SpannIndexWriter {
             self.stats
                 .num_reassigns_split_point
                 .load(std::sync::atomic::Ordering::Relaxed) as u64,
-            attribute,
+            &[],
         );
         tracing::info!(
             "Total number of splits in this compaction run: {}",
@@ -2176,7 +2169,7 @@ impl SpannIndexWriter {
             self.stats
                 .num_splits
                 .load(std::sync::atomic::Ordering::Relaxed) as u64,
-            attribute,
+            &[],
         );
     }
 
@@ -2185,14 +2178,10 @@ impl SpannIndexWriter {
         // NOTE(Sanket): This is not the best way to drain the writer but the orchestrator keeps a
         // reference to the writer so cannot do an Arc::try_unwrap() here.
         // Pl list.
-        let attribute = &[KeyValue::new(
-            "collection_id",
-            self.collection_id.to_string(),
-        )];
         let pl_flusher = {
             let stopwatch = Stopwatch::new(
                 &self.metrics.pl_commit_latency,
-                attribute,
+                &[],
                 chroma_tracing::util::StopWatchUnit::Millis,
             );
             let pl_writer_clone = self.posting_list_writer.clone();
@@ -2212,7 +2201,7 @@ impl SpannIndexWriter {
         let versions_map_flusher = {
             let stopwatch = Stopwatch::new(
                 &self.metrics.versions_map_commit_latency,
-                attribute,
+                &[],
                 chroma_tracing::util::StopWatchUnit::Millis,
             );
             // Versions map. Create a writer, write all the data and commit.
@@ -2286,7 +2275,7 @@ impl SpannIndexWriter {
         let (hnsw_id, prefix_path) = {
             let stopwatch = Stopwatch::new(
                 &self.metrics.hnsw_commit_latency,
-                attribute,
+                &[],
                 chroma_tracing::util::StopWatchUnit::Millis,
             );
             let (hnsw_id, prefix_path, hnsw_index) = match self.cleaned_up_hnsw_index {
@@ -2303,7 +2292,7 @@ impl SpannIndexWriter {
                         let index_guard = self.hnsw_index.inner.read();
                         (index_guard.hnsw_index.id, index_guard.prefix_path.clone())
                     };
-                    (id, prefix_path, self.hnsw_index)
+                    (id, prefix_path, self.hnsw_index.clone())
                 }
             };
             self.hnsw_provider.commit(hnsw_index).map_err(|e| {
@@ -2325,8 +2314,8 @@ impl SpannIndexWriter {
                 provider: self.hnsw_provider,
                 prefix_path,
                 index_id: hnsw_id,
+                hnsw_index: self.hnsw_index,
             },
-            collection_id: self.collection_id,
             metrics: SpannIndexFlusherMetrics {
                 pl_flush_latency: self.metrics.pl_flush_latency.clone(),
                 versions_map_flush_latency: self.metrics.versions_map_flush_latency.clone(),
@@ -2354,7 +2343,6 @@ pub struct SpannIndexFlusher {
     versions_map_flusher: BlockfileFlusher,
     max_head_id_flusher: BlockfileFlusher,
     hnsw_flusher: HnswIndexFlusher,
-    collection_id: CollectionUuid,
     metrics: SpannIndexFlusherMetrics,
 }
 
@@ -2376,14 +2364,11 @@ impl SpannIndexFlusher {
             hnsw_id: self.hnsw_flusher.index_id,
             prefix_path: self.max_head_id_flusher.prefix_path().to_string(),
         };
-        let attribute = &[KeyValue::new(
-            "collection_id",
-            self.collection_id.to_string(),
-        )];
+
         {
             let stopwatch = Stopwatch::new(
                 &self.metrics.pl_flush_latency,
-                attribute,
+                &[],
                 chroma_tracing::util::StopWatchUnit::Millis,
             );
             let num_pl_entries_flushed = self.pl_flusher.num_entries();
@@ -2396,7 +2381,7 @@ impl SpannIndexFlusher {
                 })?;
             self.metrics
                 .num_pl_entries_flushed
-                .add(num_pl_entries_flushed as u64, attribute);
+                .add(num_pl_entries_flushed as u64, &[]);
             tracing::info!(
                 "Flushed {} entries from posting list in {} ms",
                 num_pl_entries_flushed,
@@ -2406,7 +2391,7 @@ impl SpannIndexFlusher {
         {
             let stopwatch = Stopwatch::new(
                 &self.metrics.versions_map_flush_latency,
-                attribute,
+                &[],
                 chroma_tracing::util::StopWatchUnit::Millis,
             );
             let num_versions_map_entries_flushed = self.versions_map_flusher.num_entries();
@@ -2419,7 +2404,7 @@ impl SpannIndexFlusher {
                 })?;
             self.metrics
                 .num_versions_map_entries_flushed
-                .add(num_versions_map_entries_flushed as u64, attribute);
+                .add(num_versions_map_entries_flushed as u64, &[]);
             tracing::info!(
                 "Flushed {} entries from versions map in {} ms",
                 num_versions_map_entries_flushed,
@@ -2436,12 +2421,16 @@ impl SpannIndexFlusher {
         {
             let stopwatch = Stopwatch::new(
                 &self.metrics.hnsw_flush_latency,
-                attribute,
+                &[],
                 chroma_tracing::util::StopWatchUnit::Millis,
             );
             self.hnsw_flusher
                 .provider
-                .flush(&self.hnsw_flusher.prefix_path, &self.hnsw_flusher.index_id)
+                .flush(
+                    &self.hnsw_flusher.prefix_path,
+                    &self.hnsw_flusher.index_id,
+                    &self.hnsw_flusher.hnsw_index,
+                )
                 .await
                 .map_err(|e| {
                     tracing::error!("Error flushing hnsw index {}: {}", res.hnsw_id, e);
@@ -2620,12 +2609,14 @@ impl<'me> SpannIndexReader<'me> {
             match (pl_blockfile_id, versions_map_blockfile_id) {
                 (Some(pl_id), Some(versions_id)) => {
                     let (pl_result, vm_result) = tokio::join!(
-                        Self::posting_list_reader_from_id(pl_id, blockfile_provider, prefix_path),
+                        Self::posting_list_reader_from_id(pl_id, blockfile_provider, prefix_path)
+                            .instrument(Span::current()),
                         Self::versions_map_reader_from_id(
                             versions_id,
                             blockfile_provider,
                             prefix_path
                         )
+                        .instrument(Span::current())
                     );
                     (pl_result?, vm_result?)
                 }
@@ -2896,6 +2887,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3109,6 +3101,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3373,6 +3366,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3609,6 +3603,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3872,6 +3867,7 @@ mod tests {
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -4171,6 +4167,7 @@ mod tests {
             PathBuf::from(temp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         )
     }
 
@@ -4243,12 +4240,10 @@ mod tests {
                 doc_offset_ids[i - 1] = i as u32;
                 doc_embeddings.push(embedding);
             }
-            let flusher = writer
-                .commit()
+            let flusher = Box::pin(writer.commit())
                 .await
                 .expect("Error committing spann index writer");
-            let paths = flusher
-                .flush()
+            let paths = Box::pin(flusher.flush())
                 .await
                 .expect("Error flushing spann index writer");
             println!("Wrote 10k records of 1000 dimensions each");
@@ -4257,7 +4252,7 @@ mod tests {
             let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
-            let reader = SpannIndexReader::from_id(
+            let reader = Box::pin(SpannIndexReader::from_id(
                 Some(&paths.hnsw_id),
                 &hnsw_provider,
                 &collection_id,
@@ -4270,7 +4265,7 @@ mod tests {
                 prefix_path,
                 true,
                 params,
-            )
+            ))
             .await
             .expect("Error creating spann index reader");
             // Scan the reader and verify the data.
@@ -4383,12 +4378,10 @@ mod tests {
                 .for_each(|result| {
                     result.expect("Error in tokio task");
                 });
-            let flusher = writer
-                .commit()
+            let flusher = Box::pin(writer.commit())
                 .await
                 .expect("Error committing spann index writer");
-            let paths = flusher
-                .flush()
+            let paths = Box::pin(flusher.flush())
                 .await
                 .expect("Error flushing spann index writer");
             println!("Wrote 10k records of 1000 dimensions each");
@@ -4397,7 +4390,7 @@ mod tests {
             let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
-            let reader = SpannIndexReader::from_id(
+            let reader = Box::pin(SpannIndexReader::from_id(
                 Some(&paths.hnsw_id),
                 &hnsw_provider,
                 &collection_id,
@@ -4410,7 +4403,7 @@ mod tests {
                 prefix_path,
                 true,
                 params,
-            )
+            ))
             .await
             .expect("Error creating spann index reader");
             // Scan the reader and verify the data.
@@ -4502,12 +4495,10 @@ mod tests {
                     doc_offset_ids[id - 1] = id as u32;
                     doc_embeddings.push(embedding);
                 }
-                let flusher = writer
-                    .commit()
+                let flusher = Box::pin(writer.commit())
                     .await
                     .expect("Error committing spann index writer");
-                let paths = flusher
-                    .flush()
+                let paths = Box::pin(flusher.flush())
                     .await
                     .expect("Error flushing spann index writer");
                 println!(
@@ -4525,7 +4516,7 @@ mod tests {
             let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
-            let reader = SpannIndexReader::from_id(
+            let reader = Box::pin(SpannIndexReader::from_id(
                 hnsw_path.as_ref(),
                 &hnsw_provider,
                 &collection_id,
@@ -4538,7 +4529,7 @@ mod tests {
                 prefix_path,
                 true,
                 params.clone(),
-            )
+            ))
             .await
             .expect("Error creating spann index reader");
             // Scan the reader and verify the data.
@@ -4657,12 +4648,10 @@ mod tests {
                 for res in r {
                     res.expect("Error adding to spann index writer");
                 }
-                let flusher = writer
-                    .commit()
+                let flusher = Box::pin(writer.commit())
                     .await
                     .expect("Error committing spann index writer");
-                let paths = flusher
-                    .flush()
+                let paths = Box::pin(flusher.flush())
                     .await
                     .expect("Error flushing spann index writer");
                 println!(
@@ -4680,7 +4669,7 @@ mod tests {
             let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
-            let reader = SpannIndexReader::from_id(
+            let reader = Box::pin(SpannIndexReader::from_id(
                 hnsw_path.as_ref(),
                 &hnsw_provider,
                 &collection_id,
@@ -4693,7 +4682,7 @@ mod tests {
                 prefix_path,
                 true,
                 params.clone(),
-            )
+            ))
             .await
             .expect("Error creating spann index reader");
             // Scan the reader and verify the data.
@@ -4826,12 +4815,10 @@ mod tests {
                 for res in r {
                     res.expect("Error adding to spann index writer");
                 }
-                let flusher = writer
-                    .commit()
+                let flusher = Box::pin(writer.commit())
                     .await
                     .expect("Error committing spann index writer");
-                let paths = flusher
-                    .flush()
+                let paths = Box::pin(flusher.flush())
                     .await
                     .expect("Error flushing spann index writer");
                 println!(
@@ -4963,12 +4950,10 @@ mod tests {
             }
 
             // Commit and flush.
-            let flusher = writer
-                .commit()
+            let flusher = Box::pin(writer.commit())
                 .await
                 .expect("Error committing spann index writer");
-            let paths = flusher
-                .flush()
+            let paths = Box::pin(flusher.flush())
                 .await
                 .expect("Error flushing spann index writer");
             hnsw_path = Some(paths.hnsw_id);
@@ -4981,7 +4966,7 @@ mod tests {
             let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
-            let reader = SpannIndexReader::from_id(
+            let reader = Box::pin(SpannIndexReader::from_id(
                 hnsw_path.as_ref(),
                 &hnsw_provider,
                 &collection_id,
@@ -4994,7 +4979,7 @@ mod tests {
                 prefix_path,
                 true,
                 params.clone(),
-            )
+            ))
             .await
             .expect("Error creating spann index reader");
             // Scan the reader and verify the data.
@@ -5048,18 +5033,16 @@ mod tests {
                 .garbage_collect()
                 .await
                 .expect("Error garbage collecting");
-            let flusher = writer
-                .commit()
+            let flusher = Box::pin(writer.commit())
                 .await
                 .expect("Error committing spann index writer");
-            let paths = flusher
-                .flush()
+            let paths = Box::pin(flusher.flush())
                 .await
                 .expect("Error flushing spann index writer");
             hnsw_path = Some(paths.hnsw_id);
             versions_map_path = Some(paths.versions_map_id);
             pl_path = Some(paths.pl_id);
-            let reader = SpannIndexReader::from_id(
+            let reader = Box::pin(SpannIndexReader::from_id(
                 hnsw_path.as_ref(),
                 &hnsw_provider,
                 &collection_id,
@@ -5072,7 +5055,7 @@ mod tests {
                 prefix_path,
                 true,
                 params,
-            )
+            ))
             .await
             .expect("Error creating spann index reader");
             let mut results = reader

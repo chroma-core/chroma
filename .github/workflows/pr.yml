@@ -9,7 +9,7 @@ jobs:
   # This job detects what changed and determines which tests to run
   change-detection:
     name: Detect changes and determine tests
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       # Component changes
       docs-only: ${{ steps.determine-tests.outputs.docs-only }}
@@ -98,7 +98,7 @@ jobs:
     name: Deploy preview of docs
     needs: change-detection
     if: needs.change-detection.outputs.docs-only == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment:
       name: Preview
       url: ${{ steps.deploy.outputs.url }}
@@ -124,7 +124,7 @@ jobs:
     name: Warn if Helm chart was updated without version bump
     needs: change-detection
     if: needs.change-detection.outputs.helm-changes == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       pull-requests: write
     steps:
@@ -149,7 +149,7 @@ jobs:
     name: Delete Helm chart comment if not changed
     needs: change-detection
     if: needs.change-detection.outputs.helm-changes == 'false'
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       pull-requests: write
     steps:
@@ -196,7 +196,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -227,7 +227,7 @@ jobs:
         shell: bash
         run: cargo fmt -- --check
       - name: Clippy
-        run: cargo clippy --all-targets --all-features --keep-going -- -D warnings
+        run: cargo clippy --all-targets --all-features --keep-going -- -D warnings -D clippy::large_futures
 
   # This job exists for our branch protection rule.
   # We want to require status checks to pass before merging, but the set of
@@ -246,7 +246,7 @@ jobs:
     - lint
     - check-helm-version-bump
     - delete-helm-comment
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
     - name: Decide whether the needed jobs succeeded or failed
       uses: re-actors/alls-green@release/v1
@@ -266,7 +266,7 @@ jobs:
     - lint
     - check-helm-version-bump
     - delete-helm-comment
-    runs-on: blacksmith-2vcpu-ubuntu-2204
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Notify Slack
         uses: slackapi/slack-github-action@v2.0.0

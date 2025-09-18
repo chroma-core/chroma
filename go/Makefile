@@ -25,7 +25,6 @@ proto:
 
 build: proto
 	go build -v -o bin/coordinator ./cmd/coordinator/
-	go build -v -o bin/logservice ./cmd/logservice/
 
 # -p 1 runs tests sequentially. If run in parallel tests are pretty flaky in CI.
 # I believe this is caused by go/script/migrate_up_test.sh, which creates the possibility (observed during CI runs) of running multiple `atlas schema apply --dev-url "docker://postgres/15/dev" ...` in parallel.

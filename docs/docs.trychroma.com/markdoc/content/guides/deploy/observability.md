@@ -1,5 +1,9 @@
-# Observability
+---
+id: observability
+name: Observability
+---
 
+# Observability
 
 ## Backend Observability
 
@@ -22,13 +26,15 @@ Tracing is configured with three environment variables:
 - `OTEL_EXPORTER_OTLP_HEADERS`: Headers to use when sending observability data. Often used to send API and app keys. For example `{"x-honeycomb-team": "abc"}`.
 
 We also have dedicated observability guides for various deployments:
-* [Docker](./docker#observability-with-docker)
-* [AWS](./aws#observability-with-AWS)
-* [GCP](./gcp#observability-with-GCP)
-* [Azure](./azure#observability-with-Azure)
+
+- [Docker](./docker#observability-with-docker)
+- [AWS](./aws#observability-with-AWS)
+- [GCP](./gcp#observability-with-GCP)
+- [Azure](./azure#observability-with-Azure)
 
 ## Client (SDK) Observability
 
 Several observability platforms offer built-in integrations for Chroma, allowing you to monitor your application's interactions with the Chroma server:
+
 - [OpenLLMetry Integration](../../integrations/frameworks/openllmetry).
 - [OpenLIT Integration](../../integrations/frameworks/openlit).

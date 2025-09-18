@@ -311,6 +311,22 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
         }
         if operand.is_string() {
             let operand_str = operand.as_str().unwrap();
+            let document_operator_type = match operator.as_str() {
+                "$contains" => Some(DocumentOperator::Contains),
+                "$not_contains" => Some(DocumentOperator::NotContains),
+                "$regex" => Some(DocumentOperator::Regex),
+                "$not_regex" => Some(DocumentOperator::NotRegex),
+                _ => None,
+            };
+            if let Some(doc_op) = document_operator_type {
+                if matches!(doc_op, DocumentOperator::Regex | DocumentOperator::NotRegex) {
+                    ChromaRegex::try_from(operand_str.to_string())?;
+                }
+                return Ok(Where::Document(crate::DocumentExpression {
+                    operator: doc_op,
+                    pattern: operand_str.to_string(),
+                }));
+            }
             let operator_type;
             if operator == "$eq" {
                 operator_type = PrimitiveOperator::Equal;

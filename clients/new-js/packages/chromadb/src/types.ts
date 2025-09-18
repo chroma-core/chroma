@@ -1,4 +1,4 @@
-import { GetUserIdentityResponse, Include } from "./api";
+import { GetUserIdentityResponse, Include, SparseVector } from "./api";
 
 /**
  * User identity information including tenant and database access.
@@ -11,14 +11,17 @@ export type UserIdentity = GetUserIdentityResponse;
  */
 export type CollectionMetadata = Record<
   string,
-  boolean | number | string | null
+  boolean | number | string | SparseVector | null
 >;
 
 /**
  * Metadata that can be associated with individual records.
  * Values must be boolean, number, or string types.
  */
-export type Metadata = Record<string, boolean | number | string | null>;
+export type Metadata = Record<
+  string,
+  boolean | number | string | SparseVector | null
+>;
 
 /**
  * Base interface for record sets containing optional fields.

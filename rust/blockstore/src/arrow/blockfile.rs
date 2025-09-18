@@ -636,9 +636,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     Err(e) => Err(Box::new(e) as Box<dyn ChromaError>),
                 }
             }
-            .instrument(
-                tracing::trace_span!(parent: Span::current(), "Fetching block", block_id = %block_id),
-            )
+            .instrument(Span::current())
         });
 
         let blocks = try_join_all(block_futures).await?;

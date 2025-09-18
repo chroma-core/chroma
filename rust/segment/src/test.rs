@@ -98,13 +98,14 @@ impl TestDistributedSegment {
             .finish()
             .await
             .expect("Should be able to write to blockfile.");
-        self.metadata_segment.file_path = metadata_writer
-            .commit()
-            .await
-            .expect("Should be able to commit metadata.")
-            .flush()
-            .await
-            .expect("Should be able to flush metadata.");
+        self.metadata_segment.file_path = Box::pin(
+            Box::pin(metadata_writer.commit())
+                .await
+                .expect("Should be able to commit metadata.")
+                .flush(),
+        )
+        .await
+        .expect("Should be able to flush metadata.");
 
         let record_writer = RecordSegmentWriter::from_segment(
             &self.collection.tenant,
@@ -119,13 +120,14 @@ impl TestDistributedSegment {
             .await
             .expect("Should be able to apply materialized log.");
 
-        self.record_segment.file_path = record_writer
-            .commit()
-            .await
-            .expect("Should be able to commit record.")
-            .flush()
-            .await
-            .expect("Should be able to flush record.");
+        self.record_segment.file_path = Box::pin(
+            Box::pin(record_writer.commit())
+                .await
+                .expect("Should be able to commit record.")
+                .flush(),
+        )
+        .await
+        .expect("Should be able to flush record.");
 
         let vector_writer = DistributedHNSWSegmentWriter::from_segment(
             &self.collection,
@@ -352,8 +354,8 @@ impl TestReferenceSegment {
             result: ProjectionOutput {
                 records: records
                     .into_iter()
-                    .skip(plan.limit.skip as usize)
-                    .take(plan.limit.fetch.unwrap_or(u32::MAX) as usize)
+                    .skip(plan.limit.offset as usize)
+                    .take(plan.limit.limit.unwrap_or(u32::MAX) as usize)
                     .map(|(_, mut rec)| {
                         let Projection {
                             document,

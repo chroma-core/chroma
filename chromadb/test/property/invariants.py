@@ -27,6 +27,8 @@ from hypothesis.errors import InvalidArgument
 from pypika import Table, functions
 
 from chromadb.utils import distance_functions
+from chromadb.execution.expression.plan import Search
+from chromadb.execution.expression.operator import Knn, Select, Limit, Key
 
 T = TypeVar("T")
 
@@ -279,6 +281,7 @@ def ann_accuracy(
     embedding_function: Optional[types.EmbeddingFunction] = None,  # type: ignore[type-arg]
     query_indices: Optional[List[int]] = None,
     query_embeddings: Optional[types.Embeddings] = None,
+    use_search: bool = False,
 ) -> None:
     """Validate that the API performs nearest_neighbor searches correctly"""
     normalized_record_set = wrap_all(record_set)
@@ -331,12 +334,45 @@ def ann_accuracy(
         query_embeddings, embeddings, distance_fn=distance_function
     )
 
-    query_results = collection.query(
-        query_embeddings=query_embeddings if have_embeddings else None,
-        query_texts=query_documents if not have_embeddings else None,
-        n_results=n_results,
-        include=["embeddings", "documents", "metadatas", "distances"],  # type: ignore[list-item]
-    )
+    if use_search:
+        # Use search API instead of query
+        search_requests = []
+        for query_embedding in query_embeddings:
+            # Convert numpy array to list if needed
+            if isinstance(query_embedding, np.ndarray):
+                query_embedding_list = query_embedding.tolist()
+            else:
+                query_embedding_list = query_embedding
+            search = Search(
+                rank=Knn(query=query_embedding_list),
+                limit=Limit(limit=n_results),
+            ).select_all()
+            search_requests.append(search)
+        
+        # Call _search API
+        api = collection._client  # type: ignore
+        search_results = api._search(
+            collection_id=collection.id,
+            searches=search_requests,
+            tenant='default_tenant',
+            database='default_database',
+        )
+        
+        # Convert search results to query-like format
+        query_results = cast(types.QueryResult, {
+            "ids": search_results["ids"],
+            "distances": search_results["scores"],  # scores is distances in search API
+            "embeddings": search_results["embeddings"],
+            "documents": search_results["documents"],
+            "metadatas": search_results["metadatas"],
+        })
+    else:
+        query_results = collection.query(
+            query_embeddings=query_embeddings if have_embeddings else None,
+            query_texts=query_documents if not have_embeddings else None,
+            n_results=n_results,
+            include=["embeddings", "documents", "metadatas", "distances"],  # type: ignore[list-item]
+        )
 
     _query_results_are_correct_shape(query_results, n_results)
 

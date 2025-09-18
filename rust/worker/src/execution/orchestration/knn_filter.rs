@@ -12,7 +12,7 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    operator::Filter, CollectionAndSegments, HnswParametersFromSegmentError, Segment, SegmentType,
+    operator::Filter, CollectionAndSegments, HnswParametersFromSegmentError, SegmentType,
 };
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
@@ -116,13 +116,11 @@ where
 #[derive(Clone, Debug)]
 pub struct KnnFilterOutput {
     pub logs: FetchLogOutput,
-    pub distance_function: DistanceFunction,
-    pub filter_output: FilterOutput,
-    pub hnsw_reader: Option<Box<DistributedHNSWSegmentReader>>,
-    pub record_segment: Segment,
-    pub vector_segment: Segment,
-    pub dimension: usize,
     pub fetch_log_bytes: u64,
+    pub filter_output: FilterOutput,
+    pub dimension: usize,
+    pub distance_function: DistanceFunction,
+    pub hnsw_reader: Option<Box<DistributedHNSWSegmentReader>>,
 }
 
 type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
@@ -432,13 +430,11 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
 
         let output = KnnFilterOutput {
             logs,
-            distance_function,
-            filter_output: output,
-            hnsw_reader,
-            record_segment: self.collection_and_segments.record_segment.clone(),
-            vector_segment: self.collection_and_segments.vector_segment.clone(),
-            dimension: collection_dimension as usize,
             fetch_log_bytes,
+            filter_output: output,
+            dimension: collection_dimension as usize,
+            distance_function,
+            hnsw_reader,
         };
         self.terminate_with_result(Ok(output), ctx).await;
     }

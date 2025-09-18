@@ -16,39 +16,6 @@ else:
     dockerfile='./k8s/test/postgres/Dockerfile'
   )
 
-
-if config.tilt_subcommand == "ci":
-  custom_build(
-    'logservice',
-    'docker image tag log-service:ci $EXPECTED_REF',
-    ['./go/', './idl/'],
-    disable_push=True
-  )
-else:
-  docker_build(
-    'logservice',
-    '.',
-    only=['go/', 'idl/'],
-    dockerfile='./go/Dockerfile',
-    target='logservice'
-  )
-
-if config.tilt_subcommand == "ci":
-  custom_build(
-    'logservice-migration',
-    'docker image tag log-service-migration:ci $EXPECTED_REF',
-    ['./go/'],
-    disable_push=True
-  )
-else:
-  docker_build(
-    'logservice-migration',
-    '.',
-    only=['go/'],
-    dockerfile='./go/Dockerfile.migration',
-    target="logservice-migration"
-  )
-
 if config.tilt_subcommand == "ci":
   custom_build(
     'rust-log-service',
@@ -187,12 +154,11 @@ k8s_yaml(
 # We manually call helm template so we can call set-file
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=rust/frontend/sample_configs/tilt_config.yaml,rustLogService.configuration=rust/worker/tilt_config.yaml,compactionService.configuration=rust/worker/tilt_config.yaml,queryService.configuration=rust/worker/tilt_config.yaml,garbageCollector.configuration=rust/worker/tilt_config.yaml --values k8s/distributed-chroma/values.yaml,k8s/distributed-chroma/values.dev.yaml k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=rust/frontend/sample_configs/distributed.yaml,rustLogService.configuration=rust/worker/chroma_config.yaml,compactionService.configuration=rust/worker/chroma_config.yaml,queryService.configuration=rust/worker/chroma_config.yaml,garbageCollector.configuration=rust/worker/chroma_config.yaml --values k8s/distributed-chroma/values.yaml,k8s/distributed-chroma/values.dev.yaml k8s/distributed-chroma'
   ),
 )
 watch_file('rust/frontend/sample_configs/distributed.yaml')
 watch_file('rust/worker/chroma_config.yaml')
-watch_file('rust/worker/tilt_config.yaml')
 watch_file('k8s/distributed-chroma/values.yaml')
 watch_file('k8s/distributed-chroma/values.dev.yaml')
 watch_file('k8s/distributed-chroma/*.yaml')
@@ -229,8 +195,6 @@ k8s_resource(
     'sysdb-query-service-memberlist-binding:clusterrolebinding',
     'sysdb-compaction-service-memberlist-binding:clusterrolebinding',
 
-    'logservice-serviceaccount:serviceaccount',
-
     'query-service-serviceaccount:serviceaccount',
     'query-service-serviceaccount-rolebinding:RoleBinding',
     'query-service-memberlist-readerwriter:ClusterRole',
@@ -247,7 +211,6 @@ k8s_resource(
     'test-memberlist-reader:ClusterRole',
     'test-memberlist-reader-binding:ClusterRoleBinding',
     'lease-watcher:role',
-    'logservice-serviceaccount-rolebinding:rolebinding',
     'rust-frontend-service-config:ConfigMap',
   ],
   new_name='k8s_setup',
@@ -258,11 +221,9 @@ k8s_resource(
 k8s_resource('postgres', resource_deps=['k8s_setup'], labels=["infrastructure"], port_forwards='5432:5432')
 # Jobs are suffixed with the image tag to ensure they are unique. In this context, the image tag is defined in k8s/distributed-chroma/values.yaml.
 k8s_resource('sysdb-migration-latest', resource_deps=['postgres'], labels=["infrastructure"])
-k8s_resource('logservice-migration-latest', resource_deps=['postgres'], labels=["infrastructure"])
-k8s_resource('logservice', resource_deps=['sysdb-migration-latest'], labels=["chroma"], port_forwards='50052:50051')
 k8s_resource('rust-log-service', labels=["chroma"], port_forwards='50054:50051')
 k8s_resource('sysdb', resource_deps=['sysdb-migration-latest'], labels=["chroma"], port_forwards='50051:50051')
-k8s_resource('rust-frontend-service', resource_deps=['sysdb', 'logservice', 'rust-log-service'], labels=["chroma"], port_forwards='8000:8000')
+k8s_resource('rust-frontend-service', resource_deps=['sysdb', 'rust-log-service'], labels=["chroma"], port_forwards='8000:8000')
 k8s_resource('query-service', resource_deps=['sysdb'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service', resource_deps=['sysdb'], labels=["chroma"])
 k8s_resource('load-service', resource_deps=['k8s_setup'], labels=["infrastructure"], port_forwards='3001:3001')
@@ -270,6 +231,6 @@ k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('grafana', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('prometheus', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('otel-collector', resource_deps=['k8s_setup'], labels=["observability"])
-k8s_resource('garbage-collector', resource_deps=['k8s_setup', 'minio-deployment'], labels=["chroma"])
+k8s_resource('garbage-collector', resource_deps=['k8s_setup', 'minio-deployment'], labels=["chroma"], port_forwards='50055:50055')
 # Local S3
 k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards=['9000:9000', '9005:9005'])

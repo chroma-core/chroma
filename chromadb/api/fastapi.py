@@ -1,6 +1,6 @@
 import orjson
 import logging
-from typing import Any, Dict, Optional, cast, Tuple
+from typing import Any, Dict, Optional, cast, Tuple, List
 from typing import Sequence
 from uuid import UUID
 import httpx
@@ -17,11 +17,11 @@ from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api import ServerAPI
+from chromadb.execution.expression.plan import Search
 
 from chromadb.api.types import (
     Documents,
     Embeddings,
-    PyEmbeddings,
     IDs,
     Include,
     Metadatas,
@@ -30,11 +30,15 @@ from chromadb.api.types import (
     WhereDocument,
     GetResult,
     QueryResult,
+    SearchResult,
     CollectionMetadata,
     validate_batch,
     convert_np_embeddings_to_list,
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
+)
+
+from chromadb.api.types import (
     IncludeMetadataDocumentsEmbeddings,
     optional_embeddings_to_base64_strings,
 )
@@ -97,7 +101,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         # remove it from kwargs, and add it to the content parameter
         # This is because httpx uses a slower json serializer
         if "json" in kwargs:
-            data = orjson.dumps(kwargs.pop("json"))
+            data = orjson.dumps(kwargs.pop("json"), option=orjson.OPT_SERIALIZE_NUMPY)
             kwargs["content"] = data
 
         # Unlike requests, httpx does not automatically escape the path
@@ -352,6 +356,35 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         model = CollectionModel.from_json(resp_json)
         return model
 
+    @trace_method("FastAPI._search", OpenTelemetryGranularity.OPERATION)
+    @override
+    def _search(
+        self,
+        collection_id: UUID,
+        searches: List[Search],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> SearchResult:
+        """Performs hybrid search on a collection"""
+        # Convert Search objects to dictionaries
+        payload = {"searches": [s.to_dict() for s in searches]}
+
+        resp_json = self._make_request(
+            "post",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
+            json=payload,
+        )
+
+        # Return the column-major format directly
+        return SearchResult(
+            ids=resp_json.get("ids", []),
+            documents=resp_json.get("documents", []),
+            embeddings=resp_json.get("embeddings", []),
+            metadatas=resp_json.get("metadatas", []),
+            scores=resp_json.get("scores", []),
+            select=resp_json.get("select", []),
+        )
+
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
     def delete_collection(
@@ -469,7 +502,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self,
         batch: Tuple[
             IDs,
-            Optional[PyEmbeddings],
+            Optional[Embeddings],
             Optional[Metadatas],
             Optional[Documents],
             Optional[URIs],
@@ -510,7 +543,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings),
+            embeddings,
             metadatas,
             documents,
             uris,
@@ -541,9 +574,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings)
-            if embeddings is not None
-            else None,
+            embeddings if embeddings is not None else None,
             metadatas,
             documents,
             uris,
@@ -574,7 +605,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings),
+            embeddings,
             metadatas,
             documents,
             uris,

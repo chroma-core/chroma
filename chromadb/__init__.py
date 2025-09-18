@@ -28,6 +28,16 @@ from chromadb.api.types import (
     WhereDocument,
     UpdateCollectionMetadata,
 )
+
+# Import Search API components
+from chromadb.execution.expression.plan import Search
+from chromadb.execution.expression.operator import (
+    # Key builder for where conditions and field selection
+    Key,
+    K,  # Alias for Key
+    # KNN-based ranking for hybrid search
+    Knn,
+)
 from pathlib import Path
 import os
 
@@ -51,6 +61,11 @@ __all__ = [
     "QueryResult",
     "GetResult",
     "TokenTransportHeader",
+    # Search API components
+    "Search",
+    "Key",
+    "K",
+    "Knn",
 ]
 
 from chromadb.types import CloudClientArg
@@ -59,7 +74,7 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "1.0.20"
+__version__ = "1.1.0"
 
 
 # Workaround to deal with Colab's old sqlite3 version

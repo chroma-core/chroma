@@ -65,6 +65,22 @@ where
     /// - If no client is found for the given key
     /// - If the assignment policy fails to assign the key
     pub fn clients(&mut self, assignment_key: &str) -> Result<Vec<T>, ClientAssignmentError> {
+        self.assigned_clients(assignment_key)
+            .map(|assigned_clients| assigned_clients.into_values().collect())
+    }
+
+    /// Get a map of assigned node names to their clients for the given key in a single lock acquisition
+    /// # Arguments
+    /// - `assignment_key` - The key for which the client is to be fetched
+    /// # Returns
+    /// - A HashMap<String, T> mapping assigned node names to their corresponding gRPC clients
+    /// # Errors
+    /// - If no client is found for the given key
+    /// - If the assignment policy fails to assign the key
+    pub fn assigned_clients(
+        &mut self,
+        assignment_key: &str,
+    ) -> Result<HashMap<String, T>, ClientAssignmentError> {
         let node_name_to_client_guard = self.node_name_to_client.read();
         let members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
         let target_replication_factor = min(self.replication_factor, members.len());
@@ -72,16 +88,32 @@ where
         let assigned = self
             .assignment_policy
             .assign(assignment_key, target_replication_factor)?;
-        let clients = assigned
+
+        let assigned_clients = assigned
             .iter()
             .map(|node_name| {
-                node_name_to_client_guard
+                let client = node_name_to_client_guard
                     .get(node_name)
-                    .ok_or_else(|| ClientAssignmentError::NoClientFound(node_name.clone()))
-                    .cloned()
+                    .ok_or_else(|| ClientAssignmentError::NoClientFound(node_name.clone()))?
+                    .clone();
+                Ok::<(String, T), ClientAssignmentError>((node_name.clone(), client))
             })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(clients)
+            .collect::<Result<HashMap<String, T>, ClientAssignmentError>>()?;
+        Ok(assigned_clients)
+    }
+
+    /// Returns the names of all nodes currently managed by the assigner.
+    pub fn node_names(&self) -> Vec<String> {
+        self.node_name_to_client.read().keys().cloned().collect()
+    }
+
+    /// Returns the client for a specific node, if it exists.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_name` - The name of the node to get the client for.
+    pub fn client_for_node(&self, node_name: &str) -> Option<T> {
+        self.node_name_to_client.read().get(node_name).cloned()
     }
 
     pub fn all(&self) -> Vec<T> {
@@ -496,5 +528,29 @@ mod test {
                 .get(node)
                 .expect("Client to exist");
         }
+    }
+
+    // ClientAssigner tests
+    #[tokio::test]
+    async fn test_client_assigner_node_names_and_client_for_node() {
+        let assigner: ClientAssigner<String> = ClientAssigner::new(
+            Box::new(chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy::default()),
+            2,
+        );
+        {
+            let mut guard = assigner.node_name_to_client.write();
+            for i in 0..5 {
+                guard.insert(format!("node{}", i), format!("client{}", i));
+            }
+        }
+        let mut names = assigner.node_names();
+        names.sort();
+        assert_eq!(names, vec!["node0", "node1", "node2", "node3", "node4"]);
+
+        assert_eq!(
+            assigner.client_for_node("node3"),
+            Some("client3".to_string())
+        );
+        assert!(assigner.client_for_node("missing").is_none());
     }
 }

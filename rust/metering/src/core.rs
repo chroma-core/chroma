@@ -11,6 +11,7 @@ pub enum ReadAction {
     Get,
     GetForDelete,
     Query,
+    Search,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Hash, Serialize)]

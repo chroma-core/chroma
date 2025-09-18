@@ -145,6 +145,10 @@ pub enum StorageError {
         /// The configuration key used
         key: String,
     },
+
+    // Back off and retry---usually indicates an explicit 429/SlowDown.
+    #[error("Back off and retry---usually indicates an explicit 429/SlowDown.")]
+    Backoff,
 }
 
 impl ChromaError for StorageError {
@@ -163,6 +167,7 @@ impl ChromaError for StorageError {
             StorageError::PermissionDenied { .. } => ErrorCodes::PermissionDenied,
             StorageError::Unauthenticated { .. } => ErrorCodes::Unauthenticated,
             StorageError::UnknownConfigurationKey { .. } => ErrorCodes::InvalidArgument,
+            StorageError::Backoff { .. } => ErrorCodes::ResourceExhausted,
         }
     }
 }
@@ -281,6 +286,19 @@ impl Storage {
                     .get_with_e_tag(key, options)
                     .await
             }
+        }
+    }
+
+    // NOTE(rescrv):  Returns Ok(true) if the file is definitely the same.  Returns Ok(false) if
+    // the file cannot be confirmed to be the same but it exists.  Returns Err on error.  It is up
+    // to the user to know how they are confirming the same and to react to Ok(false) even if the
+    // file is definitely the same file on storage.
+    pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
+        match self {
+            Storage::ObjectStore(object_store) => object_store.confirm_same(key, e_tag).await,
+            Storage::S3(s3) => s3.confirm_same(key, e_tag).await,
+            Storage::Local(local) => local.confirm_same(key, e_tag).await,
+            Storage::AdmissionControlledS3(as3) => as3.confirm_same(key, e_tag).await,
         }
     }
 

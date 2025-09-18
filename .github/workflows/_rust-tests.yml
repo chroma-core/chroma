@@ -7,11 +7,12 @@ jobs:
   test:
     strategy:
       matrix:
-        platform: [blacksmith-8vcpu-ubuntu-2204]
+        platform: [blacksmith-8vcpu-ubuntu-2404]
     runs-on: ${{ matrix.platform }}
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
+      RUST_MIN_STACK_SIZE: 8388608
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,10 +25,11 @@ jobs:
       - name: Test
         run: cargo nextest run --profile ci
   test-long:
-    runs-on: blacksmith-8vcpu-ubuntu-2204
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
+      RUST_MIN_STACK_SIZE: 8388608
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,7 +43,7 @@ jobs:
   test-integration:
     strategy:
       matrix:
-        platform: [blacksmith-16vcpu-ubuntu-2204]
+        platform: [blacksmith-16vcpu-ubuntu-2404]
         nextest_profile: [ci_k8s_integration, ci_k8s_integration_slow]
         partition: [1, 2]
         include:
@@ -57,6 +59,7 @@ jobs:
       id-token: write
     env:
       CARGO_TERM_COLOR: always
+      RUST_MIN_STACK_SIZE: 8388608
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -83,7 +86,7 @@ jobs:
   test-benches:
     strategy:
       matrix:
-        platform: [blacksmith-16vcpu-ubuntu-2204]
+        platform: [blacksmith-16vcpu-ubuntu-2404]
         bench-command:
           - "--bench blockfile_writer -- --sample-size 10"
           - "--bench distance_metrics"
@@ -94,6 +97,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     env:
       RUST_BACKTRACE: 1
+      RUST_MIN_STACK_SIZE: 8388608
       CARGO_TERM_COLOR: always
     steps:
       - name: Checkout
@@ -106,8 +110,9 @@ jobs:
         run: cargo bench ${{ matrix.bench-command }}
 
   can-build-release:
-    runs-on: blacksmith-16vcpu-ubuntu-2204
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     env:
+      RUST_MIN_STACK_SIZE: 8388608
       CARGO_TERM_COLOR: always
     steps:
       - name: Checkout

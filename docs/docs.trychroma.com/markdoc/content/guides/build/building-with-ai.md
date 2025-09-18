@@ -1,3 +1,8 @@
+---
+id: building-with-ai
+name: Building with AI
+---
+
 # Building with AI
 
 AI is a new type of programming primitive. Large language models (LLMs) let us write software which can process **unstructured** information in a **common sense** way.
@@ -17,10 +22,11 @@ The output would correctly be:
 > Agamemnon, Atreus, Hera
 
 Integrating LLMs into software applications is as simple as calling an API. While the specifics of the API may vary between LLMs, most have converged on some common patterns:
-* Calls to the API typically consist of parameters including a `model` identifier, and a list of `messages`.
-* Each `message` has a `role` and `content`.
-* The `system` role can be thought of as the *instructions* to the model.
-* The `user` tole can be thought of as the *data* to process.
+
+- Calls to the API typically consist of parameters including a `model` identifier, and a list of `messages`.
+- Each `message` has a `role` and `content`.
+- The `system` role can be thought of as the _instructions_ to the model.
+- The `user` role can be thought of as the _data_ to process.
 
 For example, we can use AI to write a general purpose function that extracts names from input text.
 
@@ -31,6 +37,7 @@ For example, we can use AI to write a general purpose function that extracts nam
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 import json
 import os
@@ -52,44 +59,47 @@ def extract_names(text: str) -> list[str]:
     response = response.choices[0].message["content"]
     return json.loads(response)
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
-import { OpenAI } from 'openai';
+import { OpenAI } from "openai";
 
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 export async function extractNames(text: string): Promise<string[]> {
-    const systemPrompt =
-        'You are a name extractor. The user will give you text, and you must return a JSON array of names mentioned in the text. Do not include any explanation or formatting.';
+  const systemPrompt =
+    "You are a name extractor. The user will give you text, and you must return a JSON array of names mentioned in the text. Do not include any explanation or formatting.";
 
-    const chatCompletion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: text },
-        ]
-    });
+  const chatCompletion = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: text },
+    ],
+  });
 
-    const responseText = chatCompletion.choices[0].message?.content ?? '[]';
-    return JSON.parse(responseText);
+  const responseText = chatCompletion.choices[0].message?.content ?? "[]";
+  return JSON.parse(responseText);
 }
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
 
 {% /Tab %}
 
-
 {% Tab label="Anthropic" %}
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 import json
 import os
@@ -114,33 +124,35 @@ def extract_names(text: str) -> list[str]:
     response_text = response.content[0].text
     return json.loads(response_text)
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
-import Anthropic from '@anthropic-ai/sdk';
+import Anthropic from "@anthropic-ai/sdk";
 
 const anthropic = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
+  apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
 export async function extractNames(text: string): Promise<string[]> {
-    const systemPrompt =
-        'You are a name extractor. The user will give you text, and you must return a JSON array of names mentioned in the text. Do not include any explanation or formatting.';
+  const systemPrompt =
+    "You are a name extractor. The user will give you text, and you must return a JSON array of names mentioned in the text. Do not include any explanation or formatting.";
 
-    const message = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: systemPrompt,
-        messages: [
-            { role: 'user', content: text },
-        ]
-    });
+  const message = await anthropic.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 1000,
+    system: systemPrompt,
+    messages: [{ role: "user", content: text }],
+  });
 
-    const responseText = message.content[0]?.type === 'text' ? message.content[0].text : '[]';
-    return JSON.parse(responseText);
+  const responseText =
+    message.content[0]?.type === "text" ? message.content[0].text : "[]";
+  return JSON.parse(responseText);
 }
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}

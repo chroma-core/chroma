@@ -35,6 +35,7 @@ pub enum AuthzAction {
     Count,
     Update,
     Upsert,
+    Search,
 }
 
 impl Display for AuthzAction {
@@ -64,6 +65,7 @@ impl Display for AuthzAction {
             AuthzAction::Count => write!(f, "collection:count"),
             AuthzAction::Update => write!(f, "collection:update"),
             AuthzAction::Upsert => write!(f, "collection:upsert"),
+            AuthzAction::Search => write!(f, "collection:search"),
         }
     }
 }

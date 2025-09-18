@@ -100,6 +100,13 @@ enum GarbageCollectorCommand {
         #[arg(short, long, default_value = "10")]
         download_concurrency: usize,
     },
+
+    // Manually collect the given collection-id.
+    #[command(name = "manual-collection")]
+    ManualCollection {
+        #[arg(long)]
+        collection_id: String,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -448,6 +455,36 @@ async fn main() {
             }
 
             tracing::info!("Exported {} collections to {}", len, output_file.display());
+        }
+
+        GarbageCollectorCommand::ManualCollection { collection_id } => {
+            // Connect to the garbage collector service
+            let gc_endpoint = std::env::var("GARBAGE_COLLECTOR_ENDPOINT")
+                .unwrap_or_else(|_| "http://[::1]:50055".to_string());
+
+            tracing::info!("Connecting to garbage collector at {}", gc_endpoint);
+
+            let mut client = chroma_types::chroma_proto::garbage_collector_client::GarbageCollectorClient::connect(gc_endpoint)
+                .await
+                .expect("Failed to connect to garbage collector service");
+
+            let request = tonic::Request::new(
+                chroma_types::chroma_proto::KickoffGarbageCollectionRequest {
+                    collection_id: collection_id.clone(),
+                },
+            );
+
+            match client.kickoff_garbage_collection(request).await {
+                Ok(_) => {
+                    tracing::info!(
+                        "Successfully triggered manual garbage collection for collection {}",
+                        collection_id
+                    );
+                }
+                Err(e) => {
+                    tracing::error!("Failed to trigger manual garbage collection: {}", e);
+                }
+            }
         }
 
         GarbageCollectorCommand::ImportSysDbCollections { input_file } => {

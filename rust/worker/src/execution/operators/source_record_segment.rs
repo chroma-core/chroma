@@ -97,10 +97,10 @@ mod tests {
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;
-        let reader = RecordSegmentReader::from_segment(
+        let reader = Box::pin(RecordSegmentReader::from_segment(
             &test_segment.record_segment,
             &test_segment.blockfile_provider,
-        )
+        ))
         .await
         .expect("Record segment reader should be initialized");
         SourceRecordSegmentInput {
@@ -110,7 +110,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_source() {
-        let source_input = setup_source_input().await;
+        let source_input = Box::pin(setup_source_input()).await;
 
         let source_operator = SourceRecordSegmentOperator {};
 

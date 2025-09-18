@@ -458,6 +458,23 @@ impl AdmissionControlledS3Storage {
             .await
     }
 
+    pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
+        self.metrics.nac_outstanding_read_requests.record(
+            self.metrics
+                .outstanding_read_requests
+                .load(Ordering::Relaxed) as u64,
+            &self.metrics.hostname_attribute,
+        );
+        self.metrics
+            .outstanding_read_requests
+            .fetch_add(1, Ordering::Relaxed);
+        let res = self.storage.confirm_same(key, e_tag).await;
+        self.metrics
+            .outstanding_read_requests
+            .fetch_sub(1, Ordering::Relaxed);
+        res
+    }
+
     async fn execute_fetch<FetchReturn, FetchFn, FetchFut>(
         fetch_fn: FetchFn,
         input: Result<(Arc<Vec<u8>>, Option<ETag>), StorageError>,

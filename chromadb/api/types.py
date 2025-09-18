@@ -10,6 +10,7 @@ from typing import (
     cast,
     Literal,
     get_args,
+    TYPE_CHECKING,
 )
 from numpy.typing import NDArray
 import numpy as np
@@ -27,7 +28,11 @@ from chromadb.base_types import (
     Where,
     WhereDocumentOperator,
     WhereDocument,
+    SparseVector,
 )
+
+if TYPE_CHECKING:
+    pass
 from inspect import signature
 from tenacity import retry
 from abc import abstractmethod
@@ -43,6 +48,10 @@ __all__ = [
     "WhereDocument",
     "UpdateCollectionMetadata",
     "UpdateMetadata",
+    "SearchResult",
+    "SparseVector",
+    "is_valid_sparse_vector",
+    "validate_sparse_vector",
 ]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
@@ -70,6 +79,8 @@ PyEmbedding = PyVector
 PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
 Embeddings = List[Embedding]
+SparseEmbedding = SparseVector
+SparseEmbeddings = List[SparseEmbedding]
 
 Space = Literal["cosine", "l2", "ip"]
 
@@ -91,29 +102,27 @@ def _to_f32(value: float) -> float:
     return value
 
 
-def pack_embedding_safely(pyEmbedding: PyEmbedding) -> str:
+def pack_embedding_safely(embedding: Embedding) -> str:
     try:
         return pybase64.b64encode_as_string(  # type: ignore
-            _get_struct(len(pyEmbedding)).pack(*pyEmbedding)
+            _get_struct(len(embedding)).pack(*embedding)
         )
     except OverflowError:
         return pybase64.b64encode_as_string(  # type: ignore
-            _get_struct(len(pyEmbedding)).pack(
-                *[_to_f32(value) for value in pyEmbedding]
-            )
+            _get_struct(len(embedding)).pack(*[_to_f32(value) for value in embedding])
         )
 
 
 # returns base64 encoded embeddings or None if the embedding is None
 # currently, PyEmbeddings can't have None, but this is to future proof, we want to be able to handle None embeddings
 def optional_embeddings_to_base64_strings(
-    pyEmbeddings: Optional[PyEmbeddings],
+    embeddings: Optional[Embeddings],
 ) -> Optional[list[Union[str, None]]]:
-    if pyEmbeddings is None:
+    if embeddings is None:
         return None
     return [
-        pack_embedding_safely(pyEmbedding) if pyEmbedding is not None else None
-        for pyEmbedding in pyEmbeddings
+        pack_embedding_safely(embedding) if embedding is not None else None
+        for embedding in embeddings
     ]
 
 
@@ -146,28 +155,22 @@ def normalize_embeddings(
             f"Expected Embeddings to be non-empty list or numpy array, got {target}"
         )
 
-    if isinstance(target, list):
+    if isinstance(target, np.ndarray):
+        if target.ndim == 1:
+            return [target]
+        elif target.ndim == 2:
+            return [row for row in target]
+    elif isinstance(target, list):
         # One PyEmbedding
         if isinstance(target[0], (int, float)) and not isinstance(target[0], bool):
             return [np.array(target, dtype=np.float32)]
-        # List of PyEmbeddings
-        if isinstance(target[0], list):
+        elif isinstance(target[0], np.ndarray):
+            return cast(Embeddings, target)
+        elif isinstance(target[0], list):
             if isinstance(target[0][0], (int, float)) and not isinstance(
                 target[0][0], bool
             ):
-                return [np.array(embedding, dtype=np.float32) for embedding in target]
-        # List of np.ndarrays
-        if isinstance(target[0], np.ndarray):
-            return cast(Embeddings, target)
-
-    elif isinstance(target, np.ndarray):
-        # A single embedding as a numpy array
-        if target.ndim == 1:
-            return cast(Embeddings, [target])
-        # 2-D numpy array (comes out of embedding models)
-        # TODO: Enforce this at the embedding function level
-        if target.ndim == 2:
-            return list(target)
+                return [np.array(row, dtype=np.float32) for row in target]
 
     raise ValueError(
         f"Expected embeddings to be a list of floats or ints, a list of lists, a numpy array, or a list of numpy arrays, got {target}"
@@ -484,6 +487,29 @@ class QueryResult(TypedDict):
     included: Include
 
 
+class SearchResult(TypedDict):
+    """Column-major response from the search API matching Rust SearchResponse structure.
+
+    This is the format returned to users:
+    - ids: Always present, list of result IDs for each search payload
+    - documents: Optional per payload, None if not requested
+    - embeddings: Optional per payload, None if not requested
+    - metadatas: Optional per payload, None if not requested
+    - scores: Optional per payload, None if not requested
+    - select: List of selected fields for each payload (sorted)
+
+    Each top-level list index corresponds to a search payload.
+    Within each payload, the inner lists are aligned by record index.
+    """
+
+    ids: List[List[str]]
+    documents: List[Optional[List[Optional[str]]]]
+    embeddings: List[Optional[List[Optional[List[float]]]]]
+    metadatas: List[Optional[List[Optional[Dict[str, Any]]]]]
+    scores: List[Optional[List[Optional[float]]]]
+    select: List[List[str]]  # List of string key names for each payload
+
+
 class UpdateRequest(TypedDict):
     ids: IDs
     embeddings: Optional[Embeddings]
@@ -544,6 +570,13 @@ class EmbeddingFunction(Protocol[D]):
     @abstractmethod
     def __call__(self, input: D) -> Embeddings:
         ...
+
+    def embed_query(self, input: D) -> Embeddings:
+        """
+        Get the embeddings for a query input.
+        This method is optional, and if not implemented, the default behavior is to call __call__.
+        """
+        return self.__call__(input)
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
@@ -729,8 +762,71 @@ def validate_ids(ids: IDs) -> IDs:
     return ids
 
 
+def is_valid_sparse_vector(value: Any) -> bool:
+    """Check if a value looks like a SparseVector (has indices and values keys)."""
+    return isinstance(value, dict) and "indices" in value and "values" in value
+
+
+def validate_sparse_vector(value: Any) -> None:
+    """Validate that a value is a properly formed SparseVector.
+
+    Args:
+        value: The value to validate as a SparseVector
+
+    Raises:
+        ValueError: If the value is not a valid SparseVector
+    """
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"Expected SparseVector to be a dict, got {type(value).__name__}"
+        )
+
+    if "indices" not in value or "values" not in value:
+        raise ValueError("SparseVector must have 'indices' and 'values' keys")
+
+    indices = value.get("indices")
+    values = value.get("values")
+
+    # Validate indices
+    if not isinstance(indices, list):
+        raise ValueError(
+            f"Expected SparseVector indices to be a list, got {type(indices).__name__}"
+        )
+
+    # Validate values
+    if not isinstance(values, list):
+        raise ValueError(
+            f"Expected SparseVector values to be a list, got {type(values).__name__}"
+        )
+
+    # Check lengths match
+    if len(indices) != len(values):
+        raise ValueError(
+            f"SparseVector indices and values must have the same length, "
+            f"got {len(indices)} indices and {len(values)} values"
+        )
+
+    # Validate each index
+    for i, idx in enumerate(indices):
+        if not isinstance(idx, int):
+            raise ValueError(
+                f"SparseVector indices must be integers, got {type(idx).__name__} at position {i}"
+            )
+        if idx < 0:
+            raise ValueError(
+                f"SparseVector indices must be non-negative, got {idx} at position {i}"
+            )
+
+    # Validate each value
+    for i, val in enumerate(values):
+        if not isinstance(val, (int, float)):
+            raise ValueError(
+                f"SparseVector values must be numbers, got {type(val).__name__} at position {i}"
+            )
+
+
 def validate_metadata(metadata: Metadata) -> Metadata:
-    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats or bools"""
+    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats, bools, or SparseVectors"""
     if not isinstance(metadata, dict) and metadata is not None:
         raise ValueError(
             f"Expected metadata to be a dict or None, got {type(metadata).__name__} as metadata"
@@ -750,18 +846,24 @@ def validate_metadata(metadata: Metadata) -> Metadata:
             raise TypeError(
                 f"Expected metadata key to be a str, got {key} which is a {type(key).__name__}"
             )
+        # Check if value is a SparseVector
+        if is_valid_sparse_vector(value):
+            try:
+                validate_sparse_vector(value)
+            except ValueError as e:
+                raise ValueError(f"Invalid SparseVector for key '{key}': {e}")
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
-        if not isinstance(value, bool) and not isinstance(
+        elif not isinstance(value, bool) and not isinstance(
             value, (str, int, float, type(None))
         ):
             raise ValueError(
-                f"Expected metadata value to be a str, int, float, bool, or None, got {value} which is a {type(value).__name__}"
+                f"Expected metadata value to be a str, int, float, bool, SparseVector, or None, got {value} which is a {type(value).__name__}"
             )
     return metadata
 
 
 def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
-    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats or bools"""
+    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats, bools, or SparseVectors"""
     if not isinstance(metadata, dict) and metadata is not None:
         raise ValueError(
             f"Expected metadata to be a dict or None, got {type(metadata)}"
@@ -773,12 +875,18 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
     for key, value in metadata.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
+        # Check if value is a SparseVector
+        if is_valid_sparse_vector(value):
+            try:
+                validate_sparse_vector(value)
+            except ValueError as e:
+                raise ValueError(f"Invalid SparseVector for key '{key}': {e}")
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
-        if not isinstance(value, bool) and not isinstance(
+        elif not isinstance(value, bool) and not isinstance(
             value, (str, int, float, type(None))
         ):
             raise ValueError(
-                f"Expected metadata value to be a str, int, or float, got {value}"
+                f"Expected metadata value to be a str, int, float, bool, SparseVector, or None, got {value}"
             )
     return metadata
 
@@ -982,17 +1090,33 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
             raise ValueError(
                 f"Expected each embedding in the embeddings to be a 1-dimensional numpy array with at least 1 int/float value. Got a 1-dimensional numpy array with no values at pos {i}"
             )
-        if not all(
-            [
-                isinstance(value, (np.integer, float, np.floating))
-                and not isinstance(value, bool)
-                for value in embedding
-            ]
-        ):
+
+        if embedding.dtype not in [
+            np.float16,
+            np.float32,
+            np.float64,
+            np.int32,
+            np.int64,
+        ]:
             raise ValueError(
                 "Expected each value in the embedding to be a int or float, got an embedding with "
-                f"{list(set([type(value).__name__ for value in embedding]))} - {embedding}"
+                f"{embedding.dtype} - {embedding}"
             )
+    return embeddings
+
+
+def validate_sparse_embeddings(embeddings: SparseEmbeddings) -> SparseEmbeddings:
+    """Validates sparse embeddings to ensure it is a list of sparse vectors"""
+    if not isinstance(embeddings, list):
+        raise ValueError(
+            f"Expected sparse embeddings to be a list, got {type(embeddings).__name__}"
+        )
+    if len(embeddings) == 0:
+        raise ValueError(
+            f"Expected sparse embeddings to be a non-empty list, got {len(embeddings)} sparse embeddings"
+        )
+    for embedding in embeddings:
+        validate_sparse_vector(embedding)
     return embeddings
 
 
@@ -1050,3 +1174,95 @@ def convert_np_embeddings_to_list(embeddings: Embeddings) -> PyEmbeddings:
 
 def convert_list_embeddings_to_np(embeddings: PyEmbeddings) -> Embeddings:
     return [np.array(embedding) for embedding in embeddings]
+
+
+@runtime_checkable
+class SparseEmbeddingFunction(Protocol[D]):
+    """
+    A protocol for sparse embedding functions. To implement a new sparse embedding function,
+    you need to implement the following methods at minimum:
+    - __call__
+
+    For future compatibility, it is strongly recommended to also implement:
+    - __init__
+    - name
+    - build_from_config
+    - get_config
+    """
+
+    @abstractmethod
+    def __call__(self, input: D) -> SparseEmbeddings:
+        ...
+
+    def embed_query(self, input: D) -> SparseEmbeddings:
+        """
+        Get the embeddings for a query input.
+        This method is optional, and if not implemented, the default behavior is to call __call__.
+        """
+        return self.__call__(input)
+
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        # Raise an exception if __call__ is not defined since it is expected to be defined
+        call = getattr(cls, "__call__")
+
+        def __call__(self: SparseEmbeddingFunction[D], input: D) -> SparseEmbeddings:
+            result = call(self, input)
+            assert result is not None
+            return validate_sparse_embeddings(cast(SparseEmbeddings, result))
+
+        setattr(cls, "__call__", __call__)
+
+    def embed_with_retries(
+        self, input: D, **retry_kwargs: Dict[str, Any]
+    ) -> SparseEmbeddings:
+        return cast(SparseEmbeddings, retry(**retry_kwargs)(self.__call__)(input))
+
+    @abstractmethod
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Initialize the embedding function.
+        Pass any arguments that will be needed to build the embedding function
+        config.
+        """
+        ...
+
+    @staticmethod
+    @abstractmethod
+    def name() -> str:
+        """
+        Return the name of the embedding function.
+        """
+        ...
+
+    @staticmethod
+    @abstractmethod
+    def build_from_config(config: Dict[str, Any]) -> "SparseEmbeddingFunction[D]":
+        """
+        Build the embedding function from a config, which will be used to
+        deserialize the embedding function.
+        """
+        ...
+
+    @abstractmethod
+    def get_config(self) -> Dict[str, Any]:
+        """
+        Return the config for the embedding function, which will be used to
+        serialize the embedding function.
+        """
+        ...
+
+    def validate_config_update(
+        self, old_config: Dict[str, Any], new_config: Dict[str, Any]
+    ) -> None:
+        """
+        Validate the update to the config.
+        """
+        return
+
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
+        """
+        Validate the config.
+        """
+        return

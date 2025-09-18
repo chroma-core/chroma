@@ -723,6 +723,17 @@ impl Manifest {
         Ok(())
     }
 
+    /// Validate the e_tag against the manifest on object storage.
+    pub async fn head(
+        _: &ThrottleOptions,
+        storage: &Storage,
+        prefix: &str,
+        e_tag: &ETag,
+    ) -> Result<bool, Error> {
+        let path = manifest_path(prefix);
+        Ok(storage.confirm_same(&path, e_tag).await.map_err(Arc::new)?)
+    }
+
     /// Load the latest manifest from object storage.
     pub async fn load(
         options: &ThrottleOptions,
@@ -1717,6 +1728,80 @@ mod tests {
         assert!(
             result.unwrap().is_none(),
             "Expected None when fragments_to_drop_limit < initial_seq_no"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_head_returns_true_for_matching_etag() {
+        use chroma_storage::s3::s3_client_for_test_with_new_bucket;
+
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let prefix = "test-head-matching";
+        let throttle_options = crate::ThrottleOptions::default();
+
+        let manifest = Manifest::new_empty("test-writer");
+
+        Manifest::initialize_from_manifest(
+            &crate::LogWriterOptions::default(),
+            &storage,
+            prefix,
+            manifest,
+        )
+        .await
+        .unwrap();
+
+        let (_loaded_manifest, etag) = Manifest::load(&throttle_options, &storage, prefix)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let result = Manifest::head(&throttle_options, &storage, prefix, &etag)
+            .await
+            .unwrap();
+        assert!(result, "head should return true for matching etag");
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_head_returns_false_for_non_matching_etag() {
+        use chroma_storage::s3::s3_client_for_test_with_new_bucket;
+
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let prefix = "test-head-non-matching";
+        let throttle_options = crate::ThrottleOptions::default();
+
+        let manifest = Manifest::new_empty("test-writer");
+
+        Manifest::initialize_from_manifest(
+            &crate::LogWriterOptions::default(),
+            &storage,
+            prefix,
+            manifest,
+        )
+        .await
+        .unwrap();
+
+        let fake_etag = chroma_storage::ETag("fake-etag-wont-match".to_string());
+
+        let result = Manifest::head(&throttle_options, &storage, prefix, &fake_etag)
+            .await
+            .unwrap();
+        assert!(!result, "head should return false for non-matching etag");
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_head_returns_error_for_nonexistent_manifest() {
+        use chroma_storage::s3::s3_client_for_test_with_new_bucket;
+
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let prefix = "test-head-nonexistent";
+        let throttle_options = crate::ThrottleOptions::default();
+
+        let fake_etag = chroma_storage::ETag("fake-etag".to_string());
+
+        let result = Manifest::head(&throttle_options, &storage, prefix, &fake_etag).await;
+        assert!(
+            result.is_err(),
+            "head should return error for nonexistent manifest"
         );
     }
 }

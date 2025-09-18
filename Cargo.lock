@@ -58,6 +58,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "alga"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f823d037a7ec6ea2197046bafd4ae150e6bc36f9ca347404f46a46823fa84f2"
+dependencies = [
+ "approx 0.3.2",
+ "num-complex 0.2.4",
+ "num-traits",
+]
+
+[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -153,6 +164,15 @@ name = "anyhow"
 version = "1.0.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c95c10ba0b00a02636238b814946408b1322d5ac4760326e6fb8ec956d85775"
+
+[[package]]
+name = "approx"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0e60b75072ecd4168020818c0107f2857bb6c4e64252d8d3983f6263b40a5c3"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "approx"
@@ -1452,6 +1472,7 @@ dependencies = [
  "rand 0.8.5",
  "roaring",
  "serde",
+ "serde_bytes",
  "shuttle",
  "tempfile",
  "thiserror 1.0.69",
@@ -1483,7 +1504,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-cli"
-version = "1.1.8"
+version = "1.1.10"
 dependencies = [
  "arboard",
  "axum 0.8.1",
@@ -1620,6 +1641,7 @@ dependencies = [
  "anyhow",
  "arrow",
  "async-trait",
+ "base64 0.22.1",
  "chroma-benchmark",
  "chroma-blockstore",
  "chroma-cache",
@@ -1629,6 +1651,7 @@ dependencies = [
  "chroma-storage",
  "chroma-tracing",
  "chroma-types",
+ "clap",
  "criterion",
  "futures",
  "hnswlib",
@@ -1642,6 +1665,7 @@ dependencies = [
  "rayon",
  "roaring",
  "serde",
+ "sprs",
  "tantivy",
  "tempfile",
  "thiserror 1.0.69",
@@ -1973,6 +1997,7 @@ dependencies = [
  "roaring",
  "serde",
  "serde_json",
+ "sprs",
  "thiserror 1.0.69",
  "tokio",
  "tonic",
@@ -3451,6 +3476,7 @@ dependencies = [
  "indicatif",
  "itertools 0.13.0",
  "opentelemetry",
+ "parking_lot",
  "petgraph 0.8.1",
  "proptest",
  "proptest-derive 0.3.0",
@@ -3779,7 +3805,7 @@ dependencies = [
 [[package]]
 name = "hnswlib"
 version = "0.8.1"
-source = "git+https://github.com/chroma-core/hnswlib.git#581f689d0620fbc6601a9293142888c81b3751e1"
+source = "git+https://github.com/chroma-core/hnswlib.git?branch=master#7cb7befea40d8cf858580eb06f06cf76467755f9"
 dependencies = [
  "cc",
  "thiserror 1.0.69",
@@ -4734,7 +4760,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -5232,9 +5258,9 @@ version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "882ed72dce9365842bf196bdeedf5055305f11fc8c03dee7bb0194a6cad34841"
 dependencies = [
- "approx",
+ "approx 0.5.1",
  "matrixmultiply",
- "num-complex",
+ "num-complex 0.4.6",
  "num-integer",
  "num-traits",
  "portable-atomic",
@@ -5287,7 +5313,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35bd024e8b2ff75562e5f34e7f4905839deb4b22955ef5e73d2fea1b9813cb23"
 dependencies = [
  "num-bigint",
- "num-complex",
+ "num-complex 0.4.6",
  "num-integer",
  "num-iter",
  "num-rational",
@@ -5319,6 +5345,16 @@ dependencies = [
  "rand 0.8.5",
  "smallvec",
  "zeroize",
+]
+
+[[package]]
+name = "num-complex"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6b19411a9719e753aff12e5187b74d60d3dc449ec3f4dc21e3989c3f554bc95"
+dependencies = [
+ "autocfg",
+ "num-traits",
 ]
 
 [[package]]
@@ -7307,6 +7343,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_bytes"
+version = "0.11.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8437fd221bde2d4ca316d61b90e337e9e702b3820b87d63caa9ba6c02bd06d96"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_derive"
 version = "1.0.215"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7672,6 +7717,21 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der 0.7.9",
+]
+
+[[package]]
+name = "sprs"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bff8419009a08f6cb7519a602c5590241fbff1446bcc823c07af15386eb801b"
+dependencies = [
+ "alga",
+ "ndarray",
+ "num-complex 0.4.6",
+ "num-traits",
+ "num_cpus",
+ "rayon",
+ "smallvec",
 ]
 
 [[package]]
@@ -9088,9 +9148,9 @@ dependencies = [
 
 [[package]]
 name = "utoipa-swagger-ui"
-version = "9.0.0"
+version = "9.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "161166ec520c50144922a625d8bc4925cc801b2dda958ab69878527c0e5c5d61"
+checksum = "d047458f1b5b65237c2f6dc6db136945667f40a7668627b3490b9513a3d43a55"
 dependencies = [
  "axum 0.8.1",
  "base64 0.22.1",
@@ -9101,7 +9161,7 @@ dependencies = [
  "serde_json",
  "url",
  "utoipa",
- "zip",
+ "zip 3.0.0",
 ]
 
 [[package]]
@@ -9899,6 +9959,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "shuttle",
+ "sprs",
  "tantivy",
  "tempfile",
  "thiserror 1.0.69",
@@ -10120,6 +10181,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "zip"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12598812502ed0105f607f941c386f43d441e00148fce9dec3ca5ffb0bde9308"
+dependencies = [
+ "arbitrary",
+ "crc32fast",
+ "flate2",
+ "indexmap 2.6.0",
+ "memchr",
+ "zopfli",
+]
+
+[[package]]
 name = "zip-extract"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10127,7 +10202,7 @@ checksum = "25a8c9e90f27d1435088a7b540b6cc8ae6ee525d992a695f16012d2f365b3d3c"
 dependencies = [
  "log",
  "thiserror 1.0.69",
- "zip",
+ "zip 2.2.2",
 ]
 
 [[package]]

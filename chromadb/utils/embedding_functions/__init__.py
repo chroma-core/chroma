@@ -32,6 +32,7 @@ from chromadb.utils.embedding_functions.instructor_embedding_function import (
 )
 from chromadb.utils.embedding_functions.jina_embedding_function import (
     JinaEmbeddingFunction,
+    JinaQueryConfig,
 )
 from chromadb.utils.embedding_functions.voyageai_embedding_function import (
     VoyageAIEmbeddingFunction,
@@ -67,6 +68,15 @@ from chromadb.utils.embedding_functions.mistral_embedding_function import (
 from chromadb.utils.embedding_functions.morph_embedding_function import (
     MorphEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.huggingface_sparse_embedding_function import (
+    HuggingFaceSparseEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.fastembed_sparse_embedding_function import (
+    FastembedSparseEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.bm25_embedding_function import (
+    Bm25EmbeddingFunction,
+)
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -99,6 +109,9 @@ _all_classes: Set[str] = {
     "CloudflareWorkersAIEmbeddingFunction",
     "TogetherAIEmbeddingFunction",
     "DefaultEmbeddingFunction",
+    "HuggingFaceSparseEmbeddingFunction",
+    "FastembedSparseEmbeddingFunction",
+    "Bm25EmbeddingFunction",
 }
 
 
@@ -237,6 +250,7 @@ __all__ = [
     "OllamaEmbeddingFunction",
     "InstructorEmbeddingFunction",
     "JinaEmbeddingFunction",
+    "JinaQueryConfig",
     "MistralEmbeddingFunction",
     "MorphEmbeddingFunction",
     "VoyageAIEmbeddingFunction",
@@ -247,6 +261,9 @@ __all__ = [
     "AmazonBedrockEmbeddingFunction",
     "ChromaLangchainEmbeddingFunction",
     "TogetherAIEmbeddingFunction",
+    "HuggingFaceSparseEmbeddingFunction",
+    "FastembedSparseEmbeddingFunction",
+    "Bm25EmbeddingFunction",
     "register_embedding_function",
     "config_to_embedding_function",
     "known_embedding_functions",
