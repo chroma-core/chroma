@@ -8,7 +8,6 @@ path = "src/lib.rs"
 
 [dependencies]
 serde = { workspace = true }
-serde_bytes = { workspace = true }
 arrow = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
