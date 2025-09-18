@@ -75,10 +75,6 @@ where
         };
 
         let buffered_req_len = buffered_req.body().size_hint().lower();
-        tracing::event!(Level::ERROR,
-            name = "parsing_json",
-            bytes =? buffered_req_len
-        );
         match axum::Json::<T>::from_request(buffered_req, state)
             .instrument(tracing::debug_span!(
                 "parsing_json",
