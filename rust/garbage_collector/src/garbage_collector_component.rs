@@ -14,7 +14,7 @@ use chroma_error::ChromaError;
 use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_storage::Storage;
-use chroma_sysdb::{CollectionToGcInfo, SysDb, SysDbConfig};
+use chroma_sysdb::{CollectionToGcInfo, GetCollectionsToGcError, SysDb, SysDbConfig};
 use chroma_system::{
     wrap, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, System,
     TaskResult,
@@ -116,6 +116,37 @@ impl GarbageCollector {
 
     pub(crate) fn set_system(&mut self, system: chroma_system::System) {
         self.system = Some(system);
+    }
+
+    async fn garbage_collect_hard_delete_log(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Result<GarbageCollectorResponse, GarbageCollectCollectionError> {
+        let dispatcher = self
+            .dispatcher
+            .as_ref()
+            .ok_or(GarbageCollectCollectionError::Uninitialized)?;
+        let system = self
+            .system
+            .as_ref()
+            .ok_or(GarbageCollectCollectionError::Uninitialized)?;
+
+        let orchestrator =
+            crate::log_only_orchestrator::HardDeleteLogOnlyGarbageCollectorOrchestrator::new(
+                dispatcher.clone(),
+                self.storage.clone(),
+                self.logs.clone(),
+                collection_id,
+            );
+
+        let result = match orchestrator.run(system.clone()).await {
+            Ok(res) => res,
+            Err(e) => {
+                tracing::error!("Failed to run garbage collection orchestrator v2: {:?}", e);
+                return Err(GarbageCollectCollectionError::OrchestratorV2Error(e));
+            }
+        };
+        Ok(result)
     }
 
     async fn garbage_collect_collection(
@@ -433,6 +464,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                 }
             }
         }
+        let mut collections_to_hard_delete_log = vec![];
         for collection_id in manual {
             if collections_to_gc.iter().any(|c| c.id == collection_id) {
                 continue;
@@ -445,6 +477,9 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                         collection_id = collection_id.to_string()
                     );
                     collections_to_gc.push(collection_info);
+                }
+                Err(GetCollectionsToGcError::NoSuchCollection) => {
+                    collections_to_hard_delete_log.push(collection_id);
                 }
                 Err(err) => {
                     tracing::event!(
@@ -491,7 +526,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
 
         let mut sysdb = self.sysdb_client.clone();
 
-        let mut jobs_stream = futures::stream::iter(collections_to_gc)
+        let jobs_iter1 = collections_to_gc.into_iter()
             .map(|(cleanup_mode, collection)| {
                 tracing::info!(
                     "Processing collection: {} (tenant: {}, version_file_path: {})",
@@ -504,7 +539,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                 let instrumented_span = span!(parent: None, tracing::Level::INFO, "Garbage collection job", collection_id = ?collection.id, tenant_id = %collection.tenant, cleanup_mode = ?cleanup_mode);
                 Span::current().add_link(instrumented_span.context().span().span_context().clone());
 
-                self.garbage_collect_collection(
+                Box::pin(self.garbage_collect_collection(
                     version_absolute_cutoff_time,
                     collection_soft_delete_absolute_cutoff_time,
                     collection,
@@ -512,13 +547,20 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                     self.config
                         .enable_dangerous_option_to_ignore_min_versions_for_wal3,
                 )
-                .instrument(instrumented_span)
-            })
-            .buffer_unordered(100);
+                .instrument(instrumented_span)) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<GarbageCollectorResponse, GarbageCollectCollectionError>> + Send + '_>>
+            });
+        let jobs_iter2 = collections_to_hard_delete_log.into_iter().map(|collection_id| {
+                tracing::event!(Level::INFO, "hard delete log-only");
+                let instrumented_span = span!(parent: None, tracing::Level::INFO, "Garbage collection job (hard delete log)", collection_id =? collection_id);
+                Span::current().add_link(instrumented_span.context().span().span_context().clone());
+                Box::pin(self.garbage_collect_hard_delete_log(collection_id).instrument(instrumented_span)) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<GarbageCollectorResponse, GarbageCollectCollectionError>> + Send + '_>>
+        });
+        let mut jobs_stream1 = futures::stream::iter(jobs_iter1).buffer_unordered(100);
+        let mut jobs_stream2 = futures::stream::iter(jobs_iter2).buffer_unordered(100);
 
         let mut num_completed_jobs = 0;
         let mut num_failed_jobs = 0;
-        while let Some(job_result) = jobs_stream.next().await {
+        while let Some(job_result) = jobs_stream1.next().await {
             match job_result {
                 Ok(result) => {
                     {
@@ -526,6 +568,25 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                         manual_collections.remove(&result.collection_id);
                     }
                     tracing::info!("Garbage collection completed. Deleted {} files over {} versions for collection {}.", result.num_files_deleted, result.num_versions_deleted, result.collection_id);
+                    num_completed_jobs += 1;
+                }
+                Err(e) => {
+                    tracing::error!("Garbage collection failed: {:?}", e);
+                    num_failed_jobs += 1;
+                }
+            }
+        }
+        // NOTE(rescrv):  I'm not proud of this duplication, but I cannot coerce the
+        // futures::stream::iter above to take a chain of two different futures.  It just won't
+        // compile.
+        while let Some(job_result) = jobs_stream2.next().await {
+            match job_result {
+                Ok(result) => {
+                    {
+                        let mut manual_collections = self.manual_collections.lock();
+                        manual_collections.remove(&result.collection_id);
+                    }
+                    tracing::info!("Garbage collection hard delete completed. Deleted all log files collection {}.", result.collection_id);
                     num_completed_jobs += 1;
                 }
                 Err(e) => {
