@@ -17,6 +17,7 @@ from typing import (
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import TypedDict, Protocol, runtime_checkable
+from pydantic import BaseModel, field_validator
 import chromadb.errors as errors
 from chromadb.base_types import (
     Metadata,
@@ -55,16 +56,18 @@ __all__ = [
     "is_valid_sparse_vector",
     "validate_sparse_vector",
     # Index Configuration Types
-    "FtsIndex",
-    "HnswIndex",
-    "SpannIndex",
-    "VectorIndex",
-    "SparseVectorIndex",
-    "StringInvertedIndex",
-    "IntInvertedIndex",
-    "FloatInvertedIndex",
-    "BoolInvertedIndex",
+    "FtsIndexConfig",
+    "HnswIndexConfig",
+    "SpannIndexConfig",
+    "VectorIndexConfig",
+    "SparseVectorIndexConfig",
+    "StringInvertedIndexConfig",
+    "IntInvertedIndexConfig",
+    "FloatInvertedIndexConfig",
+    "BoolInvertedIndexConfig",
     "InvertedIndex",
+    "IndexConfig",
+    "IndexEntry",
     # Value Type Constants
     "STRING_VALUE_NAME",
     "INT_VALUE_NAME",
@@ -82,6 +85,8 @@ __all__ = [
     "InternalIntInvertedIndex",
     "InternalFloatInvertedIndex",
     "InternalBoolInvertedIndex",
+    # Schema Builder
+    "Schema",
 ]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
@@ -1299,65 +1304,91 @@ class SparseEmbeddingFunction(Protocol[D]):
 
 
 # Index Configuration Types for Collection Schema
-class FtsIndex(TypedDict):
+class FtsIndexConfig(BaseModel):
     """Configuration for Full-Text Search index. No parameters required."""
     pass
 
 
-class HnswIndex(TypedDict, total=False):
+class HnswIndexConfig(BaseModel):
     """Configuration for HNSW vector index."""
-    ef_construction: int
-    max_neighbors: int
-    ef_search: int
-    num_threads: int
-    batch_size: int
-    sync_threshold: int
-    resize_factor: float
+    ef_construction: Optional[int] = None
+    max_neighbors: Optional[int] = None
+    ef_search: Optional[int] = None
+    num_threads: Optional[int] = None
+    batch_size: Optional[int] = None
+    sync_threshold: Optional[int] = None
+    resize_factor: Optional[float] = None
 
 
-class SpannIndex(TypedDict, total=False):
+class SpannIndexConfig(BaseModel):
     """Configuration for SPANN vector index."""
-    search_nprobe: int
-    write_nprobe: int
-    ef_construction: int
-    ef_search: int
-    max_neighbors: int
-    reassign_neighbor_count: int
-    split_threshold: int
-    merge_threshold: int
+    search_nprobe: Optional[int] = None
+    write_nprobe: Optional[int] = None
+    ef_construction: Optional[int] = None
+    ef_search: Optional[int] = None
+    max_neighbors: Optional[int] = None
+    reassign_neighbor_count: Optional[int] = None
+    split_threshold: Optional[int] = None
+    merge_threshold: Optional[int] = None
 
 
-class VectorIndex(TypedDict, total=False):
+class VectorIndexConfig(BaseModel):
     """Configuration for vector index with space, embedding function, and algorithm config."""
-    space: Space
-    embedding_function: EmbeddingFunction  # type: ignore
-    source_key: str  # key to source the vector from
-    hnsw: HnswIndex
-    spann: SpannIndex
+    model_config = {"arbitrary_types_allowed": True}
+    space: Optional[Space] = None
+    embedding_function: Optional[Any] = None
+    source_key: Optional[str] = None  # key to source the vector from
+    hnsw: Optional[HnswIndexConfig] = None
+    spann: Optional[SpannIndexConfig] = None
+
+    @field_validator('embedding_function', mode='before')
+    @classmethod
+    def validate_embedding_function_field(cls, v: Any) -> Any:
+        # Use the existing validate_embedding_function for proper validation
+        if v is None:
+            return v
+        if callable(v):
+            # Use the existing validation function
+            validate_embedding_function(v)
+            return v
+        raise ValueError('embedding_function must be callable or None')
 
 
-class SparseVectorIndex(TypedDict, total=False):
+class SparseVectorIndexConfig(BaseModel):
     """Configuration for sparse vector index."""
-    embedding_function: EmbeddingFunction  # type: ignore
-    source_key: Optional[str]  # key to source the sparse vector from
+    model_config = {"arbitrary_types_allowed": True}
+    embedding_function: Optional[Any] = None
+    source_key: Optional[str] = None  # key to source the sparse vector from
+
+    @field_validator('embedding_function', mode='before')
+    @classmethod
+    def validate_embedding_function_field(cls, v: Any) -> Any:
+        # Use the existing validate_embedding_function for proper validation
+        if v is None:
+            return v
+        if callable(v):
+            # Use the existing validation function
+            validate_embedding_function(v)
+            return v
+        raise ValueError('embedding_function must be callable or None')
 
 
-class StringInvertedIndex(TypedDict):
+class StringInvertedIndexConfig(BaseModel):
     """Configuration for string inverted index."""
     pass
 
 
-class IntInvertedIndex(TypedDict):
+class IntInvertedIndexConfig(BaseModel):
     """Configuration for integer inverted index."""
     pass
 
 
-class FloatInvertedIndex(TypedDict):
+class FloatInvertedIndexConfig(BaseModel):
     """Configuration for float inverted index."""
     pass
 
 
-class BoolInvertedIndex(TypedDict):
+class BoolInvertedIndexConfig(BaseModel):
     """Configuration for boolean inverted index."""
     pass
 
@@ -1377,7 +1408,7 @@ class InternalFtsIndex:
     NAME: Final[ClassVar[str]] = "$fts_index"
     VALUE_TYPE_NAME: Final[ClassVar[str]] = STRING_VALUE_NAME
 
-    def __init__(self, config: FtsIndex, enabled: bool = True):
+    def __init__(self, config: FtsIndexConfig, enabled: bool = True):
         self.config = config
         self.enabled = enabled
 
@@ -1387,7 +1418,7 @@ class InternalHnswIndex:
     NAME: Final[ClassVar[str]] = "$hnsw_index"
     VALUE_TYPE_NAME: Final[ClassVar[str]] = FLOAT_LIST_VALUE_NAME
 
-    def __init__(self, config: HnswIndex, enabled: bool = True):
+    def __init__(self, config: HnswIndexConfig, enabled: bool = True):
         self.config = config
         self.enabled = enabled
 
@@ -1397,7 +1428,7 @@ class InternalSpannIndex:
     NAME: Final[ClassVar[str]] = "$spann_index"
     VALUE_TYPE_NAME: Final[ClassVar[str]] = FLOAT_LIST_VALUE_NAME
 
-    def __init__(self, config: SpannIndex, enabled: bool = True):
+    def __init__(self, config: SpannIndexConfig, enabled: bool = True):
         self.config = config
         self.enabled = enabled
 
@@ -1407,7 +1438,7 @@ class InternalVectorIndex:
     NAME: Final[ClassVar[str]] = "$vector_index"
     VALUE_TYPE_NAME: Final[ClassVar[str]] = FLOAT_LIST_VALUE_NAME
 
-    def __init__(self, config: VectorIndex, enabled: bool = True):
+    def __init__(self, config: VectorIndexConfig, enabled: bool = True):
         self.config = config
         self.enabled = enabled
 
@@ -1417,7 +1448,7 @@ class InternalSparseVectorIndex:
     NAME: Final[ClassVar[str]] = "$sparse_vector_index"
     VALUE_TYPE_NAME: Final[ClassVar[str]] = SPARSE_VECTOR_VALUE_NAME
 
-    def __init__(self, config: SparseVectorIndex, enabled: bool = True):
+    def __init__(self, config: SparseVectorIndexConfig, enabled: bool = True):
         self.config = config
         self.enabled = enabled
 
@@ -1427,7 +1458,7 @@ class InternalStringInvertedIndex:
     NAME: Final[ClassVar[str]] = "$string_inverted_index"
     VALUE_TYPE_NAME: Final[ClassVar[str]] = STRING_VALUE_NAME
 
-    def __init__(self, config: StringInvertedIndex, enabled: bool = True):
+    def __init__(self, config: StringInvertedIndexConfig, enabled: bool = True):
         self.config = config
         self.enabled = enabled
 
@@ -1437,7 +1468,7 @@ class InternalIntInvertedIndex:
     NAME: Final[ClassVar[str]] = "$int_inverted_index"
     VALUE_TYPE_NAME: Final[ClassVar[str]] = INT_VALUE_NAME
 
-    def __init__(self, config: IntInvertedIndex, enabled: bool = True):
+    def __init__(self, config: IntInvertedIndexConfig, enabled: bool = True):
         self.config = config
         self.enabled = enabled
 
@@ -1447,7 +1478,7 @@ class InternalFloatInvertedIndex:
     NAME: Final[ClassVar[str]] = "$float_inverted_index"
     VALUE_TYPE_NAME: Final[ClassVar[str]] = FLOAT_VALUE_NAME
 
-    def __init__(self, config: FloatInvertedIndex, enabled: bool = True):
+    def __init__(self, config: FloatInvertedIndexConfig, enabled: bool = True):
         self.config = config
         self.enabled = enabled
 
@@ -1457,15 +1488,133 @@ class InternalBoolInvertedIndex:
     NAME: Final[ClassVar[str]] = "$bool_inverted_index"
     VALUE_TYPE_NAME: Final[ClassVar[str]] = BOOL_VALUE_NAME
 
-    def __init__(self, config: BoolInvertedIndex, enabled: bool = True):
+    def __init__(self, config: BoolInvertedIndexConfig, enabled: bool = True):
         self.config = config
         self.enabled = enabled
 
 
 # Union type for all inverted index configurations
 InvertedIndex = Union[
-    StringInvertedIndex,
-    IntInvertedIndex,
-    FloatInvertedIndex,
-    BoolInvertedIndex,
+    StringInvertedIndexConfig,
+    IntInvertedIndexConfig,
+    FloatInvertedIndexConfig,
+    BoolInvertedIndexConfig,
 ]
+
+# Union type for all index configurations
+IndexConfig = Union[
+    FtsIndexConfig,
+    VectorIndexConfig,
+    SparseVectorIndexConfig,
+    StringInvertedIndexConfig,
+    IntInvertedIndexConfig,
+    FloatInvertedIndexConfig,
+    BoolInvertedIndexConfig,
+]
+
+
+# Type for index entry in schema
+class IndexEntry(BaseModel):
+    config: IndexConfig
+    enabled: bool
+
+
+def _get_class_name(config: IndexConfig) -> str:
+    """Get the class name for a config."""
+    # Pydantic models retain their class information at runtime
+    return config.__class__.__name__
+
+
+# Mapping of index config class names to their constructors
+_CONFIG_CLASSES = {
+    'FtsIndexConfig': FtsIndexConfig,
+    'VectorIndexConfig': VectorIndexConfig,
+    'SparseVectorIndexConfig': SparseVectorIndexConfig,
+    'StringInvertedIndexConfig': StringInvertedIndexConfig,
+    'IntInvertedIndexConfig': IntInvertedIndexConfig,
+    'FloatInvertedIndexConfig': FloatInvertedIndexConfig,
+    'BoolInvertedIndexConfig': BoolInvertedIndexConfig,
+}
+
+
+# Schema builder and final schema classes
+class Schema:
+    """Schema builder for collection index configurations."""
+
+    def __init__(self) -> None:
+        # Dict structure: {key: {index_type_name: IndexEntry}}
+        self._index_configs: Dict[str, Dict[str, IndexEntry]] = {}
+        self._global_configs: Dict[str, IndexEntry] = {}
+
+    def create_index(self, config: Optional[IndexConfig] = None, key: Optional[str] = None) -> "Schema":
+        """Create an index configuration."""
+        # Disallow config=None and key=None - too dangerous
+        if config is None and key is None:
+            raise ValueError("Cannot enable all index types globally. Must specify either config or key.")
+
+        # Case 1: config is not None and key is None - enable specific index type globally
+        if config is not None and key is None:
+            # For TypedDict configs, we need to determine the type by checking the structure
+            index_type_name = _get_class_name(config)
+            self._global_configs[index_type_name] = IndexEntry(config=config, enabled=True)
+
+        # Case 2: config is None and key is not None - enable all index types for that key
+        elif config is None and key is not None:
+            if key not in self._index_configs:
+                self._index_configs[key] = {}
+            for index_type_name in _CONFIG_CLASSES.keys():
+                default_config = self._create_default_config(index_type_name)
+                if default_config is not None:
+                    # Use the class name for the key
+                    actual_type_name = _get_class_name(default_config)
+                    self._index_configs[key][actual_type_name] = IndexEntry(config=default_config, enabled=True)
+
+        # Case 3: config is not None and key is not None - enable specific index type for that key
+        elif config is not None and key is not None:
+            index_type_name = _get_class_name(config)
+            if key not in self._index_configs:
+                self._index_configs[key] = {}
+            self._index_configs[key][index_type_name] = IndexEntry(config=config, enabled=True)
+
+        return self
+
+    def delete_index(self, config: Optional[IndexConfig] = None, key: Optional[str] = None) -> "Schema":
+        """Disable an index configuration (set enabled=False)."""
+        # Case 1: Both config and key are None - fail the request
+        if config is None and key is None:
+            raise ValueError("Cannot disable all indexes. Must specify either config or key.")
+
+        # Case 2: key is not None and config is None - disable all possible index types for that key
+        if key is not None and config is None:
+            if key not in self._index_configs:
+                self._index_configs[key] = {}
+
+            # Disable all possible index types for this key
+            for index_type_name in _CONFIG_CLASSES.keys():
+                # Create a default config for this index type
+                default_config = self._create_default_config(index_type_name)
+                if default_config is not None:
+                    # Use the class name for the key
+                    actual_type_name = _get_class_name(default_config)
+                    self._index_configs[key][actual_type_name] = IndexEntry(config=default_config, enabled=False)
+
+        # Case 3: key is not None and config is not None - disable specific index for that key
+        elif key is not None and config is not None:
+            index_type_name = _get_class_name(config)
+            if key not in self._index_configs:
+                self._index_configs[key] = {}
+            self._index_configs[key][index_type_name] = IndexEntry(config=config, enabled=False)
+
+        # Case 4: key is None and config is not None - disable specific index globally
+        elif key is None and config is not None:
+            index_type_name = _get_class_name(config)
+            self._global_configs[index_type_name] = IndexEntry(config=config, enabled=False)
+
+        return self
+
+    def _create_default_config(self, index_type_name: str) -> Optional[IndexConfig]:
+        """Create a default config for the given index type name."""
+        config_class = _CONFIG_CLASSES.get(index_type_name)
+        if config_class:
+            return config_class()  # type: ignore
+        return None
