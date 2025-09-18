@@ -68,8 +68,8 @@ impl<'de> Deserialize<'de> for RecordBatchWrapper {
     where
         D: serde::Deserializer<'de>,
     {
-        let data: &'de [u8] = serde_bytes::deserialize(deserializer)?;
-        let rb = Block::load_record_batch(data, false).map_err(D::Error::custom)?;
+        let data = Vec::<u8>::deserialize(deserializer)?;
+        let rb = Block::load_record_batch(&data, false).map_err(D::Error::custom)?;
         Ok(RecordBatchWrapper(rb))
     }
 }
