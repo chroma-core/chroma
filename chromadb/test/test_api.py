@@ -2528,3 +2528,550 @@ def test_rrf_to_dict() -> None:
         rrf_zero_weights.to_dict()
 
     print("All RRF tests passed!")
+
+
+# Expression API Tests - Testing dict support and from_dict methods
+class TestSearchDictSupport:
+    """Test Search class dict input support."""
+
+    def test_search_with_dict_where(self):
+        """Test Search accepts dict for where parameter."""
+        from chromadb.execution.expression.plan import Search
+        from chromadb.execution.expression.operator import Where
+
+        # Simple equality
+        search = Search(where={"status": "active"})
+        assert search._where is not None
+        assert isinstance(search._where, Where)
+
+        # Complex where with operators
+        search = Search(where={"$and": [{"status": "active"}, {"score": {"$gt": 0.5}}]})
+        assert search._where is not None
+
+    def test_search_with_dict_rank(self):
+        """Test Search accepts dict for rank parameter."""
+        from chromadb.execution.expression.plan import Search
+        from chromadb.execution.expression.operator import Rank
+
+        # KNN ranking
+        search = Search(rank={"$knn": {"query": [0.1, 0.2]}})
+        assert search._rank is not None
+        assert isinstance(search._rank, Rank)
+
+        # Val ranking
+        search = Search(rank={"$val": 0.5})
+        assert search._rank is not None
+
+    def test_search_with_dict_limit(self):
+        """Test Search accepts dict and int for limit parameter."""
+        from chromadb.execution.expression.plan import Search
+
+        # Dict limit
+        search = Search(limit={"limit": 10, "offset": 5})
+        assert search._limit.limit == 10
+        assert search._limit.offset == 5
+
+        # Int limit (creates Limit with offset=0)
+        search = Search(limit=10)
+        assert search._limit.limit == 10
+        assert search._limit.offset == 0
+
+    def test_search_with_dict_select(self):
+        """Test Search accepts dict, list, and set for select parameter."""
+        from chromadb.execution.expression.plan import Search
+
+        # Dict select
+        search = Search(select={"keys": ["#document", "#score"]})
+        assert search._select is not None
+
+        # List select
+        search = Search(select=["#document", "#metadata"])
+        assert search._select is not None
+
+        # Set select
+        search = Search(select={"#document", "#embedding"})
+        assert search._select is not None
+
+    def test_search_mixed_inputs(self):
+        """Test Search with mixed expression and dict inputs."""
+        from chromadb.execution.expression.plan import Search
+        from chromadb.execution.expression.operator import Key
+
+        search = Search(
+            where=Key("status") == "active",  # Expression
+            rank={"$knn": {"query": [0.1, 0.2]}},  # Dict
+            limit=10,  # Int
+            select=["#document"],  # List
+        )
+        assert search._where is not None
+        assert search._rank is not None
+        assert search._limit.limit == 10
+        assert search._select is not None
+
+    def test_search_builder_methods_with_dicts(self):
+        """Test Search builder methods accept dicts."""
+        from chromadb.execution.expression.plan import Search
+
+        search = Search().where({"status": "active"}).rank({"$val": 0.5})
+        assert search._where is not None
+        assert search._rank is not None
+
+    def test_search_invalid_inputs(self):
+        """Test Search rejects invalid input types."""
+        import pytest
+        from chromadb.execution.expression.plan import Search
+
+        with pytest.raises(TypeError, match="where must be"):
+            Search(where="invalid")
+
+        with pytest.raises(TypeError, match="rank must be"):
+            Search(rank=0.5)  # Primitive numbers not allowed
+
+        with pytest.raises(TypeError, match="limit must be"):
+            Search(limit="10")
+
+        with pytest.raises(TypeError, match="select must be"):
+            Search(select=123)
+
+
+class TestWhereFromDict:
+    """Test Where.from_dict() conversion."""
+
+    def test_simple_equality(self):
+        """Test simple equality conversion."""
+        from chromadb.execution.expression.operator import Where, Eq
+
+        # Shorthand for equality
+        where = Where.from_dict({"status": "active"})
+        assert isinstance(where, Eq)
+
+        # Explicit $eq
+        where = Where.from_dict({"status": {"$eq": "active"}})
+        assert isinstance(where, Eq)
+
+    def test_comparison_operators(self):
+        """Test comparison operator conversions."""
+        from chromadb.execution.expression.operator import Where, Ne, Gt, Gte, Lt, Lte
+
+        # $ne
+        where = Where.from_dict({"status": {"$ne": "inactive"}})
+        assert isinstance(where, Ne)
+
+        # $gt
+        where = Where.from_dict({"score": {"$gt": 0.5}})
+        assert isinstance(where, Gt)
+
+        # $gte
+        where = Where.from_dict({"score": {"$gte": 0.5}})
+        assert isinstance(where, Gte)
+
+        # $lt
+        where = Where.from_dict({"score": {"$lt": 1.0}})
+        assert isinstance(where, Lt)
+
+        # $lte
+        where = Where.from_dict({"score": {"$lte": 1.0}})
+        assert isinstance(where, Lte)
+
+    def test_membership_operators(self):
+        """Test membership operator conversions."""
+        from chromadb.execution.expression.operator import Where, In, Nin
+
+        # $in
+        where = Where.from_dict({"status": {"$in": ["active", "pending"]}})
+        assert isinstance(where, In)
+
+        # $nin (not in)
+        where = Where.from_dict({"status": {"$nin": ["deleted", "archived"]}})
+        assert isinstance(where, Nin)
+
+    def test_string_operators(self):
+        """Test string operator conversions."""
+        from chromadb.execution.expression.operator import (
+            Where,
+            Contains,
+            NotContains,
+            Regex,
+            NotRegex,
+        )
+
+        # $contains
+        where = Where.from_dict({"text": {"$contains": "hello"}})
+        assert isinstance(where, Contains)
+
+        # $not_contains
+        where = Where.from_dict({"text": {"$not_contains": "spam"}})
+        assert isinstance(where, NotContains)
+
+        # $regex
+        where = Where.from_dict({"text": {"$regex": "^test.*"}})
+        assert isinstance(where, Regex)
+
+        # $not_regex
+        where = Where.from_dict({"text": {"$not_regex": r"\d+"}})
+        assert isinstance(where, NotRegex)
+
+    def test_logical_operators(self):
+        """Test logical operator conversions."""
+        from chromadb.execution.expression.operator import Where, And, Or
+
+        # $and
+        where = Where.from_dict(
+            {"$and": [{"status": "active"}, {"score": {"$gt": 0.5}}]}
+        )
+        assert isinstance(where, And)
+
+        # $or
+        where = Where.from_dict({"$or": [{"status": "active"}, {"status": "pending"}]})
+        assert isinstance(where, Or)
+
+    def test_nested_logical_operators(self):
+        """Test nested logical operations."""
+        from chromadb.execution.expression.operator import Where, And
+
+        where = Where.from_dict(
+            {
+                "$and": [
+                    {"$or": [{"status": "active"}, {"status": "pending"}]},
+                    {"score": {"$gte": 0.5}},
+                ]
+            }
+        )
+        assert isinstance(where, And)
+
+    def test_special_keys(self):
+        """Test special key handling."""
+        from chromadb.execution.expression.operator import Where, In
+
+        # ID key
+        where = Where.from_dict({"#id": {"$in": ["id1", "id2"]}})
+        assert isinstance(where, In)
+
+    def test_invalid_where_dicts(self):
+        """Test invalid Where dict inputs."""
+        import pytest
+        from chromadb.execution.expression.operator import Where
+
+        with pytest.raises(TypeError, match="Expected dict"):
+            Where.from_dict("not a dict")
+
+        with pytest.raises(ValueError, match="cannot be empty"):
+            Where.from_dict({})
+
+        with pytest.raises(ValueError, match="requires at least one condition"):
+            Where.from_dict({"$and": []})
+
+
+class TestRankFromDict:
+    """Test Rank.from_dict() conversion."""
+
+    def test_val_conversion(self):
+        """Test Val conversion."""
+        from chromadb.execution.expression.operator import Rank, Val
+
+        rank = Rank.from_dict({"$val": 0.5})
+        assert isinstance(rank, Val)
+        assert rank.value == 0.5
+
+    def test_knn_conversion(self):
+        """Test KNN conversion."""
+        from chromadb.execution.expression.operator import Rank, Knn
+
+        # Basic KNN with defaults
+        rank = Rank.from_dict({"$knn": {"query": [0.1, 0.2]}})
+        assert isinstance(rank, Knn)
+        assert rank.query == [0.1, 0.2]
+        assert rank.key == "#embedding"  # default
+        assert rank.limit == 128  # default
+
+        # KNN with custom parameters
+        rank = Rank.from_dict(
+            {
+                "$knn": {
+                    "query": [0.1, 0.2],
+                    "key": "#sparse",
+                    "limit": 256,
+                    "return_rank": True,
+                }
+            }
+        )
+        assert rank.key == "#sparse"
+        assert rank.limit == 256
+        assert rank.return_rank == True
+
+    def test_arithmetic_operators(self):
+        """Test arithmetic operator conversions."""
+        from chromadb.execution.expression.operator import Rank, Sum, Sub, Mul, Div
+
+        # $sum
+        rank = Rank.from_dict({"$sum": [{"$val": 0.5}, {"$val": 0.3}]})
+        assert isinstance(rank, Sum)
+
+        # $sub
+        rank = Rank.from_dict({"$sub": {"left": {"$val": 1.0}, "right": {"$val": 0.3}}})
+        assert isinstance(rank, Sub)
+
+        # $mul
+        rank = Rank.from_dict({"$mul": [{"$val": 2.0}, {"$val": 0.5}]})
+        assert isinstance(rank, Mul)
+
+        # $div
+        rank = Rank.from_dict({"$div": {"left": {"$val": 1.0}, "right": {"$val": 2.0}}})
+        assert isinstance(rank, Div)
+
+    def test_math_functions(self):
+        """Test math function conversions."""
+        from chromadb.execution.expression.operator import Rank, Abs, Exp, Log
+
+        # $abs
+        rank = Rank.from_dict({"$abs": {"$val": -0.5}})
+        assert isinstance(rank, Abs)
+
+        # $exp
+        rank = Rank.from_dict({"$exp": {"$val": 1.0}})
+        assert isinstance(rank, Exp)
+
+        # $log
+        rank = Rank.from_dict({"$log": {"$val": 2.0}})
+        assert isinstance(rank, Log)
+
+    def test_aggregation_functions(self):
+        """Test min/max conversions."""
+        from chromadb.execution.expression.operator import Rank, Max, Min
+
+        # $max
+        rank = Rank.from_dict({"$max": [{"$val": 0.5}, {"$val": 0.8}]})
+        assert isinstance(rank, Max)
+
+        # $min
+        rank = Rank.from_dict({"$min": [{"$val": 0.5}, {"$val": 0.8}]})
+        assert isinstance(rank, Min)
+
+    def test_complex_rank_expression(self):
+        """Test complex nested rank expressions."""
+        from chromadb.execution.expression.operator import Rank, Sum
+
+        rank = Rank.from_dict(
+            {
+                "$sum": [
+                    {"$mul": [{"$knn": {"query": [0.1, 0.2]}}, {"$val": 0.8}]},
+                    {"$mul": [{"$val": 0.5}, {"$val": 0.2}]},
+                ]
+            }
+        )
+        assert isinstance(rank, Sum)
+
+    def test_invalid_rank_dicts(self):
+        """Test invalid Rank dict inputs."""
+        import pytest
+        from chromadb.execution.expression.operator import Rank
+
+        with pytest.raises(TypeError, match="Expected dict"):
+            Rank.from_dict("not a dict")
+
+        with pytest.raises(ValueError, match="cannot be empty"):
+            Rank.from_dict({})
+
+        with pytest.raises(ValueError, match="exactly one operator"):
+            Rank.from_dict({"$val": 0.5, "$knn": {"query": [0.1]}})
+
+        with pytest.raises(TypeError, match="requires a number"):
+            Rank.from_dict({"$val": "not a number"})
+
+
+class TestLimitFromDict:
+    """Test Limit.from_dict() conversion."""
+
+    def test_limit_only(self):
+        """Test limit without offset."""
+        from chromadb.execution.expression.operator import Limit
+
+        limit = Limit.from_dict({"limit": 20})
+        assert limit.limit == 20
+        assert limit.offset == 0  # default
+
+    def test_offset_only(self):
+        """Test offset without limit."""
+        from chromadb.execution.expression.operator import Limit
+
+        limit = Limit.from_dict({"offset": 10})
+        assert limit.offset == 10
+        assert limit.limit is None
+
+    def test_limit_and_offset(self):
+        """Test both limit and offset."""
+        from chromadb.execution.expression.operator import Limit
+
+        limit = Limit.from_dict({"limit": 20, "offset": 10})
+        assert limit.limit == 20
+        assert limit.offset == 10
+
+    def test_validation(self):
+        """Test Limit validation."""
+        import pytest
+        from chromadb.execution.expression.operator import Limit
+
+        # Negative limit
+        with pytest.raises(ValueError, match="must be positive"):
+            Limit.from_dict({"limit": -1})
+
+        # Zero limit
+        with pytest.raises(ValueError, match="must be positive"):
+            Limit.from_dict({"limit": 0})
+
+        # Negative offset
+        with pytest.raises(ValueError, match="must be non-negative"):
+            Limit.from_dict({"offset": -1})
+
+    def test_invalid_types(self):
+        """Test type validation."""
+        import pytest
+        from chromadb.execution.expression.operator import Limit
+
+        with pytest.raises(TypeError, match="Expected dict"):
+            Limit.from_dict("not a dict")
+
+        with pytest.raises(TypeError, match="must be an integer"):
+            Limit.from_dict({"limit": "20"})
+
+        with pytest.raises(TypeError, match="must be an integer"):
+            Limit.from_dict({"offset": 10.5})
+
+    def test_unexpected_keys(self):
+        """Test rejection of unexpected keys."""
+        import pytest
+        from chromadb.execution.expression.operator import Limit
+
+        with pytest.raises(ValueError, match="Unexpected keys"):
+            Limit.from_dict({"limit": 10, "invalid": "key"})
+
+
+class TestSelectFromDict:
+    """Test Select.from_dict() conversion."""
+
+    def test_special_keys(self):
+        """Test special key conversion."""
+        from chromadb.execution.expression.operator import Select, Key
+
+        select = Select.from_dict(
+            {"keys": ["#id", "#document", "#embedding", "#metadata", "#score"]}
+        )
+        assert Key.ID in select.keys
+        assert Key.DOCUMENT in select.keys
+        assert Key.EMBEDDING in select.keys
+        assert Key.METADATA in select.keys
+        assert Key.SCORE in select.keys
+
+    def test_metadata_keys(self):
+        """Test regular metadata field keys."""
+        from chromadb.execution.expression.operator import Select, Key
+
+        select = Select.from_dict({"keys": ["title", "author", "date"]})
+        assert Key("title") in select.keys
+        assert Key("author") in select.keys
+        assert Key("date") in select.keys
+
+    def test_mixed_keys(self):
+        """Test mix of special and metadata keys."""
+        from chromadb.execution.expression.operator import Select, Key
+
+        select = Select.from_dict({"keys": ["#document", "title", "#score"]})
+        assert Key.DOCUMENT in select.keys
+        assert Key("title") in select.keys
+        assert Key.SCORE in select.keys
+
+    def test_empty_keys(self):
+        """Test empty keys list."""
+        from chromadb.execution.expression.operator import Select
+
+        select = Select.from_dict({"keys": []})
+        assert len(select.keys) == 0
+
+    def test_validation(self):
+        """Test Select validation."""
+        import pytest
+        from chromadb.execution.expression.operator import Select
+
+        with pytest.raises(TypeError, match="Expected dict"):
+            Select.from_dict("not a dict")
+
+        with pytest.raises(TypeError, match="must be a list/tuple/set"):
+            Select.from_dict({"keys": "not a list"})
+
+        with pytest.raises(TypeError, match="must be a string"):
+            Select.from_dict({"keys": [123]})
+
+    def test_unexpected_keys(self):
+        """Test rejection of unexpected keys."""
+        import pytest
+        from chromadb.execution.expression.operator import Select
+
+        with pytest.raises(ValueError, match="Unexpected keys"):
+            Select.from_dict({"keys": [], "invalid": "key"})
+
+
+class TestRoundTripConversion:
+    """Test that to_dict() and from_dict() round-trip correctly."""
+
+    def test_where_round_trip(self):
+        """Test Where round-trip conversion."""
+        from chromadb.execution.expression.operator import Where, And, Key
+
+        original = And([Key("status") == "active", Key("score") > 0.5])
+        dict_form = original.to_dict()
+        restored = Where.from_dict(dict_form)
+        assert restored.to_dict() == dict_form
+
+    def test_rank_round_trip(self):
+        """Test Rank round-trip conversion."""
+        from chromadb.execution.expression.operator import Rank, Knn, Val
+
+        original = Knn(query=[0.1, 0.2]) * 0.8 + Val(0.5) * 0.2
+        dict_form = original.to_dict()
+        restored = Rank.from_dict(dict_form)
+        assert restored.to_dict() == dict_form
+
+    def test_limit_round_trip(self):
+        """Test Limit round-trip conversion."""
+        from chromadb.execution.expression.operator import Limit
+
+        original = Limit(limit=20, offset=10)
+        dict_form = original.to_dict()
+        restored = Limit.from_dict(dict_form)
+        assert restored.to_dict() == dict_form
+
+    def test_select_round_trip(self):
+        """Test Select round-trip conversion."""
+        from chromadb.execution.expression.operator import Select, Key
+
+        original = Select(keys={Key.DOCUMENT, Key("title"), Key.SCORE})
+        dict_form = original.to_dict()
+        restored = Select.from_dict(dict_form)
+        # Note: Set order might differ, so compare sets
+        assert set(restored.to_dict()["keys"]) == set(dict_form["keys"])
+
+    def test_search_round_trip(self):
+        """Test Search round-trip through dict inputs."""
+        from chromadb.execution.expression.plan import Search
+        from chromadb.execution.expression.operator import Key, Knn, Limit, Select
+
+        original_search = Search(
+            where=Key("status") == "active",
+            rank=Knn(query=[0.1, 0.2]),
+            limit=Limit(limit=10),
+            select=Select(keys={Key.DOCUMENT}),
+        )
+
+        # Convert to dict
+        search_dict = original_search.to_dict()
+
+        # Create new Search from dicts
+        new_search = Search(
+            where=search_dict["filter"] if search_dict["filter"] else None,
+            rank=search_dict["rank"] if search_dict["rank"] else None,
+            limit=search_dict["limit"],
+            select=search_dict["select"],
+        )
+
+        # Should produce same dict output
+        assert new_search.to_dict() == search_dict
