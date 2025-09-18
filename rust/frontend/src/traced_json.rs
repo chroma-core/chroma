@@ -1,9 +1,9 @@
-use axum::body::Body;
+use axum::body::{Body, HttpBody};
 use axum::extract::{rejection::JsonRejection, FromRequest, Request};
 use axum::response::IntoResponse;
 use axum::{BoxError, RequestExt};
 use http_body_util::BodyExt;
-use tracing::Instrument;
+use tracing::{Instrument, Level};
 
 /// TracedJson is a thin wrapper around axum::Json that allows us to trace the request body buffering
 /// as well as the JSON parsing.
@@ -74,8 +74,16 @@ where
             }
         };
 
+        let buffered_req_len = buffered_req.body().size_hint().lower();
+        tracing::event!(Level::ERROR,
+            name = "parsing_json",
+            bytes =? buffered_req_len
+        );
         match axum::Json::<T>::from_request(buffered_req, state)
-            .instrument(tracing::debug_span!("parsing_json"))
+            .instrument(tracing::debug_span!(
+                "parsing_json",
+                bytes =? buffered_req_len
+            ))
             .await
         {
             Ok(value) => Ok(Self(value.0)),
