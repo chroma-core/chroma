@@ -6,7 +6,6 @@ from chromadb.execution.expression.operator import (
     # Field proxy for building Where conditions
     Key,
     K,
-    
     # Where expressions
     Where,
     And,
@@ -23,11 +22,9 @@ from chromadb.execution.expression.operator import (
     NotRegex,
     Contains,
     NotContains,
-    
     # Search configuration
     Limit,
     Select,
-    
     # Rank expressions
     Rank,
     Abs,
@@ -38,6 +35,7 @@ from chromadb.execution.expression.operator import (
     Min,
     Mul,
     Knn,
+    Rrf,
     Sub,
     Sum,
     Val,
@@ -50,11 +48,9 @@ from chromadb.execution.expression.plan import (
 __all__ = [
     # Main search class
     "Search",
-    
     # Field proxy
     "Key",
     "K",
-    
     # Where expressions
     "Where",
     "And",
@@ -71,11 +67,9 @@ __all__ = [
     "NotRegex",
     "Contains",
     "NotContains",
-    
     # Search configuration
     "Limit",
     "Select",
-    
     # Rank expressions
     "Rank",
     "Abs",
@@ -86,6 +80,7 @@ __all__ = [
     "Min",
     "Mul",
     "Knn",
+    "Rrf",
     "Sub",
     "Sum",
     "Val",

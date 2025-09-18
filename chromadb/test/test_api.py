@@ -2209,3 +2209,187 @@ def test_search_result_rows() -> None:
     assert rows[0][0]["id"] == "test"
 
     print("All SearchResult.rows() tests passed!")
+
+
+def test_rrf_to_dict() -> None:
+    """Test the Rrf (Reciprocal Rank Fusion) to_dict conversion."""
+    import pytest
+    from chromadb.execution.expression.operator import Rrf, Knn, Val
+
+    # Test 1: Basic RRF with two KNN rankings (equal weight)
+    rrf = Rrf(
+        [
+            Knn(query=[0.1, 0.2], return_rank=True),
+            Knn(query=[0.3, 0.4], key="#sparse", return_rank=True),
+        ]
+    )
+
+    result = rrf.to_dict()
+
+    # RRF formula: -sum(weight_i / (k + rank_i))
+    # With default k=60 and equal weights (1.0 each)
+    # Expected: -(1.0/(60 + knn1) + 1.0/(60 + knn2))
+    expected = {
+        "$mul": [
+            {"$val": -1},
+            {
+                "$sum": [
+                    {
+                        "$div": {
+                            "left": {"$val": 1.0},
+                            "right": {
+                                "$sum": [
+                                    {"$val": 60},
+                                    {
+                                        "$knn": {
+                                            "query": [0.1, 0.2],
+                                            "key": "#embedding",
+                                            "limit": 128,
+                                            "return_rank": True,
+                                        }
+                                    },
+                                ]
+                            },
+                        }
+                    },
+                    {
+                        "$div": {
+                            "left": {"$val": 1.0},
+                            "right": {
+                                "$sum": [
+                                    {"$val": 60},
+                                    {
+                                        "$knn": {
+                                            "query": [0.3, 0.4],
+                                            "key": "#sparse",
+                                            "limit": 128,
+                                            "return_rank": True,
+                                        }
+                                    },
+                                ]
+                            },
+                        }
+                    },
+                ]
+            },
+        ]
+    }
+
+    assert result == expected
+
+    # Test 2: RRF with custom weights and k
+    rrf_weighted = Rrf(
+        ranks=[
+            Knn(query=[0.1, 0.2], return_rank=True),
+            Knn(query=[0.3, 0.4], key="#sparse", return_rank=True),
+        ],
+        weights=[2.0, 1.0],  # Dense is 2x more important
+        k=100,
+    )
+
+    result_weighted = rrf_weighted.to_dict()
+
+    # Expected: -(2.0/(100 + knn1) + 1.0/(100 + knn2))
+    expected_weighted = {
+        "$mul": [
+            {"$val": -1},
+            {
+                "$sum": [
+                    {
+                        "$div": {
+                            "left": {"$val": 2.0},
+                            "right": {
+                                "$sum": [
+                                    {"$val": 100},
+                                    {
+                                        "$knn": {
+                                            "query": [0.1, 0.2],
+                                            "key": "#embedding",
+                                            "limit": 128,
+                                            "return_rank": True,
+                                        }
+                                    },
+                                ]
+                            },
+                        }
+                    },
+                    {
+                        "$div": {
+                            "left": {"$val": 1.0},
+                            "right": {
+                                "$sum": [
+                                    {"$val": 100},
+                                    {
+                                        "$knn": {
+                                            "query": [0.3, 0.4],
+                                            "key": "#sparse",
+                                            "limit": 128,
+                                            "return_rank": True,
+                                        }
+                                    },
+                                ]
+                            },
+                        }
+                    },
+                ]
+            },
+        ]
+    }
+
+    assert result_weighted == expected_weighted
+
+    # Test 3: RRF with three rankings
+    rrf_three = Rrf(
+        [
+            Knn(query=[0.1, 0.2], return_rank=True),
+            Knn(query=[0.3, 0.4], key="#sparse", return_rank=True),
+            Val(5.0),  # Can also include constant rank
+        ]
+    )
+
+    result_three = rrf_three.to_dict()
+
+    # Verify it has three terms in the sum
+    assert "$mul" in result_three
+    assert "$sum" in result_three["$mul"][1]
+    terms = result_three["$mul"][1]["$sum"]
+    assert len(terms) == 3  # Three ranking strategies
+
+    # Test 4: Error case - mismatched weights
+    with pytest.raises(
+        ValueError, match="Number of weights .* must match number of ranks"
+    ):
+        rrf_bad = Rrf(
+            ranks=[
+                Knn(query=[0.1, 0.2], return_rank=True),
+                Knn(query=[0.3, 0.4], return_rank=True),
+            ],
+            weights=[1.0],  # Only one weight for two ranks
+        )
+        rrf_bad.to_dict()
+
+    # Test 5: Error case - negative weights
+    with pytest.raises(ValueError, match="All weights must be non-negative"):
+        rrf_negative = Rrf(
+            ranks=[
+                Knn(query=[0.1, 0.2], return_rank=True),
+                Knn(query=[0.3, 0.4], return_rank=True),
+            ],
+            weights=[1.0, -1.0],  # Negative weight
+        )
+        rrf_negative.to_dict()
+
+    # Test 6: Error case - empty ranks list
+    with pytest.raises(ValueError, match="RRF requires at least one rank"):
+        rrf_empty = Rrf([])
+        rrf_empty.to_dict()  # Validation happens in to_dict()
+
+    # Test 7: Error case - negative k value
+    with pytest.raises(ValueError, match="k must be positive"):
+        rrf_neg_k = Rrf([Val(1.0)], k=-5)
+        rrf_neg_k.to_dict()  # Validation happens in to_dict()
+
+    # Test 8: Error case - zero k value
+    with pytest.raises(ValueError, match="k must be positive"):
+        rrf_zero_k = Rrf([Val(1.0)], k=0)
+        rrf_zero_k.to_dict()  # Validation happens in to_dict()
