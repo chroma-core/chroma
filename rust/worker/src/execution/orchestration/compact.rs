@@ -206,6 +206,8 @@ pub enum CompactionError {
     SpannSegment(#[from] SpannSegmentWriterError),
     #[error("Error sourcing record segment: {0}")]
     SourceRecordSegment(#[from] SourceRecordSegmentError),
+    #[error("Could not count current segment: {0}")]
+    CountError(Box<dyn chroma_error::ChromaError>),
 }
 
 impl<E> From<TaskError<E>> for CompactionError
@@ -254,6 +256,7 @@ impl ChromaError for CompactionError {
                 Self::Result(_) => true,
                 Self::SpannSegment(e) => e.should_trace_error(),
                 Self::SourceRecordSegment(e) => e.should_trace_error(),
+                Self::CountError(e) => e.should_trace_error(),
             }
         }
     }
@@ -359,6 +362,17 @@ impl CompactOrchestrator {
                 .map(|reader| AtomicU32::new(reader.get_max_offset_id() + 1))
                 .unwrap_or_default(),
         );
+
+        if let Some(rr) = record_reader.as_ref() {
+            self.total_records_post_compaction = match rr.count().await {
+                Ok(count) => count as u64,
+                Err(err) => {
+                    return self
+                        .terminate_with_result(Err(CompactionError::CountError(err)), ctx)
+                        .await;
+                }
+            };
+        }
 
         self.num_uncompleted_materialization_tasks = partitions.len();
         for partition in partitions.iter() {
