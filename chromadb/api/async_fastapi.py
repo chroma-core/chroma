@@ -418,15 +418,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             json=payload,
         )
 
-        # Return the column-major format directly
-        return SearchResult(
-            ids=resp_json.get("ids", []),
-            documents=resp_json.get("documents", []),
-            embeddings=resp_json.get("embeddings", []),
-            metadatas=resp_json.get("metadatas", []),
-            scores=resp_json.get("scores", []),
-            select=resp_json.get("select", []),
-        )
+        return SearchResult(resp_json)
 
     @trace_method("AsyncFastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
