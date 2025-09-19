@@ -47,7 +47,6 @@ extend-ignore-re = [
   "\\$![a-z]+", # Bash special parameters like $!ba
 ]
 
-
 [type.python-test]
 extend-glob = ["**/test/**/*.py", "**/test_*.py", "**/*_test.py"]
 extend-ignore-re = [
