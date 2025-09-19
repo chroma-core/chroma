@@ -598,7 +598,7 @@ for maintaining a herd of wal3 instances in a single object store bucket.
 ## Serverless Behavior
 
 First off, wal3 is intended to run multiple wal3 instances in parallel and open at the same time.
-The over head per wal3 instance is single digit megabytes (manifest and a buffer of writes), meaning
+The overhead per wal3 instance is single digit megabytes (manifest and a buffer of writes), meaning
 that we can handle hundreds or thousands of concurrent logs per server. We cannot open every log
 for every customer on a single machine and have it fit memory. We will have to open and close logs.
 
