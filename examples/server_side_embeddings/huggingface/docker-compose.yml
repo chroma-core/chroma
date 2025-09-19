@@ -1,4 +1,4 @@
-version: '3.9'
+version: "3.9"
 
 networks:
   net:
@@ -32,7 +32,7 @@ services:
       - net
   embedding_server:
     image: ${EMBEDDING_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-0.3.0} #default image with CPU support
-    command: --model-id ${ST_MODEL:-BAAI/bge-small-en-v1.5} --revision ${ST_MODEL_REVISION:-main} #configure model and model revision paramters
+    command: --model-id ${ST_MODEL:-BAAI/bge-small-en-v1.5} --revision ${ST_MODEL_REVISION:-main} #configure model and model revision parameters
     ports:
       - 8001:80
     platform: linux/amd64 #right now the images are only available for linux

@@ -551,9 +551,9 @@ chroma install --list
 ```
 # Update
 
-The `chroma update` command wil inform you if you should update your CLI installation.
+The `chroma update` command will inform you if you should update your CLI installation.
 
-If you run the CLI via our Python or JavaScript packages, the `update` command will inform you if a new `chromadb` version is availble. When you update your `chromadb` package, you will also get the latest version of the CLI bundled with it.
+If you run the CLI via our Python or JavaScript packages, the `update` command will inform you if a new `chromadb` version is available. When you update your `chromadb` package, you will also get the latest version of the CLI bundled with it.
 # Vacuuming
 
 Vacuuming shrinks and optimizes your database.
@@ -1867,7 +1867,7 @@ Chroma raised an $18M seed round led by Astasia Myers from Quiet Capital. Joinin
 
 Chroma raised a pre-seed in May 2022, led by Anthony Goldbloom (Kaggle) from AIX Ventures, James Cham from Bloomberg Beta, and Nat Friedman and Daniel Gross (AI Grant).
 
-We're excited to work with a deep set of investors and enterpreneurs who have invested in and built some of the most successful open-source projects in the world.
+We're excited to work with a deep set of investors and entrepreneurs who have invested in and built some of the most successful open-source projects in the world.
 # Architecture
 
 Chroma is designed with a modular architecture that prioritizes performance and ease of use. It scales seamlessly from local development to large-scale production, while exposing a consistent API across all deployment modes.
@@ -2000,7 +2000,7 @@ CHORE: Maintenance and other tasks that do not modify source or test files
 
 ### CIPs
 
-Chroma Improvement Proposals or CIPs (pronounced "Chips") are the way to propose new features or large changes to Chroma. If you plan to make a large change to Chroma please submit a CIP first so that the core Chroma team as well as the community can discuss the proposed change and provide feedback. A CIP should provide a concise technical specification of the feature and a rationale for why it is needed. The CIP should be submitted as a pull request to the [CIPs folder](https://github.com/chroma-core/chroma/tree/main/docs/cip). The CIP will be reviewed by the Chroma team and if approved will be merged into the repository. To learn more about writing a CIP you can read the [guide](https://github.com/chroma-core/chroma/blob/main/docs/cip/CIP_Chroma_Improvment_Proposals.md). CIPs are not required for small changes such as bug fixes or documentation updates.
+Chroma Improvement Proposals or CIPs (pronounced "Chips") are the way to propose new features or large changes to Chroma. If you plan to make a large change to Chroma please submit a CIP first so that the core Chroma team as well as the community can discuss the proposed change and provide feedback. A CIP should provide a concise technical specification of the feature and a rationale for why it is needed. The CIP should be submitted as a pull request to the [CIPs folder](https://github.com/chroma-core/chroma/tree/main/docs/cip). The CIP will be reviewed by the Chroma team and if approved will be merged into the repository. To learn more about writing a CIP you can read the [guide](https://github.com/chroma-core/chroma/blob/main/docs/cip/CIP_Chroma_Improvement_Proposals.md). CIPs are not required for small changes such as bug fixes or documentation updates.
 
 A CIP starts in the "Proposed" state, then moves to "Under Review" once the Chroma team has reviewed it and is considering it for implementation. Once the CIP is approved it will move to the "Accepted" state and the implementation can begin. Once the implementation is complete the CIP will move to the "Implemented" state. If the CIP is not approved it will move to the "Rejected" state. If the CIP is withdrawn by the author it will move to the "Withdrawn" state.
 
@@ -2658,7 +2658,7 @@ CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.basic.BasicAuthServerProvider"
 
 _Note: Only one of `AUTH_CREDENTIALS` and `AUTH_CREDENTIALS_FILE` can be set, but this guide shows how to migrate both._
 
-And your corresponding client configation:
+And your corresponding client configuration:
 
 ```yaml
 CHROMA_CLIENT_AUTH_PROVIDER="chromadb.auth.token.TokenAuthClientProvider"
@@ -2694,7 +2694,7 @@ CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER="AUTHORIZATION"
 
 _Note: Only one of `AUTH_CREDENTIALS` and `AUTH_CREDENTIALS_FILE` can be set, but this guide shows how to migrate both._
 
-And your corresponding client configation:
+And your corresponding client configuration:
 
 ```yaml
 CHROMA_CLIENT_AUTH_PROVIDER="chromadb.auth.token.TokenAuthClientProvider"
@@ -3817,7 +3817,7 @@ class GetResult {
 const results = await collection.query({ queryTexts: ["first query", "second query"] })
 ```
 
-On `.query` and `.get` results, you can use the `.rows()` method, to get them in row-based format. That is, you will get an array of records, each with its `id`, `document`, `metdata` (etc.) fields.
+On `.query` and `.get` results, you can use the `.rows()` method, to get them in row-based format. That is, you will get an array of records, each with its `id`, `document`, `metadata` (etc.) fields.
 
 ```typescript
 const results = await collection.get({ ids: ["id1", "id2", ...]});
@@ -3827,7 +3827,7 @@ records.forEach((record) => {
 })
 ```
 
-You can also pass to `.get` and `.query` type arguments for the shape of your metadata. This will give you type inferrence for you metadata objects:
+You can also pass to `.get` and `.query` type arguments for the shape of your metadata. This will give you type inference for you metadata objects:
 
 ```typescript
 const results = await collection.get<{page: number; title: string}>({
@@ -5329,7 +5329,7 @@ Therefore, users should always plan on having enough RAM provisioned to accommod
 
 To analyze how much RAM is required, we launched an an instance of Chroma on variously sized EC2 instances, then inserted embeddings until each system became non-responsive. As expected, this failure point corresponded linearly to RAM and embedding count.
 
-For 1024 dimensional embeddings, with three metadata records and a small document per embedding, this works out to `N = R * 0.245` where `N` is the max collection size in millions, and `R` is the amount of system RAM required in gigabytes. Remember, you wil also need reserve at least a gigabyte for the system’s other needs, in addition to the memory required by Chroma.
+For 1024 dimensional embeddings, with three metadata records and a small document per embedding, this works out to `N = R * 0.245` where `N` is the max collection size in millions, and `R` is the amount of system RAM required in gigabytes. Remember, you will also need reserve at least a gigabyte for the system’s other needs, in addition to the memory required by Chroma.
 
 This pattern holds true up through about 7 million embeddings, which is as far as we tested. At this point Chroma is still fast and stable, and we did not find a strict upper bound on the size of a Chroma database.
 
@@ -5753,7 +5753,7 @@ collection = client.create_collection(name="name", embedding_function=google_ef)
 collection = client.get_collection(name="name", embedding_function=google_ef)
 ```
 
-You can view a more [complete example](https://github.com/chroma-core/chroma/tree/main/examples/gemini) chatting over documents with Gemini embedding and langauge models.
+You can view a more [complete example](https://github.com/chroma-core/chroma/tree/main/examples/gemini) chatting over documents with Gemini embedding and language models.
 
 For more info - please visit the [official Google python docs](https://ai.google.dev/tutorials/python_quickstart).
 
@@ -7081,7 +7081,7 @@ With the LLM Observability data now being collected by OpenLIT, the next step is
 
 To begin exploring your LLM Application's performance data within the OpenLIT UI, please see the [Quickstart Guide](https://docs.openlit.io/latest/quickstart).
 
-If you want to integrate and send metrics and traces to your existing observability tools like Promethues+Jaeger, Grafana or more, refer to the [Official Documentation for OpenLIT Connections](https://docs.openlit.io/latest/connections/intro) for detailed instructions.
+If you want to integrate and send metrics and traces to your existing observability tools like Prometheus+Jaeger, Grafana or more, refer to the [Official Documentation for OpenLIT Connections](https://docs.openlit.io/latest/connections/intro) for detailed instructions.
 
 
 ## Support
@@ -8625,7 +8625,7 @@ Get or create a collection with the given name and metadata.
 
 - `name` - The name of the collection to get or create
 - `metadata` - Optional metadata to associate with the collection. If
-  the collection alredy exists, the metadata will be ignored. If the collection does not exist, the
+  the collection already exists, the metadata will be ignored. If the collection does not exist, the
   new collection will be created with the provided metadata.
 - `embedding_function` - Optional function to use to embed documents
 - `data_loader` - Optional function to use to load records (documents, images, etc.)

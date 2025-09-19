@@ -206,7 +206,7 @@ const results = await collection.query({
 });
 ```
 
-On `.query` and `.get` results, you can use the `.rows()` method, to get them in row-based format. That is, you will get an array of records, each with its `id`, `document`, `metdata` (etc.) fields.
+On `.query` and `.get` results, you can use the `.rows()` method, to get them in row-based format. That is, you will get an array of records, each with its `id`, `document`, `metadata` (etc.) fields.
 
 ```typescript
 const results = await collection.get({ ids: ["id1", "id2", ...]});
@@ -216,7 +216,7 @@ records.forEach((record) => {
 })
 ```
 
-You can also pass to `.get` and `.query` type arguments for the shape of your metadata. This will give you type inferrence for you metadata objects:
+You can also pass to `.get` and `.query` type arguments for the shape of your metadata. This will give you type inference for you metadata objects:
 
 ```typescript
 const results = await collection.get<{page: number; title: string}>({

@@ -1017,7 +1017,7 @@ mod test {
             .versions_map
             .get_range(.., ..)
             .await
-            .expect("Error gettting all data from reader")
+            .expect("Error getting all data from reader")
             .collect::<Vec<_>>();
         versions_map.sort_by(|a, b| a.1.cmp(&b.1));
         assert_eq!(

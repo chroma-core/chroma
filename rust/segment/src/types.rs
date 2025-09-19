@@ -23,11 +23,11 @@ use super::distributed_hnsw::DistributedHNSWSegmentWriter;
 // Materializes metadata from update metadata, populating the delete list
 // and upsert list.
 fn materialize_update_metadata(
-    update_metdata: &UpdateMetadata,
+    update_metadata: &UpdateMetadata,
 ) -> Result<(Metadata, DeletedMetadata), MetadataValueConversionError> {
     let mut metadata = Metadata::new();
     let mut deleted_metadata = DeletedMetadata::new();
-    for (key, value) in update_metdata {
+    for (key, value) in update_metadata {
         if *value == UpdateMetadataValue::None {
             deleted_metadata.insert(key.clone());
             continue;

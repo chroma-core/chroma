@@ -22,7 +22,7 @@ pub enum PlanToProtoError {
     Scan(#[from] ScanToProtoError),
 }
 
-/// The `Count` plan shoud ouutput the total number of records in the collection
+/// The `Count` plan should ouutput the total number of records in the collection
 #[derive(Clone)]
 pub struct Count {
     pub scan: Scan,

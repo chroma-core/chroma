@@ -135,7 +135,7 @@ func GetDB(ctx context.Context) *gorm.DB {
 	if iface != nil {
 		tx, ok := iface.(*gorm.DB)
 		if !ok {
-			log.Error("unexpect context value type", zap.Any("type", reflect.TypeOf(tx)))
+			log.Error("unexpected context value type", zap.Any("type", reflect.TypeOf(tx)))
 			return nil
 		}
 

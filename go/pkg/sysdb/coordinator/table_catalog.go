@@ -293,7 +293,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 	if len(existing) != 0 {
 		if createCollection.GetOrCreate {
 			// In the happy path for get or create, the collection exists and under
-			// read commited isolation, we know its not deleted at the time we
+			// read committed isolation, we know its not deleted at the time we
 			// we started the transaction. So we return it
 			collection := convertCollectionToModel(existing)[0]
 			return collection, false, nil
@@ -321,7 +321,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 	created := false
 	// In get or create mode, ignore conflicts
 	// NOTE(hammadb) 5/16/2025 - We could skip the above get() and always InsertOnConflictDoNothing
-	// however when adding this change to handle a race condition I am biasing towards keeping the exisitng
+	// however when adding this change to handle a race condition I am biasing towards keeping the existing
 	// performance of the happy get() path without profiling whether InsertOnConflictDoNothing is equivalent
 	// If this proves to be a performance issue, we can change this to always use InsertOnConflictDoNothing
 	// and remove the get() above
@@ -352,7 +352,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		return nil, false, err
 	}
 
-	// Under read-commited isolation with get_or_create, its possible someone else created the collection, in which case
+	// Under read-committed isolation with get_or_create, its possible someone else created the collection, in which case
 	// we don't want to insert the metadata again, and create an inconsistent state
 	if created {
 		// insert collection metadata
@@ -368,7 +368,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 
 	// Get the inserted collection (by name, to handle the case where some other request created the collection)
 	collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, tenantID, databaseName, nil, nil, false)
-	// It is possible, under read-commited isolation that someone else deleted the collection
+	// It is possible, under read-committed isolation that someone else deleted the collection
 	// in between writing the collection and reading it back, in that case this will return empty, and we should throw an error
 	if err != nil {
 		log.Error("error getting collection", zap.Error(err))
@@ -441,8 +441,8 @@ func (tc *Catalog) GetCollection(ctx context.Context, collectionID types.UniqueI
 		return nil, common.ErrCollectionNotFound
 	}
 	// Check if the entry is soft deleted.
-	collectionWithMetdata := collectionAndMetadataList[0].Collection
-	if collectionWithMetdata.IsDeleted {
+	collectionWithMetadata := collectionAndMetadataList[0].Collection
+	if collectionWithMetadata.IsDeleted {
 		return nil, common.ErrCollectionSoftDeleted
 	}
 	// Convert to model.

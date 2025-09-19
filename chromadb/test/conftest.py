@@ -562,7 +562,7 @@ users:
 
 @pytest.fixture()
 def integration() -> Generator[System, None, None]:
-    """Fixture generator for returning a client configured via environmenet
+    """Fixture generator for returning a client configured via environment
     variables, intended for externally configured integration tests
     """
     settings = Settings(
@@ -576,7 +576,7 @@ def integration() -> Generator[System, None, None]:
 
 @pytest.fixture()
 def async_integration() -> Generator[System, None, None]:
-    """Fixture generator for returning a client configured via environmenet
+    """Fixture generator for returning a client configured via environment
     variables, intended for externally configured integration tests
     """
     settings = Settings(

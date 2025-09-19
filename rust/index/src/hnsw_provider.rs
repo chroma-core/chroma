@@ -5,7 +5,7 @@ use super::{HnswIndex, HnswIndexConfig, Index, IndexConfig, IndexUuid};
 use crate::hnsw::WrappedHnswError;
 
 use async_trait::async_trait;
-use chroma_cache::AysncPartitionedMutex;
+use chroma_cache::AsyncPartitionedMutex;
 use chroma_cache::Cache;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
@@ -46,7 +46,7 @@ type CacheKey = CollectionUuid;
 // 1. get index version v1
 // 2. get index version v2 (> v1)
 // 3. get index version v1 (can happen due to an inflight query
-//    that started before compaction of v2 occured) -- this will
+//    that started before compaction of v2 occurred) -- this will
 //    evict v2 even though it is more recent and will be used again in future.
 // Once we have versioning propagated throughout the system we can make
 // this better. We can also do a deferred eviction for such entries when
@@ -56,7 +56,7 @@ pub struct HnswIndexProvider {
     cache: Arc<dyn Cache<CollectionUuid, HnswIndexRef>>,
     pub temporary_storage_path: PathBuf,
     storage: Storage,
-    pub write_mutex: AysncPartitionedMutex<IndexUuid>,
+    pub write_mutex: AsyncPartitionedMutex<IndexUuid>,
     // TODO(tanujnay112): This feature flag is a temporary measure to gate
     // the hnsw loading from memory feature. Remove this after that feature
     // stabilizes.
@@ -149,7 +149,7 @@ impl HnswIndexProvider {
             cache,
             storage,
             temporary_storage_path: storage_path,
-            write_mutex: AysncPartitionedMutex::with_parallelism(
+            write_mutex: AsyncPartitionedMutex::with_parallelism(
                 permitted_parallelism as usize,
                 (),
             ),

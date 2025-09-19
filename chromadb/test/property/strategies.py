@@ -360,7 +360,7 @@ def collections(
         has_documents = draw(st.booleans())
     assert has_documents is not None
     # For cluster tests, we want to avoid generating documents and where_document
-    # clauses of length < 3. We also don't want them to contain certan special
+    # clauses of length < 3. We also don't want them to contain certain special
     # characters like _ and % that implicitly involve searching for a regex in sqlite.
     if not NOT_CLUSTER_ONLY:
         if has_documents and add_filterable_data:
@@ -434,7 +434,7 @@ def metadata(
 def document(draw: st.DrawFn, collection: Collection) -> types.Document:
     """Strategy for generating documents that could be a part of the given collection"""
     # For cluster tests, we want to avoid generating documents of length < 3.
-    # We also don't want them to contain certan special
+    # We also don't want them to contain certain special
     # characters like _ and % that implicitly involve searching for a regex in sqlite.
     if not NOT_CLUSTER_ONLY:
         # Blacklist certain unicode characters that affect sqlite processing.
@@ -612,7 +612,7 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
 def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocument:
     """Generate a where_document filter that could be used against the given collection"""
     # For cluster tests, we want to avoid generating where_document
-    # clauses of length < 3. We also don't want them to contain certan special
+    # clauses of length < 3. We also don't want them to contain certain special
     # characters like _ and % that implicitly involve searching for a regex in sqlite.
     if not NOT_CLUSTER_ONLY:
         if collection.known_document_keywords:

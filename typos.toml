@@ -1,0 +1,56 @@
+[default]
+check-file = true
+check-filename = true
+extend-ignore-re = []
+
+[default.extend-words]
+"nin" = "nin"                    # Chroma operator
+"americanus" = "americanus"      # Valid Latin word
+"TYP" = "TYP"                    # PR title prefix for type annotations
+"ratatui" = "ratatui"            # The name of a Rust crate
+
+[default.extend-identifiers]
+"CHROMA_OT" = "CHROMA_OT"        # The name of an environment variable
+"flate2" = "flate2"              # The name of a Rust crate
+"NDArray" = "NDArray"            # The name of a Numpy class
+"091c0ba34f0a" = "091c0ba34f0a"  # Go module pseudo-version hash fragment
+"bc3834ca7abd" = "bc3834ca7abd"  # Go module pseudo-version hash fragment
+
+[files]
+extend-exclude = [
+  "**/proptest-regressions/**/*.txt",
+  "**/*.proptest-regressions",
+  "examples/gemini/documents/state_of_the_union_2023.txt",
+  "examples/chat_with_your_documents/documents/state_of_the_union_2023.txt"
+]
+
+[type.jupyter]
+extend-glob = ["*.ipynb"]
+extend-ignore-re = [
+  "[a-fA-F0-9]{8,}",        # Long hex strings (IDs, hashes)
+  "[a-zA-Z0-9_-]{8,}",      # Cell IDs and other identifiers
+  "IPY_MODEL_[a-fA-F0-9]+", # Jupyter widget model IDs
+  "\\\\u001b\\[[0-9;]+m",   # ANSI escape sequences
+]
+
+[type.go-mod]
+extend-glob = ["**/go.mod", "**/go.sum"]
+extend-ignore-re = [
+  "[a-fA-F0-9]{12,}",                                  # Git commit hashes in go.mod
+  "[a-f0-9]{40}",                                      # Full 40-character git commit hashes
+  "v[0-9]+\\.[0-9]+\\.[0-9]+-[0-9]{8,}-[0-9a-f]{12,}", # Module pseudo-version identifiers
+]
+
+[type.shell]
+extend-glob = ["*.sh", "*.bash"]
+extend-ignore-re = [
+  "\\$![a-z]+", # Bash special parameters like $!ba
+]
+
+
+[type.python-test]
+extend-glob = ["**/test/**/*.py", "**/test_*.py", "**/*_test.py"]
+extend-ignore-re = [
+  "[a-zA-Z0-9]{8,}",              # Random test data strings
+  '"[a-zA-Z0-9_-]{3,}"',          # Quoted random identifiers in test data
+]

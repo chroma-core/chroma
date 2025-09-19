@@ -323,7 +323,7 @@ pub struct ScorecardTicket {
 
 /////////////////////////////////////////// RuleEvaluator //////////////////////////////////////////
 
-/// A rule evaluator takes a set of rules and choses all rules that match a set of tags.  It is
+/// A rule evaluator takes a set of rules and chooses all rules that match a set of tags.  It is
 /// logically akin to filtering the powerset of all rules to take the first matching rule for each
 /// member of the powerset.
 #[derive(Debug)]

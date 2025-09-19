@@ -1029,7 +1029,7 @@ def validate_where_document(where_document: WhereDocument) -> None:
             )
 
 
-def validate_include(include: Include, dissalowed: Optional[Include] = None) -> None:
+def validate_include(include: Include, disallowed: Optional[Include] = None) -> None:
     """Validates include to ensure it is a list of strings. Since get does not allow distances, allow_distances is used
     to control if distances is allowed"""
 
@@ -1046,9 +1046,9 @@ def validate_include(include: Include, dissalowed: Optional[Include] = None) -> 
                 f"Expected include item to be one of {', '.join(valid_items)}, got {item}"
             )
 
-        if dissalowed is not None and any(item == e for e in dissalowed):
+        if disallowed is not None and any(item == e for e in disallowed):
             raise ValueError(
-                f"Include item cannot be one of {', '.join(dissalowed)}, got {item}"
+                f"Include item cannot be one of {', '.join(disallowed)}, got {item}"
             )
 
 

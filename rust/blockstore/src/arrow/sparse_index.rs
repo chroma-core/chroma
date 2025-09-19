@@ -10,7 +10,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 // ============
-// Sparse Index Delimeter
+// Sparse Index Delimiter
 // ============
 
 /// A sentinel blockfilekey wrapper to represent the start blocks range

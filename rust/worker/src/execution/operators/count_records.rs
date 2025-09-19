@@ -82,7 +82,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                 match *e {
                     RecordSegmentReaderCreationError::UninitializedSegment => {
                         tracing::info!("[CountQueryOrchestrator] Record segment is uninitialized; using {} records from log", input.log_records.len());
-                        // This means there no compaction has occured.
+                        // This means there no compaction has occurred.
                         // So we can just traverse the log records
                         // and count the number of records.
                         let mut seen_id_set = HashSet::new();

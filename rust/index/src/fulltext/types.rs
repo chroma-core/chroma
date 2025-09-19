@@ -564,7 +564,7 @@ mod tests {
         index_writer
             .handle_batch([DocumentMutation::Create {
                 offset_id: 1,
-                new_document: "helo",
+                new_document: "hello",
             }])
             .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
@@ -644,7 +644,7 @@ mod tests {
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
-        let res = index_reader.search("helo").await.unwrap();
+        let res = index_reader.search("hello").await.unwrap();
         assert!(res.is_empty());
     }
 

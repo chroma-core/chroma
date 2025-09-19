@@ -114,7 +114,7 @@ impl TestDistributedSegment {
             &self.blockfile_provider,
         )
         .await
-        .expect("Should be able to initiaize record writer.");
+        .expect("Should be able to initialize record writer.");
         record_writer
             .apply_materialized_log_chunk(&None, &materialized_logs)
             .await

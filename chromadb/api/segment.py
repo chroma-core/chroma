@@ -428,7 +428,7 @@ class SegmentAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> SearchResult:
         raise NotImplementedError(
-            "Seach is not implemented for SegmentAPI"
+            "Search is not implemented for SegmentAPI"
         )
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)

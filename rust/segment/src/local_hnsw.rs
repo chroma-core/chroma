@@ -446,7 +446,7 @@ pub enum LocalHnswSegmentWriterError {
     HnswIndexResizeError,
     #[error("Error applying log chunk")]
     HnswIndexDeleteError,
-    #[error("Error converting persistant path to string")]
+    #[error("Error converting persistent path to string")]
     PersistPathError,
     #[error("Error updating max sequence id")]
     QueryBuilderError(#[from] sea_query::error::Error),

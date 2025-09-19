@@ -82,20 +82,20 @@ impl<T> Chunk<T> {
     /// The iterator returns a tuple of the element and its index
     /// # Returns
     /// An iterator over the visible elements in the data chunk
-    pub fn iter(&self) -> DataChunkIteraror<'_, T> {
-        DataChunkIteraror {
+    pub fn iter(&self) -> DataChunkIterator<'_, T> {
+        DataChunkIterator {
             chunk: self,
             index: 0,
         }
     }
 }
 
-pub struct DataChunkIteraror<'a, T> {
+pub struct DataChunkIterator<'a, T> {
     chunk: &'a Chunk<T>,
     index: usize,
 }
 
-impl<'a, T> Iterator for DataChunkIteraror<'a, T> {
+impl<'a, T> Iterator for DataChunkIterator<'a, T> {
     type Item = (&'a T, usize);
 
     fn next(&mut self) -> Option<Self::Item> {

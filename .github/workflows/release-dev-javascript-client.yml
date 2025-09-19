@@ -25,7 +25,7 @@ jobs:
             echo "Push to main branch, releasing dev version to GH packages"
             echo "NPM_SCRIPT=release_dev" >> "$GITHUB_ENV"
           else
-            echo "The ref does not point to main, exiting workflow" # we alredy make the check above but this is a good practice
+            echo "The ref does not point to main, exiting workflow" # we already make the check above but this is a good practice
             exit 1
           fi
       - name: Checkout

@@ -39,7 +39,7 @@ __all__ = [
 
 class TokenTransportHeader(str, Enum):
     """
-    Accceptable token transport headers.
+    Acceptable token transport headers.
     """
 
     # I don't love having this enum here -- it's weird to have an enum

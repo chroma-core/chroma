@@ -104,7 +104,7 @@ impl<'me> SparseWriter<'me> {
         let mut delta_guard = self.delta.lock().await;
         for (dimension_id, updates) in delta_guard.drain() {
             let encoded_dimension = encode_u32(dimension_id);
-            let (commited_blocks, mut offset_values) = match self.old_reader.as_ref() {
+            let (committed_blocks, mut offset_values) = match self.old_reader.as_ref() {
                 Some(reader) => {
                     let blocks = reader.get_blocks(&encoded_dimension).await?.collect();
                     let offset_values = reader
@@ -115,7 +115,7 @@ impl<'me> SparseWriter<'me> {
                 }
                 None => (HashMap::new(), BTreeMap::new()),
             };
-            for &offset in commited_blocks.keys() {
+            for &offset in committed_blocks.keys() {
                 self.max_writer
                     .delete::<_, f32>(&encoded_dimension, offset)
                     .await?;
