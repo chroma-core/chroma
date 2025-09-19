@@ -1035,6 +1035,22 @@ impl Configurable<StorageConfig> for S3Storage {
     ) -> Result<Self, Box<dyn ChromaError>> {
         match &config {
             StorageConfig::S3(s3_config) => {
+                let timeout_config = TimeoutConfigBuilder::default()
+                    .connect_timeout(Duration::from_millis(s3_config.connect_timeout_ms))
+                    .operation_timeout(Duration::from_millis(
+                        s3_config.request_timeout_ms * s3_config.request_retry_count as u64,
+                    ))
+                    .operation_attempt_timeout(Duration::from_millis(s3_config.request_timeout_ms))
+                    .build();
+
+                let stalled_config = StalledStreamProtectionConfig::enabled()
+                    .upload_enabled(true)
+                    .grace_period(Duration::from_millis(s3_config.stall_protection_ms))
+                    .build();
+
+                let retry_config =
+                    RetryConfig::standard().with_max_attempts(s3_config.request_retry_count);
+
                 let client = match &s3_config.credentials {
                     super::config::S3CredentialsConfig::Minio
                     | super::config::S3CredentialsConfig::Localhost => {
@@ -1046,24 +1062,6 @@ impl Configurable<StorageConfig> for S3Storage {
                             None,
                             "loaded-from-env",
                         );
-
-                        let timeout_config = TimeoutConfigBuilder::default()
-                            .connect_timeout(Duration::from_millis(s3_config.connect_timeout_ms))
-                            .operation_timeout(Duration::from_millis(
-                                s3_config.request_timeout_ms * s3_config.request_retry_count as u64,
-                            ))
-                            .operation_attempt_timeout(Duration::from_millis(
-                                s3_config.request_timeout_ms,
-                            ))
-                            .build();
-
-                        let stalled_config = StalledStreamProtectionConfig::enabled()
-                            .upload_enabled(true)
-                            .grace_period(Duration::from_millis(s3_config.stall_protection_ms))
-                            .build();
-
-                        let retry_config = RetryConfig::standard()
-                            .with_max_attempts(s3_config.request_retry_count);
 
                         let mut endpoint_url = "http://minio.chroma:9000".to_string();
                         if matches!(
@@ -1088,15 +1086,11 @@ impl Configurable<StorageConfig> for S3Storage {
                     }
                     super::config::S3CredentialsConfig::AWS => {
                         let config = aws_config::load_from_env().await;
-                        let timeout_config_builder = TimeoutConfigBuilder::default()
-                            .connect_timeout(Duration::from_millis(s3_config.connect_timeout_ms))
-                            .read_timeout(Duration::from_millis(s3_config.request_timeout_ms));
-                        let retry_config = RetryConfig::standard();
                         let config = config
                             .to_builder()
-                            .timeout_config(timeout_config_builder.build())
+                            .timeout_config(timeout_config)
+                            .stalled_stream_protection(stalled_config)
                             .retry_config(retry_config)
-                            .stalled_stream_protection(StalledStreamProtectionConfig::disabled())
                             .build();
                         aws_sdk_s3::Client::new(&config)
                     }
