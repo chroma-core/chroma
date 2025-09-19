@@ -68,6 +68,7 @@ use crate::execution::operators::{
         SourceRecordSegmentError, SourceRecordSegmentInput, SourceRecordSegmentOperator,
         SourceRecordSegmentOutput,
     },
+    transform_log::{TransformError, TransformInput, TransformOperator, TransformOutput},
 };
 
 /**  The state of the orchestrator.
@@ -111,6 +112,7 @@ impl Default for CompactOrchestratorMetrics {
 #[derive(Debug)]
 enum ExecutionState {
     Pending,
+    Transform,
     Partition,
     MaterializeApplyCommitFlush,
     Register,
@@ -141,6 +143,7 @@ pub struct CompactOrchestrator {
     hnsw_provider: HnswIndexProvider,
     spann_provider: SpannProvider,
 
+    // TODO(jobs):  Split this into source and dest collections.
     collection: OnceCell<Collection>,
     writers: OnceCell<CompactWriters>,
     flush_results: Vec<SegmentFlushInfo>,
@@ -162,6 +165,9 @@ pub struct CompactOrchestrator {
     segment_spans: HashMap<SegmentUuid, Span>,
 
     metrics: CompactOrchestratorMetrics,
+
+    // Functions
+    function: Option<()>,
 }
 
 #[derive(Error, Debug)]
@@ -192,6 +198,8 @@ pub enum CompactionError {
     Panic(#[from] PanicError),
     #[error("Error partitioning logs: {0}")]
     Partition(#[from] PartitionError),
+    #[error("Error transforming logs: {0}")]
+    Transform(#[from] TransformError),
     #[error("Error prefetching segment: {0}")]
     PrefetchSegment(#[from] PrefetchSegmentError),
     #[error("Error creating record segment reader: {0}")]
@@ -249,6 +257,7 @@ impl ChromaError for CompactionError {
                 Self::MetadataSegment(e) => e.should_trace_error(),
                 Self::Panic(e) => e.should_trace_error(),
                 Self::Partition(e) => e.should_trace_error(),
+                Self::Transform(e) => e.should_trace_error(),
                 Self::PrefetchSegment(e) => e.should_trace_error(),
                 Self::RecordSegmentReader(e) => e.should_trace_error(),
                 Self::RecordSegmentWriter(e) => e.should_trace_error(),
@@ -276,6 +285,7 @@ pub enum CompactionResponse {
 impl CompactOrchestrator {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        // TODO(jobs):  Split this into source and dest collection IDs.
         collection_id: CollectionUuid,
         rebuild: bool,
         fetch_log_batch_size: u32,
@@ -316,6 +326,7 @@ impl CompactOrchestrator {
             num_materialized_logs: 0,
             segment_spans: HashMap::new(),
             metrics: CompactOrchestratorMetrics::default(),
+            function: Some(()),
         }
     }
 
@@ -323,6 +334,36 @@ impl CompactOrchestrator {
         if let Some(hnsw_index_uuid) = hnsw_index_uuid {
             let _ = HnswIndexProvider::purge_one_id(path, hnsw_index_uuid).await;
         }
+    }
+
+    async fn transform_or_partition(
+        &mut self,
+        records: Chunk<LogRecord>,
+        ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        if let Some(_fn) = self.function {
+            self.transform(records, ctx).await;
+        } else {
+            self.partition(records, ctx).await;
+        }
+    }
+
+    async fn transform(
+        &mut self,
+        records: Chunk<LogRecord>,
+        ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        self.state = ExecutionState::Transform;
+        let operator = TransformOperator::new();
+        tracing::info!("Transforming {} records", records.len());
+        let input = TransformInput::new(records);
+        let task = wrap(
+            operator,
+            input,
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        self.send(task, ctx, Some(Span::current())).await;
     }
 
     async fn partition(
@@ -974,7 +1015,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                 return;
             }
         }
-        self.partition(output, ctx).await;
+        self.transform_or_partition(output, ctx).await;
     }
 }
 
@@ -1012,8 +1053,25 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
             )
             .await;
         } else {
-            self.partition(output, ctx).await;
+            self.transform_or_partition(output, ctx).await;
         }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<TransformOutput, TransformError>> for CompactOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<TransformOutput, TransformError>,
+        ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(recs) => recs.records,
+            None => return,
+        };
+        self.partition(output, ctx).await;
     }
 }
 
