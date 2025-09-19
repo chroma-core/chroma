@@ -50,6 +50,9 @@ extend-ignore-re = [
 [type.python-test]
 extend-glob = ["**/test/**/*.py", "**/test_*.py", "**/*_test.py"]
 extend-ignore-re = [
-  "[a-zA-Z0-9]{8,}",              # Random test data strings
-  '"[a-zA-Z0-9_-]{3,}"',          # Quoted random identifiers in test data
+  "[a-zA-Z0-9]{8,}",            # Random test data strings
+  "[a-zA-Z0-9_-]{3,}",          # Quoted random identifiers in test data
 ]
+
+[type.rust]
+extend-words = { helo = "helo" } # Used in FTS tests
