@@ -1,6 +1,6 @@
 # wal3
 
-wal3 is the write-ahead (lightweight) logging library. It implements a linearlizable log that is
+wal3 is the write-ahead (lightweight) logging library. It implements a linearizable log that is
 built entirely on top of object storage. It relies upon the atomicity of object storage to provide
 the If-Match header. This allows us to create a log entirely on top of object storage without any
 other sources of locking or coordination.
