@@ -27,3 +27,4 @@ pub mod select;
 pub mod source_record_segment;
 pub mod sparse_index_knn;
 pub mod sparse_log_knn;
+pub mod transform_log;
