@@ -196,7 +196,6 @@ jobs:
 
   typo-check:
     name: Check for typos
-    needs: change-detection
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
     - name: Checkout chroma-core/chroma
