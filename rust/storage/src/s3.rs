@@ -1047,10 +1047,23 @@ impl Configurable<StorageConfig> for S3Storage {
                             "loaded-from-env",
                         );
 
-                        let timeout_config_builder = TimeoutConfigBuilder::default()
+                        let timeout_config = TimeoutConfigBuilder::default()
                             .connect_timeout(Duration::from_millis(s3_config.connect_timeout_ms))
-                            .read_timeout(Duration::from_millis(s3_config.request_timeout_ms));
-                        let retry_config = RetryConfig::standard();
+                            .operation_timeout(Duration::from_millis(
+                                s3_config.request_timeout_ms * s3_config.request_retry_count as u64,
+                            ))
+                            .operation_attempt_timeout(Duration::from_millis(
+                                s3_config.request_timeout_ms,
+                            ))
+                            .build();
+
+                        let stalled_config = StalledStreamProtectionConfig::enabled()
+                            .upload_enabled(true)
+                            .grace_period(Duration::from_millis(s3_config.stall_protection_ms))
+                            .build();
+
+                        let retry_config = RetryConfig::standard()
+                            .with_max_attempts(s3_config.request_retry_count);
 
                         let mut endpoint_url = "http://minio.chroma:9000".to_string();
                         if matches!(
@@ -1067,7 +1080,8 @@ impl Configurable<StorageConfig> for S3Storage {
                             .behavior_version_latest()
                             .region(aws_sdk_s3::config::Region::new("us-east-1"))
                             .force_path_style(true)
-                            .timeout_config(timeout_config_builder.build())
+                            .timeout_config(timeout_config)
+                            .stalled_stream_protection(stalled_config)
                             .retry_config(retry_config)
                             .build();
                         aws_sdk_s3::Client::from_conf(config)
