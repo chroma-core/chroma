@@ -69,6 +69,10 @@ pub struct S3StorageConfig {
     pub connect_timeout_ms: u64,
     #[serde(default = "S3StorageConfig::default_request_timeout_ms")]
     pub request_timeout_ms: u64,
+    #[serde(default = "S3StorageConfig::default_request_retry_count")]
+    pub request_retry_count: u32,
+    #[serde(default = "S3StorageConfig::default_stall_protection_ms")]
+    pub stall_protection_ms: u64,
     #[serde(default = "S3StorageConfig::default_upload_part_size_bytes")]
     pub upload_part_size_bytes: usize,
     #[serde(default = "S3StorageConfig::default_download_part_size_bytes")]
@@ -88,6 +92,14 @@ impl S3StorageConfig {
         30000
     }
 
+    fn default_request_retry_count() -> u32 {
+        3
+    }
+
+    fn default_stall_protection_ms() -> u64 {
+        20000
+    }
+
     fn default_upload_part_size_bytes() -> usize {
         5 * 1024 * 1024
     }
@@ -104,6 +116,8 @@ impl Default for S3StorageConfig {
             credentials: S3CredentialsConfig::default(),
             connect_timeout_ms: S3StorageConfig::default_connect_timeout_ms(),
             request_timeout_ms: S3StorageConfig::default_request_timeout_ms(),
+            request_retry_count: S3StorageConfig::default_request_retry_count(),
+            stall_protection_ms: S3StorageConfig::default_stall_protection_ms(),
             upload_part_size_bytes: S3StorageConfig::default_upload_part_size_bytes(),
             download_part_size_bytes: S3StorageConfig::default_download_part_size_bytes(),
         }
@@ -121,28 +135,12 @@ pub struct LocalStorageConfig {
     pub root: String,
 }
 
-#[derive(Deserialize, Debug, Clone, Serialize)]
+#[derive(Deserialize, Debug, Default, Clone, Serialize)]
 pub struct AdmissionControlledS3StorageConfig {
     #[serde(default)]
     pub s3_config: S3StorageConfig,
     #[serde(default)]
     pub rate_limiting_policy: RateLimitingConfig,
-}
-
-impl Default for AdmissionControlledS3StorageConfig {
-    fn default() -> Self {
-        AdmissionControlledS3StorageConfig {
-            s3_config: S3StorageConfig {
-                bucket: S3StorageConfig::default_bucket(),
-                credentials: S3CredentialsConfig::default(),
-                connect_timeout_ms: S3StorageConfig::default_connect_timeout_ms(),
-                request_timeout_ms: S3StorageConfig::default_request_timeout_ms(),
-                upload_part_size_bytes: S3StorageConfig::default_upload_part_size_bytes(),
-                download_part_size_bytes: S3StorageConfig::default_download_part_size_bytes(),
-            },
-            rate_limiting_policy: RateLimitingConfig::default(),
-        }
-    }
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
