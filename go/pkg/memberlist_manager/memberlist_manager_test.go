@@ -16,7 +16,7 @@ import (
 )
 
 func TestNodeWatcher(t *testing.T) {
-	clientset, err := utils.GetTestKubenertesInterface()
+	clientset, err := utils.GetTestKubernetesInterface()
 	if err != nil {
 		panic(err)
 	}
@@ -160,7 +160,7 @@ func TestMemberlistManager(t *testing.T) {
 	initialCrMemberlist := initialMemberlist.toCr(namespace, memberlist_name, "0")
 
 	// Create a fake kubernetes client
-	clientset, err := utils.GetTestKubenertesInterface()
+	clientset, err := utils.GetTestKubernetesInterface()
 	if err != nil {
 		t.Fatalf("Error getting kubernetes client: %v", err)
 	}

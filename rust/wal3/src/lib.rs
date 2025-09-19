@@ -54,7 +54,7 @@ pub enum Error {
     // - The operation does not need to be retried because it is durable, but we need to internally
     //   propagate state to correct for the log contention.
     // - The operation needs to be retried because there was explicit contention writing the
-    //   fragement.  We need to retry, but can return this error to the user.
+    //   fragment.  We need to retry, but can return this error to the user.
     // - The operation is in an ambiguous state and we cannot advise the user either way.  Fail the
     //   write and let a higher level protocol handle it.
     //

@@ -138,7 +138,7 @@ proptest::proptest! {
         for offset in start.offset()..=limit.offset() {
             let position = LogPosition::from_offset(offset);
             eprintln!("position = {position:?}");
-            let Some(garbage) = rt.block_on(Garbage::new(&storage, "manifests_gargage", &manifest, &throttle, &cache, position)).unwrap() else {
+            let Some(garbage) = rt.block_on(Garbage::new(&storage, "manifests_garage", &manifest, &throttle, &cache, position)).unwrap() else {
                 continue;
             };
             eprintln!("garbage = {garbage:#?}");
@@ -205,7 +205,7 @@ proptest::proptest! {
         for offset in start.offset()..=limit.offset() {
             let position = LogPosition::from_offset(offset);
             eprintln!("position = {position:?}");
-            let garbage = rt.block_on(Garbage::new(&storage, "manifests_with_snapshots_gargage", &manifest, &throttle, &cache, position)).unwrap();
+            let garbage = rt.block_on(Garbage::new(&storage, "manifests_with_snapshots_garage", &manifest, &throttle, &cache, position)).unwrap();
             let Some(garbage) = garbage else {
                 continue;
             };

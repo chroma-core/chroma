@@ -27,7 +27,7 @@ impl PartitionInput {
     /// # Parameters
     /// * `records` - The records to partition.
     /// * `max_partition_size` - The maximum size of a partition. Since we are trying to
-    ///   partition the records by id, which can casue the partition size to be larger than this
+    ///   partition the records by id, which can cause the partition size to be larger than this
     ///   value.
     pub fn new(records: Chunk<LogRecord>, max_partition_size: usize) -> Self {
         PartitionInput {
@@ -73,7 +73,7 @@ impl PartitionOperator {
             map.entry(key).or_insert_with(Vec::new).push(index);
         }
         let mut result = Vec::new();
-        // Create a new DataChunk for each parition of records with partition_size without
+        // Create a new DataChunk for each partition of records with partition_size without
         // data copying.
         let mut current_batch_size = 0;
         let mut new_partition = true;

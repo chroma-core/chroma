@@ -44,10 +44,10 @@ func (s *Server) ResetState(context.Context, *emptypb.Empty) (*coordinatorpb.Res
 // Case 3
 // new_metadata is not none, coll is a new collection
 // get_or_create should create a new collection with the new metadata, ignoring
-// the metdata of in the input coll.
+// the metadata of in the input coll.
 
 // The fact that we ignore the metadata of the generated collections is a
-// bit weird, but it is the easiest way to excercise all cases
+// bit weird, but it is the easiest way to exercise all cases
 
 // NOTE: In current implementation, we do not support updating the metadata of an existing collection via this RPC.
 //

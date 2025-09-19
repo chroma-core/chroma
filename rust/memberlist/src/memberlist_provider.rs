@@ -149,9 +149,9 @@ impl CustomResourceMemberlistProvider {
             Api::<MemberListKubeResource>::namespaced(self.kube_client.clone(), &self.kube_ns);
 
         let field_selector = format!("metadata.name={}", self.memberlist_name);
-        let conifg = Config::default().fields(&field_selector);
+        let config = Config::default().fields(&field_selector);
 
-        let stream = watcher(memberlist_cr_client, conifg)
+        let stream = watcher(memberlist_cr_client, config)
             .default_backoff()
             .applied_objects();
         let stream = stream.then(|event| async move {

@@ -896,7 +896,7 @@ def test_invalid_configuration() -> None:
 
 def test_collection_load_with_invalid_configuration(client: ClientAPI) -> None:
     """
-    When an invalid confiugration is used, collection create, get, list_collections should all pass
+    When an invalid configuration is used, collection create, get, list_collections should all pass
     Only when trying to use the collection should an error be reaised
     """
     client.reset()

@@ -143,7 +143,7 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 	return collections, nil
 }
 
-func (s *collectionDb) getCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted *bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
+func (s *collectionDb) getCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted *bool) (collectionWithMetadata []*dbmodel.CollectionAndMetadata, err error) {
 	type Result struct {
 		// Collection fields
 		CollectionId               string     `gorm:"column:collection_id"`

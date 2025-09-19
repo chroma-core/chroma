@@ -398,7 +398,7 @@ impl SegmentFilePaths {
     }
 }
 
-/// A group of the three segment types. Note that the files generated for each segment type may not corelate with what the real system would create (e.g. the metadata segment may have HNSW files).
+/// A group of the three segment types. Note that the files generated for each segment type may not correlate with what the real system would create (e.g. the metadata segment may have HNSW files).
 ///
 /// This grouping is used instead of generating a variable number of segments as the latter is quite difficult to construct with proptest (there's no transform for `Vec<BoxedStrategy<T>> -> BoxedStrategy<Vec<T>>`).
 #[derive(Clone, Debug)]

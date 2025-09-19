@@ -15,7 +15,7 @@ def user_identity() -> UserIdentity:
     )
 
 
-def test_doesnt_overrite_from_auth(user_identity: UserIdentity) -> None:
+def test_doesnt_overwrite_from_auth(user_identity: UserIdentity) -> None:
     resolved_tenant, resolved_database = maybe_set_tenant_and_database(
         user_identity=user_identity,
         overwrite_singleton_tenant_database_access_from_auth=False,
@@ -63,7 +63,7 @@ def test_errors_when_provided_tenant_and_database_dont_match_from_auth(
         )
 
 
-def test_doesnt_overrite_from_auth_when_ambiguous(user_identity: UserIdentity) -> None:
+def test_doesnt_overwrite_from_auth_when_ambiguous(user_identity: UserIdentity) -> None:
     user_identity.tenant = "*"
     user_identity.databases = ["*"]
     resolved_tenant, resolved_database = maybe_set_tenant_and_database(

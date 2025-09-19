@@ -2119,7 +2119,7 @@ pub struct SearchRequestPayload {
     searches: Vec<SearchPayload>,
 }
 
-/// Search records from a collection with hybrid criterias.
+/// Search records from a collection with hybrid criteria.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
@@ -2167,7 +2167,7 @@ async fn collection_search(
         .with_search_payloads(payload.searches.as_slice());
     let quota_override = server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
-        // TODO: Make this a read operation once we stablize this
+        // TODO: Make this a read operation once we stabilize this
         // "op:read",
         "op:search",
         format!("tenant:{}", tenant).as_str(),

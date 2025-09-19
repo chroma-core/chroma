@@ -47,4 +47,4 @@ Chroma raised an $18M seed round led by Astasia Myers from Quiet Capital. Joinin
 
 Chroma raised a pre-seed in May 2022, led by Anthony Goldbloom (Kaggle) from AIX Ventures, James Cham from Bloomberg Beta, and Nat Friedman and Daniel Gross (AI Grant).
 
-We're excited to work with a deep set of investors and enterpreneurs who have invested in and built some of the most successful open-source projects in the world.
+We're excited to work with a deep set of investors and entrepreneurs who have invested in and built some of the most successful open-source projects in the world.

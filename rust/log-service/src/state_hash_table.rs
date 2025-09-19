@@ -211,7 +211,7 @@ impl<K: Key, V: Value> StateHashTable<K, V> {
     /// Return a seemingly-arbitrary key from the hash table or None if there's no keys in the hash
     /// table.  This is meant to be used for draining a server of waiters.
     #[allow(dead_code)]
-    pub fn arbitary_key(&self) -> Option<K> {
+    pub fn arbitrary_key(&self) -> Option<K> {
         self.entries
             .lock()
             .unwrap()

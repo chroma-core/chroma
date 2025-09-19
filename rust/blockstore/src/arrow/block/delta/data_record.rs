@@ -136,7 +136,7 @@ impl DataRecordStorage {
         let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
         let key_offset_bytes: usize = K::offset_size(self.len());
         let id_offset = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
-        let metdata_offset = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
+        let metadata_offset = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
         let document_offset = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
 
         // validity sizing both document and metadata can be null
@@ -152,7 +152,7 @@ impl DataRecordStorage {
             + prefix_offset_bytes
             + key_offset_bytes
             + id_offset
-            + metdata_offset
+            + metadata_offset
             + document_offset
             + validity_bytes
     }
@@ -177,7 +177,7 @@ impl DataRecordStorage {
             let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
             let key_offset_bytes: usize = K::offset_size(item_count);
             let id_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
-            let metdata_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
+            let metadata_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
             let document_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
 
             // validity sizing both document and metadata can be null
@@ -197,7 +197,7 @@ impl DataRecordStorage {
                     + prefix_offset_bytes
                     + key_offset_bytes
                     + id_offset
-                    + metdata_offset
+                    + metadata_offset
                     + document_offset
                     + validity_bytes;
 

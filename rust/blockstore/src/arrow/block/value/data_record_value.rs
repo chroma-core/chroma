@@ -41,10 +41,10 @@ impl ArrowWriteableValue for &DataRecord<'_> {
 
     fn offset_size(item_count: usize) -> usize {
         let id_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
-        let metdata_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
+        let metadata_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
         let document_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
 
-        id_offset + metdata_offset + document_offset
+        id_offset + metadata_offset + document_offset
     }
 
     fn validity_size(item_count: usize) -> usize {

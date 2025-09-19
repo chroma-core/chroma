@@ -46,7 +46,7 @@ pub enum ProjectionError {
     RecordReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error reading record segment: {0}")]
     RecordSegment(#[from] Box<dyn ChromaError>),
-    #[error("Error reading unitialized record segment")]
+    #[error("Error reading uninitialized record segment")]
     RecordSegmentUninitialized,
     #[error("Error reading phantom record: {0}")]
     RecordSegmentPhantomRecord(u32),

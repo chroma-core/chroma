@@ -86,7 +86,7 @@ impl ChromaError for FilterError {
     }
 }
 
-/// This sturct provides an abstraction over the materialized logs that is similar to the metadata segment
+/// This struct provides an abstraction over the materialized logs that is similar to the metadata segment
 pub(crate) struct MetadataLogReader<'me> {
     // This maps metadata keys to `BTreeMap`s, which further map values to offset ids
     // This mimics the layout in the metadata segment
@@ -568,13 +568,13 @@ impl Operator<FilterInput, FilterOutput> for Filter {
 
         let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
 
-        let metadata_segement_reader = Box::pin(MetadataSegmentReader::from_segment(
+        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
             &input.metadata_segment,
             &input.blockfile_provider,
         ))
         .await?;
         let compact_metadata_provider =
-            MetadataProvider::CompactData(&metadata_segement_reader, &record_segment_reader);
+            MetadataProvider::CompactData(&metadata_segment_reader, &record_segment_reader);
 
         // Get offset ids corresponding to user ids
         let (user_allowed_log_offset_ids, user_allowed_compact_offset_ids) =
@@ -1482,14 +1482,14 @@ mod tests {
                 .unwrap();
         let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
 
-        let metadata_segement_reader = Box::pin(MetadataSegmentReader::from_segment(
+        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
             &filter_input.metadata_segment,
             &filter_input.blockfile_provider,
         ))
         .await
         .unwrap();
         let compact_metadata_provider =
-            MetadataProvider::CompactData(&metadata_segement_reader, &record_segment_reader);
+            MetadataProvider::CompactData(&metadata_segment_reader, &record_segment_reader);
 
         let match_all = r".*";
         assert_eq!(

@@ -403,7 +403,7 @@ def ann_accuracy(
                 atol=accuracy_threshold,
             )
             if unexpected_id:
-                # If the ID is unexpcted, but the distance is correct, then we
+                # If the ID is unexpected, but the distance is correct, then we
                 # have a duplicate in the data. In this case, we should not reduce recall.
                 if correct_distance:
                     missing -= 1

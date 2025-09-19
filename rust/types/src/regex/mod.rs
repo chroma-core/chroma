@@ -13,7 +13,7 @@ use thiserror::Error;
 /// will perform all necessary validation to check this.
 ///
 /// We would like to leverage the regex_syntax crate to provide basic parsing and simplification
-/// of regex expression, and in the process guard against unsupported features by examing the
+/// of regex expression, and in the process guard against unsupported features by examining the
 /// parsed syntax tree.
 #[derive(Clone, Debug)]
 pub struct ChromaRegex {
@@ -30,7 +30,7 @@ pub enum ChromaRegexError {
     #[error("Unexpected regex error: {0}")]
     Regex(String),
     // NOTE: regex_syntax::Error is a large type, so we only store its error message here.
-    #[error("Regex syntax errror: {0}")]
+    #[error("Regex syntax error: {0}")]
     RegexSyntax(String),
 }
 
@@ -43,7 +43,7 @@ impl ChromaRegex {
     }
     pub fn regex(&self) -> Result<Regex, ChromaRegexError> {
         // NOTE: Although this method return a Result<_, _> type, in practice it should always
-        // be Ok(_) becasue we validate the pattern during struct construction. Specifically,
+        // be Ok(_) because we validate the pattern during struct construction. Specifically,
         // we verify that the pattern can be properly parsed and is thus a valid pattern supported
         // by the regex crate.
         Regex::new(&self.pattern).map_err(|e| ChromaRegexError::Regex(e.to_string()))

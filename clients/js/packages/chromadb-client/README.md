@@ -2,7 +2,7 @@
 
 Chroma is the open-source embedding database. Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs.
 
-**Note:** JS client version 3._ is only compatible with chromadb v1.0.6 and newer or Chroma Cloud. For prior version compatiblity, please use JS client version 2._.
+**Note:** JS client version 3._ is only compatible with chromadb v1.0.6 and newer or Chroma Cloud. For prior version compatibility, please use JS client version 2._.
 
 **This package provides embedding libraries as peer dependencies**, allowing you to manage your own versions of embedding libraries and keep your dependency tree lean by not bundling dependencies you don't use. For a thick client with bundled embedding functions, install `chromadb`.
 

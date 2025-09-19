@@ -26,7 +26,7 @@ collection = client.create_collection(name="name", embedding_function=google_ef)
 collection = client.get_collection(name="name", embedding_function=google_ef)
 ```
 
-You can view a more [complete example](https://github.com/chroma-core/chroma/tree/main/examples/gemini) chatting over documents with Gemini embedding and langauge models.
+You can view a more [complete example](https://github.com/chroma-core/chroma/tree/main/examples/gemini) chatting over documents with Gemini embedding and language models.
 
 For more info - please visit the [official Google python docs](https://ai.google.dev/tutorials/python_quickstart).
 

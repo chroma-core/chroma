@@ -17,7 +17,7 @@ use super::error::QueryConversionError;
 
 pub type InitialInput = ();
 
-/// The `Scan` opeartor pins the data used by all downstream operators
+/// The `Scan` operator pins the data used by all downstream operators
 ///
 /// # Parameters
 /// - `collection_and_segments`: The consistent snapshot of collection
