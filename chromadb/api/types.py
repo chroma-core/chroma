@@ -309,7 +309,6 @@ def validate_insert_record_set(record_set: InsertRecordSet) -> None:
     """
     Validates the InsertRecordSet, ensuring that all fields are of the right type and length.
     """
-    _validate_record_set_length_consistency(record_set)
     validate_base_record_set(record_set)
 
     validate_ids(record_set["ids"])
