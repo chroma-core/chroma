@@ -104,6 +104,11 @@ __all__ = [
     "InternalSchema",
     # Space type
     "Space",
+    # Embedding Functions
+    "EmbeddingFunction",
+    "SparseEmbeddingFunction",
+    "validate_embedding_function",
+    "validate_sparse_embedding_function",
 ]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
@@ -773,6 +778,20 @@ def validate_embedding_function(
         )
 
 
+def validate_sparse_embedding_function(
+    sparse_embedding_function: Any,
+) -> None:
+    """Validate that a sparse embedding function conforms to the SparseEmbeddingFunction protocol."""
+    if not callable(sparse_embedding_function):
+        raise ValueError('sparse_embedding_function must be callable')
+
+    if not hasattr(sparse_embedding_function, '__call__'):
+        raise ValueError('sparse_embedding_function must have a __call__ method')
+
+    # Basic validation - check if it looks like a sparse embedding function
+    # We'll do more detailed validation when SparseEmbeddingFunction is fully defined
+
+
 class DataLoader(Protocol[L]):
     def __call__(self, uris: URIs) -> L:
         ...
@@ -1380,14 +1399,14 @@ class SparseVectorIndexConfig(BaseModel):
     @field_validator('embedding_function', mode='before')
     @classmethod
     def validate_embedding_function_field(cls, v: Any) -> Any:
-        # Use the existing validate_embedding_function for proper validation
+        # Validate sparse embedding function for sparse vector index
         if v is None:
             return v
         if callable(v):
-            # Use the existing validation function
-            validate_embedding_function(v)
+            # Use the sparse embedding function validation
+            validate_sparse_embedding_function(v)
             return v
-        raise ValueError('embedding_function must be callable or None')
+        raise ValueError('embedding_function must be a callable SparseEmbeddingFunction or None')
 
 
 class StringInvertedIndexConfig(BaseModel):
