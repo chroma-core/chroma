@@ -10,6 +10,7 @@ use chroma_metering::{
     ExternalCollectionReadContext, MeteredFutureExt, ReadAction, StartRequest, WriteAction,
 };
 use chroma_system::System;
+use chroma_tracing::add_tracing_middleware;
 use chroma_types::plan::SearchPayload;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
@@ -58,7 +59,6 @@ use crate::{
     config::FrontendServerConfig,
     quota::{Action, QuotaEnforcer, QuotaPayload},
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
-    tower_tracing::add_tracing_middleware,
     traced_json::TracedJson,
     types::errors::{ErrorResponse, ServerError, ValidationError},
     Frontend,

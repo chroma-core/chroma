@@ -1963,9 +1963,11 @@ dependencies = [
 name = "chroma-tracing"
 version = "0.1.0"
 dependencies = [
+ "axum 0.8.1",
  "chroma-system",
  "fastrace",
  "fastrace-opentelemetry",
+ "futures",
  "http 1.1.0",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -1974,6 +1976,7 @@ dependencies = [
  "serde_json",
  "tonic",
  "tower 0.4.13",
+ "tower-http 0.6.2",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",

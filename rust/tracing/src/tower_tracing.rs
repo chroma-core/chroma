@@ -1,11 +1,12 @@
 use axum::extract::MatchedPath;
 use axum::http::{header, Request, Response};
 use axum::Router;
-use chroma_tracing::util::get_current_trace_id;
 use futures::future::BoxFuture;
 use std::time::Duration;
 use tower::Service;
 use tower_http::trace::{MakeSpan, OnResponse, TraceLayer};
+
+use crate::util::get_current_trace_id;
 
 #[derive(Clone)]
 struct RequestTracing;
@@ -108,7 +109,7 @@ impl<S> tower::layer::Layer<S> for SetTraceIdLayer {
     }
 }
 
-pub(crate) fn add_tracing_middleware(router: Router) -> Router {
+pub fn add_tracing_middleware(router: Router) -> Router {
     router.layer(SetTraceIdLayer::new()).layer(
         TraceLayer::new_for_http()
             .make_span_with(RequestTracing)
