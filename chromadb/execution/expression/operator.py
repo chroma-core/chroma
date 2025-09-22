@@ -672,14 +672,12 @@ class Rank:
                 # Dense vector case - normalize then validate
                 normalized = normalize_embeddings(query)
                 if not normalized:
-                    raise TypeError(f"$knn query cannot be empty")
+                    raise ValueError(f"$knn query cannot be empty")
 
                 # Validate the normalized version
                 validate_embeddings(normalized)
 
-                # Convert tuple to list if needed (Knn expects List not tuple)
-                if isinstance(query, tuple):
-                    query = list(query)
+                query = normalized
 
             else:
                 raise TypeError(
