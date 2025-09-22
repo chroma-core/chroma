@@ -682,13 +682,13 @@ class Rank:
             elif isinstance(query, (list, tuple, np.ndarray)):
                 # Dense vector case - normalize then validate
                 normalized = normalize_embeddings(query)
-                if not normalized:
-                    raise ValueError(f"$knn query cannot be empty")
+                if not normalized or len(normalized) > 1:
+                    raise ValueError("$knn requires exactly one query embedding")
 
                 # Validate the normalized version
                 validate_embeddings(normalized)
 
-                query = normalized
+                query = normalized[0]
 
             else:
                 raise TypeError(
@@ -1124,7 +1124,6 @@ class Rrf(Rank):
                 Knn(query=[0.1, 0.2], return_rank=True),
                 Knn(query=another_vector, key="custom_embedding", return_rank=True)  # Example metadata field
             weights=[2.0, 1.0],  # First ranking is 2x more important
-            weights=[2.0, 1.0],  # Dense is 2x more important than sparse
             k=100
         )
 
