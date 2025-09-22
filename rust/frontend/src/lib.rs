@@ -11,7 +11,7 @@ pub mod impls;
 pub mod quota;
 pub mod server;
 mod server_middleware;
-pub mod tower_tracing;
+mod tower_tracing;
 mod traced_json;
 mod types;
 
@@ -30,6 +30,7 @@ use server::FrontendServer;
 
 pub use config::{FrontendConfig, ScorecardRule};
 pub use impls::Frontend;
+pub use tower_tracing::add_tracing_middleware;
 
 pub const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
