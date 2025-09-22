@@ -2213,6 +2213,10 @@ def test_search_result_rows() -> None:
 
 def test_rrf_to_dict() -> None:
     """Test the Rrf (Reciprocal Rank Fusion) to_dict conversion."""
+    # Note: In these tests, "sparse_embedding" is just an example metadata field name.
+    # Users can store any data in metadata fields and reference them by name (without # prefix).
+    # The "#embedding" key refers to the special main embedding field.
+
     import pytest
     from chromadb.execution.expression.operator import Rrf, Knn, Val
 
@@ -2220,7 +2224,7 @@ def test_rrf_to_dict() -> None:
     rrf = Rrf(
         [
             Knn(query=[0.1, 0.2], return_rank=True),
-            Knn(query=[0.3, 0.4], key="#sparse", return_rank=True),
+            Knn(query=[0.3, 0.4], key="sparse_embedding", return_rank=True),
         ]
     )
 
@@ -2261,7 +2265,7 @@ def test_rrf_to_dict() -> None:
                                     {
                                         "$knn": {
                                             "query": [0.3, 0.4],
-                                            "key": "#sparse",
+                                            "key": "sparse_embedding",
                                             "limit": 128,
                                             "return_rank": True,
                                         }
@@ -2281,7 +2285,7 @@ def test_rrf_to_dict() -> None:
     rrf_weighted = Rrf(
         ranks=[
             Knn(query=[0.1, 0.2], return_rank=True),
-            Knn(query=[0.3, 0.4], key="#sparse", return_rank=True),
+            Knn(query=[0.3, 0.4], key="sparse_embedding", return_rank=True),
         ],
         weights=[2.0, 1.0],  # Dense is 2x more important
         k=100,
@@ -2322,7 +2326,7 @@ def test_rrf_to_dict() -> None:
                                     {
                                         "$knn": {
                                             "query": [0.3, 0.4],
-                                            "key": "#sparse",
+                                            "key": "sparse_embedding",
                                             "limit": 128,
                                             "return_rank": True,
                                         }
@@ -2342,7 +2346,7 @@ def test_rrf_to_dict() -> None:
     rrf_three = Rrf(
         [
             Knn(query=[0.1, 0.2], return_rank=True),
-            Knn(query=[0.3, 0.4], key="#sparse", return_rank=True),
+            Knn(query=[0.3, 0.4], key="sparse_embedding", return_rank=True),
             Val(5.0),  # Can also include constant rank
         ]
     )
@@ -2397,7 +2401,7 @@ def test_rrf_to_dict() -> None:
     rrf_normalized = Rrf(
         ranks=[
             Knn(query=[0.1, 0.2], return_rank=True),
-            Knn(query=[0.3, 0.4], key="#sparse", return_rank=True),
+            Knn(query=[0.3, 0.4], key="sparse_embedding", return_rank=True),
         ],
         weights=[3.0, 1.0],  # Will be normalized to [0.75, 0.25]
         normalize=True,
@@ -2439,7 +2443,7 @@ def test_rrf_to_dict() -> None:
                                     {
                                         "$knn": {
                                             "query": [0.3, 0.4],
-                                            "key": "#sparse",
+                                            "key": "sparse_embedding",
                                             "limit": 128,
                                             "return_rank": True,
                                         }
@@ -2789,7 +2793,7 @@ class TestRankFromDict:
             {
                 "$knn": {
                     "query": [0.1, 0.2],
-                    "key": "#sparse",
+                    "key": "sparse_embedding",
                     "limit": 256,
                     "return_rank": True,
                 }

@@ -395,7 +395,12 @@ class NotRegex(Where):
 class Key:
     """Field proxy for building Where conditions with operator overloading.
 
-    Predefined field constants:
+    The Key class allows for readable field references using either:
+    1. Predefined constants for special fields: K.EMBEDDING, K.DOCUMENT, K.SCORE, etc.
+    2. String literals with # prefix for special fields: Key("#embedding")
+    3. Metadata field names without # prefix: Key("my_metadata_field")
+
+    Predefined field constants (special fields with # prefix):
         Key.ID - ID field (equivalent to Key("#id"))
         Key.DOCUMENT - Document field (equivalent to Key("#document"))
         Key.EMBEDDING - Embedding field (equivalent to Key("#embedding"))
@@ -405,13 +410,19 @@ class Key:
     Note: K is an alias for Key, so you can use K.DOCUMENT or Key.DOCUMENT interchangeably.
 
     Examples:
-        # Using predefined keys with K alias
+        # Using predefined keys with K alias for special fields
         from chromadb.execution.expression import K
-        K.DOCUMENT.contains("search text")
+        K.DOCUMENT.contains("search text")  # Searches document field
 
-        # Custom field names
-        K("status") == "active"
-        K("category").is_in(["science", "tech"])
+        # Custom metadata field names (without # prefix)
+        K("status") == "active"  # Metadata field named "status"
+        K("category").is_in(["science", "tech"])  # Metadata field named "category"
+        K("sparse_embedding")  # Example: metadata field (could store anything)
+
+        # Using with Knn for different fields
+        Knn(query=[0.1, 0.2])  # Default: searches "#embedding"
+        Knn(query=[0.1, 0.2], key=K.EMBEDDING)  # Explicit: searches "#embedding"
+        Knn(query=sparse, key="sparse_embedding")  # Example: searches a metadata field
 
         # Combining conditions
         (K("status") == "active") & (K.SCORE > 0.5)
@@ -1003,10 +1014,21 @@ class Knn(Rank):
 
     Args:
         query: The query vector for KNN search (dense, sparse, or numpy array)
-        key: The embedding key to search against (default: "#embedding")
+        key: The embedding key to search against. Can be:
+             - "#embedding" (default) - searches the main embedding field
+             - A metadata field name (e.g., "my_custom_field") - searches that metadata field
         limit: Maximum number of results to consider (default: 128)
         default: Default score for records not in KNN results (default: None)
         return_rank: If True, return the rank position (0, 1, 2, ...) instead of distance (default: False)
+
+    Examples:
+        # Search main embeddings (equivalent forms)
+        Knn(query=[0.1, 0.2])  # Uses default key="#embedding"
+        Knn(query=[0.1, 0.2], key=K.EMBEDDING)
+        Knn(query=[0.1, 0.2], key="#embedding")
+
+        # Search sparse embeddings stored in metadata
+        Knn(query=my_vector, key="custom_embedding")  # Example: searches a metadata field
     """
 
     query: Union[
@@ -1088,18 +1110,20 @@ class Rrf(Rank):
                   When True, weights are scaled so they sum to 1.0.
 
     Examples:
+        # Note: metadata fields (like "sparse_embedding" below) are user-defined and can store any data.
+        # The field name is just an example - use whatever name matches your metadata structure.
         # Basic RRF combining KNN rankings (equal weight)
         Rrf([
             Knn(query=[0.1, 0.2], return_rank=True),
-            Knn(query=sparse_vector, key="#sparse_embedding", return_rank=True)
+            Knn(query=another_vector, key="custom_embedding", return_rank=True)  # Example metadata field
         ])
 
         # Weighted RRF with relative weights (not normalized)
         Rrf(
             ranks=[
                 Knn(query=[0.1, 0.2], return_rank=True),
-                Knn(query=sparse_vector, key="#sparse", return_rank=True)
-            ],
+                Knn(query=another_vector, key="custom_embedding", return_rank=True)  # Example metadata field
+            weights=[2.0, 1.0],  # First ranking is 2x more important
             weights=[2.0, 1.0],  # Dense is 2x more important than sparse
             k=100
         )
@@ -1108,7 +1132,7 @@ class Rrf(Rank):
         Rrf(
             ranks=[
                 Knn(query=[0.1, 0.2], return_rank=True),
-                Knn(query=sparse_vector, key="#sparse", return_rank=True)
+                Knn(query=another_vector, key="custom_embedding", return_rank=True)  # Example metadata field
             ],
             weights=[3.0, 1.0],  # Will be normalized to [0.75, 0.25]
             normalize=True,
