@@ -108,7 +108,7 @@ impl<S> tower::layer::Layer<S> for SetTraceIdLayer {
     }
 }
 
-pub(crate) fn add_tracing_middleware(router: Router) -> Router {
+pub fn add_tracing_middleware(router: Router) -> Router {
     router.layer(SetTraceIdLayer::new()).layer(
         TraceLayer::new_for_http()
             .make_span_with(RequestTracing)
