@@ -678,6 +678,9 @@ class Rrf(Rank):
         k: Smoothing constant (default: 60, standard in literature)
         weights: Optional weights for each ranking strategy. If not provided,
                 all ranks are weighted equally (weight=1.0 each).
+        normalize: If True, normalize weights to sum to 1.0 (default: False).
+                  When False, weights are used as-is for relative importance.
+                  When True, weights are scaled so they sum to 1.0.
 
     Examples:
         # Basic RRF combining KNN rankings (equal weight)
@@ -686,7 +689,7 @@ class Rrf(Rank):
             Knn(query=sparse_vector, key="#sparse_embedding", return_rank=True)
         ])
 
-        # Weighted RRF (weights are relative importance)
+        # Weighted RRF with relative weights (not normalized)
         Rrf(
             ranks=[
                 Knn(query=[0.1, 0.2], return_rank=True),
@@ -695,11 +698,23 @@ class Rrf(Rank):
             weights=[2.0, 1.0],  # Dense is 2x more important than sparse
             k=100
         )
+
+        # Weighted RRF with normalized weights
+        Rrf(
+            ranks=[
+                Knn(query=[0.1, 0.2], return_rank=True),
+                Knn(query=sparse_vector, key="#sparse", return_rank=True)
+            ],
+            weights=[3.0, 1.0],  # Will be normalized to [0.75, 0.25]
+            normalize=True,
+            k=100
+        )
     """
 
     ranks: List[Rank]
     k: int = 60
     weights: Optional[List[float]] = None
+    normalize: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert RRF to a composition of existing expression operators.
@@ -724,6 +739,13 @@ class Rrf(Rank):
 
         # Populate weights with 1.0 if not provided
         weights = self.weights if self.weights else [1.0] * len(self.ranks)
+
+        # Normalize weights if requested
+        if self.normalize:
+            weight_sum = sum(weights)
+            if weight_sum == 0:
+                raise ValueError("Sum of weights must be positive when normalize=True")
+            weights = [w / weight_sum for w in weights]
 
         # Zip weights with ranks and build terms: weight / (k + rank)
         terms = [w / (self.k + rank) for w, rank in zip(weights, self.ranks)]

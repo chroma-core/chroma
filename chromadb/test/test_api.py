@@ -2393,3 +2393,138 @@ def test_rrf_to_dict() -> None:
     with pytest.raises(ValueError, match="k must be positive"):
         rrf_zero_k = Rrf([Val(1.0)], k=0)
         rrf_zero_k.to_dict()  # Validation happens in to_dict()
+    # Test 9: Normalize flag with weights
+    rrf_normalized = Rrf(
+        ranks=[
+            Knn(query=[0.1, 0.2], return_rank=True),
+            Knn(query=[0.3, 0.4], key="#sparse", return_rank=True),
+        ],
+        weights=[3.0, 1.0],  # Will be normalized to [0.75, 0.25]
+        normalize=True,
+        k=100,
+    )
+
+    result_normalized = rrf_normalized.to_dict()
+
+    # Expected: -(0.75/(100 + knn1) + 0.25/(100 + knn2))
+    expected_normalized = {
+        "$mul": [
+            {"$val": -1},
+            {
+                "$sum": [
+                    {
+                        "$div": {
+                            "left": {"$val": 0.75},
+                            "right": {
+                                "$sum": [
+                                    {"$val": 100},
+                                    {
+                                        "$knn": {
+                                            "query": [0.1, 0.2],
+                                            "key": "#embedding",
+                                            "limit": 128,
+                                            "return_rank": True,
+                                        }
+                                    },
+                                ]
+                            },
+                        }
+                    },
+                    {
+                        "$div": {
+                            "left": {"$val": 0.25},
+                            "right": {
+                                "$sum": [
+                                    {"$val": 100},
+                                    {
+                                        "$knn": {
+                                            "query": [0.3, 0.4],
+                                            "key": "#sparse",
+                                            "limit": 128,
+                                            "return_rank": True,
+                                        }
+                                    },
+                                ]
+                            },
+                        }
+                    },
+                ]
+            },
+        ]
+    }
+
+    assert result_normalized == expected_normalized
+
+    # Test 10: Normalize flag without weights (should work with defaults)
+    rrf_normalize_defaults = Rrf(
+        ranks=[
+            Knn(query=[0.1, 0.2], return_rank=True),
+            Knn(query=[0.3, 0.4], return_rank=True),
+        ],
+        normalize=True,  # Will normalize [1.0, 1.0] to [0.5, 0.5]
+    )
+
+    result_defaults = rrf_normalize_defaults.to_dict()
+
+    # Both weights should be 0.5 after normalization
+    expected_defaults = {
+        "$mul": [
+            {"$val": -1},
+            {
+                "$sum": [
+                    {
+                        "$div": {
+                            "left": {"$val": 0.5},
+                            "right": {
+                                "$sum": [
+                                    {"$val": 60},  # Default k=60
+                                    {
+                                        "$knn": {
+                                            "query": [0.1, 0.2],
+                                            "key": "#embedding",
+                                            "limit": 128,
+                                            "return_rank": True,
+                                        }
+                                    },
+                                ]
+                            },
+                        }
+                    },
+                    {
+                        "$div": {
+                            "left": {"$val": 0.5},
+                            "right": {
+                                "$sum": [
+                                    {"$val": 60},
+                                    {
+                                        "$knn": {
+                                            "query": [0.3, 0.4],
+                                            "key": "#embedding",
+                                            "limit": 128,
+                                            "return_rank": True,
+                                        }
+                                    },
+                                ]
+                            },
+                        }
+                    },
+                ]
+            },
+        ]
+    }
+
+    assert result_defaults == expected_defaults
+
+    # Test 11: Error case - normalize with all zero weights
+    with pytest.raises(ValueError, match="Sum of weights must be positive"):
+        rrf_zero_weights = Rrf(
+            ranks=[
+                Knn(query=[0.1, 0.2], return_rank=True),
+                Knn(query=[0.3, 0.4], return_rank=True),
+            ],
+            weights=[0.0, 0.0],
+            normalize=True,
+        )
+        rrf_zero_weights.to_dict()
+
+    print("All RRF tests passed!")
