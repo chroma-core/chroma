@@ -1,11 +1,12 @@
 use axum::extract::MatchedPath;
 use axum::http::{header, Request, Response};
 use axum::Router;
-use chroma_tracing::util::get_current_trace_id;
 use futures::future::BoxFuture;
 use std::time::Duration;
 use tower::Service;
 use tower_http::trace::{MakeSpan, OnResponse, TraceLayer};
+
+use crate::util::get_current_trace_id;
 
 #[derive(Clone)]
 struct RequestTracing;
