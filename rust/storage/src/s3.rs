@@ -1037,10 +1037,12 @@ impl Configurable<StorageConfig> for S3Storage {
             StorageConfig::S3(s3_config) => {
                 let timeout_config = TimeoutConfigBuilder::default()
                     .connect_timeout(Duration::from_millis(s3_config.connect_timeout_ms))
-                    .operation_timeout(Duration::from_millis(
-                        s3_config.request_timeout_ms * s3_config.request_retry_count as u64,
+                    .operation_timeout(Duration::from_millis(s3_config.request_timeout_ms))
+                    .operation_attempt_timeout(Duration::from_millis(
+                        (s3_config.request_timeout_ms
+                            / s3_config.request_retry_count.max(1) as u64)
+                            .max(1),
                     ))
-                    .operation_attempt_timeout(Duration::from_millis(s3_config.request_timeout_ms))
                     .build();
 
                 let stalled_config = StalledStreamProtectionConfig::enabled()
