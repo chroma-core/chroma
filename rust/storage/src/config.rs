@@ -89,7 +89,7 @@ impl S3StorageConfig {
     }
 
     fn default_request_timeout_ms() -> u64 {
-        30000
+        60000
     }
 
     fn default_request_retry_count() -> u32 {
@@ -97,7 +97,7 @@ impl S3StorageConfig {
     }
 
     fn default_stall_protection_ms() -> u64 {
-        20000
+        15000
     }
 
     fn default_upload_part_size_bytes() -> usize {
