@@ -196,7 +196,7 @@ Similarly, Chroma handles the embedding of queries for you out-of-the-box.
 user_query = "What is your return policy for tooth brushes?"
 
 context = customer_support_collection.query(
-    queryTexts=[user_query],
+    query_texts=[user_query],
     n_results=1
 )['documents'][0]
 
