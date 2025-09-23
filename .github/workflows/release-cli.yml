@@ -43,7 +43,7 @@ jobs:
 
   build-windows:
     name: Build Windows binary
-    runs-on: 8core-32gb-windows-latest
+    runs-on: blacksmith-8vcpu-windows-2025
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3

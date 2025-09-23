@@ -66,8 +66,12 @@ jobs:
       matrix:
         platform:
           - { os: linux, runner: blacksmith-4vcpu-ubuntu-2404, target: x86_64 }
-          - { os: linux, runner: blacksmith-4vcpu-ubuntu-2404-arm, target: aarch64 }
-          - { os: windows, runner: 8core-32gb-windows-latest, target: x64 }
+          - {
+              os: linux,
+              runner: blacksmith-4vcpu-ubuntu-2404-arm,
+              target: aarch64,
+            }
+          - { os: windows, runner: blacksmith-8vcpu-windows-2025, target: x64 }
           - { os: macos, runner: macos-14, target: x86_64 }
           - { os: macos, runner: macos-14, target: aarch64 }
 
