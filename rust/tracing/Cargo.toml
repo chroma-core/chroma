@@ -26,4 +26,4 @@ chroma-system = { workspace = true }
 
 [features]
 grpc = ["dep:tower", "dep:http"]
-middleware = ["dep:axum", "dep:tower-http", "dep:futures"]
+middleware = ["dep:tower", "dep:axum", "dep:tower-http", "dep:futures"]
