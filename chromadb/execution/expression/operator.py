@@ -438,22 +438,18 @@ class Key:
     def __init__(self, name: str):
         self.name = name
 
-    def __eq__(self, other: Any) -> Union[Eq, bool]:  # type: ignore[override]
-        """Equality operator - can be used for Key comparison or Where condition creation"""
-        if isinstance(other, Key):
-            return self.name == other.name
-        else:
-            # Create Where condition
-            return Eq(self.name, other)
-
     def __hash__(self) -> int:
         """Make Key hashable for use in sets"""
         return hash(self.name)
 
     # Comparison operators
-    def __ne__(self, value: Any) -> Ne:  # type: ignore[override]
+    def __eq__(self, other: Any) -> Eq:  # type: ignore[override]
+        """Equality: Key('field') == value"""
+        return Eq(self.name, other)
+
+    def __ne__(self, other: Any) -> Ne:  # type: ignore[override]
         """Not equal: Key('field') != value"""
-        return Ne(self.name, value)
+        return Ne(self.name, other)
 
     def __gt__(self, value: Any) -> Gt:
         """Greater than: Key('field') > value"""
