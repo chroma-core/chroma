@@ -37,6 +37,8 @@ from chromadb.execution.expression.operator import (
     K,  # Alias for Key
     # KNN-based ranking for hybrid search
     Knn,
+    # Reciprocal Rank Fusion for combining rankings
+    Rrf,
 )
 from pathlib import Path
 import os
@@ -66,6 +68,7 @@ __all__ = [
     "Key",
     "K",
     "Knn",
+    "Rrf",
 ]
 
 from chromadb.types import CloudClientArg
