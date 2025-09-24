@@ -3,6 +3,7 @@ pub mod grpc_client_trace_layer;
 #[cfg(feature = "grpc")]
 pub mod grpc_server_trace_layer;
 pub mod init_tracer;
+#[cfg(feature = "middleware")]
 mod tower_tracing;
 pub mod util;
 
