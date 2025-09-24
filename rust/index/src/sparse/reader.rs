@@ -28,7 +28,7 @@ impl ChromaError for SparseReaderError {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct CursorHead {
     offset: u32,
-    index: usize,
+    index: u32,
 }
 
 struct CursorBody<B, D> {
@@ -59,7 +59,7 @@ where
             .is_some_and(|head| head.offset < cutoff)
         {
             let head = &mut self.heads[index];
-            let body = &mut self.bodies[head.index];
+            let body = &mut self.bodies[head.index as usize];
             let Some((offset, value)) = body
                 .dimension_iterator
                 .by_ref()
@@ -99,7 +99,7 @@ where
                 following_cursor_offset = head.offset;
                 break;
             }
-            let body = &self.bodies[head.index];
+            let body = &self.bodies[head.index as usize];
             accumulated_dimension_upper_bound += body.dimension_upper_bound;
             if threshold < accumulated_dimension_upper_bound {
                 pivot_cursor_index = Some(cursor_index);
@@ -113,7 +113,7 @@ where
             self.heads[..=pivot_cursor_index].iter().fold(
                 (0.0, following_cursor_offset),
                 |(accumulated_block_upper_bound, min_block_next_offset), head| {
-                    let body = &self.bodies[head.index];
+                    let body = &self.bodies[head.index as usize];
                     (
                         accumulated_block_upper_bound + body.block_upper_bound,
                         min_block_next_offset.min(body.block_next_offset),
@@ -132,7 +132,7 @@ where
                     .iter()
                     .take_while(|head| head.offset <= pivot_offset)
                     .map(|head| {
-                        let body = &self.bodies[head.index];
+                        let body = &self.bodies[head.index as usize];
                         body.query * body.value
                     })
                     .sum();
@@ -160,7 +160,7 @@ where
 
         let head = CursorHead {
             offset,
-            index: self.heads.len(),
+            index: self.heads.len() as u32,
         };
 
         let Some((block_next_offset, block_max)) = block_iterator
