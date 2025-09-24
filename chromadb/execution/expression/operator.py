@@ -443,13 +443,13 @@ class Key:
         return hash(self.name)
 
     # Comparison operators
-    def __eq__(self, other: Any) -> Eq:  # type: ignore[override]
+    def __eq__(self, value: Any) -> Eq:  # type: ignore[override]
         """Equality: Key('field') == value"""
-        return Eq(self.name, other)
+        return Eq(self.name, value)
 
-    def __ne__(self, other: Any) -> Ne:  # type: ignore[override]
+    def __ne__(self, value: Any) -> Ne:  # type: ignore[override]
         """Not equal: Key('field') != value"""
-        return Ne(self.name, other)
+        return Ne(self.name, value)
 
     def __gt__(self, value: Any) -> Gt:
         """Greater than: Key('field') > value"""
