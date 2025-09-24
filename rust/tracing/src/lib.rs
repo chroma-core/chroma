@@ -14,4 +14,6 @@ pub use init_tracer::{
     init_global_filter_layer, init_otel_layer, init_otel_tracing, init_panic_tracing_hook,
     init_stdout_layer, init_tracing, OtelFilter, OtelFilterLevel,
 };
+
+#[cfg(feature = "middleware")]
 pub use tower_tracing::add_tracing_middleware;
