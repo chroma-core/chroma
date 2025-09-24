@@ -132,7 +132,24 @@ const sidebarConfig: AppSection[] = [
       {
         id: "features",
         name: "Features",
-        pages: [{ id: "collection-forking", name: "Collection Forking" }],
+        pages: [
+          { id: "collection-forking", name: "Collection Forking" },
+        ],
+      },
+      {
+        id: "search-api",
+        name: "Search API (Beta)",
+        pages: [
+          { id: "overview", name: "Overview" },
+          { id: "search-basics", name: "Search Basics" },
+          { id: "filtering", name: "Filtering with Where" },
+          { id: "ranking", name: "Ranking and Scoring" },
+          { id: "hybrid-search", name: "Hybrid Search with RRF" },
+          { id: "pagination-selection", name: "Pagination & Selection" },
+          { id: "batch-operations", name: "Batch Operations" },
+          { id: "examples", name: "Examples & Patterns" },
+          { id: "migration", name: "Migration Guide" },
+        ],
       },
       {
         id: "package-search",

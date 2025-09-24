@@ -5,6 +5,10 @@ name: Query and Get
 
 # Query and Get Data from Chroma Collections
 
+{% Note type="info" %}
+**New Search API Available**: Chroma Cloud users can now use the powerful [Search API](/cloud/search-api/overview) for advanced hybrid search capabilities with better filtering, ranking, and batch operations.
+{% /Note %}
+
 {% Tabs %}
 
 {% Tab label="python" %}
