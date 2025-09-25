@@ -28,7 +28,7 @@ impl ChromaError for SparseReaderError {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct CursorHead {
     offset: u32,
-    index: u32,
+    body_index: u32,
 }
 
 struct CursorBody<B, D> {
@@ -39,163 +39,6 @@ struct CursorBody<B, D> {
     dimension_upper_bound: f32,
     query: f32,
     value: f32,
-}
-
-struct Cursors<B, D> {
-    heads: Vec<CursorHead>,
-    bodies: Vec<CursorBody<B, D>>,
-}
-
-impl<B, D> Cursors<B, D>
-where
-    B: Iterator<Item = (u32, f32)>,
-    D: Iterator<Item = (u32, f32)>,
-{
-    fn advance(&mut self, cutoff: u32, mask: &SignedRoaringBitmap) {
-        let mut index = 0;
-        while self
-            .heads
-            .get(index)
-            .is_some_and(|head| head.offset < cutoff)
-        {
-            let head = &mut self.heads[index];
-            let body = &mut self.bodies[head.index as usize];
-            let Some((offset, value)) = body
-                .dimension_iterator
-                .by_ref()
-                .find(|&(offset, _)| cutoff <= offset && mask.contains(offset))
-            else {
-                self.heads.remove(index);
-                continue;
-            };
-            head.offset = offset;
-            body.value = value;
-            if body.block_next_offset <= offset {
-                let Some((block_next_offset, block_max)) = body
-                    .block_iterator
-                    .by_ref()
-                    .find(|&(block_next_offset, _)| offset < block_next_offset)
-                else {
-                    self.heads.remove(index);
-                    continue;
-                };
-                body.block_next_offset = block_next_offset;
-                body.block_upper_bound = body.query * block_max;
-            }
-            index += 1;
-        }
-    }
-
-    fn first_offset(&self) -> Option<u32> {
-        self.heads.first().map(|head| head.offset)
-    }
-
-    fn pivot(&self, global_offset: u32, threshold: f32) -> Option<(u32, Option<f32>)> {
-        let mut accumulated_dimension_upper_bound = 0.0;
-        let mut following_cursor_offset = u32::MAX;
-        let mut pivot_cursor_index = None;
-        for (cursor_index, head) in self.heads.iter().enumerate() {
-            if pivot_cursor_index.is_some() {
-                following_cursor_offset = head.offset;
-                break;
-            }
-            let body = &self.bodies[head.index as usize];
-            accumulated_dimension_upper_bound += body.dimension_upper_bound;
-            if threshold < accumulated_dimension_upper_bound {
-                pivot_cursor_index = Some(cursor_index);
-            }
-        }
-
-        let pivot_cursor_index = pivot_cursor_index?;
-        let pivot_offset = self.heads[pivot_cursor_index].offset;
-
-        let (accumulated_block_upper_bound, min_block_next_offset) =
-            self.heads[..=pivot_cursor_index].iter().fold(
-                (0.0, following_cursor_offset),
-                |(accumulated_block_upper_bound, min_block_next_offset), head| {
-                    let body = &self.bodies[head.index as usize];
-                    (
-                        accumulated_block_upper_bound + body.block_upper_bound,
-                        min_block_next_offset.min(body.block_next_offset),
-                    )
-                },
-            );
-
-        let cutoff_score =
-            if accumulated_block_upper_bound < threshold && pivot_offset < min_block_next_offset {
-                (min_block_next_offset, None)
-            } else if pivot_offset < global_offset {
-                (global_offset, None)
-            } else if pivot_offset <= self.heads[0].offset {
-                let score = self
-                    .heads
-                    .iter()
-                    .take_while(|head| head.offset <= pivot_offset)
-                    .map(|head| {
-                        let body = &self.bodies[head.index as usize];
-                        body.query * body.value
-                    })
-                    .sum();
-                (pivot_offset + 1, Some(score))
-            } else {
-                (pivot_offset, None)
-            };
-        Some(cutoff_score)
-    }
-
-    fn push(
-        &mut self,
-        mut block_iterator: B,
-        mut dimension_iterator: D,
-        dimension_max: f32,
-        mask: &SignedRoaringBitmap,
-        query: f32,
-    ) -> Result<(), SparseReaderError> {
-        let Some((offset, value)) = dimension_iterator
-            .by_ref()
-            .find(|&(offset, _)| mask.contains(offset))
-        else {
-            return Ok(());
-        };
-
-        let head = CursorHead {
-            offset,
-            index: self.heads.len() as u32,
-        };
-
-        let Some((block_next_offset, block_max)) = block_iterator
-            .by_ref()
-            .find(|&(block_next_offset, _)| offset < block_next_offset)
-        else {
-            return Ok(());
-        };
-
-        let body = CursorBody {
-            block_iterator,
-            block_next_offset,
-            block_upper_bound: query * block_max,
-            dimension_iterator,
-            dimension_upper_bound: query * dimension_max,
-            query,
-            value,
-        };
-
-        self.heads.push(head);
-        self.bodies.push(body);
-
-        Ok(())
-    }
-
-    fn sort(&mut self) {
-        self.heads.sort_unstable();
-    }
-
-    fn with_capacity(capacity: usize) -> Self {
-        Self {
-            heads: Vec::with_capacity(capacity),
-            bodies: Vec::with_capacity(capacity),
-        }
-    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -295,34 +138,102 @@ impl<'me> SparseReader<'me> {
         let dimension_count = collected_query.len();
         let all_dimension_max = self.get_dimension_max().await?;
 
-        let mut cursors = Cursors::with_capacity(dimension_count);
+        let mut heads = Vec::with_capacity(dimension_count);
+        let mut bodies = Vec::with_capacity(dimension_count);
         for (dimension_id, encoded_dimension_id, query) in &collected_query {
             let Some(dimension_max) = all_dimension_max.get(dimension_id) else {
                 continue;
             };
-            cursors.push(
-                self.get_blocks(encoded_dimension_id).await?,
-                self.get_offset_values(&encoded_dimension_id, ..).await?,
-                *dimension_max,
-                &mask,
-                *query,
-            )?;
-        }
-        cursors.sort();
 
-        let Some(mut first_unchecked_offset) = cursors.first_offset() else {
+            let mut dimension_iterator = self.get_offset_values(&encoded_dimension_id, ..).await?;
+            let Some((offset, value)) = dimension_iterator
+                .by_ref()
+                .find(|&(offset, _)| mask.contains(offset))
+            else {
+                continue;
+            };
+            let head = CursorHead {
+                offset,
+                body_index: bodies.len() as u32,
+            };
+
+            let mut block_iterator = self.get_blocks(encoded_dimension_id).await?;
+            let Some((block_next_offset, block_max)) = block_iterator
+                .by_ref()
+                .find(|&(block_next_offset, _)| offset < block_next_offset)
+            else {
+                continue;
+            };
+            let body = CursorBody {
+                block_iterator,
+                block_next_offset,
+                block_upper_bound: query * block_max,
+                dimension_iterator,
+                dimension_upper_bound: query * dimension_max,
+                query: *query,
+                value,
+            };
+
+            heads.push(head);
+            bodies.push(body);
+        }
+        heads.sort_unstable();
+
+        let Some(mut first_unchecked_offset) = heads.first().map(|head| head.offset) else {
             return Ok(Vec::new());
         };
         let mut threshold = f32::MIN;
         let mut top_scores = BinaryHeap::with_capacity(k as usize);
 
         loop {
-            let Some((cutoff, score)) = cursors.pivot(first_unchecked_offset, threshold) else {
+            let mut accumulated_dimension_upper_bound = 0.0;
+            let mut following_offset = u32::MAX;
+            let mut pivot_index = Option::<usize>::None;
+
+            for (index, head) in heads.iter().enumerate() {
+                if pivot_index.is_some_and(|index| heads[index].offset < head.offset) {
+                    following_offset = head.offset;
+                    break;
+                }
+                let body = &bodies[head.body_index as usize];
+                accumulated_dimension_upper_bound += body.dimension_upper_bound;
+                if threshold <= accumulated_dimension_upper_bound {
+                    pivot_index = Some(index);
+                }
+            }
+
+            let Some(pivot_index) = pivot_index else {
                 break;
             };
+            let pivot_offset = heads[pivot_index].offset;
 
-            if let Some(score) = score {
-                let offset = cutoff - 1;
+            let (accumulated_block_upper_bound, min_block_next_offset) =
+                heads[..=pivot_index].iter().fold(
+                    (0.0, following_offset),
+                    |(accumulated_block_upper_bound, min_block_next_offset), head| {
+                        let body = &bodies[head.body_index as usize];
+                        (
+                            accumulated_block_upper_bound + body.block_upper_bound,
+                            min_block_next_offset.min(body.block_next_offset),
+                        )
+                    },
+                );
+
+            let cutoff = if accumulated_block_upper_bound < threshold
+                && pivot_offset < min_block_next_offset
+            {
+                min_block_next_offset
+            } else if pivot_offset < first_unchecked_offset {
+                first_unchecked_offset
+            } else if pivot_offset <= heads[0].offset {
+                let offset = pivot_offset;
+                let score = heads[..=pivot_index]
+                    .iter()
+                    .map(|head| {
+                        let body = &bodies[head.body_index as usize];
+                        body.query * body.value
+                    })
+                    .sum();
                 if (top_scores.len() as u32) < k {
                     top_scores.push(Score { score, offset });
                 } else if top_scores
@@ -338,11 +249,47 @@ impl<'me> SparseReader<'me> {
                         .map(|score| score.score)
                         .unwrap_or_default();
                 }
-                first_unchecked_offset = cutoff;
+                first_unchecked_offset = pivot_offset + 1;
+                first_unchecked_offset
+            } else {
+                pivot_offset
+            };
+
+            let mut head_index = 0;
+            while heads
+                .get(head_index)
+                .is_some_and(|head| head.offset < cutoff)
+            {
+                let head = &mut heads[head_index];
+                let body = &mut bodies[head.body_index as usize];
+                let Some((offset, value)) = body
+                    .dimension_iterator
+                    .by_ref()
+                    .find(|&(offset, _)| cutoff <= offset && mask.contains(offset))
+                else {
+                    heads.remove(head_index);
+                    continue;
+                };
+                head.offset = offset;
+
+                if body.block_next_offset <= offset {
+                    let Some((block_next_offset, block_max)) = body
+                        .block_iterator
+                        .by_ref()
+                        .find(|&(block_next_offset, _)| offset < block_next_offset)
+                    else {
+                        heads.remove(head_index);
+                        continue;
+                    };
+                    body.block_next_offset = block_next_offset;
+                    body.block_upper_bound = body.query * block_max;
+                }
+                body.value = value;
+
+                head_index += 1;
             }
 
-            cursors.advance(cutoff, &mask);
-            cursors.sort();
+            heads.sort_unstable();
         }
 
         Ok(top_scores.into_sorted_vec())
