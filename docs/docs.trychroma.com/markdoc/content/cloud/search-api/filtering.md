@@ -5,9 +5,11 @@ name: Filtering with Where
 
 # Filtering with Where
 
-Learn how to filter search results using Where expressions and the Key/K class.
+Learn how to filter search results using Where expressions and the Key/K class to narrow down your search to specific documents, IDs, or metadata values.
 
 ## The Key/K Class
+
+The `Key` class (aliased as `K` for brevity) provides a fluent interface for building filter expressions. Use `K` to reference document fields, IDs, and metadata properties.
 
 {% Tabs %}
 
@@ -15,15 +17,15 @@ Learn how to filter search results using Where expressions and the Key/K class.
 ```python
 from chromadb import K
 
-# K is an alias for Key - use either interchangeably
-from chromadb import Key
-
-# Simple equality
+# K is an alias for Key - use K for more concise code
+# Filter by metadata field
 K("status") == "active"
 
-# Comparison operators
-K("score") > 0.5
-K("year") >= 2020
+# Filter by document content
+K.DOCUMENT.contains("machine learning")
+
+# Filter by document IDs
+K.ID.is_in(["doc1", "doc2", "doc3"])
 ```
 {% /Tab %}
 
@@ -35,163 +37,427 @@ K("year") >= 2020
 
 {% /Tabs %}
 
-## Key/K Class Complete Reference
+## Filterable Fields
 
-[TODO: Add complete reference table]
-| Constant | Value | Description |
-|----------|-------|-------------|
-| K.ID | "#id" | Document ID |
-| K.DOCUMENT | "#document" | Document content |
-| K.EMBEDDING | "#embedding" | Embedding vector |
-| K.METADATA | "#metadata" | All metadata |
-| K.SCORE | "#score" | Search score |
+| Field | Usage | Description |
+|-------|-------|-------------|
+| `K.ID` | `K.ID.is_in(["id1", "id2"])` | Filter by document IDs |
+| `K.DOCUMENT` | `K.DOCUMENT.contains("text")` | Filter by document content |
+| `K("field_name")` | `K("status") == "active"` | Filter by any metadata field |
 
 ## Comparison Operators
 
-[TODO: Add all operators with examples and edge cases]
+**Supported operators:**
+- `==` - Equality (all types: string, numeric, boolean)
+- `!=` - Inequality (all types: string, numeric, boolean)
+- `>` - Greater than (numeric only)
+- `>=` - Greater than or equal (numeric only)
+- `<` - Less than (numeric only)
+- `<=` - Less than or equal (numeric only)
+
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
-# Equality
-K("status") == "active"  # Exact match
-K("count") == 5          # Numeric equality
+# Equality and inequality (all types)
+K("status") == "published"     # String equality
+K("views") != 0                # Numeric inequality
+K("featured") == True          # Boolean equality
 
-# Inequality
-K("status") != "draft"   # Not equal
-
-# Greater/Less than
-K("score") > 0.5
-K("score") >= 0.5
-K("score") < 1.0
-K("score") <= 1.0
+# Numeric comparisons (numbers only)
+K("price") > 100               # Greater than
+K("rating") >= 4.5             # Greater than or equal
+K("stock") < 10                # Less than
+K("discount") <= 0.25          # Less than or equal
 ```
+{% /Tab %}
 
-[TODO: Type handling for different data types]
-[TODO: NULL/None handling]
-[TODO: Edge cases and gotchas]
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
 
-## Collection Operators
+{% /Tabs %}
 
-[TODO: Complete examples for each operator]
+{% Note type="info" %}
+Chroma supports three data types for metadata: strings, numbers (int/float), and booleans. Order comparison operators (`>`, `<`, `>=`, `<=`) currently only work with numeric types.
+{% /Note %}
+
+## Set and String Operators
+
+**Supported operators:**
+- `is_in()` - Value matches any in the list
+- `not_in()` - Value doesn't match any in the list
+- `contains()` - String contains substring (case-sensitive, currently K.DOCUMENT only)
+- `not_contains()` - String doesn't contain substring (currently K.DOCUMENT only)
+- `regex()` - String matches regex pattern (currently K.DOCUMENT only)
+- `not_regex()` - String doesn't match regex pattern (currently K.DOCUMENT only)
+
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
-# is_in - check if value in list
-K("category").is_in(["tech", "science"])
+# Set membership operators (works on all fields)
+K.ID.is_in(["doc1", "doc2", "doc3"])           # Match any ID in list
+K("category").is_in(["tech", "science"])       # Match any category
+K("status").not_in(["draft", "deleted"])       # Exclude specific values
 
-# not_in - check if value not in list
-K("status").not_in(["draft", "deleted"])
+# String content operators (currently K.DOCUMENT only)
+K.DOCUMENT.contains("machine learning")        # Substring search in document
+K.DOCUMENT.not_contains("deprecated")          # Exclude documents with text
+K.DOCUMENT.regex(r"\bAPI\b")                   # Match whole word "API" in document
 
-# contains - substring search
-K.DOCUMENT.contains("machine learning")
-
-# not_contains
-K.DOCUMENT.not_contains("deprecated")
-
-# regex - pattern matching
-K("email").regex(r"^[a-zA-Z0-9+_.-]+@[a-zA-Z0-9.-]+$")
-
-# not_regex
-K("phone").not_regex(r"^\d{3}-\d{3}-\d{4}$")
+# Note: String pattern matching on metadata fields not yet supported
+# K("title").contains("Python")                # NOT YET SUPPORTED
+# K("email").regex(r".*@company\.com$")        # NOT YET SUPPORTED
 ```
+{% /Tab %}
 
-[TODO: Performance implications of each operator]
-[TODO: Case sensitivity notes]
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
+
+{% /Tabs %}
+
+{% Note type="info" %}
+String operations like `contains()` and `regex()` are case-sensitive by default. The `is_in()` operator is efficient even with large lists.
+{% /Note %}
 
 ## Logical Operators
 
-[TODO: Precedence rules]
-[TODO: Complex nested examples]
+**Supported operators:**
+- `&` - Logical AND (all conditions must match)
+- `|` - Logical OR (any condition can match)
+
+Combine multiple conditions using these operators. Always use parentheses to ensure correct precedence.
+
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
-# AND operator (&)
+# AND operator (&) - all conditions must match
 (K("status") == "published") & (K("year") >= 2020)
 
-# OR operator (|)
+# OR operator (|) - any condition can match
 (K("category") == "tech") | (K("category") == "science")
 
-# Complex nesting
-((K("status") == "published") & (K("featured") == True)) | (K("priority") > 5)
+# Combining with document and ID filters
+(K.DOCUMENT.contains("AI")) & (K("author") == "Smith")
+(K.ID.is_in(["id1", "id2"])) | (K("featured") == True)
+
+# Complex nesting - use parentheses for clarity
+(
+    (K("status") == "published") & 
+    ((K("category") == "tech") | (K("category") == "science")) &
+    (K("rating") >= 4.0)
+)
 ```
+{% /Tab %}
 
-[TODO: Parentheses and precedence]
-[TODO: Common mistakes to avoid]
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
 
-## MongoDB-style Syntax Complete Reference
+{% /Tabs %}
 
-[TODO: All operators with examples]
+{% Note type="warning" %}
+Always use parentheses around each condition when using logical operators. Python's operator precedence may not work as expected without them.
+{% /Note %}
+
+## Dictionary Syntax (MongoDB-style)
+
+You can also use dictionary syntax instead of K expressions. This is useful when building filters programmatically.
+
+**Supported dictionary operators:**
+- Direct value - Shorthand for equality
+- `$eq` - Equality
+- `$ne` - Not equal
+- `$gt` - Greater than (numeric only)
+- `$gte` - Greater than or equal (numeric only)
+- `$lt` - Less than (numeric only)
+- `$lte` - Less than or equal (numeric only)
+- `$in` - Value in list
+- `$nin` - Value not in list
+- `$contains` - String contains
+- `$not_contains` - String doesn't contain
+- `$regex` - Regex match
+- `$not_regex` - Regex doesn't match
+- `$and` - Logical AND
+- `$or` - Logical OR
+
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
-# Comparison operators
-{"field": {"$eq": "value"}}
-{"field": {"$ne": "value"}}
-{"field": {"$gt": 10}}
-{"field": {"$gte": 10}}
-{"field": {"$lt": 100}}
-{"field": {"$lte": 100}}
+# Direct equality (shorthand)
+{"status": "active"}                        # Same as K("status") == "active"
 
-# Collection operators
-{"field": {"$in": ["val1", "val2"]}}
-{"field": {"$nin": ["val1", "val2"]}}
-{"field": {"$contains": "text"}}
-{"field": {"$not_contains": "text"}}
-{"field": {"$regex": "^pattern"}}
-{"field": {"$not_regex": "pattern"}}
+# Comparison operators
+{"status": {"$eq": "published"}}            # Same as K("status") == "published"
+{"count": {"$ne": 0}}                       # Same as K("count") != 0
+{"price": {"$gt": 100}}                     # Same as K("price") > 100 (numbers only)
+{"rating": {"$gte": 4.5}}                   # Same as K("rating") >= 4.5 (numbers only)
+{"stock": {"$lt": 10}}                      # Same as K("stock") < 10 (numbers only)
+{"discount": {"$lte": 0.25}}                # Same as K("discount") <= 0.25 (numbers only)
+
+# Set membership operators
+{"#id": {"$in": ["id1", "id2"]}}            # Same as K.ID.is_in(["id1", "id2"])
+{"category": {"$in": ["tech", "ai"]}}       # Same as K("category").is_in(["tech", "ai"])
+{"status": {"$nin": ["draft", "deleted"]}}  # Same as K("status").not_in(["draft", "deleted"])
+
+# String operators
+{"#document": {"$contains": "API"}}         # Same as K.DOCUMENT.contains("API")
+{"title": {"$not_contains": "draft"}}       # Same as K("title").not_contains("draft")
+{"email": {"$regex": ".*@example\\.com"}}   # Same as K("email").regex(".*@example\\.com")
+{"version": {"$not_regex": "^beta"}}        # Same as K("version").not_regex("^beta")
 
 # Logical operators
-{"$and": [{"field1": "val1"}, {"field2": "val2"}]}
-{"$or": [{"field1": "val1"}, {"field2": "val2"}]}
+{"$and": [
+    {"status": "published"},
+    {"year": {"$gte": 2020}},
+    {"#document": {"$contains": "AI"}}
+]}                                          # Combines multiple conditions with AND
+
+{"$or": [
+    {"category": "tech"},
+    {"category": "science"},
+    {"featured": True}
+]}                                          # Combines multiple conditions with OR
+
+# Complex nested example
+{
+    "$and": [
+        {"$or": [
+            {"category": "tech"},
+            {"category": "science"}
+        ]},
+        {"status": "published"},
+        {"quality_score": {"$gte": 0.8}}
+    ]
+}
 ```
+{% /Tab %}
 
-## Filtering by Special Fields
-
-[TODO: ID filtering patterns]
-```python
-# Filter by specific IDs
-K.ID.is_in(["id1", "id2", "id3"])
-
-# Exclude specific IDs
-K.ID.not_in(["id4", "id5"])
-
-# Document content filtering
-K.DOCUMENT.contains("search term")
-
-# Score filtering (in re-ranking scenarios)
-K.SCORE > 0.8
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
 ```
+{% /Tab %}
 
-## Metadata Field Type Handling
+{% /Tabs %}
 
-[TODO: How different types are handled]
-- Strings: exact match, contains, regex
-- Numbers: comparison operators
-- Booleans: equality only
-- Arrays: element matching
-- Nested objects: dot notation (if supported)
-
-## Filter Optimization
-
-[TODO: Performance tips]
-- Index usage
-- Filter selectivity
-- Operator performance comparison
-- Query planning
+{% Note type="info" %}
+Each dictionary can only contain one field or one logical operator (`$and`/`$or`). For field dictionaries, only one operator is allowed per field.
+{% /Note %}
 
 ## Common Filtering Patterns
 
-[TODO: Real-world patterns]
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
-# Date range filtering
-(K("created_at") >= "2024-01-01") & (K("created_at") < "2024-02-01")
+# Filter by specific document IDs
+search = Search().where(K.ID.is_in(["doc_001", "doc_002", "doc_003"]))
 
-# Multi-value matching
-K("tags").is_in(["ai", "ml", "nlp"])
+# Exclude already processed documents
+processed_ids = ["doc_100", "doc_101"]
+search = Search().where(K.ID.not_in(processed_ids))
 
-# Null checking
-K("optional_field") != None
+# Full-text search in documents
+search = Search().where(K.DOCUMENT.contains("quantum computing"))
 
-# Complex business logic
-((K("status") == "active") & (K("score") > 0.7)) | (K("featured") == True)
+# Combine document search with metadata
+search = Search().where(
+    K.DOCUMENT.contains("machine learning") & 
+    (K("language") == "en")
+)
+
+# Price range filtering
+search = Search().where(
+    (K("price") >= 100) & 
+    (K("price") <= 500)
+)
+
+# Multi-field filtering
+search = Search().where(
+    (K("status") == "active") &
+    (K("category").is_in(["tech", "ai", "ml"])) &
+    (K("score") >= 0.8)
+)
 ```
+{% /Tab %}
 
-## Anti-Patterns to Avoid
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
 
-[TODO: Common mistakes]
-- Over-filtering reducing recall
-- Inefficient operator combinations
-- Type mismatches
-- Case sensitivity issues
+{% /Tabs %}
+
+
+
+
+
+
+
+## Edge Cases and Important Behavior
+
+### Missing Keys
+When filtering on a metadata field that doesn't exist for a document:
+- Most operators (`==`, `>`, `<`, `>=`, `<=`, `is_in()`) evaluate to `false` - the document won't match
+- `!=` evaluates to `true` - documents without the field are considered "not equal" to any value
+- `not_in()` evaluates to `true` - documents without the field are not in any list
+
+{% Tabs %}
+
+{% Tab label="python" %}
+```python
+# If a document doesn't have a "category" field:
+K("category") == "tech"         # false - won't match
+K("category") != "tech"         # true - will match
+K("category").is_in(["tech"])   # false - won't match  
+K("category").not_in(["tech"])  # true - will match
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
+
+{% /Tabs %}
+
+### Mixed Types
+Avoid storing different data types under the same metadata key across documents. Query behavior is undefined when comparing values of different types.
+
+{% Tabs %}
+
+{% Tab label="python" %}
+```python
+# DON'T DO THIS - undefined behavior
+# Document 1: {"score": 95}      (numeric)
+# Document 2: {"score": "95"}    (string)
+# Document 3: {"score": true}    (boolean)
+
+K("score") > 90  # Undefined results when mixed types exist
+
+# DO THIS - consistent types
+# All documents: {"score": <numeric>} or all {"score": <string>}
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
+
+{% /Tabs %}
+
+### String Pattern Matching Limitations
+
+**Currently, `contains()`, `not_contains()`, `regex()`, and `not_regex()` operators only work on `K.DOCUMENT`**. These operators do not yet support metadata fields.
+
+Additionally, the pattern must contain at least 3 literal characters to ensure accurate results.
+
+{% Tabs %}
+
+{% Tab label="python" %}
+```python
+# Currently supported - K.DOCUMENT only
+K.DOCUMENT.contains("API")              # ✓ Works
+K.DOCUMENT.regex(r"v\d\.\d\.\d")       # ✓ Works
+K.DOCUMENT.contains("machine learning") # ✓ Works
+
+# NOT YET SUPPORTED - metadata fields
+K("title").contains("Python")           # ✗ Not supported yet
+K("description").regex(r"API.*")        # ✗ Not supported yet
+
+# Pattern length requirements (for K.DOCUMENT)
+K.DOCUMENT.contains("API")              # ✓ 3 characters - good
+K.DOCUMENT.contains("AI")               # ✗ Only 2 characters - may give incorrect results
+K.DOCUMENT.regex(r"\d+")                # ✗ No literal characters - may give incorrect results
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
+
+{% /Tabs %}
+
+{% Note type="warning" %}
+String pattern matching currently only works on `K.DOCUMENT`. Support for metadata fields is not yet available. Also, patterns with fewer than 3 literal characters may return incorrect results.
+{% /Note %}
+
+{% Note type="info" %}
+TODO: When collection schema is supported, users will be able to opt-in to enable additional indexes for string pattern matching on metadata fields.
+{% /Note %}
+
+## Complete Example
+
+Here's a practical example combining different filter types:
+
+{% Tabs %}
+
+{% Tab label="python" %}
+```python
+from chromadb import Search, K, Knn
+
+# Complex filter combining IDs, document content, and metadata
+search = (Search()
+    .where(
+        # Exclude specific documents
+        K.ID.not_in(["excluded_001", "excluded_002"]) &
+        
+        # Must contain specific content
+        K.DOCUMENT.contains("artificial intelligence") &
+        
+        # Metadata conditions
+        (K("status") == "published") &
+        (K("quality_score") >= 0.75) &
+        (
+            (K("category") == "research") | 
+            (K("category") == "tutorial")
+        ) &
+        (K("year") >= 2023)
+    )
+    .rank(Knn(query=embedding_vector))
+    .limit(10)
+    .select(K.DOCUMENT, "title", "author", "year")
+)
+
+results = collection.search(search)
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
+
+{% /Tabs %}
+
+## Tips and Best Practices
+
+- **Use parentheses liberally** when combining conditions with `&` and `|` to avoid precedence issues
+- **Filter before ranking** when possible to reduce the number of vectors to score
+- **Be specific with ID filters** - using `K.ID.is_in()` with a small list is very efficient
+- **String matching is case-sensitive** - normalize your data if case-insensitive matching is needed
+- **Use the right operator** - `is_in()` for multiple exact matches, `contains()` for substring search
+
+## Next Steps
+
+- Learn about [ranking and scoring](./ranking) to order your filtered results
+- See [practical examples](./examples) of filtering in real-world scenarios
+- Explore [batch operations](./batch-operations) for running multiple filtered searches
