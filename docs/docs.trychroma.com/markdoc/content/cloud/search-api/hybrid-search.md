@@ -5,11 +5,11 @@ name: Hybrid Search with RRF
 
 # Hybrid Search with RRF
 
-Learn how to combine multiple ranking strategies using Reciprocal Rank Fusion (RRF).
+Learn how to combine multiple ranking strategies using Reciprocal Rank Fusion (RRF). RRF is ideal for hybrid search scenarios where you want to merge results from different ranking methods (e.g., dense and sparse embeddings).
 
 ## Understanding RRF
 
-Reciprocal Rank Fusion is a technique for combining multiple ranking strategies effectively.
+Reciprocal Rank Fusion combines multiple rankings by using rank positions rather than raw scores. This makes it effective for merging rankings with different score scales.
 
 {% Tabs %}
 
@@ -17,20 +17,20 @@ Reciprocal Rank Fusion is a technique for combining multiple ranking strategies 
 ```python
 from chromadb import Rrf, Knn
 
-# Basic RRF with equal weights
+# Basic RRF - equal weights for both rankings
 rrf = Rrf([
     Knn(query=dense_vector, return_rank=True),
     Knn(query=sparse_vector, key="sparse_embedding", return_rank=True)
 ])
 
-# Weighted RRF
+# Weighted RRF - adjust importance of each ranking
 rrf = Rrf(
     ranks=[
         Knn(query=dense_vector, return_rank=True),
         Knn(query=sparse_vector, key="sparse_embedding", return_rank=True)
     ],
-    weights=[2.0, 1.0],  # First ranking 2x more important
-    k=60                 # Smoothing parameter
+    weights=[2.0, 1.0],  # Dense embedding 2x more important
+    k=60                 # Smoothing parameter (default: 60)
 )
 ```
 {% /Tab %}
@@ -43,188 +43,417 @@ rrf = Rrf(
 
 {% /Tabs %}
 
-## RRF Algorithm Explained
+{% Note type="warning" %}
+All ranking expressions in RRF must have `return_rank=True`. This ensures they return rank positions (0, 1, 2...) instead of distances.
+{% /Note %}
 
-[TODO: Detailed explanation with formula]
-```
-RRF Score = -Σ(weight_i / (k + rank_i))
-```
-- Negative because Chroma uses ascending order (lower = better)
-- rank_i is the position (0, 1, 2, ...)
-- k is smoothing parameter (default: 60)
-- weight_i is the importance of each ranking
+## How RRF Works
 
-[TODO: Visual diagram of RRF]
+RRF combines rankings using the formula:
 
-## Why RRF vs Linear Combination?
+{% CenteredContent %}
+{% Latex %} \\displaystyle \\text{score} = -\\sum_{i} \\frac{w_i}{k + r_i} {% /Latex %}
+{% /CenteredContent %}
 
-[TODO: Comparison and benefits]
-- Rank-based vs score-based fusion
-- Handles different score scales
-- More robust to outliers
-- Better for heterogeneous sources
+Where:
+- {% Latex %} w_i {% /Latex %} = weight for ranking i (default: 1.0)
+- {% Latex %} r_i {% /Latex %} = rank position from ranking i (0, 1, 2, ...)
+- {% Latex %} k {% /Latex %} = smoothing parameter (default: 60)
 
-## Complete Rrf Parameters
+The score is negative because Chroma uses ascending order (lower scores = better matches).
 
-[TODO: Full parameter reference]
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
-Rrf(
-    ranks,           # List[Rank] - ranking expressions
-    k=60,           # Smoothing constant (higher = less emphasis on top ranks)
-    weights=None,   # Optional weights for each rank
-    normalize=False # Whether to normalize weights to sum to 1
-)
+# Example: How RRF calculates scores
+# Document A: rank 0 in first Knn, rank 2 in second Knn
+# Document B: rank 1 in first Knn, rank 0 in second Knn
+
+# With equal weights (1.0, 1.0) and k=60:
+# Document A score = -(1.0/(60+0) + 1.0/(60+2)) = -(0.0167 + 0.0161) = -0.0328
+# Document B score = -(1.0/(60+1) + 1.0/(60+0)) = -(0.0164 + 0.0167) = -0.0331
+# Document A ranks higher (smaller negative score)
 ```
+{% /Tab %}
 
-### The return_rank Requirement
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
 
-[TODO: Explain why return_rank=True is needed]
+{% /Tabs %}
+
+## Rrf Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `ranks` | List[Rank] | Required | List of ranking expressions (must have `return_rank=True`) |
+| `k` | int | `60` | Smoothing parameter - higher values reduce emphasis on top ranks |
+| `weights` | List[float] or None | `None` | Weights for each ranking (defaults to 1.0 for each) |
+| `normalize` | bool | `False` | If `True`, normalize weights to sum to 1.0 |
+
+## RRF vs Linear Combination
+
+| Approach | Use Case | Pros | Cons |
+|----------|----------|------|------|
+| **RRF** | Different score scales (e.g., dense + sparse) | Scale-agnostic, robust to outliers | Requires `return_rank=True` |
+| **Linear Combination** | Same score scales | Simple, preserves distances | Sensitive to scale differences |
+
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
-# CORRECT - using rank positions
-Rrf([
-    Knn(query=v1, return_rank=True),  # Returns 0, 1, 2, ...
-    Knn(query=v2, return_rank=True)
+# RRF - works well with different scales
+rrf = Rrf([
+    Knn(query=dense_vec, return_rank=True),      # Distance scale: 0.1-2.0
+    Knn(query=sparse_vec, key="sparse_embedding", return_rank=True)  # Different scale: 0-100
 ])
 
-# INCORRECT - using distances
-Rrf([
-    Knn(query=v1),  # Returns distances - won't work correctly!
-    Knn(query=v2)
-])
+# Linear combination - better when scales are similar
+linear = Knn(query=dense_vec) * 0.7 + Knn(query=other_dense, key="other") * 0.3
 ```
+{% /Tab %}
 
-## Weight Configuration Strategies
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
 
-[TODO: Different weighting approaches]
+{% /Tabs %}
+
+## The return_rank Requirement
+
+RRF requires rank positions (0, 1, 2...) not distance scores. Always set `return_rank=True` on all Knn expressions used in RRF.
+
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
-# Equal weights (default)
-Rrf([rank1, rank2, rank3])  # Each weight = 1.0
+# ✓ CORRECT - returns rank positions
+rrf = Rrf([
+    Knn(query=v1, return_rank=True),  # Returns: 0, 1, 2, 3...
+    Knn(query=v2, key="sparse_embedding", return_rank=True)
+])
 
-# Custom weights (relative importance)
-Rrf(
-    ranks=[semantic, keyword, title],
-    weights=[3.0, 2.0, 1.0]  # Semantic 3x, keyword 2x, title 1x
+# ✗ INCORRECT - returns distances
+rrf = Rrf([
+    Knn(query=v1),  # Returns: 0.23, 0.45, 0.67... (distances)
+    Knn(query=v2, key="sparse_embedding")
+])
+# This will produce incorrect results!
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
+
+{% /Tabs %}
+
+## Weight Configuration
+
+{% Tabs %}
+
+{% Tab label="python" %}
+```python
+# Equal weights (default) - each ranking equally important
+rrf = Rrf([
+    Knn(query=dense_vec, return_rank=True),
+    Knn(query=sparse_vec, key="sparse_embedding", return_rank=True)
+])  # Implicit weights: [1.0, 1.0]
+
+# Custom weights - adjust relative importance
+rrf = Rrf(
+    ranks=[
+        Knn(query=dense_vec, return_rank=True),
+        Knn(query=sparse_vec, key="sparse_embedding", return_rank=True)
+    ],
+    weights=[3.0, 1.0]  # Dense 3x more important than sparse
 )
 
-# Normalized weights (sum to 1)
-Rrf(
-    ranks=[semantic, keyword],
-    weights=[0.7, 0.3],  # Must sum to 1.0
-    normalize=True  # Enforces sum = 1
-)
-
-# Auto-normalization
-Rrf(
-    ranks=[semantic, keyword],
-    weights=[70, 30],  # Will be normalized to [0.7, 0.3]
+# Normalized weights - ensures weights sum to 1.0
+rrf = Rrf(
+    ranks=[
+        Knn(query=dense_vec, return_rank=True),
+        Knn(query=sparse_vec, key="sparse_embedding", return_rank=True)
+    ],
+    weights=[75, 25],     # Will be normalized to [0.75, 0.25]
     normalize=True
 )
 ```
+{% /Tab %}
 
-## K Parameter Tuning
-
-[TODO: How to choose k value]
-```python
-# Small k (e.g., 10) - Heavy emphasis on top ranks
-Rrf(ranks, k=10)
-
-# Default k (60) - Balanced
-Rrf(ranks, k=60)
-
-# Large k (e.g., 100+) - More uniform weighting
-Rrf(ranks, k=100)
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
 ```
+{% /Tab %}
 
-[TODO: Impact visualization/table]
+{% /Tabs %}
 
-## Combining Dense and Sparse Embeddings
+## The k Parameter
 
-[TODO: Complete example]
+The `k` parameter controls how much emphasis is placed on top-ranked results:
+- **Small k (e.g., 10)**: Heavy emphasis on top ranks
+- **Default k (60)**: Balanced emphasis (standard in literature)
+- **Large k (e.g., 100+)**: More uniform weighting across ranks
+
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
-# Dense semantic embeddings
+# Small k - top results heavily weighted
+rrf = Rrf(ranks=[...], k=10)
+# Rank 0 gets weight/(10+0) = weight/10
+# Rank 10 gets weight/(10+10) = weight/20 (half as important)
+
+# Default k - balanced
+rrf = Rrf(ranks=[...], k=60)
+# Rank 0 gets weight/(60+0) = weight/60
+# Rank 10 gets weight/(60+10) = weight/70 (still significant)
+
+# Large k - more uniform
+rrf = Rrf(ranks=[...], k=200)
+# Rank 0 gets weight/(200+0) = weight/200
+# Rank 10 gets weight/(200+10) = weight/210 (almost equal importance)
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
+
+{% /Tabs %}
+
+## Common Use Case: Dense + Sparse
+
+The most common RRF use case is combining dense semantic embeddings with sparse keyword embeddings.
+
+{% Tabs %}
+
+{% Tab label="python" %}
+```python
+from chromadb import Search, K, Knn, Rrf
+
+# Dense semantic embeddings (e.g., from sentence-transformers)
 dense_rank = Knn(
-    query=dense_vector,
-    key="#embedding",
-    return_rank=True
+    query=dense_vector,        # Your dense embedding
+    key="#embedding",          # Default embedding field
+    return_rank=True,
+    limit=200                  # Consider top 200 candidates
 )
 
-# Sparse keyword embeddings (e.g., BM25)
+# Sparse keyword embeddings (e.g., BM25 or SPLADE)
 sparse_rank = Knn(
-    query=sparse_vector,
-    key="sparse_embedding",
-    return_rank=True
+    query=sparse_vector,       # {"indices": [...], "values": [...]}
+    key="sparse_embedding",    # Metadata field for sparse vectors
+    return_rank=True,
+    limit=200
 )
 
 # Combine with RRF
-hybrid = Rrf(
+hybrid_rank = Rrf(
     ranks=[dense_rank, sparse_rank],
-    weights=[0.6, 0.4],  # 60% semantic, 40% keyword
+    weights=[0.7, 0.3],       # 70% semantic, 30% keyword
     k=60
 )
 
-search = Search().rank(hybrid).limit(20)
+# Use in search
+search = (Search()
+    .where(K("status") == "published")  # Optional filtering
+    .rank(hybrid_rank)
+    .limit(20)
+    .select(K.DOCUMENT, K.SCORE, "title")
+)
+
+results = collection.search(search)
 ```
+{% /Tab %}
 
-## Multi-Modal Search Examples
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
 
-[TODO: 2+ modalities]
+{% /Tabs %}
+
+## Edge Cases and Important Behavior
+
+### Empty Results from Component Rankings
+If a component Knn returns no results (e.g., due to filtering), RRF handles it gracefully - documents from other rankings are still scored.
+
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
-# Text + Image search
-text_rank = Knn(query=text_emb, return_rank=True)
-image_rank = Knn(query=image_emb, key="image_embedding", return_rank=True)
+# If sparse_rank returns no results, dense_rank results are still used
+rrf = Rrf([
+    Knn(query=dense_vec, return_rank=True, limit=100),
+    Knn(query=sparse_vec, key="sparse_embedding", return_rank=True, limit=100)
+])
+```
+{% /Tab %}
 
-# Text + Image + Audio
-text_rank = Knn(query=text_emb, return_rank=True)
-image_rank = Knn(query=image_emb, key="image_emb", return_rank=True)
-audio_rank = Knn(query=audio_emb, key="audio_emb", return_rank=True)
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
 
-multi_modal = Rrf(
-    ranks=[text_rank, image_rank, audio_rank],
-    weights=[0.5, 0.3, 0.2],
+{% /Tabs %}
+
+### Minimum Requirements
+- At least one ranking expression is required
+- All rankings must have `return_rank=True`
+- Weights (if provided) must match the number of rankings
+
+### Document Selection with RRF
+Documents must appear in at least one component ranking to be scored. To include documents that don't appear in a specific Knn's results, set the `default` parameter on that Knn:
+
+{% Tabs %}
+
+{% Tab label="python" %}
+```python
+# Without default: only documents in BOTH rankings are scored
+rrf = Rrf([
+    Knn(query=dense_vec, return_rank=True, limit=100),
+    Knn(query=sparse_vec, key="sparse_embedding", return_rank=True, limit=100)
+])
+
+# With default: documents in EITHER ranking can be scored
+rrf = Rrf([
+    Knn(query=dense_vec, return_rank=True, limit=100, default=1000),
+    Knn(query=sparse_vec, key="sparse_embedding", return_rank=True, limit=100, default=1000)
+])
+# Documents missing from one ranking get default rank of 1000
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
+
+{% /Tabs %}
+
+### RRF as a Convenience Wrapper
+`Rrf` is a convenience class that constructs the underlying ranking expression. You can manually build the same expression if needed:
+
+{% Tabs %}
+
+{% Tab label="python" %}
+```python
+# Using Rrf wrapper (recommended)
+rrf = Rrf(
+    ranks=[rank1, rank2],
+    weights=[0.7, 0.3],
     k=60
 )
+
+# Manual construction (equivalent)
+# RRF formula: -sum(weight_i / (k + rank_i))
+manual_rrf = -0.7 / (60 + rank1) - 0.3 / (60 + rank2)
+
+# Both produce the same ranking expression
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
+
+{% /Tabs %}
+
+## Complete Example
+
+Here's a practical example showing RRF with filtering and result processing:
+
+{% Tabs %}
+
+{% Tab label="python" %}
+```python
+from chromadb import Search, K, Knn, Rrf
+
+# Prepare your vectors
+dense_embedding = model.encode("machine learning applications")  # Your dense model
+sparse_embedding = {
+    "indices": [42, 128, 512, 1024],
+    "values": [0.8, 0.6, 0.4, 0.3]
+}  # Your sparse model output
+
+# Create RRF ranking
+hybrid_rank = Rrf(
+    ranks=[
+        Knn(query=dense_embedding, return_rank=True, limit=300),
+        Knn(query=sparse_embedding, key="sparse_embedding", return_rank=True, limit=300)
+    ],
+    weights=[2.0, 1.0],  # Dense 2x more important
+    k=60
+)
+
+# Build complete search
+search = (Search()
+    .where(
+        (K("language") == "en") & 
+        (K("year") >= 2020)
+    )
+    .rank(hybrid_rank)
+    .limit(10)
+    .select(K.DOCUMENT, K.SCORE, "title", "year")
+)
+
+# Execute and process results
+results = collection.search(search)
+rows = results.rows()[0]  # Get first (and only) search results
+
+for i, row in enumerate(rows, 1):
+    print(f"{i}. {row['metadata']['title']} ({row['metadata']['year']})")
+    print(f"   RRF Score: {row['score']:.4f}")
+    print(f"   Preview: {row['document'][:100]}...")
+    print()
 ```
 
-## Common Hybrid Search Architectures
+Example output:
+```
+1. Introduction to Neural Networks (2023)
+   RRF Score: -0.0428
+   Preview: Neural networks are computational models inspired by biological neural networks...
 
-[TODO: Real-world patterns]
-1. **Semantic + Keyword**
-   - Dense embeddings for concepts
-   - Sparse for exact matches
+2. Deep Learning Fundamentals (2022)
+   RRF Score: -0.0385
+   Preview: This comprehensive guide covers the fundamental concepts of deep learning...
+```
+{% /Tab %}
 
-2. **Multiple Embedding Models**
-   - Different models for different aspects
-   - Ensemble approach
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
 
-3. **Cross-lingual Search**
-   - Language-specific embeddings
-   - Multilingual embeddings
+{% /Tabs %}
 
-4. **Domain-specific Combinations**
-   - General + specialized embeddings
-   - Coarse + fine rankings
+## Tips and Best Practices
 
-## Performance Benchmarks
+- **Always use `return_rank=True`** for all Knn expressions in RRF
+- **Set appropriate limits** on component Knn expressions (usually 100-500)
+- **Consider the k parameter** - default of 60 works well for most cases
+- **Test different weights** - start with equal weights, then tune based on results
+- **Use `default` values in Knn** if you want documents from partial matches
 
-[TODO: Add performance comparisons]
-| Method | Recall@10 | Latency | Use Case |
-|--------|-----------|---------|----------|
-| Dense only | 0.85 | 10ms | Semantic |
-| Sparse only | 0.75 | 5ms | Keyword |
-| RRF Hybrid | 0.92 | 15ms | Best overall |
+## Next Steps
 
-## Performance Optimization
-
-[TODO: Tips for performance]
-- Limit values for component Knn
-- Pre-computing embeddings
-- Caching strategies
-- Batch processing
-
-## Debugging RRF Results
-
-[TODO: How to debug and tune]
-- Inspecting individual rank components
-- Visualizing score distributions
-- A/B testing strategies
-- Metrics for evaluation
+- Learn about [batch operations](./batch-operations) for running multiple RRF searches
+- See [practical examples](./examples) of hybrid search in production
+- Explore [ranking expressions](./ranking) for arithmetic combinations instead of RRF
