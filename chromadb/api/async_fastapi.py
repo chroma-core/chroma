@@ -6,6 +6,15 @@ from typing import Any, Optional, cast, Tuple, Sequence, Dict, List
 import logging
 import httpx
 from overrides import override
+from tenacity import (
+    AsyncRetrying,
+    RetryError,
+    before_sleep_log,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+    wait_random_exponential,
+)
 from chromadb import __version__
 from chromadb.auth import UserIdentity
 from chromadb.api.async_api import AsyncServerAPI
@@ -16,6 +25,7 @@ from chromadb.api.collection_configuration import (
     create_collection_configuration_to_json,
     update_collection_configuration_to_json,
 )
+from chromadb.api.fastapi import is_retryable_exception
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, Settings
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
@@ -140,20 +150,63 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def _make_request(
         self, method: str, path: str, **kwargs: Dict[str, Any]
     ) -> Any:
-        # If the request has json in kwargs, use orjson to serialize it,
-        # remove it from kwargs, and add it to the content parameter
-        # This is because httpx uses a slower json serializer
-        if "json" in kwargs:
-            data = orjson.dumps(kwargs.pop("json"), option=orjson.OPT_SERIALIZE_NUMPY)
-            kwargs["content"] = data
+        async def _send_request() -> Any:
+            # If the request has json in kwargs, use orjson to serialize it,
+            # remove it from kwargs, and add it to the content parameter
+            # This is because httpx uses a slower json serializer
+            if "json" in kwargs:
+                data = orjson.dumps(
+                    kwargs.pop("json"), option=orjson.OPT_SERIALIZE_NUMPY
+                )
+                kwargs["content"] = data
 
-        # Unlike requests, httpx does not automatically escape the path
-        escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
-        url = self._api_url + escaped_path
+            # Unlike requests, httpx does not automatically escape the path
+            escaped_path = urllib.parse.quote(
+                path, safe="/", encoding=None, errors=None
+            )
+            url = self._api_url + escaped_path
 
-        response = await self._get_client().request(method, url, **cast(Any, kwargs))
-        BaseHTTPClient._raise_chroma_error(response)
-        return orjson.loads(response.text)
+            response = await self._get_client().request(
+                method, url, **cast(Any, kwargs)
+            )
+            BaseHTTPClient._raise_chroma_error(response)
+            return orjson.loads(response.text)
+
+        retry_config = self._settings.retry_config
+
+        if retry_config is None:
+            return await _send_request()
+
+        min_delay = max(float(retry_config.min_delay), 0.0)
+        max_delay = max(float(retry_config.max_delay), min_delay)
+        multiplier = max(min_delay, 1e-3)
+        exp_base = retry_config.factor if retry_config.factor > 0 else 2.0
+
+        wait_args = {
+            "multiplier": multiplier,
+            "min": min_delay,
+            "max": max_delay,
+            "exp_base": exp_base,
+        }
+
+        wait_strategy = (
+            wait_random_exponential(**wait_args)
+            if retry_config.jitter
+            else wait_exponential(**wait_args)
+        )
+
+        retrying = AsyncRetrying(
+            stop=stop_after_attempt(retry_config.max_attempts),
+            wait=wait_strategy,
+            retry=retry_if_exception(is_retryable_exception),
+            before_sleep=before_sleep_log(logger, logging.INFO),
+            reraise=True,
+        )
+
+        try:
+            return await retrying(_send_request)
+        except RetryError as e:
+            raise e.last_attempt.exception() from None
 
     @trace_method("AsyncFastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override

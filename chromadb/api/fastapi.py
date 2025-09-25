@@ -6,6 +6,15 @@ from uuid import UUID
 import httpx
 import urllib.parse
 from overrides import override
+from tenacity import (
+    RetryError,
+    Retrying,
+    before_sleep_log,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+    wait_random_exponential,
+)
 
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
@@ -57,6 +66,28 @@ from chromadb.telemetry.product import ProductTelemetryClient
 logger = logging.getLogger(__name__)
 
 
+def is_retryable_exception(exception: BaseException) -> bool:
+    if isinstance(
+        exception,
+        (
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            httpx.ReadTimeout,
+            httpx.WriteTimeout,
+            httpx.PoolTimeout,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+        ),
+    ):
+        return True
+
+    if isinstance(exception, httpx.HTTPStatusError):
+        # Retry on server errors that might be temporary
+        return exception.response.status_code in [502, 503, 504]
+
+    return False
+
+
 class FastAPI(BaseHTTPClient, ServerAPI):
     def __init__(self, system: System):
         super().__init__(system)
@@ -97,20 +128,62 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 self._session.headers[header] = value.get_secret_value()
 
     def _make_request(self, method: str, path: str, **kwargs: Dict[str, Any]) -> Any:
-        # If the request has json in kwargs, use orjson to serialize it,
-        # remove it from kwargs, and add it to the content parameter
-        # This is because httpx uses a slower json serializer
-        if "json" in kwargs:
-            data = orjson.dumps(kwargs.pop("json"), option=orjson.OPT_SERIALIZE_NUMPY)
-            kwargs["content"] = data
+        def _send_request() -> Any:
+            # If the request has json in kwargs, use orjson to serialize it,
+            # remove it from kwargs, and add it to the content parameter
+            # This is because httpx uses a slower json serializer
+            if "json" in kwargs:
+                data = orjson.dumps(
+                    kwargs.pop("json"), option=orjson.OPT_SERIALIZE_NUMPY
+                )
+                kwargs["content"] = data
 
-        # Unlike requests, httpx does not automatically escape the path
-        escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
-        url = self._api_url + escaped_path
+            # Unlike requests, httpx does not automatically escape the path
+            escaped_path = urllib.parse.quote(
+                path, safe="/", encoding=None, errors=None
+            )
+            url = self._api_url + escaped_path
 
-        response = self._session.request(method, url, **cast(Any, kwargs))
-        BaseHTTPClient._raise_chroma_error(response)
-        return orjson.loads(response.text)
+            response = self._session.request(method, url, **cast(Any, kwargs))
+            BaseHTTPClient._raise_chroma_error(response)
+            return orjson.loads(response.text)
+
+        retry_config = self._settings.retry_config
+
+        if retry_config is None:
+            return _send_request()
+
+        min_delay = max(float(retry_config.min_delay), 0.0)
+        max_delay = max(float(retry_config.max_delay), min_delay)
+        multiplier = max(min_delay, 1e-3)
+        exp_base = retry_config.factor if retry_config.factor > 0 else 2.0
+
+        wait_args = {
+            "multiplier": multiplier,
+            "min": min_delay,
+            "max": max_delay,
+            "exp_base": exp_base,
+        }
+
+        wait_strategy = (
+            wait_random_exponential(**wait_args)
+            if retry_config.jitter
+            else wait_exponential(**wait_args)
+        )
+
+        retrying = Retrying(
+            stop=stop_after_attempt(retry_config.max_attempts),
+            wait=wait_strategy,
+            retry=retry_if_exception(is_retryable_exception),
+            before_sleep=before_sleep_log(logger, logging.INFO),
+            reraise=True,
+        )
+
+        try:
+            return retrying(_send_request)
+        except RetryError as e:
+            # Re-raise the last exception that caused the retry to fail
+            raise e.last_attempt.exception() from None
 
     @trace_method("FastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override

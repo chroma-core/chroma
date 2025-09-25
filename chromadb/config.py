@@ -11,6 +11,7 @@ from overrides import EnforceOverrides
 from overrides import override
 from typing_extensions import Literal
 import platform
+from pydantic import BaseModel
 
 in_pydantic_v2 = False
 try:
@@ -97,6 +98,14 @@ class APIVersion(str, Enum):
     V2 = "/api/v2"
 
 
+class RetryConfig(BaseModel):
+    factor: float = 2.0
+    min_delay: int = 1
+    max_delay: int = 5
+    max_attempts: int = 5
+    jitter: bool = True
+
+
 # NOTE(hammadb) 1/13/2024 - This has to be in config.py instead of being localized to the module
 # that uses it because of a circular import issue. This is a temporary solution until we can
 # refactor the code to remove the circular import.
@@ -132,6 +141,8 @@ class Settings(BaseSettings):  # type: ignore
         if type(v) is str and v.strip() == "":
             return None
         return v
+
+    retry_config: Optional[RetryConfig] = RetryConfig()
 
     chroma_server_nofile: Optional[int] = None
     # the number of maximum threads to handle synchronous tasks in the FastAPI server

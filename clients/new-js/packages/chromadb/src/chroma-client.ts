@@ -9,7 +9,8 @@ import { DefaultService as Api, ChecklistResponse } from "./api";
 import { CollectionMetadata, UserIdentity } from "./types";
 import { Collection, CollectionImpl } from "./collection";
 import { EmbeddingFunction, getEmbeddingFunction } from "./embedding-function";
-import { chromaFetch } from "./chroma-fetch";
+import { createChromaFetch } from "./chroma-fetch";
+import type { RetryConfig } from "./retry";
 import * as process from "node:process";
 import {
   ChromaConnectionError,
@@ -39,6 +40,8 @@ export interface ChromaClientArgs {
   headers?: Record<string, string>;
   /** Additional fetch options for HTTP requests */
   fetchOptions?: RequestInit;
+  /** Retry configuration for HTTP requests. Set to null to disable retries */
+  retryConfig?: RetryConfig | null;
   /** @deprecated Use host, port, and ssl instead */
   path?: string;
   /** @deprecated */
@@ -68,6 +71,7 @@ export class ChromaClient {
       database = defaultArgs.database,
       headers = defaultArgs.headers,
       fetchOptions = defaultArgs.fetchOptions,
+      retryConfig = defaultArgs.retryConfig,
     } = args;
 
     if (args.path) {
@@ -109,7 +113,7 @@ export class ChromaClient {
     };
 
     this.apiClient = createClient(createConfig(configOptions));
-    this.apiClient.setConfig({ fetch: chromaFetch });
+    this.apiClient.setConfig({ fetch: createChromaFetch({ retryConfig }) });
   }
 
   /**
