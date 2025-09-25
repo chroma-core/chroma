@@ -5,9 +5,11 @@ name: Pagination & Selection
 
 # Pagination & Field Selection
 
-Learn how to control pagination and select which fields to return in search results.
+Control how many results to return and which fields to include in your search results.
 
 ## Pagination with Limit
+
+Use `limit()` to control how many results to return and `offset` to skip results for pagination.
 
 {% Tabs %}
 
@@ -15,15 +17,14 @@ Learn how to control pagination and select which fields to return in search resu
 ```python
 from chromadb import Search
 
-# Simple limit
-search = Search().limit(10)
+# Limit results
+search = Search().limit(10)  # Return top 10 results
 
-# Limit with offset for pagination
-search = Search().limit(10, offset=20)  # Skip first 20 results
+# Pagination with offset
+search = Search().limit(10, offset=20)  # Skip first 20, return next 10
 
-# Using Limit object directly
-from chromadb.execution.expression.operator import Limit
-search = Search(limit=Limit(limit=10, offset=20))
+# No limit - returns all matching results
+search = Search()  # Be careful with large collections!
 ```
 {% /Tab %}
 
@@ -35,7 +36,56 @@ search = Search(limit=Limit(limit=10, offset=20))
 
 {% /Tabs %}
 
+## Limit Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | int or None | `None` | Maximum results to return (`None` = no limit) |
+| `offset` | int | `0` | Number of results to skip (for pagination) |
+
+{% Note type="info" %}
+For Chroma Cloud users: The actual number of results returned will be capped by your quota limits, regardless of the `limit` value specified. This applies even when no limit is set.
+{% /Note %}
+
+## Pagination Patterns
+
+{% Tabs %}
+
+{% Tab label="python" %}
+```python
+# Page through results (0-indexed)
+page_size = 10
+
+# Page 0: Results 1-10
+page_0 = Search().limit(page_size, offset=0)
+
+# Page 1: Results 11-20  
+page_1 = Search().limit(page_size, offset=10)
+
+# Page 2: Results 21-30
+page_2 = Search().limit(page_size, offset=20)
+
+# General formula
+def get_page(page_number, page_size=10):
+    return Search().limit(page_size, offset=page_number * page_size)
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
+```
+{% /Tab %}
+
+{% /Tabs %}
+
+{% Note type="info" %}
+Pagination uses 0-based indexing. The first page is page 0, not page 1.
+{% /Note %}
+
 ## Field Selection with Select
+
+Control which fields are returned in your results to optimize data transfer and processing.
 
 {% Tabs %}
 
@@ -43,11 +93,21 @@ search = Search(limit=Limit(limit=10, offset=20))
 ```python
 from chromadb import Search, K
 
-# Select specific fields
-search = Search().select(K.DOCUMENT, K.SCORE, "custom_field")
+# Default - returns IDs only
+search = Search()
 
-# Select all predefined fields
-search = Search().select_all()  # Returns document, embedding, metadata, score
+# Select specific fields
+search = Search().select(K.DOCUMENT, K.SCORE)
+
+# Select metadata fields
+search = Search().select("title", "author", "date")
+
+# Mix predefined and metadata fields
+search = Search().select(K.DOCUMENT, K.SCORE, "title", "author")
+
+# Select all available fields
+search = Search().select_all()
+# Returns: IDs, documents, embeddings, metadata, scores
 ```
 {% /Tab %}
 
@@ -59,193 +119,166 @@ search = Search().select_all()  # Returns document, embedding, metadata, score
 
 {% /Tabs %}
 
-## Limit Class Detailed Reference
+## Selectable Fields
 
-[TODO: Complete Limit documentation]
+| Field | Usage | Description |
+|-------|-------|-------------|
+| IDs | Always included | Document IDs are always returned |
+| `K.DOCUMENT` | `.select(K.DOCUMENT)` | Full document text |
+| `K.EMBEDDING` | `.select(K.EMBEDDING)` | Vector embeddings |
+| `K.METADATA` | `.select(K.METADATA)` | All metadata fields as a dict |
+| `K.SCORE` | `.select(K.SCORE)` | Search scores (when ranking is used) |
+| `"field_name"` | `.select("title", "author")` | Specific metadata fields |
+
+{% Note type="info" %}
+When selecting specific metadata fields (e.g., "title"), they appear directly in the metadata dict. Using `K.METADATA` returns ALL metadata fields at once.
+{% /Note %}
+
+## Performance Considerations
+
+Selecting fewer fields improves performance by reducing data transfer:
+
+- **Minimal**: IDs only (default) - fastest queries
+- **Moderate**: Add scores and specific metadata fields
+- **Heavy**: Including documents and embeddings - larger payloads
+- **Maximum**: `select_all()` - returns everything
+
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
-Limit(
-    limit=None,  # Max results (None = no limit)
-    offset=0    # Skip first N results
-)
+# Fast - minimal data
+search = Search().limit(100)  # IDs only
+
+# Moderate - just what you need
+search = Search().limit(100).select(K.SCORE, "title", "date")
+
+# Slower - large fields
+search = Search().limit(100).select(K.DOCUMENT, K.EMBEDDING)
+
+# Slowest - everything
+search = Search().limit(100).select_all()
 ```
+{% /Tab %}
 
-### Offset Calculation for Pagination
-
-[TODO: Pagination patterns]
-```python
-# Page 1: First 10 results
-Search().limit(10, offset=0)
-
-# Page 2: Results 11-20
-Search().limit(10, offset=10)
-
-# Page 3: Results 21-30
-Search().limit(10, offset=20)
-
-# General formula
-page_size = 10
-page_number = 3  # 0-indexed
-Search().limit(page_size, offset=page_number * page_size)
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
 ```
+{% /Tab %}
 
-### Page Size Optimization
+{% /Tabs %}
 
-[TODO: Guidelines for choosing page size]
-- Small (10-20): Interactive UIs
-- Medium (50-100): Batch processing
-- Large (500+): Export operations
-- Trade-offs: Memory vs round trips
+## Edge Cases
 
-## Select Class Detailed Reference
+### No Limit Specified
+Without a limit, the search attempts to return all matching results, but will be capped by quota limits in Chroma Cloud.
 
-[TODO: Complete Select documentation]
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
-Select(keys=set())  # Set of fields to return
+# Attempts to return ALL matching documents
+search = Search().where(K("status") == "active")  # No limit()
+# Chroma Cloud: Results capped by quota
 ```
+{% /Tab %}
 
-### Predefined Field Constants
-
-[TODO: All constants with descriptions]
-| Constant | String Value | Returns |
-|----------|-------------|---------|
-| K.ID | "#id" | Document IDs (always included) |
-| K.DOCUMENT | "#document" | Full document text |
-| K.EMBEDDING | "#embedding" | Vector embeddings |
-| K.METADATA | "#metadata" | All metadata fields |
-| K.SCORE | "#score" | Search scores |
-
-### Selecting Specific Fields
-
-[TODO: Examples of field selection]
-```python
-# Select only documents and scores
-Search().select(K.DOCUMENT, K.SCORE)
-
-# Select specific metadata fields
-Search().select("title", "author", "date")
-
-# Mix predefined and custom fields
-Search().select(K.DOCUMENT, K.SCORE, "custom_field")
-
-# Select all predefined fields
-Search().select_all()
-# Equivalent to:
-Search().select(K.DOCUMENT, K.EMBEDDING, K.METADATA, K.SCORE)
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
 ```
+{% /Tab %}
 
-## Custom Metadata Field Selection
+{% /Tabs %}
 
-[TODO: How to select metadata]
+### Empty Results
+When no documents match, results will have empty lists/arrays.
+
+### Non-existent Fields
+Selecting non-existent metadata fields simply omits them from the results - they won't appear in the metadata dict.
+
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
-# Select specific metadata fields only
-search = Search().select("field1", "field2", "field3")
+# If "non_existent_field" doesn't exist
+search = Search().select("title", "non_existent_field")
 
-# Combine with predefined fields
-search = Search().select(K.DOCUMENT, "custom1", "custom2")
-
-# Dynamic field selection
-fields_to_select = ["title", "author"]
-if include_dates:
-    fields_to_select.append("published_date")
-search = Search().select(*fields_to_select)
+# Result metadata will only contain "title" if it exists
+# "non_existent_field" will not appear in the metadata dict at all
 ```
+{% /Tab %}
 
-## Performance Impact of Field Selection
-
-[TODO: Performance considerations]
-```python
-# Minimal data transfer (fastest)
-Search().select()  # Only IDs
-
-# Moderate data transfer
-Search().select(K.SCORE, "title")
-
-# Heavy data transfer (slowest)
-Search().select_all()  # Everything
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
 ```
+{% /Tab %}
 
-[TODO: Add performance table]
-| Selection | Data Size | Network Transfer | Use Case |
-|-----------|-----------|------------------|----------|
-| IDs only | Minimal | ~1KB/1000 | Existence check |
-| + Scores | Small | ~10KB/1000 | Ranking only |
-| + Documents | Large | ~1MB/1000 | Full results |
-| + Embeddings | Very Large | ~10MB/1000 | Re-processing |
+{% /Tabs %}
 
-## Memory Considerations
+## Complete Example
 
-[TODO: Memory usage patterns]
+Here's a practical example combining pagination with field selection:
+
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
-# Memory-efficient pagination
-def paginate_results(search_base, total_limit=10000):
-    page_size = 100
-    offset = 0
-    all_results = []
+from chromadb import Search, K, Knn
+
+# Paginated search with field selection
+def search_with_pagination(collection, query_vector, page_size=20):
+    current_page = 0
     
-    while offset < total_limit:
-        page = search_base.limit(page_size, offset=offset)
-        results = collection.search(page)
+    while True:
+        search = (Search()
+            .where(K("status") == "published")
+            .rank(Knn(query=query_vector))
+            .limit(page_size, offset=current_page * page_size)
+            .select(K.DOCUMENT, K.SCORE, "title", "author", "date")
+        )
         
-        if not results.ids[0]:  # No more results
+        results = collection.search(search)
+        rows = results.rows()[0]  # Get first (and only) search results
+        
+        if not rows:  # No more results
             break
             
-        all_results.extend(results.ids[0])
-        offset += page_size
-    
-    return all_results
+        print(f"\n--- Page {current_page + 1} ---")
+        for i, row in enumerate(rows, 1):
+            print(f"{i}. {row['metadata']['title']} by {row['metadata']['author']}")
+            print(f"   Score: {row['score']:.3f}, Date: {row['metadata']['date']}")
+            print(f"   Preview: {row['document'][:100]}...")
+        
+        # Check if we want to continue
+        user_input = input("\nPress Enter for next page, or 'q' to quit: ")
+        if user_input.lower() == 'q':
+            break
+            
+        current_page += 1
 ```
+{% /Tab %}
 
-## Result Size Estimation
-
-[TODO: How to estimate result size]
-```python
-# Estimate before fetching
-def estimate_result_size(num_results, fields):
-    size_per_result = {
-        K.ID: 50,  # bytes
-        K.DOCUMENT: 1000,  # Average doc size
-        K.EMBEDDING: 4 * 768,  # 768-dim float32
-        K.METADATA: 200,  # Average metadata
-        K.SCORE: 8,  # float64
-    }
-    
-    total = sum(size_per_result.get(f, 100) for f in fields)
-    return total * num_results
+{% Tab label="typescript" %}
+```typescript
+// TypeScript implementation coming soon
 ```
+{% /Tab %}
 
-## Cursor-Based Pagination Patterns
+{% /Tabs %}
 
-[TODO: If/when cursor support is added]
-```python
-# Future cursor-based pagination
-# search = Search().limit(10).after(cursor="...")
-```
+## Tips and Best Practices
 
-## select_all() vs Selective Retrieval
+- **Select only what you need** - Reduces network transfer and memory usage
+- **Use appropriate page sizes** - 10-50 for UI, 100-500 for batch processing
+- **Consider bandwidth** - Avoid selecting embeddings unless necessary
+- **IDs are always included** - No need to explicitly select them
+- **Use `select_all()` sparingly** - Only when you truly need all fields
 
-[TODO: When to use each approach]
-```python
-# Use select_all() when:
-# - Need complete data for analysis
-# - Exporting/backing up data
-# - Don't know fields in advance
+## Next Steps
 
-# Use selective retrieval when:
-# - Displaying in UI (only needed fields)
-# - Network bandwidth is limited
-# - Processing large result sets
-```
-
-## Common Patterns
-
-[TODO: Real-world patterns]
-```python
-# Pattern 1: Progressive loading
-# First load IDs and scores, then load documents on demand
-
-# Pattern 2: Field projection for UI
-# Select only fields shown in the interface
-
-# Pattern 3: Batch export
-# Large limit with specific fields for data export
-```
+- Learn about [batch operations](./batch-operations) for running multiple searches
+- See [practical examples](./examples) of pagination in production
+- Explore [search basics](./search-basics) for building complete queries
