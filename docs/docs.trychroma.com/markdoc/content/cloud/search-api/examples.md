@@ -7,6 +7,10 @@ name: Examples & Patterns
 
 Real-world examples and common patterns for using the Search API effectively.
 
+{% Note type="info" %}
+TODO: Examples in this section will be updated when collection schema support is available. With schema support, users will be able to pass text queries directly instead of embeddings, making the examples more practical and easier to follow.
+{% /Note %}
+
 ## Simple Vector Search
 
 {% Tabs %}
