@@ -34,6 +34,7 @@ import {
   processUpdateCollectionConfig,
   UpdateCollectionConfiguration,
 } from "./collection-configuration";
+import { SearchLike, SearchResult, toSearch } from "./execution/expression";
 
 /**
  * Interface for collection operations using collection ID.
@@ -180,6 +181,12 @@ export interface Collection {
     /** Document content-based filtering for deletion */
     whereDocument?: WhereDocument;
   }): Promise<void>;
+  /**
+   * Performs hybrid search on the collection using expression builders.
+   * @param searches - Single search payload or array of payloads
+   * @returns Promise resolving to column-major search results
+   */
+  search(searches: SearchLike | SearchLike[]): Promise<SearchResult>;
 }
 
 /**
@@ -528,6 +535,24 @@ export class CollectionImpl implements Collection {
       metadatas: (data.metadatas ?? []) as (TMeta | null)[][],
       uris: data.uris ?? [],
     });
+  }
+
+  public async search(searches: SearchLike | SearchLike[]): Promise<SearchResult> {
+    const items = Array.isArray(searches) ? searches : [searches];
+
+    if (items.length === 0) {
+      throw new ChromaValueError("At least one search payload must be provided.");
+    }
+
+    const payloads = items.map((search) => toSearch(search).toPayload());
+
+    const { data } = await Api.collectionSearch({
+      client: this.apiClient,
+      path: await this.path(),
+      body: { searches: payloads },
+    });
+
+    return new SearchResult(data);
   }
 
   public async modify({
