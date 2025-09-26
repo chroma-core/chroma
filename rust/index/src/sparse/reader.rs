@@ -1,7 +1,6 @@
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap},
-    ops::RangeBounds,
 };
 
 use chroma_blockstore::BlockfileReader;
@@ -85,9 +84,9 @@ impl<'me> SparseReader<'me> {
     pub async fn get_dimension_max(&self) -> Result<HashMap<u32, f32>, SparseReaderError> {
         Ok(self
             .max_reader
-            .get_range(DIMENSION_PREFIX..=DIMENSION_PREFIX, ..)
+            .get_prefix(DIMENSION_PREFIX)
             .await?
-            .map(|(_, dimension_id, max)| (dimension_id, max))
+            .into_iter()
             .collect())
     }
 
@@ -108,21 +107,20 @@ impl<'me> SparseReader<'me> {
     ) -> Result<impl Iterator<Item = (u32, f32)> + 'me, SparseReaderError> {
         Ok(self
             .max_reader
-            .get_range(encoded_dimension_id..=encoded_dimension_id, ..)
+            .get_prefix(encoded_dimension_id)
             .await?
-            .map(|(_, dimension_id, max)| (dimension_id, max)))
+            .into_iter())
     }
 
     pub async fn get_offset_values(
         &'me self,
         encoded_dimension_id: &'me str,
-        offset_range: impl RangeBounds<u32> + Clone + Send + 'me,
     ) -> Result<impl Iterator<Item = (u32, f32)> + 'me, SparseReaderError> {
         Ok(self
             .offset_value_reader
-            .get_range(encoded_dimension_id..=encoded_dimension_id, offset_range)
+            .get_prefix(encoded_dimension_id)
             .await?
-            .map(|(_, offset, value)| (offset, value)))
+            .into_iter())
     }
 
     pub async fn wand(
@@ -145,7 +143,7 @@ impl<'me> SparseReader<'me> {
                 continue;
             };
 
-            let mut dimension_iterator = self.get_offset_values(encoded_dimension_id, ..).await?;
+            let mut dimension_iterator = self.get_offset_values(encoded_dimension_id).await?;
             let Some((offset, value)) = dimension_iterator
                 .by_ref()
                 .find(|&(offset, _)| mask.contains(offset))
