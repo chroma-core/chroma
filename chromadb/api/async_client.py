@@ -30,11 +30,11 @@ from chromadb.api.types import (
     Metadatas,
     QueryResult,
     URIs,
+    DefaultEmbeddingFunction,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.errors import ChromaError
 from chromadb.types import Database, Tenant, Where, WhereDocument
-import chromadb.utils.embedding_functions as ef
 
 
 class AsyncClient(SharedSystemClient, AsyncClientAPI):
@@ -180,7 +180,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> AsyncCollection:
@@ -219,7 +219,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         name: str,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
         model = await self._server.get_collection(
@@ -248,7 +248,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
         if configuration is None:

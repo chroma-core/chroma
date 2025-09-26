@@ -27,12 +27,12 @@ from chromadb.api.types import (
     GetResult,
     WhereDocument,
     SearchResult,
+    DefaultEmbeddingFunction,
 )
 from chromadb.auth import UserIdentity
 from chromadb.execution.expression.plan import Search
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant, Collection as CollectionModel
-import chromadb.utils.embedding_functions as ef
 from chromadb.api.models.Collection import Collection
 
 # Re-export the async version
@@ -372,7 +372,7 @@ class ClientAPI(BaseAPI, ABC):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
@@ -409,7 +409,7 @@ class ClientAPI(BaseAPI, ABC):
         name: str,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         """Get a collection with the given name.
@@ -441,7 +441,7 @@ class ClientAPI(BaseAPI, ABC):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         """Get or create a collection with the given name and metadata.

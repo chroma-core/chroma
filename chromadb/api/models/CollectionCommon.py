@@ -15,7 +15,6 @@ from chromadb.types import Metadata
 import numpy as np
 from uuid import UUID
 
-import chromadb.utils.embedding_functions as ef
 from chromadb.api.types import (
     URI,
     URIs,
@@ -57,6 +56,7 @@ from chromadb.api.types import (
     validate_record_set_contains_any,
     validate_record_set_for_embedding,
     validate_filter_set,
+    DefaultEmbeddingFunction,
 )
 from chromadb.api.collection_configuration import (
     UpdateCollectionConfiguration,
@@ -117,7 +117,7 @@ class CollectionCommon(Generic[ClientT]):
         model: CollectionModel,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ):
         """Initializes a new instance of the Collection class."""
@@ -566,7 +566,7 @@ class CollectionCommon(Generic[ClientT]):
 
     def _embed(self, input: Any, is_query: bool = False) -> Embeddings:
         if self._embedding_function is not None and not isinstance(
-            self._embedding_function, ef.DefaultEmbeddingFunction
+            self._embedding_function, DefaultEmbeddingFunction
         ):
             if is_query:
                 return self._embedding_function.embed_query(input=input)

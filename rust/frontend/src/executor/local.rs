@@ -15,7 +15,7 @@ use chroma_types::{
         Limit, Projection, ProjectionRecord, RecordMeasure, SearchResult,
     },
     plan::{Count, Get, Knn, Search},
-    CollectionAndSegments, CollectionUuid, ExecutorError, HnswSpace, SegmentType,
+    CollectionAndSegments, CollectionUuid, ExecutorError, SegmentType, Space,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -219,7 +219,7 @@ impl LocalExecutor {
         let mut results = Vec::new();
         let mut returned_user_ids = Vec::new();
         for embedding in plan.knn.embeddings {
-            let query_embedding = if let HnswSpace::Cosine = distance_function {
+            let query_embedding = if let Space::Cosine = distance_function {
                 normalize(&embedding)
             } else {
                 embedding
