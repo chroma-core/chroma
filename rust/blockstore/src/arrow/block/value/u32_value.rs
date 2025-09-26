@@ -86,6 +86,13 @@ impl ArrowReadableValue<'_> for u32 {
         let array = array.as_any().downcast_ref::<UInt32Array>().unwrap();
         array.value(index)
     }
+
+    fn to_vec(array: &Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+        let arr = array.as_any().downcast_ref::<UInt32Array>().unwrap();
+        let slice = arr.values().slice(offset, length);
+        slice.to_vec()
+    }
+
     fn add_to_delta<K: ArrowWriteableKey>(
         prefix: &str,
         key: K,

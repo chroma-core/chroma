@@ -99,6 +99,16 @@ impl ArrowReadableValue<'_> for RoaringBitmap {
         RoaringBitmap::deserialize_from(bytes).unwrap()
     }
 
+    fn to_vec(array: &std::sync::Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+        let arr = array.as_any().downcast_ref::<BinaryArray>().unwrap();
+        (offset..offset + length)
+            .map(|i| {
+                let bytes = arr.value(i);
+                RoaringBitmap::deserialize_from(bytes).unwrap()
+            })
+            .collect()
+    }
+
     fn add_to_delta<K: ArrowWriteableKey>(
         prefix: &str,
         key: K,

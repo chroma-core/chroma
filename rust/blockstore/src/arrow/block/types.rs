@@ -285,6 +285,42 @@ impl Block {
         ===== Block Queries =====
     */
 
+    /// Get all key-value pairs for a specific prefix in the block
+    /// Returns a vector of (key, value) pairs for better performance when collecting all values
+    pub fn get_prefix<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+    ) -> Vec<(K, V)> {
+        // Find the start index for this prefix
+        let start_idx = self.find_smallest_index_of_prefix::<K>(prefix);
+        if start_idx >= self.len() {
+            return Vec::new();
+        }
+
+        // Verify the prefix actually matches
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+
+        if prefix_array.value(start_idx) != prefix {
+            return Vec::new();
+        }
+
+        // Find the end index (first element with a different prefix)
+        let end_idx = self.find_smallest_index_of_next_prefix::<K>(prefix);
+        let count = end_idx - start_idx;
+
+        // Use the new to_vec methods for efficient extraction
+        let keys = K::to_vec(self.data.column(1), start_idx, count);
+        let values = V::to_vec(self.data.column(2), start_idx, count);
+
+        // Zip and collect
+        keys.into_iter().zip(values).collect()
+    }
+
     /// Get the value for a given key in the block
     /// ### Panics
     /// - If the underlying data types are not the same as the types specified in the function signature
