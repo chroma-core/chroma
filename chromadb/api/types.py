@@ -1456,8 +1456,8 @@ EMBEDDING_KEY: Final[str] = "$embedding"
 # Internal index types that encapsulate the configuration, name, value type, and enabled status
 class InternalFtsIndex:
     """Internal wrapper for FTS index with encapsulated name, value type, and enabled status."""
-    NAME: Final[ClassVar[str]] = "$fts_index"
-    VALUE_TYPE_NAME: Final[ClassVar[str]] = STRING_VALUE_NAME
+    NAME: Final[str] = "$fts_index"
+    VALUE_TYPE_NAME: Final[str] = STRING_VALUE_NAME
 
     def __init__(self, config: FtsIndexConfig, enabled: bool = True):
         self.config = config
@@ -1466,8 +1466,8 @@ class InternalFtsIndex:
 
 class InternalHnswIndex:
     """Internal wrapper for HNSW index with encapsulated name, value type, and enabled status."""
-    NAME: Final[ClassVar[str]] = "$hnsw_index"
-    VALUE_TYPE_NAME: Final[ClassVar[str]] = FLOAT_LIST_VALUE_NAME
+    NAME: Final[str] = "$hnsw_index"
+    VALUE_TYPE_NAME: Final[str] = FLOAT_LIST_VALUE_NAME
 
     def __init__(self, config: HnswIndexConfig, enabled: bool = True):
         self.config = config
@@ -1476,8 +1476,8 @@ class InternalHnswIndex:
 
 class InternalSpannIndex:
     """Internal wrapper for SPANN index with encapsulated name, value type, and enabled status."""
-    NAME: Final[ClassVar[str]] = "$spann_index"
-    VALUE_TYPE_NAME: Final[ClassVar[str]] = FLOAT_LIST_VALUE_NAME
+    NAME: Final[str] = "$spann_index"
+    VALUE_TYPE_NAME: Final[str] = FLOAT_LIST_VALUE_NAME
 
     def __init__(self, config: SpannIndexConfig, enabled: bool = True):
         self.config = config
@@ -1486,8 +1486,8 @@ class InternalSpannIndex:
 
 class InternalVectorIndex:
     """Internal wrapper for vector index with encapsulated name, value type, and enabled status."""
-    NAME: Final[ClassVar[str]] = "$vector_index"
-    VALUE_TYPE_NAME: Final[ClassVar[str]] = FLOAT_LIST_VALUE_NAME
+    NAME: Final[str] = "$vector_index"
+    VALUE_TYPE_NAME: Final[str] = FLOAT_LIST_VALUE_NAME
 
     def __init__(self, config: VectorIndexConfig, enabled: bool = True):
         self.config = config
@@ -1496,8 +1496,8 @@ class InternalVectorIndex:
 
 class InternalSparseVectorIndex:
     """Internal wrapper for sparse vector index with encapsulated name, value type, and enabled status."""
-    NAME: Final[ClassVar[str]] = "$sparse_vector_index"
-    VALUE_TYPE_NAME: Final[ClassVar[str]] = SPARSE_VECTOR_VALUE_NAME
+    NAME: Final[str] = "$sparse_vector_index"
+    VALUE_TYPE_NAME: Final[str] = SPARSE_VECTOR_VALUE_NAME
 
     def __init__(self, config: SparseVectorIndexConfig, enabled: bool = True):
         self.config = config
@@ -1506,8 +1506,8 @@ class InternalSparseVectorIndex:
 
 class InternalStringInvertedIndex:
     """Internal wrapper for string inverted index with encapsulated name, value type, and enabled status."""
-    NAME: Final[ClassVar[str]] = "$string_inverted_index"
-    VALUE_TYPE_NAME: Final[ClassVar[str]] = STRING_VALUE_NAME
+    NAME: Final[str] = "$string_inverted_index"
+    VALUE_TYPE_NAME: Final[str] = STRING_VALUE_NAME
 
     def __init__(self, config: StringInvertedIndexConfig, enabled: bool = True):
         self.config = config
@@ -1516,8 +1516,8 @@ class InternalStringInvertedIndex:
 
 class InternalIntInvertedIndex:
     """Internal wrapper for int inverted index with encapsulated name, value type, and enabled status."""
-    NAME: Final[ClassVar[str]] = "$int_inverted_index"
-    VALUE_TYPE_NAME: Final[ClassVar[str]] = INT_VALUE_NAME
+    NAME: Final[str] = "$int_inverted_index"
+    VALUE_TYPE_NAME: Final[str] = INT_VALUE_NAME
 
     def __init__(self, config: IntInvertedIndexConfig, enabled: bool = True):
         self.config = config
@@ -1526,8 +1526,8 @@ class InternalIntInvertedIndex:
 
 class InternalFloatInvertedIndex:
     """Internal wrapper for float inverted index with encapsulated name, value type, and enabled status."""
-    NAME: Final[ClassVar[str]] = "$float_inverted_index"
-    VALUE_TYPE_NAME: Final[ClassVar[str]] = FLOAT_VALUE_NAME
+    NAME: Final[str] = "$float_inverted_index"
+    VALUE_TYPE_NAME: Final[str] = FLOAT_VALUE_NAME
 
     def __init__(self, config: FloatInvertedIndexConfig, enabled: bool = True):
         self.config = config
@@ -1536,8 +1536,8 @@ class InternalFloatInvertedIndex:
 
 class InternalBoolInvertedIndex:
     """Internal wrapper for bool inverted index with encapsulated name, value type, and enabled status."""
-    NAME: Final[ClassVar[str]] = "$bool_inverted_index"
-    VALUE_TYPE_NAME: Final[ClassVar[str]] = BOOL_VALUE_NAME
+    NAME: Final[str] = "$bool_inverted_index"
+    VALUE_TYPE_NAME: Final[str] = BOOL_VALUE_NAME
 
     def __init__(self, config: BoolInvertedIndexConfig, enabled: bool = True):
         self.config = config
