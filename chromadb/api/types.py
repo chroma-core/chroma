@@ -16,6 +16,7 @@ from typing import (
 )
 from numpy.typing import NDArray
 import numpy as np
+import warnings
 from typing_extensions import TypedDict, Protocol, runtime_checkable
 from pydantic import BaseModel, field_validator
 
@@ -37,6 +38,12 @@ from chromadb.base_types import (
 
 if TYPE_CHECKING:
     pass
+
+# Import for DefaultEmbeddingFunction
+try:
+    from clients.python.is_thin_client import is_thin_client
+except ImportError:
+    is_thin_client = False
 from inspect import signature
 from tenacity import retry
 from abc import abstractmethod
@@ -726,7 +733,6 @@ class EmbeddingFunction(Protocol[D]):
         Note: This method is provided for backward compatibility.
         Future implementations should override this method.
         """
-        import warnings
 
         warnings.warn(
             f"The class {self.__class__.__name__} does not implement __init__. "
@@ -743,7 +749,6 @@ class EmbeddingFunction(Protocol[D]):
         Note: This method is provided for backward compatibility.
         Future implementations should override this method.
         """
-        import warnings
 
         warnings.warn(
             "The EmbeddingFunction class does not implement name(). "
@@ -774,7 +779,6 @@ class EmbeddingFunction(Protocol[D]):
         Note: This method is provided for backward compatibility.
         Future implementations should override this method.
         """
-        import warnings
 
         warnings.warn(
             "The EmbeddingFunction class does not implement build_from_config(). "
@@ -792,7 +796,6 @@ class EmbeddingFunction(Protocol[D]):
         Note: This method is provided for backward compatibility.
         Future implementations should override this method.
         """
-        import warnings
 
         warnings.warn(
             f"The class {self.__class__.__name__} does not implement get_config(). "
@@ -825,6 +828,38 @@ class EmbeddingFunction(Protocol[D]):
         ):
             return True
         return False
+
+
+class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
+    """Default embedding function that delegates to ONNXMiniLM_L6_V2."""
+
+    def __init__(self) -> None:
+        if is_thin_client:
+            return
+
+    def __call__(self, input: Documents) -> Embeddings:
+        # Import here to avoid circular imports
+        from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import ONNXMiniLM_L6_V2
+        return ONNXMiniLM_L6_V2()(input)
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "DefaultEmbeddingFunction":
+        DefaultEmbeddingFunction.validate_config(config)
+        return DefaultEmbeddingFunction()
+
+    @staticmethod
+    def name() -> str:
+        return "default"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {}
+
+    def max_tokens(self) -> int:
+        return 256
+
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
+        return
 
 
 def validate_embedding_function(
@@ -1437,7 +1472,7 @@ class VectorIndexConfig(BaseModel):
     """Configuration for vector index with space, embedding function, and algorithm config."""
     model_config = {"arbitrary_types_allowed": True}
     space: Optional[Space] = None
-    embedding_function: Optional[Any] = None
+    embedding_function: Optional[Any] = DefaultEmbeddingFunction()
     source_key: Optional[str] = None  # key to source the vector from
     hnsw: Optional[HnswIndexConfig] = None
     spann: Optional[SpannIndexConfig] = None
@@ -1458,6 +1493,7 @@ class VectorIndexConfig(BaseModel):
 class SparseVectorIndexConfig(BaseModel):
     """Configuration for sparse vector index."""
     model_config = {"arbitrary_types_allowed": True}
+    # TODO(Sanket): Change this to the appropriate sparse ef and use a default here.
     embedding_function: Optional[Any] = None
     source_key: Optional[str] = None  # key to source the sparse vector from
 
@@ -1809,8 +1845,8 @@ class InternalSchema(BaseModel):
         key_overrides: Dict[str, Dict[str, ValueTypeIndexes]] = {}
 
         # Initialize with standard defaults
-        self._initialize_defaults(defaults)
-        self._initialize_key_overrides(key_overrides)
+        # self._initialize_defaults(defaults)
+        # self._initialize_key_overrides(key_overrides)
 
         # Process global configs
         for config_type_name, index_entry in schema._global_configs.items():
@@ -1818,6 +1854,10 @@ class InternalSchema(BaseModel):
             if internal_class:
                 value_type = internal_class.VALUE_TYPE_NAME
                 index_name = internal_class.NAME
+
+                # Initialize value_type dict if not present
+                if value_type not in defaults:
+                    defaults[value_type] = {}
 
                 # Apply user-specified global configurations
                 defaults[value_type][index_name] = internal_class(
@@ -1857,13 +1897,53 @@ class InternalSchema(BaseModel):
             if isinstance(index_value, bool):
                 result[index_name] = index_value
             else:
-                # Exclude None values from serialization
-                config_dict = index_value.config.model_dump(exclude_none=True) if hasattr(index_value.config, 'model_dump') else index_value.config.__dict__
+                # Handle config serialization using the same logic as create_collection_configuration_to_json
+                config_dict = self._serialize_config(index_value.config)
                 result[index_name] = {
                     "enabled": index_value.enabled,
                     "config": config_dict
                 }
         return result
+
+    def _serialize_config(self, config: IndexConfig) -> Dict[str, Any]:
+        """Serialize config object to JSON-serializable dictionary."""
+        # All IndexConfig types are Pydantic models, so use model_dump
+        config_dict = config.model_dump(exclude_none=True)
+
+        # Handle embedding function and space serialization for vector/sparse vector indexes
+        if hasattr(config, 'embedding_function'):
+            embedding_func = getattr(config, 'embedding_function', None)
+            if embedding_func is None:
+                config_dict["embedding_function"] = {"type": "legacy"}
+            else:
+                try:
+                    # Cast to EmbeddingFunction type to access methods
+                    embedding_func = cast(EmbeddingFunction, embedding_func)  # type: ignore
+                    if embedding_func.is_legacy():
+                        config_dict["embedding_function"] = {"type": "legacy"}
+                    else:
+                        config_dict["embedding_function"] = {
+                            "name": embedding_func.name(),
+                            "type": "known",
+                            "config": embedding_func.get_config(),
+                        }
+
+                        # Handle space resolution from embedding function (similar to create_collection_configuration_to_json)
+                        if hasattr(config, 'space') and config.space is None:
+                            # If space is not provided, populate it from embedding function's default space
+                            config_dict["space"] = embedding_func.default_space()
+                        elif hasattr(config, 'space') and config.space is not None:
+                            # Validate space compatibility with embedding function
+                            if config.space not in embedding_func.supported_spaces():
+                                warnings.warn(
+                                    f"space {config.space} is not supported by {embedding_func.name()}. Supported spaces: {embedding_func.supported_spaces()}",
+                                    UserWarning,
+                                    stacklevel=2,
+                                )
+                except Exception:
+                    config_dict["embedding_function"] = {"type": "legacy"}
+
+        return config_dict
 
     def serialize_to_json(self) -> Dict[str, Any]:
         """Convert InternalSchema to a JSON-serializable dict for transmission over the wire."""
@@ -1931,7 +2011,45 @@ class InternalSchema(BaseModel):
                 index_mapping = cls._INDEX_TYPE_MAP.get(index_name)
                 if index_mapping:
                     internal_class, config_class = index_mapping
-                    config_obj = config_class(**index_data["config"])
+
+                    # Handle embedding function and space deserialization
+                    config_data = index_data["config"].copy()
+                    if "embedding_function" in config_data:
+                        ef_config = config_data["embedding_function"]
+                        if ef_config.get("type") == "legacy":
+                            warnings.warn(
+                                "legacy embedding function config",
+                                DeprecationWarning,
+                                stacklevel=2,
+                            )
+                            config_data["embedding_function"] = None
+                        else:
+                            # Attempt to reconstruct embedding function
+                            try:
+                                from chromadb.utils.embedding_functions import known_embedding_functions
+                                ef_name = ef_config["name"]
+                                ef = known_embedding_functions[ef_name]
+                                config_data["embedding_function"] = ef.build_from_config(ef_config["config"])
+
+                                # Handle space deserialization - if space is not provided, populate from embedding function
+                                if hasattr(config_class, 'space'):
+                                    if "space" not in config_data or config_data["space"] is None:
+                                        config_data["space"] = config_data["embedding_function"].default_space()
+                                    elif config_data["space"] not in config_data["embedding_function"].supported_spaces():
+                                        warnings.warn(
+                                            f"space {config_data['space']} is not supported by {config_data['embedding_function'].name()}. Supported spaces: {config_data['embedding_function'].supported_spaces()}",
+                                            UserWarning,
+                                            stacklevel=2,
+                                        )
+                            except Exception as e:
+                                # Catch all exceptions to ensure we always have a safe fallback
+                                warnings.warn(
+                                    f"Could not reconstruct embedding function {ef_config.get('name', 'unknown')}: {e}. Setting to None.",
+                                    UserWarning,
+                                    stacklevel=2,
+                                )
+                                config_data["embedding_function"] = None
+                    config_obj = config_class(**config_data)
                     result[index_name] = internal_class(config=config_obj, enabled=index_data["enabled"])
                 else:
                     # Unknown index type - cannot reconstruct
