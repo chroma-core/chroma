@@ -212,7 +212,7 @@ CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.basic.BasicAuthServerProvider"
 
 _Note: Only one of `AUTH_CREDENTIALS` and `AUTH_CREDENTIALS_FILE` can be set, but this guide shows how to migrate both._
 
-And your corresponding client configation:
+And your corresponding client configuration:
 
 ```yaml
 CHROMA_CLIENT_AUTH_PROVIDER="chromadb.auth.token.TokenAuthClientProvider"
@@ -248,7 +248,7 @@ CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER="AUTHORIZATION"
 
 _Note: Only one of `AUTH_CREDENTIALS` and `AUTH_CREDENTIALS_FILE` can be set, but this guide shows how to migrate both._
 
-And your corresponding client configation:
+And your corresponding client configuration:
 
 ```yaml
 CHROMA_CLIENT_AUTH_PROVIDER="chromadb.auth.token.TokenAuthClientProvider"

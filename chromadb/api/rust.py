@@ -86,7 +86,7 @@ class RustBindingsAPI(ServerAPI):
     @override
     def start(self) -> None:
         # Construct the SqliteConfig
-        # TOOD: We should add a "config converter"
+        # TODO: We should add a "config converter"
         if self._system.settings.require("is_persistent"):
             persist_path = self._system.settings.require("persist_directory")
             sqlite_persist_path = persist_path + "/chroma.sqlite3"

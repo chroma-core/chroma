@@ -25,7 +25,7 @@ pub enum KeyWrapper {
 impl KeyWrapper {
     pub(crate) fn get_size(&self) -> usize {
         match self {
-            // TOOD: use key trait if possible
+            // TODO: use key trait if possible
             KeyWrapper::String(s) => s.len(),
             KeyWrapper::Float32(_) => 4,
             KeyWrapper::Bool(_) => 1,

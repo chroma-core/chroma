@@ -66,10 +66,10 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	rows, err := query.Rows()
 	suite.NoError(err)
 	for rows.Next() {
-		var scanedCollectionID string
-		err = rows.Scan(&scanedCollectionID)
+		var scannedCollectionID string
+		err = rows.Scan(&scannedCollectionID)
 		suite.NoError(err)
-		suite.Equal(collectionID, scanedCollectionID)
+		suite.Equal(collectionID, scannedCollectionID)
 	}
 	collections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)

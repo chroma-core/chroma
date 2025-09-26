@@ -1219,10 +1219,10 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 	// TODO: revisit why we need this
 	// Update collection to new value
 	//segment.CollectionID = sampleCollections[1].ID
-	//newCollecionID := segment.CollectionID.String()
+	//newCollectionID := segment.CollectionID.String()
 	//c.UpdateSegment(ctx, &model.UpdateSegment{
 	//	ID:         segment.ID,
-	//	Collection: &newCollecionID,
+	//	Collection: &newCollectionID,
 	//})
 	//result, err = c.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
 	//assert.NoError(t, err)
@@ -1620,7 +1620,7 @@ func (suite *APIsTestSuite) TestForkCollection() {
 		assertExpectedSegmentInfoExist(suite, segment, v0.SegmentInfo.SegmentCompactionInfo)
 	}
 
-	// Attempt to fork a collcetion with same name (should fail)
+	// Attempt to fork a collection with same name (should fail)
 	forkCollectionWithSameName := &model.ForkCollection{
 		SourceCollectionID:                   sourceCreateCollection.ID,
 		SourceCollectionLogCompactionOffset:  800,

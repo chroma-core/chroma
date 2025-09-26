@@ -404,7 +404,7 @@ mod tests {
         assert_eq!(EMBEDDING_SIZE, MANY_WORDS.len());
     }
 
-    mod synthethic {
+    mod synthetic {
         use std::time::Instant;
 
         use super::*;

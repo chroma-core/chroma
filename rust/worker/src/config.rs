@@ -14,7 +14,7 @@ const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 /// The RootConfig for all chroma services this is a YAML file that
 /// is shared between all services, and secondarily, fields can be
 /// populated from environment variables. The environment variables
-/// are prefixed with CHROMA_ and are uppercase. Values in the envionment
+/// are prefixed with CHROMA_ and are uppercase. Values in the environment
 /// variables take precedence over values in the YAML file.
 /// By default, it is read from the current working directory,
 /// with the filename chroma_config.yaml.
@@ -41,7 +41,7 @@ impl RootConfig {
     /// # Notes
     /// The default location is the current working directory, with the filename chroma_config.yaml.
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
-    /// Values in the envionment variables take precedence over values in the YAML file.
+    /// Values in the environment variables take precedence over values in the YAML file.
     pub fn load() -> Self {
         Self::load_from_path(DEFAULT_CONFIG_PATH)
     }
@@ -60,7 +60,7 @@ impl RootConfig {
     /// - If the environment variables contain invalid values.
     /// # Notes
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
-    /// Values in the envionment variables take precedence over values in the YAML file.
+    /// Values in the environment variables take precedence over values in the YAML file.
     // NOTE:  Copied to ../load/src/config.rs.
     pub fn load_from_path(path: &str) -> Self {
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
@@ -104,7 +104,7 @@ impl Default for RootConfig {
 /// - my_ip: The IP address of the worker service. Used for memberlist assignment. Must be provided.
 /// - assignment_policy: The assignment policy to use. Must be provided.
 /// # Notes
-/// In order to set the enviroment variables, you must prefix them with CHROMA_WORKER__<FIELD_NAME>.
+/// In order to set the environment variables, you must prefix them with CHROMA_WORKER__<FIELD_NAME>.
 /// For example, to set my_ip, you would set CHROMA_WORKER__MY_IP.
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
@@ -197,7 +197,7 @@ impl QueryServiceConfig {
 /// - my_ip: The IP address of the worker service. Used for memberlist assignment. Must be provided.
 /// - assignment_policy: The assignment policy to use. Must be provided.
 /// # Notes
-/// In order to set the enviroment variables, you must prefix them with CHROMA_COMPACTOR__<FIELD_NAME>.
+/// In order to set the environment variables, you must prefix them with CHROMA_COMPACTOR__<FIELD_NAME>.
 /// For example, to set my_ip, you would set CHROMA_COMPACTOR__MY_IP.
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.

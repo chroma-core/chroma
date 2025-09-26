@@ -246,7 +246,7 @@ fn bench_literal(criterion: &mut Criterion) {
             .expect("Blockfile should be writable");
         let flusher = runtime
             .block_on(full_text_writer.commit())
-            .expect("Changes should be commitable");
+            .expect("Changes should be committable");
         runtime
             .block_on(flusher.flush())
             .expect("Changes should be flushable");

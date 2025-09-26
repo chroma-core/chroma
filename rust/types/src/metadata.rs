@@ -734,7 +734,7 @@ impl WhereConversionError {
 /// unifying them together, and the structure of the unified AST should be identical to the one here.
 /// Currently both `where` and `where_document` clauses will be translated into `Where`, and if both are
 /// present we simply create a conjunction of both clauses as the actual filter. This is consistent with
-/// the semantics we used to have when the `where` and `where_document` clauses are treated seperately.
+/// the semantics we used to have when the `where` and `where_document` clauses are treated separately.
 // TODO: Remove this note once the `where` clause and `where_document` clause is unified in the API level.
 #[derive(Clone, Debug, PartialEq, ToSchema)]
 pub enum Where {

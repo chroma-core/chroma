@@ -857,7 +857,7 @@ class SqlSysDB(SqlDB, SysDB):
     ) -> None:
         # It would be cleaner to use something like ON CONFLICT UPDATE here But that is
         # very difficult to do in a portable way (e.g sqlite and postgres have
-        # completely different sytnax)
+        # completely different syntax)
         add_attributes_to_current_span(
             {
                 "num_keys": len(metadata),

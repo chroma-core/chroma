@@ -68,7 +68,7 @@ type Config struct {
 
 // Server wraps Coordinator with GRPC services.
 //
-// When Testing is set to true, the GRPC services will not be intialzed. This is
+// When Testing is set to true, the GRPC services will not be initialized. This is
 // convenient for end-to-end property based testing.
 type Server struct {
 	coordinatorpb.UnimplementedSysDBServer

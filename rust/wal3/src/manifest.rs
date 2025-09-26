@@ -40,9 +40,9 @@ pub fn unprefixed_snapshot_path(setsum: Setsum) -> String {
 pub fn snapshot_setsum(path: &str) -> Result<Setsum, Error> {
     let setsum = path
         .strip_prefix("snapshot/SNAPSHOT.")
-        .ok_or_else(|| Error::CorruptManifest(format!("unparseable snapshot path: {}", path,)))?;
+        .ok_or_else(|| Error::CorruptManifest(format!("unparsable snapshot path: {}", path,)))?;
     let setsum = Setsum::from_hexdigest(setsum).ok_or_else(|| {
-        Error::CorruptManifest(format!("unparseable snapshot setsum in {}", path,))
+        Error::CorruptManifest(format!("unparsable snapshot setsum in {}", path,))
     })?;
     Ok(setsum)
 }
@@ -921,7 +921,7 @@ impl Manifest {
         // Sanity check that new manifest contains valid range of logs
         // From the scrub above we know the manifest is continuous, so we only need to check endpoints
         if new.oldest_timestamp() > garbage.first_to_keep {
-            tracing::error!("Manifest after garbage collection does not contain the first log to keep: needs logs since position {:?} to be present, but the smallest log postion available is {:?}", garbage.first_to_keep, new.oldest_timestamp());
+            tracing::error!("Manifest after garbage collection does not contain the first log to keep: needs logs since position {:?} to be present, but the smallest log position available is {:?}", garbage.first_to_keep, new.oldest_timestamp());
             return Err(Error::CorruptManifest(
                 "Manifest corruption detected after GC: missing first log to keep".to_string(),
             ));

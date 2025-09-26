@@ -50,8 +50,8 @@ use tracing::{trace_span, Instrument, Span};
 ## Implementation notes
 - The dispatcher has a queue of tasks that it distributes to worker threads
 - A worker thread sends a TaskRequestMessage to the dispatcher when it is ready for a new task
-- If no task is available for the worker thread, the dispatcher will place that worker's reciever
-    in a queue and send a task to the worker when it recieves another one
+- If no task is available for the worker thread, the dispatcher will place that worker's receiver
+    in a queue and send a task to the worker when it receives another one
 - The reason to introduce this abstraction is to allow us to control fairness and dynamically adjust
   system utilization. It also makes mechanisms like pausing/stopping work easier.
   It would have likely been more performant to use the Tokio MT runtime, but we chose to use
@@ -429,7 +429,7 @@ mod tests {
     #[derive(Debug)]
     struct MockIoDispatchUser {
         pub dispatcher: ComponentHandle<Dispatcher>,
-        counter: Arc<AtomicUsize>, // We expect to recieve DISPATCH_COUNT messages
+        counter: Arc<AtomicUsize>, // We expect to receive DISPATCH_COUNT messages
         sent_tasks: Arc<Mutex<HashSet<Uuid>>>,
         received_tasks: Arc<Mutex<HashSet<Uuid>>>,
     }
@@ -497,7 +497,7 @@ mod tests {
     #[derive(Debug)]
     struct MockDispatchUser {
         pub dispatcher: ComponentHandle<Dispatcher>,
-        counter: Arc<AtomicUsize>, // We expect to recieve DISPATCH_COUNT messages
+        counter: Arc<AtomicUsize>, // We expect to receive DISPATCH_COUNT messages
         sent_tasks: Arc<Mutex<HashSet<Uuid>>>,
         received_tasks: Arc<Mutex<HashSet<Uuid>>>,
     }
@@ -584,7 +584,7 @@ mod tests {
         assert_eq!(counter.load(Ordering::SeqCst), DISPATCH_COUNT);
         // The sent tasks should be equal to the received tasks
         assert_eq!(*sent_tasks.lock(), *received_tasks.lock());
-        // The length of the sent/recieved tasks should be equal to the number of dispatched tasks
+        // The length of the sent/received tasks should be equal to the number of dispatched tasks
         assert_eq!(sent_tasks.lock().len(), DISPATCH_COUNT);
         assert_eq!(received_tasks.lock().len(), DISPATCH_COUNT);
     }
@@ -618,7 +618,7 @@ mod tests {
         assert_eq!(counter.load(Ordering::SeqCst), DISPATCH_COUNT);
         // The sent tasks should be equal to the received tasks
         assert_eq!(*sent_tasks.lock(), *received_tasks.lock());
-        // The length of the sent/recieved tasks should be equal to the number of dispatched tasks
+        // The length of the sent/received tasks should be equal to the number of dispatched tasks
         assert_eq!(sent_tasks.lock().len(), DISPATCH_COUNT);
         assert_eq!(received_tasks.lock().len(), DISPATCH_COUNT);
     }

@@ -50,14 +50,14 @@ func TestConvertCollectionToProto(t *testing.T) {
 	assert.Nil(t, collectionpb)
 
 	// Test case 2: collection is not nil
-	dimention := int32(10)
+	dimension := int32(10)
 	num_records := uint64(100)
 	size_bytes := uint64(500000)
 	last_compaction_time := uint64(1741037006)
 	collection := &model.Collection{
 		ID:        types.NewUniqueID(),
 		Name:      "test_collection",
-		Dimension: &dimention,
+		Dimension: &dimension,
 		Metadata: &model.CollectionMetadata[model.CollectionMetadataValueType]{
 			Metadata: map[string]model.CollectionMetadataValueType{
 				"key1": &model.CollectionMetadataValueStringType{Value: "value1"},

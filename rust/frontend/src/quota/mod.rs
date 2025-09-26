@@ -250,7 +250,7 @@ pub enum UsageType {
     IdSizeBytes,                     // Max id size in bytes
     NameSizeBytes,                   // Max name size in bytes (e.g. collection, database)
     LimitValue,                      // Max number of results to return
-    RankKnnLimit,                    // Max limit in rank knn expresion
+    RankKnnLimit,                    // Max limit in rank knn expression
     NumResults,                      // Number of results
     NumQueryEmbeddings,              // Number of query embeddings
     CollectionSizeRecords,           // Number of records in the collection

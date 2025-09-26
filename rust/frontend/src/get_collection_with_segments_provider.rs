@@ -1,5 +1,5 @@
 use backon::ConstantBuilder;
-use chroma_cache::{AysncPartitionedMutex, Cache, CacheError, Weighted};
+use chroma_cache::{AsyncPartitionedMutex, Cache, CacheError, Weighted};
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
@@ -67,7 +67,7 @@ impl Configurable<CollectionsWithSegmentsProviderConfig> for CollectionsWithSegm
         >(&config.cache)
         .await?;
         let sysdb_rpc_lock =
-            AysncPartitionedMutex::with_parallelism(config.permitted_parallelism as usize, ());
+            AsyncPartitionedMutex::with_parallelism(config.permitted_parallelism as usize, ());
 
         let retry_backoff = ConstantBuilder::default()
             .with_delay(Duration::from_millis(
@@ -108,7 +108,7 @@ pub struct CollectionsWithSegmentsProvider {
     pub(crate) collections_with_segments_cache:
         Arc<dyn Cache<CollectionUuid, CollectionAndSegmentsWithTtl>>,
     pub(crate) cache_ttl_secs: u32,
-    pub(crate) sysdb_rpc_lock: chroma_cache::AysncPartitionedMutex<CollectionUuid>,
+    pub(crate) sysdb_rpc_lock: chroma_cache::AsyncPartitionedMutex<CollectionUuid>,
     pub(crate) retry_backoff: ConstantBuilder,
 }
 

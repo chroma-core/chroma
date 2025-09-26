@@ -5,7 +5,7 @@ use roaring::RoaringBitmap;
 /// This enum helps to delay the evaluation of set minus in metadata filtering:
 /// - `Include(rbm)` suggests the result contains the specified ids in `rbm`.
 ///   For example, `<k>: {$eq: <v>}` will result in a `Include(<record ids with k=v>)`.
-/// - `Exclude(rbm)` suggests the result exludes the specified ids in `rbm`.
+/// - `Exclude(rbm)` suggests the result excludes the specified ids in `rbm`.
 ///   For example, `<k>: {$ne: <v>}` will result in a `Exclude(<record ids with k=v>)`
 ///
 /// Without this, we need to figure out the set of existing ids when we evaluate `$ne`, `$nin`, and `$not_contains`,
@@ -13,7 +13,7 @@ use roaring::RoaringBitmap;
 ///
 /// `{$and: [{<k0>: {$gt: <v0>}}, {<k1>: {$ne: <v1>}}]}`
 ///
-/// The naive way is to evaluate the `$gt` and `$ne` seperately and take the conjunction, but this requires
+/// The naive way is to evaluate the `$gt` and `$ne` separately and take the conjunction, but this requires
 /// us to know the full set of existing ids because it is needed to evaluate `$ne`.
 /// However, we can first evaluate `$gt` and then exclude the offset ids for records with metadata `k1=v1`.
 /// This behavior is captured in the `BitAnd::bitand` operator of `SignedRoaringBitmap`:

@@ -82,7 +82,7 @@ Authorization response provides authorization provider evaluation response. It r
 
 ##### ChromaAuthzMiddleware
 
-The `ChromaAuthzMiddleware` is an abstraction for the server-side middleware. At the time of writing we only support FastAPI. The  middleware interface supports several methods:
+The `ChromaAuthzMiddleware` is an abstraction for the server-side middleware. At the time of writing we only support FastAPI. The middleware interface supports several methods:
 
 - `authorize` - authorizes the request against the authorization provider.
 - `ignore_operation` - determines whether or not the operation should be ignored by the middleware
@@ -90,7 +90,7 @@ The `ChromaAuthzMiddleware` is an abstraction for the server-side middleware. At
 
 ##### AuthorizationError
 
-Error thrown when an authorization request is disallowed/denied by the authorization provider. Depending on authorization provider's implementation such error may also be thrown when the authorization provider is not available or an internal error ocurred.
+Error thrown when an authorization request is disallowed/denied by the authorization provider. Depending on authorization provider's implementation such error may also be thrown when the authorization provider is not available or an internal error occurred.
 
 Client semantics of this error is a 403 Unauthorized error being returned over HTTP interface.
 
@@ -102,12 +102,11 @@ The AuthorizationContext is composed of three components as defined in #Basic Au
 - Resource
 - Action
 
-
 ```json
 {
-"user": {"id": "API Token or User Id"},
-"resource": {"namespace": "*", "id": "collection_id","type": "database"},
-"action": {"id":"get_or_create"},
+  "user": { "id": "API Token or User Id" },
+  "resource": { "namespace": "*", "id": "collection_id", "type": "database" },
+  "action": { "id": "get_or_create" }
 }
 ```
 
@@ -283,7 +282,6 @@ users:
     tokens:
       - token: my_api_token
         secret: my_api_secret
-
 ```
 
 ## **Compatibility, Deprecation, and Migration Plan**

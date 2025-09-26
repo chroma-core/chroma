@@ -37,7 +37,7 @@ Therefore, users should always plan on having enough RAM provisioned to accommod
 
 To analyze how much RAM is required, we launched an an instance of Chroma on variously sized EC2 instances, then inserted embeddings until each system became non-responsive. As expected, this failure point corresponded linearly to RAM and embedding count.
 
-For 1024 dimensional embeddings, with three metadata records and a small document per embedding, this works out to `N = R * 0.245` where `N` is the max collection size in millions, and `R` is the amount of system RAM required in gigabytes. Remember, you wil also need reserve at least a gigabyte for the system’s other needs, in addition to the memory required by Chroma.
+For 1024 dimensional embeddings, with three metadata records and a small document per embedding, this works out to `N = R * 0.245` where `N` is the max collection size in millions, and `R` is the amount of system RAM required in gigabytes. Remember, you will also need to reserve at least a gigabyte for the system’s other needs, in addition to the memory required by Chroma.
 
 This pattern holds true up through about 7 million embeddings, which is as far as we tested. At this point Chroma is still fast and stable, and we did not find a strict upper bound on the size of a Chroma database.
 

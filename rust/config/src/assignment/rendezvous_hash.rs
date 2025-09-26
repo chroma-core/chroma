@@ -147,7 +147,7 @@ mod tests {
     fn test_even_distribution() {
         let key_count = 1000;
         let member_count = 10;
-        // Probablity of a key get assigned to a particular member, assuming perfect hashing
+        // Probability of a key get assigned to a particular member, assuming perfect hashing
         let prob = 1_f64 / member_count as f64;
         // Expected number of keys assigned to a member
         let expected = key_count as f64 * prob;
@@ -180,7 +180,7 @@ mod tests {
         let k = 3;
         let key_count = 1000;
         let member_count = 10;
-        // Probablity of a key get assigned to a particular member, assuming perfect hashing
+        // Probability of a key get assigned to a particular member, assuming perfect hashing
         let prob = k as f64 / member_count as f64;
         // Expected number of keys assigned to a member
         let expected = key_count as f64 * prob;

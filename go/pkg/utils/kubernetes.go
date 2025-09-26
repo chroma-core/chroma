@@ -7,7 +7,7 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-func GetTestKubenertesInterface() (kubernetes.Interface, error) {
+func GetTestKubernetesInterface() (kubernetes.Interface, error) {
 	clientset := fake.NewSimpleClientset()
 	return clientset, nil
 }

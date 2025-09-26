@@ -75,7 +75,7 @@ class MigratableDB(SqlDB):
     importlib_resources.
 
     All migrations in the same directory are assumed to be dependent on previous
-    migrations in the same directory, where "previous" is defined on lexographical
+    migrations in the same directory, where "previous" is defined on lexicographical
     ordering of filenames.
 
     Migrations have a ascending numeric version number and a hash of the file contents.
