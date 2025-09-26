@@ -145,7 +145,7 @@ impl<'me> SparseReader<'me> {
                 continue;
             };
 
-            let mut dimension_iterator = self.get_offset_values(&encoded_dimension_id, ..).await?;
+            let mut dimension_iterator = self.get_offset_values(encoded_dimension_id, ..).await?;
             let Some((offset, value)) = dimension_iterator
                 .by_ref()
                 .find(|&(offset, _)| mask.contains(offset))
