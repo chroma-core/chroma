@@ -35,5 +35,6 @@ runs:
       uses: Swatinem/rust-cache@v2
       with:
         workspaces: ${{ inputs.workspaces }}
+        cache-all-crates: true
     - name: Setup Nextest
       uses: taiki-e/install-action@nextest
