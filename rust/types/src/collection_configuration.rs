@@ -1,4 +1,14 @@
 use crate::{
+    default_batch_size, default_construction_ef, default_construction_ef_spann,
+    default_initial_lambda, default_m, default_m_spann, default_merge_threshold,
+    default_nreplica_count, default_num_centers_to_merge_to, default_num_samples_kmeans,
+    default_num_threads, default_reassign_neighbor_count, default_resize_factor, default_search_ef,
+    default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
+    default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
+    default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor,
+    is_embedding_function_default,
+};
+use crate::{
     HnswConfiguration, HnswParametersFromSegmentError, InternalHnswConfiguration,
     InternalSpannConfiguration, Metadata, Segment, SpannConfiguration, UpdateHnswConfiguration,
     UpdateSpannConfiguration,
@@ -27,6 +37,15 @@ pub enum EmbeddingFunctionConfiguration {
     Legacy,
     #[serde(rename = "known")]
     Known(EmbeddingFunctionNewConfiguration),
+}
+
+impl EmbeddingFunctionConfiguration {
+    pub fn is_default(&self) -> bool {
+        match self {
+            EmbeddingFunctionConfiguration::Legacy => false,
+            EmbeddingFunctionConfiguration::Known(config) => config.name == "default",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -110,6 +129,46 @@ impl InternalCollectionConfiguration {
         Self {
             vector_index: VectorIndexConfiguration::Spann(InternalSpannConfiguration::default()),
             embedding_function: None,
+        }
+    }
+
+    /// Check if this collection configuration is default
+    pub fn is_default(&self) -> bool {
+        if !is_embedding_function_default(&self.embedding_function) {
+            return false;
+        }
+
+        // Check vector index configuration
+        match &self.vector_index {
+            VectorIndexConfiguration::Hnsw(hnsw_config) => {
+                hnsw_config.ef_construction == default_construction_ef()
+                    && hnsw_config.ef_search == default_search_ef()
+                    && hnsw_config.max_neighbors == default_m()
+                    && hnsw_config.num_threads == default_num_threads()
+                    && hnsw_config.batch_size == default_batch_size()
+                    && hnsw_config.sync_threshold == default_sync_threshold()
+                    && hnsw_config.resize_factor == default_resize_factor()
+                    && hnsw_config.space == default_space()
+            }
+            VectorIndexConfiguration::Spann(spann_config) => {
+                spann_config.search_nprobe == default_search_nprobe()
+                    && spann_config.search_rng_factor == default_search_rng_factor()
+                    && spann_config.search_rng_epsilon == default_search_rng_epsilon()
+                    && spann_config.write_nprobe == default_write_nprobe()
+                    && spann_config.nreplica_count == default_nreplica_count()
+                    && spann_config.write_rng_factor == default_write_rng_factor()
+                    && spann_config.write_rng_epsilon == default_write_rng_epsilon()
+                    && spann_config.split_threshold == default_split_threshold()
+                    && spann_config.num_samples_kmeans == default_num_samples_kmeans()
+                    && spann_config.initial_lambda == default_initial_lambda()
+                    && spann_config.reassign_neighbor_count == default_reassign_neighbor_count()
+                    && spann_config.merge_threshold == default_merge_threshold()
+                    && spann_config.num_centers_to_merge_to == default_num_centers_to_merge_to()
+                    && spann_config.ef_construction == default_construction_ef_spann()
+                    && spann_config.ef_search == default_search_ef_spann()
+                    && spann_config.max_neighbors == default_m_spann()
+                    && spann_config.space == default_space()
+            }
         }
     }
 
@@ -452,7 +511,7 @@ impl TryFrom<UpdateCollectionConfiguration> for InternalUpdateCollectionConfigur
 mod tests {
 
     use crate::hnsw_configuration::HnswConfiguration;
-    use crate::hnsw_configuration::HnswSpace;
+    use crate::hnsw_configuration::Space;
     use crate::spann_configuration::SpannConfiguration;
     use crate::{test_segment, CollectionUuid, Metadata};
 
@@ -516,7 +575,7 @@ mod tests {
             num_threads: Some(4),
             sync_threshold: Some(500),
             resize_factor: Some(1.2),
-            space: Some(HnswSpace::Cosine),
+            space: Some(Space::Cosine),
         };
 
         let collection_config = CollectionConfiguration {
@@ -548,7 +607,7 @@ mod tests {
             num_threads: Some(4),
             sync_threshold: Some(500),
             resize_factor: Some(1.2),
-            space: Some(HnswSpace::Cosine),
+            space: Some(Space::Cosine),
         };
 
         let collection_config = CollectionConfiguration {
@@ -567,7 +626,7 @@ mod tests {
         let internal_config = internal_config_result.unwrap();
 
         let expected_vector_index = VectorIndexConfiguration::Spann(InternalSpannConfiguration {
-            space: hnsw_config.space.unwrap_or(HnswSpace::L2),
+            space: hnsw_config.space.unwrap_or(Space::L2),
             ..Default::default()
         });
         assert_eq!(internal_config.vector_index, expected_vector_index);
@@ -581,7 +640,7 @@ mod tests {
             max_neighbors: Some(16),
             search_nprobe: Some(1),
             write_nprobe: Some(1),
-            space: Some(HnswSpace::Cosine),
+            space: Some(Space::Cosine),
             reassign_neighbor_count: Some(64),
             split_threshold: Some(200),
             merge_threshold: Some(100),
@@ -614,7 +673,7 @@ mod tests {
             max_neighbors: Some(16),
             search_nprobe: Some(1),
             write_nprobe: Some(1),
-            space: Some(HnswSpace::Cosine),
+            space: Some(Space::Cosine),
             reassign_neighbor_count: Some(64),
             split_threshold: Some(200),
             merge_threshold: Some(100),
@@ -633,7 +692,7 @@ mod tests {
         );
 
         let expected_vector_index = VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
-            space: spann_config.space.unwrap_or(HnswSpace::L2),
+            space: spann_config.space.unwrap_or(Space::L2),
             ..Default::default()
         });
         assert_eq!(
@@ -720,7 +779,7 @@ mod tests {
         assert_eq!(
             internal_config.vector_index,
             VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
-                space: HnswSpace::Cosine,
+                space: Space::Cosine,
                 ef_construction: 1,
                 ..Default::default()
             })
@@ -758,7 +817,7 @@ mod tests {
         assert_eq!(
             internal_config.vector_index,
             VectorIndexConfiguration::Spann(InternalSpannConfiguration {
-                space: HnswSpace::Cosine,
+                space: Space::Cosine,
                 ..Default::default()
             })
         );
@@ -768,7 +827,7 @@ mod tests {
     fn test_update_collection_configuration_with_hnsw() {
         let mut config = InternalCollectionConfiguration {
             vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
-                space: HnswSpace::Cosine,
+                space: Space::Cosine,
                 ..Default::default()
             }),
             embedding_function: Some(EmbeddingFunctionConfiguration::Known(
@@ -790,7 +849,7 @@ mod tests {
         assert_eq!(
             config.vector_index,
             VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
-                space: HnswSpace::Cosine,
+                space: Space::Cosine,
                 ef_search: 1,
                 ..Default::default()
             })
@@ -811,7 +870,7 @@ mod tests {
     fn test_update_collection_configuration_with_spann() {
         let mut config = InternalCollectionConfiguration {
             vector_index: VectorIndexConfiguration::Spann(InternalSpannConfiguration {
-                space: HnswSpace::Cosine,
+                space: Space::Cosine,
                 ..Default::default()
             }),
             embedding_function: Some(EmbeddingFunctionConfiguration::Known(
@@ -833,7 +892,7 @@ mod tests {
         assert_eq!(
             config.vector_index,
             VectorIndexConfiguration::Spann(InternalSpannConfiguration {
-                space: HnswSpace::Cosine,
+                space: Space::Cosine,
                 ef_search: 1,
                 ..Default::default()
             })

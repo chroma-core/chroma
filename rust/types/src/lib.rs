@@ -3,6 +3,7 @@ mod types;
 mod api_types;
 mod collection;
 mod collection_configuration;
+mod collection_schema;
 mod data_chunk;
 mod data_record;
 mod execution;
@@ -26,10 +27,14 @@ mod where_parsing;
 pub mod optional_u128;
 pub mod regex;
 
+// Re-export Space from hnsw_configuration
+pub use hnsw_configuration::Space;
+
 // Re-export the types module, so that we can use it as a single import in other modules.
 pub use api_types::*;
 pub use collection::*;
 pub use collection_configuration::*;
+pub use collection_schema::*;
 pub use data_chunk::*;
 pub use data_record::*;
 pub use execution::*;
