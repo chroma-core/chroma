@@ -33,6 +33,12 @@ impl<'referred_data> ArrowReadableKey<'referred_data> for &'referred_data str {
             .unwrap()
             .value(index)
     }
+
+    fn to_vec(array: &'referred_data Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+        let arr = array.as_any().downcast_ref::<StringArray>().unwrap();
+        (offset..offset + length).map(|i| arr.value(i)).collect()
+    }
+
     fn add_to_delta<'external, V: ArrowReadableValue<'external>>(
         prefix: &str,
         key: Self,

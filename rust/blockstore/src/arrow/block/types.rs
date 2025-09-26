@@ -297,39 +297,6 @@ impl Block {
             return Vec::new();
         }
 
-        // Find the end index (first element with a different prefix)
-        let end_idx = self.find_smallest_index_of_next_prefix::<K>(prefix);
-
-        // Pre-allocate result vector with exact capacity
-        let count = end_idx - start_idx;
-        let mut result = Vec::with_capacity(count);
-
-        // Get the columns once to avoid repeated lookups
-        let key_column = self.data.column(1);
-        let value_column = self.data.column(2);
-
-        // Extract all key-value pairs for this prefix
-        // Sequential access should benefit from CPU cache prefetching
-        for i in start_idx..end_idx {
-            let key = K::get(key_column, i);
-            let value = V::get(value_column, i);
-            result.push((key, value));
-        }
-
-        result
-    }
-
-    /// Optimized version using array slicing for u32 keys and f32 values
-    #[allow(dead_code)]
-    pub fn get_prefix_sliced_u32_f32(&self, prefix: &str) -> Vec<(u32, f32)> {
-        use arrow::array::{Float32Array, UInt32Array};
-
-        // Find the start index for this prefix
-        let start_idx = self.find_smallest_index_of_prefix::<u32>(prefix);
-        if start_idx >= self.len() {
-            return Vec::new();
-        }
-
         // Verify the prefix actually matches
         let prefix_array = self
             .data
@@ -342,31 +309,16 @@ impl Block {
             return Vec::new();
         }
 
-        // Find the end index
-        let end_idx = self.find_smallest_index_of_next_prefix::<u32>(prefix);
+        // Find the end index (first element with a different prefix)
+        let end_idx = self.find_smallest_index_of_next_prefix::<K>(prefix);
         let count = end_idx - start_idx;
 
-        // Create sliced arrays - zero-copy views
-        let key_slice = self.data.column(1).slice(start_idx, count);
-        let value_slice = self.data.column(2).slice(start_idx, count);
+        // Use the new to_vec methods for efficient extraction
+        let keys = K::to_vec(self.data.column(1), start_idx, count);
+        let values = V::to_vec(self.data.column(2), start_idx, count);
 
-        // Downcast the sliced arrays
-        let key_array = key_slice.as_any().downcast_ref::<UInt32Array>().unwrap();
-        let value_array = value_slice.as_any().downcast_ref::<Float32Array>().unwrap();
-
-        // Pre-allocate result
-        let mut result = Vec::with_capacity(count);
-
-        // Access the underlying buffers directly
-        let key_values = key_array.values();
-        let value_values = value_array.values();
-
-        // Now we iterate from 0 to count on the sliced arrays
-        for i in 0..count {
-            result.push((key_values[i], value_values[i]));
-        }
-
-        result
+        // Zip and collect
+        keys.into_iter().zip(values).collect()
     }
 
     /// Get the value for a given key in the block

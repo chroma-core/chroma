@@ -256,6 +256,11 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for DataRecord<'referred
         }
     }
 
+    fn to_vec(_array: &'referred_data Arc<dyn Array>, _offset: usize, _length: usize) -> Vec<Self> {
+        // TODO: Implement properly - stub for compilation
+        Vec::new()
+    }
+
     fn add_to_delta<K: ArrowWriteableKey>(
         prefix: &str,
         key: K,
