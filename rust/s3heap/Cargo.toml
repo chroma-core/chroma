@@ -1,0 +1,17 @@
+[package]
+name = "s3heap"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = { workspace = true }
+arrow = { workspace = true }
+backon = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+parquet = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+chroma-storage = { workspace = true }
