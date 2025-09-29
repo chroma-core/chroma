@@ -297,23 +297,11 @@ impl Block {
             return Vec::new();
         }
 
-        // Verify the prefix actually matches
-        let prefix_array = self
-            .data
-            .column(0)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-
-        if prefix_array.value(start_idx) != prefix {
-            return Vec::new();
-        }
-
         // Find the end index (first element with a different prefix)
         let end_idx = self.find_smallest_index_of_next_prefix::<K>(prefix);
         let count = end_idx - start_idx;
 
-        // Use the new to_vec methods for efficient extraction
+        // Extract key value pairs
         let keys = K::to_vec(self.data.column(1), start_idx, count);
         let values = V::to_vec(self.data.column(2), start_idx, count);
 

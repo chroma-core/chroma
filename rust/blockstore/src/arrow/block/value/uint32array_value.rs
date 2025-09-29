@@ -137,31 +137,8 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data [u32
     }
 
     fn to_vec(array: &'referred_data Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
-        let list_array = array.as_any().downcast_ref::<ListArray>().unwrap();
-
         (offset..offset + length)
-            .map(|index| {
-                let start = list_array.value_offsets()[index] as usize;
-                let end = list_array.value_offsets()[index + 1] as usize;
-
-                let u32array = list_array.values().as_any().downcast_ref::<UInt32Array>();
-                match u32array {
-                    Some(u32array) => &u32array.values()[start..end],
-                    None => {
-                        let i32array = list_array
-                            .values()
-                            .as_any()
-                            .downcast_ref::<Int32Array>()
-                            .unwrap();
-                        unsafe {
-                            std::slice::from_raw_parts(
-                                i32array.values()[start..end].as_ptr() as *const u32,
-                                i32array.values()[start..end].len(),
-                            )
-                        }
-                    }
-                }
-            })
+            .map(|i| Self::get(array, i))
             .collect()
     }
 
