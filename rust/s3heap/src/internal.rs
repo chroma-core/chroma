@@ -374,6 +374,81 @@ fn construct_parquet(items: &[HeapItem]) -> Result<Vec<u8>, Error> {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use std::time::Duration;
+
+    // HeapItem tests
+    #[test]
+    fn heap_item_creation_and_equality() {
+        let trigger = crate::Triggerable {
+            uuid: Uuid::new_v4(),
+            name: "test-task".to_string(),
+        };
+        let nonce = Uuid::new_v4();
+
+        let item1 = HeapItem {
+            trigger: trigger.clone(),
+            nonce,
+        };
+
+        let item2 = HeapItem {
+            trigger: trigger.clone(),
+            nonce,
+        };
+
+        assert_eq!(item1, item2);
+        assert_eq!(item1.trigger, trigger);
+        assert_eq!(item1.nonce, nonce);
+    }
+
+    #[test]
+    fn heap_item_clone() {
+        let item = HeapItem {
+            trigger: crate::Triggerable {
+                uuid: Uuid::new_v4(),
+                name: "clone-test".to_string(),
+            },
+            nonce: Uuid::new_v4(),
+        };
+
+        let cloned = item.clone();
+        assert_eq!(item, cloned);
+        assert_eq!(item.trigger, cloned.trigger);
+        assert_eq!(item.nonce, cloned.nonce);
+    }
+
+    #[test]
+    fn heap_item_default() {
+        let item = HeapItem::default();
+        assert_eq!(item.trigger.uuid, Uuid::nil());
+        assert_eq!(item.trigger.name, "");
+        assert_eq!(item.nonce, Uuid::nil());
+    }
+
+    // Internal struct tests
+    #[test]
+    fn internal_new() {
+        let (_temp_dir, storage) = chroma_storage::test_storage();
+        let scheduler = Arc::new(DummyScheduler {});
+        let retry_config = RetryConfig {
+            min_delay: Duration::from_millis(50),
+            max_delay: Duration::from_secs(5),
+            factor: 1.5,
+            max_retries: 3,
+        };
+
+        let internal = Internal::new(
+            "test-prefix".to_string(),
+            storage.clone(),
+            scheduler.clone(),
+            retry_config.clone(),
+        );
+
+        assert_eq!(internal.prefix, "test-prefix");
+        assert_eq!(internal.retry_config.min_delay, retry_config.min_delay);
+        assert_eq!(internal.retry_config.max_delay, retry_config.max_delay);
+        assert_eq!(internal.retry_config.factor, retry_config.factor);
+        assert_eq!(internal.retry_config.max_retries, retry_config.max_retries);
+    }
 
     #[test]
     fn bucket_computation_truncates_to_minute() {
@@ -406,6 +481,38 @@ mod tests {
     }
 
     #[test]
+    fn bucket_computation_edge_cases() {
+        let (_temp_dir, storage) = chroma_storage::test_storage();
+        let internal = Internal {
+            prefix: "test".to_string(),
+            storage,
+            heap_scheduler: Arc::new(DummyScheduler {}),
+            retry_config: RetryConfig::default(),
+        };
+
+        // Test edge of year transition
+        let new_year = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+        let bucket = internal.compute_bucket(new_year).unwrap();
+        assert_eq!(
+            bucket,
+            Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 0).unwrap()
+        );
+
+        // Test first minute of new year
+        let first_minute = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 30).unwrap();
+        let bucket = internal.compute_bucket(first_minute).unwrap();
+        assert_eq!(bucket, Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap());
+
+        // Test leap year boundary
+        let leap_day = Utc.with_ymd_and_hms(2024, 2, 29, 12, 34, 56).unwrap();
+        let bucket = internal.compute_bucket(leap_day).unwrap();
+        assert_eq!(
+            bucket,
+            Utc.with_ymd_and_hms(2024, 2, 29, 12, 34, 0).unwrap()
+        );
+    }
+
+    #[test]
     fn path_for_bucket_format() {
         let (_temp_dir, storage) = chroma_storage::test_storage();
         let internal = Internal {
@@ -431,6 +538,49 @@ mod tests {
     }
 
     #[test]
+    fn path_for_bucket_edge_cases() {
+        let (_temp_dir, storage) = chroma_storage::test_storage();
+        let internal = Internal {
+            prefix: "edge".to_string(),
+            storage,
+            heap_scheduler: Arc::new(DummyScheduler {}),
+            retry_config: RetryConfig::default(),
+        };
+
+        // Test midnight
+        let midnight = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let path = internal.path_for_bucket(midnight);
+        assert_eq!(path, "edge/2024-01-01T00:00:00Z");
+
+        // Test last minute of day
+        let last_minute = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 0).unwrap();
+        let path = internal.path_for_bucket(last_minute);
+        assert_eq!(path, "edge/2024-12-31T23:59:00Z");
+
+        // Test single digit month and day
+        let single_digits = Utc.with_ymd_and_hms(2024, 3, 5, 7, 9, 0).unwrap();
+        let path = internal.path_for_bucket(single_digits);
+        assert_eq!(path, "edge/2024-03-05T07:09:00Z");
+    }
+
+    #[test]
+    fn heap_scheduler_reference() {
+        let (_temp_dir, storage) = chroma_storage::test_storage();
+        let scheduler = Arc::new(DummyScheduler {});
+        let internal = Internal {
+            prefix: "test".to_string(),
+            storage,
+            heap_scheduler: scheduler.clone(),
+            retry_config: RetryConfig::default(),
+        };
+
+        // Verify we can get the scheduler reference
+        let scheduler_ref = internal.heap_scheduler();
+        // Just verify it's accessible - can't really test the pointer itself
+        let _ = scheduler_ref;
+    }
+
+    #[test]
     fn construct_parquet_empty_items() {
         // Test that construct_parquet handles empty list correctly
         let items = vec![];
@@ -441,35 +591,8 @@ mod tests {
             !buffer.is_empty(),
             "Parquet file should have headers even when empty"
         );
-    }
 
-    #[test]
-    fn construct_parquet_with_items() {
-        use crate::Triggerable;
-
-        let items = vec![
-            HeapItem {
-                trigger: Triggerable {
-                    uuid: Uuid::new_v4(),
-                    name: "test-task-1".to_string(),
-                },
-                nonce: Uuid::new_v4(),
-            },
-            HeapItem {
-                trigger: Triggerable {
-                    uuid: Uuid::new_v4(),
-                    name: "test-task-2".to_string(),
-                },
-                nonce: Uuid::new_v4(),
-            },
-        ];
-
-        let result = construct_parquet(&items);
-        assert!(result.is_ok());
-        let buffer = result.unwrap();
-        assert!(!buffer.is_empty());
-
-        // Verify we can read it back
+        // Verify the parquet file is valid even when empty
         let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
             bytes::Bytes::from(buffer),
         )
@@ -480,13 +603,251 @@ mod tests {
         for batch in reader {
             let batch = batch.unwrap();
             total_rows += batch.num_rows();
-            assert!(batch.column_by_name("uuids").is_some());
-            assert!(batch.column_by_name("names").is_some());
-            assert!(batch.column_by_name("nonces").is_some());
         }
-        assert_eq!(total_rows, 2);
+        assert_eq!(total_rows, 0);
     }
 
+    #[test]
+    fn construct_parquet_with_items() {
+        use crate::Triggerable;
+
+        let uuid1 = Uuid::new_v4();
+        let uuid2 = Uuid::new_v4();
+        let nonce1 = Uuid::new_v4();
+        let nonce2 = Uuid::new_v4();
+
+        let items = vec![
+            HeapItem {
+                trigger: Triggerable {
+                    uuid: uuid1,
+                    name: "test-task-1".to_string(),
+                },
+                nonce: nonce1,
+            },
+            HeapItem {
+                trigger: Triggerable {
+                    uuid: uuid2,
+                    name: "test-task-2".to_string(),
+                },
+                nonce: nonce2,
+            },
+        ];
+
+        let result = construct_parquet(&items);
+        assert!(result.is_ok());
+        let buffer = result.unwrap();
+        assert!(!buffer.is_empty());
+
+        // Verify we can read it back and the data matches
+        let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+            bytes::Bytes::from(buffer),
+        )
+        .unwrap();
+        let reader = builder.build().unwrap();
+
+        let mut total_rows = 0;
+        let mut found_items = vec![];
+
+        for batch in reader {
+            let batch = batch.unwrap();
+            total_rows += batch.num_rows();
+
+            // Verify columns exist
+            let uuids = batch.column_by_name("uuids").unwrap();
+            let names = batch.column_by_name("names").unwrap();
+            let nonces = batch.column_by_name("nonces").unwrap();
+
+            // Extract and verify data
+            let uuids = uuids.as_any().downcast_ref::<StringArray>().unwrap();
+            let names = names.as_any().downcast_ref::<StringArray>().unwrap();
+            let nonces = nonces.as_any().downcast_ref::<StringArray>().unwrap();
+
+            for i in 0..batch.num_rows() {
+                found_items.push((
+                    uuids.value(i).to_string(),
+                    names.value(i).to_string(),
+                    nonces.value(i).to_string(),
+                ));
+            }
+        }
+
+        assert_eq!(total_rows, 2);
+        assert_eq!(found_items.len(), 2);
+
+        // Verify the data matches what we put in
+        assert!(found_items.iter().any(|(u, n, nc)| u == &uuid1.to_string()
+            && n == "test-task-1"
+            && nc == &nonce1.to_string()));
+        assert!(found_items.iter().any(|(u, n, nc)| u == &uuid2.to_string()
+            && n == "test-task-2"
+            && nc == &nonce2.to_string()));
+    }
+
+    #[test]
+    fn construct_parquet_single_item() {
+        use crate::Triggerable;
+
+        let item = HeapItem {
+            trigger: Triggerable {
+                uuid: Uuid::new_v4(),
+                name: "single-task".to_string(),
+            },
+            nonce: Uuid::new_v4(),
+        };
+
+        let result = construct_parquet(&[item.clone()]);
+        assert!(result.is_ok());
+        let buffer = result.unwrap();
+
+        // Read it back
+        let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+            bytes::Bytes::from(buffer),
+        )
+        .unwrap();
+        let reader = builder.build().unwrap();
+
+        let mut total_rows = 0;
+        for batch in reader {
+            let batch = batch.unwrap();
+            total_rows += batch.num_rows();
+
+            let names = batch
+                .column_by_name("names")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            assert_eq!(names.value(0), "single-task");
+        }
+        assert_eq!(total_rows, 1);
+    }
+
+    #[test]
+    fn construct_parquet_with_special_characters() {
+        use crate::Triggerable;
+
+        let items = vec![
+            HeapItem {
+                trigger: Triggerable {
+                    uuid: Uuid::new_v4(),
+                    name: "task-with-😀-emoji".to_string(),
+                },
+                nonce: Uuid::new_v4(),
+            },
+            HeapItem {
+                trigger: Triggerable {
+                    uuid: Uuid::new_v4(),
+                    name: "task/with\\special|chars<>&\"'".to_string(),
+                },
+                nonce: Uuid::new_v4(),
+            },
+            HeapItem {
+                trigger: Triggerable {
+                    uuid: Uuid::new_v4(),
+                    name: "".to_string(), // empty name
+                },
+                nonce: Uuid::new_v4(),
+            },
+        ];
+
+        let result = construct_parquet(&items);
+        assert!(result.is_ok());
+        let buffer = result.unwrap();
+
+        // Read it back and verify special characters are preserved
+        let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+            bytes::Bytes::from(buffer),
+        )
+        .unwrap();
+        let reader = builder.build().unwrap();
+
+        let mut found_names = vec![];
+        for batch in reader {
+            let batch = batch.unwrap();
+            let names = batch
+                .column_by_name("names")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+
+            for i in 0..batch.num_rows() {
+                found_names.push(names.value(i).to_string());
+            }
+        }
+
+        assert_eq!(found_names.len(), 3);
+        assert!(found_names.contains(&"task-with-😀-emoji".to_string()));
+        assert!(found_names.contains(&"task/with\\special|chars<>&\"'".to_string()));
+        assert!(found_names.contains(&"".to_string()));
+    }
+
+    #[test]
+    fn construct_parquet_large_batch() {
+        use crate::Triggerable;
+
+        // Create a large batch of items
+        let items: Vec<HeapItem> = (0..1000)
+            .map(|i| HeapItem {
+                trigger: Triggerable {
+                    uuid: Uuid::new_v4(),
+                    name: format!("task-{}", i),
+                },
+                nonce: Uuid::new_v4(),
+            })
+            .collect();
+
+        let result = construct_parquet(&items);
+        assert!(result.is_ok());
+        let buffer = result.unwrap();
+
+        // Read it back and verify count
+        let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+            bytes::Bytes::from(buffer),
+        )
+        .unwrap();
+        let reader = builder.build().unwrap();
+
+        let mut total_rows = 0;
+        for batch in reader {
+            let batch = batch.unwrap();
+            total_rows += batch.num_rows();
+        }
+        assert_eq!(total_rows, 1000);
+    }
+
+    // Async tests for Internal methods
+    #[tokio::test]
+    async fn list_approx_first_1k_buckets_empty() {
+        let (_temp_dir, storage) = chroma_storage::test_storage();
+        let internal = Internal {
+            prefix: "empty-list".to_string(),
+            storage,
+            heap_scheduler: Arc::new(DummyScheduler {}),
+            retry_config: RetryConfig::default(),
+        };
+
+        let buckets = internal.list_approx_first_1k_buckets().await.unwrap();
+        assert_eq!(buckets.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn clear_bucket_nonexistent() {
+        let (_temp_dir, storage) = chroma_storage::test_storage();
+        let internal = Internal {
+            prefix: "clear-test".to_string(),
+            storage,
+            heap_scheduler: Arc::new(DummyScheduler {}),
+            retry_config: RetryConfig::default(),
+        };
+
+        let bucket = Utc.with_ymd_and_hms(2024, 1, 1, 12, 0, 0).unwrap();
+        // Clearing a non-existent bucket might return an error depending on storage implementation
+        // In production S3, it would succeed, but test storage might behave differently
+        let _ = internal.clear_bucket(bucket).await;
+    }
+
+    // Test schedulers
     struct DummyScheduler;
 
     #[async_trait::async_trait]
