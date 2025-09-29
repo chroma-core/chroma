@@ -7137,9 +7137,11 @@ dependencies = [
  "bytes",
  "chroma-storage",
  "chrono",
+ "futures",
  "parquet",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "uuid",
 ]
 

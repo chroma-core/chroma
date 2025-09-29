@@ -155,18 +155,14 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
     writer.push(&initial_items).await.unwrap();
 
     // Launch concurrent operations
-    let mut handles = vec![];
-
     // Pruner removing completed items
     let pruner = HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    handles.push(tokio::spawn(async move {
-        pruner.prune(Limits::default()).await
-    }));
+    let prune_handle = tokio::spawn(async move { pruner.prune(Limits::default()).await });
 
     // Writer adding new items
     let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone());
     let scheduler_clone = scheduler.clone();
-    handles.push(tokio::spawn(async move {
+    let write_handle = tokio::spawn(async move {
         let new_items: Vec<_> = (100..105)
             .map(|i| {
                 let item = create_test_triggerable(i, &format!("new_item_{}", i));
@@ -175,12 +171,11 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
             })
             .collect();
         writer.push(&new_items).await
-    }));
+    });
 
     // Wait for operations
-    for handle in handles {
-        handle.await.unwrap().unwrap();
-    }
+    prune_handle.await.unwrap().unwrap();
+    write_handle.await.unwrap().unwrap();
 
     // Check final state
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());

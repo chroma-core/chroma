@@ -4,16 +4,15 @@ use std::sync::Arc;
 use arrow::array::{Array, ArrayRef, RecordBatch, StringArray};
 use backon::Retryable;
 use bytes::Bytes;
+use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
+use chroma_storage::{DeleteOptions, ETag, GetOptions, PutOptions, Storage, StorageError};
 use chrono::round::DurationRound;
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, TimeDelta, Timelike, Utc};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use uuid::Uuid;
-
-use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::{DeleteOptions, ETag, GetOptions, PutOptions, Storage, StorageError};
 
 use crate::{Error, HeapScheduler, RetryConfig, Triggerable};
 
@@ -126,13 +125,7 @@ impl Internal {
 
         let entries = entries.to_vec();
         (|| async {
-            let (mut on_s3, e_tag) = match self.load_bucket(bucket).await {
-                Ok((on_s3, e_tag)) => (on_s3, e_tag),
-                Err(Error::Storage(StorageError::NotFound { .. })) => (vec![], None),
-                Err(err) => {
-                    return Err(err);
-                }
-            };
+            let (mut on_s3, e_tag) = self.load_bucket_or_empty(bucket).await?;
             on_s3.extend(entries.iter().cloned());
             self.store_bucket(bucket, &on_s3, e_tag).await
         })
@@ -206,10 +199,18 @@ impl Internal {
     /// - [`Error::Parquet`] if the parquet file is corrupted
     /// - [`Error::Arrow`] if required columns are missing or have wrong types
     /// - [`Error::Uuid`] if UUID parsing fails
+    /// - [`Error::InvalidBucket`] if bucket is not minute-aligned
     pub async fn load_bucket(
         &self,
         bucket: DateTime<Utc>,
     ) -> Result<(Vec<HeapItem>, Option<ETag>), Error> {
+        // Validate that bucket is minute-aligned
+        if bucket.second() != 0 || bucket.nanosecond() != 0 {
+            return Err(Error::InvalidBucket(format!(
+                "Bucket {} is not minute-aligned",
+                bucket
+            )));
+        }
         let path = self.path_for_bucket(bucket);
         let (parquet, e_tag) = self
             .storage
@@ -248,25 +249,41 @@ impl Internal {
                 .ok_or_else(|| {
                     Error::Arrow(format!("'nonces' column is not a StringArray in {}", path))
                 })?;
+            let mut errors = Vec::new();
             for i in 0..batch.num_rows() {
                 if uuid.is_null(i) || name.is_null(i) || nonce.is_null(i) {
-                    return Err(Error::Arrow(format!(
-                        "null value at row {} in parquet file: {}",
-                        i, path
-                    )));
+                    errors.push(format!("null value at row {}", i));
+                    continue;
                 }
                 let uuid_str = uuid.value(i);
                 let name_str = name.value(i);
                 let nonce_str = nonce.value(i);
 
-                let uuid = Uuid::from_str(uuid_str)?;
-                let name = name_str.to_string();
-                let nonce = Uuid::from_str(nonce_str)?;
+                match (Uuid::from_str(uuid_str), Uuid::from_str(nonce_str)) {
+                    (Ok(uuid), Ok(nonce)) => {
+                        let name = name_str.to_string();
+                        items.push(HeapItem {
+                            trigger: Triggerable { uuid, name },
+                            nonce,
+                        });
+                    }
+                    (Err(e), _) => {
+                        errors.push(format!("invalid UUID at row {}: {}", i, e));
+                    }
+                    (_, Err(e)) => {
+                        errors.push(format!("invalid nonce at row {}: {}", i, e));
+                    }
+                }
+            }
 
-                items.push(HeapItem {
-                    trigger: Triggerable { uuid, name },
-                    nonce,
-                });
+            if !errors.is_empty() {
+                let first_errors: Vec<_> = errors.iter().take(3).cloned().collect();
+                tracing::warn!(
+                    "Found {} errors while loading parquet file {}: {:?}",
+                    errors.len(),
+                    path,
+                    first_errors
+                );
             }
         }
         Ok((items, e_tag))
@@ -412,6 +429,31 @@ impl Internal {
             self.prefix,
             bucket.naive_utc().format("%Y-%m-%dT%H:%M:%SZ")
         )
+    }
+
+    /// Load a bucket or return empty if not found.
+    ///
+    /// This is a common pattern where we want to treat a missing bucket
+    /// as an empty bucket rather than an error.
+    ///
+    /// # Arguments
+    ///
+    /// * `bucket` - The bucket timestamp to load
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// - The vector of HeapItems in the bucket (empty if not found)
+    /// - The ETag of the file (None if not found)
+    pub async fn load_bucket_or_empty(
+        &self,
+        bucket: DateTime<Utc>,
+    ) -> Result<(Vec<HeapItem>, Option<ETag>), Error> {
+        match self.load_bucket(bucket).await {
+            Ok((entries, e_tag)) => Ok((entries, e_tag)),
+            Err(Error::Storage(StorageError::NotFound { .. })) => Ok((vec![], None)),
+            Err(err) => Err(err),
+        }
     }
 }
 

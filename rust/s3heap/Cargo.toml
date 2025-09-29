@@ -9,9 +9,11 @@ arrow = { workspace = true }
 backon = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
+futures = { workspace = true }
 parquet = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 uuid = { workspace = true }
 
 chroma-storage = { workspace = true }
