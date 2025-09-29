@@ -331,8 +331,13 @@ class TestSchema:
         assert "defaults" in internal.model_dump()
         assert "key_overrides" in internal.model_dump()
 
-        # With initialization commented out, defaults are empty
-        assert len(internal.defaults) == 0
+        # With initialization enabled, defaults are populated with 6 value types
+        assert len(internal.defaults) == 6
+
+        # Check that all expected value types have defaults
+        expected_value_types = ["#string", "#float", "#float_list", "#sparse_vector", "#bool", "#int"]
+        for value_type in expected_value_types:
+            assert value_type in internal.defaults
 
         # Check key override - uses InternalFtsIndex
         assert "title" in internal.key_overrides
@@ -389,8 +394,9 @@ class TestSchema:
         assert isinstance(string_override, InternalStringInvertedIndex)
         assert string_override.enabled is True
         assert isinstance(string_override.config, StringInvertedIndexConfig)
-        # With initialization commented out, only user-specified configs are present
-        assert "$fts_index" not in internal.defaults["#string"]
+        # With initialization enabled, FTS index is present in defaults (set to False by default)
+        assert "$fts_index" in internal.defaults["#string"]
+        assert internal.defaults["#string"]["$fts_index"] is False
 
     def test_to_internal_schema_mixed_configs(self) -> None:
         """Test conversion with both global and key-specific configs."""
@@ -411,8 +417,9 @@ class TestSchema:
         assert isinstance(string_global, InternalStringInvertedIndex)
         assert string_global.enabled is True
         assert isinstance(string_global.config, StringInvertedIndexConfig)
-        # With initialization commented out, only user-specified configs are present
-        assert "$fts_index" not in internal.defaults["#string"]
+        # With initialization enabled, FTS index is present in defaults (set to False by default)
+        assert "$fts_index" in internal.defaults["#string"]
+        assert internal.defaults["#string"]["$fts_index"] is False
 
         # Check key override - uses InternalFtsIndex
         assert "document" in internal.key_overrides
@@ -453,23 +460,30 @@ class TestSchema:
         assert embedding_override.config.hnsw.ef_construction == 200  # ← Nested config preserved
 
     def test_default_internal_schema_population(self) -> None:
-        """Test that InternalSchema starts empty with no default population."""
-        # Empty schema should start empty
+        """Test that InternalSchema starts with default population."""
+        # Empty schema should have defaults populated
         schema = Schema()
         internal = InternalSchema(schema)
 
-        # With initialization commented out, defaults and key_overrides are empty
-        assert len(internal.defaults) == 0
-        assert len(internal.key_overrides) == 0
+        # With initialization enabled, defaults and key_overrides are populated
+        assert len(internal.defaults) == 6  # 6 value types with defaults
+        assert len(internal.key_overrides) == 2  # $document and $embedding keys
+
+        # Check that all expected value types have defaults
+        expected_value_types = ["#string", "#float", "#float_list", "#sparse_vector", "#bool", "#int"]
+        for value_type in expected_value_types:
+            assert value_type in internal.defaults
 
     def test_default_key_overrides_population(self) -> None:
-        """Test that InternalSchema starts empty with no default population."""
-        # Empty schema should start empty
+        """Test that InternalSchema starts with default key overrides."""
+        # Empty schema should have key overrides populated
         schema = Schema()
         internal = InternalSchema(schema)
 
-        # With initialization commented out, key_overrides are empty
-        assert len(internal.key_overrides) == 0
+        # With initialization enabled, key_overrides are populated with $document and $embedding
+        assert len(internal.key_overrides) == 2
+        assert "$document" in internal.key_overrides
+        assert "$embedding" in internal.key_overrides
 
     def test_user_config_overrides_defaults(self) -> None:
         """Test that user configurations are properly stored in defaults."""
@@ -524,25 +538,25 @@ class TestSchema:
         schema = Schema()
         internal = InternalSchema(schema)
 
-        # With initialization commented out, both should be empty
-        assert len(internal.defaults) == 0
-        assert len(internal.key_overrides) == 0
+        # With initialization enabled, both should be populated
+        assert len(internal.defaults) == 6  # 6 value types with defaults
+        assert len(internal.key_overrides) == 2  # $document and $embedding keys
 
     def test_all_value_types_have_base_defaults(self) -> None:
         """Test that InternalSchema starts empty with no default population."""
         schema = Schema()
         internal = InternalSchema(schema)
 
-        # With initialization commented out, defaults are empty
-        assert len(internal.defaults) == 0
+        # With initialization enabled, defaults are populated
+        assert len(internal.defaults) == 6  # 6 value types with defaults
 
     def test_embedding_vector_index_has_source_key(self) -> None:
         """Test that InternalSchema starts empty with no default population."""
         schema = Schema()
         internal = InternalSchema(schema)
 
-        # With initialization commented out, key_overrides are empty
-        assert len(internal.key_overrides) == 0
+        # With initialization enabled, key_overrides are populated
+        assert len(internal.key_overrides) == 2  # $document and $embedding keys
 
     # Edge Case Tests
     def test_edge_case_special_character_keys(self) -> None:
@@ -744,8 +758,8 @@ class TestSchema:
 
         internal = InternalSchema(schema)
 
-        # Should handle large number of keys
-        assert len(internal.key_overrides) == num_keys
+        # Should handle large number of keys (plus 2 default keys: $document and $embedding)
+        assert len(internal.key_overrides) == num_keys + 2
 
         # Spot check a few keys
         assert "key_0000" in internal.key_overrides
@@ -822,9 +836,9 @@ class TestSchema:
         assert isinstance(json_data["defaults"], dict)
         assert isinstance(json_data["key_overrides"], dict)
 
-        # With initialization commented out, InternalSchema starts empty
-        assert len(json_data["defaults"]) == 0
-        assert len(json_data["key_overrides"]) == 0
+        # With initialization enabled, InternalSchema starts with defaults
+        assert len(json_data["defaults"]) == 6  # 6 value types with defaults
+        assert len(json_data["key_overrides"]) == 2  # $document and $embedding keys
 
     def test_serialize_to_json_with_configs(self) -> None:
         """Test JSON serialization of InternalSchema with complex configurations."""
@@ -881,9 +895,9 @@ class TestSchema:
         assert len(deserialized.defaults) == len(original.defaults)
         assert len(deserialized.key_overrides) == len(original.key_overrides)
 
-        # With initialization commented out, both should be empty
-        assert len(deserialized.defaults) == 0
-        assert len(deserialized.key_overrides) == 0
+        # With initialization enabled, both should be populated
+        assert len(deserialized.defaults) == 6  # 6 value types with defaults
+        assert len(deserialized.key_overrides) == 2  # $document and $embedding keys
 
     def test_deserialize_from_json_with_configs(self) -> None:
         """Test JSON deserialization with complex configurations."""
@@ -955,9 +969,9 @@ class TestSchema:
         json_data = original.serialize_to_json()
         deserialized = InternalSchema.deserialize_from_json(json_data)
 
-        # With initialization commented out, both should be empty
-        assert len(deserialized.defaults) == 0
-        assert len(deserialized.key_overrides) == 0
+        # With initialization enabled, both should be populated
+        assert len(deserialized.defaults) == 6  # 6 value types with defaults
+        assert len(deserialized.key_overrides) == 2  # $document and $embedding keys
 
     def test_deserialize_handles_malformed_json(self) -> None:
         """Test that deserialization handles malformed JSON with appropriate errors."""

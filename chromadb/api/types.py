@@ -1895,8 +1895,8 @@ class InternalSchema(BaseModel):
         key_overrides: Dict[str, Dict[str, ValueTypeIndexes]] = {}
 
         # Initialize with standard defaults
-        # self._initialize_defaults(defaults)
-        # self._initialize_key_overrides(key_overrides)
+        self._initialize_defaults(defaults)
+        self._initialize_key_overrides(key_overrides)
 
         # Process global configs
         for config_type_name, index_entry in schema._global_configs.items():
