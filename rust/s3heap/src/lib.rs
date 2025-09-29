@@ -851,6 +851,12 @@ impl HeapPruner {
             .collect::<Vec<_>>();
 
         let (buckets_deleted, buckets_updated) = if to_retain.is_empty() {
+            // TODO(rescrv):  Address the race condition by requiring the bucket to be empty and
+            // old.  Talk with reviewer about best way to do so.
+            // Options:
+            // - (now - bucket) > threshold
+            // - (empty X times in a row)
+            // - Just let it drop (bad straw man)
             self.internal.clear_bucket(bucket).await?;
             (1, 0)
         } else {
