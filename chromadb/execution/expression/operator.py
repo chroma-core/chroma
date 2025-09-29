@@ -695,7 +695,7 @@ class Rank:
             if not isinstance(key, str):
                 raise TypeError(f"$knn key must be a string, got {type(key).__name__}")
 
-            limit = knn_data.get("limit", 128)
+            limit = knn_data.get("limit", 16)
             if not isinstance(limit, int):
                 raise TypeError(
                     f"$knn limit must be an integer, got {type(limit).__name__}"
@@ -1013,7 +1013,7 @@ class Knn(Rank):
         key: The embedding key to search against. Can be:
              - "#embedding" (default) - searches the main embedding field
              - A metadata field name (e.g., "my_custom_field") - searches that metadata field
-        limit: Maximum number of results to consider (default: 128)
+        limit: Maximum number of results to consider (default: 16)
         default: Default score for records not in KNN results (default: None)
         return_rank: If True, return the rank position (0, 1, 2, ...) instead of distance (default: False)
 
@@ -1035,7 +1035,7 @@ class Knn(Rank):
         "NDArray[np.int32]",
     ]
     key: str = "#embedding"
-    limit: int = 128
+    limit: int = 16
     default: Optional[float] = None
     return_rank: bool = False
 

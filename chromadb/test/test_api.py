@@ -2248,7 +2248,7 @@ def test_rrf_to_dict() -> None:
                                         "$knn": {
                                             "query": [0.1, 0.2],
                                             "key": "#embedding",
-                                            "limit": 128,
+                                            "limit": 16,
                                             "return_rank": True,
                                         }
                                     },
@@ -2266,7 +2266,7 @@ def test_rrf_to_dict() -> None:
                                         "$knn": {
                                             "query": [0.3, 0.4],
                                             "key": "sparse_embedding",
-                                            "limit": 128,
+                                            "limit": 16,
                                             "return_rank": True,
                                         }
                                     },
@@ -2309,7 +2309,7 @@ def test_rrf_to_dict() -> None:
                                         "$knn": {
                                             "query": [0.1, 0.2],
                                             "key": "#embedding",
-                                            "limit": 128,
+                                            "limit": 16,
                                             "return_rank": True,
                                         }
                                     },
@@ -2327,7 +2327,7 @@ def test_rrf_to_dict() -> None:
                                         "$knn": {
                                             "query": [0.3, 0.4],
                                             "key": "sparse_embedding",
-                                            "limit": 128,
+                                            "limit": 16,
                                             "return_rank": True,
                                         }
                                     },
@@ -2426,7 +2426,7 @@ def test_rrf_to_dict() -> None:
                                         "$knn": {
                                             "query": [0.1, 0.2],
                                             "key": "#embedding",
-                                            "limit": 128,
+                                            "limit": 16,
                                             "return_rank": True,
                                         }
                                     },
@@ -2444,7 +2444,7 @@ def test_rrf_to_dict() -> None:
                                         "$knn": {
                                             "query": [0.3, 0.4],
                                             "key": "sparse_embedding",
-                                            "limit": 128,
+                                            "limit": 16,
                                             "return_rank": True,
                                         }
                                     },
@@ -2486,7 +2486,7 @@ def test_rrf_to_dict() -> None:
                                         "$knn": {
                                             "query": [0.1, 0.2],
                                             "key": "#embedding",
-                                            "limit": 128,
+                                            "limit": 16,
                                             "return_rank": True,
                                         }
                                     },
@@ -2504,7 +2504,7 @@ def test_rrf_to_dict() -> None:
                                         "$knn": {
                                             "query": [0.3, 0.4],
                                             "key": "#embedding",
-                                            "limit": 128,
+                                            "limit": 16,
                                             "return_rank": True,
                                         }
                                     },
@@ -2792,7 +2792,7 @@ class TestRankFromDict:
         else:
             assert rank.query == [0.1, 0.2]
         assert rank.key == "#embedding"  # default
-        assert rank.limit == 128  # default
+        assert rank.limit == 16  # default
 
         # KNN with custom parameters
         rank = Rank.from_dict(
