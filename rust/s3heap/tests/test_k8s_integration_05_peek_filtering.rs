@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
 use chrono::Utc;
-use s3heap::{HeapReader, HeapWriter};
+use s3heap::{HeapReader, HeapWriter, Limits};
 
 mod common;
 
@@ -46,25 +46,34 @@ async fn test_k8s_integration_05_peek_with_filter() {
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
 
     // Filter for payment processing tasks
-    let payment_items = reader.peek(|t| t.name.contains("payment")).await.unwrap();
+    let payment_items = reader
+        .peek(|t| t.name.contains("payment"), Limits::default())
+        .await
+        .unwrap();
     assert_eq!(payment_items.len(), 2, "Should have 2 payment tasks");
     assert!(payment_items
         .iter()
         .all(|i| i.trigger.name.contains("payment")));
 
     // Filter for email tasks
-    let email_items = reader.peek(|t| t.name.contains("email")).await.unwrap();
+    let email_items = reader
+        .peek(|t| t.name.contains("email"), Limits::default())
+        .await
+        .unwrap();
     assert_eq!(email_items.len(), 2, "Should have 2 email tasks");
     assert!(email_items.iter().all(|i| i.trigger.name.contains("email")));
 
     // Filter for report tasks
-    let report_items = reader.peek(|t| t.name.contains("report")).await.unwrap();
+    let report_items = reader
+        .peek(|t| t.name.contains("report"), Limits::default())
+        .await
+        .unwrap();
     assert_eq!(report_items.len(), 1, "Should have 1 report task");
     assert_eq!(report_items[0].trigger.name, "generate_report");
 
     // Filter that matches nothing
     let no_items = reader
-        .peek(|t| t.name.contains("nonexistent"))
+        .peek(|t| t.name.contains("nonexistent"), Limits::default())
         .await
         .unwrap();
     assert_eq!(
@@ -110,7 +119,7 @@ async fn test_k8s_integration_05_peek_filters_completed() {
 
     // Peek should automatically filter out completed items
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    let items = reader.peek(|_| true).await.unwrap();
+    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 1, "Should only return incomplete items");
     assert_eq!(
         items[0].trigger.uuid, item2.uuid,
@@ -118,7 +127,10 @@ async fn test_k8s_integration_05_peek_filters_completed() {
     );
 
     // Even with specific filter, completed items shouldn't appear
-    let done_items = reader.peek(|t| t.name.contains("done")).await.unwrap();
+    let done_items = reader
+        .peek(|t| t.name.contains("done"), Limits::default())
+        .await
+        .unwrap();
     assert_eq!(
         done_items.len(),
         0,
@@ -158,14 +170,20 @@ async fn test_k8s_integration_05_peek_across_buckets() {
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
 
     // Filter across buckets
-    let type_a_items = reader.peek(|t| t.name.contains("type_a")).await.unwrap();
+    let type_a_items = reader
+        .peek(|t| t.name.contains("type_a"), Limits::default())
+        .await
+        .unwrap();
     assert_eq!(
         type_a_items.len(),
         2,
         "Should find type_a items across buckets"
     );
 
-    let type_b_items = reader.peek(|t| t.name.contains("type_b")).await.unwrap();
+    let type_b_items = reader
+        .peek(|t| t.name.contains("type_b"), Limits::default())
+        .await
+        .unwrap();
     assert_eq!(
         type_b_items.len(),
         2,

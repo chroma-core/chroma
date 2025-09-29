@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
 use chrono::Utc;
-use s3heap::{HeapPruner, HeapReader, HeapWriter};
+use s3heap::{HeapPruner, HeapReader, HeapWriter, Limits};
 
 mod common;
 
@@ -47,7 +47,7 @@ async fn test_k8s_integration_08_concurrent_pushes() {
 
     // Verify all items are present
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    let items = reader.peek(|_| true).await.unwrap();
+    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(
         items.len(),
         (num_writers * items_per_writer) as usize,
@@ -103,7 +103,7 @@ async fn test_k8s_integration_08_concurrent_read_write() {
         let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
 
         read_handles.push(tokio::spawn(async move {
-            let items = reader.peek(|_| true).await?;
+            let items = reader.peek(|_| true, Limits::default()).await?;
             // Items count will vary as writes complete
             assert!(items.len() >= 5, "Should have at least initial items");
             Ok::<_, s3heap::Error>(items.len())
@@ -120,7 +120,7 @@ async fn test_k8s_integration_08_concurrent_read_write() {
 
     // Final check - should have all items
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    let final_items = reader.peek(|_| true).await.unwrap();
+    let final_items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(
         final_items.len(),
         20,
@@ -159,7 +159,9 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
 
     // Pruner removing completed items
     let pruner = HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    handles.push(tokio::spawn(async move { pruner.prune().await }));
+    handles.push(tokio::spawn(async move {
+        pruner.prune(Limits::default()).await
+    }));
 
     // Writer adding new items
     let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone());
@@ -182,7 +184,7 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
 
     // Check final state
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    let final_items = reader.peek(|_| true).await.unwrap();
+    let final_items = reader.peek(|_| true, Limits::default()).await.unwrap();
 
     // Should have: 5 incomplete initial items (odds) + 5 new items
     assert!(

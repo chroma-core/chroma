@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use chroma_storage::{s3_client_for_test_with_new_bucket, GetOptions};
 use chrono::{Duration, DurationRound, TimeDelta, Utc};
-use s3heap::{HeapReader, HeapWriter};
+use s3heap::{HeapReader, HeapWriter, Limits};
 
 mod common;
 
@@ -52,7 +52,7 @@ async fn test_k8s_integration_03_merge_same_bucket() {
 
     // Verify all items are in the heap
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    let items = reader.peek(|_| true).await.unwrap();
+    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 3, "Should read all 3 items from single bucket");
 }
 
@@ -107,7 +107,7 @@ async fn test_k8s_integration_03_merge_multiple_pushes() {
 
     // Verify all 4 items are in the heap
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    let items = reader.peek(|_| true).await.unwrap();
+    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 4, "Should have all 4 items after merging");
 
     // Verify all items are present

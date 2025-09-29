@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
 use chrono::Utc;
-use s3heap::{HeapPruner, HeapWriter};
+use s3heap::{HeapPruner, HeapWriter, Limits};
 
 mod common;
 
@@ -63,9 +63,9 @@ async fn test_k8s_integration_06_prune_with_retry() {
         let pruner2 = HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone());
 
         // Prune concurrently - retry logic should handle conflicts
-        let handle1 = tokio::spawn(async move { pruner1.prune().await });
+        let handle1 = tokio::spawn(async move { pruner1.prune(Limits::default()).await });
 
-        let handle2 = tokio::spawn(async move { pruner2.prune().await });
+        let handle2 = tokio::spawn(async move { pruner2.prune(Limits::default()).await });
 
         // Both should succeed
         handle1.await.unwrap().unwrap();

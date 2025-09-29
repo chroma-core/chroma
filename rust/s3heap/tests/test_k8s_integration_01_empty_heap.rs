@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chroma_storage::{s3_client_for_test_with_new_bucket, GetOptions};
-use s3heap::{HeapReader, HeapWriter};
+use s3heap::{HeapReader, HeapWriter, Limits};
 
 mod common;
 
@@ -17,7 +17,7 @@ async fn test_k8s_integration_01_empty_heap() {
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
 
     // Peek should return empty results
-    let items = reader.peek(|_| true).await.unwrap();
+    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 0, "Empty heap should return no items");
 
     // Verify no buckets exist

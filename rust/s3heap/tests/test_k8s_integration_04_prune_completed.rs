@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use chroma_storage::{s3_client_for_test_with_new_bucket, GetOptions};
 use chrono::Utc;
-use s3heap::{HeapPruner, HeapReader, HeapWriter};
+use s3heap::{HeapPruner, HeapReader, HeapWriter, Limits};
 
 mod common;
 
@@ -44,11 +44,11 @@ async fn test_k8s_integration_04_prune_completed_items() {
 
     // Prune completed items
     let pruner = HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    pruner.prune().await.unwrap();
+    pruner.prune(Limits::default()).await.unwrap();
 
     // Verify only incomplete item remains
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    let items = reader.peek(|_| true).await.unwrap();
+    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(
         items.len(),
         1,
@@ -95,11 +95,11 @@ async fn test_k8s_integration_04_prune_empty_bucket() {
 
     // Prune - should clear the bucket
     let pruner = HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    pruner.prune().await.unwrap();
+    pruner.prune(Limits::default()).await.unwrap();
 
     // Verify bucket was cleared
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    let items = reader.peek(|_| true).await.unwrap();
+    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(
         items.len(),
         0,
@@ -149,11 +149,11 @@ async fn test_k8s_integration_04_prune_multiple_buckets() {
 
     // Prune
     let pruner = HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    pruner.prune().await.unwrap();
+    pruner.prune(Limits::default()).await.unwrap();
 
     // Verify correct items remain
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    let items = reader.peek(|_| true).await.unwrap();
+    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 2, "Two incomplete items should remain");
 
     let uuids: Vec<_> = items.iter().map(|i| i.trigger.uuid).collect();

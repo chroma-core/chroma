@@ -141,13 +141,25 @@ impl Default for RetryConfig {
 
 impl RetryConfig {
     /// Convert to a backon ExponentialBuilder.
-    fn to_backoff(&self) -> ExponentialBuilder {
+    pub fn to_backoff(&self) -> ExponentialBuilder {
         ExponentialBuilder::default()
             .with_factor(self.factor)
             .with_min_delay(self.min_delay)
             .with_max_delay(self.max_delay)
             .with_max_times(self.max_retries)
     }
+}
+
+////////////////////////////////////////////// Limits //////////////////////////////////////////////
+
+/// Limits on range-scan-backed operations.  Used to bound costs.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Limits {
+    buckets_to_read: Option<usize>,
+}
+
+impl Limits {
+    const DEFAULT_BUCKETS_TO_READ: usize = 1000;
 }
 
 //////////////////////////////////////////// Triggerable ///////////////////////////////////////////
@@ -316,9 +328,13 @@ impl HeapPruner {
     /// # Returns
     /// * `Ok(())` if pruning succeeded
     /// * `Err` if there was an error during pruning
-    pub async fn prune(&self) -> Result<(), Error> {
+    pub async fn prune(&self, limits: Limits) -> Result<(), Error> {
         let buckets = self.internal.list_approx_first_1k_buckets().await?;
-        for bucket in buckets {
+        for bucket in buckets.into_iter().take(
+            limits
+                .buckets_to_read
+                .unwrap_or(Limits::DEFAULT_BUCKETS_TO_READ),
+        ) {
             self.prune_bucket(bucket).await?;
         }
         Ok(())
@@ -335,11 +351,7 @@ impl HeapPruner {
     /// * `Ok(())` if the bucket was successfully pruned
     /// * `Err` if there was an error during pruning
     async fn prune_bucket(&self, bucket: DateTime<Utc>) -> Result<(), Error> {
-        let backoff = ExponentialBuilder::default()
-            .with_factor(2.0)
-            .with_min_delay(std::time::Duration::from_millis(100))
-            .with_max_delay(std::time::Duration::from_millis(10_000))
-            .with_max_times(10);
+        let backoff = RetryConfig::default().to_backoff();
 
         (|| async { self.prune_bucket_inner(bucket).await })
             .retry(backoff)
@@ -423,11 +435,16 @@ impl HeapReader {
     pub async fn peek(
         &self,
         should_return: impl for<'a> Fn(&'a Triggerable) -> bool + Send + Sync,
+        limits: Limits,
     ) -> Result<Vec<HeapItem>, Error> {
         let heap_scheduler = self.internal.heap_scheduler();
         let buckets = self.internal.list_approx_first_1k_buckets().await?;
         let mut returns = vec![];
-        for bucket in buckets {
+        for bucket in buckets.into_iter().take(
+            limits
+                .buckets_to_read
+                .unwrap_or(Limits::DEFAULT_BUCKETS_TO_READ),
+        ) {
             let (entries, _) = match self.internal.load_bucket(bucket).await {
                 Ok((entries, e_tag)) => (entries, e_tag),
                 Err(Error::Storage(StorageError::NotFound { .. })) => continue,

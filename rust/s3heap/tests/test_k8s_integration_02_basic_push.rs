@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use chroma_storage::{s3_client_for_test_with_new_bucket, GetOptions};
 use chrono::Utc;
-use s3heap::{HeapReader, HeapWriter};
+use s3heap::{HeapReader, HeapWriter, Limits};
 use uuid::Uuid;
 
 mod common;
@@ -44,7 +44,7 @@ async fn test_k8s_integration_02_basic_push() {
 
     // Verify we can read the items back
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    let items = reader.peek(|_| true).await.unwrap();
+    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 2, "Should read 2 items back");
 
     // Verify items have correct data
@@ -90,7 +90,7 @@ async fn test_k8s_integration_02_push_with_no_schedule() {
 
     // Verify only scheduled item is in heap
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    let items = reader.peek(|_| true).await.unwrap();
+    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 1, "Should have only 1 scheduled item");
     assert_eq!(
         items[0].trigger.uuid, item2.uuid,
