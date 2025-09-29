@@ -8,13 +8,17 @@ from typing import (
     Any,
     Tuple,
     cast,
+    ClassVar,
     Literal,
     get_args,
     TYPE_CHECKING,
+    Final,
 )
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import TypedDict, Protocol, runtime_checkable
+from pydantic import BaseModel, field_validator
+
 import chromadb.errors as errors
 from chromadb.base_types import (
     Metadata,
@@ -53,6 +57,59 @@ __all__ = [
     "SparseVector",
     "is_valid_sparse_vector",
     "validate_sparse_vector",
+    # Index Configuration Types
+    "FtsIndexConfig",
+    "HnswIndexConfig",
+    "SpannIndexConfig",
+    "VectorIndexConfig",
+    "SparseVectorIndexConfig",
+    "StringInvertedIndexConfig",
+    "IntInvertedIndexConfig",
+    "FloatInvertedIndexConfig",
+    "BoolInvertedIndexConfig",
+    "IndexConfig",
+    "IndexEntry",
+    # Value Type Constants
+    "STRING_VALUE_NAME",
+    "INT_VALUE_NAME",
+    "BOOL_VALUE_NAME",
+    "FLOAT_VALUE_NAME",
+    "FLOAT_LIST_VALUE_NAME",
+    "SPARSE_VECTOR_VALUE_NAME",
+    # Index Name Constants
+    "FTS_INDEX_NAME",
+    "VECTOR_INDEX_NAME",
+    "SPARSE_VECTOR_INDEX_NAME",
+    "STRING_INVERTED_INDEX_NAME",
+    "INT_INVERTED_INDEX_NAME",
+    "FLOAT_INVERTED_INDEX_NAME",
+    "BOOL_INVERTED_INDEX_NAME",
+    "HNSW_INDEX_NAME",
+    "SPANN_INDEX_NAME",
+    "DOCUMENT_KEY",
+    "EMBEDDING_KEY",
+    # Internal Index Types
+    "InternalFtsIndex",
+    "InternalHnswIndex",
+    "InternalSpannIndex",
+    "InternalVectorIndex",
+    "InternalSparseVectorIndex",
+    "InternalStringInvertedIndex",
+    "InternalIntInvertedIndex",
+    "InternalFloatInvertedIndex",
+    "InternalBoolInvertedIndex",
+    "InternalIndexType",
+    "ValueTypeIndexes",
+    # Schema Builder and Internal Schema
+    "Schema",
+    "InternalSchema",
+    # Space type
+    "Space",
+    # Embedding Functions
+    "EmbeddingFunction",
+    "SparseEmbeddingFunction",
+    "validate_embedding_function",
+    "validate_sparse_embedding_function",
 ]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
@@ -82,8 +139,6 @@ Embedding = Vector
 Embeddings = List[Embedding]
 SparseEmbedding = SparseVector
 SparseEmbeddings = List[SparseEmbedding]
-
-Space = Literal["cosine", "l2", "ip"]
 
 
 @lru_cache
@@ -427,7 +482,6 @@ def validate_filter_set(filter_set: FilterSet) -> None:
 Embeddable = Union[Documents, Images]
 D = TypeVar("D", bound=Embeddable, contravariant=True)
 
-
 Loadable = List[Optional[Image]]
 L = TypeVar("L", covariant=True, bound=Loadable)
 
@@ -617,6 +671,9 @@ class IndexMetadata(TypedDict):
     time_created: float
 
 
+Space = Literal["cosine", "l2", "ip"]
+
+
 # TODO: make warnings prettier and add link to migration docs
 @runtime_checkable
 class EmbeddingFunction(Protocol[D]):
@@ -784,6 +841,20 @@ def validate_embedding_function(
             "Please see https://docs.trychroma.com/guides/embeddings for details of the EmbeddingFunction interface.\n"
             "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/deployment/migration#migration-to-0.4.16---november-7,-2023 \n"
         )
+
+
+def validate_sparse_embedding_function(
+    sparse_embedding_function: Any,
+) -> None:
+    """Validate that a sparse embedding function conforms to the SparseEmbeddingFunction protocol."""
+    if not callable(sparse_embedding_function):
+        raise ValueError('sparse_embedding_function must be callable')
+
+    if not hasattr(sparse_embedding_function, '__call__'):
+        raise ValueError('sparse_embedding_function must have a __call__ method')
+
+    # Basic validation - check if it looks like a sparse embedding function
+    # We'll do more detailed validation when SparseEmbeddingFunction is fully defined
 
 
 class DataLoader(Protocol[L]):
@@ -1331,3 +1402,539 @@ class SparseEmbeddingFunction(Protocol[D]):
         Validate the config.
         """
         return
+
+
+# Index Configuration Types for Collection Schema
+class FtsIndexConfig(BaseModel):
+    """Configuration for Full-Text Search index. No parameters required."""
+    pass
+
+
+class HnswIndexConfig(BaseModel):
+    """Configuration for HNSW vector index."""
+    ef_construction: Optional[int] = None
+    max_neighbors: Optional[int] = None
+    ef_search: Optional[int] = None
+    num_threads: Optional[int] = None
+    batch_size: Optional[int] = None
+    sync_threshold: Optional[int] = None
+    resize_factor: Optional[float] = None
+
+
+class SpannIndexConfig(BaseModel):
+    """Configuration for SPANN vector index."""
+    search_nprobe: Optional[int] = None
+    write_nprobe: Optional[int] = None
+    ef_construction: Optional[int] = None
+    ef_search: Optional[int] = None
+    max_neighbors: Optional[int] = None
+    reassign_neighbor_count: Optional[int] = None
+    split_threshold: Optional[int] = None
+    merge_threshold: Optional[int] = None
+
+
+class VectorIndexConfig(BaseModel):
+    """Configuration for vector index with space, embedding function, and algorithm config."""
+    model_config = {"arbitrary_types_allowed": True}
+    space: Optional[Space] = None
+    embedding_function: Optional[Any] = None
+    source_key: Optional[str] = None  # key to source the vector from
+    hnsw: Optional[HnswIndexConfig] = None
+    spann: Optional[SpannIndexConfig] = None
+
+    @field_validator('embedding_function', mode='before')
+    @classmethod
+    def validate_embedding_function_field(cls, v: Any) -> Any:
+        # Use the existing validate_embedding_function for proper validation
+        if v is None:
+            return v
+        if callable(v):
+            # Use the existing validation function
+            validate_embedding_function(v)
+            return v
+        raise ValueError('embedding_function must be callable or None')
+
+
+class SparseVectorIndexConfig(BaseModel):
+    """Configuration for sparse vector index."""
+    model_config = {"arbitrary_types_allowed": True}
+    embedding_function: Optional[Any] = None
+    source_key: Optional[str] = None  # key to source the sparse vector from
+
+    @field_validator('embedding_function', mode='before')
+    @classmethod
+    def validate_embedding_function_field(cls, v: Any) -> Any:
+        # Validate sparse embedding function for sparse vector index
+        if v is None:
+            return v
+        if callable(v):
+            # Use the sparse embedding function validation
+            validate_sparse_embedding_function(v)
+            return v
+        raise ValueError('embedding_function must be a callable SparseEmbeddingFunction or None')
+
+
+class StringInvertedIndexConfig(BaseModel):
+    """Configuration for string inverted index."""
+    pass
+
+
+class IntInvertedIndexConfig(BaseModel):
+    """Configuration for integer inverted index."""
+    pass
+
+
+class FloatInvertedIndexConfig(BaseModel):
+    """Configuration for float inverted index."""
+    pass
+
+
+class BoolInvertedIndexConfig(BaseModel):
+    """Configuration for boolean inverted index."""
+    pass
+
+
+# Value type constants
+STRING_VALUE_NAME: Final[str] = "#string"
+INT_VALUE_NAME: Final[str] = "#int"
+BOOL_VALUE_NAME: Final[str] = "#bool"
+FLOAT_VALUE_NAME: Final[str] = "#float"
+FLOAT_LIST_VALUE_NAME: Final[str] = "#float_list"
+SPARSE_VECTOR_VALUE_NAME: Final[str] = "#sparse_vector"
+
+# Index type name constants
+FTS_INDEX_NAME: Final[str] = "$fts_index"
+VECTOR_INDEX_NAME: Final[str] = "$vector_index"
+SPARSE_VECTOR_INDEX_NAME: Final[str] = "$sparse_vector_index"
+STRING_INVERTED_INDEX_NAME: Final[str] = "$string_inverted_index"
+INT_INVERTED_INDEX_NAME: Final[str] = "$int_inverted_index"
+FLOAT_INVERTED_INDEX_NAME: Final[str] = "$float_inverted_index"
+BOOL_INVERTED_INDEX_NAME: Final[str] = "$bool_inverted_index"
+HNSW_INDEX_NAME: Final[str] = "$hnsw_index"
+SPANN_INDEX_NAME: Final[str] = "$spann_index"
+
+# Special key constants
+DOCUMENT_KEY: Final[str] = "$document"
+EMBEDDING_KEY: Final[str] = "$embedding"
+
+
+# Internal index types that encapsulate the configuration, name, value type, and enabled status
+class InternalFtsIndex:
+    """Internal wrapper for FTS index with encapsulated name, value type, and enabled status."""
+    NAME: Final[str] = "$fts_index"
+    VALUE_TYPE_NAME: Final[str] = STRING_VALUE_NAME
+
+    def __init__(self, config: FtsIndexConfig, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalHnswIndex:
+    """Internal wrapper for HNSW index with encapsulated name, value type, and enabled status."""
+    NAME: Final[str] = "$hnsw_index"
+    VALUE_TYPE_NAME: Final[str] = FLOAT_LIST_VALUE_NAME
+
+    def __init__(self, config: HnswIndexConfig, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalSpannIndex:
+    """Internal wrapper for SPANN index with encapsulated name, value type, and enabled status."""
+    NAME: Final[str] = "$spann_index"
+    VALUE_TYPE_NAME: Final[str] = FLOAT_LIST_VALUE_NAME
+
+    def __init__(self, config: SpannIndexConfig, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalVectorIndex:
+    """Internal wrapper for vector index with encapsulated name, value type, and enabled status."""
+    NAME: Final[str] = "$vector_index"
+    VALUE_TYPE_NAME: Final[str] = FLOAT_LIST_VALUE_NAME
+
+    def __init__(self, config: VectorIndexConfig, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalSparseVectorIndex:
+    """Internal wrapper for sparse vector index with encapsulated name, value type, and enabled status."""
+    NAME: Final[str] = "$sparse_vector_index"
+    VALUE_TYPE_NAME: Final[str] = SPARSE_VECTOR_VALUE_NAME
+
+    def __init__(self, config: SparseVectorIndexConfig, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalStringInvertedIndex:
+    """Internal wrapper for string inverted index with encapsulated name, value type, and enabled status."""
+    NAME: Final[str] = "$string_inverted_index"
+    VALUE_TYPE_NAME: Final[str] = STRING_VALUE_NAME
+
+    def __init__(self, config: StringInvertedIndexConfig, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalIntInvertedIndex:
+    """Internal wrapper for int inverted index with encapsulated name, value type, and enabled status."""
+    NAME: Final[str] = "$int_inverted_index"
+    VALUE_TYPE_NAME: Final[str] = INT_VALUE_NAME
+
+    def __init__(self, config: IntInvertedIndexConfig, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalFloatInvertedIndex:
+    """Internal wrapper for float inverted index with encapsulated name, value type, and enabled status."""
+    NAME: Final[str] = "$float_inverted_index"
+    VALUE_TYPE_NAME: Final[str] = FLOAT_VALUE_NAME
+
+    def __init__(self, config: FloatInvertedIndexConfig, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+class InternalBoolInvertedIndex:
+    """Internal wrapper for bool inverted index with encapsulated name, value type, and enabled status."""
+    NAME: Final[str] = "$bool_inverted_index"
+    VALUE_TYPE_NAME: Final[str] = BOOL_VALUE_NAME
+
+    def __init__(self, config: BoolInvertedIndexConfig, enabled: bool = True):
+        self.config = config
+        self.enabled = enabled
+
+
+# Union type for all index configurations
+IndexConfig = Union[
+    FtsIndexConfig,
+    VectorIndexConfig,
+    SparseVectorIndexConfig,
+    StringInvertedIndexConfig,
+    IntInvertedIndexConfig,
+    FloatInvertedIndexConfig,
+    BoolInvertedIndexConfig,
+]
+
+
+# Type for index entry in schema
+class IndexEntry(BaseModel):
+    config: IndexConfig
+    enabled: bool
+
+
+def _get_class_name(config: IndexConfig) -> str:
+    """Get the class name for a config."""
+    # Pydantic models retain their class information at runtime
+    return config.__class__.__name__
+
+
+# Internal schema types with strong typing using existing Internal*Index types
+# Union type for index values (boolean for default/unset, Internal*Index for configured)
+InternalIndexType = Union[
+    InternalFtsIndex,
+    InternalVectorIndex,
+    InternalSparseVectorIndex,
+    InternalStringInvertedIndex,
+    InternalIntInvertedIndex,
+    InternalFloatInvertedIndex,
+    InternalBoolInvertedIndex
+]
+
+# Type for a value type's index configuration (reused in multiple places)
+ValueTypeIndexes = Dict[str, Union[bool, InternalIndexType]]
+
+
+# Schema builder and final schema classes
+class Schema:
+    """Schema builder for collection index configurations."""
+
+    def __init__(self) -> None:
+        # Dict structure: {key: {index_type_name: IndexEntry}}
+        self._index_configs: Dict[str, Dict[str, IndexEntry]] = {}
+        # Dict structure: {index_type_name: IndexEntry}
+        self._global_configs: Dict[str, IndexEntry] = {}
+
+    def create_index(self, config: Optional[IndexConfig] = None, key: Optional[str] = None) -> "Schema":
+        """Create an index configuration."""
+        # Disallow config=None and key=None - too dangerous
+        if config is None and key is None:
+            raise ValueError("Cannot enable all index types globally. Must specify either config or key.")
+
+        # Case 1: config is not None and key is None - enable specific index type globally
+        if config is not None and key is None:
+            # For TypedDict configs, we need to determine the type by checking the structure
+            index_type_name = _get_class_name(config)
+            self._global_configs[index_type_name] = IndexEntry(config=config, enabled=True)
+
+        # Case 2: config is None and key is not None - enable all index types for that key
+        elif config is None and key is not None:
+            if key not in self._index_configs:
+                self._index_configs[key] = {}
+            for config_class in IndexConfig.__args__:  # type: ignore
+                index_type_name = config_class.__name__
+                default_config = config_class()
+                self._index_configs[key][index_type_name] = IndexEntry(config=default_config, enabled=True)
+
+        # Case 3: config is not None and key is not None - enable specific index type for that key
+        elif config is not None and key is not None:
+            index_type_name = _get_class_name(config)
+            if key not in self._index_configs:
+                self._index_configs[key] = {}
+            self._index_configs[key][index_type_name] = IndexEntry(config=config, enabled=True)
+
+        return self
+
+    def delete_index(self, config: Optional[IndexConfig] = None, key: Optional[str] = None) -> "Schema":
+        """Disable an index configuration (set enabled=False)."""
+        # Case 1: Both config and key are None - fail the request
+        if config is None and key is None:
+            raise ValueError("Cannot disable all indexes. Must specify either config or key.")
+
+        # Case 2: key is not None and config is None - disable all possible index types for that key
+        if key is not None and config is None:
+            if key not in self._index_configs:
+                self._index_configs[key] = {}
+
+            # Disable all possible index types for this key
+            for config_class in IndexConfig.__args__:  # type: ignore
+                index_type_name = config_class.__name__
+                default_config = config_class()
+                self._index_configs[key][index_type_name] = IndexEntry(config=default_config, enabled=False)
+
+        # Case 3: key is not None and config is not None - disable specific index for that key
+        elif key is not None and config is not None:
+            index_type_name = _get_class_name(config)
+            if key not in self._index_configs:
+                self._index_configs[key] = {}
+            self._index_configs[key][index_type_name] = IndexEntry(config=config, enabled=False)
+
+        # Case 4: key is None and config is not None - disable specific index globally
+        elif key is None and config is not None:
+            index_type_name = _get_class_name(config)
+            self._global_configs[index_type_name] = IndexEntry(config=config, enabled=False)
+
+        return self
+
+
+class InternalSchema(BaseModel):
+    """Internal schema representation for server-side processing."""
+    model_config = {"arbitrary_types_allowed": True}
+    defaults: Dict[str, ValueTypeIndexes]
+    key_overrides: Dict[str, Dict[str, ValueTypeIndexes]]
+
+    # Index type mappings for deserialization and schema conversion
+    # Maps index names to (Internal*Index class, Config class) tuples
+    _INDEX_TYPE_MAP: ClassVar[Dict[str, Tuple[Any, Any]]] = {
+        FTS_INDEX_NAME: (InternalFtsIndex, FtsIndexConfig),
+        VECTOR_INDEX_NAME: (InternalVectorIndex, VectorIndexConfig),
+        SPARSE_VECTOR_INDEX_NAME: (InternalSparseVectorIndex, SparseVectorIndexConfig),
+        STRING_INVERTED_INDEX_NAME: (InternalStringInvertedIndex, StringInvertedIndexConfig),
+        INT_INVERTED_INDEX_NAME: (InternalIntInvertedIndex, IntInvertedIndexConfig),
+        FLOAT_INVERTED_INDEX_NAME: (InternalFloatInvertedIndex, FloatInvertedIndexConfig),
+        BOOL_INVERTED_INDEX_NAME: (InternalBoolInvertedIndex, BoolInvertedIndexConfig),
+        HNSW_INDEX_NAME: (InternalHnswIndex, HnswIndexConfig),
+        SPANN_INDEX_NAME: (InternalSpannIndex, SpannIndexConfig),
+    }
+
+    # Maps config class names to their internal representations
+    _CONFIG_TO_INTERNAL_MAP: ClassVar[Dict[str, Any]] = {
+        'FtsIndexConfig': InternalFtsIndex,
+        'VectorIndexConfig': InternalVectorIndex,
+        'SparseVectorIndexConfig': InternalSparseVectorIndex,
+        'StringInvertedIndexConfig': InternalStringInvertedIndex,
+        'IntInvertedIndexConfig': InternalIntInvertedIndex,
+        'FloatInvertedIndexConfig': InternalFloatInvertedIndex,
+        'BoolInvertedIndexConfig': InternalBoolInvertedIndex,
+    }
+
+    # Maps value types to supported index types
+    _VALUE_TYPE_TO_INDEX_TYPES: ClassVar[Dict[str, List[str]]] = {
+        STRING_VALUE_NAME: [STRING_INVERTED_INDEX_NAME, FTS_INDEX_NAME],
+        FLOAT_VALUE_NAME: [FLOAT_INVERTED_INDEX_NAME],
+        FLOAT_LIST_VALUE_NAME: [VECTOR_INDEX_NAME],
+        SPARSE_VECTOR_VALUE_NAME: [SPARSE_VECTOR_INDEX_NAME],
+        BOOL_VALUE_NAME: [BOOL_INVERTED_INDEX_NAME],
+        INT_VALUE_NAME: [INT_INVERTED_INDEX_NAME],
+    }
+
+    def _initialize_defaults(self, defaults: Dict[str, ValueTypeIndexes]) -> None:
+        """Initialize defaults with base structure and standard configuration."""
+        # Set all supported index types to enabled by default
+        for value_type, index_types in self._VALUE_TYPE_TO_INDEX_TYPES.items():
+            defaults[value_type] = {}
+            for index_type in index_types:
+                defaults[value_type][index_type] = True
+
+        # Apply specific default overrides for certain index types
+        # Most indexes are enabled by default, but some are disabled for performance reasons
+
+        # "#sparse_vector": { "$sparse_vector_index": False }
+        defaults[SPARSE_VECTOR_VALUE_NAME][SPARSE_VECTOR_INDEX_NAME] = False
+
+        # For string values, prefer inverted index over full-text search for better performance
+        defaults[STRING_VALUE_NAME][FTS_INDEX_NAME] = False
+
+        # "#float_list": { "$vector_index": False }
+        defaults[FLOAT_LIST_VALUE_NAME][VECTOR_INDEX_NAME] = False
+
+    def _initialize_key_overrides(self, key_overrides: Dict[str, Dict[str, ValueTypeIndexes]]) -> None:
+        """Initialize key-specific index overrides."""
+        # Enable full-text search for document content
+        key_overrides[DOCUMENT_KEY] = {
+            STRING_VALUE_NAME: {
+                FTS_INDEX_NAME: True,
+                STRING_INVERTED_INDEX_NAME: False
+            }
+        }
+
+        # Enable vector index for embeddings with document source reference
+        vector_config = VectorIndexConfig(source_key=DOCUMENT_KEY)
+        key_overrides[EMBEDDING_KEY] = {
+            FLOAT_LIST_VALUE_NAME: {
+                VECTOR_INDEX_NAME: InternalVectorIndex(
+                    config=vector_config,
+                    enabled=True
+                )
+            }
+        }
+
+    def __init__(self, schema: Schema) -> None:
+        """Create InternalSchema from a client-facing Schema."""
+        defaults: Dict[str, ValueTypeIndexes] = {}
+        key_overrides: Dict[str, Dict[str, ValueTypeIndexes]] = {}
+
+        # Initialize with standard defaults
+        self._initialize_defaults(defaults)
+        self._initialize_key_overrides(key_overrides)
+
+        # Process global configs
+        for config_type_name, index_entry in schema._global_configs.items():
+            internal_class = self._CONFIG_TO_INTERNAL_MAP.get(config_type_name)
+            if internal_class:
+                value_type = internal_class.VALUE_TYPE_NAME
+                index_name = internal_class.NAME
+
+                # Apply user-specified global configurations
+                defaults[value_type][index_name] = internal_class(
+                    config=index_entry.config,
+                    enabled=index_entry.enabled
+                )
+
+        # Process key-specific configs
+        for key, key_configs in schema._index_configs.items():
+            # Initialize key if not already present
+            if key not in key_overrides:
+                key_overrides[key] = {}
+
+            for config_type_name, index_entry in key_configs.items():
+                internal_class = self._CONFIG_TO_INTERNAL_MAP.get(config_type_name)
+                if internal_class:
+                    value_type = internal_class.VALUE_TYPE_NAME
+                    index_name = internal_class.NAME
+
+                    # Create value_type dict only when we have configs for it
+                    if value_type not in key_overrides[key]:
+                        key_overrides[key][value_type] = {}
+
+                    # Apply user-specified key configurations
+                    key_overrides[key][value_type][index_name] = internal_class(
+                        config=index_entry.config,
+                        enabled=index_entry.enabled
+                    )
+
+        # Initialize the Pydantic model with computed values
+        super().__init__(defaults=defaults, key_overrides=key_overrides)
+
+    def _serialize_value_type_indexes(self, value_type_indexes: ValueTypeIndexes) -> Dict[str, Any]:
+        """Convert a ValueTypeIndexes dict to JSON-serializable format."""
+        result: Dict[str, Any] = {}
+        for index_name, index_value in value_type_indexes.items():
+            if isinstance(index_value, bool):
+                result[index_name] = index_value
+            else:
+                # Exclude None values from serialization
+                config_dict = index_value.config.model_dump(exclude_none=True) if hasattr(index_value.config, 'model_dump') else index_value.config.__dict__
+                result[index_name] = {
+                    "enabled": index_value.enabled,
+                    "config": config_dict
+                }
+        return result
+
+    def serialize_to_json(self) -> Dict[str, Any]:
+        """Convert InternalSchema to a JSON-serializable dict for transmission over the wire."""
+        # Convert defaults to JSON format
+        defaults_json = {}
+        for value_type, indexes in self.defaults.items():
+            defaults_json[value_type] = self._serialize_value_type_indexes(indexes)
+
+        # Convert key overrides to JSON format
+        key_overrides_json: Dict[str, Dict[str, Any]] = {}
+        for key, value_types in self.key_overrides.items():
+            key_overrides_json[key] = {}
+            for value_type, indexes in value_types.items():
+                key_overrides_json[key][value_type] = self._serialize_value_type_indexes(indexes)
+
+        return {
+            "defaults": defaults_json,
+            "key_overrides": key_overrides_json
+        }
+
+    @classmethod
+    def deserialize_from_json(cls, json_data: Dict[str, Any]) -> "InternalSchema":
+        """Create InternalSchema from JSON-serialized data."""
+        # Extract and deserialize components
+        defaults = cls._deserialize_defaults(json_data.get("defaults", {}))
+        key_overrides = cls._deserialize_key_overrides(json_data.get("key_overrides", {}))
+
+        # Create instance directly from deserialized data
+        instance = cls.model_construct(defaults=defaults, key_overrides=key_overrides)
+
+        return instance
+
+    @classmethod
+    def _deserialize_defaults(cls, defaults_json: Dict[str, Any]) -> Dict[str, ValueTypeIndexes]:
+        """Deserialize defaults from JSON format."""
+        defaults: Dict[str, ValueTypeIndexes] = {}
+
+        for value_type, indexes_json in defaults_json.items():
+            defaults[value_type] = cls._deserialize_value_type_indexes(indexes_json)
+
+        return defaults
+
+    @classmethod
+    def _deserialize_key_overrides(cls, key_overrides_json: Dict[str, Any]) -> Dict[str, Dict[str, ValueTypeIndexes]]:
+        """Deserialize key_overrides from JSON format."""
+        key_overrides: Dict[str, Dict[str, ValueTypeIndexes]] = {}
+
+        for key, value_types_json in key_overrides_json.items():
+            key_overrides[key] = {}
+            for value_type, indexes_json in value_types_json.items():
+                key_overrides[key][value_type] = cls._deserialize_value_type_indexes(indexes_json)
+
+        return key_overrides
+
+    @classmethod
+    def _deserialize_value_type_indexes(cls, indexes_json: Dict[str, Any]) -> ValueTypeIndexes:
+        """Deserialize ValueTypeIndexes from JSON format."""
+        result: ValueTypeIndexes = {}
+
+        for index_name, index_data in indexes_json.items():
+            if isinstance(index_data, bool):
+                result[index_name] = index_data
+            else:
+                # Reconstruct Internal*Index object
+                index_mapping = cls._INDEX_TYPE_MAP.get(index_name)
+                if index_mapping:
+                    internal_class, config_class = index_mapping
+                    config_obj = config_class(**index_data["config"])
+                    result[index_name] = internal_class(config=config_obj, enabled=index_data["enabled"])
+                else:
+                    # Unknown index type - cannot reconstruct
+                    raise ValueError(f"Unknown index type '{index_name}' during deserialization. Cannot reconstruct Internal*Index object.")
+
+        return result
