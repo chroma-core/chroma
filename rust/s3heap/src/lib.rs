@@ -1,4 +1,4 @@
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 #![warn(clippy::all)]
 #![deny(unsafe_code)]
 
@@ -18,15 +18,15 @@
 //!
 //! ## Core Components
 //!
-//! - **HeapWriter**: Adds new tasks to the heap
-//! - **HeapReader**: Reads tasks from the heap for processing
-//! - **HeapPruner**: Removes completed tasks and cleans up empty buckets
-//! - **HeapScheduler**: User-implemented trait that determines task scheduling and completion
+//! - [`HeapWriter`]: Adds new tasks to the heap
+//! - [`HeapReader`]: Reads tasks from the heap for processing
+//! - [`HeapPruner`]: Removes completed tasks and cleans up empty buckets
+//! - [`HeapScheduler`]: User-implemented trait that determines task scheduling and completion
 //!
 //! ## Data Model
 //!
-//! Each task in the heap is represented by a `HeapItem` containing:
-//! - A `Triggerable` with a UUID and name identifying the task
+//! Each task in the heap is represented by a [`HeapItem`] containing:
+//! - A [`Triggerable`] with a UUID and name identifying the task
 //! - A nonce (UUID) uniquely identifying each invocation
 //!
 //! ## Usage Example
@@ -81,7 +81,11 @@ use internal::Internal;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-/// Errors that can occur in heap operations.
+/// Errors that can occur during heap operations.
+///
+/// This enum represents all possible errors that can occur when interacting
+/// with the s3heap system. Errors can originate from storage operations,
+/// data format issues, or concurrency conflicts.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// ETag conflict during concurrent modification
@@ -152,20 +156,95 @@ impl RetryConfig {
 
 ////////////////////////////////////////////// Limits //////////////////////////////////////////////
 
-/// Limits on range-scan-backed operations.  Used to bound costs.
+/// Limits on range-scan-backed operations.
+///
+/// This struct allows callers to bound the cost and time of operations that scan
+/// through heap buckets. By limiting the number of buckets to read, you can ensure
+/// predictable performance even when the heap contains many buckets.
+///
+/// # Examples
+///
+/// ```
+/// use s3heap::Limits;
+///
+/// // Use default limits (reads up to 1000 buckets)
+/// let limits = Limits::default();
+///
+/// // Create custom limits
+/// let custom_limits = Limits::with_buckets(100);
+/// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Limits {
+    /// Maximum number of buckets to read during a scan operation.
+    /// If None, defaults to 1000 buckets.
     buckets_to_read: Option<usize>,
 }
 
 impl Limits {
     const DEFAULT_BUCKETS_TO_READ: usize = 1000;
+
+    /// Create limits with a specific maximum number of buckets to read.
+    ///
+    /// # Arguments
+    /// * `max_buckets` - Maximum number of buckets to scan
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use s3heap::Limits;
+    ///
+    /// let limits = Limits::with_buckets(50);
+    /// assert_eq!(limits.max_buckets(), 50);
+    /// ```
+    pub fn with_buckets(max_buckets: usize) -> Self {
+        Self {
+            buckets_to_read: Some(max_buckets),
+        }
+    }
+
+    /// Get the maximum number of buckets to read.
+    ///
+    /// Returns the configured limit or the default (1000) if not set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use s3heap::Limits;
+    ///
+    /// let default_limits = Limits::default();
+    /// assert_eq!(default_limits.max_buckets(), 1000);
+    ///
+    /// let custom_limits = Limits::with_buckets(50);
+    /// assert_eq!(custom_limits.max_buckets(), 50);
+    /// ```
+    pub fn max_buckets(&self) -> usize {
+        self.buckets_to_read
+            .unwrap_or(Self::DEFAULT_BUCKETS_TO_READ)
+    }
 }
 
 //////////////////////////////////////////// Triggerable ///////////////////////////////////////////
 
-/// A Triggerable item is a UUID identifying the unit of scheduling and a name of the triggerable
-/// task on that unit of scheduling.
+/// Represents a task that can be scheduled and triggered in the heap.
+///
+/// A `Triggerable` consists of two parts:
+/// - A UUID identifying the schedulable unit (e.g., a document, job, or entity)
+/// - A name specifying which task to execute on that unit
+///
+/// This allows multiple different tasks to be scheduled for the same entity,
+/// each identified by its name.
+///
+/// # Examples
+///
+/// ```
+/// use s3heap::Triggerable;
+/// use uuid::Uuid;
+///
+/// let task = Triggerable {
+///     uuid: Uuid::new_v4(),
+///     name: "index_document".to_string(),
+/// };
+/// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Triggerable {
     /// The UUID identifying the schedulable unit
@@ -176,11 +255,51 @@ pub struct Triggerable {
 
 /////////////////////////////////////////// HeapScheduler //////////////////////////////////////////
 
-/// A HeapScheduler connects a heap writer to a heap reader.
+/// User-implemented trait that defines the scheduling behavior for heap items.
 ///
-/// This trait must be implemented by the user to define the scheduling behavior
-/// for items in the heap. It provides methods to check if tasks are complete
-/// and to determine when tasks should next be executed.
+/// The `HeapScheduler` trait connects the heap writer to the heap reader by providing
+/// the business logic for task scheduling and completion detection. Users must
+/// implement this trait to define how their specific tasks should be scheduled
+/// and when they are considered complete.
+///
+/// # Implementation Notes
+///
+/// Implementations should be thread-safe (Send + Sync) as they may be called
+/// from multiple threads concurrently. Consider using interior mutability
+/// patterns if state needs to be shared.
+///
+/// # Examples
+///
+/// ```
+/// use s3heap::{HeapScheduler, Triggerable, Error};
+/// use chrono::{DateTime, Utc};
+/// use uuid::Uuid;
+/// use std::collections::HashMap;
+/// use std::sync::Mutex;
+///
+/// struct MyScheduler {
+///     completed_tasks: Mutex<HashMap<(Uuid, Uuid), bool>>,
+/// }
+///
+/// #[async_trait::async_trait]
+/// impl HeapScheduler for MyScheduler {
+///     async fn is_done(&self, item: &Triggerable, nonce: Uuid) -> Result<bool, Error> {
+///         // Check if task is complete in your system
+///         Ok(self.completed_tasks.lock().unwrap()
+///             .get(&(item.uuid, nonce))
+///             .copied()
+///             .unwrap_or(false))
+///     }
+///
+///     async fn next_time_and_nonce(
+///         &self,
+///         item: &Triggerable,
+///     ) -> Result<Option<(DateTime<Utc>, Uuid)>, Error> {
+///         // Determine when to schedule this task
+///         Ok(Some((Utc::now() + chrono::Duration::minutes(5), Uuid::new_v4())))
+///     }
+/// }
+/// ```
 #[async_trait::async_trait]
 pub trait HeapScheduler: Send + Sync {
     /// Check if a specific invocation of a task has completed.
@@ -211,14 +330,50 @@ pub trait HeapScheduler: Send + Sync {
 
 //////////////////////////////////////////// HeapWriter ////////////////////////////////////////////
 
-/// A HeapWriter is assumed to be instantiated 1:1 with a heap for performance reasons.  And for
-/// performance reasons the API is batch-centric.
+/// Writer for adding tasks to the S3-backed heap.
 ///
-/// This is the structure that writes the heap.  All writes happen via this structure.
+/// `HeapWriter` provides the interface for scheduling new tasks in the heap.
+/// It batches tasks by their scheduled time (rounded to the nearest minute)
+/// and stores them efficiently in parquet files on S3.
+///
+/// For optimal performance, instantiate one `HeapWriter` per heap prefix
+/// and reuse it across multiple operations. The API is designed to be
+/// batch-centric - scheduling multiple tasks in a single call is more
+/// efficient than making multiple calls with single tasks.
 ///
 /// # Thread Safety
-/// HeapWriter is Send + Sync and can be shared across threads. Multiple concurrent
-/// push operations are safe due to optimistic concurrency control at the storage layer.
+///
+/// `HeapWriter` is Send + Sync and can be safely shared across threads.
+/// Multiple concurrent push operations are safe due to optimistic
+/// concurrency control at the storage layer. If concurrent writes to
+/// the same bucket occur, they will be automatically retried.
+///
+/// # Examples
+///
+/// ```ignore
+/// use s3heap::{HeapWriter, Triggerable};
+/// use uuid::Uuid;
+///
+/// let writer = HeapWriter::new(
+///     "my-heap".to_string(),
+///     storage,
+///     scheduler,
+/// );
+///
+/// // Schedule a batch of tasks
+/// let tasks = vec![
+///     Triggerable {
+///         uuid: Uuid::new_v4(),
+///         name: "process_payment".to_string(),
+///     },
+///     Triggerable {
+///         uuid: Uuid::new_v4(),
+///         name: "send_notification".to_string(),
+///     },
+/// ];
+///
+/// writer.push(&tasks).await?;
+/// ```
 pub struct HeapWriter {
     internal: Internal,
 }
@@ -227,12 +382,28 @@ impl HeapWriter {
     /// Create a new HeapWriter.
     ///
     /// # Arguments
-    /// * `prefix` - The S3 prefix for storing heap data
-    /// * `storage` - The storage backend to use
+    ///
+    /// * `prefix` - The S3 prefix for storing heap data. Must not be empty or contain "//".
+    /// * `storage` - The storage backend to use for S3 operations
     /// * `heap_scheduler` - The scheduler implementation for determining task schedules
     ///
     /// # Panics
-    /// Panics if `prefix` is empty
+    ///
+    /// - Panics if `prefix` is empty
+    /// - Panics if `prefix` contains "//" (double slashes)
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use s3heap::HeapWriter;
+    /// use std::sync::Arc;
+    ///
+    /// let writer = HeapWriter::new(
+    ///     "production/task-queue".to_string(),
+    ///     storage,
+    ///     Arc::new(scheduler),
+    /// );
+    /// ```
     pub fn new(prefix: String, storage: Storage, heap_scheduler: Arc<dyn HeapScheduler>) -> Self {
         assert!(!prefix.is_empty(), "prefix cannot be empty");
         assert!(
@@ -244,17 +415,46 @@ impl HeapWriter {
         }
     }
 
-    /// Push a new set of Triggerable items onto the heap.
+    /// Schedule a batch of tasks in the heap.
     ///
-    /// Tasks are grouped by their scheduled minute for efficient storage.
-    /// The bigger the batch size, the more efficiency wins to be had.
+    /// This method queries the [`HeapScheduler`] for each task to determine when it should
+    /// be executed. Tasks scheduled for the same minute are automatically batched together
+    /// into a single parquet file for efficient storage. Tasks with no scheduled time
+    /// (when the scheduler returns `None`) are silently skipped.
+    ///
+    /// For best performance, batch multiple tasks into a single call rather than
+    /// calling this method repeatedly with individual tasks.
     ///
     /// # Arguments
-    /// * `items` - The tasks to schedule
     ///
-    /// # Returns
-    /// * `Ok(())` if all tasks were successfully scheduled
-    /// * `Err` if there was an error scheduling tasks
+    /// * `items` - The tasks to schedule. Empty slices are allowed and will return immediately.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::Internal`] if the scheduler returns an error
+    /// - [`Error::Storage`] if there's an S3 operation failure
+    /// - [`Error::ETagConflict`] if concurrent modifications exhaust retries
+    /// - [`Error::Parquet`] if parquet serialization fails
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use s3heap::Triggerable;
+    /// use uuid::Uuid;
+    ///
+    /// let tasks = vec![
+    ///     Triggerable {
+    ///         uuid: Uuid::new_v4(),
+    ///         name: "daily_report".to_string(),
+    ///     },
+    /// ];
+    ///
+    /// // Schedule tasks - those without a next execution time are skipped
+    /// writer.push(&tasks).await?;
+    ///
+    /// // Empty push is safe and does nothing
+    /// writer.push(&[]).await?;
+    /// ```
     pub async fn push(&self, items: &[Triggerable]) -> Result<(), Error> {
         if items.is_empty() {
             return Ok(());
@@ -286,15 +486,39 @@ impl HeapWriter {
 
 //////////////////////////////////////////// HeapPruner ////////////////////////////////////////////
 
-/// A HeapPruner manages garbage collection of completed tasks from the heap.
+/// Manages garbage collection of completed tasks from the heap.
 ///
-/// The pruner scans through heap buckets and removes tasks that have been
-/// marked as complete by the HeapScheduler. Empty buckets are deleted.
+/// `HeapPruner` scans through heap buckets and removes tasks that have been
+/// marked as complete by the [`HeapScheduler`]. When all tasks in a bucket
+/// are complete, the entire bucket file is deleted from S3 to save storage costs.
+///
+/// Pruning is an important maintenance operation that should be run periodically
+/// to prevent the heap from growing unbounded with completed tasks.
 ///
 /// # Thread Safety
-/// HeapPruner is Send + Sync. However, running multiple pruners concurrently
-/// on the same prefix may cause conflicts. It's recommended to have a single
-/// pruner instance per heap prefix.
+///
+/// `HeapPruner` is Send + Sync. However, running multiple pruners concurrently
+/// on the same prefix may cause unnecessary conflicts and retries. It's recommended
+/// to have a single pruner instance per heap prefix, possibly running on a
+/// scheduled basis.
+///
+/// # Examples
+///
+/// ```ignore
+/// use s3heap::{HeapPruner, Limits};
+///
+/// let pruner = HeapPruner::new(
+///     "my-heap".to_string(),
+///     storage,
+///     scheduler,
+/// );
+///
+/// // Prune with default limits (up to 1000 buckets)
+/// pruner.prune(Limits::default()).await?;
+///
+/// // Prune with custom limits
+/// pruner.prune(Limits::with_buckets(100)).await?;
+/// ```
 pub struct HeapPruner {
     internal: Internal,
 }
@@ -303,12 +527,28 @@ impl HeapPruner {
     /// Create a new HeapPruner.
     ///
     /// # Arguments
-    /// * `prefix` - The S3 prefix for storing heap data
-    /// * `storage` - The storage backend to use
+    ///
+    /// * `prefix` - The S3 prefix for storing heap data. Must not be empty or contain "//".
+    /// * `storage` - The storage backend to use for S3 operations
     /// * `heap_scheduler` - The scheduler implementation for checking task completion
     ///
     /// # Panics
-    /// Panics if `prefix` is empty
+    ///
+    /// - Panics if `prefix` is empty
+    /// - Panics if `prefix` contains "//" (double slashes)
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use s3heap::HeapPruner;
+    /// use std::sync::Arc;
+    ///
+    /// let pruner = HeapPruner::new(
+    ///     "production/task-queue".to_string(),
+    ///     storage,
+    ///     Arc::new(scheduler),
+    /// );
+    /// ```
     pub fn new(prefix: String, storage: Storage, heap_scheduler: Arc<dyn HeapScheduler>) -> Self {
         assert!(!prefix.is_empty(), "prefix cannot be empty");
         assert!(
@@ -320,14 +560,37 @@ impl HeapPruner {
         }
     }
 
-    /// Prune completed tasks from the heap.
+    /// Remove completed tasks from the heap.
     ///
-    /// This method scans approximately the first 1000 buckets in the heap,
-    /// removes completed tasks from each bucket, and deletes empty buckets.
+    /// This method scans through heap buckets (up to the limit specified),
+    /// queries the [`HeapScheduler`] to check which tasks are complete,
+    /// removes those tasks, and deletes any buckets that become empty.
     ///
-    /// # Returns
-    /// * `Ok(())` if pruning succeeded
-    /// * `Err` if there was an error during pruning
+    /// Pruning operations use exponential backoff for retry on conflicts,
+    /// ensuring eventual consistency even under concurrent modifications.
+    ///
+    /// # Arguments
+    ///
+    /// * `limits` - Controls how many buckets to scan. Use [`Limits::default()`]
+    ///   for the default of 1000 buckets, or [`Limits::with_buckets()`] for a custom limit.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::Storage`] if S3 operations fail
+    /// - [`Error::Internal`] if the scheduler returns an error
+    /// - [`Error::Arrow`] if parquet deserialization fails
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use s3heap::Limits;
+    ///
+    /// // Prune with default limits
+    /// pruner.prune(Limits::default()).await?;
+    ///
+    /// // Prune only the first 50 buckets for faster operation
+    /// pruner.prune(Limits::with_buckets(50)).await?;
+    /// ```
     pub async fn prune(&self, limits: Limits) -> Result<(), Error> {
         let buckets = self.internal.list_approx_first_1k_buckets().await?;
         for bucket in buckets.into_iter().take(
@@ -390,11 +653,41 @@ impl HeapPruner {
 
 //////////////////////////////////////////// HeapReader ////////////////////////////////////////////
 
-/// The reader allows for peeking at the first N tasks to be scheduled.
+/// Reader for retrieving tasks from the S3-backed heap.
+///
+/// `HeapReader` provides read-only access to the heap, allowing you to peek at
+/// scheduled tasks without removing them. This is useful for monitoring,
+/// debugging, or implementing custom task processing logic.
+///
+/// The reader scans buckets in chronological order, making it efficient for
+/// finding tasks that are due to be executed soon.
 ///
 /// # Thread Safety
-/// HeapReader is Send + Sync and can be safely shared across threads.
-/// Multiple concurrent peek operations are safe as they only perform reads.
+///
+/// `HeapReader` is Send + Sync and can be safely shared across threads.
+/// Multiple concurrent peek operations are safe as they only perform reads
+/// and do not modify the heap state.
+///
+/// # Examples
+///
+/// ```ignore
+/// use s3heap::{HeapReader, Limits};
+///
+/// let reader = HeapReader::new(
+///     "my-heap".to_string(),
+///     storage,
+///     scheduler,
+/// );
+///
+/// // Get all non-completed tasks
+/// let all_tasks = reader.peek(|_| true, Limits::default()).await?;
+///
+/// // Get only tasks with a specific name
+/// let specific_tasks = reader.peek(
+///     |task| task.name == "process_payment",
+///     Limits::with_buckets(100),
+/// ).await?;
+/// ```
 pub struct HeapReader {
     internal: Internal,
 }
@@ -403,12 +696,28 @@ impl HeapReader {
     /// Create a new HeapReader.
     ///
     /// # Arguments
-    /// * `prefix` - The S3 prefix for storing heap data
-    /// * `storage` - The storage backend to use
+    ///
+    /// * `prefix` - The S3 prefix for storing heap data. Must not be empty or contain "//".
+    /// * `storage` - The storage backend to use for S3 operations
     /// * `heap_scheduler` - The scheduler implementation for checking task status
     ///
     /// # Panics
-    /// Panics if `prefix` is empty
+    ///
+    /// - Panics if `prefix` is empty
+    /// - Panics if `prefix` contains "//" (double slashes)
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use s3heap::HeapReader;
+    /// use std::sync::Arc;
+    ///
+    /// let reader = HeapReader::new(
+    ///     "production/task-queue".to_string(),
+    ///     storage,
+    ///     Arc::new(scheduler),
+    /// );
+    /// ```
     pub fn new(prefix: String, storage: Storage, heap_scheduler: Arc<dyn HeapScheduler>) -> Self {
         assert!(!prefix.is_empty(), "prefix cannot be empty");
         assert!(
@@ -420,18 +729,51 @@ impl HeapReader {
         }
     }
 
-    /// Peek into the heap, filtering by the should_return predicate.
+    /// Retrieve tasks from the heap that match the given filter.
     ///
-    /// This method scans through the heap buckets and returns tasks that:
-    /// 1. Are not marked as done by the HeapScheduler
-    /// 2. Match the provided filter predicate
+    /// This method scans through heap buckets (up to the specified limit) and
+    /// returns tasks that meet two criteria:
+    /// 1. The task is not marked as complete by the [`HeapScheduler`]
+    /// 2. The task passes the provided filter predicate
+    ///
+    /// Tasks are returned in the order they appear in the heap buckets,
+    /// which corresponds roughly to their scheduled execution time.
     ///
     /// # Arguments
-    /// * `should_return` - A predicate function to filter which tasks to return
     ///
-    /// # Returns
-    /// * `Ok(Vec<HeapItem>)` containing the filtered tasks
-    /// * `Err` if there was an error reading the heap
+    /// * `should_return` - A predicate function that returns `true` for tasks
+    ///   that should be included in the results. This function is called for
+    ///   each non-completed task found.
+    /// * `limits` - Controls how many buckets to scan. Use [`Limits::default()`]
+    ///   for the default of 1000 buckets, or [`Limits::with_buckets()`] for a custom limit.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::Storage`] if S3 operations fail
+    /// - [`Error::Internal`] if the scheduler returns an error
+    /// - [`Error::Arrow`] if parquet deserialization fails
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use s3heap::Limits;
+    ///
+    /// // Get all pending tasks
+    /// let all_pending = reader.peek(|_| true, Limits::default()).await?;
+    ///
+    /// // Get only high-priority tasks
+    /// let high_priority = reader.peek(
+    ///     |task| task.name.starts_with("urgent_"),
+    ///     Limits::with_buckets(50),
+    /// ).await?;
+    ///
+    /// // Get tasks for a specific entity
+    /// let entity_id = uuid::Uuid::new_v4();
+    /// let entity_tasks = reader.peek(
+    ///     move |task| task.uuid == entity_id,
+    ///     Limits::default(),
+    /// ).await?;
+    /// ```
     pub async fn peek(
         &self,
         should_return: impl for<'a> Fn(&'a Triggerable) -> bool + Send + Sync,

@@ -1,18 +1,17 @@
-use std::sync::Arc;
-
-use chroma_storage::{s3_client_for_test_with_new_bucket, GetOptions};
 use chrono::{Duration, DurationRound, TimeDelta, Utc};
 use s3heap::{HeapReader, HeapWriter, Limits};
 
 mod common;
 
-use common::{create_test_triggerable, test_nonce, test_time_at_minute_offset, MockHeapScheduler};
+use common::{
+    create_test_triggerable, setup_test_environment, test_nonce, test_time_at_minute_offset,
+    verify_bucket_count,
+};
 
 #[tokio::test]
 async fn test_k8s_integration_03_merge_same_bucket() {
-    let storage = s3_client_for_test_with_new_bucket().await;
     let prefix = "test_k8s_integration_03_merge_same_bucket";
-    let scheduler = Arc::new(MockHeapScheduler::new());
+    let (storage, scheduler) = setup_test_environment().await;
 
     // Create test items that will go to the same bucket (same minute)
     let item1 = create_test_triggerable(1, "task1");
@@ -40,15 +39,13 @@ async fn test_k8s_integration_03_merge_same_bucket() {
         .unwrap();
 
     // Verify only one bucket was created (items in same minute)
-    let buckets = storage
-        .list_prefix(prefix, GetOptions::default())
-        .await
-        .unwrap();
-    assert_eq!(
-        buckets.len(),
+    verify_bucket_count(
+        &storage,
+        prefix,
         1,
-        "Items in same minute should create only 1 bucket"
-    );
+        "Items in same minute should create only 1 bucket",
+    )
+    .await;
 
     // Verify all items are in the heap
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
@@ -58,9 +55,8 @@ async fn test_k8s_integration_03_merge_same_bucket() {
 
 #[tokio::test]
 async fn test_k8s_integration_03_merge_multiple_pushes() {
-    let storage = s3_client_for_test_with_new_bucket().await;
     let prefix = "test_k8s_integration_03_merge_multiple_pushes";
-    let scheduler = Arc::new(MockHeapScheduler::new());
+    let (storage, scheduler) = setup_test_environment().await;
 
     // Create writer
     let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone());
@@ -95,15 +91,13 @@ async fn test_k8s_integration_03_merge_multiple_pushes() {
     writer.push(&[item3.clone(), item4.clone()]).await.unwrap();
 
     // Verify still only one bucket
-    let buckets = storage
-        .list_prefix(prefix, GetOptions::default())
-        .await
-        .unwrap();
-    assert_eq!(
-        buckets.len(),
+    verify_bucket_count(
+        &storage,
+        prefix,
         1,
-        "Multiple pushes to same minute should still have 1 bucket"
-    );
+        "Multiple pushes to same minute should still have 1 bucket",
+    )
+    .await;
 
     // Verify all 4 items are in the heap
     let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());

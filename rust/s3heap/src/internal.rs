@@ -19,11 +19,26 @@ use crate::{Error, HeapScheduler, RetryConfig, Triggerable};
 
 ///////////////////////////////////////////// HeapItem /////////////////////////////////////////////
 
-/// A HeapItem represents a scheduled task in the heap.
+/// A scheduled task instance in the heap.
 ///
-/// Each item contains:
-/// - `trigger`: The triggerable task with UUID and name
-/// - `nonce`: A unique identifier for this specific invocation
+/// Each `HeapItem` represents a specific invocation of a task at a particular time.
+/// The combination of the trigger and nonce uniquely identifies this invocation,
+/// allowing the same task to be scheduled multiple times with different nonces.
+///
+/// # Examples
+///
+/// ```
+/// use s3heap::{HeapItem, Triggerable};
+/// use uuid::Uuid;
+///
+/// let item = HeapItem {
+///     trigger: Triggerable {
+///         uuid: Uuid::new_v4(),
+///         name: "send_email".to_string(),
+///     },
+///     nonce: Uuid::new_v4(),
+/// };
+/// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HeapItem {
     /// The triggerable task to be executed
@@ -34,10 +49,19 @@ pub struct HeapItem {
 
 ///////////////////////////////////////////// Internal /////////////////////////////////////////////
 
-/// Internal implementation details for the S3-backed heap.
+/// Internal implementation for S3-backed heap operations.
 ///
-/// This struct handles the low-level operations of storing and retrieving
+/// This struct encapsulates the low-level operations of storing and retrieving
 /// heap items from S3 using parquet files organized into time-based buckets.
+/// It handles the complexity of bucket management, parquet serialization,
+/// and concurrent access control via ETags.
+///
+/// # Design Decisions
+///
+/// - **Bucket Granularity**: One minute was chosen as the bucket size to balance
+///   between file count (too many small files) and update contention (too few large files)
+/// - **Parquet Format**: Provides efficient compression and columnar storage for UUID/string data
+/// - **ETag-based Concurrency**: Uses S3's conditional PUT/GET for optimistic concurrency control
 pub struct Internal {
     prefix: String,
     storage: Storage,
@@ -49,9 +73,11 @@ impl Internal {
     /// Create a new Internal instance.
     ///
     /// # Arguments
+    ///
     /// * `prefix` - The S3 prefix for storing heap data
     /// * `storage` - The storage backend to use
     /// * `heap_scheduler` - The scheduler implementation
+    /// * `retry_config` - Configuration for retry behavior on conflicts
     pub fn new(
         prefix: String,
         storage: Storage,
@@ -66,24 +92,31 @@ impl Internal {
         }
     }
 
-    /// Merge entries into the file on S3.
+    /// Atomically append entries to a bucket on S3.
     ///
-    /// This function loads the existing bucket data (if any), appends the new entries,
-    /// and writes everything back. It uses exponential backoff for retries.
+    /// This method implements an optimistic concurrency control pattern:
+    /// 1. Load the current bucket contents (if it exists)
+    /// 2. Append new entries to the existing data
+    /// 3. Write back with ETag validation
+    /// 4. Retry with exponential backoff on conflicts
     ///
     /// # Concurrency Safety
-    /// This method uses optimistic concurrency control via ETags. If multiple writers
-    /// attempt to modify the same bucket simultaneously, the ETag check will cause
-    /// conflicts to be detected and retried automatically.
+    ///
+    /// Multiple writers can safely call this method concurrently for the same bucket.
+    /// The ETag mechanism ensures that only one writer succeeds at a time, with
+    /// others automatically retrying. This provides eventual consistency without
+    /// requiring distributed locks.
     ///
     /// # Arguments
+    ///
     /// * `bucket` - The bucket timestamp to merge into
     /// * `entries` - The new entries to add
     ///
-    /// # Returns
-    /// * `Ok(())` if the merge succeeded
-    /// * `Err(Error::ETagConflict)` if retries were exhausted due to conflicts
-    /// * `Err` if there was another error during merging
+    /// # Errors
+    ///
+    /// - [`Error::ETagConflict`] if retries were exhausted due to concurrent modifications
+    /// - [`Error::Storage`] if S3 operations fail
+    /// - [`Error::Parquet`] if serialization fails
     pub async fn merge_on_s3(
         &self,
         bucket: DateTime<Utc>,
@@ -107,14 +140,22 @@ impl Internal {
         .await
     }
 
-    /// List the first 1k buckets in lexicographic order.
+    /// List approximately the first 1000 buckets in chronological order.
     ///
-    /// This provides an approximation of the earliest buckets in the heap.
-    /// The limit of 1000 is imposed by S3's list operation.
+    /// S3's list operation returns keys in lexicographic order, which for our
+    /// timestamp-based keys corresponds to chronological order. The ~1000 limit
+    /// is imposed by S3's ListObjectsV2 API.
     ///
-    /// # Returns
-    /// * `Ok(Vec<DateTime<Utc>>)` containing bucket timestamps
-    /// * `Err` if there was an error listing buckets
+    /// # Implementation Note
+    ///
+    /// The actual number returned may be less than 1000 if fewer buckets exist,
+    /// or slightly different due to S3's pagination boundaries.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::Storage`] if the S3 list operation fails
+    /// - [`Error::Internal`] if a returned path has an unexpected format
+    /// - [`Error::ParseDate`] if a bucket timestamp cannot be parsed
     pub async fn list_approx_first_1k_buckets(&self) -> Result<Vec<DateTime<Utc>>, Error> {
         let first_1k = self
             .storage
@@ -144,16 +185,27 @@ impl Internal {
             .collect::<Result<Vec<_>, _>>()
     }
 
-    /// Load the entries from a bucket.
+    /// Load all entries from a bucket.
     ///
-    /// Reads the parquet file for a given bucket and deserializes the HeapItems.
+    /// Reads the parquet file for a given bucket and deserializes all HeapItems
+    /// contained within. Also returns the ETag for use in subsequent conditional updates.
     ///
     /// # Arguments
+    ///
     /// * `bucket` - The bucket timestamp to load
     ///
     /// # Returns
-    /// * `Ok((items, e_tag))` containing the items and the file's ETag
-    /// * `Err` if there was an error loading the bucket
+    ///
+    /// A tuple containing:
+    /// - The vector of HeapItems in the bucket
+    /// - The ETag of the file (if the storage backend provides one)
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::Storage`] if the file cannot be read from S3
+    /// - [`Error::Parquet`] if the parquet file is corrupted
+    /// - [`Error::Arrow`] if required columns are missing or have wrong types
+    /// - [`Error::Uuid`] if UUID parsing fails
     pub async fn load_bucket(
         &self,
         bucket: DateTime<Utc>,
@@ -220,26 +272,32 @@ impl Internal {
         Ok((items, e_tag))
     }
 
-    /// Store entries in a bucket.
+    /// Atomically store entries in a bucket.
     ///
-    /// Serializes HeapItems to parquet and writes to S3 with conditional updates
-    /// based on the ETag to prevent concurrent modification issues.
+    /// Serializes HeapItems to parquet format and writes to S3 using conditional
+    /// PUT operations to ensure atomicity. This is the core primitive for safe
+    /// concurrent updates to the heap.
     ///
-    /// # Concurrency Safety
-    /// This method uses conditional PUT operations:
-    /// - If `e_tag` is Some, the PUT only succeeds if the current ETag matches
-    /// - If `e_tag` is None, the PUT only succeeds if the file doesn't exist
-    ///   This ensures atomic updates and prevents lost updates in concurrent scenarios.
+    /// # Concurrency Control
+    ///
+    /// This method implements conditional writes:
+    /// - If `e_tag` is `Some`, the PUT only succeeds if the current ETag matches (update case)
+    /// - If `e_tag` is `None`, the PUT only succeeds if the file doesn't exist (create case)
+    ///
+    /// This ensures that concurrent modifications are detected and can be retried,
+    /// preventing lost updates without requiring distributed locks.
     ///
     /// # Arguments
-    /// * `bucket` - The bucket timestamp to store
-    /// * `items` - The items to store
-    /// * `e_tag` - The expected ETag for conditional updates (None for new files)
     ///
-    /// # Returns
-    /// * `Ok(())` if the store succeeded
-    /// * `Err(Error::ETagConflict)` if the ETag didn't match (concurrent modification)
-    /// * `Err` if there was another error
+    /// * `bucket` - The bucket timestamp to store
+    /// * `items` - The items to store (will replace existing contents)
+    /// * `e_tag` - The expected ETag for conditional updates (`None` for new files)
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::ETagConflict`] if the ETag doesn't match (concurrent modification detected)
+    /// - [`Error::Storage`] if S3 operations fail
+    /// - [`Error::Parquet`] if serialization fails
     pub async fn store_bucket(
         &self,
         bucket: DateTime<Utc>,
@@ -268,14 +326,22 @@ impl Internal {
         Ok(())
     }
 
-    /// Remove the file corresponding to a bucket.
+    /// Delete a bucket file from S3.
+    ///
+    /// Removes the entire parquet file for a bucket, typically called when
+    /// all tasks in the bucket have been completed.
     ///
     /// # Arguments
+    ///
     /// * `bucket` - The bucket timestamp to clear
     ///
-    /// # Returns
-    /// * `Ok(())` if the bucket was deleted or didn't exist
-    /// * `Err` if there was an error deleting the bucket
+    /// # Errors
+    ///
+    /// - [`Error::Storage`] if the S3 delete operation fails
+    ///
+    /// # Note
+    ///
+    /// Deleting a non-existent bucket is typically not an error in S3.
     pub async fn clear_bucket(&self, bucket: DateTime<Utc>) -> Result<(), Error> {
         self.storage
             .delete(&self.path_for_bucket(bucket), DeleteOptions::default())
@@ -283,35 +349,63 @@ impl Internal {
         Ok(())
     }
 
-    /// Turn a timestamp into a bucket.
+    /// Compute the bucket for a given timestamp.
     ///
-    /// Buckets are aligned to minute boundaries for efficient grouping of tasks.
+    /// Buckets are aligned to minute boundaries, meaning all tasks scheduled
+    /// within the same minute are stored in the same bucket file. This provides
+    /// a good balance between file size and update contention.
     ///
     /// # Arguments
+    ///
     /// * `when` - The timestamp to compute a bucket for
     ///
     /// # Returns
-    /// * `Ok(DateTime<Utc>)` truncated to the minute
-    /// * `Err` if the timestamp cannot be truncated
+    ///
+    /// The timestamp truncated to the start of its minute
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::RoundError`] if the timestamp cannot be truncated (extremely rare)
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // 12:34:56 -> 12:34:00
+    /// let bucket = internal.compute_bucket(timestamp)?;
+    /// ```
     pub fn compute_bucket(&self, when: DateTime<Utc>) -> Result<DateTime<Utc>, Error> {
         Ok(when.duration_trunc(TimeDelta::minutes(1))?)
     }
 
     /// Get a reference to the heap scheduler.
     ///
-    /// # Returns
-    /// A reference to the underlying HeapScheduler implementation
+    /// Provides access to the scheduler for checking task completion
+    /// and determining scheduling times.
     pub fn heap_scheduler(&self) -> &dyn HeapScheduler {
         self.heap_scheduler.as_ref()
     }
 
     /// Generate the S3 path for a given bucket.
     ///
+    /// Converts a bucket timestamp into the S3 object key where its
+    /// parquet file is stored.
+    ///
     /// # Arguments
-    /// * `bucket` - The bucket timestamp
+    ///
+    /// * `bucket` - The bucket timestamp (must be minute-aligned)
     ///
     /// # Returns
-    /// The S3 path as a string in the format: `{prefix}/{timestamp}`
+    ///
+    /// The S3 path in the format: `{prefix}/{timestamp}`
+    /// where timestamp is formatted as `YYYY-MM-DDTHH:MM:SSZ`
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // For prefix "my-heap" and bucket 2024-03-15T14:30:00Z
+    /// // Returns: "my-heap/2024-03-15T14:30:00Z"
+    /// let path = internal.path_for_bucket(bucket);
+    /// ```
     pub fn path_for_bucket(&self, bucket: DateTime<Utc>) -> String {
         format!(
             "{}/{}",
@@ -321,19 +415,34 @@ impl Internal {
     }
 }
 
-/// Construct a parquet file from a list of HeapItems.
+/// Serialize HeapItems into a parquet file.
 ///
-/// The parquet file contains three columns:
-/// - uuids: String representation of the trigger UUIDs
-/// - names: The trigger names
-/// - nonces: String representation of the nonce UUIDs
+/// Creates a parquet file with three string columns:
+/// - `uuids`: String representation of the trigger UUIDs
+/// - `names`: The trigger task names
+/// - `nonces`: String representation of the invocation nonces
+///
+/// The parquet format provides efficient compression (using Snappy) and
+/// columnar storage, which is ideal for our UUID and string data.
 ///
 /// # Arguments
+///
 /// * `items` - The heap items to serialize
 ///
 /// # Returns
-/// * `Ok(Vec<u8>)` containing the parquet file bytes
-/// * `Err` if serialization fails
+///
+/// The serialized parquet file as a byte vector
+///
+/// # Errors
+///
+/// - [`Error::Arrow`] if the record batch cannot be created
+/// - [`Error::Parquet`] if parquet serialization fails
+///
+/// # Implementation Notes
+///
+/// - Uses Snappy compression for good compression/speed tradeoff
+/// - All columns are non-nullable strings
+/// - Empty input produces a valid parquet file with no rows
 fn construct_parquet(items: &[HeapItem]) -> Result<Vec<u8>, Error> {
     let uuids = items
         .iter()
