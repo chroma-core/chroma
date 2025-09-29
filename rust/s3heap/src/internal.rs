@@ -276,14 +276,10 @@ impl Internal {
                 }
             }
 
+            // Return error if there were any loading failures
             if !errors.is_empty() {
                 let first_errors: Vec<_> = errors.iter().take(3).cloned().collect();
-                tracing::warn!(
-                    "Found {} errors while loading parquet file {}: {:?}",
-                    errors.len(),
-                    path,
-                    first_errors
-                );
+                return Err(Error::PartialLoadFailure(errors.len(), first_errors));
             }
         }
         Ok((items, e_tag))
@@ -321,6 +317,13 @@ impl Internal {
         items: &[HeapItem],
         e_tag: Option<ETag>,
     ) -> Result<(), Error> {
+        // Validate that bucket is minute-aligned
+        if bucket.second() != 0 || bucket.nanosecond() != 0 {
+            return Err(Error::InvalidBucket(format!(
+                "Bucket {} is not minute-aligned",
+                bucket
+            )));
+        }
         let backoff = self.retry_config.to_backoff();
 
         let path = self.path_for_bucket(bucket);

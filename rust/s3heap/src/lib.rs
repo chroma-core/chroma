@@ -66,10 +66,12 @@
 //! - Exponential backoff prevents thundering herd problems
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use backon::{ExponentialBuilder, Retryable};
+use backon::ExponentialBuilder;
+use backon::Retryable;
 use chroma_storage::Storage;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -100,6 +102,12 @@ pub enum Error {
     /// Invalid bucket timestamp (not minute-aligned)
     #[error("invalid bucket: {0}")]
     InvalidBucket(String),
+    /// Partial failure when loading parquet data
+    #[error("partial parquet load failure: {0} errors encountered, first errors: {1:?}")]
+    PartialLoadFailure(usize, Vec<String>),
+    /// Invalid prefix format
+    #[error("invalid prefix: {0}")]
+    InvalidPrefix(String),
     /// Storage backend error
     #[error("storage error: {0}")]
     Storage(#[from] chroma_storage::StorageError),
@@ -120,10 +128,66 @@ pub enum Error {
     RoundError(#[from] chrono::RoundingError),
 }
 
+/////////////////////////////////////////// Configuration //////////////////////////////////////////
+
+/// Configuration for S3Heap operations.
+///
+/// This struct encapsulates all configuration options for the heap,
+/// including retry behavior for S3 operations.
+///
+/// # Examples
+///
+/// ```
+/// use s3heap::{Configuration, RetryConfig};
+/// use std::time::Duration;
+///
+/// let config = Configuration::default()
+///     .with_backoff(
+///         RetryConfig {
+///             max_retries: 5,
+///             min_delay: Duration::from_millis(50),
+///             .. Default::default()
+///         }
+///     )
+///     .with_max_concurrent_operations(20);
+/// ```
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct Configuration {
+    /// Retry configuration for S3 operations
+    pub backoff: RetryConfig,
+    /// Maximum number of concurrent S3 operations for parallel processing.
+    /// This limit helps prevent overwhelming the S3 service and ensures
+    /// reasonable memory usage during parallel operations (default: 10).
+    pub max_concurrent_operations: usize,
+}
+
+impl Configuration {
+    /// Set the retry configuration.
+    pub fn with_backoff(mut self, backoff: RetryConfig) -> Self {
+        self.backoff = backoff;
+        self
+    }
+
+    /// Set the maximum number of concurrent S3 operations.
+    pub fn with_max_concurrent_operations(mut self, max_ops: usize) -> Self {
+        self.max_concurrent_operations = max_ops;
+        self
+    }
+}
+
+impl Default for Configuration {
+    fn default() -> Self {
+        Self {
+            backoff: RetryConfig::default(),
+            max_concurrent_operations: 10,
+        }
+    }
+}
+
 ////////////////////////////////////////// RetryConfig /////////////////////////////////////////////
 
 /// Configuration for retry behavior in heap operations.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct RetryConfig {
     /// Base delay for exponential backoff (default: 100ms)
     pub min_delay: Duration,
@@ -148,7 +212,7 @@ impl Default for RetryConfig {
 
 impl RetryConfig {
     /// Convert to a backon ExponentialBuilder.
-    pub fn to_backoff(&self) -> ExponentialBuilder {
+    pub(crate) fn to_backoff(&self) -> ExponentialBuilder {
         ExponentialBuilder::default()
             .with_factor(self.factor)
             .with_min_delay(self.min_delay)
@@ -398,6 +462,7 @@ pub trait HeapScheduler: Send + Sync {
 /// ```
 pub struct HeapWriter {
     internal: Internal,
+    config: Configuration,
 }
 
 impl HeapWriter {
@@ -409,10 +474,10 @@ impl HeapWriter {
     /// * `storage` - The storage backend to use for S3 operations
     /// * `heap_scheduler` - The scheduler implementation for determining task schedules
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// - Panics if `prefix` is empty
-    /// - Panics if `prefix` contains "//" (double slashes)
+    /// - Returns [`Error::InvalidPrefix`] if `prefix` is empty
+    /// - Returns [`Error::InvalidPrefix`] if `prefix` contains "//" (double slashes)
     ///
     /// # Examples
     ///
@@ -424,13 +489,19 @@ impl HeapWriter {
     ///     "production/task-queue".to_string(),
     ///     storage,
     ///     Arc::new(scheduler),
-    /// );
+    /// )?;
     /// ```
-    pub fn new(prefix: String, storage: Storage, heap_scheduler: Arc<dyn HeapScheduler>) -> Self {
-        validate_prefix(&prefix);
-        Self {
-            internal: Internal::new(prefix, storage, heap_scheduler, RetryConfig::default()),
-        }
+    pub fn new(
+        prefix: String,
+        storage: Storage,
+        heap_scheduler: Arc<dyn HeapScheduler>,
+    ) -> Result<Self, Error> {
+        let config = Configuration::default();
+        validate_prefix(&prefix)?;
+        Ok(Self {
+            internal: Internal::new(prefix, storage, heap_scheduler, config.backoff.clone()),
+            config,
+        })
     }
 
     /// Schedule a batch of tasks in the heap.
@@ -501,7 +572,7 @@ impl HeapWriter {
             .map(|(bucket, entries)| async move {
                 self.internal.merge_on_s3(bucket, &entries).await
             })
-            .buffer_unordered(10)
+            .buffer_unordered(self.config.max_concurrent_operations)
             .try_collect::<Vec<_>>()
             .await?;
 
@@ -512,7 +583,7 @@ impl HeapWriter {
 //////////////////////////////////////////// HeapPruner ////////////////////////////////////////////
 
 /// Statistics from a pruning operation.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PruneStats {
     /// Number of items that were pruned (removed)
     pub items_pruned: usize,
@@ -526,11 +597,22 @@ pub struct PruneStats {
 
 impl PruneStats {
     /// Combine stats from multiple pruning operations.
-    pub fn merge(&mut self, other: &PruneStats) {
+    pub fn merge(&mut self, other: &PruneStats) -> &mut Self {
         self.items_pruned += other.items_pruned;
         self.items_retained += other.items_retained;
         self.buckets_deleted += other.buckets_deleted;
         self.buckets_updated += other.buckets_updated;
+        self
+    }
+}
+
+impl fmt::Display for PruneStats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "PruneStats {{ pruned: {}, retained: {}, buckets_deleted: {}, buckets_updated: {} }}",
+            self.items_pruned, self.items_retained, self.buckets_deleted, self.buckets_updated
+        )
     }
 }
 
@@ -569,6 +651,7 @@ impl PruneStats {
 /// ```
 pub struct HeapPruner {
     internal: Internal,
+    config: Configuration,
 }
 
 impl HeapPruner {
@@ -580,10 +663,10 @@ impl HeapPruner {
     /// * `storage` - The storage backend to use for S3 operations
     /// * `heap_scheduler` - The scheduler implementation for checking task completion
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// - Panics if `prefix` is empty
-    /// - Panics if `prefix` contains "//" (double slashes)
+    /// - Returns [`Error::InvalidPrefix`] if `prefix` is empty
+    /// - Returns [`Error::InvalidPrefix`] if `prefix` contains "//" (double slashes)
     ///
     /// # Examples
     ///
@@ -595,13 +678,19 @@ impl HeapPruner {
     ///     "production/task-queue".to_string(),
     ///     storage,
     ///     Arc::new(scheduler),
-    /// );
+    /// )?;
     /// ```
-    pub fn new(prefix: String, storage: Storage, heap_scheduler: Arc<dyn HeapScheduler>) -> Self {
-        validate_prefix(&prefix);
-        Self {
-            internal: Internal::new(prefix, storage, heap_scheduler, RetryConfig::default()),
-        }
+    pub fn new(
+        prefix: String,
+        storage: Storage,
+        heap_scheduler: Arc<dyn HeapScheduler>,
+    ) -> Result<Self, Error> {
+        let config = Configuration::default();
+        validate_prefix(&prefix)?;
+        Ok(Self {
+            internal: Internal::new(prefix, storage, heap_scheduler, config.backoff.clone()),
+            config,
+        })
     }
 
     /// Remove completed tasks from the heap.
@@ -692,7 +781,7 @@ impl HeapPruner {
                 let should_retain = !heap_scheduler.is_done(&entry.trigger, entry.nonce).await?;
                 Ok::<_, Error>((entry, should_retain))
             })
-            .buffer_unordered(10)
+            .buffer_unordered(self.config.max_concurrent_operations)
             .try_filter_map(|(entry, should_retain)| async move {
                 Ok(if should_retain { Some(entry) } else { None })
             })
@@ -770,10 +859,10 @@ impl HeapReader {
     /// * `storage` - The storage backend to use for S3 operations
     /// * `heap_scheduler` - The scheduler implementation for checking task status
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// - Panics if `prefix` is empty
-    /// - Panics if `prefix` contains "//" (double slashes)
+    /// - Returns [`Error::InvalidPrefix`] if `prefix` is empty
+    /// - Returns [`Error::InvalidPrefix`] if `prefix` contains "//" (double slashes)
     ///
     /// # Examples
     ///
@@ -785,13 +874,18 @@ impl HeapReader {
     ///     "production/task-queue".to_string(),
     ///     storage,
     ///     Arc::new(scheduler),
-    /// );
+    /// )?;
     /// ```
-    pub fn new(prefix: String, storage: Storage, heap_scheduler: Arc<dyn HeapScheduler>) -> Self {
-        validate_prefix(&prefix);
-        Self {
-            internal: Internal::new(prefix, storage, heap_scheduler, RetryConfig::default()),
-        }
+    pub fn new(
+        prefix: String,
+        storage: Storage,
+        heap_scheduler: Arc<dyn HeapScheduler>,
+    ) -> Result<Self, Error> {
+        let config = Configuration::default();
+        validate_prefix(&prefix)?;
+        Ok(Self {
+            internal: Internal::new(prefix, storage, heap_scheduler, config.backoff),
+        })
     }
 
     /// Retrieve tasks from the heap that match the given filter.
@@ -878,14 +972,18 @@ impl HeapReader {
 
 /// Validate that a prefix meets the requirements for heap operations.
 ///
-/// # Panics
+/// # Errors
 ///
-/// - Panics if `prefix` is empty
-/// - Panics if `prefix` contains "//" (double slashes)
-fn validate_prefix(prefix: &str) {
-    assert!(!prefix.is_empty(), "prefix cannot be empty");
-    assert!(
-        !prefix.contains("//"),
-        "prefix cannot contain double slashes"
-    );
+/// - Returns [`Error::InvalidPrefix`] if `prefix` is empty
+/// - Returns [`Error::InvalidPrefix`] if `prefix` contains "//" (double slashes)
+fn validate_prefix(prefix: &str) -> Result<(), Error> {
+    if prefix.is_empty() {
+        return Err(Error::InvalidPrefix("prefix cannot be empty".to_string()));
+    }
+    if prefix.contains("//") {
+        return Err(Error::InvalidPrefix(
+            "prefix cannot contain double slashes".to_string(),
+        ));
+    }
+    Ok(())
 }

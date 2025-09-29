@@ -29,7 +29,8 @@ async fn test_k8s_integration_08_concurrent_pushes() {
     // Launch concurrent writers
     let mut handles = vec![];
     for writer_id in 0..num_writers {
-        let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone());
+        let writer =
+            HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
         let items: Vec<_> = (0..items_per_writer)
             .map(|j| {
                 let idx = writer_id * items_per_writer + j;
@@ -46,7 +47,7 @@ async fn test_k8s_integration_08_concurrent_pushes() {
     }
 
     // Verify all items are present
-    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
+    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(
         items.len(),
@@ -73,7 +74,7 @@ async fn test_k8s_integration_08_concurrent_read_write() {
         })
         .collect();
 
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone());
+    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
     writer.push(&initial_items).await.unwrap();
 
     // Launch concurrent readers and writers
@@ -82,7 +83,8 @@ async fn test_k8s_integration_08_concurrent_read_write() {
 
     // Writers adding more items
     for batch in 0..3 {
-        let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone());
+        let writer =
+            HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
         let scheduler_clone = scheduler.clone();
 
         write_handles.push(tokio::spawn(async move {
@@ -100,7 +102,8 @@ async fn test_k8s_integration_08_concurrent_read_write() {
 
     // Readers checking items
     for _ in 0..3 {
-        let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
+        let reader =
+            HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
 
         read_handles.push(tokio::spawn(async move {
             let items = reader.peek(|_| true, Limits::default()).await?;
@@ -119,7 +122,7 @@ async fn test_k8s_integration_08_concurrent_read_write() {
     }
 
     // Final check - should have all items
-    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
+    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
     let final_items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(
         final_items.len(),
@@ -151,16 +154,16 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
         })
         .collect();
 
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone());
+    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
     writer.push(&initial_items).await.unwrap();
 
     // Launch concurrent operations
     // Pruner removing completed items
-    let pruner = HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone());
+    let pruner = HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
     let prune_handle = tokio::spawn(async move { pruner.prune(Limits::default()).await });
 
     // Writer adding new items
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone());
+    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
     let scheduler_clone = scheduler.clone();
     let write_handle = tokio::spawn(async move {
         let new_items: Vec<_> = (100..105)
@@ -178,7 +181,7 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
     write_handle.await.unwrap().unwrap();
 
     // Check final state
-    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone());
+    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
     let final_items = reader.peek(|_| true, Limits::default()).await.unwrap();
 
     // Should have: 5 incomplete initial items (odds) + 5 new items

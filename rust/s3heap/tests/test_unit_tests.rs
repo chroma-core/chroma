@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use s3heap::{
-    Error, HeapPruner, HeapReader, HeapScheduler, HeapWriter, Limits, RetryConfig, Triggerable,
+    Error, HeapPruner, HeapReader, HeapScheduler, HeapWriter, Limits, PruneStats, RetryConfig,
+    Triggerable,
 };
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -82,27 +83,39 @@ impl HeapScheduler for ConfigurableScheduler {
 
 // Tests for prefix validation
 #[test]
-#[should_panic(expected = "prefix cannot be empty")]
-fn writer_panics_on_empty_prefix() {
+fn writer_errors_on_empty_prefix() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    HeapWriter::new(String::new(), storage, scheduler);
+    let result = HeapWriter::new(String::new(), storage, scheduler);
+    assert!(result.is_err());
+    match result {
+        Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("empty")),
+        _ => panic!("Expected InvalidPrefix error"),
+    }
 }
 
 #[test]
-#[should_panic(expected = "prefix cannot be empty")]
-fn pruner_panics_on_empty_prefix() {
+fn pruner_errors_on_empty_prefix() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    HeapPruner::new(String::new(), storage, scheduler);
+    let result = HeapPruner::new(String::new(), storage, scheduler);
+    assert!(result.is_err());
+    match result {
+        Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("empty")),
+        _ => panic!("Expected InvalidPrefix error"),
+    }
 }
 
 #[test]
-#[should_panic(expected = "prefix cannot be empty")]
-fn reader_panics_on_empty_prefix() {
+fn reader_errors_on_empty_prefix() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    HeapReader::new(String::new(), storage, scheduler);
+    let result = HeapReader::new(String::new(), storage, scheduler);
+    assert!(result.is_err());
+    match result {
+        Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("empty")),
+        _ => panic!("Expected InvalidPrefix error"),
+    }
 }
 
 #[test]
@@ -110,42 +123,56 @@ fn heap_components_accept_valid_prefix() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
 
-    // These should not panic
+    // These should not error
     let _writer = HeapWriter::new(
         "valid-prefix".to_string(),
         storage.clone(),
         scheduler.clone(),
-    );
+    )
+    .unwrap();
     let _pruner = HeapPruner::new(
         "valid-prefix".to_string(),
         storage.clone(),
         scheduler.clone(),
-    );
-    let _reader = HeapReader::new("valid-prefix".to_string(), storage, scheduler);
+    )
+    .unwrap();
+    let _reader = HeapReader::new("valid-prefix".to_string(), storage, scheduler).unwrap();
 }
 
 #[test]
-#[should_panic(expected = "prefix cannot contain double slashes")]
-fn heap_writer_panics_on_double_slash() {
+fn heap_writer_errors_on_double_slash() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    HeapWriter::new("prefix//with//slashes".to_string(), storage, scheduler);
+    let result = HeapWriter::new("prefix//with//slashes".to_string(), storage, scheduler);
+    assert!(result.is_err());
+    match result {
+        Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("double slashes")),
+        _ => panic!("Expected InvalidPrefix error"),
+    }
 }
 
 #[test]
-#[should_panic(expected = "prefix cannot contain double slashes")]
-fn heap_pruner_panics_on_double_slash() {
+fn heap_pruner_errors_on_double_slash() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    HeapPruner::new("prefix//with//slashes".to_string(), storage, scheduler);
+    let result = HeapPruner::new("prefix//with//slashes".to_string(), storage, scheduler);
+    assert!(result.is_err());
+    match result {
+        Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("double slashes")),
+        _ => panic!("Expected InvalidPrefix error"),
+    }
 }
 
 #[test]
-#[should_panic(expected = "prefix cannot contain double slashes")]
-fn heap_reader_panics_on_double_slash() {
+fn heap_reader_errors_on_double_slash() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    HeapReader::new("prefix//with//slashes".to_string(), storage, scheduler);
+    let result = HeapReader::new("prefix//with//slashes".to_string(), storage, scheduler);
+    assert!(result.is_err());
+    match result {
+        Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("double slashes")),
+        _ => panic!("Expected InvalidPrefix error"),
+    }
 }
 
 // Tests for RetryConfig
@@ -158,25 +185,12 @@ fn retry_config_default_values() {
     assert_eq!(config.max_retries, 10);
 }
 
-#[test]
-fn retry_config_to_backoff() {
-    let config = RetryConfig {
-        min_delay: Duration::from_millis(50),
-        max_delay: Duration::from_secs(5),
-        factor: 1.5,
-        max_retries: 5,
-    };
-    let backoff = config.to_backoff();
-    // The backoff builder is properly configured
-    // We can't easily test the internal state, but we can verify it builds without panic
-    let _ = backoff;
-}
-
 // Tests for Limits
 #[test]
 fn limits_default_is_none() {
     let limits = Limits::default();
     assert_eq!(limits.buckets_to_read, None);
+    assert_eq!(limits.max_items, None);
 }
 
 #[test]
@@ -291,7 +305,7 @@ fn error_display() {
 async fn writer_push_empty_items() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let writer = HeapWriter::new("test-prefix".to_string(), storage, scheduler);
+    let writer = HeapWriter::new("test-prefix".to_string(), storage, scheduler).unwrap();
 
     // Pushing empty items should succeed without doing anything
     let result = writer.push(&[]).await;
@@ -302,7 +316,7 @@ async fn writer_push_empty_items() {
 async fn writer_push_with_no_scheduled_items() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(ConfigurableScheduler::new());
-    let writer = HeapWriter::new("test-no-schedule".to_string(), storage, scheduler);
+    let writer = HeapWriter::new("test-no-schedule".to_string(), storage, scheduler).unwrap();
 
     let item = Triggerable {
         uuid: Uuid::new_v4(),
@@ -320,7 +334,7 @@ async fn writer_push_with_scheduler_error() {
     let scheduler = Arc::new(ConfigurableScheduler::new());
     scheduler.set_error_on_schedule(true);
 
-    let writer = HeapWriter::new("test-error".to_string(), storage, scheduler);
+    let writer = HeapWriter::new("test-error".to_string(), storage, scheduler).unwrap();
 
     let item = Triggerable {
         uuid: Uuid::new_v4(),
@@ -341,7 +355,7 @@ async fn writer_push_with_scheduler_error() {
 async fn pruner_with_empty_heap() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let pruner = HeapPruner::new("empty-heap".to_string(), storage, scheduler);
+    let pruner = HeapPruner::new("empty-heap".to_string(), storage, scheduler).unwrap();
 
     // Pruning empty heap should succeed
     let result = pruner.prune(Limits::default()).await;
@@ -352,7 +366,7 @@ async fn pruner_with_empty_heap() {
 async fn pruner_respects_limits() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let pruner = HeapPruner::new("limited-prune".to_string(), storage, scheduler);
+    let pruner = HeapPruner::new("limited-prune".to_string(), storage, scheduler).unwrap();
 
     let limits = Limits {
         buckets_to_read: Some(5),
@@ -369,7 +383,7 @@ async fn pruner_respects_limits() {
 async fn reader_peek_empty_heap() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let reader = HeapReader::new("empty-reader".to_string(), storage, scheduler);
+    let reader = HeapReader::new("empty-reader".to_string(), storage, scheduler).unwrap();
 
     let items = reader.peek(|_| true, Limits::default()).await;
     assert!(items.is_ok());
@@ -380,7 +394,7 @@ async fn reader_peek_empty_heap() {
 async fn reader_peek_with_filter() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let reader = HeapReader::new("filtered-reader".to_string(), storage, scheduler);
+    let reader = HeapReader::new("filtered-reader".to_string(), storage, scheduler).unwrap();
 
     // Filter that rejects everything
     let items = reader.peek(|_| false, Limits::default()).await;
@@ -392,7 +406,7 @@ async fn reader_peek_with_filter() {
 async fn reader_respects_limits() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let reader = HeapReader::new("limited-reader".to_string(), storage, scheduler);
+    let reader = HeapReader::new("limited-reader".to_string(), storage, scheduler).unwrap();
 
     let limits = Limits {
         buckets_to_read: Some(3),
@@ -440,9 +454,6 @@ fn retry_config_with_extreme_values() {
     assert_eq!(config.max_delay, Duration::from_secs(3600));
     assert_eq!(config.factor, 100.0);
     assert_eq!(config.max_retries, 1000);
-
-    // Should still create a valid backoff
-    let _backoff = config.to_backoff();
 }
 
 #[test]
@@ -454,7 +465,6 @@ fn retry_config_with_zero_retries() {
         max_retries: 0,
     };
     assert_eq!(config.max_retries, 0);
-    let _backoff = config.to_backoff();
 }
 
 #[test]
@@ -464,4 +474,141 @@ fn limits_with_max_value() {
         max_items: None,
     };
     assert_eq!(limits.buckets_to_read, Some(usize::MAX));
+}
+
+#[test]
+fn limits_builder_methods() {
+    let limits = Limits::default().with_buckets(100).with_items(50);
+    assert_eq!(limits.buckets_to_read, Some(100));
+    assert_eq!(limits.max_items, Some(50));
+    assert_eq!(limits.max_buckets(), 100);
+}
+
+#[test]
+fn limits_max_buckets_returns_default_when_none() {
+    let limits = Limits::default();
+    assert_eq!(limits.max_buckets(), 1000); // Default value
+
+    let limits_with_value = Limits::default().with_buckets(42);
+    assert_eq!(limits_with_value.max_buckets(), 42);
+}
+
+// Tests for PruneStats
+#[test]
+fn prune_stats_default_values() {
+    let stats = PruneStats::default();
+    assert_eq!(stats.items_pruned, 0);
+    assert_eq!(stats.items_retained, 0);
+    assert_eq!(stats.buckets_deleted, 0);
+    assert_eq!(stats.buckets_updated, 0);
+}
+
+#[test]
+fn prune_stats_equality() {
+    let stats1 = PruneStats {
+        items_pruned: 10,
+        items_retained: 5,
+        buckets_deleted: 2,
+        buckets_updated: 3,
+    };
+    let stats2 = PruneStats {
+        items_pruned: 10,
+        items_retained: 5,
+        buckets_deleted: 2,
+        buckets_updated: 3,
+    };
+    let stats3 = PruneStats {
+        items_pruned: 10,
+        items_retained: 5,
+        buckets_deleted: 2,
+        buckets_updated: 4, // Different
+    };
+
+    assert_eq!(stats1, stats2);
+    assert_ne!(stats1, stats3);
+}
+
+#[test]
+fn prune_stats_merge() {
+    let mut stats1 = PruneStats {
+        items_pruned: 10,
+        items_retained: 5,
+        buckets_deleted: 2,
+        buckets_updated: 3,
+    };
+    let stats2 = PruneStats {
+        items_pruned: 7,
+        items_retained: 3,
+        buckets_deleted: 1,
+        buckets_updated: 2,
+    };
+
+    let result = stats1.merge(&stats2);
+
+    // Should return mutable reference for chaining
+    assert_eq!(result.items_pruned, 17);
+    assert_eq!(result.items_retained, 8);
+    assert_eq!(result.buckets_deleted, 3);
+    assert_eq!(result.buckets_updated, 5);
+
+    // Original should be modified
+    assert_eq!(stats1.items_pruned, 17);
+}
+
+#[test]
+fn prune_stats_merge_chaining() {
+    let mut total = PruneStats::default();
+    let stats1 = PruneStats {
+        items_pruned: 5,
+        items_retained: 2,
+        buckets_deleted: 1,
+        buckets_updated: 1,
+    };
+    let stats2 = PruneStats {
+        items_pruned: 3,
+        items_retained: 1,
+        buckets_deleted: 0,
+        buckets_updated: 2,
+    };
+
+    // Test method chaining
+    total.merge(&stats1).merge(&stats2);
+
+    assert_eq!(total.items_pruned, 8);
+    assert_eq!(total.items_retained, 3);
+    assert_eq!(total.buckets_deleted, 1);
+    assert_eq!(total.buckets_updated, 3);
+}
+
+#[test]
+fn prune_stats_display() {
+    let stats = PruneStats {
+        items_pruned: 42,
+        items_retained: 13,
+        buckets_deleted: 5,
+        buckets_updated: 7,
+    };
+
+    let display_str = format!("{}", stats);
+    assert_eq!(
+        display_str,
+        "PruneStats { pruned: 42, retained: 13, buckets_deleted: 5, buckets_updated: 7 }"
+    );
+}
+
+#[test]
+fn prune_stats_clone() {
+    let original = PruneStats {
+        items_pruned: 100,
+        items_retained: 50,
+        buckets_deleted: 10,
+        buckets_updated: 20,
+    };
+    let cloned = original.clone();
+
+    assert_eq!(original, cloned);
+    assert_eq!(original.items_pruned, cloned.items_pruned);
+    assert_eq!(original.items_retained, cloned.items_retained);
+    assert_eq!(original.buckets_deleted, cloned.buckets_deleted);
+    assert_eq!(original.buckets_updated, cloned.buckets_updated);
 }

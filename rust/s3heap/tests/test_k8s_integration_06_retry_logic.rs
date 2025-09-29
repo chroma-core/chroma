@@ -19,8 +19,8 @@ async fn test_k8s_integration_06_concurrent_writes_with_retry() {
     let scheduler = Arc::new(MockHeapScheduler::new());
 
     // Create multiple writers that will potentially conflict
-    let writer1 = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone());
-    let writer2 = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone());
+    let writer1 = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer2 = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
 
     // Create items that go to same bucket
     let now = Utc::now();
@@ -55,12 +55,15 @@ async fn test_k8s_integration_06_prune_with_retry() {
         scheduler.set_next_time(&item, Some((test_time_at_minute_offset(now, 3), nonce)));
         scheduler.set_done(&item, nonce, true);
 
-        let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone());
+        let writer =
+            HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
         writer.push(&[item]).await.unwrap();
 
         // Create multiple pruners that might conflict
-        let pruner1 = HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone());
-        let pruner2 = HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone());
+        let pruner1 =
+            HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+        let pruner2 =
+            HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
 
         // Prune concurrently - retry logic should handle conflicts
         let handle1 = tokio::spawn(async move { pruner1.prune(Limits::default()).await });
