@@ -1,5 +1,5 @@
 use crate::{
-    executor::config::{ExecutorConfig, LocalExecutorConfig},
+    executor::config::{ExecutorConfig, LocalExecutorConfig, RetryConfig},
     CollectionsWithSegmentsProviderConfig,
 };
 use chroma_log::config::LogConfig;
@@ -69,6 +69,8 @@ pub struct FrontendConfig {
     pub tenants_to_migrate_immediately: Vec<String>,
     #[serde(default = "Default::default")]
     pub tenants_to_migrate_immediately_threshold: Option<String>,
+    #[serde(default)]
+    pub retry: RetryConfig,
 }
 
 impl FrontendConfig {
@@ -87,6 +89,7 @@ impl FrontendConfig {
             default_knn_index: default_default_knn_index(),
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
+            retry: RetryConfig::default(),
         }
     }
 }

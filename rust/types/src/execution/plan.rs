@@ -5,6 +5,7 @@ use super::{
     },
 };
 use crate::{chroma_proto, validators::validate_rank};
+use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::{
@@ -20,6 +21,14 @@ use validator::Validate;
 pub enum PlanToProtoError {
     #[error("Failed to convert scan to proto: {0}")]
     Scan(#[from] ScanToProtoError),
+}
+
+impl ChromaError for PlanToProtoError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            PlanToProtoError::Scan(e) => e.code(),
+        }
+    }
 }
 
 /// The `Count` plan shoud ouutput the total number of records in the collection

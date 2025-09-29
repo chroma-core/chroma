@@ -1,3 +1,4 @@
+use chroma_error::{ChromaError, ErrorCodes};
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::{
@@ -57,6 +58,14 @@ impl TryFrom<chroma_proto::ScanOperator> for Scan {
 pub enum ScanToProtoError {
     #[error("Could not convert collection to proto")]
     CollectionToProto(#[from] crate::CollectionToProtoError),
+}
+
+impl ChromaError for ScanToProtoError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ScanToProtoError::CollectionToProto(e) => e.code(),
+        }
+    }
 }
 
 impl TryFrom<Scan> for chroma_proto::ScanOperator {
