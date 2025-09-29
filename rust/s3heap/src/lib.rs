@@ -1020,13 +1020,21 @@ impl HeapReader {
 
         'outer: for bucket in buckets.into_iter().take(limits.max_buckets()) {
             let (entries, _) = self.internal.load_bucket_or_empty(bucket).await?;
-            for entry in entries {
-                if !heap_scheduler.is_done(&entry.trigger, entry.nonce).await?
-                    && should_return(&entry.trigger)
-                {
-                    returns.push(entry);
-
-                    // Early termination when we've collected enough items
+            let triggerable_and_uuid = entries
+                .iter()
+                .filter(|hi| should_return(&hi.trigger))
+                .map(|hi| (hi.trigger.clone(), hi.nonce))
+                .collect::<Vec<_>>();
+            let are_done = heap_scheduler.are_done(&triggerable_and_uuid).await?;
+            if triggerable_and_uuid.len() != are_done.len() {
+                todo!("CLAUDE");
+            }
+            for ((triggerable, uuid), is_done) in triggerable_and_uuid.iter().zip(are_done) {
+                if !is_done {
+                    returns.push(HeapItem {
+                        trigger: triggerable.clone(),
+                        nonce: *uuid,
+                    });
                     if returns.len() >= max_items {
                         break 'outer;
                     }
