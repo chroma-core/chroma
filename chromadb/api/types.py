@@ -563,7 +563,7 @@ class SearchResultRow(TypedDict, total=False):
     score: Optional[float]
 
 
-class SearchResult(dict):
+class SearchResult(dict):  # type: ignore
     """Column-major response from the search API with conversion methods.
 
     Inherits from dict to maintain backward compatibility with existing code
@@ -839,7 +839,10 @@ class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def __call__(self, input: Documents) -> Embeddings:
         # Import here to avoid circular imports
-        from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import ONNXMiniLM_L6_V2
+        from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
+            ONNXMiniLM_L6_V2,
+        )
+
         return ONNXMiniLM_L6_V2()(input)
 
     @staticmethod
@@ -876,20 +879,6 @@ def validate_embedding_function(
             "Please see https://docs.trychroma.com/guides/embeddings for details of the EmbeddingFunction interface.\n"
             "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/deployment/migration#migration-to-0.4.16---november-7,-2023 \n"
         )
-
-
-def validate_sparse_embedding_function(
-    sparse_embedding_function: Any,
-) -> None:
-    """Validate that a sparse embedding function conforms to the SparseEmbeddingFunction protocol."""
-    if not callable(sparse_embedding_function):
-        raise ValueError('sparse_embedding_function must be callable')
-
-    if not hasattr(sparse_embedding_function, '__call__'):
-        raise ValueError('sparse_embedding_function must have a __call__ method')
-
-    # Basic validation - check if it looks like a sparse embedding function
-    # We'll do more detailed validation when SparseEmbeddingFunction is fully defined
 
 
 class DataLoader(Protocol[L]):
@@ -1439,14 +1428,32 @@ class SparseEmbeddingFunction(Protocol[D]):
         return
 
 
+def validate_sparse_embedding_function(
+    sparse_embedding_function: SparseEmbeddingFunction[Embeddable],
+) -> None:
+    """Validate that a sparse embedding function conforms to the SparseEmbeddingFunction protocol."""
+    function_signature = signature(
+        sparse_embedding_function.__class__.__call__
+    ).parameters.keys()
+    protocol_signature = signature(SparseEmbeddingFunction.__call__).parameters.keys()
+
+    if not function_signature == protocol_signature:
+        raise ValueError(
+            f"Expected SparseEmbeddingFunction.__call__ to have the following signature: {protocol_signature}, got {function_signature}\n"
+            "Please see https://docs.trychroma.com/guides/embeddings for details of the SparseEmbeddingFunction interface.\n"
+        )
+
+
 # Index Configuration Types for Collection Schema
 class FtsIndexConfig(BaseModel):
     """Configuration for Full-Text Search index. No parameters required."""
+
     pass
 
 
 class HnswIndexConfig(BaseModel):
     """Configuration for HNSW vector index."""
+
     ef_construction: Optional[int] = None
     max_neighbors: Optional[int] = None
     ef_search: Optional[int] = None
@@ -1458,6 +1465,7 @@ class HnswIndexConfig(BaseModel):
 
 class SpannIndexConfig(BaseModel):
     """Configuration for SPANN vector index."""
+
     search_nprobe: Optional[int] = None
     write_nprobe: Optional[int] = None
     ef_construction: Optional[int] = None
@@ -1470,6 +1478,7 @@ class SpannIndexConfig(BaseModel):
 
 class VectorIndexConfig(BaseModel):
     """Configuration for vector index with space, embedding function, and algorithm config."""
+
     model_config = {"arbitrary_types_allowed": True}
     space: Optional[Space] = None
     embedding_function: Optional[Any] = DefaultEmbeddingFunction()
@@ -1477,7 +1486,7 @@ class VectorIndexConfig(BaseModel):
     hnsw: Optional[HnswIndexConfig] = None
     spann: Optional[SpannIndexConfig] = None
 
-    @field_validator('embedding_function', mode='before')
+    @field_validator("embedding_function", mode="before")
     @classmethod
     def validate_embedding_function_field(cls, v: Any) -> Any:
         # Use the existing validate_embedding_function for proper validation
@@ -1487,17 +1496,18 @@ class VectorIndexConfig(BaseModel):
             # Use the existing validation function
             validate_embedding_function(v)
             return v
-        raise ValueError('embedding_function must be callable or None')
+        raise ValueError("embedding_function must be callable or None")
 
 
 class SparseVectorIndexConfig(BaseModel):
     """Configuration for sparse vector index."""
+
     model_config = {"arbitrary_types_allowed": True}
     # TODO(Sanket): Change this to the appropriate sparse ef and use a default here.
     embedding_function: Optional[Any] = None
     source_key: Optional[str] = None  # key to source the sparse vector from
 
-    @field_validator('embedding_function', mode='before')
+    @field_validator("embedding_function", mode="before")
     @classmethod
     def validate_embedding_function_field(cls, v: Any) -> Any:
         # Validate sparse embedding function for sparse vector index
@@ -1507,26 +1517,32 @@ class SparseVectorIndexConfig(BaseModel):
             # Use the sparse embedding function validation
             validate_sparse_embedding_function(v)
             return v
-        raise ValueError('embedding_function must be a callable SparseEmbeddingFunction or None')
+        raise ValueError(
+            "embedding_function must be a callable SparseEmbeddingFunction or None"
+        )
 
 
 class StringInvertedIndexConfig(BaseModel):
     """Configuration for string inverted index."""
+
     pass
 
 
 class IntInvertedIndexConfig(BaseModel):
     """Configuration for integer inverted index."""
+
     pass
 
 
 class FloatInvertedIndexConfig(BaseModel):
     """Configuration for float inverted index."""
+
     pass
 
 
 class BoolInvertedIndexConfig(BaseModel):
     """Configuration for boolean inverted index."""
+
     pass
 
 
@@ -1557,6 +1573,7 @@ EMBEDDING_KEY: Final[str] = "$embedding"
 # Internal index types that encapsulate the configuration, name, value type, and enabled status
 class InternalFtsIndex:
     """Internal wrapper for FTS index with encapsulated name, value type, and enabled status."""
+
     NAME: Final[str] = "$fts_index"
     VALUE_TYPE_NAME: Final[str] = STRING_VALUE_NAME
 
@@ -1567,6 +1584,7 @@ class InternalFtsIndex:
 
 class InternalHnswIndex:
     """Internal wrapper for HNSW index with encapsulated name, value type, and enabled status."""
+
     NAME: Final[str] = "$hnsw_index"
     VALUE_TYPE_NAME: Final[str] = FLOAT_LIST_VALUE_NAME
 
@@ -1577,6 +1595,7 @@ class InternalHnswIndex:
 
 class InternalSpannIndex:
     """Internal wrapper for SPANN index with encapsulated name, value type, and enabled status."""
+
     NAME: Final[str] = "$spann_index"
     VALUE_TYPE_NAME: Final[str] = FLOAT_LIST_VALUE_NAME
 
@@ -1587,6 +1606,7 @@ class InternalSpannIndex:
 
 class InternalVectorIndex:
     """Internal wrapper for vector index with encapsulated name, value type, and enabled status."""
+
     NAME: Final[str] = "$vector_index"
     VALUE_TYPE_NAME: Final[str] = FLOAT_LIST_VALUE_NAME
 
@@ -1597,6 +1617,7 @@ class InternalVectorIndex:
 
 class InternalSparseVectorIndex:
     """Internal wrapper for sparse vector index with encapsulated name, value type, and enabled status."""
+
     NAME: Final[str] = "$sparse_vector_index"
     VALUE_TYPE_NAME: Final[str] = SPARSE_VECTOR_VALUE_NAME
 
@@ -1607,6 +1628,7 @@ class InternalSparseVectorIndex:
 
 class InternalStringInvertedIndex:
     """Internal wrapper for string inverted index with encapsulated name, value type, and enabled status."""
+
     NAME: Final[str] = "$string_inverted_index"
     VALUE_TYPE_NAME: Final[str] = STRING_VALUE_NAME
 
@@ -1617,6 +1639,7 @@ class InternalStringInvertedIndex:
 
 class InternalIntInvertedIndex:
     """Internal wrapper for int inverted index with encapsulated name, value type, and enabled status."""
+
     NAME: Final[str] = "$int_inverted_index"
     VALUE_TYPE_NAME: Final[str] = INT_VALUE_NAME
 
@@ -1627,6 +1650,7 @@ class InternalIntInvertedIndex:
 
 class InternalFloatInvertedIndex:
     """Internal wrapper for float inverted index with encapsulated name, value type, and enabled status."""
+
     NAME: Final[str] = "$float_inverted_index"
     VALUE_TYPE_NAME: Final[str] = FLOAT_VALUE_NAME
 
@@ -1637,6 +1661,7 @@ class InternalFloatInvertedIndex:
 
 class InternalBoolInvertedIndex:
     """Internal wrapper for bool inverted index with encapsulated name, value type, and enabled status."""
+
     NAME: Final[str] = "$bool_inverted_index"
     VALUE_TYPE_NAME: Final[str] = BOOL_VALUE_NAME
 
@@ -1678,7 +1703,7 @@ InternalIndexType = Union[
     InternalStringInvertedIndex,
     InternalIntInvertedIndex,
     InternalFloatInvertedIndex,
-    InternalBoolInvertedIndex
+    InternalBoolInvertedIndex,
 ]
 
 # Type for a value type's index configuration (reused in multiple places)
@@ -1695,17 +1720,23 @@ class Schema:
         # Dict structure: {index_type_name: IndexEntry}
         self._global_configs: Dict[str, IndexEntry] = {}
 
-    def create_index(self, config: Optional[IndexConfig] = None, key: Optional[str] = None) -> "Schema":
+    def create_index(
+        self, config: Optional[IndexConfig] = None, key: Optional[str] = None
+    ) -> "Schema":
         """Create an index configuration."""
         # Disallow config=None and key=None - too dangerous
         if config is None and key is None:
-            raise ValueError("Cannot enable all index types globally. Must specify either config or key.")
+            raise ValueError(
+                "Cannot enable all index types globally. Must specify either config or key."
+            )
 
         # Case 1: config is not None and key is None - enable specific index type globally
         if config is not None and key is None:
             # For TypedDict configs, we need to determine the type by checking the structure
             index_type_name = _get_class_name(config)
-            self._global_configs[index_type_name] = IndexEntry(config=config, enabled=True)
+            self._global_configs[index_type_name] = IndexEntry(
+                config=config, enabled=True
+            )
 
         # Case 2: config is None and key is not None - enable all index types for that key
         elif config is None and key is not None:
@@ -1714,22 +1745,30 @@ class Schema:
             for config_class in IndexConfig.__args__:  # type: ignore
                 index_type_name = config_class.__name__
                 default_config = config_class()
-                self._index_configs[key][index_type_name] = IndexEntry(config=default_config, enabled=True)
+                self._index_configs[key][index_type_name] = IndexEntry(
+                    config=default_config, enabled=True
+                )
 
         # Case 3: config is not None and key is not None - enable specific index type for that key
         elif config is not None and key is not None:
             index_type_name = _get_class_name(config)
             if key not in self._index_configs:
                 self._index_configs[key] = {}
-            self._index_configs[key][index_type_name] = IndexEntry(config=config, enabled=True)
+            self._index_configs[key][index_type_name] = IndexEntry(
+                config=config, enabled=True
+            )
 
         return self
 
-    def delete_index(self, config: Optional[IndexConfig] = None, key: Optional[str] = None) -> "Schema":
+    def delete_index(
+        self, config: Optional[IndexConfig] = None, key: Optional[str] = None
+    ) -> "Schema":
         """Disable an index configuration (set enabled=False)."""
         # Case 1: Both config and key are None - fail the request
         if config is None and key is None:
-            raise ValueError("Cannot disable all indexes. Must specify either config or key.")
+            raise ValueError(
+                "Cannot disable all indexes. Must specify either config or key."
+            )
 
         # Case 2: key is not None and config is None - disable all possible index types for that key
         if key is not None and config is None:
@@ -1740,25 +1779,32 @@ class Schema:
             for config_class in IndexConfig.__args__:  # type: ignore
                 index_type_name = config_class.__name__
                 default_config = config_class()
-                self._index_configs[key][index_type_name] = IndexEntry(config=default_config, enabled=False)
+                self._index_configs[key][index_type_name] = IndexEntry(
+                    config=default_config, enabled=False
+                )
 
         # Case 3: key is not None and config is not None - disable specific index for that key
         elif key is not None and config is not None:
             index_type_name = _get_class_name(config)
             if key not in self._index_configs:
                 self._index_configs[key] = {}
-            self._index_configs[key][index_type_name] = IndexEntry(config=config, enabled=False)
+            self._index_configs[key][index_type_name] = IndexEntry(
+                config=config, enabled=False
+            )
 
         # Case 4: key is None and config is not None - disable specific index globally
         elif key is None and config is not None:
             index_type_name = _get_class_name(config)
-            self._global_configs[index_type_name] = IndexEntry(config=config, enabled=False)
+            self._global_configs[index_type_name] = IndexEntry(
+                config=config, enabled=False
+            )
 
         return self
 
 
 class InternalSchema(BaseModel):
     """Internal schema representation for server-side processing."""
+
     model_config = {"arbitrary_types_allowed": True}
     defaults: Dict[str, ValueTypeIndexes]
     key_overrides: Dict[str, Dict[str, ValueTypeIndexes]]
@@ -1769,9 +1815,15 @@ class InternalSchema(BaseModel):
         FTS_INDEX_NAME: (InternalFtsIndex, FtsIndexConfig),
         VECTOR_INDEX_NAME: (InternalVectorIndex, VectorIndexConfig),
         SPARSE_VECTOR_INDEX_NAME: (InternalSparseVectorIndex, SparseVectorIndexConfig),
-        STRING_INVERTED_INDEX_NAME: (InternalStringInvertedIndex, StringInvertedIndexConfig),
+        STRING_INVERTED_INDEX_NAME: (
+            InternalStringInvertedIndex,
+            StringInvertedIndexConfig,
+        ),
         INT_INVERTED_INDEX_NAME: (InternalIntInvertedIndex, IntInvertedIndexConfig),
-        FLOAT_INVERTED_INDEX_NAME: (InternalFloatInvertedIndex, FloatInvertedIndexConfig),
+        FLOAT_INVERTED_INDEX_NAME: (
+            InternalFloatInvertedIndex,
+            FloatInvertedIndexConfig,
+        ),
         BOOL_INVERTED_INDEX_NAME: (InternalBoolInvertedIndex, BoolInvertedIndexConfig),
         HNSW_INDEX_NAME: (InternalHnswIndex, HnswIndexConfig),
         SPANN_INDEX_NAME: (InternalSpannIndex, SpannIndexConfig),
@@ -1779,13 +1831,13 @@ class InternalSchema(BaseModel):
 
     # Maps config class names to their internal representations
     _CONFIG_TO_INTERNAL_MAP: ClassVar[Dict[str, Any]] = {
-        'FtsIndexConfig': InternalFtsIndex,
-        'VectorIndexConfig': InternalVectorIndex,
-        'SparseVectorIndexConfig': InternalSparseVectorIndex,
-        'StringInvertedIndexConfig': InternalStringInvertedIndex,
-        'IntInvertedIndexConfig': InternalIntInvertedIndex,
-        'FloatInvertedIndexConfig': InternalFloatInvertedIndex,
-        'BoolInvertedIndexConfig': InternalBoolInvertedIndex,
+        "FtsIndexConfig": InternalFtsIndex,
+        "VectorIndexConfig": InternalVectorIndex,
+        "SparseVectorIndexConfig": InternalSparseVectorIndex,
+        "StringInvertedIndexConfig": InternalStringInvertedIndex,
+        "IntInvertedIndexConfig": InternalIntInvertedIndex,
+        "FloatInvertedIndexConfig": InternalFloatInvertedIndex,
+        "BoolInvertedIndexConfig": InternalBoolInvertedIndex,
     }
 
     # Maps value types to supported index types
@@ -1818,14 +1870,13 @@ class InternalSchema(BaseModel):
         # "#float_list": { "$vector_index": False }
         defaults[FLOAT_LIST_VALUE_NAME][VECTOR_INDEX_NAME] = False
 
-    def _initialize_key_overrides(self, key_overrides: Dict[str, Dict[str, ValueTypeIndexes]]) -> None:
+    def _initialize_key_overrides(
+        self, key_overrides: Dict[str, Dict[str, ValueTypeIndexes]]
+    ) -> None:
         """Initialize key-specific index overrides."""
         # Enable full-text search for document content
         key_overrides[DOCUMENT_KEY] = {
-            STRING_VALUE_NAME: {
-                FTS_INDEX_NAME: True,
-                STRING_INVERTED_INDEX_NAME: False
-            }
+            STRING_VALUE_NAME: {FTS_INDEX_NAME: True, STRING_INVERTED_INDEX_NAME: False}
         }
 
         # Enable vector index for embeddings with document source reference
@@ -1833,8 +1884,7 @@ class InternalSchema(BaseModel):
         key_overrides[EMBEDDING_KEY] = {
             FLOAT_LIST_VALUE_NAME: {
                 VECTOR_INDEX_NAME: InternalVectorIndex(
-                    config=vector_config,
-                    enabled=True
+                    config=vector_config, enabled=True
                 )
             }
         }
@@ -1861,8 +1911,7 @@ class InternalSchema(BaseModel):
 
                 # Apply user-specified global configurations
                 defaults[value_type][index_name] = internal_class(
-                    config=index_entry.config,
-                    enabled=index_entry.enabled
+                    config=index_entry.config, enabled=index_entry.enabled
                 )
 
         # Process key-specific configs
@@ -1883,14 +1932,15 @@ class InternalSchema(BaseModel):
 
                     # Apply user-specified key configurations
                     key_overrides[key][value_type][index_name] = internal_class(
-                        config=index_entry.config,
-                        enabled=index_entry.enabled
+                        config=index_entry.config, enabled=index_entry.enabled
                     )
 
         # Initialize the Pydantic model with computed values
         super().__init__(defaults=defaults, key_overrides=key_overrides)
 
-    def _serialize_value_type_indexes(self, value_type_indexes: ValueTypeIndexes) -> Dict[str, Any]:
+    def _serialize_value_type_indexes(
+        self, value_type_indexes: ValueTypeIndexes
+    ) -> Dict[str, Any]:
         """Convert a ValueTypeIndexes dict to JSON-serializable format."""
         result: Dict[str, Any] = {}
         for index_name, index_value in value_type_indexes.items():
@@ -1901,7 +1951,7 @@ class InternalSchema(BaseModel):
                 config_dict = self._serialize_config(index_value.config)
                 result[index_name] = {
                     "enabled": index_value.enabled,
-                    "config": config_dict
+                    "config": config_dict,
                 }
         return result
 
@@ -1910,38 +1960,56 @@ class InternalSchema(BaseModel):
         # All IndexConfig types are Pydantic models, so use model_dump
         config_dict = config.model_dump(exclude_none=True)
 
-        # Handle embedding function and space serialization for vector/sparse vector indexes
-        if hasattr(config, 'embedding_function'):
-            embedding_func = getattr(config, 'embedding_function', None)
-            if embedding_func is None:
-                config_dict["embedding_function"] = {"type": "legacy"}
-            else:
-                try:
-                    # Cast to EmbeddingFunction type to access methods
-                    embedding_func = cast(EmbeddingFunction, embedding_func)  # type: ignore
-                    if embedding_func.is_legacy():
-                        config_dict["embedding_function"] = {"type": "legacy"}
-                    else:
-                        config_dict["embedding_function"] = {
-                            "name": embedding_func.name(),
-                            "type": "known",
-                            "config": embedding_func.get_config(),
-                        }
-
-                        # Handle space resolution from embedding function (similar to create_collection_configuration_to_json)
-                        if hasattr(config, 'space') and config.space is None:
-                            # If space is not provided, populate it from embedding function's default space
-                            config_dict["space"] = embedding_func.default_space()
-                        elif hasattr(config, 'space') and config.space is not None:
-                            # Validate space compatibility with embedding function
-                            if config.space not in embedding_func.supported_spaces():
-                                warnings.warn(
-                                    f"space {config.space} is not supported by {embedding_func.name()}. Supported spaces: {embedding_func.supported_spaces()}",
-                                    UserWarning,
-                                    stacklevel=2,
-                                )
-                except Exception:
+        # check if config is a SparseVectorIndexConfig
+        if isinstance(config, SparseVectorIndexConfig):
+            if hasattr(config, "embedding_function"):
+                embedding_func = getattr(config, "embedding_function", None)
+                if embedding_func is None:
                     config_dict["embedding_function"] = {"type": "legacy"}
+                else:
+                    embedding_func = cast(SparseEmbeddingFunction, embedding_func)  # type: ignore
+                    config_dict["embedding_function"] = {
+                        "name": embedding_func.name(),
+                        "type": "known",
+                        "config": embedding_func.get_config(),
+                    }
+
+        elif isinstance(config, VectorIndexConfig):
+            # Handle embedding function and space serialization for vector/sparse vector indexes
+            if hasattr(config, "embedding_function"):
+                embedding_func = getattr(config, "embedding_function", None)
+                if embedding_func is None:
+                    config_dict["embedding_function"] = {"type": "legacy"}
+                else:
+                    try:
+                        # Cast to EmbeddingFunction type to access methods
+                        embedding_func = cast(EmbeddingFunction, embedding_func)  # type: ignore
+                        if embedding_func.is_legacy():
+                            config_dict["embedding_function"] = {"type": "legacy"}
+                        else:
+                            config_dict["embedding_function"] = {
+                                "name": embedding_func.name(),
+                                "type": "known",
+                                "config": embedding_func.get_config(),
+                            }
+
+                            # Handle space resolution from embedding function (similar to create_collection_configuration_to_json)
+                            if hasattr(config, "space") and config.space is None:
+                                # If space is not provided, populate it from embedding function's default space
+                                config_dict["space"] = embedding_func.default_space()
+                            elif hasattr(config, "space") and config.space is not None:
+                                # Validate space compatibility with embedding function
+                                if (
+                                    config.space
+                                    not in embedding_func.supported_spaces()
+                                ):
+                                    warnings.warn(
+                                        f"space {config.space} is not supported by {embedding_func.name()}. Supported spaces: {embedding_func.supported_spaces()}",
+                                        UserWarning,
+                                        stacklevel=2,
+                                    )
+                    except Exception:
+                        config_dict["embedding_function"] = {"type": "legacy"}
 
         return config_dict
 
@@ -1957,19 +2025,20 @@ class InternalSchema(BaseModel):
         for key, value_types in self.key_overrides.items():
             key_overrides_json[key] = {}
             for value_type, indexes in value_types.items():
-                key_overrides_json[key][value_type] = self._serialize_value_type_indexes(indexes)
+                key_overrides_json[key][
+                    value_type
+                ] = self._serialize_value_type_indexes(indexes)
 
-        return {
-            "defaults": defaults_json,
-            "key_overrides": key_overrides_json
-        }
+        return {"defaults": defaults_json, "key_overrides": key_overrides_json}
 
     @classmethod
     def deserialize_from_json(cls, json_data: Dict[str, Any]) -> "InternalSchema":
         """Create InternalSchema from JSON-serialized data."""
         # Extract and deserialize components
         defaults = cls._deserialize_defaults(json_data.get("defaults", {}))
-        key_overrides = cls._deserialize_key_overrides(json_data.get("key_overrides", {}))
+        key_overrides = cls._deserialize_key_overrides(
+            json_data.get("key_overrides", {})
+        )
 
         # Create instance directly from deserialized data
         instance = cls.model_construct(defaults=defaults, key_overrides=key_overrides)
@@ -1977,7 +2046,9 @@ class InternalSchema(BaseModel):
         return instance
 
     @classmethod
-    def _deserialize_defaults(cls, defaults_json: Dict[str, Any]) -> Dict[str, ValueTypeIndexes]:
+    def _deserialize_defaults(
+        cls, defaults_json: Dict[str, Any]
+    ) -> Dict[str, ValueTypeIndexes]:
         """Deserialize defaults from JSON format."""
         defaults: Dict[str, ValueTypeIndexes] = {}
 
@@ -1987,19 +2058,25 @@ class InternalSchema(BaseModel):
         return defaults
 
     @classmethod
-    def _deserialize_key_overrides(cls, key_overrides_json: Dict[str, Any]) -> Dict[str, Dict[str, ValueTypeIndexes]]:
+    def _deserialize_key_overrides(
+        cls, key_overrides_json: Dict[str, Any]
+    ) -> Dict[str, Dict[str, ValueTypeIndexes]]:
         """Deserialize key_overrides from JSON format."""
         key_overrides: Dict[str, Dict[str, ValueTypeIndexes]] = {}
 
         for key, value_types_json in key_overrides_json.items():
             key_overrides[key] = {}
             for value_type, indexes_json in value_types_json.items():
-                key_overrides[key][value_type] = cls._deserialize_value_type_indexes(indexes_json)
+                key_overrides[key][value_type] = cls._deserialize_value_type_indexes(
+                    indexes_json
+                )
 
         return key_overrides
 
     @classmethod
-    def _deserialize_value_type_indexes(cls, indexes_json: Dict[str, Any]) -> ValueTypeIndexes:
+    def _deserialize_value_type_indexes(
+        cls, indexes_json: Dict[str, Any]
+    ) -> ValueTypeIndexes:
         """Deserialize ValueTypeIndexes from JSON format."""
         result: ValueTypeIndexes = {}
 
@@ -2026,16 +2103,31 @@ class InternalSchema(BaseModel):
                         else:
                             # Attempt to reconstruct embedding function
                             try:
-                                from chromadb.utils.embedding_functions import known_embedding_functions
+                                from chromadb.utils.embedding_functions import (
+                                    known_embedding_functions,
+                                )
+
                                 ef_name = ef_config["name"]
                                 ef = known_embedding_functions[ef_name]
-                                config_data["embedding_function"] = ef.build_from_config(ef_config["config"])
+                                config_data[
+                                    "embedding_function"
+                                ] = ef.build_from_config(ef_config["config"])
 
                                 # Handle space deserialization - if space is not provided, populate from embedding function
-                                if hasattr(config_class, 'space'):
-                                    if "space" not in config_data or config_data["space"] is None:
-                                        config_data["space"] = config_data["embedding_function"].default_space()
-                                    elif config_data["space"] not in config_data["embedding_function"].supported_spaces():
+                                if hasattr(config_class, "space"):
+                                    if (
+                                        "space" not in config_data
+                                        or config_data["space"] is None
+                                    ):
+                                        config_data["space"] = config_data[
+                                            "embedding_function"
+                                        ].default_space()
+                                    elif (
+                                        config_data["space"]
+                                        not in config_data[
+                                            "embedding_function"
+                                        ].supported_spaces()
+                                    ):
                                         warnings.warn(
                                             f"space {config_data['space']} is not supported by {config_data['embedding_function'].name()}. Supported spaces: {config_data['embedding_function'].supported_spaces()}",
                                             UserWarning,
@@ -2050,9 +2142,13 @@ class InternalSchema(BaseModel):
                                 )
                                 config_data["embedding_function"] = None
                     config_obj = config_class(**config_data)
-                    result[index_name] = internal_class(config=config_obj, enabled=index_data["enabled"])
+                    result[index_name] = internal_class(
+                        config=config_obj, enabled=index_data["enabled"]
+                    )
                 else:
                     # Unknown index type - cannot reconstruct
-                    raise ValueError(f"Unknown index type '{index_name}' during deserialization. Cannot reconstruct Internal*Index object.")
+                    raise ValueError(
+                        f"Unknown index type '{index_name}' during deserialization. Cannot reconstruct Internal*Index object."
+                    )
 
         return result

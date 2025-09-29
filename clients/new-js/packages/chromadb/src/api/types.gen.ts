@@ -143,11 +143,9 @@ export type HnswConfiguration = {
     ef_search?: number | null;
     max_neighbors?: number | null;
     resize_factor?: number | null;
-    space?: null | HnswSpace;
+    space?: null | Space;
     sync_threshold?: number | null;
 };
-
-export type HnswSpace = 'l2' | 'cosine' | 'ip';
 
 export type Include = 'distances' | 'documents' | 'embeddings' | 'metadatas' | 'uris';
 
@@ -211,6 +209,8 @@ export type SearchResponse = {
     select: Array<Array<Key>>;
 };
 
+export type Space = 'l2' | 'cosine' | 'ip';
+
 export type SpannConfiguration = {
     ef_construction?: number | null;
     ef_search?: number | null;
@@ -218,7 +218,7 @@ export type SpannConfiguration = {
     merge_threshold?: number | null;
     reassign_neighbor_count?: number | null;
     search_nprobe?: number | null;
-    space?: null | HnswSpace;
+    space?: null | Space;
     split_threshold?: number | null;
     write_nprobe?: number | null;
 };

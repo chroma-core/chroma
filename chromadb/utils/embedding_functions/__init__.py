@@ -103,6 +103,7 @@ _all_classes: Set[str] = {
     "BasetenEmbeddingFunction",
     "CloudflareWorkersAIEmbeddingFunction",
     "TogetherAIEmbeddingFunction",
+    "DefaultEmbeddingFunction",
     "HuggingFaceSparseEmbeddingFunction",
     "FastembedSparseEmbeddingFunction",
     "Bm25EmbeddingFunction",
