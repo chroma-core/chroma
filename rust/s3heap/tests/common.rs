@@ -68,23 +68,29 @@ impl Default for MockHeapScheduler {
 
 #[async_trait::async_trait]
 impl HeapScheduler for MockHeapScheduler {
-    async fn is_done(&self, item: &Triggerable, nonce: Uuid) -> Result<bool, Error> {
-        let key = (item.uuid, item.name.clone(), nonce);
-        Ok(self
-            .done_items
-            .lock()
-            .unwrap()
-            .get(&key)
-            .copied()
-            .unwrap_or(false))
+    async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error> {
+        let done_items = self.done_items.lock().unwrap();
+        Ok(items
+            .iter()
+            .map(|(item, nonce)| {
+                let key = (item.uuid, item.name.clone(), *nonce);
+                done_items.get(&key).copied().unwrap_or(false)
+            })
+            .collect())
     }
 
-    async fn next_time_and_nonce(
+    async fn next_times_and_nonces(
         &self,
-        item: &Triggerable,
-    ) -> Result<Option<(DateTime<Utc>, Uuid)>, Error> {
-        let key = (item.uuid, item.name.clone());
-        Ok(self.next_times.lock().unwrap().get(&key).cloned().flatten())
+        items: &[Triggerable],
+    ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, Error> {
+        let next_times = self.next_times.lock().unwrap();
+        Ok(items
+            .iter()
+            .map(|item| {
+                let key = (item.uuid, item.name.clone());
+                next_times.get(&key).cloned().flatten()
+            })
+            .collect())
     }
 }
 

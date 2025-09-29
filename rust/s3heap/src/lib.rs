@@ -1,7 +1,3 @@
-#![deny(missing_docs)]
-#![warn(clippy::all)]
-#![deny(unsafe_code)]
-
 //! s3heap - An S3-backed distributed heap for scheduling tasks at scale.
 //!
 //! # Overview
@@ -64,6 +60,10 @@
 //! - Parquet compression reduces storage costs
 //! - List operations are limited to ~1000 buckets for scalability
 //! - Exponential backoff prevents thundering herd problems
+
+#![deny(missing_docs)]
+#![warn(clippy::all)]
+#![deny(unsafe_code)]
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -369,20 +369,22 @@ pub struct Triggerable {
 ///
 /// #[async_trait::async_trait]
 /// impl HeapScheduler for MyScheduler {
-///     async fn is_done(&self, item: &Triggerable, nonce: Uuid) -> Result<bool, Error> {
-///         // Check if task is complete in your system
-///         Ok(self.completed_tasks.lock().unwrap()
-///             .get(&(item.uuid, nonce))
-///             .copied()
-///             .unwrap_or(false))
+///     async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error> {
+///         // Check if tasks are complete in your system
+///         let completed = self.completed_tasks.lock().unwrap();
+///         Ok(items.iter()
+///             .map(|(item, nonce)| completed.get(&(item.uuid, *nonce)).copied().unwrap_or(false))
+///             .collect())
 ///     }
 ///
-///     async fn next_time_and_nonce(
+///     async fn next_times_and_nonces(
 ///         &self,
-///         item: &Triggerable,
-///     ) -> Result<Option<(DateTime<Utc>, Uuid)>, Error> {
-///         // Determine when to schedule this task
-///         Ok(Some((Utc::now() + chrono::Duration::minutes(5), Uuid::new_v4())))
+///         items: &[Triggerable],
+///     ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, Error> {
+///         // Determine when to schedule these tasks
+///         Ok(items.iter()
+///             .map(|_| Some((Utc::now() + chrono::Duration::minutes(5), Uuid::new_v4())))
+///             .collect())
 ///     }
 /// }
 /// ```
@@ -398,7 +400,30 @@ pub trait HeapScheduler: Send + Sync {
     /// * `Ok(true)` if the task has completed
     /// * `Ok(false)` if the task is still pending or running
     /// * `Err` if there was an error checking the status
-    async fn is_done(&self, item: &Triggerable, nonce: Uuid) -> Result<bool, Error>;
+    async fn is_done(&self, item: &Triggerable, nonce: Uuid) -> Result<bool, Error> {
+        let results = self.are_done(&[(item.clone(), nonce)]).await?;
+        if results.len() != 1 {
+            return Err(Error::Internal(format!(
+                "are_done returned {} results for 1 item",
+                results.len()
+            )));
+        }
+        Ok(results[0])
+    }
+
+    /// Check if multiple task invocations have completed.
+    ///
+    /// # Arguments
+    /// * `items` - The triggerable tasks and their nonces to check
+    ///
+    /// # Returns
+    /// * `Ok(Vec<bool>)` with one boolean per item indicating completion status
+    /// * `Err` if there was an error checking the status
+    ///
+    /// # Implementation Requirements
+    /// The returned vector must have exactly the same length as the input slice.
+    async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error>;
+
     /// Get the next scheduled execution time and nonce for a task.
     ///
     /// # Arguments
@@ -411,7 +436,32 @@ pub trait HeapScheduler: Send + Sync {
     async fn next_time_and_nonce(
         &self,
         item: &Triggerable,
-    ) -> Result<Option<(DateTime<Utc>, Uuid)>, Error>;
+    ) -> Result<Option<(DateTime<Utc>, Uuid)>, Error> {
+        let results = self.next_times_and_nonces(&[item.clone()]).await?;
+        if results.len() != 1 {
+            return Err(Error::Internal(format!(
+                "next_times_and_nonces returned {} results for 1 item",
+                results.len()
+            )));
+        }
+        Ok(results[0])
+    }
+
+    /// Get the next scheduled execution times and nonces for multiple tasks.
+    ///
+    /// # Arguments
+    /// * `items` - The triggerable tasks to schedule
+    ///
+    /// # Returns
+    /// * `Ok(Vec<Option<(time, nonce)>>)` with one option per item
+    /// * `Err` if there was an error determining the schedules
+    ///
+    /// # Implementation Requirements
+    /// The returned vector must have exactly the same length as the input slice.
+    async fn next_times_and_nonces(
+        &self,
+        items: &[Triggerable],
+    ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, Error>;
 }
 
 //////////////////////////////////////////// HeapWriter ////////////////////////////////////////////
@@ -551,9 +601,18 @@ impl HeapWriter {
 
         let heap_scheduler = self.internal.heap_scheduler();
         let mut buckets: BTreeMap<DateTime<Utc>, Vec<HeapItem>> = BTreeMap::new();
+        let next_times_and_nonces = heap_scheduler.next_times_and_nonces(items).await?;
 
-        for item in items {
-            let Some((when, nonce)) = heap_scheduler.next_time_and_nonce(item).await? else {
+        if items.len() != next_times_and_nonces.len() {
+            return Err(Error::Internal(format!(
+                "scheduler returned {} results for {} items",
+                next_times_and_nonces.len(),
+                items.len()
+            )));
+        }
+
+        for (item, next) in items.iter().zip(next_times_and_nonces) {
+            let Some((when, nonce)) = next else {
                 // Skip items that have no next scheduled time
                 continue;
             };
@@ -651,7 +710,6 @@ impl fmt::Display for PruneStats {
 /// ```
 pub struct HeapPruner {
     internal: Internal,
-    config: Configuration,
 }
 
 impl HeapPruner {
@@ -689,7 +747,6 @@ impl HeapPruner {
         validate_prefix(&prefix)?;
         Ok(Self {
             internal: Internal::new(prefix, storage, heap_scheduler, config.backoff.clone()),
-            config,
         })
     }
 
@@ -772,21 +829,26 @@ impl HeapPruner {
             return Ok(PruneStats::default());
         }
 
-        // Check items in parallel for better performance
-        use futures::stream::{self, StreamExt, TryStreamExt};
-
         let original_count = entries.len();
-        let to_retain: Vec<HeapItem> = stream::iter(entries.into_iter())
-            .map(|entry| async move {
-                let should_retain = !heap_scheduler.is_done(&entry.trigger, entry.nonce).await?;
-                Ok::<_, Error>((entry, should_retain))
-            })
-            .buffer_unordered(self.config.max_concurrent_operations)
-            .try_filter_map(|(entry, should_retain)| async move {
-                Ok(if should_retain { Some(entry) } else { None })
-            })
-            .try_collect()
-            .await?;
+        let triggers = entries
+            .iter()
+            .map(|e| (e.trigger.clone(), e.nonce))
+            .collect::<Vec<_>>();
+        let are_done = heap_scheduler.are_done(&triggers).await?;
+
+        if entries.len() != are_done.len() {
+            return Err(Error::Internal(format!(
+                "scheduler returned {} results for {} items",
+                are_done.len(),
+                entries.len()
+            )));
+        }
+
+        let to_retain = entries
+            .iter()
+            .zip(are_done)
+            .flat_map(|(e, d)| if d { None } else { Some(e.clone()) })
+            .collect::<Vec<_>>();
 
         let (buckets_deleted, buckets_updated) = if to_retain.is_empty() {
             self.internal.clear_bucket(bucket).await?;

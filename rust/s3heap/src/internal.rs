@@ -1006,19 +1006,18 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::HeapScheduler for DummyScheduler {
-        async fn is_done(
+        async fn are_done(
             &self,
-            _item: &crate::Triggerable,
-            _nonce: Uuid,
-        ) -> Result<bool, crate::Error> {
-            Ok(false)
+            items: &[(crate::Triggerable, Uuid)],
+        ) -> Result<Vec<bool>, crate::Error> {
+            Ok(vec![false; items.len()])
         }
 
-        async fn next_time_and_nonce(
+        async fn next_times_and_nonces(
             &self,
-            _item: &crate::Triggerable,
-        ) -> Result<Option<(DateTime<Utc>, Uuid)>, crate::Error> {
-            Ok(None)
+            items: &[crate::Triggerable],
+        ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, crate::Error> {
+            Ok(vec![None; items.len()])
         }
     }
 }

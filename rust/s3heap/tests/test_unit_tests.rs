@@ -13,15 +13,15 @@ struct TestScheduler;
 
 #[async_trait::async_trait]
 impl HeapScheduler for TestScheduler {
-    async fn is_done(&self, _item: &Triggerable, _nonce: Uuid) -> Result<bool, Error> {
-        Ok(false)
+    async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error> {
+        Ok(vec![false; items.len()])
     }
 
-    async fn next_time_and_nonce(
+    async fn next_times_and_nonces(
         &self,
-        _item: &Triggerable,
-    ) -> Result<Option<(DateTime<Utc>, Uuid)>, Error> {
-        Ok(None)
+        items: &[Triggerable],
+    ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, Error> {
+        Ok(vec![None; items.len()])
     }
 }
 
@@ -52,32 +52,36 @@ impl ConfigurableScheduler {
 
 #[async_trait::async_trait]
 impl HeapScheduler for ConfigurableScheduler {
-    async fn is_done(&self, item: &Triggerable, nonce: Uuid) -> Result<bool, Error> {
+    async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error> {
         if *self.error_on_done.lock().unwrap() {
             return Err(Error::Internal("Simulated error in is_done".to_string()));
         }
-        Ok(self
-            .done_items
-            .lock()
-            .unwrap()
-            .get(&(item.uuid, nonce))
-            .copied()
-            .unwrap_or(false))
+        let done_items = self.done_items.lock().unwrap();
+        Ok(items
+            .iter()
+            .map(|(item, nonce)| {
+                done_items
+                    .get(&(item.uuid, *nonce))
+                    .copied()
+                    .unwrap_or(false)
+            })
+            .collect())
     }
 
-    async fn next_time_and_nonce(&self, item: &Triggerable) -> Result<ScheduleInfo, Error> {
+    async fn next_times_and_nonces(
+        &self,
+        items: &[Triggerable],
+    ) -> Result<Vec<ScheduleInfo>, Error> {
         if *self.error_on_schedule.lock().unwrap() {
             return Err(Error::Internal(
                 "Simulated error in next_time_and_nonce".to_string(),
             ));
         }
-        Ok(self
-            .scheduled_items
-            .lock()
-            .unwrap()
-            .get(&item.uuid)
-            .cloned()
-            .flatten())
+        let scheduled_items = self.scheduled_items.lock().unwrap();
+        Ok(items
+            .iter()
+            .map(|item| scheduled_items.get(&item.uuid).cloned().flatten())
+            .collect())
     }
 }
 
