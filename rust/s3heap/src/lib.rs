@@ -159,6 +159,10 @@ pub struct Configuration {
     /// This limit helps prevent overwhelming the S3 service and ensures
     /// reasonable memory usage during parallel operations (default: 10).
     pub max_concurrent_operations: usize,
+    /// Minimum age before an empty bucket can be deleted during pruning.
+    /// This prevents race conditions where a bucket is deleted while new items
+    /// are being added to it (default: 5 minutes).
+    pub min_age_for_deletion: Duration,
 }
 
 impl Configuration {
@@ -173,6 +177,12 @@ impl Configuration {
         self.max_concurrent_operations = max_ops;
         self
     }
+
+    /// Set the minimum age for empty bucket deletion.
+    pub fn with_min_age_for_deletion(mut self, min_age: Duration) -> Self {
+        self.min_age_for_deletion = min_age;
+        self
+    }
 }
 
 impl Default for Configuration {
@@ -180,6 +190,7 @@ impl Default for Configuration {
         Self {
             backoff: RetryConfig::default(),
             max_concurrent_operations: 10,
+            min_age_for_deletion: Duration::from_secs(300),
         }
     }
 }
@@ -361,7 +372,7 @@ pub struct Triggerable {
 /// use chrono::{DateTime, Utc};
 /// use uuid::Uuid;
 /// use std::collections::HashMap;
-/// use std::sync::Mutex;
+/// use parking_lot::Mutex;
 ///
 /// struct MyScheduler {
 ///     completed_tasks: Mutex<HashMap<(Uuid, Uuid), bool>>,
@@ -371,7 +382,7 @@ pub struct Triggerable {
 /// impl HeapScheduler for MyScheduler {
 ///     async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error> {
 ///         // Check if tasks are complete in your system
-///         let completed = self.completed_tasks.lock().unwrap();
+///         let completed = self.completed_tasks.lock();
 ///         Ok(items.iter()
 ///             .map(|(item, nonce)| completed.get(&(item.uuid, *nonce)).copied().unwrap_or(false))
 ///             .collect())
@@ -710,6 +721,7 @@ impl fmt::Display for PruneStats {
 /// ```
 pub struct HeapPruner {
     internal: Internal,
+    config: Configuration,
 }
 
 impl HeapPruner {
@@ -747,6 +759,7 @@ impl HeapPruner {
         validate_prefix(&prefix)?;
         Ok(Self {
             internal: Internal::new(prefix, storage, heap_scheduler, config.backoff.clone()),
+            config,
         })
     }
 
@@ -851,14 +864,17 @@ impl HeapPruner {
             .collect::<Vec<_>>();
 
         let (buckets_deleted, buckets_updated) = if to_retain.is_empty() {
-            // TODO(rescrv):  Address the race condition by requiring the bucket to be empty and
-            // old.  Talk with reviewer about best way to do so.
-            // Options:
-            // - (now - bucket) > threshold
-            // - (empty X times in a row)
-            // - Just let it drop (bad straw man)
-            self.internal.clear_bucket(bucket).await?;
-            (1, 0)
+            let now = Utc::now();
+            let bucket_age = now.signed_duration_since(bucket);
+            let min_age = chrono::Duration::from_std(self.config.min_age_for_deletion)
+                .map_err(|e| Error::Internal(format!("Invalid min_age_for_deletion: {}", e)))?;
+
+            if bucket_age >= min_age {
+                self.internal.clear_bucket(bucket).await?;
+                (1, 0)
+            } else {
+                (0, 0)
+            }
         } else {
             self.internal
                 .store_bucket(bucket, &to_retain, e_tag)
@@ -1027,7 +1043,11 @@ impl HeapReader {
                 .collect::<Vec<_>>();
             let are_done = heap_scheduler.are_done(&triggerable_and_uuid).await?;
             if triggerable_and_uuid.len() != are_done.len() {
-                todo!("CLAUDE");
+                return Err(Error::Internal(format!(
+                    "scheduler returned {} results for {} items",
+                    are_done.len(),
+                    triggerable_and_uuid.len()
+                )));
             }
             for ((triggerable, uuid), is_done) in triggerable_and_uuid.iter().zip(are_done) {
                 if !is_done {

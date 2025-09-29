@@ -1,11 +1,12 @@
 use chrono::{DateTime, Utc};
+use parking_lot::Mutex;
 use s3heap::{
     Error, HeapPruner, HeapReader, HeapScheduler, HeapWriter, Limits, PruneStats, RetryConfig,
     Triggerable,
 };
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -46,17 +47,17 @@ impl ConfigurableScheduler {
     }
 
     fn set_error_on_schedule(&self, should_error: bool) {
-        *self.error_on_schedule.lock().unwrap() = should_error;
+        *self.error_on_schedule.lock() = should_error;
     }
 }
 
 #[async_trait::async_trait]
 impl HeapScheduler for ConfigurableScheduler {
     async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error> {
-        if *self.error_on_done.lock().unwrap() {
+        if *self.error_on_done.lock() {
             return Err(Error::Internal("Simulated error in is_done".to_string()));
         }
-        let done_items = self.done_items.lock().unwrap();
+        let done_items = self.done_items.lock();
         Ok(items
             .iter()
             .map(|(item, nonce)| {
@@ -72,12 +73,12 @@ impl HeapScheduler for ConfigurableScheduler {
         &self,
         items: &[Triggerable],
     ) -> Result<Vec<ScheduleInfo>, Error> {
-        if *self.error_on_schedule.lock().unwrap() {
+        if *self.error_on_schedule.lock() {
             return Err(Error::Internal(
                 "Simulated error in next_time_and_nonce".to_string(),
             ));
         }
-        let scheduled_items = self.scheduled_items.lock().unwrap();
+        let scheduled_items = self.scheduled_items.lock();
         Ok(items
             .iter()
             .map(|item| scheduled_items.get(&item.uuid).cloned().flatten())

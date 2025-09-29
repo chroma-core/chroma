@@ -10,6 +10,7 @@ backon = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
+parking_lot = { workspace = true }
 parquet = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

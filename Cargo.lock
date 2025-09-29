@@ -7138,6 +7138,7 @@ dependencies = [
  "chroma-storage",
  "chrono",
  "futures",
+ "parking_lot",
  "parquet",
  "serde",
  "thiserror 1.0.69",

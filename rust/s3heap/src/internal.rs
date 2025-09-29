@@ -16,6 +16,11 @@ use uuid::Uuid;
 
 use crate::{Error, HeapScheduler, RetryConfig, Triggerable};
 
+/// Column name constants for the parquet schema
+const COLUMN_UUIDS: &str = "uuids";
+const COLUMN_NAMES: &str = "names";
+const COLUMN_NONCES: &str = "nonces";
+
 ///////////////////////////////////////////// HeapItem /////////////////////////////////////////////
 
 /// A scheduled task instance in the heap.
@@ -222,32 +227,50 @@ impl Internal {
         let mut items = vec![];
         for batch in reader {
             let batch = batch.map_err(|err| Error::Arrow(err.to_string()))?;
-            let uuid = batch.column_by_name("uuids").ok_or_else(|| {
-                Error::Arrow(format!("missing 'uuids' column in parquet file: {}", path))
+            let uuid = batch.column_by_name(COLUMN_UUIDS).ok_or_else(|| {
+                Error::Arrow(format!(
+                    "missing '{}' column in parquet file: {}",
+                    COLUMN_UUIDS, path
+                ))
             })?;
-            let name = batch.column_by_name("names").ok_or_else(|| {
-                Error::Arrow(format!("missing 'names' column in parquet file: {}", path))
+            let name = batch.column_by_name(COLUMN_NAMES).ok_or_else(|| {
+                Error::Arrow(format!(
+                    "missing '{}' column in parquet file: {}",
+                    COLUMN_NAMES, path
+                ))
             })?;
-            let nonce = batch.column_by_name("nonces").ok_or_else(|| {
-                Error::Arrow(format!("missing 'nonces' column in parquet file: {}", path))
+            let nonce = batch.column_by_name(COLUMN_NONCES).ok_or_else(|| {
+                Error::Arrow(format!(
+                    "missing '{}' column in parquet file: {}",
+                    COLUMN_NONCES, path
+                ))
             })?;
             let uuid = uuid
                 .as_any()
                 .downcast_ref::<arrow::array::StringArray>()
                 .ok_or_else(|| {
-                    Error::Arrow(format!("'uuids' column is not a StringArray in {}", path))
+                    Error::Arrow(format!(
+                        "'{}' column is not a StringArray in {}",
+                        COLUMN_UUIDS, path
+                    ))
                 })?;
             let name = name
                 .as_any()
                 .downcast_ref::<arrow::array::StringArray>()
                 .ok_or_else(|| {
-                    Error::Arrow(format!("'names' column is not a StringArray in {}", path))
+                    Error::Arrow(format!(
+                        "'{}' column is not a StringArray in {}",
+                        COLUMN_NAMES, path
+                    ))
                 })?;
             let nonce = nonce
                 .as_any()
                 .downcast_ref::<arrow::array::StringArray>()
                 .ok_or_else(|| {
-                    Error::Arrow(format!("'nonces' column is not a StringArray in {}", path))
+                    Error::Arrow(format!(
+                        "'{}' column is not a StringArray in {}",
+                        COLUMN_NONCES, path
+                    ))
                 })?;
             let mut errors = Vec::new();
             for i in 0..batch.num_rows() {
@@ -506,9 +529,9 @@ fn construct_parquet(items: &[HeapItem]) -> Result<Vec<u8>, Error> {
     let names = StringArray::from(names);
     let nonces = StringArray::from(nonces);
     let batch = RecordBatch::try_from_iter(vec![
-        ("uuids", Arc::new(uuids) as ArrayRef),
-        ("names", Arc::new(names) as ArrayRef),
-        ("nonces", Arc::new(nonces) as ArrayRef),
+        (COLUMN_UUIDS, Arc::new(uuids) as ArrayRef),
+        (COLUMN_NAMES, Arc::new(names) as ArrayRef),
+        (COLUMN_NONCES, Arc::new(nonces) as ArrayRef),
     ])
     .map_err(|err| Error::Arrow(format!("Failed to create RecordBatch: {}", err)))?;
 
@@ -807,9 +830,9 @@ mod tests {
             total_rows += batch.num_rows();
 
             // Verify columns exist
-            let uuids = batch.column_by_name("uuids").unwrap();
-            let names = batch.column_by_name("names").unwrap();
-            let nonces = batch.column_by_name("nonces").unwrap();
+            let uuids = batch.column_by_name(COLUMN_UUIDS).unwrap();
+            let names = batch.column_by_name(COLUMN_NAMES).unwrap();
+            let nonces = batch.column_by_name(COLUMN_NONCES).unwrap();
 
             // Extract and verify data
             let uuids = uuids.as_any().downcast_ref::<StringArray>().unwrap();
@@ -866,7 +889,7 @@ mod tests {
             total_rows += batch.num_rows();
 
             let names = batch
-                .column_by_name("names")
+                .column_by_name(COLUMN_NAMES)
                 .unwrap()
                 .as_any()
                 .downcast_ref::<StringArray>()
@@ -919,7 +942,7 @@ mod tests {
         for batch in reader {
             let batch = batch.unwrap();
             let names = batch
-                .column_by_name("names")
+                .column_by_name(COLUMN_NAMES)
                 .unwrap()
                 .as_any()
                 .downcast_ref::<StringArray>()

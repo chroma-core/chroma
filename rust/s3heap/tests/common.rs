@@ -6,10 +6,11 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use chroma_storage::{GetOptions, Storage};
 use chrono::{DateTime, Utc};
+use parking_lot::Mutex;
 use uuid::Uuid;
 
 use s3heap::{Error, HeapScheduler, Triggerable};
@@ -45,7 +46,7 @@ impl MockHeapScheduler {
     /// * `done` - Whether this invocation is complete
     pub fn set_done(&self, item: &Triggerable, nonce: Uuid, done: bool) {
         let key = (item.uuid, item.name.clone(), nonce);
-        self.done_items.lock().unwrap().insert(key, done);
+        self.done_items.lock().insert(key, done);
     }
 
     /// Configure when a task should next be scheduled.
@@ -56,7 +57,7 @@ impl MockHeapScheduler {
     /// * `when` - The next execution time and nonce, or None if the task shouldn't be scheduled
     pub fn set_next_time(&self, item: &Triggerable, when: Option<(DateTime<Utc>, Uuid)>) {
         let key = (item.uuid, item.name.clone());
-        self.next_times.lock().unwrap().insert(key, when);
+        self.next_times.lock().insert(key, when);
     }
 }
 
@@ -69,7 +70,7 @@ impl Default for MockHeapScheduler {
 #[async_trait::async_trait]
 impl HeapScheduler for MockHeapScheduler {
     async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error> {
-        let done_items = self.done_items.lock().unwrap();
+        let done_items = self.done_items.lock();
         Ok(items
             .iter()
             .map(|(item, nonce)| {
@@ -83,7 +84,7 @@ impl HeapScheduler for MockHeapScheduler {
         &self,
         items: &[Triggerable],
     ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, Error> {
-        let next_times = self.next_times.lock().unwrap();
+        let next_times = self.next_times.lock();
         Ok(items
             .iter()
             .map(|item| {
