@@ -615,8 +615,9 @@ impl HeapPruner {
     ///
     /// # Arguments
     ///
-    /// * `limits` - Controls how many buckets to scan. Use [`Limits::default()`]
-    ///   for the default of 1000 buckets, or use `.with_buckets()` for a custom limit.
+    /// * `limits` - Controls pruning limits:
+    ///   - `.with_buckets(n)` - Maximum number of buckets to scan (default: 1000)
+    ///   - `.with_items(n)` - Maximum number of items to process (default: unlimited)
     ///
     /// # Errors
     ///
@@ -634,11 +635,22 @@ impl HeapPruner {
     ///
     /// // Prune only the first 50 buckets for faster operation
     /// pruner.prune(Limits::default().with_buckets(50)).await?;
+    ///
+    /// // Stop after processing 1000 items total
+    /// pruner.prune(Limits::default().with_items(1000)).await?;
     /// ```
     pub async fn prune(&self, limits: Limits) -> Result<PruneStats, Error> {
         let buckets = self.internal.list_approx_first_1k_buckets().await?;
         let mut total_stats = PruneStats::default();
+        let max_items = limits.max_items.unwrap_or(usize::MAX);
+
         for bucket in buckets.into_iter().take(limits.max_buckets()) {
+            // Stop if we've processed enough items
+            let items_processed = total_stats.items_pruned + total_stats.items_retained;
+            if items_processed >= max_items {
+                break;
+            }
+
             let stats = self.prune_bucket(bucket).await?;
             total_stats.merge(&stats);
         }
@@ -797,8 +809,9 @@ impl HeapReader {
     /// * `should_return` - A predicate function that returns `true` for tasks
     ///   that should be included in the results. This function is called for
     ///   each non-completed task found.
-    /// * `limits` - Controls how many buckets to scan. Use [`Limits::default()`]
-    ///   for the default of 1000 buckets, or use `.with_buckets()` for a custom limit.
+    /// * `limits` - Controls scanning limits:
+    ///   - `.with_buckets(n)` - Maximum number of buckets to scan (default: 1000)
+    ///   - `.with_items(n)` - Maximum number of items to return (default: unlimited)
     ///
     /// # Errors
     ///
@@ -825,6 +838,12 @@ impl HeapReader {
     /// let entity_tasks = reader.peek(
     ///     move |task| task.uuid == entity_id,
     ///     Limits::default(),
+    /// ).await?;
+    ///
+    /// // Get at most 10 tasks, scanning at most 5 buckets
+    /// let limited = reader.peek(
+    ///     |_| true,
+    ///     Limits::default().with_buckets(5).with_items(10),
     /// ).await?;
     /// ```
     pub async fn peek(
