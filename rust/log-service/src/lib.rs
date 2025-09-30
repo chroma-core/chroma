@@ -104,8 +104,6 @@ pub enum Error {
     Wal3(#[from] wal3::Error),
     #[error("serialization error: {0:?}")]
     Json(#[from] serde_json::Error),
-    #[error("Service is in read-only mode")]
-    ReadOnlyMode,
     #[error("Dirty log writer failed to provide a reader")]
     CouldNotGetDirtyLogReader,
     #[error("Dirty log writer failed to provide a cursor store")]
