@@ -604,8 +604,18 @@ impl LogServer {
 
     /// Verify that the service is not in read-only mode.
     fn ensure_write_mode(&self) -> Result<(), Status> {
-        if self.config.is_read_only() {
-            Err(Status::permission_denied("service is in read-only mode"))
+        if self.dirty_log.is_none() {
+            // NOTE(rescrv):  This should NEVER happen in production.
+            //
+            // If it does happen, it is better to reject writes than to silently write data that
+            // will never be accounted for by billing or compaction.
+            Err(Status::permission_denied(
+                "service is in read-only mode because it has no dirty log",
+            ))
+        } else if self.config.is_read_only() {
+            Err(Status::permission_denied(
+                "service is in read-only mode because of operator configuration",
+            ))
         } else {
             Ok(())
         }
