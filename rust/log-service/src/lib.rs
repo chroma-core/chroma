@@ -104,6 +104,8 @@ pub enum Error {
     Wal3(#[from] wal3::Error),
     #[error("serialization error: {0:?}")]
     Json(#[from] serde_json::Error),
+    #[error("Service is in read-only mode")]
+    ReadOnlyMode,
     #[error("Dirty log writer failed to provide a reader")]
     CouldNotGetDirtyLogReader,
     #[error("Dirty log writer failed to provide a cursor store")]
@@ -606,6 +608,9 @@ impl LogServer {
         allow_rollback: bool,
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
         let request = request.into_inner();
+        if self.config.is_read_only() {
+            return Err(Status::permission_denied("service is in read-only mode"));
+        }
         let adjusted_log_offset = request.log_offset + 1;
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
@@ -1084,6 +1089,9 @@ impl LogServer {
     }
 
     pub async fn background_task(&self) {
+        if self.config.is_read_only() {
+            return;
+        }
         loop {
             tokio::time::sleep(self.config.rollup_interval).await;
             if let Err(err) = self.roll_dirty_log().await {
@@ -1096,6 +1104,9 @@ impl LogServer {
         &self,
         request: Request<PushLogsRequest>,
     ) -> Result<Response<PushLogsResponse>, Status> {
+        if self.config.is_read_only() {
+            return Err(Status::permission_denied("service is in read-only mode"));
+        }
         let push_logs = request.into_inner();
         let collection_id = Uuid::parse_str(&push_logs.collection_id)
             .map(CollectionUuid)
@@ -1398,6 +1409,9 @@ impl LogServer {
         &self,
         request: Request<ForkLogsRequest>,
     ) -> Result<Response<ForkLogsResponse>, Status> {
+        if self.config.is_read_only() {
+            return Err(Status::permission_denied("service is in read-only mode"));
+        }
         let request = request.into_inner();
         let source_collection_id = Uuid::parse_str(&request.source_collection_id)
             .map(CollectionUuid)
@@ -1492,6 +1506,9 @@ impl LogServer {
         &self,
         request: Request<UpdateCollectionLogOffsetRequest>,
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
+        if self.config.is_read_only() {
+            return Err(Status::permission_denied("service is in read-only mode"));
+        }
         let request = request.into_inner();
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
@@ -1509,6 +1526,9 @@ impl LogServer {
         &self,
         request: Request<UpdateCollectionLogOffsetRequest>,
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
+        if self.config.is_read_only() {
+            return Err(Status::permission_denied("service is in read-only mode"));
+        }
         let request = request.into_inner();
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
@@ -1527,6 +1547,9 @@ impl LogServer {
         &self,
         request: Request<PurgeDirtyForCollectionRequest>,
     ) -> Result<Response<PurgeDirtyForCollectionResponse>, Status> {
+        if self.config.is_read_only() {
+            return Err(Status::permission_denied("service is in read-only mode"));
+        }
         let request = request.into_inner();
         let collection_ids = request
             .collection_ids
@@ -1736,6 +1759,9 @@ impl LogServer {
         &self,
         request: Request<GarbageCollectPhase2Request>,
     ) -> Result<Response<GarbageCollectPhase2Response>, Status> {
+        if self.config.is_read_only() {
+            return Err(Status::permission_denied("service is in read-only mode"));
+        }
         let gc2 = request.into_inner();
 
         fn handle_error_properly(err: wal3::Error) -> Status {
@@ -1793,6 +1819,9 @@ impl LogServer {
         &self,
         request: Request<PurgeFromCacheRequest>,
     ) -> Result<Response<PurgeFromCacheResponse>, Status> {
+        if self.config.is_read_only() {
+            return Err(Status::permission_denied("service is in read-only mode"));
+        }
         let purge = request.into_inner();
 
         let key = match purge.entry_to_evict {
@@ -2171,6 +2200,8 @@ pub struct LogServerConfig {
     #[serde(default = "LogServerConfig::default_my_member_id")]
     pub my_member_id: String,
     #[serde(default)]
+    pub read_only: bool,
+    #[serde(default)]
     pub opentelemetry: Option<OpenTelemetryConfig>,
     #[serde(default)]
     pub storage: StorageConfig,
@@ -2206,6 +2237,11 @@ pub struct LogServerConfig {
 }
 
 impl LogServerConfig {
+    /// Should the log service allow mutable log operations?
+    fn is_read_only(&self) -> bool {
+        self.read_only
+    }
+
     /// one hundred records on the log.
     fn default_record_count_threshold() -> u64 {
         100
@@ -2253,6 +2289,7 @@ impl Default for LogServerConfig {
         Self {
             port: default_port(),
             my_member_id: LogServerConfig::default_my_member_id(),
+            read_only: false,
             opentelemetry: None,
             storage: StorageConfig::default(),
             writer: LogWriterOptions::default(),
