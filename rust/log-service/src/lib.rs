@@ -600,6 +600,15 @@ impl LogServer {
         Ok(())
     }
 
+    /// Verify that the service is not in read-only mode.
+    fn ensure_write_mode(&self) -> Result<(), Status> {
+        if self.config.is_read_only() {
+            Err(Status::permission_denied("service is in read-only mode"))
+        } else {
+            Ok(())
+        }
+    }
+
     #[tracing::instrument(skip(self, request), err(Display))]
     async fn _update_collection_log_offset(
         &self,
@@ -607,10 +616,8 @@ impl LogServer {
         active: tokio::sync::MutexGuard<'_, ActiveLog>,
         allow_rollback: bool,
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
+        self.ensure_write_mode()?;
         let request = request.into_inner();
-        if self.config.is_read_only() {
-            return Err(Status::permission_denied("service is in read-only mode"));
-        }
         let adjusted_log_offset = request.log_offset + 1;
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
@@ -1104,9 +1111,7 @@ impl LogServer {
         &self,
         request: Request<PushLogsRequest>,
     ) -> Result<Response<PushLogsResponse>, Status> {
-        if self.config.is_read_only() {
-            return Err(Status::permission_denied("service is in read-only mode"));
-        }
+        self.ensure_write_mode()?;
         let push_logs = request.into_inner();
         let collection_id = Uuid::parse_str(&push_logs.collection_id)
             .map(CollectionUuid)
@@ -1409,9 +1414,7 @@ impl LogServer {
         &self,
         request: Request<ForkLogsRequest>,
     ) -> Result<Response<ForkLogsResponse>, Status> {
-        if self.config.is_read_only() {
-            return Err(Status::permission_denied("service is in read-only mode"));
-        }
+        self.ensure_write_mode()?;
         let request = request.into_inner();
         let source_collection_id = Uuid::parse_str(&request.source_collection_id)
             .map(CollectionUuid)
@@ -1506,9 +1509,7 @@ impl LogServer {
         &self,
         request: Request<UpdateCollectionLogOffsetRequest>,
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
-        if self.config.is_read_only() {
-            return Err(Status::permission_denied("service is in read-only mode"));
-        }
+        self.ensure_write_mode()?;
         let request = request.into_inner();
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
@@ -1526,9 +1527,7 @@ impl LogServer {
         &self,
         request: Request<UpdateCollectionLogOffsetRequest>,
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
-        if self.config.is_read_only() {
-            return Err(Status::permission_denied("service is in read-only mode"));
-        }
+        self.ensure_write_mode()?;
         let request = request.into_inner();
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
@@ -1547,9 +1546,7 @@ impl LogServer {
         &self,
         request: Request<PurgeDirtyForCollectionRequest>,
     ) -> Result<Response<PurgeDirtyForCollectionResponse>, Status> {
-        if self.config.is_read_only() {
-            return Err(Status::permission_denied("service is in read-only mode"));
-        }
+        self.ensure_write_mode()?;
         let request = request.into_inner();
         let collection_ids = request
             .collection_ids
@@ -1759,9 +1756,7 @@ impl LogServer {
         &self,
         request: Request<GarbageCollectPhase2Request>,
     ) -> Result<Response<GarbageCollectPhase2Response>, Status> {
-        if self.config.is_read_only() {
-            return Err(Status::permission_denied("service is in read-only mode"));
-        }
+        self.ensure_write_mode()?;
         let gc2 = request.into_inner();
 
         fn handle_error_properly(err: wal3::Error) -> Status {
@@ -1819,9 +1814,7 @@ impl LogServer {
         &self,
         request: Request<PurgeFromCacheRequest>,
     ) -> Result<Response<PurgeFromCacheResponse>, Status> {
-        if self.config.is_read_only() {
-            return Err(Status::permission_denied("service is in read-only mode"));
-        }
+        self.ensure_write_mode()?;
         let purge = request.into_inner();
 
         let key = match purge.entry_to_evict {
