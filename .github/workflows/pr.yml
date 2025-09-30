@@ -5,6 +5,11 @@ on:
       - main
       - '**'
 
+# Cancel any in-progress workflows when a new commit is pushed to the PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # This job detects what changed and determines which tests to run
   change-detection:
