@@ -556,10 +556,11 @@ impl wal3::MarkDirty for MarkDirty {
                 wal3::Error::Internal
             })?;
             dirty_log.append(Vec::from(dirty_marker_json)).await?;
+            Ok(())
         } else {
             tracing::error!("asked to mark dirty with no dirty log");
+            Err(wal3::Error::Internal)
         }
-        Ok(())
     }
 }
 
@@ -821,7 +822,7 @@ impl LogServer {
         let _guard = self.rolling_up.lock().await;
         let Some(dirty_log) = self.dirty_log.as_ref() else {
             tracing::error!("roll dirty log called with no dirty log configured");
-            return Ok(());
+            return Err(Error::CouldNotGetDirtyLogReader);
         };
         let mut rollup = self.read_and_coalesce_dirty_log(dirty_log).await?;
         if rollup.rollups.is_empty() {
@@ -1585,10 +1586,11 @@ impl LogServer {
                 .append_many(dirty_marker_json_blobs)
                 .await
                 .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+            Ok(Response::new(PurgeDirtyForCollectionResponse {}))
         } else {
             tracing::error!("dirty log not set and purge dirty received");
+            Err(Status::failed_precondition("dirty log not configured"))
         }
-        Ok(Response::new(PurgeDirtyForCollectionResponse {}))
     }
 
     #[tracing::instrument(skip(self, _request))]
@@ -1830,6 +1832,9 @@ impl LogServer {
                     .map_err(|err| Status::unknown(err.to_string()))?;
                 } else {
                     tracing::error!("Could not garbage collect dirty log.");
+                    return Err(Status::failed_precondition(
+                        "no dirty log configured for garbage collection".to_string(),
+                    ));
                 }
                 Ok(Response::new(GarbageCollectPhase2Response {}))
             }
