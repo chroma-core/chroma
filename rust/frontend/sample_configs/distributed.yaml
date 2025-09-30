@@ -60,6 +60,7 @@ circuit_breaker:
   requests: 1000
 enable_span_indexing: true
 default_knn_index: "spann"
+enable_schema: false
 tenants_to_migrate_immediately:
 - "default_tenant"
 tenants_to_migrate_immediately_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff"

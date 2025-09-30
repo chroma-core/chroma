@@ -371,6 +371,7 @@ mod tests {
                     "test".to_string(),
                     None,
                     None,
+                    None,
                     false,
                 )
                 .unwrap(),
@@ -396,8 +397,8 @@ mod tests {
             .unwrap();
 
         // Knn should work
-        let result = frontend
-            .query(
+        let result = Box::pin(
+            frontend.query(
                 QueryRequest::try_new(
                     "default_tenant".to_string(),
                     "default_database".to_string(),
@@ -409,14 +410,15 @@ mod tests {
                     IncludeList::default_query(),
                 )
                 .unwrap(),
-            )
-            .await
-            .unwrap();
+            ),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.ids[0], vec!["id2".to_string(), "id1".to_string()]);
 
         // An empty list of IDs should return no results
-        let result = frontend
-            .query(
+        let result = Box::pin(
+            frontend.query(
                 QueryRequest::try_new(
                     "default_tenant".to_string(),
                     "default_database".to_string(),
@@ -428,9 +430,10 @@ mod tests {
                     IncludeList::default_query(),
                 )
                 .unwrap(),
-            )
-            .await
-            .unwrap();
+            ),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.ids[0].len(), 0);
     }
 }

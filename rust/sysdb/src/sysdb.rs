@@ -23,7 +23,7 @@ use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
     FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
-    ForkCollectionError, Segment, SegmentConversionError, SegmentScope, Tenant,
+    ForkCollectionError, InternalSchema, Segment, SegmentConversionError, SegmentScope, Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -229,6 +229,7 @@ impl SysDb {
         name: String,
         segments: Vec<Segment>,
         configuration: Option<InternalCollectionConfiguration>,
+        schema: Option<InternalSchema>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -259,6 +260,7 @@ impl SysDb {
                     name,
                     segments,
                     configuration,
+                    schema,
                     metadata,
                     dimension,
                     get_or_create,
@@ -285,6 +287,7 @@ impl SysDb {
                     collection_id,
                     name,
                     config: configuration,
+                    schema,
                     metadata,
                     dimension,
                     tenant: tenant.clone(),
@@ -1010,6 +1013,7 @@ impl GrpcSysDb {
         name: String,
         segments: Vec<Segment>,
         configuration: InternalCollectionConfiguration,
+        schema: Option<InternalSchema>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -1030,6 +1034,10 @@ impl GrpcSysDb {
                 metadata: metadata.map(|metadata| metadata.into()),
                 dimension,
                 get_or_create: Some(get_or_create),
+                schema_str: schema
+                    .map(|s| serde_json::to_string(&s))
+                    .transpose()
+                    .map_err(CreateCollectionError::Schema)?,
             })
             .await
             .map_err(|err| match err.code() {
@@ -1046,7 +1054,6 @@ impl GrpcSysDb {
             ))?
             .try_into()
             .map_err(|e: CollectionConversionError| CreateCollectionError::Internal(e.boxed()))?;
-
         Ok(collection)
     }
 

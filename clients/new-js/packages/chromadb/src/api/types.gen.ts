@@ -12,6 +12,22 @@ export type AddCollectionRecordsResponse = {
     [key: string]: unknown;
 };
 
+export type BoolInvertedIndexConfig = {
+    [key: string]: never;
+};
+
+export type BoolInvertedIndexType = {
+    config: BoolInvertedIndexConfig;
+    enabled: boolean;
+};
+
+/**
+ * Boolean value type index configurations
+ */
+export type BoolValueType = {
+    $bool_inverted_index?: null | BoolInvertedIndexType;
+};
+
 export type ChecklistResponse = {
     max_batch_size: number;
     supports_base64_encoding: boolean;
@@ -25,6 +41,7 @@ export type Collection = {
     log_position: number;
     metadata?: null | HashMap;
     name: string;
+    schema?: null | InternalSchema;
     tenant: string;
     version: number;
 };
@@ -45,6 +62,7 @@ export type CreateCollectionPayload = {
     get_or_create?: boolean;
     metadata?: null | HashMap;
     name: string;
+    schema?: null | InternalSchema;
 };
 
 export type CreateDatabasePayload = {
@@ -99,8 +117,40 @@ export type ErrorResponse = {
     message: string;
 };
 
+export type FloatInvertedIndexConfig = {
+    [key: string]: never;
+};
+
+export type FloatInvertedIndexType = {
+    config: FloatInvertedIndexConfig;
+    enabled: boolean;
+};
+
+/**
+ * Float list value type index configurations (for vectors)
+ */
+export type FloatListValueType = {
+    $vector_index?: null | VectorIndexType;
+};
+
+/**
+ * Float value type index configurations
+ */
+export type FloatValueType = {
+    $float_inverted_index?: null | FloatInvertedIndexType;
+};
+
 export type ForkCollectionPayload = {
     new_name: string;
+};
+
+export type FtsIndexConfig = {
+    [key: string]: never;
+};
+
+export type FtsIndexType = {
+    config: FtsIndexConfig;
+    enabled: boolean;
 };
 
 export type GetRequestPayload = RawWhereFields & {
@@ -147,9 +197,55 @@ export type HnswConfiguration = {
     sync_threshold?: number | null;
 };
 
+/**
+ * Configuration for HNSW vector index algorithm parameters
+ */
+export type HnswIndexConfig = {
+    batch_size?: number | null;
+    ef_construction?: number | null;
+    ef_search?: number | null;
+    max_neighbors?: number | null;
+    num_threads?: number | null;
+    resize_factor?: number | null;
+    sync_threshold?: number | null;
+};
+
 export type Include = 'distances' | 'documents' | 'embeddings' | 'metadatas' | 'uris';
 
 export type IncludeList = Array<Include>;
+
+export type IntInvertedIndexConfig = {
+    [key: string]: never;
+};
+
+export type IntInvertedIndexType = {
+    config: IntInvertedIndexConfig;
+    enabled: boolean;
+};
+
+/**
+ * Integer value type index configurations
+ */
+export type IntValueType = {
+    $int_inverted_index?: null | IntInvertedIndexType;
+};
+
+/**
+ * Internal schema representation for collection index configurations
+ * This represents the server-side schema structure used for index management
+ */
+export type InternalSchema = {
+    /**
+     * Default index configurations for each value type
+     */
+    defaults: ValueTypes;
+    /**
+     * Key-specific index overrides
+     */
+    key_overrides: {
+        [key: string]: ValueTypes;
+    };
+};
 
 export type Key = 'Document' | 'Embedding' | 'Metadata' | 'Score' | {
     MetadataField: string;
@@ -224,6 +320,28 @@ export type SpannConfiguration = {
 };
 
 /**
+ * Configuration for SPANN vector index algorithm parameters
+ */
+export type SpannIndexConfig = {
+    ef_construction?: number | null;
+    ef_search?: number | null;
+    initial_lambda?: number | null;
+    max_neighbors?: number | null;
+    merge_threshold?: number | null;
+    nreplica_count?: number | null;
+    num_centers_to_merge_to?: number | null;
+    num_samples_kmeans?: number | null;
+    reassign_neighbor_count?: number | null;
+    search_nprobe?: number | null;
+    search_rng_epsilon?: number | null;
+    search_rng_factor?: number | null;
+    split_threshold?: number | null;
+    write_nprobe?: number | null;
+    write_rng_epsilon?: number | null;
+    write_rng_factor?: number | null;
+};
+
+/**
  * Represents a sparse vector using parallel arrays for indices and values.
  */
 export type SparseVector = {
@@ -235,6 +353,47 @@ export type SparseVector = {
      * Values corresponding to each index
      */
     values: Array<number>;
+};
+
+export type SparseVectorIndexConfig = {
+    /**
+     * Embedding function configuration (flexible JSON for dynamic configurations)
+     * TODO(Sanket): Strongly type ef.
+     */
+    embedding_function?: unknown;
+    /**
+     * Key to source the sparse vector from
+     */
+    source_key?: string | null;
+};
+
+export type SparseVectorIndexType = {
+    config: SparseVectorIndexConfig;
+    enabled: boolean;
+};
+
+/**
+ * Sparse vector value type index configurations
+ */
+export type SparseVectorValueType = {
+    $sparse_vector_index?: null | SparseVectorIndexType;
+};
+
+export type StringInvertedIndexConfig = {
+    [key: string]: never;
+};
+
+export type StringInvertedIndexType = {
+    config: StringInvertedIndexConfig;
+    enabled: boolean;
+};
+
+/**
+ * String value type index configurations
+ */
+export type StringValueType = {
+    $fts_index?: null | FtsIndexType;
+    $string_inverted_index?: null | StringInvertedIndexType;
 };
 
 export type UpdateCollectionConfiguration = {
@@ -301,6 +460,19 @@ export type UpsertCollectionRecordsResponse = {
     [key: string]: unknown;
 };
 
+/**
+ * Strongly-typed value type configurations
+ * Contains optional configurations for each supported value type
+ */
+export type ValueTypes = {
+    '#bool'?: null | BoolValueType;
+    '#float'?: null | FloatValueType;
+    '#float_list'?: null | FloatListValueType;
+    '#int'?: null | IntValueType;
+    '#sparse_vector'?: null | SparseVectorValueType;
+    '#string'?: null | StringValueType;
+};
+
 export type Vec = Array<{
     configuration_json: CollectionConfiguration;
     database: string;
@@ -309,9 +481,26 @@ export type Vec = Array<{
     log_position: number;
     metadata?: null | HashMap;
     name: string;
+    schema?: null | InternalSchema;
     tenant: string;
     version: number;
 }>;
+
+export type VectorIndexConfig = {
+    embedding_function?: null | EmbeddingFunctionConfiguration;
+    hnsw?: null | HnswIndexConfig;
+    /**
+     * Key to source the vector from
+     */
+    source_key?: string | null;
+    space?: null | Space;
+    spann?: null | SpannIndexConfig;
+};
+
+export type VectorIndexType = {
+    config: VectorIndexConfig;
+    enabled: boolean;
+};
 
 export type U32 = number;
 

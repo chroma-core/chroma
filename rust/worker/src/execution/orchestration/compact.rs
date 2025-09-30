@@ -1242,6 +1242,7 @@ mod tests {
                 ],
                 None,
                 None,
+                None,
                 test_segments.collection.dimension,
                 false,
             )

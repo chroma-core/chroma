@@ -700,6 +700,7 @@ mod tests {
             collection_name.clone(),
             None,
             None,
+            None,
             false,
         )
         .unwrap();

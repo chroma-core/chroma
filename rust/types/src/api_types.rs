@@ -19,6 +19,7 @@ use crate::CollectionConversionError;
 use crate::CollectionUuid;
 use crate::DistributedSpannParametersFromSegmentError;
 use crate::HnswParametersFromSegmentError;
+use crate::InternalSchema;
 use crate::Metadata;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
@@ -663,6 +664,7 @@ pub struct CreateCollectionRequest {
     #[validate(custom(function = "validate_optional_metadata"))]
     pub metadata: Option<Metadata>,
     pub configuration: Option<InternalCollectionConfiguration>,
+    pub schema: Option<InternalSchema>,
     pub get_or_create: bool,
 }
 
@@ -673,6 +675,7 @@ impl CreateCollectionRequest {
         name: String,
         metadata: Option<Metadata>,
         configuration: Option<InternalCollectionConfiguration>,
+        schema: Option<InternalSchema>,
         get_or_create: bool,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
@@ -681,6 +684,7 @@ impl CreateCollectionRequest {
             name,
             metadata,
             configuration,
+            schema,
             get_or_create,
         };
         request.validate().map_err(ChromaValidationError::from)?;
@@ -705,7 +709,9 @@ pub enum CreateCollectionError {
     #[error("Could not fetch collections: {0}")]
     Get(#[from] GetCollectionsError),
     #[error("Could not deserialize configuration: {0}")]
-    Configuration(#[from] serde_json::Error),
+    Configuration(serde_json::Error),
+    #[error("Could not serialize schema: {0}")]
+    Schema(serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("The operation was aborted, {0}")]
@@ -716,6 +722,8 @@ pub enum CreateCollectionError {
     HnswNotSupported,
     #[error("Failed to parse db id")]
     DatabaseIdParseError,
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(String),
 }
 
 impl ChromaError for CreateCollectionError {
@@ -733,6 +741,8 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
             CreateCollectionError::DatabaseIdParseError => ErrorCodes::Internal,
+            CreateCollectionError::InvalidSchema(_) => ErrorCodes::InvalidArgument,
+            CreateCollectionError::Schema(_) => ErrorCodes::Internal,
         }
     }
 }

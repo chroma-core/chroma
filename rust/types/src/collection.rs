@@ -2,8 +2,8 @@ use std::str::FromStr;
 
 use super::{Metadata, MetadataValueConversionError};
 use crate::{
-    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Segment,
-    SegmentScope,
+    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration,
+    InternalSchema, Segment, SegmentScope,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
@@ -129,6 +129,7 @@ pub struct Collection {
     )]
     #[schema(value_type = CollectionConfiguration)]
     pub config: InternalCollectionConfiguration,
+    pub schema: Option<InternalSchema>,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
     pub tenant: String,
@@ -159,6 +160,7 @@ impl Default for Collection {
             collection_id: CollectionUuid::new(),
             name: "".to_string(),
             config: InternalCollectionConfiguration::default_hnsw(),
+            schema: None,
             metadata: None,
             dimension: None,
             tenant: "".to_string(),
@@ -291,10 +293,16 @@ impl TryFrom<chroma_proto::Collection> for Collection {
                 return Err(CollectionConversionError::MissingDatabaseId);
             }
         };
+        let schema = match proto_collection.schema_str {
+            Some(schema_str) if !schema_str.is_empty() => Some(serde_json::from_str(&schema_str)?),
+            _ => None,
+        };
+
         Ok(Collection {
             collection_id,
             name: proto_collection.name,
             config: serde_json::from_str(&proto_collection.configuration_json_str)?,
+            schema,
             metadata: collection_metadata,
             dimension: proto_collection.dimension,
             tenant: proto_collection.tenant,
@@ -337,6 +345,10 @@ impl TryFrom<Collection> for chroma_proto::Collection {
             id: value.collection_id.0.to_string(),
             name: value.name,
             configuration_json_str: serde_json::to_string(&value.config)?,
+            schema_str: value
+                .schema
+                .map(|s| serde_json::to_string(&s))
+                .transpose()?,
             metadata: value.metadata.map(Into::into),
             dimension: value.dimension,
             tenant: value.tenant,
@@ -388,11 +400,16 @@ mod test {
 
     #[test]
     fn test_collection_try_from() {
+        // Create a valid InternalSchema and serialize it
+        let schema = InternalSchema::new_default(crate::KnnIndex::Spann);
+        let schema_str = serde_json::to_string(&schema).unwrap();
+
         let proto_collection = chroma_proto::Collection {
             id: "00000000-0000-0000-0000-000000000000".to_string(),
             name: "foo".to_string(),
             configuration_json_str: "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
                 .to_string(),
+            schema_str: Some(schema_str),
             metadata: None,
             dimension: None,
             tenant: "baz".to_string(),

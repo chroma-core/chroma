@@ -11,7 +11,7 @@ use chroma_metering::{
 };
 use chroma_system::System;
 use chroma_tracing::add_tracing_middleware;
-use chroma_types::plan::SearchPayload;
+use chroma_types::{plan::SearchPayload, InternalSchema};
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
     CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
@@ -966,6 +966,7 @@ async fn count_collections(
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct CreateCollectionPayload {
     pub name: String,
+    pub schema: Option<InternalSchema>,
     pub configuration: Option<CollectionConfiguration>,
     pub metadata: Option<Metadata>,
     #[serde(default)]
@@ -1042,6 +1043,7 @@ async fn create_collection(
         payload.name,
         payload.metadata,
         configuration,
+        payload.schema,
         payload.get_or_create,
     )?;
     let collection = server.frontend.create_collection(request).await?;
@@ -2105,11 +2107,15 @@ async fn collection_query(
         payload.include,
     )?;
 
-    let res = server
-        .frontend
-        .query(request)
-        .meter(metering_context_container)
-        .await?;
+    // pin the request since future exceeds size limit (16KB)
+    // Box::pin is required to avoid stack overflow by moving future to heap
+    let res = Box::pin(
+        server
+            .frontend
+            .query(request)
+            .meter(metering_context_container),
+    )
+    .await?;
 
     Ok(Json(res))
 }

@@ -133,6 +133,7 @@ message CreateCollectionRequest {
   // When segments are set, then the collection and segments will be created as
   // a single atomic operation.
   repeated Segment segments = 9;  // Optional.
+  optional string schema_str = 10;
 }
 
 message CreateCollectionResponse {

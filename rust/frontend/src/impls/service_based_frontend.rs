@@ -31,7 +31,7 @@ use chroma_types::{
     GetCollectionByCrnResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
     GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
     GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
-    HeartbeatError, HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest,
+    HeartbeatError, HeartbeatResponse, Include, InternalSchema, KnnIndex, ListCollectionsRequest,
     ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
     Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
     SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
@@ -77,6 +77,7 @@ pub struct ServiceBasedFrontend {
     max_batch_size: u32,
     metrics: Arc<Metrics>,
     default_knn_index: KnnIndex,
+    enable_schema: bool,
     retries_builder: ExponentialBuilder,
 }
 
@@ -90,6 +91,7 @@ impl ServiceBasedFrontend {
         executor: Executor,
         max_batch_size: u32,
         default_knn_index: KnnIndex,
+        enable_schema: bool,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -141,6 +143,7 @@ impl ServiceBasedFrontend {
             max_batch_size,
             metrics,
             default_knn_index,
+            enable_schema,
             retries_builder,
         }
     }
@@ -435,6 +438,7 @@ impl ServiceBasedFrontend {
             name,
             metadata,
             configuration,
+            schema,
             get_or_create,
             ..
         }: CreateCollectionRequest,
@@ -478,6 +482,16 @@ impl ServiceBasedFrontend {
                 }
             }
         }
+
+        let reconciled_schema = if self.enable_schema {
+            match InternalSchema::reconcile_schema_and_config(schema.clone(), configuration.clone())
+            {
+                Ok(schema) => Some(schema),
+                Err(e) => return Err(CreateCollectionError::InvalidSchema(e)),
+            }
+        } else {
+            None
+        };
 
         let segments = match self.executor {
             Executor::Distributed(_) => {
@@ -546,6 +560,7 @@ impl ServiceBasedFrontend {
                 name,
                 segments,
                 configuration,
+                reconciled_schema,
                 metadata,
                 None,
                 get_or_create,
@@ -1586,20 +1601,22 @@ impl ServiceBasedFrontend {
                 }
             }
         };
-        let res = query_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying query() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .await;
+        let res = Box::pin(
+            query_to_retry
+                .retry(self.collections_with_segments_provider.get_retry_backoff())
+                // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+                .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+                .notify(|_, _| {
+                    let retried = retries.fetch_add(1, Ordering::Relaxed);
+                    if retried > 0 {
+                        tracing::info!(
+                            "Retrying query() request for collection {}",
+                            request.collection_id
+                        );
+                    }
+                }),
+        )
+        .await;
         self.metrics
             .query_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
@@ -1805,6 +1822,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             executor,
             max_batch_size,
             config.default_knn_index,
+            config.enable_schema,
         ))
     }
 }
@@ -1838,6 +1856,7 @@ mod tests {
                     "test".to_string(),
                     None,
                     None,
+                    None,
                     false,
                 )
                 .unwrap(),
@@ -1868,7 +1887,7 @@ mod tests {
         let create_response = client
             .post("http://localhost:8000/api/v2/tenants/default_tenant/databases/default_database/collections")
             .json(
-                &CreateCollectionPayload { name: Uuid::new_v4().to_string(), configuration: None, metadata: None, get_or_create: false },
+                &CreateCollectionPayload { name: Uuid::new_v4().to_string(), configuration: None, schema: None, metadata: None, get_or_create: false },
             )
             .send()
             .await

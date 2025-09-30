@@ -198,6 +198,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                             None,
                             None,
                             None,
+                            None,
                             false,
                         )
                         .await
