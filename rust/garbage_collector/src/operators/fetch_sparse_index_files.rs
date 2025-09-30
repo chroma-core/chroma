@@ -59,6 +59,10 @@ impl ChromaError for FetchSparseIndexFilesError {
             FetchSparseIndexFilesError::ParsingIdFailed => ErrorCodes::Internal,
         }
     }
+
+    fn should_trace_error(&self) -> bool {
+        self.code() != ErrorCodes::NotFound
+    }
 }
 
 #[async_trait]
