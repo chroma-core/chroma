@@ -522,7 +522,7 @@ impl DirtyMarker {
 #[derive(Clone, Debug)]
 pub struct MarkDirty {
     collection_id: CollectionUuid,
-    dirty_log: Arc<LogWriter>,
+    dirty_log: Option<Arc<LogWriter>>,
 }
 
 impl MarkDirty {
@@ -538,24 +538,29 @@ impl wal3::MarkDirty for MarkDirty {
         log_position: LogPosition,
         num_records: usize,
     ) -> Result<(), wal3::Error> {
-        let num_records = num_records as u64;
-        let initial_insertion_epoch_us = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|_| wal3::Error::Internal)?
-            .as_micros() as u64;
-        let dirty_marker = DirtyMarker::MarkDirty {
-            collection_id: self.collection_id,
-            log_position,
-            num_records,
-            reinsert_count: 0,
-            initial_insertion_epoch_us,
-        };
-        let dirty_marker_json = serde_json::to_string(&dirty_marker).map_err(|err| {
-            tracing::error!("Failed to serialize dirty marker: {}", err);
-            wal3::Error::Internal
-        })?;
-        self.dirty_log.append(Vec::from(dirty_marker_json)).await?;
-        Ok(())
+        if let Some(dirty_log) = self.dirty_log.as_ref() {
+            let num_records = num_records as u64;
+            let initial_insertion_epoch_us = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_err(|_| wal3::Error::Internal)?
+                .as_micros() as u64;
+            let dirty_marker = DirtyMarker::MarkDirty {
+                collection_id: self.collection_id,
+                log_position,
+                num_records,
+                reinsert_count: 0,
+                initial_insertion_epoch_us,
+            };
+            let dirty_marker_json = serde_json::to_string(&dirty_marker).map_err(|err| {
+                tracing::error!("Failed to serialize dirty marker: {}", err);
+                wal3::Error::Internal
+            })?;
+            dirty_log.append(Vec::from(dirty_marker_json)).await?;
+            Ok(())
+        } else {
+            tracing::error!("asked to mark dirty with no dirty log");
+            Err(wal3::Error::Internal)
+        }
     }
 }
 
@@ -572,7 +577,7 @@ pub struct LogServer {
     config: LogServerConfig,
     storage: Arc<Storage>,
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
-    dirty_log: Arc<LogWriter>,
+    dirty_log: Option<Arc<LogWriter>>,
     rolling_up: tokio::sync::Mutex<()>,
     backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
     need_to_compact: Mutex<HashMap<CollectionUuid, RollupPerCollection>>,
@@ -600,8 +605,18 @@ impl LogServer {
 
     /// Verify that the service is not in read-only mode.
     fn ensure_write_mode(&self) -> Result<(), Status> {
-        if self.config.is_read_only() {
-            Err(Status::permission_denied("service is in read-only mode"))
+        if self.dirty_log.is_none() {
+            // NOTE(rescrv):  This should NEVER happen in production.
+            //
+            // If it does happen, it is better to reject writes than to silently write data that
+            // will never be accounted for by billing or compaction.
+            Err(Status::permission_denied(
+                "service is in read-only mode because it has no dirty log",
+            ))
+        } else if self.config.is_read_only() {
+            Err(Status::permission_denied(
+                "service is in read-only mode because of operator configuration",
+            ))
         } else {
             Ok(())
         }
@@ -629,7 +644,7 @@ impl LogServer {
         let handle = self.open_logs.get_or_create_state(key);
         let mark_dirty = MarkDirty {
             collection_id,
-            dirty_log: Arc::clone(&self.dirty_log),
+            dirty_log: self.dirty_log.clone(),
         };
         // NOTE(rescrv):  We use the writer and fall back to constructing a local reader in order
         // to force a read-repair of the collection when things partially fail.
@@ -720,7 +735,7 @@ impl LogServer {
         if allow_rollback {
             let mark_dirty = MarkDirty {
                 collection_id,
-                dirty_log: Arc::clone(&self.dirty_log),
+                dirty_log: self.dirty_log.clone(),
             };
             let _ = mark_dirty
                 .mark_dirty(LogPosition::from_offset(adjusted_log_offset as u64), 1usize)
@@ -805,7 +820,11 @@ impl LogServer {
     async fn roll_dirty_log(&self) -> Result<(), Error> {
         // Ensure at most one request at a time.
         let _guard = self.rolling_up.lock().await;
-        let mut rollup = self.read_and_coalesce_dirty_log().await?;
+        let Some(dirty_log) = self.dirty_log.as_ref() else {
+            tracing::error!("roll dirty log called with no dirty log configured");
+            return Err(Error::CouldNotGetDirtyLogReader);
+        };
+        let mut rollup = self.read_and_coalesce_dirty_log(dirty_log).await?;
         if rollup.rollups.is_empty() {
             tracing::info!("rollups is empty");
             let backpressure = vec![];
@@ -824,10 +843,10 @@ impl LogServer {
             .dirty_log_collections
             .record(collections as u64, &[]);
         self.enrich_dirty_log(&mut rollup.rollups).await?;
-        self.save_dirty_log(rollup).await
+        self.save_dirty_log(rollup, dirty_log).await
     }
 
-    async fn save_dirty_log(&self, mut rollup: Rollup) -> Result<(), Error> {
+    async fn save_dirty_log(&self, mut rollup: Rollup, dirty_log: &LogWriter) -> Result<(), Error> {
         let mut markers = vec![];
         let mut backpressure = vec![];
         let mut total_uncompacted = 0;
@@ -849,12 +868,12 @@ impl LogServer {
             markers.push(serde_json::to_string(&DirtyMarker::Cleared).map(Vec::from)?);
         }
         let mut new_cursor = rollup.cursor.clone();
-        match self.dirty_log.append_many(markers).await {
+        match dirty_log.append_many(markers).await {
             Ok(_) | Err(wal3::Error::LogContentionDurable) => Ok(()),
             Err(err) => Err(err),
         }?;
         new_cursor.position = rollup.last_record_witnessed + 1u64;
-        let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
+        let Some(cursors) = dirty_log.cursors(CursorStoreOptions::default()) else {
             return Err(Error::CouldNotGetDirtyLogCursors);
         };
         tracing::info!(
@@ -879,11 +898,11 @@ impl LogServer {
     /// Read the entirety of a prefix of the dirty log.
     #[tracing::instrument(skip(self), err(Display))]
     #[allow(clippy::type_complexity)]
-    async fn read_and_coalesce_dirty_log(&self) -> Result<Rollup, Error> {
-        let Some(reader) = self.dirty_log.reader(LogReaderOptions::default()) else {
+    async fn read_and_coalesce_dirty_log(&self, dirty_log: &LogWriter) -> Result<Rollup, Error> {
+        let Some(reader) = dirty_log.reader(LogReaderOptions::default()) else {
             return Err(Error::CouldNotGetDirtyLogReader);
         };
-        let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
+        let Some(cursors) = dirty_log.cursors(CursorStoreOptions::default()) else {
             return Err(Error::CouldNotGetDirtyLogCursors);
         };
         let witness = cursors.load(&STABLE_PREFIX).await?;
@@ -1128,7 +1147,7 @@ impl LogServer {
         let handle = self.open_logs.get_or_create_state(key);
         let mark_dirty = MarkDirty {
             collection_id,
-            dirty_log: Arc::clone(&self.dirty_log),
+            dirty_log: self.dirty_log.clone(),
         };
         let log = match get_log_from_handle(
             &handle,
@@ -1480,7 +1499,7 @@ impl LogServer {
         if offset != max_offset {
             let mark_dirty = MarkDirty {
                 collection_id: target_collection_id,
-                dirty_log: Arc::clone(&self.dirty_log),
+                dirty_log: self.dirty_log.clone(),
             };
             let _ = mark_dirty
                 .mark_dirty(offset, (max_offset - offset) as usize)
@@ -1562,11 +1581,16 @@ impl LogServer {
             })
             .collect::<Result<_, _>>()
             .map_err(|err| Status::internal(format!("Failed to serialize dirty marker: {err}")))?;
-        self.dirty_log
-            .append_many(dirty_marker_json_blobs)
-            .await
-            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
-        Ok(Response::new(PurgeDirtyForCollectionResponse {}))
+        if let Some(dirty_log) = self.dirty_log.as_ref() {
+            dirty_log
+                .append_many(dirty_marker_json_blobs)
+                .await
+                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+            Ok(Response::new(PurgeDirtyForCollectionResponse {}))
+        } else {
+            tracing::error!("dirty log not set and purge dirty received");
+            Err(Status::failed_precondition("dirty log not configured"))
+        }
     }
 
     #[tracing::instrument(skip(self, _request))]
@@ -1574,10 +1598,13 @@ impl LogServer {
         &self,
         _request: Request<InspectDirtyLogRequest>,
     ) -> Result<Response<InspectDirtyLogResponse>, Status> {
-        let Some(reader) = self.dirty_log.reader(LogReaderOptions::default()) else {
+        let Some(dirty_log) = self.dirty_log.as_ref() else {
+            return Err(Status::unavailable("dirty log not configured"));
+        };
+        let Some(reader) = dirty_log.reader(LogReaderOptions::default()) else {
             return Err(Status::unavailable("Failed to get dirty log reader"));
         };
-        let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
+        let Some(cursors) = dirty_log.cursors(CursorStoreOptions::default()) else {
             return Err(Status::unavailable("Failed to get dirty log cursors"));
         };
         let witness = match cursors.load(&STABLE_PREFIX).await {
@@ -1774,7 +1801,7 @@ impl LogServer {
                 let key = LogKey { collection_id };
                 let mark_dirty = MarkDirty {
                     collection_id,
-                    dirty_log: Arc::clone(&self.dirty_log),
+                    dirty_log: self.dirty_log.clone(),
                 };
                 let handle = self.open_logs.get_or_create_state(key);
                 let log = get_log_from_handle(
@@ -1798,10 +1825,17 @@ impl LogServer {
                         ));
                 }
                 tracing::event!(Level::INFO, host =? host);
-                self.dirty_log
+                if let Some(dirty_log) = self.dirty_log.as_ref() {
+                    dirty_log
                     .garbage_collect_phase2_update_manifest(&GarbageCollectionOptions::default())
                     .await
                     .map_err(|err| Status::unknown(err.to_string()))?;
+                } else {
+                    tracing::error!("Could not garbage collect dirty log.");
+                    return Err(Status::failed_precondition(
+                        "no dirty log configured for garbage collection".to_string(),
+                    ));
+                }
                 Ok(Response::new(GarbageCollectPhase2Response {}))
             }
             None => Err(Status::not_found("log not found because it's null")),
@@ -2327,7 +2361,7 @@ impl Configurable<LogServerConfig> for LogServer {
         )
         .await
         .map_err(|err| -> Box<dyn ChromaError> { Box::new(err) as _ })?;
-        let dirty_log = Arc::new(dirty_log);
+        let dirty_log = Some(Arc::new(dirty_log));
         let rolling_up = tokio::sync::Mutex::new(());
         let metrics = Metrics::new(opentelemetry::global::meter("chroma"));
         let backpressure = Mutex::new(Arc::new(HashSet::default()));
@@ -3529,7 +3563,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let dirty_log = Arc::new(
+        let dirty_log = Some(Arc::new(
             LogWriter::open_or_initialize(
                 writer_options.clone(),
                 storage.clone(),
@@ -3539,7 +3573,7 @@ mod tests {
             )
             .await
             .expect("Dirty log should be initializable"),
-        );
+        ));
         let config = LogServerConfig {
             writer: writer_options,
             ..Default::default()
@@ -4089,7 +4123,7 @@ mod tests {
         )
         .await
         .expect("Failed to create dirty log");
-        let dirty_log = Arc::new(dirty_log);
+        let dirty_log = Some(Arc::new(dirty_log));
 
         // Create LogServer manually
         let config = LogServerConfig::default();
