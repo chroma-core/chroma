@@ -76,10 +76,16 @@ use chroma_storage::Storage;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+/// Heap tender service implementation for managing collection compaction scheduling.
+///
+/// This module provides the gRPC service implementation for the heap tender, which
+/// coordinates with the heap to schedule and track compaction operations for collections.
+pub mod tender;
+
 mod internal;
+use internal::Internal;
 
 pub use internal::HeapItem;
-use internal::Internal;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -126,6 +132,26 @@ pub enum Error {
     /// Date rounding error
     #[error("could not round date: {0}")]
     RoundError(#[from] chrono::RoundingError),
+}
+
+impl chroma_error::ChromaError for Error {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        use chroma_error::ErrorCodes;
+        match self {
+            Error::ETagConflict => ErrorCodes::FailedPrecondition,
+            Error::MissingETag(_) => ErrorCodes::FailedPrecondition,
+            Error::Internal(_) => ErrorCodes::Internal,
+            Error::InvalidBucket(_) => ErrorCodes::InvalidArgument,
+            Error::PartialLoadFailure(..) => ErrorCodes::Internal,
+            Error::InvalidPrefix(_) => ErrorCodes::InvalidArgument,
+            Error::Storage(_) => ErrorCodes::Internal,
+            Error::Uuid(_) => ErrorCodes::InvalidArgument,
+            Error::Parquet(_) => ErrorCodes::Internal,
+            Error::Arrow(_) => ErrorCodes::Internal,
+            Error::ParseDate(_) => ErrorCodes::InvalidArgument,
+            Error::RoundError(_) => ErrorCodes::Internal,
+        }
+    }
 }
 
 /////////////////////////////////////////// Configuration //////////////////////////////////////////
@@ -554,14 +580,14 @@ impl HeapWriter {
     /// )?;
     /// ```
     pub fn new(
-        prefix: String,
         storage: Storage,
+        prefix: String,
         heap_scheduler: Arc<dyn HeapScheduler>,
     ) -> Result<Self, Error> {
         let config = Configuration::default();
         validate_prefix(&prefix)?;
         Ok(Self {
-            internal: Internal::new(prefix, storage, heap_scheduler, config.backoff.clone()),
+            internal: Internal::new(storage, prefix, heap_scheduler, config.backoff.clone()),
             config,
         })
     }
@@ -752,14 +778,14 @@ impl HeapPruner {
     /// )?;
     /// ```
     pub fn new(
-        prefix: String,
         storage: Storage,
+        prefix: String,
         heap_scheduler: Arc<dyn HeapScheduler>,
     ) -> Result<Self, Error> {
         let config = Configuration::default();
         validate_prefix(&prefix)?;
         Ok(Self {
-            internal: Internal::new(prefix, storage, heap_scheduler, config.backoff.clone()),
+            internal: Internal::new(storage, prefix, heap_scheduler, config.backoff.clone()),
             config,
         })
     }
@@ -964,14 +990,14 @@ impl HeapReader {
     /// )?;
     /// ```
     pub fn new(
-        prefix: String,
         storage: Storage,
+        prefix: String,
         heap_scheduler: Arc<dyn HeapScheduler>,
     ) -> Result<Self, Error> {
         let config = Configuration::default();
         validate_prefix(&prefix)?;
         Ok(Self {
-            internal: Internal::new(prefix, storage, heap_scheduler, config.backoff),
+            internal: Internal::new(storage, prefix, heap_scheduler, config.backoff),
         })
     }
 

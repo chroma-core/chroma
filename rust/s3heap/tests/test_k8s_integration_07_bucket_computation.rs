@@ -39,7 +39,12 @@ async fn test_k8s_integration_07_bucket_rounding() {
     );
 
     // Push all items
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     writer.push(&[item1, item2, item3, item4]).await.unwrap();
 
     // Should create only one bucket (all in same minute)
@@ -75,7 +80,12 @@ async fn test_k8s_integration_07_bucket_boundaries() {
     scheduler.set_next_time(&item2, Some((minute2, test_nonce(2))));
 
     // Push items
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     writer.push(&[item1, item2]).await.unwrap();
 
     // Should create two buckets (different minutes)
@@ -105,7 +115,12 @@ async fn test_k8s_integration_07_bucket_path_format() {
     scheduler.set_next_time(&item, Some((scheduled_time, test_nonce(1))));
 
     // Push item
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     writer.push(&[item]).await.unwrap();
 
     // Check bucket path format
@@ -144,7 +159,12 @@ async fn test_k8s_integration_07_multiple_buckets_ordering() {
         .collect();
 
     // Push all items
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     writer.push(&items).await.unwrap();
 
     // Verify bucket count

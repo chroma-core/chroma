@@ -4,6 +4,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "idl/chromadb/proto/chroma.proto",
         "idl/chromadb/proto/compactor.proto",
         "idl/chromadb/proto/coordinator.proto",
+        "idl/chromadb/proto/heapservice.proto",
         "idl/chromadb/proto/logservice.proto",
         "idl/chromadb/proto/query_executor.proto",
         "idl/chromadb/proto/garbage_collector.proto",

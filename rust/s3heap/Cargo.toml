@@ -10,12 +10,21 @@ backon = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
+figment = { workspace = true }
 parking_lot = { workspace = true }
 parquet = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tonic = { workspace = true }
+tonic-health = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 
+chroma-config = { workspace = true }
+chroma-error = { workspace = true, features = ["sqlx"] }
+chroma-log = { workspace = true }
 chroma-storage = { workspace = true }
+chroma-tracing = { workspace = true, features = ["grpc"] }
+chroma-types = { workspace = true }
+wal3 = { workspace = true }

@@ -91,7 +91,7 @@ impl HeapScheduler for ConfigurableScheduler {
 fn writer_errors_on_empty_prefix() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let result = HeapWriter::new(String::new(), storage, scheduler);
+    let result = HeapWriter::new(storage, String::new(), scheduler);
     assert!(result.is_err());
     match result {
         Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("empty")),
@@ -103,7 +103,7 @@ fn writer_errors_on_empty_prefix() {
 fn pruner_errors_on_empty_prefix() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let result = HeapPruner::new(String::new(), storage, scheduler);
+    let result = HeapPruner::new(storage, String::new(), scheduler);
     assert!(result.is_err());
     match result {
         Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("empty")),
@@ -115,7 +115,7 @@ fn pruner_errors_on_empty_prefix() {
 fn reader_errors_on_empty_prefix() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let result = HeapReader::new(String::new(), storage, scheduler);
+    let result = HeapReader::new(storage, String::new(), scheduler);
     assert!(result.is_err());
     match result {
         Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("empty")),
@@ -130,25 +130,25 @@ fn heap_components_accept_valid_prefix() {
 
     // These should not error
     let _writer = HeapWriter::new(
-        "valid-prefix".to_string(),
         storage.clone(),
+        "valid-prefix".to_string(),
         scheduler.clone(),
     )
     .unwrap();
     let _pruner = HeapPruner::new(
-        "valid-prefix".to_string(),
         storage.clone(),
+        "valid-prefix".to_string(),
         scheduler.clone(),
     )
     .unwrap();
-    let _reader = HeapReader::new("valid-prefix".to_string(), storage, scheduler).unwrap();
+    let _reader = HeapReader::new(storage, "valid-prefix".to_string(), scheduler).unwrap();
 }
 
 #[test]
 fn heap_writer_errors_on_double_slash() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let result = HeapWriter::new("prefix//with//slashes".to_string(), storage, scheduler);
+    let result = HeapWriter::new(storage, "prefix//with//slashes".to_string(), scheduler);
     assert!(result.is_err());
     match result {
         Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("double slashes")),
@@ -160,7 +160,7 @@ fn heap_writer_errors_on_double_slash() {
 fn heap_pruner_errors_on_double_slash() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let result = HeapPruner::new("prefix//with//slashes".to_string(), storage, scheduler);
+    let result = HeapPruner::new(storage, "prefix//with//slashes".to_string(), scheduler);
     assert!(result.is_err());
     match result {
         Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("double slashes")),
@@ -172,7 +172,7 @@ fn heap_pruner_errors_on_double_slash() {
 fn heap_reader_errors_on_double_slash() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let result = HeapReader::new("prefix//with//slashes".to_string(), storage, scheduler);
+    let result = HeapReader::new(storage, "prefix//with//slashes".to_string(), scheduler);
     assert!(result.is_err());
     match result {
         Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("double slashes")),
@@ -310,7 +310,7 @@ fn error_display() {
 async fn writer_push_empty_items() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let writer = HeapWriter::new("test-prefix".to_string(), storage, scheduler).unwrap();
+    let writer = HeapWriter::new(storage, "test-prefix".to_string(), scheduler).unwrap();
 
     // Pushing empty items should succeed without doing anything
     let result = writer.push(&[]).await;
@@ -321,7 +321,7 @@ async fn writer_push_empty_items() {
 async fn writer_push_with_no_scheduled_items() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(ConfigurableScheduler::new());
-    let writer = HeapWriter::new("test-no-schedule".to_string(), storage, scheduler).unwrap();
+    let writer = HeapWriter::new(storage, "test-no-schedule".to_string(), scheduler).unwrap();
 
     let item = Triggerable {
         uuid: Uuid::new_v4(),
@@ -339,7 +339,7 @@ async fn writer_push_with_scheduler_error() {
     let scheduler = Arc::new(ConfigurableScheduler::new());
     scheduler.set_error_on_schedule(true);
 
-    let writer = HeapWriter::new("test-error".to_string(), storage, scheduler).unwrap();
+    let writer = HeapWriter::new(storage, "test-error".to_string(), scheduler).unwrap();
 
     let item = Triggerable {
         uuid: Uuid::new_v4(),
@@ -360,7 +360,7 @@ async fn writer_push_with_scheduler_error() {
 async fn pruner_with_empty_heap() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let pruner = HeapPruner::new("empty-heap".to_string(), storage, scheduler).unwrap();
+    let pruner = HeapPruner::new(storage, "empty-heap".to_string(), scheduler).unwrap();
 
     // Pruning empty heap should succeed
     let result = pruner.prune(Limits::default()).await;
@@ -371,7 +371,7 @@ async fn pruner_with_empty_heap() {
 async fn pruner_respects_limits() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let pruner = HeapPruner::new("limited-prune".to_string(), storage, scheduler).unwrap();
+    let pruner = HeapPruner::new(storage, "limited-prune".to_string(), scheduler).unwrap();
 
     let limits = Limits {
         buckets_to_read: Some(5),
@@ -388,7 +388,7 @@ async fn pruner_respects_limits() {
 async fn reader_peek_empty_heap() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let reader = HeapReader::new("empty-reader".to_string(), storage, scheduler).unwrap();
+    let reader = HeapReader::new(storage, "empty-reader".to_string(), scheduler).unwrap();
 
     let items = reader.peek(|_| true, Limits::default()).await;
     assert!(items.is_ok());
@@ -399,7 +399,7 @@ async fn reader_peek_empty_heap() {
 async fn reader_peek_with_filter() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let reader = HeapReader::new("filtered-reader".to_string(), storage, scheduler).unwrap();
+    let reader = HeapReader::new(storage, "filtered-reader".to_string(), scheduler).unwrap();
 
     // Filter that rejects everything
     let items = reader.peek(|_| false, Limits::default()).await;
@@ -411,7 +411,7 @@ async fn reader_peek_with_filter() {
 async fn reader_respects_limits() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(TestScheduler);
-    let reader = HeapReader::new("limited-reader".to_string(), storage, scheduler).unwrap();
+    let reader = HeapReader::new(storage, "limited-reader".to_string(), scheduler).unwrap();
 
     let limits = Limits {
         buckets_to_read: Some(3),

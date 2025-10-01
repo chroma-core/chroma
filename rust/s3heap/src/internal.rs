@@ -67,8 +67,8 @@ pub struct HeapItem {
 /// - **Parquet Format**: Provides efficient compression and columnar storage for UUID/string data
 /// - **ETag-based Concurrency**: Uses S3's conditional PUT/GET for optimistic concurrency control
 pub struct Internal {
-    prefix: String,
     storage: Storage,
+    prefix: String,
     heap_scheduler: Arc<dyn HeapScheduler>,
     retry_config: RetryConfig,
 }
@@ -83,8 +83,8 @@ impl Internal {
     /// * `heap_scheduler` - The scheduler implementation
     /// * `retry_config` - Configuration for retry behavior on conflicts
     pub fn new(
-        prefix: String,
         storage: Storage,
+        prefix: String,
         heap_scheduler: Arc<dyn HeapScheduler>,
         retry_config: RetryConfig,
     ) -> Self {
@@ -614,8 +614,8 @@ mod tests {
         };
 
         let internal = Internal::new(
+            storage,
             "test-prefix".to_string(),
-            storage.clone(),
             scheduler.clone(),
             retry_config.clone(),
         );
