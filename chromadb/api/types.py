@@ -167,11 +167,11 @@ def _to_f32(value: float) -> float:
 
 def pack_embedding_safely(embedding: Embedding) -> str:
     try:
-        return pybase64.b64encode_as_string(  # type: ignore
+        return pybase64.b64encode_as_string(
             _get_struct(len(embedding)).pack(*embedding)
         )
     except OverflowError:
-        return pybase64.b64encode_as_string(  # type: ignore
+        return pybase64.b64encode_as_string(
             _get_struct(len(embedding)).pack(*[_to_f32(value) for value in embedding])
         )
 
@@ -1852,23 +1852,36 @@ class InternalSchema(BaseModel):
 
     def _initialize_defaults(self, defaults: Dict[str, ValueTypeIndexes]) -> None:
         """Initialize defaults with base structure and standard configuration."""
-        # Set all supported index types to enabled by default
+        # Set all supported index types to enabled by default using structured objects
         for value_type, index_types in self._VALUE_TYPE_TO_INDEX_TYPES.items():
             defaults[value_type] = {}
             for index_type in index_types:
-                defaults[value_type][index_type] = True
+                # Create structured objects instead of booleans
+                defaults[value_type][index_type] = self._create_default_index_object(index_type, enabled=True)
 
         # Apply specific default overrides for certain index types
         # Most indexes are enabled by default, but some are disabled for performance reasons
 
         # "#sparse_vector": { "$sparse_vector_index": False }
-        defaults[SPARSE_VECTOR_VALUE_NAME][SPARSE_VECTOR_INDEX_NAME] = False
+        defaults[SPARSE_VECTOR_VALUE_NAME][SPARSE_VECTOR_INDEX_NAME] = self._create_default_index_object(SPARSE_VECTOR_INDEX_NAME, enabled=False)
 
         # For string values, prefer inverted index over full-text search for better performance
-        defaults[STRING_VALUE_NAME][FTS_INDEX_NAME] = False
+        defaults[STRING_VALUE_NAME][FTS_INDEX_NAME] = self._create_default_index_object(FTS_INDEX_NAME, enabled=False)
 
         # "#float_list": { "$vector_index": False }
-        defaults[FLOAT_LIST_VALUE_NAME][VECTOR_INDEX_NAME] = False
+        defaults[FLOAT_LIST_VALUE_NAME][VECTOR_INDEX_NAME] = self._create_default_index_object(VECTOR_INDEX_NAME, enabled=False)
+
+    def _create_default_index_object(self, index_name: str, enabled: bool) -> Any:
+        """Create a default index object with the given enabled state."""
+        index_mapping = self._INDEX_TYPE_MAP.get(index_name)
+        if index_mapping:
+            internal_class, config_class = index_mapping
+            # Create with default config
+            default_config = config_class()
+            return internal_class(enabled=enabled, config=default_config)
+        else:
+            # Fallback for unknown index types
+            return enabled
 
     def _initialize_key_overrides(
         self, key_overrides: Dict[str, Dict[str, ValueTypeIndexes]]
@@ -1876,7 +1889,10 @@ class InternalSchema(BaseModel):
         """Initialize key-specific index overrides."""
         # Enable full-text search for document content
         key_overrides[DOCUMENT_KEY] = {
-            STRING_VALUE_NAME: {FTS_INDEX_NAME: True, STRING_INVERTED_INDEX_NAME: False}
+            STRING_VALUE_NAME: {
+                FTS_INDEX_NAME: self._create_default_index_object(FTS_INDEX_NAME, enabled=True),
+                STRING_INVERTED_INDEX_NAME: self._create_default_index_object(STRING_INVERTED_INDEX_NAME, enabled=False)
+            }
         }
 
         # Enable vector index for embeddings with document source reference
@@ -1945,13 +1961,17 @@ class InternalSchema(BaseModel):
         result: Dict[str, Any] = {}
         for index_name, index_value in value_type_indexes.items():
             if isinstance(index_value, bool):
-                result[index_name] = index_value
+                # Convert boolean to structured format
+                result[index_name] = {
+                    "enabled": index_value,
+                    "config": {}  # Empty config object
+                }
             else:
-                # Handle config serialization using the same logic as create_collection_configuration_to_json
+                # Nest config fields under "config" key to match Rust structure
                 config_dict = self._serialize_config(index_value.config)
                 result[index_name] = {
                     "enabled": index_value.enabled,
-                    "config": config_dict,
+                    "config": config_dict  # Nest config fields under "config"
                 }
         return result
 
@@ -2011,6 +2031,7 @@ class InternalSchema(BaseModel):
                     except Exception:
                         config_dict["embedding_function"] = {"type": "legacy"}
 
+        # Return flat config dict (type is inferred from IndexTypeName key)
         return config_dict
 
     def serialize_to_json(self) -> Dict[str, Any]:
@@ -2084,13 +2105,23 @@ class InternalSchema(BaseModel):
             if isinstance(index_data, bool):
                 result[index_name] = index_data
             else:
+                # Check if this is a simple boolean state (empty config)
+                enabled = index_data.get("enabled", True)
+
+                # Extract config data from nested structure
+                if "config" in index_data:
+                    config_data = index_data["config"]
+                else:
+                    # Fallback for old flattened format
+                    config_data = index_data.copy()
+                    config_data.pop("enabled", None)
+
+                # Always create structured objects - no more booleans in internal representation
+
                 # Reconstruct Internal*Index object
                 index_mapping = cls._INDEX_TYPE_MAP.get(index_name)
                 if index_mapping:
                     internal_class, config_class = index_mapping
-
-                    # Handle embedding function and space deserialization
-                    config_data = index_data["config"].copy()
                     if "embedding_function" in config_data:
                         ef_config = config_data["embedding_function"]
                         if ef_config.get("type") == "legacy":
@@ -2143,7 +2174,7 @@ class InternalSchema(BaseModel):
                                 config_data["embedding_function"] = None
                     config_obj = config_class(**config_data)
                     result[index_name] = internal_class(
-                        config=config_obj, enabled=index_data["enabled"]
+                        config=config_obj, enabled=enabled
                     )
                 else:
                     # Unknown index type - cannot reconstruct

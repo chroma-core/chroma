@@ -1,12 +1,12 @@
 use crate::{
-    default_batch_size, default_construction_ef, default_construction_ef_spann,
-    default_initial_lambda, default_m, default_m_spann, default_merge_threshold,
-    default_nreplica_count, default_num_centers_to_merge_to, default_num_samples_kmeans,
-    default_num_threads, default_reassign_neighbor_count, default_resize_factor, default_search_ef,
-    default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
-    default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
-    default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor,
-    is_embedding_function_default,
+    collection_schema::is_embedding_function_default, default_batch_size, default_construction_ef,
+    default_construction_ef_spann, default_initial_lambda, default_m, default_m_spann,
+    default_merge_threshold, default_nreplica_count, default_num_centers_to_merge_to,
+    default_num_samples_kmeans, default_num_threads, default_reassign_neighbor_count,
+    default_resize_factor, default_search_ef, default_search_ef_spann, default_search_nprobe,
+    default_search_rng_epsilon, default_search_rng_factor, default_space, default_split_threshold,
+    default_sync_threshold, default_write_nprobe, default_write_rng_epsilon,
+    default_write_rng_factor,
 };
 use crate::{
     HnswConfiguration, HnswParametersFromSegmentError, InternalHnswConfiguration,
