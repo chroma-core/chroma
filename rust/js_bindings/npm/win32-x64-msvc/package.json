@@ -1,6 +1,6 @@
 {
   "name": "chromadb-js-bindings-win32-x64-msvc",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "os": [
     "win32"
   ],

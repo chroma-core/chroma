@@ -7,7 +7,7 @@ set -e
 #   curl -sSL https://raw.githubusercontent.com/chroma-core/chroma/main/rust/cli/install/install.sh | bash
 # ----------------------------------------------
 REPO="chroma-core/chroma"
-RELEASE="cli-1.1.10"
+RELEASE="cli-1.1.11"
 
 OS=$(uname -s)
 ARCH=$(uname -m)
