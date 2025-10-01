@@ -396,7 +396,9 @@ class TestSchema:
         assert isinstance(string_override.config, StringInvertedIndexConfig)
         # With initialization enabled, FTS index is present in defaults (set to False by default)
         assert "$fts_index" in internal.defaults["#string"]
-        assert internal.defaults["#string"]["$fts_index"] is False
+        fts_default = internal.defaults["#string"]["$fts_index"]
+        assert isinstance(fts_default, InternalFtsIndex)
+        assert fts_default.enabled is False
 
     def test_to_internal_schema_mixed_configs(self) -> None:
         """Test conversion with both global and key-specific configs."""
@@ -419,7 +421,9 @@ class TestSchema:
         assert isinstance(string_global.config, StringInvertedIndexConfig)
         # With initialization enabled, FTS index is present in defaults (set to False by default)
         assert "$fts_index" in internal.defaults["#string"]
-        assert internal.defaults["#string"]["$fts_index"] is False
+        fts_default = internal.defaults["#string"]["$fts_index"]
+        assert isinstance(fts_default, InternalFtsIndex)
+        assert fts_default.enabled is False
 
         # Check key override - uses InternalFtsIndex
         assert "document" in internal.key_overrides
@@ -854,11 +858,12 @@ class TestSchema:
 
         vector_config = json_data["key_overrides"]["test_key"]["#float_list"]["$vector_index"]
 
-        # Verify Internal*Index object serialization (flattened structure)
+        # Verify Internal*Index object serialization (nested structure)
         assert isinstance(vector_config, dict)
         assert "enabled" in vector_config
         assert vector_config["enabled"] is True
-        assert vector_config["source_key"] == "custom_source"
+        assert "config" in vector_config
+        assert vector_config["config"]["source_key"] == "custom_source"
 
     def test_serialize_to_json_roundtrip_compatibility(self) -> None:
         """Test that serialized JSON can be converted back to JSON string."""
@@ -1003,11 +1008,12 @@ class TestSchema:
         internal = InternalSchema(schema)
         json_data = internal.serialize_to_json()
 
-        # Check that embedding function is serialized as {"type": "legacy"} (flattened structure)
+        # Check that embedding function is serialized as {"type": "legacy"} (nested structure)
         vector_config_data = json_data["key_overrides"]["test_key"]["#float_list"]["$vector_index"]
-        assert "embedding_function" in vector_config_data
-        assert vector_config_data["embedding_function"] == {"type": "legacy"}
-        assert vector_config_data["source_key"] == "test_source"
+        assert "config" in vector_config_data
+        assert "embedding_function" in vector_config_data["config"]
+        assert vector_config_data["config"]["embedding_function"] == {"type": "legacy"}
+        assert vector_config_data["config"]["source_key"] == "test_source"
 
         # Test roundtrip deserialization
         deserialized = InternalSchema.deserialize_from_json(json_data)
@@ -1033,10 +1039,11 @@ class TestSchema:
         internal = InternalSchema(schema)
         json_data = internal.serialize_to_json()
 
-        # Verify space is in serialized data (flattened structure)
+        # Verify space is in serialized data (nested structure)
         vector_index_data = json_data["key_overrides"]["test_key"]["#float_list"]["$vector_index"]
-        assert "space" in vector_index_data
-        assert vector_index_data["space"] == "cosine"
+        assert "config" in vector_index_data
+        assert "space" in vector_index_data["config"]
+        assert vector_index_data["config"]["space"] == "cosine"
 
         # Deserialize back
         deserialized = InternalSchema.deserialize_from_json(json_data)
@@ -1064,10 +1071,11 @@ class TestSchema:
         internal = InternalSchema(schema)
         json_data = internal.serialize_to_json()
 
-        # Verify embedding function is serialized (flattened structure)
+        # Verify embedding function is serialized (nested structure)
         vector_index_data = json_data["key_overrides"]["test_key"]["#float_list"]["$vector_index"]
-        assert "embedding_function" in vector_index_data
-        ef_config = vector_index_data["embedding_function"]
+        assert "config" in vector_index_data
+        assert "embedding_function" in vector_index_data["config"]
+        ef_config = vector_index_data["config"]["embedding_function"]
         assert ef_config["type"] == "known"
         assert ef_config["name"] == "default"
         assert ef_config["config"] == {}
@@ -1094,10 +1102,11 @@ class TestSchema:
         internal = InternalSchema(schema)
         json_data = internal.serialize_to_json()
 
-        # Verify legacy embedding function is serialized (flattened structure)
+        # Verify legacy embedding function is serialized (nested structure)
         vector_index_data = json_data["key_overrides"]["test_key"]["#float_list"]["$vector_index"]
-        assert "embedding_function" in vector_index_data
-        ef_config = vector_index_data["embedding_function"]
+        assert "config" in vector_index_data
+        assert "embedding_function" in vector_index_data["config"]
+        ef_config = vector_index_data["config"]["embedding_function"]
         assert ef_config["type"] == "legacy"
 
         # Deserialize back
@@ -1143,11 +1152,12 @@ class TestSchema:
         internal = InternalSchema(schema)
         json_data = internal.serialize_to_json()
 
-        # Verify space is resolved and serialized (flattened structure)
+        # Verify space is resolved and serialized (nested structure)
         vector_index_data = json_data["key_overrides"]["test_key"]["#float_list"]["$vector_index"]
-        assert "space" in vector_index_data
+        assert "config" in vector_index_data
+        assert "space" in vector_index_data["config"]
         # MockEmbeddingFunction should have default space "l2"
-        assert vector_index_data["space"] == "l2"
+        assert vector_index_data["config"]["space"] == "l2"
 
         # Deserialize back
         deserialized = InternalSchema.deserialize_from_json(json_data)
@@ -1194,6 +1204,6 @@ class TestSchema:
         with pytest.warns(UserWarning, match="space ip is not supported"):
             json_data = internal.serialize_to_json()
 
-        # Verify the space is still serialized (with warning) (flattened structure)
+        # Verify the space is still serialized (with warning) (nested structure)
         vector_index_data = json_data["key_overrides"]["test_key"]["#float_list"]["$vector_index"]
-        assert vector_index_data["space"] == "ip"
+        assert vector_index_data["config"]["space"] == "ip"
