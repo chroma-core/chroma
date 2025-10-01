@@ -1,15 +1,15 @@
 //! Sparse Index Block-Max WAND Benchmark
 //!
 //! This benchmark evaluates the performance of the Block-Max WAND algorithm
-//! for sparse vector search compared to brute force baseline.
+//! for sparse vector search compared to brute force baseline using the
+//! Wikipedia SPLADE dataset from HuggingFace.
 //!
 //! ## Usage Modes
 //!
 //! ### Full Benchmark Mode (default)
 //! Compares WAND performance against brute force ground truth:
 //! ```bash
-//! cargo run --release --example sparse_wand_benchmark -- \
-//!   -d /path/to/dataset \
+//! cargo run --release --example sparse_vector_benchmark -- \
 //!   -n 65536 \  # number of documents
 //!   -m 200 \    # number of queries
 //!   -k 128      # top-k results
@@ -18,8 +18,7 @@
 //! ### With Filtering
 //! Test WAND with a filter that excludes 30% of documents:
 //! ```bash
-//! cargo run --release --example sparse_wand_benchmark -- \
-//!   -d /path/to/dataset \
+//! cargo run --release --example sparse_vector_benchmark -- \
 //!   -n 65536 \
 //!   -m 200 \
 //!   -k 128 \
@@ -29,8 +28,7 @@
 //! ### WAND-Only Mode (for profiling)
 //! Runs only WAND without brute force comparison, useful for flamegraph profiling:
 //! ```bash
-//! cargo run --release --example sparse_wand_benchmark -- \
-//!   -d /path/to/dataset \
+//! cargo run --release --example sparse_vector_benchmark -- \
 //!   --wand-only \
 //!   -i 100  # run each query 100 times for better profiling
 //! ```
@@ -41,8 +39,7 @@
 //! cargo install flamegraph
 //!
 //! # Run with profiling
-//! cargo flamegraph --example sparse_wand_benchmark -- \
-//!   -d /path/to/dataset \
+//! cargo flamegraph --example sparse_vector_benchmark -- \
 //!   --wand-only \
 //!   -n 10000 \
 //!   -m 50 \
@@ -55,9 +52,7 @@
 //! - `-i, --iterations`: Number of iterations per query (for profiling)
 //! - `-f, --filter-percentage`: Randomly exclude a percentage of documents (0-100) to test filtering
 
-use anyhow::Result;
-use arrow::array::{Array, Float32Array, Int32Array, ListArray, StringArray};
-use arrow::record_batch::RecordBatch;
+use chroma_benchmark::datasets::wikipedia_splade::WikipediaSplade;
 use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::test_arrow_blockfile_provider;
 use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
@@ -68,10 +63,8 @@ use chroma_index::sparse::{
 use chroma_types::SignedRoaringBitmap;
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use sprs::CsVec;
 use std::collections::{BinaryHeap, HashSet};
-use std::fs::File;
 use std::time::Instant;
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -97,252 +90,14 @@ pub struct SparseQuery {
     pub sparse_vector: CsVec<f32>,
 }
 
-/// Load documents with sparse vectors from parquet file
-pub fn load_sparse_documents(
-    path: String,
-    offset: usize,
-    limit: usize,
-) -> Result<Vec<SparseDocument>> {
-    let file = File::open(&path)?;
-    let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
-    let reader = builder.build()?;
-
-    let mut documents = Vec::new();
-    let mut current_offset = 0;
-
-    for batch_result in reader {
-        let batch = batch_result?;
-        let batch_size = batch.num_rows();
-
-        // Skip if we haven't reached the offset yet
-        if current_offset + batch_size <= offset {
-            current_offset += batch_size;
-            continue;
-        }
-
-        // Process the batch
-        let start = offset.saturating_sub(current_offset);
-        let end = std::cmp::min(batch_size, start + (limit - documents.len()));
-
-        if start < end {
-            let sliced_batch = batch.slice(start, end - start);
-            documents.extend(process_sparse_document_batch(sliced_batch)?);
-        }
-
-        current_offset += batch_size;
-
-        // Stop if we've collected enough documents
-        if documents.len() >= limit {
-            break;
-        }
-    }
-
-    Ok(documents)
-}
-
-/// Load queries with sparse vectors from parquet file
-pub fn load_sparse_queries(path: String, offset: usize, limit: usize) -> Result<Vec<SparseQuery>> {
-    let file = File::open(&path)?;
-    let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
-    let reader = builder.build()?;
-
-    let mut queries = Vec::new();
-    let mut current_offset = 0;
-
-    for batch_result in reader {
-        let batch = batch_result?;
-        let batch_size = batch.num_rows();
-
-        // Skip if we haven't reached the offset yet
-        if current_offset + batch_size <= offset {
-            current_offset += batch_size;
-            continue;
-        }
-
-        // Process the batch
-        let start = offset.saturating_sub(current_offset);
-        let end = std::cmp::min(batch_size, start + (limit - queries.len()));
-
-        if start < end {
-            let sliced_batch = batch.slice(start, end - start);
-            queries.extend(process_sparse_query_batch(sliced_batch)?);
-        }
-
-        current_offset += batch_size;
-
-        // Stop if we've collected enough queries
-        if queries.len() >= limit {
-            break;
-        }
-    }
-
-    Ok(queries)
-}
-
-/// Process a document batch and extract sparse vectors
-fn process_sparse_document_batch(batch: RecordBatch) -> Result<Vec<SparseDocument>> {
-    let doc_ids = batch
-        .column_by_name("doc_id")
-        .ok_or_else(|| anyhow::anyhow!("doc_id column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow::anyhow!("doc_id is not a string array"))?;
-
-    let urls = batch
-        .column_by_name("url")
-        .ok_or_else(|| anyhow::anyhow!("url column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow::anyhow!("url is not a string array"))?;
-
-    let titles = batch
-        .column_by_name("title")
-        .ok_or_else(|| anyhow::anyhow!("title column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow::anyhow!("title is not a string array"))?;
-
-    let bodies = batch
-        .column_by_name("body")
-        .ok_or_else(|| anyhow::anyhow!("body column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow::anyhow!("body is not a string array"))?;
-
-    let sparse_indices = batch
-        .column_by_name("sparse_indices")
-        .ok_or_else(|| anyhow::anyhow!("sparse_indices column not found"))?
-        .as_any()
-        .downcast_ref::<ListArray>()
-        .ok_or_else(|| anyhow::anyhow!("sparse_indices is not a list array"))?;
-
-    let sparse_values = batch
-        .column_by_name("sparse_values")
-        .ok_or_else(|| anyhow::anyhow!("sparse_values column not found"))?
-        .as_any()
-        .downcast_ref::<ListArray>()
-        .ok_or_else(|| anyhow::anyhow!("sparse_values is not a list array"))?;
-
-    let mut documents = Vec::with_capacity(batch.num_rows());
-
-    for i in 0..batch.num_rows() {
-        let doc_id = doc_ids.value(i).to_string();
-        let url = urls.value(i).to_string();
-        let title = titles.value(i).to_string();
-        let body = bodies.value(i).to_string();
-
-        // Get indices and values for this document
-        let indices_array = sparse_indices.value(i);
-        let values_array = sparse_values.value(i);
-
-        let indices = indices_array
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .ok_or_else(|| anyhow::anyhow!("indices is not Int32Array"))?;
-
-        let values = values_array
-            .as_any()
-            .downcast_ref::<Float32Array>()
-            .ok_or_else(|| anyhow::anyhow!("values is not Float32Array"))?;
-
-        // Create sparse vector as CsVec
-        let mut sparse_indices = Vec::new();
-        let mut sparse_values = Vec::new();
-        for j in 0..indices.len() {
-            sparse_indices.push(indices.value(j) as usize);
-            sparse_values.push(values.value(j));
-        }
-        let sparse_vector = CsVec::new(usize::MAX, sparse_indices, sparse_values);
-
-        documents.push(SparseDocument {
-            doc_id,
-            url,
-            title,
-            body,
-            sparse_vector,
-        });
-    }
-
-    Ok(documents)
-}
-
-/// Process a query batch and extract sparse vectors
-fn process_sparse_query_batch(batch: RecordBatch) -> Result<Vec<SparseQuery>> {
-    let query_ids = batch
-        .column_by_name("query_id")
-        .ok_or_else(|| anyhow::anyhow!("query_id column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow::anyhow!("query_id is not a string array"))?;
-
-    let texts = batch
-        .column_by_name("text")
-        .ok_or_else(|| anyhow::anyhow!("text column not found"))?
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| anyhow::anyhow!("text is not a string array"))?;
-
-    let sparse_indices = batch
-        .column_by_name("sparse_indices")
-        .ok_or_else(|| anyhow::anyhow!("sparse_indices column not found"))?
-        .as_any()
-        .downcast_ref::<ListArray>()
-        .ok_or_else(|| anyhow::anyhow!("sparse_indices is not a list array"))?;
-
-    let sparse_values = batch
-        .column_by_name("sparse_values")
-        .ok_or_else(|| anyhow::anyhow!("sparse_values column not found"))?
-        .as_any()
-        .downcast_ref::<ListArray>()
-        .ok_or_else(|| anyhow::anyhow!("sparse_values is not a list array"))?;
-
-    let mut queries = Vec::with_capacity(batch.num_rows());
-
-    for i in 0..batch.num_rows() {
-        let query_id = query_ids.value(i).to_string();
-        let text = texts.value(i).to_string();
-
-        // Get indices and values for this query
-        let indices_array = sparse_indices.value(i);
-        let values_array = sparse_values.value(i);
-
-        let indices = indices_array
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .ok_or_else(|| anyhow::anyhow!("indices is not Int32Array"))?;
-
-        let values = values_array
-            .as_any()
-            .downcast_ref::<Float32Array>()
-            .ok_or_else(|| anyhow::anyhow!("values is not Float32Array"))?;
-
-        // Create sparse vector as CsVec
-        let mut sparse_indices = Vec::new();
-        let mut sparse_values = Vec::new();
-        for j in 0..indices.len() {
-            sparse_indices.push(indices.value(j) as usize);
-            sparse_values.push(values.value(j));
-        }
-        let sparse_vector = CsVec::new(usize::MAX, sparse_indices, sparse_values);
-
-        queries.push(SparseQuery {
-            query_id,
-            text,
-            sparse_vector,
-        });
-    }
-
-    Ok(queries)
-}
-
 /// Command line arguments for the benchmark
 #[derive(Parser, Debug)]
-#[command(name = "sparse_wand_benchmark")]
+#[command(name = "sparse_vector_benchmark")]
 #[command(about = "Benchmark sparse index with Block-Max WAND algorithm")]
 struct Args {
-    /// Path to the dataset directory containing documents.parquet and queries.parquet
-    #[arg(short = 'd', long)]
-    dataset_path: String,
+    /// Path to the query parquet file
+    #[arg(short = 'q', long)]
+    query_path: String,
 
     /// Number of documents to load
     #[arg(short = 'n', long, default_value_t = 65536)]
@@ -365,7 +120,7 @@ struct Args {
     sort_by_url: bool,
 
     /// Skip brute force comparison (WAND only mode for profiling)
-    #[arg(long)]
+    #[arg(short = 'w', long)]
     wand_only: bool,
 
     /// Number of iterations to run each query (for profiling)
@@ -885,18 +640,54 @@ async fn main() -> anyhow::Result<()> {
     // Parse command line arguments using clap
     let args = Args::parse();
 
-    // Construct paths to documents and queries files
-    let documents_path = format!("{}/documents.parquet", args.dataset_path);
-    let queries_path = format!("{}/queries.parquet", args.dataset_path);
-
     println!("🚀 Sparse Index Block-Max WAND Benchmark");
     println!("{}", "=".repeat(60));
     println!("Configuration:");
-    println!("  Dataset: {}", args.dataset_path);
-    println!("  Documents: {documents_path}");
-    println!("  Queries: {queries_path}");
+    println!("  Dataset: Wikipedia SPLADE (from HuggingFace)");
+    println!("  Query file: {}", args.query_path);
     println!("  Num documents: {}", args.num_documents);
     println!("  Num queries: {}", args.num_queries);
+
+    // Load Wikipedia dataset
+    println!("\n📥 Downloading Wikipedia dataset from HuggingFace...");
+    let dataset = WikipediaSplade::init().await?;
+
+    println!("📄 Loading documents...");
+    let wiki_docs = dataset.documents().await?;
+
+    // Convert to SparseDocument and limit to requested number
+    let documents: Vec<SparseDocument> = wiki_docs
+        .into_iter()
+        .take(args.num_documents)
+        .map(|doc| SparseDocument {
+            doc_id: doc.doc_id,
+            url: doc.url,
+            title: doc.title,
+            body: doc.body,
+            sparse_vector: doc.sparse_vector,
+        })
+        .collect();
+
+    println!("✅ Loaded {} documents", documents.len());
+
+    // Load queries from local parquet file
+    println!("🔍 Loading queries from {}...", args.query_path);
+    let wiki_queries = WikipediaSplade::queries(&args.query_path).await?;
+
+    // Convert to SparseQuery and limit to requested number
+    let queries: Vec<SparseQuery> = wiki_queries
+        .into_iter()
+        .take(args.num_queries)
+        .map(|q| SparseQuery {
+            query_id: q.query_id,
+            text: q.text,
+            sparse_vector: q.sparse_vector,
+        })
+        .collect();
+
+    println!("✅ Loaded {} queries", queries.len());
+
+    // Print rest of configuration
     println!("  Top-k: {}", args.top_k);
     println!("  Block size: {}", args.block_size);
     println!("  Sort by URL: {}", args.sort_by_url);
@@ -918,16 +709,6 @@ async fn main() -> anyhow::Result<()> {
         println!("  Iterations per query: {}", args.iterations);
     }
     println!();
-
-    // Load documents
-    println!("📄 Loading documents...");
-    let documents = load_sparse_documents(documents_path, 0, args.num_documents)?;
-    println!("✅ Loaded {} documents", documents.len());
-
-    // Load queries
-    println!("🔍 Loading queries...");
-    let queries = load_sparse_queries(queries_path, 0, args.num_queries)?;
-    println!("✅ Loaded {} queries", queries.len());
 
     // Build sparse index
     let (temp_dir, provider, max_reader_id, offset_value_reader_id) = Box::pin(build_sparse_index(

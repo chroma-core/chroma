@@ -1440,6 +1440,7 @@ dependencies = [
  "reqwest 0.12.9",
  "serde",
  "serde_json",
+ "sprs",
  "tantivy",
  "tokio",
  "tokio-stream",

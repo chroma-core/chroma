@@ -7,8 +7,8 @@ edition = "2021"
 path = "src/lib.rs"
 
 [[example]]
-name = "sparse_wand_benchmark"
-path = "examples/sparse_wand_benchmark.rs"
+name = "sparse_vector_benchmark"
+path = "examples/sparse_vector_benchmark.rs"
 
 [dependencies]
 rand = { workspace = true }
@@ -44,11 +44,11 @@ indicatif = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 sprs = { workspace = true }
+chroma-benchmark = { workspace = true }
 
 [dev-dependencies]
 rayon = { workspace = true }
 criterion = { workspace = true }
-chroma-benchmark = { workspace = true }
 proptest = { workspace = true }
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { workspace = true }
