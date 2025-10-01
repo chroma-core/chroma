@@ -612,6 +612,58 @@ impl SqliteSysDb {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn create_task(
+        &self,
+        _name: String,
+        _operator_id: String,
+        _input_collection_id: chroma_types::CollectionUuid,
+        _output_collection_id: chroma_types::CollectionUuid,
+        _params: Option<String>,
+        _tenant_id: String,
+        _database_id: String,
+        _min_records_for_task: u64,
+    ) -> Result<chroma_types::TaskUuid, crate::CreateTaskError> {
+        // TODO: Implement this when task support is added to SqliteSysDb
+        Err(crate::CreateTaskError::FailedToCreateTask(
+            tonic::Status::unimplemented("Task operations not yet implemented in SqliteSysDb"),
+        ))
+    }
+
+    pub(crate) async fn get_task_by_name(
+        &self,
+        _tenant_id: String,
+        _database_id: String,
+        _task_name: String,
+    ) -> Result<Option<chroma_types::Task>, crate::GetTaskError> {
+        // TODO: Implement this when task support is added to SqliteSysDb
+        Err(crate::GetTaskError::FailedToGetTask(
+            tonic::Status::unimplemented("Task operations not yet implemented in SqliteSysDb"),
+        ))
+    }
+
+    pub(crate) async fn soft_delete_task(
+        &self,
+        _task_id: chroma_types::TaskUuid,
+    ) -> Result<(), crate::DeleteTaskError> {
+        // TODO: Implement this when task support is added to SqliteSysDb
+        Err(crate::DeleteTaskError::FailedToDeleteTask(
+            tonic::Status::unimplemented("Task operations not yet implemented in SqliteSysDb"),
+        ))
+    }
+
+    pub(crate) async fn delete_task_by_name(
+        &self,
+        _tenant_id: String,
+        _database_id: String,
+        _task_name: String,
+    ) -> Result<chroma_types::Task, crate::DeleteTaskError> {
+        // TODO: Implement this when task support is added to SqliteSysDb
+        Err(crate::DeleteTaskError::FailedToDeleteTask(
+            tonic::Status::unimplemented("Task operations not yet implemented in SqliteSysDb"),
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
     async fn get_collections_with_conn<'a, C>(
         &self,
         conn: C,

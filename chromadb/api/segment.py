@@ -902,6 +902,38 @@ class SegmentAPI(ServerAPI):
     def get_max_batch_size(self) -> int:
         return self._producer.max_batch_size
 
+    @override
+    def create_task(
+        self,
+        task_name: str,
+        operator_id: str,
+        input_collection_name: str,
+        output_collection_name: str,
+        params: Optional[str] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> tuple[bool, str]:
+        """Tasks are not supported in the Segment API (local embedded mode)."""
+        raise NotImplementedError(
+            "Tasks are only supported when connecting to a Chroma server via HttpClient. "
+            "The Segment API (embedded mode) does not support task operations."
+        )
+
+    @override
+    def remove_task(
+        self,
+        task_name: str,
+        input_collection_name: str,
+        delete_output: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """Tasks are not supported in the Segment API (local embedded mode)."""
+        raise NotImplementedError(
+            "Tasks are only supported when connecting to a Chroma server via HttpClient. "
+            "The Segment API (embedded mode) does not support task operations."
+        )
+
     # TODO: This could potentially cause race conditions in a distributed version of the
     # system, since the cache is only local.
     # TODO: promote collection -> topic to a base class method so that it can be

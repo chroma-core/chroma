@@ -48,6 +48,11 @@ var (
 	// Segment metadata errors
 	ErrUnknownSegmentMetadataType = errors.New("segment metadata value type not supported")
 
+	// Task errors
+	ErrTaskNotFound                  = errors.New("task not found")
+	ErrTaskUniqueConstraintViolation = errors.New("task unique constraint violation")
+	ErrTaskAlreadyExists             = errors.New("task already exists")
+
 	// Others
 	ErrCompactionOffsetSomehowAhead = errors.New("system invariant was violated. Compaction offset in sysdb should always be behind or equal to offset in log")
 )

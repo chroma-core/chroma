@@ -770,3 +770,53 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         database: str = DEFAULT_DATABASE,
     ) -> None:
         pass
+
+    @abstractmethod
+    def create_task(
+        self,
+        task_name: str,
+        operator_id: str,
+        input_collection_name: str,
+        output_collection_name: str,
+        params: Optional[str] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> tuple[bool, str]:
+        """Create a recurring task on a collection.
+
+        Args:
+            task_name: Unique name for this task instance
+            operator_id: Built-in operator identifier
+            input_collection_name: Source collection that triggers the task
+            output_collection_name: Target collection where task output is stored
+            params: Optional JSON string with operator-specific parameters
+            tenant: The tenant name
+            database: The database name
+
+        Returns:
+            tuple: (success: bool, task_id: str)
+        """
+        pass
+
+    @abstractmethod
+    def remove_task(
+        self,
+        task_name: str,
+        input_collection_name: str,
+        delete_output: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """Delete a task and prevent any further runs.
+
+        Args:
+            task_name: Name of the task to remove
+            input_collection_name: Name of the input collection the task is registered on
+            delete_output: Whether to also delete the output collection
+            tenant: The tenant name
+            database: The database name
+
+        Returns:
+            bool: True if successful
+        """
+        pass

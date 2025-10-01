@@ -523,6 +523,48 @@ message BatchGetCollectionSoftDeleteStatusResponse {
   map<string, bool> collection_id_to_is_soft_deleted = 1;
 }
 
+message CreateTaskRequest {
+  string name = 1;
+  string operator_id = 2;
+  string input_collection_id = 3;
+  string output_collection_id = 4;
+  string params = 5;
+  string tenant_id = 6;
+  string database_id = 7;
+  uint64 min_records_for_task = 8;
+}
+
+message CreateTaskResponse {
+  string task_id = 1;
+}
+
+message GetTaskByNameRequest {
+  string tenant_id = 1;
+  string database_id = 2;
+  string task_name = 3;
+}
+
+message GetTaskByNameResponse {
+  optional string task_id = 1;
+  optional string name = 2;
+  optional string operator_id = 3;
+  optional string input_collection_id = 4;
+  optional string output_collection_id = 5;
+  optional string params = 6;
+  optional int64 completion_offset = 7;
+  optional uint64 min_records_for_task = 8;
+}
+
+message DeleteTaskRequest {
+  string tenant_id = 1;
+  string database_id = 2;
+  string task_name = 3;
+}
+
+message DeleteTaskResponse {
+  bool success = 1;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -560,4 +602,7 @@ service SysDB {
   rpc DeleteCollectionVersion(DeleteCollectionVersionRequest) returns (DeleteCollectionVersionResponse) {}
   rpc BatchGetCollectionVersionFilePaths(BatchGetCollectionVersionFilePathsRequest) returns (BatchGetCollectionVersionFilePathsResponse) {}
   rpc BatchGetCollectionSoftDeleteStatus(BatchGetCollectionSoftDeleteStatusRequest) returns (BatchGetCollectionSoftDeleteStatusResponse) {}
+  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse) {}
+  rpc GetTaskByName(GetTaskByNameRequest) returns (GetTaskByNameResponse) {}
+  rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse) {}
 }
