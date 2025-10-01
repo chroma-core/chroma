@@ -38,6 +38,8 @@ pub enum LoginError {
     BrowserAuthFailed,
     #[error("Team {0} not found")]
     TeamNotFound(String),
+    #[error("Profile {0} already exists")]
+    ProfileAlreadyExists(String),
 }
 
 fn team_selection_prompt() -> String {
@@ -236,8 +238,54 @@ pub async fn browser_login(args: LoginArgs) -> Result<(), CliError> {
     Ok(())
 }
 
+pub async fn headless_login(args: LoginArgs) -> Result<(), CliError> {
+    let api_key = args.api_key.unwrap_or_default();
+
+    let mut profile_name = args.profile.unwrap_or_default();
+    profile_name = validate_profile_name(profile_name)?;
+
+    let mut profiles = read_profiles()?;
+
+    if profiles.contains_key(&profile_name) {
+        return Err(LoginError::ProfileAlreadyExists(profile_name).into());
+    }
+
+    let admin_client = get_admin_client(
+        Some(&Profile::new(api_key.clone(), profile_name.clone())),
+        args.dev,
+    );
+
+    let team_id = admin_client.get_tenant_id().await?;
+
+    let profile = Profile::new(api_key, team_id.clone());
+
+    let set_current = profiles.is_empty();
+    profiles.insert(profile_name.clone(), profile);
+    write_profiles(&profiles)?;
+
+    let mut config = read_config()?;
+
+    if set_current {
+        config.current_profile = profile_name.clone();
+        write_config(&config)?;
+    }
+    
+    if !config.current_profile.eq(&profile_name) {
+        println!("{}", set_profile_message(&profile_name));
+    }
+
+    println!("{}", next_steps_message());
+
+    Ok(())
+}
+
 pub fn login(args: LoginArgs) -> Result<(), CliError> {
     let runtime = tokio::runtime::Runtime::new().map_err(|_| DbError::RuntimeError)?;
-    runtime.block_on(async { browser_login(args).await })?;
+    runtime.block_on(async {
+        match (&args.api_key, &args.profile) {
+            (Some(_), Some(_)) => headless_login(args).await,
+            _ => browser_login(args).await,
+        }
+    })?;
     Ok(())
 }
