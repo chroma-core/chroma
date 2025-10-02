@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use figment::providers::{Env, Format, Yaml};
+use futures::stream::StreamExt;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 
@@ -16,16 +18,28 @@ use chroma_types::chroma_proto::heap_tender_service_server::{
     HeapTenderService, HeapTenderServiceServer,
 };
 use chroma_types::chroma_proto::{HeapSummaryRequest, HeapSummaryResponse};
-use wal3::{CursorStore, CursorStoreOptions, LogReader, LogReaderOptions};
+use chroma_types::{dirty_log_path_from_hostname, CollectionUuid, DirtyMarker};
+use wal3::{
+    Cursor, CursorName, CursorStore, CursorStoreOptions, LogPosition, LogReader, LogReaderOptions,
+    Witness,
+};
 
 use crate::dummy::DummyScheduler;
-use crate::HeapWriter;
+use crate::{Configuration, Error, HeapWriter, Triggerable};
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
+
+/// The path for the heap tended to on behalf of this hostname.
+pub fn heap_path_from_hostname(hostname: &str) -> String {
+    format!("heap/{}", hostname)
+}
+
+static HEAP_TENDER_CURSOR_NAME: CursorName =
+    unsafe { CursorName::from_string_unchecked("heap_tender") };
 
 //////////////////////////////////////////// HeapTender ////////////////////////////////////////////
 
@@ -36,11 +50,108 @@ struct HeapTender {
 }
 
 impl HeapTender {
-    fn tend_to_heap(&self) -> Result<(), Box<dyn chroma_error::ChromaError>> {
-        // 1.  load all dirty records from the reader up to a defined limit on number of collections, noting the last offset of the dirty log to which we read.
-        // 2.  call writer.push(all)
-        // 3.  update the cursor to the offset saved in step one
-        todo!();
+    async fn tend_to_heap(&self) -> Result<(), Error> {
+        let (witness, cursor, tended) = self.read_and_coalesce_dirty_log().await?;
+        // TODO(rescrv):  Do something with tended and update the cursor iff tended is false.
+        _ = tended;
+        if let Some(witness) = witness.as_ref() {
+            self.cursor
+                .save(&HEAP_TENDER_CURSOR_NAME, &cursor, witness)
+                .await?;
+        } else {
+            self.cursor
+                .init(&HEAP_TENDER_CURSOR_NAME, cursor.clone())
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn read_and_coalesce_dirty_log(
+        &self,
+    ) -> Result<(Option<Witness>, Cursor, Vec<(CollectionUuid, LogPosition)>), Error> {
+        let witness = self.cursor.load(&HEAP_TENDER_CURSOR_NAME).await?;
+        let position = self.reader.oldest_timestamp().await?;
+        let default = Cursor {
+            position,
+            epoch_us: position.offset(),
+            writer: "heap-tender".to_string(),
+        };
+        let start_cursor = witness
+            .as_ref()
+            .map(|w| w.cursor())
+            .unwrap_or(&default)
+            .clone();
+        let mut limit_cursor = start_cursor.clone();
+        tracing::info!("cursoring from {start_cursor:?}");
+        let dirty_fragments = match self
+            .reader
+            .scan(
+                start_cursor.position,
+                wal3::Limits {
+                    max_files: None,
+                    max_bytes: None,
+                    max_records: None,
+                },
+            )
+            .await
+        {
+            Ok(dirty_fragments) => dirty_fragments,
+            Err(wal3::Error::UninitializedLog) => {
+                tracing::info!("empty dirty log");
+                return Ok((witness, limit_cursor, vec![]));
+            }
+            Err(e) => {
+                return Err(Error::Wal3(e));
+            }
+        };
+        let dirty_futures = dirty_fragments
+            .iter()
+            .map(|fragment| async {
+                let (_, records, _) = self.reader.read_parquet(fragment).await?;
+                let dirty_markers = records
+                    .into_iter()
+                    .map(|x| -> Result<(LogPosition, DirtyMarker), Error> {
+                        let dirty = serde_json::from_slice::<DirtyMarker>(&x.1)?;
+                        Ok((x.0, dirty))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok::<_, Error>(dirty_markers)
+            })
+            .collect::<Vec<_>>();
+        let stream = futures::stream::iter(dirty_futures);
+        let mut buffered = stream.buffer_unordered(10);
+        let mut collections: HashMap<CollectionUuid, LogPosition> = HashMap::default();
+        while let Some(res) = buffered.next().await {
+            for (position, marker) in res? {
+                limit_cursor.position = std::cmp::max(limit_cursor.position, position + 1u64);
+                if let DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position,
+                    num_records,
+                    reinsert_count,
+                    ..
+                } = marker
+                {
+                    if reinsert_count == 0 {
+                        let collection_position = collections.entry(collection_id).or_default();
+                        *collection_position = std::cmp::max(
+                            *collection_position,
+                            LogPosition::from_offset(log_position.saturating_add(num_records)),
+                        );
+                    }
+                }
+            }
+        }
+        Ok((witness, limit_cursor, collections.into_iter().collect()))
+    }
+
+    async fn background(tender: Arc<Self>, poll_interval: Duration) {
+        loop {
+            tokio::time::sleep(poll_interval).await;
+            if let Err(err) = tender.tend_to_heap().await {
+                tracing::error!("could not roll up dirty log: {err:?}");
+            }
+        }
     }
 }
 
@@ -64,6 +175,9 @@ impl HeapTenderServer {
         let max_encoding_message_size = self.config.max_encoding_message_size;
         let max_decoding_message_size = self.config.max_decoding_message_size;
         let shutdown_grace_period = self.config.grpc_shutdown_grace_period;
+        let tender = Arc::clone(&self.tender);
+        let background =
+            tokio::task::spawn(HeapTender::background(tender, self.config.poll_interval));
 
         let server = Server::builder()
             .layer(chroma_tracing::GrpcServerTraceLayer)
@@ -89,6 +203,7 @@ impl HeapTenderServer {
         });
 
         let res = server.await;
+        background.abort();
         Ok(res?)
     }
 }
@@ -100,20 +215,21 @@ impl Configurable<HeapTenderServerConfig> for HeapTenderServer {
         registry: &chroma_config::registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let storage = Storage::try_from_config(&config.storage, registry).await?;
-        let prefix = "FOO".to_string();
+        let dirty_log_prefix = dirty_log_path_from_hostname(&config.my_member_id);
         let reader = LogReader::new(
             config.reader.clone(),
             Arc::new(storage.clone()),
-            prefix.clone(),
+            dirty_log_prefix.clone(),
         );
         let cursor = CursorStore::new(
             config.cursor.clone(),
             Arc::new(storage.clone()),
-            prefix.clone(),
+            dirty_log_prefix.clone(),
             "s3heap-tender".to_string(),
         );
+        let heap_prefix = heap_path_from_hostname(&config.my_member_id);
         let scheduler = Arc::new(DummyScheduler) as _;
-        let writer = HeapWriter::new(storage, prefix, scheduler)
+        let writer = HeapWriter::new(storage, heap_prefix, scheduler)
             .map_err(|e| -> Box<dyn chroma_error::ChromaError> { Box::new(e) })?;
         let tender = Arc::new(HeapTender {
             reader,
@@ -277,6 +393,12 @@ pub struct HeapTenderServerConfig {
     /// wal3 configuration of the cursor store.
     #[serde(default)]
     pub cursor: CursorStoreOptions,
+    /// Configuration of the HeapWriter.
+    #[serde(default)]
+    pub writer: Configuration,
+    /// Periodicity of poll from end of one poll of the dirty log to start of the next.
+    #[serde(default = "HeapTenderServerConfig::default_poll_interval")]
+    pub poll_interval: Duration,
     /// Maximum size in bytes for outgoing gRPC messages.
     #[serde(default = "HeapTenderServerConfig::default_max_encoding_message_size")]
     pub max_encoding_message_size: usize,
@@ -310,6 +432,10 @@ impl HeapTenderServerConfig {
         32_000_000
     }
 
+    fn default_poll_interval() -> Duration {
+        Duration::from_secs(10)
+    }
+
     fn default_grpc_shutdown_grace_period() -> Duration {
         Duration::from_secs(1)
     }
@@ -324,6 +450,8 @@ impl Default for HeapTenderServerConfig {
             storage: StorageConfig::default(),
             reader: LogReaderOptions::default(),
             cursor: CursorStoreOptions::default(),
+            writer: Configuration::default(),
+            poll_interval: Self::default_poll_interval(),
             max_encoding_message_size: Self::default_max_encoding_message_size(),
             max_decoding_message_size: Self::default_max_decoding_message_size(),
             grpc_shutdown_grace_period: Self::default_grpc_shutdown_grace_period(),

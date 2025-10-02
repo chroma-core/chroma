@@ -14,6 +14,7 @@ figment = { workspace = true }
 parking_lot = { workspace = true }
 parquet = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }

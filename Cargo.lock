@@ -7147,6 +7147,7 @@ dependencies = [
  "parking_lot",
  "parquet",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
  "tonic",

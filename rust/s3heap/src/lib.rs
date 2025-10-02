@@ -63,7 +63,6 @@
 
 #![deny(missing_docs)]
 #![warn(clippy::all)]
-#![deny(unsafe_code)]
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -119,6 +118,9 @@ pub enum Error {
     /// Storage backend error
     #[error("storage error: {0}")]
     Storage(#[from] chroma_storage::StorageError),
+    /// wal3 error
+    #[error("wal3 error: {0}")]
+    Wal3(#[from] wal3::Error),
     /// UUID parsing error
     #[error("uuid error: {0}")]
     Uuid(#[from] uuid::Error),
@@ -128,6 +130,10 @@ pub enum Error {
     /// Arrow data processing error
     #[error("arrow error: {0}")]
     Arrow(String),
+    /// JSON data processing error
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+    /// Date parsing error
     /// Date parsing error
     #[error("invalid date: {0}")]
     ParseDate(#[from] chrono::ParseError),
@@ -146,9 +152,11 @@ impl chroma_error::ChromaError for Error {
             Error::InvalidBucket(_) => ErrorCodes::InvalidArgument,
             Error::PartialLoadFailure(..) => ErrorCodes::Internal,
             Error::InvalidPrefix(_) => ErrorCodes::InvalidArgument,
-            Error::Storage(_) => ErrorCodes::Internal,
+            Error::Storage(e) => e.code(),
+            Error::Wal3(e) => e.code(),
             Error::Uuid(_) => ErrorCodes::InvalidArgument,
             Error::Parquet(_) => ErrorCodes::Internal,
+            Error::Json(_) => ErrorCodes::Internal,
             Error::Arrow(_) => ErrorCodes::Internal,
             Error::ParseDate(_) => ErrorCodes::InvalidArgument,
             Error::RoundError(_) => ErrorCodes::Internal,

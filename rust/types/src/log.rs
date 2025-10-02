@@ -1,5 +1,11 @@
 use crate::CollectionUuid;
 
+////////////////////////////////////// constants and variables /////////////////////////////////////
+
+pub fn dirty_log_path_from_hostname(hostname: &str) -> String {
+    format!("dirty-{}", hostname)
+}
+
 //////////////////////////////////////////// DirtyMarker ///////////////////////////////////////////
 
 /// Markers for tracking collection compaction state changes.

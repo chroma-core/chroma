@@ -32,6 +32,7 @@ use chroma_types::chroma_proto::{
     UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
+use chroma_types::dirty_log_path_from_hostname;
 use chroma_types::{CollectionUuid, DirtyMarker};
 use figment::providers::{Env, Format, Yaml};
 use futures::stream::StreamExt;
@@ -492,7 +493,7 @@ pub struct MarkDirty {
 
 impl MarkDirty {
     pub fn path_for_hostname(hostname: &str) -> String {
-        format!("dirty-{}", hostname)
+        dirty_log_path_from_hostname(hostname)
     }
 }
 
