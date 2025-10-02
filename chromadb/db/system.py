@@ -5,6 +5,7 @@ from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
 )
+from chromadb.api.types import Schema
 from chromadb.types import (
     Collection,
     CollectionAndSegments,
@@ -104,6 +105,7 @@ class SysDB(Component):
         self,
         id: UUID,
         name: str,
+        schema: Optional[Schema],
         configuration: CreateCollectionConfiguration,
         segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,

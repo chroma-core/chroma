@@ -32,6 +32,7 @@ from chromadb.api.types import (
     Embeddings,
     IDs,
     Include,
+    Schema,
     Metadatas,
     URIs,
     Where,
@@ -293,6 +294,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
@@ -305,6 +307,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             if configuration
             else None
         )
+        serialized_schema = schema.serialize_to_json() if schema else None
         resp_json = await self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections",
@@ -312,6 +315,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 "name": name,
                 "metadata": metadata,
                 "configuration": config_json,
+                "schema": serialized_schema,
                 "get_or_create": get_or_create,
             },
         )
@@ -343,6 +347,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def get_or_create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
@@ -350,6 +355,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> CollectionModel:
         return await self.create_collection(
             name=name,
+            schema=schema,
             configuration=configuration,
             metadata=metadata,
             get_or_create=True,

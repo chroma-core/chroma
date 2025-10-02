@@ -2,6 +2,7 @@ from typing import Dict, Any, Type, Set
 from chromadb.api.types import (
     EmbeddingFunction,
     DefaultEmbeddingFunction,
+    SparseEmbeddingFunction,
 )
 
 # Import all embedding functions
@@ -140,6 +141,12 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "default": DefaultEmbeddingFunction,
     "cloudflare_workers_ai": CloudflareWorkersAIEmbeddingFunction,
     "together_ai": TogetherAIEmbeddingFunction,
+}
+
+sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {
+    "huggingface_sparse": HuggingFaceSparseEmbeddingFunction,
+    "fastembed_sparse": FastembedSparseEmbeddingFunction,
+    "bm25": Bm25EmbeddingFunction,
 }
 
 

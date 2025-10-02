@@ -21,6 +21,7 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     Loadable,
     Metadatas,
+    Schema,
     URIs,
     Where,
     QueryResult,
@@ -368,6 +369,7 @@ class ClientAPI(BaseAPI, ABC):
     def create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
@@ -437,6 +439,7 @@ class ClientAPI(BaseAPI, ABC):
     def get_or_create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
@@ -589,6 +592,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
@@ -610,6 +614,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def get_or_create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,

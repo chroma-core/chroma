@@ -34,6 +34,7 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
     IncludeMetadataDocumentsEmbeddings,
+    Schema,
     SearchResult,
 )
 
@@ -192,6 +193,7 @@ class RustBindingsAPI(ServerAPI):
             CollectionModel(
                 id=collection.id,
                 name=collection.name,
+                serialized_schema=None,
                 configuration_json=collection.configuration,
                 metadata=collection.metadata,
                 dimension=collection.dimension,
@@ -205,6 +207,7 @@ class RustBindingsAPI(ServerAPI):
     def create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
@@ -233,6 +236,7 @@ class RustBindingsAPI(ServerAPI):
             id=collection.id,
             name=collection.name,
             configuration_json=collection.configuration,
+            serialized_schema=None,
             metadata=collection.metadata,
             dimension=collection.dimension,
             tenant=collection.tenant,
@@ -252,6 +256,7 @@ class RustBindingsAPI(ServerAPI):
             id=collection.id,
             name=collection.name,
             configuration_json=collection.configuration,
+            serialized_schema=None,
             metadata=collection.metadata,
             dimension=collection.dimension,
             tenant=collection.tenant,
@@ -262,13 +267,14 @@ class RustBindingsAPI(ServerAPI):
     def get_or_create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         return self.create_collection(
-            name, configuration, metadata, True, tenant, database
+            name, schema, configuration, metadata, True, tenant, database
         )
 
     @override
@@ -320,9 +326,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> SearchResult:
-        raise NotImplementedError(
-            "Search is not implemented for Local Chroma"
-        )
+        raise NotImplementedError("Search is not implemented for Local Chroma")
 
     @override
     def _count(

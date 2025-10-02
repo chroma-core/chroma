@@ -29,6 +29,7 @@ from chromadb.api.types import (
     Loadable,
     Metadatas,
     QueryResult,
+    Schema,
     URIs,
     DefaultEmbeddingFunction,
 )
@@ -176,6 +177,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
@@ -200,6 +202,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
 
         model = await self._server.create_collection(
             name=name,
+            schema=schema,
             configuration=configuration,
             metadata=metadata,
             tenant=self.tenant,
@@ -244,6 +247,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def get_or_create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
@@ -264,6 +268,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             configuration["embedding_function"] = embedding_function
         model = await self._server.get_or_create_collection(
             name=name,
+            schema=schema,
             configuration=configuration,
             metadata=metadata,
             tenant=self.tenant,

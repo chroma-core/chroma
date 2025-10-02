@@ -8,6 +8,7 @@ from chromadb.api.collection_configuration import (
     update_collection_configuration_to_json_str,
     CollectionMetadata,
 )
+from chromadb.api.types import Schema
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
 from chromadb.db.system import SysDB
 from chromadb.errors import NotFoundError, UniqueConstraintError, InternalError
@@ -315,6 +316,7 @@ class GrpcSysDB(SysDB):
         self,
         id: UUID,
         name: str,
+        schema: Optional[Schema],
         configuration: CreateCollectionConfiguration,
         segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
