@@ -2018,6 +2018,132 @@ impl ChromaError for ExecutorError {
     }
 }
 
+////////////////////////// Task Operations //////////////////////////
+
+#[non_exhaustive]
+#[derive(Clone, Debug, Deserialize, Serialize, Validate, ToSchema)]
+pub struct CreateTaskRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    #[validate(length(min = 1))]
+    pub task_name: String,
+    pub operator_id: String,
+    pub input_collection_name: String,
+    pub output_collection_name: String,
+    pub params: Option<String>,
+}
+
+impl CreateTaskRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        task_name: String,
+        operator_id: String,
+        input_collection_name: String,
+        output_collection_name: String,
+        params: Option<String>,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            task_name,
+            operator_id,
+            input_collection_name,
+            output_collection_name,
+            params,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct CreateTaskResponse {
+    pub success: bool,
+    pub task_id: String,
+}
+
+#[derive(Error, Debug)]
+pub enum AddTaskError {
+    #[error("Task with name [{0}] already exists")]
+    AlreadyExists(String),
+    #[error("Input collection [{0}] does not exist")]
+    InputCollectionNotFound(String),
+    #[error("Output collection [{0}] already exists")]
+    OutputCollectionExists(String),
+    #[error(transparent)]
+    Validation(#[from] ChromaValidationError),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for AddTaskError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            AddTaskError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            AddTaskError::InputCollectionNotFound(_) => ErrorCodes::NotFound,
+            AddTaskError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
+            AddTaskError::Validation(err) => err.code(),
+            AddTaskError::Internal(err) => err.code(),
+        }
+    }
+}
+
+#[non_exhaustive]
+#[derive(Clone, Debug, Deserialize, Validate, Serialize, ToSchema)]
+pub struct RemoveTaskRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    #[validate(length(min = 1))]
+    pub task_name: String,
+    /// Whether to delete the output collection as well
+    #[serde(default)]
+    pub delete_output: bool,
+}
+
+impl RemoveTaskRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        task_name: String,
+        delete_output: bool,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            task_name,
+            delete_output,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct RemoveTaskResponse {
+    pub success: bool,
+}
+
+#[derive(Error, Debug)]
+pub enum RemoveTaskError {
+    #[error("Task with name [{0}] does not exist")]
+    NotFound(String),
+    #[error(transparent)]
+    Validation(#[from] ChromaValidationError),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for RemoveTaskError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            RemoveTaskError::NotFound(_) => ErrorCodes::NotFound,
+            RemoveTaskError::Validation(err) => err.code(),
+            RemoveTaskError::Internal(err) => err.code(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

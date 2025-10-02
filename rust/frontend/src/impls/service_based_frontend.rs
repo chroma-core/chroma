@@ -20,26 +20,27 @@ use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn, Search},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
+    AddTaskError, Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
     CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError,
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantError, CreateTenantRequest, CreateTenantResponse,
-    DeleteCollectionError, DeleteCollectionRecordsError, DeleteCollectionRecordsRequest,
-    DeleteCollectionRecordsResponse, DeleteCollectionRequest, DeleteDatabaseError,
-    DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError, ForkCollectionRequest,
-    ForkCollectionResponse, GetCollectionByCrnError, GetCollectionByCrnRequest,
-    GetCollectionByCrnResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
-    GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
-    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
-    HeartbeatError, HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
-    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where,
+    CreateDatabaseResponse, CreateTaskRequest, CreateTaskResponse, CreateTenantError,
+    CreateTenantRequest, CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
+    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
+    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError,
+    ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
+    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
+    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
+    Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
+    ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError,
+    QueryRequest, QueryResponse, RemoveTaskError, RemoveTaskRequest, RemoveTaskResponse,
+    ResetError, ResetResponse, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType,
+    SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
+    VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -1740,6 +1741,185 @@ impl ServiceBasedFrontend {
             .search_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
         res
+    }
+
+    pub async fn create_task(
+        &mut self,
+        CreateTaskRequest {
+            tenant_id,
+            database_name,
+            task_name,
+            operator_id,
+            input_collection_name,
+            output_collection_name,
+            params,
+            ..
+        }: CreateTaskRequest,
+    ) -> Result<CreateTaskResponse, AddTaskError> {
+        // TODO: Make min_records_for_task configurable
+        const DEFAULT_MIN_RECORDS_FOR_TASK: u64 = 100;
+        // 1. Check input collection exists
+        let input_collection = self
+            .get_collection(
+                GetCollectionRequest::try_new(
+                    tenant_id.clone(),
+                    database_name.clone(),
+                    input_collection_name.clone(),
+                )
+                .map_err(AddTaskError::Validation)?,
+            )
+            .await
+            .map_err(|_| AddTaskError::InputCollectionNotFound(input_collection_name.clone()))?;
+
+        // 2. Check output collection doesn't exist
+        let output_collection_exists = self
+            .get_collection(
+                GetCollectionRequest::try_new(
+                    tenant_id.clone(),
+                    database_name.clone(),
+                    output_collection_name.clone(),
+                )
+                .map_err(AddTaskError::Validation)?,
+            )
+            .await
+            .is_ok();
+
+        if output_collection_exists {
+            return Err(AddTaskError::OutputCollectionExists(
+                output_collection_name.clone(),
+            ));
+        }
+
+        // 3. Check if task with same name already exists
+        let existing_task = self
+            .sysdb_client
+            .get_task_by_name(
+                tenant_id.clone(),
+                input_collection.database_id.to_string(),
+                task_name.clone(),
+            )
+            .await
+            .map_err(|e| e.boxed())?;
+
+        if existing_task.is_some() {
+            return Err(AddTaskError::AlreadyExists(task_name.clone()));
+        }
+
+        // TODO: Create output collection and task atomically in a single SysDB transaction
+        // This should be a single call like `create_task_with_output_collection()` to ensure
+        // atomicity and avoid orphaned collections if task creation fails
+
+        // 4. Create output collection
+        let create_collection_request = CreateCollectionRequest::try_new(
+            tenant_id.clone(),
+            database_name.clone(),
+            output_collection_name.clone(),
+            None,
+            None,
+            false,
+        )
+        .map_err(AddTaskError::Validation)?;
+
+        let output_collection = self
+            .create_collection(create_collection_request)
+            .await
+            .map_err(|e| e.boxed())?;
+
+        // 5. Create task in SysDB
+        let task_id = self
+            .sysdb_client
+            .create_task(
+                task_name.clone(),
+                operator_id,
+                input_collection.collection_id,
+                output_collection.collection_id,
+                params,
+                tenant_id,
+                input_collection.database_id.to_string(),
+                DEFAULT_MIN_RECORDS_FOR_TASK,
+            )
+            .await
+            .map_err(|e| match e {
+                chroma_sysdb::CreateTaskError::AlreadyExists => {
+                    AddTaskError::AlreadyExists(task_name.clone())
+                }
+                chroma_sysdb::CreateTaskError::FailedToCreateTask(s) => {
+                    AddTaskError::Internal(Box::new(chroma_error::TonicError(s)))
+                }
+            })?;
+
+        // TODO: Trigger initial task run via heaptender
+
+        Ok(CreateTaskResponse {
+            success: true,
+            task_id: task_id.to_string(),
+        })
+    }
+
+    pub async fn remove_task(
+        &mut self,
+        RemoveTaskRequest {
+            tenant_id,
+            database_name,
+            task_name,
+            delete_output,
+            ..
+        }: RemoveTaskRequest,
+    ) -> Result<RemoveTaskResponse, RemoveTaskError> {
+        // Get database to resolve ID
+        let get_db_request = GetDatabaseRequest::try_new(tenant_id.clone(), database_name.clone())
+            .map_err(RemoveTaskError::Validation)?;
+        let database = self
+            .get_database(get_db_request)
+            .await
+            .map_err(|e| e.boxed())?;
+
+        // Delete task by name (combines lookup and soft delete in one SysDB call)
+        let task = self
+            .sysdb_client
+            .delete_task_by_name(
+                tenant_id.clone(),
+                database.id.to_string(),
+                task_name.clone(),
+            )
+            .await
+            .map_err(|e| match e {
+                chroma_sysdb::DeleteTaskError::NotFound => {
+                    RemoveTaskError::NotFound(task_name.clone())
+                }
+                chroma_sysdb::DeleteTaskError::FailedToDeleteTask(s) => {
+                    RemoveTaskError::Internal(Box::new(chroma_error::TonicError(s)))
+                }
+            })?;
+
+        // Optionally delete the output collection
+        if delete_output {
+            // Get collection by its UUID to retrieve its name
+            let collections = self
+                .sysdb_client
+                .get_collections(GetCollectionsOptions {
+                    collection_id: Some(task.output_collection_id),
+                    ..Default::default()
+                })
+                .await
+                .map_err(|e| e.boxed())?;
+
+            if let Some(output_collection) = collections.first() {
+                let delete_request = DeleteCollectionRequest::try_new(
+                    tenant_id.clone(),
+                    output_collection.database.clone(),
+                    output_collection.name.clone(),
+                )
+                .map_err(RemoveTaskError::Validation)?;
+
+                let _ = self.delete_collection(delete_request).await;
+                // Ignore errors - if deletion fails, it can be cleaned up later
+            }
+        }
+
+        // TODO: Remove task from collection's task manifest in S3
+
+        Ok(RemoveTaskResponse { success: true })
     }
 
     pub async fn healthcheck(&self) -> HealthCheckResponse {

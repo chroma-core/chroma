@@ -320,9 +320,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> SearchResult:
-        raise NotImplementedError(
-            "Search is not implemented for Local Chroma"
-        )
+        raise NotImplementedError("Search is not implemented for Local Chroma")
 
     @override
     def _count(
@@ -582,6 +580,38 @@ class RustBindingsAPI(ServerAPI):
     @override
     def get_max_batch_size(self) -> int:
         return self.bindings.get_max_batch_size()
+
+    @override
+    def create_task(
+        self,
+        task_name: str,
+        operator_id: str,
+        input_collection_name: str,
+        output_collection_name: str,
+        params: Optional[str] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> tuple[bool, str]:
+        """Tasks are not supported in the Rust bindings (local embedded mode)."""
+        raise NotImplementedError(
+            "Tasks are only supported when connecting to a Chroma server via HttpClient. "
+            "The Rust bindings (embedded mode) do not support task operations."
+        )
+
+    @override
+    def remove_task(
+        self,
+        task_name: str,
+        input_collection_name: str,
+        delete_output: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """Tasks are not supported in the Rust bindings (local embedded mode)."""
+        raise NotImplementedError(
+            "Tasks are only supported when connecting to a Chroma server via HttpClient. "
+            "The Rust bindings (embedded mode) do not support task operations."
+        )
 
     # TODO: Remove this if it's not planned to be used
     @override

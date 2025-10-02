@@ -327,29 +327,29 @@ class Collection(CollectionCommon["ServerAPI"]):
             from chromadb.execution.expression import (
                 Search, Key, K, Knn, Val
             )
-            
+
             # Note: K is an alias for Key, so K.DOCUMENT == Key.DOCUMENT
             search = (Search()
                 .where((K("category") == "science") & (K("score") > 0.5))
                 .rank(Knn(query=[0.1, 0.2, 0.3]) * 0.8 + Val(0.5) * 0.2)
                 .limit(10, offset=0)
                 .select(K.DOCUMENT, K.SCORE, "title"))
-            
+
             # Direct construction
             from chromadb.execution.expression import (
                 Search, Eq, And, Gt, Knn, Limit, Select, Key
             )
-            
+
             search = Search(
                 where=And([Eq("category", "science"), Gt("score", 0.5)]),
                 rank=Knn(query=[0.1, 0.2, 0.3]),
                 limit=Limit(offset=0, limit=10),
                 select=Select(keys={Key.DOCUMENT, Key.SCORE, "title"})
             )
-            
+
             # Single search
             result = collection.search(search)
-            
+
             # Multiple searches at once
             searches = [
                 Search().where(K("type") == "article").rank(Knn(query=[0.1, 0.2])),
@@ -487,6 +487,67 @@ class Collection(CollectionCommon["ServerAPI"]):
             ids=delete_request["ids"],
             where=delete_request["where"],
             where_document=delete_request["where_document"],
+            tenant=self.tenant,
+            database=self.database,
+        )
+
+    def create_task(
+        self,
+        name: str,
+        operator_id: str,
+        output_collection: str,
+        params: Optional[str] = None,
+    ) -> tuple[bool, str]:
+        """Create a recurring task that processes this collection.
+
+        Args:
+            name: Unique name for this task instance
+            operator_id: Built-in operator identifier (e.g., "record_counter")
+            output_collection: Name of the collection where task output will be stored
+            params: Optional JSON string with operator-specific parameters
+
+        Returns:
+            tuple: (success: bool, task_id: str)
+
+        Example:
+            >>> success, task_id = collection.create_task(
+            ...     name="count_docs",
+            ...     operator_id="record_counter",
+            ...     output_collection="doc_counts",
+            ...     params=None
+            ... )
+        """
+        return self._client.create_task(
+            task_name=name,
+            operator_id=operator_id,
+            input_collection_name=self.name,
+            output_collection_name=output_collection,
+            params=params,
+            tenant=self.tenant,
+            database=self.database,
+        )
+
+    def remove_task(
+        self,
+        name: str,
+        delete_output: bool = False,
+    ) -> bool:
+        """Delete a task and prevent any further runs.
+
+        Args:
+            name: Name of the task to remove
+            delete_output: Whether to also delete the output collection. Defaults to False.
+
+        Returns:
+            bool: True if successful
+
+        Example:
+            >>> success = collection.remove_task("count_docs", delete_output=True)
+        """
+        return self._client.remove_task(
+            task_name=name,
+            input_collection_name=self.name,
+            delete_output=delete_output,
             tenant=self.tenant,
             database=self.database,
         )

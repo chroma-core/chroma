@@ -695,3 +695,64 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         pre_flight_checks = self.get_pre_flight_checks()
         max_batch_size = cast(int, pre_flight_checks.get("max_batch_size", -1))
         return max_batch_size
+
+    @trace_method("FastAPI.create_task", OpenTelemetryGranularity.ALL)
+    @override
+    def create_task(
+        self,
+        task_name: str,
+        operator_id: str,
+        input_collection_name: str,
+        output_collection_name: str,
+        params: Optional[str] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> tuple[bool, str]:
+        """Register a recurring task on a collection."""
+        # Get collection ID from name
+        collection = self.get_collection(
+            input_collection_name, tenant=tenant, database=database
+        )
+
+        resp_json = self._make_request(
+            "post",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection.id}/tasks/create",
+            json={
+                "tenant_id": tenant,
+                "database_name": database,
+                "task_name": task_name,
+                "operator_id": operator_id,
+                "input_collection_name": input_collection_name,
+                "output_collection_name": output_collection_name,
+                "params": params,
+            },
+        )
+        return cast(bool, resp_json["success"]), cast(str, resp_json["task_id"])
+
+    @trace_method("FastAPI.remove_task", OpenTelemetryGranularity.ALL)
+    @override
+    def remove_task(
+        self,
+        task_name: str,
+        input_collection_name: str,
+        delete_output: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """Delete a task and prevent any further runs."""
+        # Get collection ID from name
+        collection = self.get_collection(
+            input_collection_name, tenant=tenant, database=database
+        )
+
+        resp_json = self._make_request(
+            "post",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection.id}/tasks/delete",
+            json={
+                "tenant_id": tenant,
+                "database_name": database,
+                "task_name": task_name,
+                "delete_output": delete_output,
+            },
+        )
+        return cast(bool, resp_json["success"])

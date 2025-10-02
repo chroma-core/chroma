@@ -16,16 +16,16 @@ use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
     CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
     CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
-    DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    GetCollectionByCrnRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
-    GetRequest, GetResponse, GetTenantRequest, GetTenantResponse, GetUserIdentityResponse,
-    HeartbeatResponse, IncludeList, InternalCollectionConfiguration,
+    CreateDatabaseResponse, CreateTaskRequest, CreateTaskResponse, CreateTenantRequest,
+    CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
+    DeleteDatabaseResponse, GetCollectionByCrnRequest, GetCollectionRequest, GetDatabaseRequest,
+    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
+    GetUserIdentityResponse, HeartbeatResponse, IncludeList, InternalCollectionConfiguration,
     InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    SearchRequest, SearchResponse, UpdateCollectionConfiguration, UpdateCollectionRecordsResponse,
-    UpdateCollectionResponse, UpdateMetadata, UpdateTenantRequest, UpdateTenantResponse,
-    UpsertCollectionRecordsResponse,
+    RemoveTaskRequest, RemoveTaskResponse, SearchRequest, SearchResponse,
+    UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
+    UpdateMetadata, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
@@ -150,6 +150,8 @@ pub struct Metrics {
     collection_get: Counter<u64>,
     collection_query: Counter<u64>,
     collection_search: Counter<u64>,
+    create_task: Counter<u64>,
+    remove_task: Counter<u64>,
 }
 
 impl Metrics {
@@ -184,6 +186,8 @@ impl Metrics {
             collection_get: meter.u64_counter("collection_get").build(),
             collection_query: meter.u64_counter("collection_query").build(),
             collection_search: meter.u64_counter("collection_search").build(),
+            create_task: meter.u64_counter("create_task").build(),
+            remove_task: meter.u64_counter("remove_task").build(),
         }
     }
 }
@@ -324,6 +328,14 @@ impl FrontendServer {
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
                 post(collection_search),
+            )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/tasks/create",
+                post(create_task),
+            )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/tasks/delete",
+                post(remove_task),
             )
             .merge(docs_router)
             .with_state(self)
@@ -2226,6 +2238,96 @@ async fn collection_search(
     Ok(Json(res))
 }
 
+/// Register a new task for a collection
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/tasks/create",
+    request_body = CreateTaskRequest,
+    responses(
+        (status = 200, description = "Task created successfully", body = CreateTaskResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection ID")
+    )
+)]
+async fn create_task(
+    headers: HeaderMap,
+    Path((tenant, database, _collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    TracedJson(request): TracedJson<CreateTaskRequest>,
+) -> Result<Json<CreateTaskResponse>, ServerError> {
+    server.metrics.create_task.add(1, &[]);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::CreateTask,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: None,
+            },
+        )
+        .await?;
+
+    let _guard = server.scorecard_request(&[
+        "op:create_task",
+        format!("tenant:{}", tenant).as_str(),
+        format!("database:{}", database).as_str(),
+    ])?;
+
+    let res = server.frontend.create_task(request).await?;
+    Ok(Json(res))
+}
+
+/// Remove a task
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/tasks/delete",
+    request_body = RemoveTaskRequest,
+    responses(
+        (status = 200, description = "Task removed successfully", body = RemoveTaskResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection ID")
+    )
+)]
+async fn remove_task(
+    headers: HeaderMap,
+    Path((tenant, database_name, _collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    TracedJson(request): TracedJson<RemoveTaskRequest>,
+) -> Result<Json<RemoveTaskResponse>, ServerError> {
+    server.metrics.remove_task.add(1, &[]);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::RemoveTask,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database_name.clone()),
+                collection: None,
+            },
+        )
+        .await?;
+
+    let _guard = server.scorecard_request(&[
+        "op:remove_task",
+        format!("tenant:{}", tenant).as_str(),
+        format!("database:{}", database_name).as_str(),
+    ])?;
+
+    let res = server.frontend.remove_task(request).await?;
+    Ok(Json(res))
+}
+
 async fn v1_deprecation_notice() -> Response {
     let err_response = ErrorResponse::new(
         "Unimplemented".to_string(),
@@ -2284,6 +2386,8 @@ impl Modify for ChromaTokenSecurityAddon {
         collection_get,
         collection_query,
         collection_search,
+        create_task,
+        remove_task,
     ),
     // Apply our new security scheme here
     modifiers(&ChromaTokenSecurityAddon)

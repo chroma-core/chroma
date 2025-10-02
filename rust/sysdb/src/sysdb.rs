@@ -1535,6 +1535,153 @@ impl GrpcSysDb {
             .map_err(|e| TonicError(e).boxed())?;
         Ok(ResetResponse {})
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_task(
+        &mut self,
+        name: String,
+        operator_id: String,
+        input_collection_id: chroma_types::CollectionUuid,
+        output_collection_id: chroma_types::CollectionUuid,
+        params: Option<String>,
+        tenant_id: String,
+        database_id: String,
+        min_records_for_task: u64,
+    ) -> Result<chroma_types::TaskUuid, CreateTaskError> {
+        let req = chroma_proto::CreateTaskRequest {
+            name: name.clone(),
+            operator_id: operator_id.clone(),
+            input_collection_id: input_collection_id.to_string(),
+            output_collection_id: output_collection_id.to_string(),
+            params: params.clone().unwrap_or_else(|| "{}".to_string()),
+            tenant_id: tenant_id.clone(),
+            database_id: database_id.clone(),
+            min_records_for_task,
+        };
+
+        let response = self.client.create_task(req).await?.into_inner();
+
+        // Parse the returned task_id
+        let task_id =
+            chroma_types::TaskUuid(uuid::Uuid::parse_str(&response.task_id).map_err(|e| {
+                CreateTaskError::FailedToCreateTask(tonic::Status::internal(format!(
+                    "Invalid task_id returned: {}",
+                    e
+                )))
+            })?);
+
+        // Return the created task
+        Ok(task_id)
+    }
+
+    pub async fn get_task_by_name(
+        &mut self,
+        tenant_id: String,
+        database_id: String,
+        task_name: String,
+    ) -> Result<Option<chroma_types::Task>, GetTaskError> {
+        let req = chroma_proto::GetTaskByNameRequest {
+            tenant_id: tenant_id.clone(),
+            database_id: database_id.clone(),
+            task_name: task_name.clone(),
+        };
+
+        let response = self.client.get_task_by_name(req).await?.into_inner();
+
+        // If response has no task_id, task was not found
+        if response.task_id.is_none() {
+            return Ok(None);
+        }
+
+        // Parse the response and construct Task
+        let task_id = chroma_types::TaskUuid(
+            uuid::Uuid::parse_str(&response.task_id.unwrap()).map_err(|e| GetTaskError::Uuid(e))?,
+        );
+
+        let operator_id = response.operator_id.unwrap_or_default();
+
+        let input_collection_id_str = response.input_collection_id.unwrap_or_default();
+        let input_collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&input_collection_id_str).map_err(|e| {
+                GetTaskError::FailedToGetTask(tonic::Status::internal(format!(
+                    "Invalid input_collection_id UUID: {} - {}",
+                    input_collection_id_str, e
+                )))
+            })?,
+        );
+
+        let output_collection_id_str = response.output_collection_id.unwrap_or_default();
+        let output_collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&output_collection_id_str).map_err(|e| {
+                GetTaskError::FailedToGetTask(tonic::Status::internal(format!(
+                    "Invalid output_collection_id UUID: {} - {}",
+                    output_collection_id_str, e
+                )))
+            })?,
+        );
+
+        Ok(Some(chroma_types::Task {
+            id: task_id,
+            name: response.name.unwrap_or(task_name),
+            operator_id,
+            input_collection_id,
+            output_collection_id,
+            params: Some(response.params.unwrap_or_default()),
+            tenant_id,
+            database_id,
+            last_run: None,
+            next_run: None, // Task scheduling info not returned in this API
+            completion_offset: response.completion_offset.unwrap_or(0) as u64,
+            min_records_for_task: response.min_records_for_task.unwrap_or(100),
+            is_deleted: false,
+            created_at: std::time::SystemTime::now(),
+            updated_at: std::time::SystemTime::now(),
+        }))
+    }
+
+    pub async fn soft_delete_task(
+        &mut self,
+        _task_id: chroma_types::TaskUuid,
+    ) -> Result<(), DeleteTaskError> {
+        // Note: The gRPC DeleteTask API requires tenant_id, database_id, and task_name.
+        // We cannot implement this method with just a task_id.
+        // Callers should use delete_task_by_name() instead, which has all required parameters.
+        Err(DeleteTaskError::FailedToDeleteTask(
+            tonic::Status::unimplemented(
+                "soft_delete_task by ID not supported - use delete_task_by_name instead",
+            ),
+        ))
+    }
+
+    pub async fn delete_task_by_name(
+        &mut self,
+        tenant_id: String,
+        database_id: String,
+        task_name: String,
+    ) -> Result<chroma_types::Task, DeleteTaskError> {
+        // First, get the task to return its information
+        let task = self
+            .get_task_by_name(tenant_id.clone(), database_id.clone(), task_name.clone())
+            .await
+            .map_err(|e| match e {
+                GetTaskError::FailedToGetTask(s) => DeleteTaskError::FailedToDeleteTask(s),
+                GetTaskError::Uuid(_) => DeleteTaskError::FailedToDeleteTask(
+                    tonic::Status::internal("Invalid UUID in task data"),
+                ),
+            })?
+            .ok_or(DeleteTaskError::NotFound)?;
+
+        // Then delete it
+        let req = chroma_proto::DeleteTaskRequest {
+            tenant_id,
+            database_id,
+            task_name,
+        };
+
+        self.client.delete_task(req).await?;
+
+        Ok(task)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -1615,6 +1762,164 @@ impl ChromaError for DeleteCollectionVersionError {
     fn code(&self) -> ErrorCodes {
         match self {
             DeleteCollectionVersionError::FailedToDeleteVersion(e) => e.code().into(),
+        }
+    }
+}
+
+////////////////////////// Task Operations //////////////////////////
+
+impl SysDb {
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_task(
+        &mut self,
+        name: String,
+        operator_id: String,
+        input_collection_id: chroma_types::CollectionUuid,
+        output_collection_id: chroma_types::CollectionUuid,
+        params: Option<String>,
+        tenant_id: String,
+        database_id: String,
+        min_records_for_task: u64,
+    ) -> Result<chroma_types::TaskUuid, CreateTaskError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.create_task(
+                    name,
+                    operator_id,
+                    input_collection_id,
+                    output_collection_id,
+                    params,
+                    tenant_id,
+                    database_id,
+                    min_records_for_task,
+                )
+                .await
+            }
+            SysDb::Sqlite(sqlite) => {
+                sqlite
+                    .create_task(
+                        name,
+                        operator_id,
+                        input_collection_id,
+                        output_collection_id,
+                        params,
+                        tenant_id,
+                        database_id,
+                        min_records_for_task,
+                    )
+                    .await
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
+    pub async fn get_task_by_name(
+        &mut self,
+        tenant_id: String,
+        database_id: String,
+        task_name: String,
+    ) -> Result<Option<chroma_types::Task>, GetTaskError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.get_task_by_name(tenant_id, database_id, task_name)
+                    .await
+            }
+            SysDb::Sqlite(sqlite) => {
+                sqlite
+                    .get_task_by_name(tenant_id, database_id, task_name)
+                    .await
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
+    pub async fn soft_delete_task(
+        &mut self,
+        task_id: chroma_types::TaskUuid,
+    ) -> Result<(), DeleteTaskError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.soft_delete_task(task_id).await,
+            SysDb::Sqlite(sqlite) => sqlite.soft_delete_task(task_id).await,
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
+    pub async fn delete_task_by_name(
+        &mut self,
+        tenant_id: String,
+        database_id: String,
+        task_name: String,
+    ) -> Result<chroma_types::Task, DeleteTaskError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.delete_task_by_name(tenant_id, database_id, task_name)
+                    .await
+            }
+            SysDb::Sqlite(sqlite) => {
+                sqlite
+                    .delete_task_by_name(tenant_id, database_id, task_name)
+                    .await
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum CreateTaskError {
+    #[error("Task already exists")]
+    AlreadyExists,
+    #[error("Failed to create task: {0}")]
+    FailedToCreateTask(#[from] tonic::Status),
+}
+
+impl ChromaError for CreateTaskError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CreateTaskError::AlreadyExists => ErrorCodes::AlreadyExists,
+            CreateTaskError::FailedToCreateTask(e) => e.code().into(),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum GetTaskError {
+    #[error("Failed to get task: {0}")]
+    FailedToGetTask(#[from] tonic::Status),
+    #[error("Failed to parse UUID: {0}")]
+    Uuid(#[from] uuid::Error),
+}
+
+impl ChromaError for GetTaskError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetTaskError::FailedToGetTask(e) => e.code().into(),
+            GetTaskError::Uuid(_) => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum DeleteTaskError {
+    #[error("Task not found")]
+    NotFound,
+    #[error("Failed to delete task: {0}")]
+    FailedToDeleteTask(#[from] tonic::Status),
+}
+
+impl ChromaError for DeleteTaskError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            DeleteTaskError::NotFound => ErrorCodes::NotFound,
+            DeleteTaskError::FailedToDeleteTask(e) => e.code().into(),
         }
     }
 }
