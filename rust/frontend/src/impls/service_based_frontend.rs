@@ -1926,6 +1926,66 @@ mod tests {
             .any(|s| s.r#type == SegmentType::BlockfileRecord && s.scope == SegmentScope::RECORD));
     }
 
+    #[tokio::test]
+    async fn test_k8s_integration_operator_constants() {
+        // Validate that hardcoded Rust operator constants match the live database.
+        // This prevents drift between constants and database migrations.
+        use chroma_types::{OPERATOR_RECORD_COUNTER_ID, OPERATOR_RECORD_COUNTER_NAME};
+        use std::collections::HashMap;
+
+        // Map of operator names to their expected UUID constants
+        // Add new operators here as they are added to rust/types/src/operators.rs
+        let expected_operators: HashMap<&str, uuid::Uuid> =
+            [(OPERATOR_RECORD_COUNTER_NAME, OPERATOR_RECORD_COUNTER_ID)]
+                .iter()
+                .cloned()
+                .collect();
+
+        // Connect to sysdb via gRPC
+        let registry = Registry::new();
+        let sysdb_config = chroma_sysdb::SysDbConfig::Grpc(GrpcSysDbConfig {
+            host: "localhost".to_string(),
+            port: 50051,
+            ..Default::default()
+        });
+        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+            .await
+            .unwrap();
+
+        // Get all operators from the database via gRPC
+        let operators = sysdb.get_all_operators().await.unwrap();
+
+        // Verify count matches expectations
+        assert_eq!(
+            operators.len(),
+            expected_operators.len(),
+            "Operator count mismatch. If you added a new operator to migrations, \
+             rebuild Rust (cargo build -p chroma-types) to auto-generate constants and update this test. \
+             Expected: {}, Actual: {}",
+            expected_operators.len(),
+            operators.len()
+        );
+
+        // Verify each operator constant matches the database
+        for (operator_name, expected_uuid) in &expected_operators {
+            let db_operator = operators
+                .iter()
+                .find(|(name, _)| name == operator_name)
+                .unwrap_or_else(|| panic!("Operator '{}' not found in database", operator_name));
+
+            assert_eq!(
+                *expected_uuid, db_operator.1,
+                "Operator '{}' UUID mismatch. Code: {}, DB: {}",
+                operator_name, expected_uuid, db_operator.1
+            );
+        }
+
+        println!(
+            "Verified {} operator(s) match database",
+            expected_operators.len()
+        );
+    }
+
     #[test]
     fn test_crn_parsing() {
         use chroma_types::GetCollectionByCrnRequest;
