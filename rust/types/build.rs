@@ -1,3 +1,5 @@
+mod operator_codegen;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compile the protobuf files in the chromadb proto directory.
     let mut proto_paths = vec![
@@ -23,6 +25,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .emit_rerun_if_changed(true)
         .compile(&proto_paths, &["idl/"])?;
+
+    // Generate operator constants from Go source
+    operator_codegen::generate_operator_constants()?;
 
     Ok(())
 }
