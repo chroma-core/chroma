@@ -3,6 +3,9 @@ use uuid::Uuid;
 
 use crate::{Error, HeapScheduler, Triggerable};
 
+/// A dummy scheduler implementation for testing purposes.
+///
+/// This scheduler always reports that items are not done and have no scheduled times.
 pub struct DummyScheduler;
 
 #[async_trait::async_trait]

@@ -25,7 +25,7 @@ use wal3::{
 };
 
 use crate::dummy::DummyScheduler;
-use crate::{Configuration, Error, HeapWriter, Triggerable};
+use crate::{Configuration, Error, HeapWriter};
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
 
@@ -38,19 +38,31 @@ pub fn heap_path_from_hostname(hostname: &str) -> String {
     format!("heap/{}", hostname)
 }
 
-static HEAP_TENDER_CURSOR_NAME: CursorName =
+/// The cursor name used by HeapTender to track its position in the dirty log.
+pub static HEAP_TENDER_CURSOR_NAME: CursorName =
     unsafe { CursorName::from_string_unchecked("heap_tender") };
 
 //////////////////////////////////////////// HeapTender ////////////////////////////////////////////
 
-struct HeapTender {
+/// Manages heap compaction by reading dirty logs and coordinating with HeapWriter.
+pub struct HeapTender {
     reader: LogReader,
     cursor: CursorStore,
     writer: HeapWriter,
 }
 
 impl HeapTender {
-    async fn tend_to_heap(&self) -> Result<(), Error> {
+    /// Creates a new HeapTender.
+    pub fn new(reader: LogReader, cursor: CursorStore, writer: HeapWriter) -> Self {
+        Self {
+            reader,
+            cursor,
+            writer,
+        }
+    }
+
+    /// Tends to the heap by reading and coalescing the dirty log, then updating the cursor.
+    pub async fn tend_to_heap(&self) -> Result<(), Error> {
         let (witness, cursor, tended) = self.read_and_coalesce_dirty_log().await?;
         // TODO(rescrv):  Do something with tended and update the cursor iff tended is false.
         _ = tended;
@@ -66,11 +78,24 @@ impl HeapTender {
         Ok(())
     }
 
-    async fn read_and_coalesce_dirty_log(
+    /// Reads the dirty log and coalesces entries by collection.
+    pub async fn read_and_coalesce_dirty_log(
         &self,
     ) -> Result<(Option<Witness>, Cursor, Vec<(CollectionUuid, LogPosition)>), Error> {
         let witness = self.cursor.load(&HEAP_TENDER_CURSOR_NAME).await?;
-        let position = self.reader.oldest_timestamp().await?;
+        let position = match self.reader.oldest_timestamp().await {
+            Ok(position) => position,
+            Err(wal3::Error::UninitializedLog) => {
+                tracing::info!("empty dirty log");
+                let default_cursor = Cursor {
+                    position: LogPosition::from_offset(0),
+                    epoch_us: 0,
+                    writer: "heap-tender".to_string(),
+                };
+                return Ok((witness, default_cursor, vec![]));
+            }
+            Err(e) => return Err(Error::Wal3(e)),
+        };
         let default = Cursor {
             position,
             epoch_us: position.offset(),

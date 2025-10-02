@@ -86,7 +86,9 @@ mod dummy;
 mod internal;
 use internal::Internal;
 
+pub use dummy::DummyScheduler;
 pub use internal::HeapItem;
+pub use tender::{HeapTender, HEAP_TENDER_CURSOR_NAME};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
