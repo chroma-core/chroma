@@ -205,6 +205,19 @@ log_service:
       batch_size_bytes: 8388608 # 8MiB
       throughput: 3300
       headroom: 200
+heap_tender_service:
+  log:
+    grpc
+  opentelemetry:
+    service_name: "rust-log-service"
+    endpoint: "http://otel-collector:4317"
+    filters:
+      - crate_name: "chroma_log"
+        filter_level: "trace"
+      - crate_name: "wal3"
+        filter_level: "trace"
+      - crate_name: "s3heap"
+        filter_level: "trace"
 garbage_collector:
   service_name: "garbage-collector"
   otel_endpoint: "http://otel-collector:4317"

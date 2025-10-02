@@ -11,6 +11,19 @@ data:
 
 ---
 
+{{if .Values.heapTenderService.configuration }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: heap-tender-service-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{  .Values.heapTenderService.configuration | indent 4 }}
+{{ end }}
+
+---
+
 apiVersion: v1
 kind: Service
 metadata:
@@ -51,6 +64,11 @@ spec:
         - name: rust-log-service-config
           configMap:
             name: rust-log-service-config
+        {{ end }}
+        {{if .Values.rustLogService.configuration}}
+        - name: heap-tender-service-config
+          configMap:
+            name: heap-tender-service-config
         {{ end }}
         {{if .Values.rustLogService.cache}}
         - name: rust-log-service-cache
@@ -100,6 +118,44 @@ spec:
               cpu: {{ .Values.rustLogService.resources.requests.cpu }}
               memory: {{ .Values.rustLogService.resources.requests.memory }}
           {{ end }}
+        {{ if .Values.heapTenderService }}
+        - name: heap-tender
+          {{ if .Values.heapTenderService.command }}
+          command: {{ .Values.heapTenderService.command }}
+          {{ end }}
+          image: "{{ .Values.heapTenderService.image.repository }}:{{ .Values.heapTenderService.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 30 # 30 seconds to allow for initial startup
+            grpc:
+              port: 50051
+          volumeMounts:
+            {{if .Values.heapTenderService.configuration}}
+            - name: heap-tender-service-config
+              mountPath: /config/
+            {{ end }}
+          ports:
+            - containerPort: 50052
+          env:
+            - name: CONFIG_PATH
+              value: "/config/config.yaml"
+            - name: CHROMA_HEAP_TENDER_SERVICE__MY_MEMBER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{ if .Values.heapTenderService.otherEnvConfig }}
+              {{ .Values.heapTenderService.otherEnvConfig | nindent 12 }}
+            {{ end }}
+          {{ if .Values.heapTenderService.resources }}
+          resources:
+            limits:
+              cpu: {{ .Values.heapTenderService.resources.limits.cpu }}
+              memory: {{ .Values.heapTenderService.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.heapTenderService.resources.requests.cpu }}
+              memory: {{ .Values.heapTenderService.resources.requests.memory }}
+          {{ end }}
       {{if .Values.rustLogService.tolerations}}
       tolerations:
         {{ toYaml .Values.rustLogService.tolerations | nindent 8 }}
@@ -115,6 +171,7 @@ spec:
           labelSelector:
             matchLabels:
               member-type: rust-log-service
+        {{ end }}
 
 ---
 

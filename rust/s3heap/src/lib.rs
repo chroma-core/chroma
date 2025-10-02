@@ -82,6 +82,8 @@ use uuid::Uuid;
 /// coordinates with the heap to schedule and track compaction operations for collections.
 pub mod tender;
 
+// TODO(rescrv):  Clean this up once the real pieces are doable.
+mod dummy;
 mod internal;
 use internal::Internal;
 

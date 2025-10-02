@@ -18,6 +18,7 @@ use chroma_types::chroma_proto::heap_tender_service_server::{
 use chroma_types::chroma_proto::{HeapSummaryRequest, HeapSummaryResponse};
 use wal3::{CursorStore, CursorStoreOptions, LogReader, LogReaderOptions};
 
+use crate::dummy::DummyScheduler;
 use crate::HeapWriter;
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
@@ -36,6 +37,9 @@ struct HeapTender {
 
 impl HeapTender {
     fn tend_to_heap(&self) -> Result<(), Box<dyn chroma_error::ChromaError>> {
+        // 1.  load all dirty records from the reader up to a defined limit on number of collections, noting the last offset of the dirty log to which we read.
+        // 2.  call writer.push(all)
+        // 3.  update the cursor to the offset saved in step one
         todo!();
     }
 }
@@ -50,7 +54,7 @@ struct HeapTenderServer {
 impl HeapTenderServer {
     async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("[::]:{}", self.config.port).parse().unwrap();
-        println!("Log listening on {}", addr);
+        println!("Heap tender listening on {}", addr);
 
         let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
         health_reporter
@@ -108,7 +112,7 @@ impl Configurable<HeapTenderServerConfig> for HeapTenderServer {
             prefix.clone(),
             "s3heap-tender".to_string(),
         );
-        let scheduler = todo!();
+        let scheduler = Arc::new(DummyScheduler) as _;
         let writer = HeapWriter::new(storage, prefix, scheduler)
             .map_err(|e| -> Box<dyn chroma_error::ChromaError> { Box::new(e) })?;
         let tender = Arc::new(HeapTender {
@@ -291,7 +295,7 @@ pub struct HeapTenderServerConfig {
 
 impl HeapTenderServerConfig {
     fn default_port() -> u16 {
-        50051
+        50052
     }
 
     fn default_my_member_id() -> String {
