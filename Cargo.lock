@@ -7128,6 +7128,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3cb5ba0dc43242ce17de99c180e96db90b235b8a9fdc9543c96d2209116bd9f"
 
 [[package]]
+name = "s3heap"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "backon",
+ "bytes",
+ "chroma-storage",
+ "chrono",
+ "futures",
+ "parking_lot",
+ "parquet",
+ "serde",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
