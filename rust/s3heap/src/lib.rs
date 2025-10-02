@@ -433,6 +433,7 @@ pub trait HeapScheduler: Send + Sync {
     ///
     /// # Implementation Requirements
     /// The returned vector must have exactly the same length as the input slice.
+    /// result[i] = is_done(&items[i])
     async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error>;
 
     /// Get the next scheduled execution time and nonce for a task.
@@ -875,11 +876,13 @@ impl HeapPruner {
             } else {
                 (0, 0)
             }
-        } else {
+        } else if to_retain.len() != entries.len() {
             self.internal
                 .store_bucket(bucket, &to_retain, e_tag)
                 .await?;
             (0, 1)
+        } else {
+            (0, 0)
         };
 
         let stats = PruneStats {
@@ -1036,20 +1039,20 @@ impl HeapReader {
 
         'outer: for bucket in buckets.into_iter().take(limits.max_buckets()) {
             let (entries, _) = self.internal.load_bucket_or_empty(bucket).await?;
-            let triggerable_and_uuid = entries
+            let triggerable_and_nonce = entries
                 .iter()
                 .filter(|hi| should_return(&hi.trigger))
                 .map(|hi| (hi.trigger.clone(), hi.nonce))
                 .collect::<Vec<_>>();
-            let are_done = heap_scheduler.are_done(&triggerable_and_uuid).await?;
-            if triggerable_and_uuid.len() != are_done.len() {
+            let are_done = heap_scheduler.are_done(&triggerable_and_nonce).await?;
+            if triggerable_and_nonce.len() != are_done.len() {
                 return Err(Error::Internal(format!(
                     "scheduler returned {} results for {} items",
                     are_done.len(),
-                    triggerable_and_uuid.len()
+                    triggerable_and_nonce.len()
                 )));
             }
-            for ((triggerable, uuid), is_done) in triggerable_and_uuid.iter().zip(are_done) {
+            for ((triggerable, uuid), is_done) in triggerable_and_nonce.iter().zip(are_done) {
                 if !is_done {
                     returns.push(HeapItem {
                         trigger: triggerable.clone(),
