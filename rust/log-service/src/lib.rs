@@ -110,6 +110,16 @@ pub enum Error {
     CouldNotGetDirtyLogCursors,
 }
 
+///////////////////////////////////////// InspectedLogState ////////////////////////////////////////
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct InspectedLogState {
+    manifest: Option<Manifest>,
+    witness: Option<Witness>,
+    start: u64,
+    limit: u64,
+}
+
 ///////////////////////////////////////// state maintenance ////////////////////////////////////////
 
 // NOTE(rescrv):  This code dynamically opens and closes logs.  An opened log will stay open until
@@ -1693,6 +1703,7 @@ impl LogServer {
                 debug: "log uninitialized\n".to_string(),
                 start: 0,
                 limit: 0,
+                json: "{}".to_string(),
             }));
         }
         let mani = mani.map_err(|err| Status::unknown(err.to_string()))?;
@@ -1717,10 +1728,20 @@ impl LogServer {
         } else {
             (0, 0)
         };
-        Ok(Response::new(InspectLogStateResponse {
-            debug: format!("manifest: {mani:#?}\ncompaction cursor: {witness:?}"),
+        let debug = format!("manifest: {mani:#?}\ncompaction cursor: {witness:?}");
+        let inspected = InspectedLogState {
+            manifest: mani,
+            witness,
             start,
             limit,
+        };
+        let json =
+            serde_json::to_string(&inspected).map_err(|err| Status::internal(err.to_string()))?;
+        Ok(Response::new(InspectLogStateResponse {
+            debug,
+            start,
+            limit,
+            json,
         }))
     }
 
