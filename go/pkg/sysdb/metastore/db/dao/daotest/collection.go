@@ -12,6 +12,7 @@ import (
 // defaults for a test collection
 var (
 	defaultConfigurationJsonStr       = "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
+	defaultSchemaStr                  = "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
 	defaultDimension                  = int32(128)
 	defaultTotalRecordsPostCompaction = uint64(100)
 	defaultSizeBytesPostCompaction    = uint64(500000)
@@ -54,6 +55,7 @@ func NewTestCollection(tenantID, databaseID, collectionName string, options ...T
 		ID:                   collectionId,
 		Name:                 &collectionName,
 		ConfigurationJsonStr: &defaultConfigurationJsonStr,
+		SchemaStr:            &defaultSchemaStr,
 		Dimension:            &defaultDimension,
 		DatabaseID:           databaseID,
 		CreatedAt:            time.Now(),
@@ -72,6 +74,12 @@ type TestCollectionOption func(*dbmodel.Collection)
 func WithConfigurationJsonStr(configurationJsonStr string) func(*dbmodel.Collection) {
 	return func(collection *dbmodel.Collection) {
 		collection.ConfigurationJsonStr = &configurationJsonStr
+	}
+}
+
+func WithSchemaStr(schemaStr string) func(*dbmodel.Collection) {
+	return func(collection *dbmodel.Collection) {
+		collection.SchemaStr = &schemaStr
 	}
 }
 

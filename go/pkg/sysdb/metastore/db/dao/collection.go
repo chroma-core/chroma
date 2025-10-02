@@ -149,6 +149,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 		CollectionId               string     `gorm:"column:collection_id"`
 		CollectionName             *string    `gorm:"column:collection_name"`
 		ConfigurationJsonStr       *string    `gorm:"column:configuration_json_str"`
+		SchemaStr                  *string    `gorm:"column:schema_str"`
 		Dimension                  *int32     `gorm:"column:dimension"`
 		DatabaseID                 string     `gorm:"column:database_id"`
 		CollectionTs               *int64     `gorm:"column:collection_ts"`
@@ -183,6 +184,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 	collection_targets := "collections.id as collection_id, " +
 		"collections.name as collection_name, " +
 		"collections.configuration_json_str, " +
+		"collections.schema_str, " +
 		"collections.dimension, " +
 		"collections.database_id AS database_id, " +
 		"collections.ts as collection_ts, " +
@@ -291,6 +293,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 				ID:                         r.CollectionId,
 				Name:                       r.CollectionName,
 				ConfigurationJsonStr:       r.ConfigurationJsonStr,
+				SchemaStr:                  r.SchemaStr,
 				Dimension:                  r.Dimension,
 				DatabaseID:                 r.DatabaseID,
 				IsDeleted:                  r.IsDeleted,

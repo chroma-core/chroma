@@ -10,6 +10,7 @@ type Collection struct {
 	ID                         string          `gorm:"id;primaryKey"`
 	Name                       *string         `gorm:"name;not null;index:idx_name,unique;"`
 	ConfigurationJsonStr       *string         `gorm:"configuration_json_str"`
+	SchemaStr                  *string         `gorm:"schema_str"`
 	Dimension                  *int32          `gorm:"dimension"`
 	DatabaseID                 string          `gorm:"database_id;not null;index:idx_name,unique;"`
 	Ts                         types.Timestamp `gorm:"ts;type:bigint;default:0"`
