@@ -52,7 +52,7 @@
 //! - `-i, --iterations`: Number of iterations per query (for profiling)
 //! - `-f, --filter-percentage`: Randomly exclude a percentage of documents (0-100) to test filtering
 
-use chroma_benchmark::datasets::wikipedia_splade::WikipediaSplade;
+use chroma_benchmark::datasets::wikipedia_splade::{SparseDocument, SparseQuery, WikipediaSplade};
 use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::test_arrow_blockfile_provider;
 use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
@@ -62,8 +62,8 @@ use chroma_index::sparse::{
 };
 use chroma_types::SignedRoaringBitmap;
 use clap::Parser;
+use futures::{StreamExt, TryStreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
-use sprs::CsVec;
 use std::collections::{BinaryHeap, HashSet};
 use std::time::Instant;
 use tempfile::TempDir;
@@ -73,38 +73,17 @@ use uuid::Uuid;
 const SPARSE_MAX_PREFIX: &str = "sparse_max";
 const SPARSE_OFFSET_VALUE_PREFIX: &str = "sparse_offset_value";
 
-// Sparse document and query structures using CsVec from sprs
-#[derive(Debug, Clone)]
-pub struct SparseDocument {
-    pub doc_id: String,
-    pub url: String,
-    pub title: String,
-    pub body: String,
-    pub sparse_vector: CsVec<f32>,
-}
-
-#[derive(Debug, Clone)]
-pub struct SparseQuery {
-    pub query_id: String,
-    pub text: String,
-    pub sparse_vector: CsVec<f32>,
-}
-
 /// Command line arguments for the benchmark
 #[derive(Parser, Debug)]
 #[command(name = "sparse_vector_benchmark")]
 #[command(about = "Benchmark sparse index with Block-Max WAND algorithm")]
 struct Args {
-    /// Path to the query parquet file
-    #[arg(short = 'q', long)]
-    query_path: String,
-
     /// Number of documents to load
     #[arg(short = 'n', long, default_value_t = 65536)]
     num_documents: usize,
 
     /// Number of queries to run
-    #[arg(short = 'm', long, default_value_t = 200)]
+    #[arg(short = 'm', long, default_value_t = 256)]
     num_queries: usize,
 
     /// Top-k results to retrieve
@@ -644,7 +623,7 @@ async fn main() -> anyhow::Result<()> {
     println!("{}", "=".repeat(60));
     println!("Configuration:");
     println!("  Dataset: Wikipedia SPLADE (from HuggingFace)");
-    println!("  Query file: {}", args.query_path);
+    println!("  Queries: Downloaded from HuggingFace");
     println!("  Num documents: {}", args.num_documents);
     println!("  Num queries: {}", args.num_queries);
 
@@ -653,37 +632,22 @@ async fn main() -> anyhow::Result<()> {
     let dataset = WikipediaSplade::init().await?;
 
     println!("📄 Loading documents...");
-    let wiki_docs = dataset.documents().await?;
-
-    // Convert to SparseDocument and limit to requested number
-    let documents: Vec<SparseDocument> = wiki_docs
-        .into_iter()
+    let documents: Vec<_> = dataset
+        .documents()
+        .await?
         .take(args.num_documents)
-        .map(|doc| SparseDocument {
-            doc_id: doc.doc_id,
-            url: doc.url,
-            title: doc.title,
-            body: doc.body,
-            sparse_vector: doc.sparse_vector,
-        })
-        .collect();
+        .try_collect()
+        .await?;
 
     println!("✅ Loaded {} documents", documents.len());
 
     // Load queries from local parquet file
-    println!("🔍 Loading queries from {}...", args.query_path);
-    let wiki_queries = WikipediaSplade::queries(&args.query_path).await?;
+    println!("🔍 Loading queries from HuggingFace...");
+    // Load queries from the dataset (uses already downloaded test split)
+    let wiki_queries = dataset.queries().await?;
 
     // Convert to SparseQuery and limit to requested number
-    let queries: Vec<SparseQuery> = wiki_queries
-        .into_iter()
-        .take(args.num_queries)
-        .map(|q| SparseQuery {
-            query_id: q.query_id,
-            text: q.text,
-            sparse_vector: q.sparse_vector,
-        })
-        .collect();
+    let queries: Vec<_> = wiki_queries.into_iter().take(args.num_queries).collect();
 
     println!("✅ Loaded {} queries", queries.len());
 
