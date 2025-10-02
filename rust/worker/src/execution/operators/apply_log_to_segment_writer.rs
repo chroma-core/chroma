@@ -78,6 +78,8 @@ impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
 #[derive(Debug)]
 pub struct ApplyLogToSegmentWriterOutput {
     pub segment_id: SegmentUuid,
+    pub segment_type: &'static str,
+    pub schema_update: Option<InternalSchema>,
 }
 
 #[async_trait]
@@ -99,7 +101,7 @@ impl Operator<ApplyLogToSegmentWriterInput<'_>, ApplyLogToSegmentWriterOutput>
         }
 
         // Apply materialized records.
-        match input
+        let schema_update = match input
             .segment_writer
             .apply_materialized_log_chunk(
                 &input.record_segment_reader,
@@ -116,14 +118,16 @@ impl Operator<ApplyLogToSegmentWriterInput<'_>, ApplyLogToSegmentWriterOutput>
             ))
             .await
         {
-            Ok(()) => (),
+            Ok(schema_update) => schema_update,
             Err(e) => {
                 return Err(ApplyLogToSegmentWriterOperatorError::ApplyMaterializedLogsError(e));
             }
-        }
+        };
 
         Ok(ApplyLogToSegmentWriterOutput {
             segment_id: input.segment_writer.get_id(),
+            segment_type: input.segment_writer.get_name(),
+            schema_update,
         })
     }
 }

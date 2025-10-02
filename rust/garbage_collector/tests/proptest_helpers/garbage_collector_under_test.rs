@@ -245,6 +245,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                             segment_flush_info,
                             0,
                             0,
+                            None,
                         )
                         .await
                         .unwrap();

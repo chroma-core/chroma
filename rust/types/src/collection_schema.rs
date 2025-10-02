@@ -405,6 +405,194 @@ impl InternalSchema {
         }
     }
 
+    /// Merge two schemas together, combining key overrides when possible.
+    pub fn merge(&self, other: &InternalSchema) -> Result<InternalSchema, SchemaError> {
+        if self.defaults != other.defaults {
+            return Err(SchemaError::InvalidSchema {
+                reason: "Cannot merge schemas with differing defaults".to_string(),
+            });
+        }
+
+        let mut key_overrides = self.key_overrides.clone();
+
+        for (key, other_value_types) in &other.key_overrides {
+            if let Some(existing) = key_overrides.get(key).cloned() {
+                let merged = Self::merge_override_value_types(key, &existing, other_value_types)?;
+                key_overrides.insert(key.clone(), merged);
+            } else {
+                key_overrides.insert(key.clone(), other_value_types.clone());
+            }
+        }
+
+        Ok(InternalSchema {
+            defaults: self.defaults.clone(),
+            key_overrides,
+        })
+    }
+
+    fn merge_override_value_types(
+        key: &str,
+        left: &ValueTypes,
+        right: &ValueTypes,
+    ) -> Result<ValueTypes, SchemaError> {
+        Ok(ValueTypes {
+            string: Self::merge_string_override(key, left.string.as_ref(), right.string.as_ref())?,
+            float: Self::merge_float_override(key, left.float.as_ref(), right.float.as_ref())?,
+            int: Self::merge_int_override(key, left.int.as_ref(), right.int.as_ref())?,
+            boolean: Self::merge_bool_override(key, left.boolean.as_ref(), right.boolean.as_ref())?,
+            float_list: Self::merge_float_list_override(
+                key,
+                left.float_list.as_ref(),
+                right.float_list.as_ref(),
+            )?,
+            sparse_vector: Self::merge_sparse_vector_override(
+                key,
+                left.sparse_vector.as_ref(),
+                right.sparse_vector.as_ref(),
+            )?,
+        })
+    }
+
+    fn merge_string_override(
+        key: &str,
+        left: Option<&StringValueType>,
+        right: Option<&StringValueType>,
+    ) -> Result<Option<StringValueType>, SchemaError> {
+        match (left, right) {
+            (Some(l), Some(r)) => Ok(Some(StringValueType {
+                string_inverted_index: Self::merge_index_or_error(
+                    l.string_inverted_index.as_ref(),
+                    r.string_inverted_index.as_ref(),
+                    &format!("key '{key}' string.string_inverted_index"),
+                )?,
+                fts_index: Self::merge_index_or_error(
+                    l.fts_index.as_ref(),
+                    r.fts_index.as_ref(),
+                    &format!("key '{key}' string.fts_index"),
+                )?,
+            })),
+            (Some(l), None) => Ok(Some(l.clone())),
+            (None, Some(r)) => Ok(Some(r.clone())),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn merge_float_override(
+        key: &str,
+        left: Option<&FloatValueType>,
+        right: Option<&FloatValueType>,
+    ) -> Result<Option<FloatValueType>, SchemaError> {
+        match (left, right) {
+            (Some(l), Some(r)) => Ok(Some(FloatValueType {
+                float_inverted_index: Self::merge_index_or_error(
+                    l.float_inverted_index.as_ref(),
+                    r.float_inverted_index.as_ref(),
+                    &format!("key '{key}' float.float_inverted_index"),
+                )?,
+            })),
+            (Some(l), None) => Ok(Some(l.clone())),
+            (None, Some(r)) => Ok(Some(r.clone())),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn merge_int_override(
+        key: &str,
+        left: Option<&IntValueType>,
+        right: Option<&IntValueType>,
+    ) -> Result<Option<IntValueType>, SchemaError> {
+        match (left, right) {
+            (Some(l), Some(r)) => Ok(Some(IntValueType {
+                int_inverted_index: Self::merge_index_or_error(
+                    l.int_inverted_index.as_ref(),
+                    r.int_inverted_index.as_ref(),
+                    &format!("key '{key}' int.int_inverted_index"),
+                )?,
+            })),
+            (Some(l), None) => Ok(Some(l.clone())),
+            (None, Some(r)) => Ok(Some(r.clone())),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn merge_bool_override(
+        key: &str,
+        left: Option<&BoolValueType>,
+        right: Option<&BoolValueType>,
+    ) -> Result<Option<BoolValueType>, SchemaError> {
+        match (left, right) {
+            (Some(l), Some(r)) => Ok(Some(BoolValueType {
+                bool_inverted_index: Self::merge_index_or_error(
+                    l.bool_inverted_index.as_ref(),
+                    r.bool_inverted_index.as_ref(),
+                    &format!("key '{key}' bool.bool_inverted_index"),
+                )?,
+            })),
+            (Some(l), None) => Ok(Some(l.clone())),
+            (None, Some(r)) => Ok(Some(r.clone())),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn merge_float_list_override(
+        key: &str,
+        left: Option<&FloatListValueType>,
+        right: Option<&FloatListValueType>,
+    ) -> Result<Option<FloatListValueType>, SchemaError> {
+        match (left, right) {
+            (Some(l), Some(r)) => Ok(Some(FloatListValueType {
+                vector_index: Self::merge_index_or_error(
+                    l.vector_index.as_ref(),
+                    r.vector_index.as_ref(),
+                    &format!("key '{key}' float_list.vector_index"),
+                )?,
+            })),
+            (Some(l), None) => Ok(Some(l.clone())),
+            (None, Some(r)) => Ok(Some(r.clone())),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn merge_sparse_vector_override(
+        key: &str,
+        left: Option<&SparseVectorValueType>,
+        right: Option<&SparseVectorValueType>,
+    ) -> Result<Option<SparseVectorValueType>, SchemaError> {
+        match (left, right) {
+            (Some(l), Some(r)) => Ok(Some(SparseVectorValueType {
+                sparse_vector_index: Self::merge_index_or_error(
+                    l.sparse_vector_index.as_ref(),
+                    r.sparse_vector_index.as_ref(),
+                    &format!("key '{key}' sparse_vector.sparse_vector_index"),
+                )?,
+            })),
+            (Some(l), None) => Ok(Some(l.clone())),
+            (None, Some(r)) => Ok(Some(r.clone())),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn merge_index_or_error<T: Clone + PartialEq>(
+        left: Option<&T>,
+        right: Option<&T>,
+        context: &str,
+    ) -> Result<Option<T>, SchemaError> {
+        match (left, right) {
+            (Some(l), Some(r)) => {
+                if l == r {
+                    Ok(Some(l.clone()))
+                } else {
+                    Err(SchemaError::InvalidSchema {
+                        reason: format!("Conflicting configuration for {context}"),
+                    })
+                }
+            }
+            (Some(l), None) => Ok(Some(l.clone())),
+            (None, Some(r)) => Ok(Some(r.clone())),
+            (None, None) => Ok(None),
+        }
+    }
+
     /// Merge two ValueTypes with field-level merging
     /// User values take precedence over default values
     fn merge_value_types(default: &ValueTypes, user: &ValueTypes) -> Result<ValueTypes, String> {
@@ -965,6 +1153,44 @@ impl InternalSchema {
             },
         }
     }
+
+    /// Ensure a single metadata key/value-type has an override, inserting from defaults when missing.
+    pub fn ensure_key_from_metadata(&mut self, key: &str, value_type: MetadataValueType) -> bool {
+        let value_types = self.key_overrides.entry(key.to_string()).or_default();
+        match value_type {
+            MetadataValueType::Bool => {
+                if value_types.boolean.is_none() {
+                    value_types.boolean = self.defaults.boolean.clone();
+                    return true;
+                }
+            }
+            MetadataValueType::Int => {
+                if value_types.int.is_none() {
+                    value_types.int = self.defaults.int.clone();
+                    return true;
+                }
+            }
+            MetadataValueType::Float => {
+                if value_types.float.is_none() {
+                    value_types.float = self.defaults.float.clone();
+                    return true;
+                }
+            }
+            MetadataValueType::Str => {
+                if value_types.string.is_none() {
+                    value_types.string = self.defaults.string.clone();
+                    return true;
+                }
+            }
+            MetadataValueType::SparseVector => {
+                if value_types.sparse_vector.is_none() {
+                    value_types.sparse_vector = self.defaults.sparse_vector.clone();
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }
 
 // ============================================================================
@@ -1328,6 +1554,59 @@ mod tests {
             vector_config.config.source_key,
             Some("custom_embedding_key".to_string())
         );
+    }
+
+    #[test]
+    fn test_ensure_key_from_metadata_no_changes_for_existing_key() {
+        let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        let before = schema.clone();
+        let modified = schema.ensure_key_from_metadata("$document", MetadataValueType::Str);
+        assert!(!modified);
+        assert_eq!(schema, before);
+    }
+
+    #[test]
+    fn test_ensure_key_from_metadata_populates_new_key_with_default_value_type() {
+        let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        assert!(!schema.key_overrides.contains_key("custom_field"));
+
+        let modified = schema.ensure_key_from_metadata("custom_field", MetadataValueType::Bool);
+
+        assert!(modified);
+        let entry = schema
+            .key_overrides
+            .get("custom_field")
+            .expect("expected new key override to be inserted");
+        assert_eq!(entry.boolean, schema.defaults.boolean);
+        assert!(entry.string.is_none());
+        assert!(entry.int.is_none());
+        assert!(entry.float.is_none());
+        assert!(entry.float_list.is_none());
+        assert!(entry.sparse_vector.is_none());
+    }
+
+    #[test]
+    fn test_ensure_key_from_metadata_adds_missing_value_type_to_existing_key() {
+        let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        let initial_len = schema.key_overrides.len();
+        schema.key_overrides.insert(
+            "custom_field".to_string(),
+            ValueTypes {
+                string: schema.defaults.string.clone(),
+                ..Default::default()
+            },
+        );
+
+        let modified = schema.ensure_key_from_metadata("custom_field", MetadataValueType::Bool);
+
+        assert!(modified);
+        assert_eq!(schema.key_overrides.len(), initial_len + 1);
+        let entry = schema
+            .key_overrides
+            .get("custom_field")
+            .expect("expected key override to exist after ensure call");
+        assert!(entry.string.is_some());
+        assert_eq!(entry.boolean, schema.defaults.boolean);
     }
 
     #[test]
@@ -1923,5 +2202,126 @@ mod tests {
         assert!(!InternalSchema::is_schema_default(
             &schema_with_extra_overrides
         ));
+    }
+
+    #[test]
+    fn test_add_merges_key_overrides_by_value_type() {
+        let mut schema_a = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut schema_b = InternalSchema::new_default(KnnIndex::Hnsw);
+
+        let string_override = ValueTypes {
+            string: Some(StringValueType {
+                string_inverted_index: Some(StringInvertedIndexType {
+                    enabled: true,
+                    config: StringInvertedIndexConfig {},
+                }),
+                fts_index: None,
+            }),
+            ..Default::default()
+        };
+        schema_a
+            .key_overrides
+            .insert("custom_field".to_string(), string_override);
+
+        let float_override = ValueTypes {
+            float: Some(FloatValueType {
+                float_inverted_index: Some(FloatInvertedIndexType {
+                    enabled: true,
+                    config: FloatInvertedIndexConfig {},
+                }),
+            }),
+            ..Default::default()
+        };
+        schema_b
+            .key_overrides
+            .insert("custom_field".to_string(), float_override);
+
+        let merged = schema_a.merge(&schema_b).unwrap();
+        let merged_override = merged.key_overrides.get("custom_field").unwrap();
+
+        assert!(merged_override.string.is_some());
+        assert!(merged_override.float.is_some());
+        assert!(
+            merged_override
+                .string
+                .as_ref()
+                .unwrap()
+                .string_inverted_index
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
+        assert!(
+            merged_override
+                .float
+                .as_ref()
+                .unwrap()
+                .float_inverted_index
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
+    }
+
+    #[test]
+    fn test_add_rejects_different_defaults() {
+        let schema_a = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut schema_b = InternalSchema::new_default(KnnIndex::Hnsw);
+
+        if let Some(string_type) = schema_b.defaults.string.as_mut() {
+            if let Some(string_index) = string_type.string_inverted_index.as_mut() {
+                string_index.enabled = false;
+            }
+        }
+
+        let err = schema_a.merge(&schema_b).unwrap_err();
+        match err {
+            SchemaError::InvalidSchema { reason } => {
+                assert_eq!(reason, "Cannot merge schemas with differing defaults")
+            }
+            _ => panic!("Expected InvalidSchema error"),
+        }
+    }
+
+    #[test]
+    fn test_add_detects_conflicting_value_type_configuration() {
+        let mut schema_a = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut schema_b = InternalSchema::new_default(KnnIndex::Hnsw);
+
+        let string_override_enabled = ValueTypes {
+            string: Some(StringValueType {
+                string_inverted_index: Some(StringInvertedIndexType {
+                    enabled: true,
+                    config: StringInvertedIndexConfig {},
+                }),
+                fts_index: None,
+            }),
+            ..Default::default()
+        };
+        schema_a
+            .key_overrides
+            .insert("custom_field".to_string(), string_override_enabled);
+
+        let string_override_disabled = ValueTypes {
+            string: Some(StringValueType {
+                string_inverted_index: Some(StringInvertedIndexType {
+                    enabled: false,
+                    config: StringInvertedIndexConfig {},
+                }),
+                fts_index: None,
+            }),
+            ..Default::default()
+        };
+        schema_b
+            .key_overrides
+            .insert("custom_field".to_string(), string_override_disabled);
+
+        let err = schema_a.merge(&schema_b).unwrap_err();
+        match err {
+            SchemaError::InvalidSchema { reason } => {
+                assert!(reason.contains("Conflicting configuration"));
+            }
+            _ => panic!("Expected InvalidSchema error"),
+        }
     }
 }

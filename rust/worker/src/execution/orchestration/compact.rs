@@ -13,8 +13,8 @@ use chroma_log::Log;
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
     blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
-        RecordSegmentWriterCreationError,
+        ApplyMaterializedLogError, RecordSegmentReader, RecordSegmentReaderCreationError,
+        RecordSegmentWriter, RecordSegmentWriterCreationError,
     },
     distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter},
     distributed_spann::SpannSegmentWriterError,
@@ -29,7 +29,8 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    Chunk, Collection, CollectionUuid, LogRecord, SegmentFlushInfo, SegmentType, SegmentUuid,
+    Chunk, Collection, CollectionUuid, InternalSchema, LogRecord, SchemaError, SegmentFlushInfo,
+    SegmentType, SegmentUuid,
 };
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
@@ -162,6 +163,9 @@ pub struct CompactOrchestrator {
     segment_spans: HashMap<SegmentUuid, Span>,
 
     metrics: CompactOrchestratorMetrics,
+
+    // schema after applying deltas
+    schema: Option<InternalSchema>,
 }
 
 #[derive(Error, Debug)]
@@ -316,6 +320,7 @@ impl CompactOrchestrator {
             num_materialized_logs: 0,
             segment_spans: HashMap::new(),
             metrics: CompactOrchestratorMetrics::default(),
+            schema: None,
         }
     }
 
@@ -573,6 +578,7 @@ impl CompactOrchestrator {
             collection_logical_size_bytes,
             self.sysdb.clone(),
             self.log.clone(),
+            self.schema.clone(),
         );
 
         let task = wrap(
@@ -726,6 +732,8 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             .await;
             return;
         };
+
+        self.schema = collection.schema.clone();
 
         self.pulled_log_offset = collection.log_position;
 
@@ -1089,6 +1097,37 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
             None => return,
         };
 
+        if message.segment_type == "MetadataSegmentWriter" {
+            if let Some(update) = message.schema_update {
+                match self.schema.take() {
+                    Some(existing) => match existing.merge(&update) {
+                        Ok(merged) => {
+                            self.schema = Some(merged);
+                        }
+                        Err(err) => {
+                            let err = CompactionError::ApplyLog(
+                                ApplyLogToSegmentWriterOperatorError::ApplyMaterializedLogsError(
+                                    ApplyMaterializedLogError::Schema(err),
+                                ),
+                            );
+                            self.terminate_with_result(Err(err), ctx).await;
+                            return;
+                        }
+                    },
+                    None => {
+                        let err = CompactionError::ApplyLog(
+                            ApplyLogToSegmentWriterOperatorError::ApplyMaterializedLogsError(
+                                ApplyMaterializedLogError::Schema(SchemaError::InvalidSchema {
+                                    reason: "schema not found".to_string(),
+                                }),
+                            ),
+                        );
+                        self.terminate_with_result(Err(err), ctx).await;
+                        return;
+                    }
+                }
+            }
+        }
         self.num_uncompleted_tasks_by_segment
             .entry(message.segment_id)
             .and_modify(|v| {

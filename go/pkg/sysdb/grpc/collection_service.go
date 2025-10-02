@@ -552,6 +552,7 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		FlushSegmentCompactions:    segmentCompactionInfo,
 		TotalRecordsPostCompaction: req.TotalRecordsPostCompaction,
 		SizeBytesPostCompaction:    req.SizeBytesPostCompaction,
+		SchemaStr:                  req.SchemaStr,
 	}
 	flushCollectionInfo, err := s.coordinator.FlushCollectionCompaction(ctx, FlushCollectionCompaction)
 	if err != nil {

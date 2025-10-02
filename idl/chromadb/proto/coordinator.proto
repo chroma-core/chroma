@@ -311,6 +311,7 @@ message FlushCollectionCompactionRequest {
   repeated FlushSegmentCompactionInfo segment_compaction_info = 5;
   uint64 total_records_post_compaction = 6;
   uint64 size_bytes_post_compaction = 7;
+  optional string schema_str = 8;
 }
 
 message FlushCollectionCompactionResponse {
