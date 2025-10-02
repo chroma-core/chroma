@@ -12,8 +12,8 @@ use chroma_blockstore::{
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::types::FullTextIndexError;
 use chroma_types::{
-    DataRecord, DatabaseUuid, MaterializedLogOperation, Segment, SegmentType, SegmentUuid,
-    MAX_OFFSET_ID, OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_TO_OFFSET_ID,
+    DataRecord, DatabaseUuid, MaterializedLogOperation, SchemaError, Segment, SegmentType,
+    SegmentUuid, MAX_OFFSET_ID, OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_TO_OFFSET_ID,
 };
 use futures::{Stream, StreamExt, TryStreamExt};
 use std::collections::HashMap;
@@ -558,6 +558,8 @@ pub enum ApplyMaterializedLogError {
     BlockfileUpdate,
     #[error("Allocation error")]
     Allocation,
+    #[error("Schema error: {0}")]
+    Schema(#[from] SchemaError),
     #[error("Error writing to the full text index: {0}")]
     FullTextIndex(#[from] FullTextIndexError),
     #[error("Error writing to hnsw index")]
@@ -575,6 +577,7 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::BlockfileDelete => ErrorCodes::Internal,
             ApplyMaterializedLogError::BlockfileUpdate => ErrorCodes::Internal,
             ApplyMaterializedLogError::Allocation => ErrorCodes::Internal,
+            ApplyMaterializedLogError::Schema(e) => e.code(),
             ApplyMaterializedLogError::FullTextIndex(e) => e.code(),
             ApplyMaterializedLogError::HnswIndex(_) => ErrorCodes::Internal,
             ApplyMaterializedLogError::Materialization(e) => e.code(),

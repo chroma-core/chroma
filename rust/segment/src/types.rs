@@ -1,6 +1,6 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    logical_size_of_metadata, Chunk, DataRecord, DeletedMetadata, LogRecord,
+    logical_size_of_metadata, Chunk, DataRecord, DeletedMetadata, InternalSchema, LogRecord,
     MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue, MetadataValueConversionError,
     Operation, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
 };
@@ -1008,6 +1008,7 @@ impl ChromaSegmentWriter<'_> {
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized: &MaterializeLogsResult,
+        schema: Option<InternalSchema>,
     ) -> Result<(), ApplyMaterializedLogError> {
         match self {
             ChromaSegmentWriter::RecordSegment(writer) => {
@@ -1017,7 +1018,7 @@ impl ChromaSegmentWriter<'_> {
             }
             ChromaSegmentWriter::MetadataSegment(writer) => {
                 writer
-                    .apply_materialized_log_chunk(record_segment_reader, materialized)
+                    .apply_materialized_log_chunk(record_segment_reader, materialized, schema)
                     .await
             }
             ChromaSegmentWriter::VectorSegment(writer) => {
@@ -1229,7 +1230,7 @@ mod tests {
                 .await
                 .expect("Log materialization failed");
             metadata_writer
-                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records, None)
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
@@ -1337,7 +1338,7 @@ mod tests {
             .await
             .expect("Error applying materialized log chunk");
         metadata_writer
-            .apply_materialized_log_chunk(&some_reader, &res)
+            .apply_materialized_log_chunk(&some_reader, &res, None)
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
@@ -1531,7 +1532,7 @@ mod tests {
                 .await
                 .expect("Log materialization failed");
             metadata_writer
-                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records, None)
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
@@ -1630,7 +1631,7 @@ mod tests {
             .await
             .expect("Error applying materialized log chunk");
         metadata_writer
-            .apply_materialized_log_chunk(&some_reader, &res)
+            .apply_materialized_log_chunk(&some_reader, &res, None)
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
@@ -1825,7 +1826,7 @@ mod tests {
                 .await
                 .expect("Log materialization failed");
             metadata_writer
-                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records, None)
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
@@ -1944,7 +1945,7 @@ mod tests {
             .await
             .expect("Error applying materialized log chunk");
         metadata_writer
-            .apply_materialized_log_chunk(&some_reader, &res)
+            .apply_materialized_log_chunk(&some_reader, &res, None)
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer

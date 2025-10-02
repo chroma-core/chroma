@@ -91,7 +91,7 @@ impl TestDistributedSegment {
         .await
         .expect("Should be able to initialize metadata writer.");
         metadata_writer
-            .apply_materialized_log_chunk(&None, &materialized_logs)
+            .apply_materialized_log_chunk(&None, &materialized_logs, None)
             .await
             .expect("Should be able to apply materialized logs.");
         metadata_writer
