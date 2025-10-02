@@ -2,7 +2,10 @@ use crate::arrow::{
     block::delta::{BlockKeyArrowBuilder, BlockStorage},
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey},
 };
-use arrow::array::{Array, Float32Array, Float32Builder, StringBuilder};
+use arrow::{
+    array::{Array, AsArray, Float32Array, Float32Builder, StringBuilder},
+    datatypes::Float32Type,
+};
 use std::sync::Arc;
 
 impl ArrowWriteableKey for f32 {
@@ -31,10 +34,12 @@ impl ArrowReadableKey<'_> for f32 {
             .value(index)
     }
 
-    fn to_vec(array: &Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
-        let arr = array.as_any().downcast_ref::<Float32Array>().unwrap();
-        let slice = arr.values().slice(offset, length);
-        slice.to_vec()
+    fn get_range(array: &Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+        array
+            .as_primitive::<Float32Type>()
+            .slice(offset, length)
+            .values()
+            .to_vec()
     }
 
     fn add_to_delta<'external, V: ArrowReadableValue<'external>>(

@@ -10,7 +10,7 @@ use crate::{
     BlockfileWriterMutationOrdering,
 };
 use arrow::{
-    array::{Array, StringArray, StringBuilder},
+    array::{Array, AsArray, StringArray, StringBuilder},
     datatypes::Field,
     util::bit_util,
 };
@@ -88,9 +88,11 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data str 
         array.value(index)
     }
 
-    fn to_vec(array: &'referred_data Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
-        let arr = array.as_any().downcast_ref::<StringArray>().unwrap();
-        (offset..offset + length).map(|i| arr.value(i)).collect()
+    fn get_range(array: &'referred_data Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+        let str_array = array.as_string::<i32>();
+        (offset..offset + length)
+            .map(|i| str_array.value(i))
+            .collect()
     }
 
     fn add_to_delta<K: ArrowWriteableKey>(

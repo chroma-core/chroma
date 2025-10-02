@@ -2,7 +2,7 @@ use crate::arrow::{
     block::delta::{BlockKeyArrowBuilder, BlockStorage},
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey},
 };
-use arrow::array::{Array, BooleanArray, BooleanBuilder, StringBuilder};
+use arrow::array::{Array, AsArray, BooleanArray, BooleanBuilder, StringBuilder};
 use std::sync::Arc;
 
 impl ArrowWriteableKey for bool {
@@ -31,9 +31,13 @@ impl ArrowReadableKey<'_> for bool {
             .value(index)
     }
 
-    fn to_vec(array: &Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
-        let arr = array.as_any().downcast_ref::<BooleanArray>().unwrap();
-        (offset..offset + length).map(|i| arr.value(i)).collect()
+    fn get_range(array: &Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+        array
+            .as_boolean()
+            .slice(offset, length)
+            .iter()
+            .map(Option::unwrap_or_default)
+            .collect()
     }
 
     fn add_to_delta<'external, V: ArrowReadableValue<'external>>(

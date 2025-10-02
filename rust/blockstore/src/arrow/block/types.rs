@@ -292,18 +292,18 @@ impl Block {
         prefix: &str,
     ) -> Vec<(K, V)> {
         // Find the start index for this prefix
-        let start_idx = self.find_smallest_index_of_prefix::<K>(prefix);
-        if start_idx >= self.len() {
+        let offset = self.find_smallest_index_of_prefix::<K>(prefix);
+        if offset >= self.len() {
             return Vec::new();
         }
 
         // Find the end index (first element with a different prefix)
-        let end_idx = self.find_smallest_index_of_next_prefix::<K>(prefix);
-        let count = end_idx - start_idx;
+        let cap = self.find_smallest_index_of_next_prefix::<K>(prefix);
+        let length = cap - offset;
 
         // Extract key value pairs
-        let keys = K::to_vec(self.data.column(1), start_idx, count);
-        let values = V::to_vec(self.data.column(2), start_idx, count);
+        let keys = K::get_range(self.data.column(1), offset, length);
+        let values = V::get_range(self.data.column(2), offset, length);
 
         // Zip and collect
         keys.into_iter().zip(values).collect()

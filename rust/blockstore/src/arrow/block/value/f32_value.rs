@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use arrow::{
-    array::{Array, Float32Array, Float32Builder},
-    datatypes::{DataType, Field},
+    array::{Array, AsArray, Float32Array, Float32Builder},
+    datatypes::{DataType, Field, Float32Type},
 };
 
 use crate::{
@@ -86,10 +86,12 @@ impl ArrowReadableValue<'_> for f32 {
         array.value(index)
     }
 
-    fn to_vec(array: &Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
-        let arr = array.as_any().downcast_ref::<Float32Array>().unwrap();
-        let slice = arr.values().slice(offset, length);
-        slice.to_vec()
+    fn get_range(array: &Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+        array
+            .as_primitive::<Float32Type>()
+            .slice(offset, length)
+            .values()
+            .to_vec()
     }
 
     fn add_to_delta<K: ArrowWriteableKey>(

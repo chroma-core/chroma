@@ -256,7 +256,8 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for DataRecord<'referred
         }
     }
 
-    fn to_vec(array: &'referred_data Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+    fn get_range(array: &'referred_data Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+        // TODO: Optiomize range get
         (offset..offset + length)
             .map(|i| Self::get(array, i))
             .collect()

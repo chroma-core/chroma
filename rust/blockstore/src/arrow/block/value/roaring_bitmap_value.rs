@@ -12,7 +12,7 @@ use crate::{
     BlockfileWriterMutationOrdering,
 };
 use arrow::{
-    array::{Array, BinaryArray, BinaryBuilder},
+    array::{Array, AsArray, BinaryArray, BinaryBuilder},
     datatypes::Field,
     util::bit_util,
 };
@@ -99,12 +99,14 @@ impl ArrowReadableValue<'_> for RoaringBitmap {
         RoaringBitmap::deserialize_from(bytes).unwrap()
     }
 
-    fn to_vec(array: &std::sync::Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
-        let arr = array.as_any().downcast_ref::<BinaryArray>().unwrap();
-        (offset..offset + length)
-            .map(|i| {
-                let bytes = arr.value(i);
-                RoaringBitmap::deserialize_from(bytes).unwrap()
+    fn get_range(array: &std::sync::Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+        array
+            .as_binary::<i32>()
+            .slice(offset, length)
+            .iter()
+            .map(|data| {
+                data.map(|bytes| RoaringBitmap::deserialize_from(bytes).unwrap_or_default())
+                    .unwrap_or_default()
             })
             .collect()
     }
