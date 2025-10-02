@@ -129,6 +129,7 @@ message InspectLogStateResponse {
   string debug = 1;
   uint64 start = 2;
   uint64 limit = 3;
+  string json = 4;
 }
 
 message ScrubLogRequest {
