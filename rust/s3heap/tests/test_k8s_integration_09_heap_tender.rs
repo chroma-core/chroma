@@ -9,19 +9,23 @@ use s3heap::{DummyScheduler, Error, HeapTender, HeapWriter, HEAP_TENDER_CURSOR_N
 fn test_heap_tender(storage: Storage, test_id: &str) -> HeapTender {
     let dirty_log_prefix = format!("test-dirty-log-{}", test_id);
     let heap_prefix = format!("test-heap-{}", test_id);
+    create_heap_tender(storage, &dirty_log_prefix, &heap_prefix)
+}
+
+fn create_heap_tender(storage: Storage, dirty_log_prefix: &str, heap_prefix: &str) -> HeapTender {
     let reader = LogReader::new(
         LogReaderOptions::default(),
         Arc::new(storage.clone()),
-        dirty_log_prefix.clone(),
+        dirty_log_prefix.to_string(),
     );
     let cursor = CursorStore::new(
         CursorStoreOptions::default(),
         Arc::new(storage.clone()),
-        dirty_log_prefix,
+        dirty_log_prefix.to_string(),
         "test-tender".to_string(),
     );
     let scheduler = Arc::new(DummyScheduler) as _;
-    let writer = HeapWriter::new(storage, heap_prefix, scheduler).unwrap();
+    let writer = HeapWriter::new(storage, heap_prefix.to_string(), scheduler).unwrap();
     HeapTender::new(reader, cursor, writer)
 }
 
@@ -69,20 +73,7 @@ async fn test_k8s_integration_single_mark_dirty_returns_collection() {
     let marker_bytes = serde_json::to_vec(&marker).unwrap();
     log_writer.append(marker_bytes).await.unwrap();
 
-    let reader = LogReader::new(
-        LogReaderOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix.clone(),
-    );
-    let cursor = CursorStore::new(
-        CursorStoreOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix,
-        "test-tender".to_string(),
-    );
-    let scheduler = Arc::new(DummyScheduler) as _;
-    let writer = HeapWriter::new(storage, heap_prefix, scheduler).unwrap();
-    let tender = HeapTender::new(reader, cursor, writer);
+    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix);
 
     let result = tender.read_and_coalesce_dirty_log().await;
     assert!(result.is_ok());
@@ -138,20 +129,7 @@ async fn test_k8s_integration_multiple_markers_same_collection_keeps_max() {
         log_writer.append(marker_bytes).await.unwrap();
     }
 
-    let reader = LogReader::new(
-        LogReaderOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix.clone(),
-    );
-    let cursor = CursorStore::new(
-        CursorStoreOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix,
-        "test-tender".to_string(),
-    );
-    let scheduler = Arc::new(DummyScheduler) as _;
-    let writer = HeapWriter::new(storage, heap_prefix, scheduler).unwrap();
-    let tender = HeapTender::new(reader, cursor, writer);
+    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix);
 
     let result = tender.read_and_coalesce_dirty_log().await;
     assert!(result.is_ok());
@@ -201,20 +179,7 @@ async fn test_k8s_integration_reinsert_count_nonzero_filters_marker() {
         log_writer.append(marker_bytes).await.unwrap();
     }
 
-    let reader = LogReader::new(
-        LogReaderOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix.clone(),
-    );
-    let cursor = CursorStore::new(
-        CursorStoreOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix,
-        "test-tender".to_string(),
-    );
-    let scheduler = Arc::new(DummyScheduler) as _;
-    let writer = HeapWriter::new(storage, heap_prefix, scheduler).unwrap();
-    let tender = HeapTender::new(reader, cursor, writer);
+    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix);
 
     let result = tender.read_and_coalesce_dirty_log().await;
     assert!(result.is_ok());
@@ -268,20 +233,7 @@ async fn test_k8s_integration_purge_and_cleared_markers_ignored() {
         log_writer.append(marker_bytes).await.unwrap();
     }
 
-    let reader = LogReader::new(
-        LogReaderOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix.clone(),
-    );
-    let cursor = CursorStore::new(
-        CursorStoreOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix,
-        "test-tender".to_string(),
-    );
-    let scheduler = Arc::new(DummyScheduler) as _;
-    let writer = HeapWriter::new(storage, heap_prefix, scheduler).unwrap();
-    let tender = HeapTender::new(reader, cursor, writer);
+    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix);
 
     let result = tender.read_and_coalesce_dirty_log().await;
     assert!(result.is_ok());
@@ -326,20 +278,7 @@ async fn test_k8s_integration_multiple_collections_all_processed() {
         log_writer.append(marker_bytes).await.unwrap();
     }
 
-    let reader = LogReader::new(
-        LogReaderOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix.clone(),
-    );
-    let cursor = CursorStore::new(
-        CursorStoreOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix,
-        "test-tender".to_string(),
-    );
-    let scheduler = Arc::new(DummyScheduler) as _;
-    let writer = HeapWriter::new(storage, heap_prefix, scheduler).unwrap();
-    let tender = HeapTender::new(reader, cursor, writer);
+    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix);
 
     let result = tender.read_and_coalesce_dirty_log().await;
     assert!(result.is_ok());
@@ -379,20 +318,7 @@ async fn test_k8s_integration_cursor_initialized_on_first_run() {
     let marker_bytes = serde_json::to_vec(&marker).unwrap();
     log_writer.append(marker_bytes).await.unwrap();
 
-    let reader = LogReader::new(
-        LogReaderOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix.clone(),
-    );
-    let cursor = CursorStore::new(
-        CursorStoreOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix.clone(),
-        "test-tender".to_string(),
-    );
-    let scheduler = Arc::new(DummyScheduler) as _;
-    let writer = HeapWriter::new(storage.clone(), heap_prefix, scheduler).unwrap();
-    let tender = HeapTender::new(reader, cursor, writer);
+    let tender = create_heap_tender(storage.clone(), &dirty_log_prefix, &heap_prefix);
 
     let result = tender.tend_to_heap().await;
     assert!(result.is_ok());
@@ -401,7 +327,7 @@ async fn test_k8s_integration_cursor_initialized_on_first_run() {
     let verify_cursor = CursorStore::new(
         CursorStoreOptions::default(),
         Arc::new(storage),
-        dirty_log_prefix,
+        dirty_log_prefix.to_string(),
         "test-verify".to_string(),
     );
     let witness = verify_cursor.load(&HEAP_TENDER_CURSOR_NAME).await.unwrap();
@@ -438,20 +364,7 @@ async fn test_k8s_integration_cursor_advances_on_subsequent_runs() {
         .await
         .unwrap();
 
-    let reader = LogReader::new(
-        LogReaderOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix.clone(),
-    );
-    let cursor = CursorStore::new(
-        CursorStoreOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix.clone(),
-        "test-tender".to_string(),
-    );
-    let scheduler = Arc::new(DummyScheduler) as _;
-    let writer = HeapWriter::new(storage.clone(), heap_prefix, scheduler).unwrap();
-    let tender = HeapTender::new(reader, cursor, writer);
+    let tender = create_heap_tender(storage.clone(), &dirty_log_prefix, &heap_prefix);
 
     tender.tend_to_heap().await.unwrap();
 
@@ -515,20 +428,7 @@ async fn test_k8s_integration_cursor_not_updated_when_no_new_data() {
         .await
         .unwrap();
 
-    let reader = LogReader::new(
-        LogReaderOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix.clone(),
-    );
-    let cursor = CursorStore::new(
-        CursorStoreOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix.clone(),
-        "test-tender".to_string(),
-    );
-    let scheduler = Arc::new(DummyScheduler) as _;
-    let writer = HeapWriter::new(storage.clone(), heap_prefix, scheduler).unwrap();
-    let tender = HeapTender::new(reader, cursor, writer);
+    let tender = create_heap_tender(storage.clone(), &dirty_log_prefix, &heap_prefix);
 
     tender.tend_to_heap().await.unwrap();
 
@@ -568,20 +468,7 @@ async fn test_k8s_integration_invalid_json_in_dirty_log_fails() {
     let invalid_json = b"not valid json at all".to_vec();
     log_writer.append(invalid_json).await.unwrap();
 
-    let reader = LogReader::new(
-        LogReaderOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix.clone(),
-    );
-    let cursor = CursorStore::new(
-        CursorStoreOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix,
-        "test-tender".to_string(),
-    );
-    let scheduler = Arc::new(DummyScheduler) as _;
-    let writer = HeapWriter::new(storage, heap_prefix, scheduler).unwrap();
-    let tender = HeapTender::new(reader, cursor, writer);
+    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix);
 
     let result = tender.read_and_coalesce_dirty_log().await;
     assert!(result.is_err());
@@ -625,20 +512,7 @@ async fn test_k8s_integration_handles_empty_markers_after_filtering() {
             .unwrap();
     }
 
-    let reader = LogReader::new(
-        LogReaderOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix.clone(),
-    );
-    let cursor = CursorStore::new(
-        CursorStoreOptions::default(),
-        Arc::new(storage.clone()),
-        dirty_log_prefix,
-        "test-tender".to_string(),
-    );
-    let scheduler = Arc::new(DummyScheduler) as _;
-    let writer = HeapWriter::new(storage, heap_prefix, scheduler).unwrap();
-    let tender = HeapTender::new(reader, cursor, writer);
+    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix);
 
     let result = tender.read_and_coalesce_dirty_log().await;
     assert!(result.is_ok());

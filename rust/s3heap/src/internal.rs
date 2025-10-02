@@ -21,6 +21,30 @@ const COLUMN_UUIDS: &str = "uuids";
 const COLUMN_NAMES: &str = "names";
 const COLUMN_NONCES: &str = "nonces";
 
+/// Helper function to extract and validate a string column from a parquet record batch.
+fn get_string_column<'a>(
+    batch: &'a RecordBatch,
+    column_name: &str,
+    path: &str,
+) -> Result<&'a StringArray, Error> {
+    let column = batch.column_by_name(column_name).ok_or_else(|| {
+        Error::Arrow(format!(
+            "missing '{}' column in parquet file: {}",
+            column_name, path
+        ))
+    })?;
+
+    column
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .ok_or_else(|| {
+            Error::Arrow(format!(
+                "'{}' column is not a StringArray in {}",
+                column_name, path
+            ))
+        })
+}
+
 ///////////////////////////////////////////// HeapItem /////////////////////////////////////////////
 
 /// A scheduled task instance in the heap.
@@ -227,51 +251,9 @@ impl Internal {
         let mut items = vec![];
         for batch in reader {
             let batch = batch.map_err(|err| Error::Arrow(err.to_string()))?;
-            let uuid = batch.column_by_name(COLUMN_UUIDS).ok_or_else(|| {
-                Error::Arrow(format!(
-                    "missing '{}' column in parquet file: {}",
-                    COLUMN_UUIDS, path
-                ))
-            })?;
-            let name = batch.column_by_name(COLUMN_NAMES).ok_or_else(|| {
-                Error::Arrow(format!(
-                    "missing '{}' column in parquet file: {}",
-                    COLUMN_NAMES, path
-                ))
-            })?;
-            let nonce = batch.column_by_name(COLUMN_NONCES).ok_or_else(|| {
-                Error::Arrow(format!(
-                    "missing '{}' column in parquet file: {}",
-                    COLUMN_NONCES, path
-                ))
-            })?;
-            let uuid = uuid
-                .as_any()
-                .downcast_ref::<arrow::array::StringArray>()
-                .ok_or_else(|| {
-                    Error::Arrow(format!(
-                        "'{}' column is not a StringArray in {}",
-                        COLUMN_UUIDS, path
-                    ))
-                })?;
-            let name = name
-                .as_any()
-                .downcast_ref::<arrow::array::StringArray>()
-                .ok_or_else(|| {
-                    Error::Arrow(format!(
-                        "'{}' column is not a StringArray in {}",
-                        COLUMN_NAMES, path
-                    ))
-                })?;
-            let nonce = nonce
-                .as_any()
-                .downcast_ref::<arrow::array::StringArray>()
-                .ok_or_else(|| {
-                    Error::Arrow(format!(
-                        "'{}' column is not a StringArray in {}",
-                        COLUMN_NONCES, path
-                    ))
-                })?;
+            let uuid = get_string_column(&batch, COLUMN_UUIDS, &path)?;
+            let name = get_string_column(&batch, COLUMN_NAMES, &path)?;
+            let nonce = get_string_column(&batch, COLUMN_NONCES, &path)?;
             let mut errors = Vec::new();
             for i in 0..batch.num_rows() {
                 if uuid.is_null(i) || name.is_null(i) || nonce.is_null(i) {
@@ -553,6 +535,8 @@ mod tests {
     use chrono::TimeZone;
     use std::time::Duration;
 
+    use crate::DummyScheduler;
+
     // HeapItem tests
     #[test]
     fn heap_item_creation_and_equality() {
@@ -605,7 +589,7 @@ mod tests {
     #[test]
     fn internal_new() {
         let (_temp_dir, storage) = chroma_storage::test_storage();
-        let scheduler = Arc::new(DummyScheduler {});
+        let scheduler = Arc::new(DummyScheduler);
         let retry_config = RetryConfig {
             min_delay: Duration::from_millis(50),
             max_delay: Duration::from_secs(5),
@@ -633,7 +617,7 @@ mod tests {
         let internal = Internal {
             prefix: "test".to_string(),
             storage,
-            heap_scheduler: Arc::new(DummyScheduler {}),
+            heap_scheduler: Arc::new(DummyScheduler),
             retry_config: RetryConfig::default(),
         };
 
@@ -663,7 +647,7 @@ mod tests {
         let internal = Internal {
             prefix: "test".to_string(),
             storage,
-            heap_scheduler: Arc::new(DummyScheduler {}),
+            heap_scheduler: Arc::new(DummyScheduler),
             retry_config: RetryConfig::default(),
         };
 
@@ -695,7 +679,7 @@ mod tests {
         let internal = Internal {
             prefix: "test-prefix".to_string(),
             storage,
-            heap_scheduler: Arc::new(DummyScheduler {}),
+            heap_scheduler: Arc::new(DummyScheduler),
             retry_config: RetryConfig::default(),
         };
 
@@ -707,7 +691,7 @@ mod tests {
         let internal2 = Internal {
             prefix: "another/nested/prefix".to_string(),
             storage: chroma_storage::test_storage().1,
-            heap_scheduler: Arc::new(DummyScheduler {}),
+            heap_scheduler: Arc::new(DummyScheduler),
             retry_config: RetryConfig::default(),
         };
         let path2 = internal2.path_for_bucket(bucket);
@@ -720,7 +704,7 @@ mod tests {
         let internal = Internal {
             prefix: "edge".to_string(),
             storage,
-            heap_scheduler: Arc::new(DummyScheduler {}),
+            heap_scheduler: Arc::new(DummyScheduler),
             retry_config: RetryConfig::default(),
         };
 
@@ -743,7 +727,7 @@ mod tests {
     #[test]
     fn heap_scheduler_reference() {
         let (_temp_dir, storage) = chroma_storage::test_storage();
-        let scheduler = Arc::new(DummyScheduler {});
+        let scheduler = Arc::new(DummyScheduler);
         let internal = Internal {
             prefix: "test".to_string(),
             storage,
@@ -1000,7 +984,7 @@ mod tests {
         let internal = Internal {
             prefix: "empty-list".to_string(),
             storage,
-            heap_scheduler: Arc::new(DummyScheduler {}),
+            heap_scheduler: Arc::new(DummyScheduler),
             retry_config: RetryConfig::default(),
         };
 
@@ -1014,7 +998,7 @@ mod tests {
         let internal = Internal {
             prefix: "clear-test".to_string(),
             storage,
-            heap_scheduler: Arc::new(DummyScheduler {}),
+            heap_scheduler: Arc::new(DummyScheduler),
             retry_config: RetryConfig::default(),
         };
 
@@ -1022,25 +1006,5 @@ mod tests {
         // Clearing a non-existent bucket might return an error depending on storage implementation
         // In production S3, it would succeed, but test storage might behave differently
         let _ = internal.clear_bucket(bucket).await;
-    }
-
-    // Test schedulers
-    struct DummyScheduler;
-
-    #[async_trait::async_trait]
-    impl crate::HeapScheduler for DummyScheduler {
-        async fn are_done(
-            &self,
-            items: &[(crate::Triggerable, Uuid)],
-        ) -> Result<Vec<bool>, crate::Error> {
-            Ok(vec![false; items.len()])
-        }
-
-        async fn next_times_and_nonces(
-            &self,
-            items: &[crate::Triggerable],
-        ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, crate::Error> {
-            Ok(vec![None; items.len()])
-        }
     }
 }
