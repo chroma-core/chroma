@@ -8,7 +8,6 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use roaring::RoaringBitmap;
 use std::collections::HashSet;
-use std::ops::RangeBounds;
 use std::sync::Arc;
 use tantivy::tokenizer::NgramTokenizer;
 use tantivy::tokenizer::TokenStream;
@@ -450,18 +449,14 @@ impl NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'_> {
             .await
     }
 
-    async fn lookup_ngram_range<'me, NgramRange>(
+    async fn lookup_ngram<'me>(
         &'me self,
-        ngram_range: NgramRange,
-    ) -> Result<Vec<(&'me str, u32, &'me [u32])>, FullTextIndexError>
-    where
-        NgramRange: Clone + RangeBounds<&'me str> + Send + Sync + 'me,
-    {
+        ngram: &'me str,
+    ) -> Result<Vec<(u32, &'me [u32])>, FullTextIndexError> {
         Ok(self
             .posting_lists_blockfile_reader
-            .get_range(ngram_range, ..)
-            .await?
-            .collect::<Vec<_>>())
+            .get_prefix(ngram)
+            .await?)
     }
 }
 
