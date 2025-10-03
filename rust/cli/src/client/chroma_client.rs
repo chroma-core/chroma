@@ -116,6 +116,7 @@ impl ChromaClient {
             configuration,
             metadata,
             get_or_create: false,
+            schema: None,
         };
         let response = send_request::<CreateCollectionPayload, CollectionModel>(
             &self.host,

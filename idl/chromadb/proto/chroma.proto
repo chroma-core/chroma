@@ -71,6 +71,7 @@ message Collection {
   google.protobuf.Timestamp updated_at = 16;
   // This is the database id of the collection.
   optional string database_id = 17;
+  optional string schema_str = 18;
 }
 
 message Database {

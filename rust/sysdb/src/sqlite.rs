@@ -347,6 +347,7 @@ impl SqliteSysDb {
             database,
             config: configuration,
             metadata,
+            schema: None,
             dimension,
             log_position: 0,
             total_records_post_compaction: 0,
@@ -744,6 +745,7 @@ impl SqliteSysDb {
                 Some(Ok(Collection {
                     collection_id,
                     config: configuration,
+                    schema: None,
                     metadata,
                     total_records_post_compaction: 0,
                     version: 0,

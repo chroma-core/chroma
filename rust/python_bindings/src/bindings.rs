@@ -112,6 +112,7 @@ impl Bindings {
         let executor_config = ExecutorConfig::Local(LocalExecutorConfig {});
 
         let knn_index = KnnIndex::Hnsw;
+        let enable_schema = false;
 
         let frontend_config = FrontendConfig {
             allow_reset,
@@ -124,6 +125,7 @@ impl Bindings {
             default_knn_index: knn_index,
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
+            enable_schema,
         };
 
         let frontend = runtime.block_on(async {
@@ -293,6 +295,7 @@ impl Bindings {
             name,
             metadata,
             configuration,
+            None,
             get_or_create,
         )?;
 

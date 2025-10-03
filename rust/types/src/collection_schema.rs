@@ -743,6 +743,18 @@ impl InternalSchema {
         Self::convert_collection_config_to_schema(collection_config)
     }
 
+    pub fn reconcile_schema_and_config(
+        schema: Option<InternalSchema>,
+        configuration: Option<InternalCollectionConfiguration>,
+    ) -> Result<InternalSchema, String> {
+        let reconciled_schema = Self::reconcile_with_defaults(schema)?;
+        if let Some(config) = configuration {
+            Self::reconcile_with_collection_config(reconciled_schema, config)
+        } else {
+            Ok(reconciled_schema)
+        }
+    }
+
     /// Check if schema is default by comparing it word-by-word with new_default
     fn is_schema_default(schema: &InternalSchema) -> bool {
         // Compare with both possible default schemas (HNSW and SPANN)
