@@ -39,9 +39,8 @@ from chromadb.base_types import (
 if TYPE_CHECKING:
     pass
 
-# Import for DefaultEmbeddingFunction
 try:
-    from clients.python.is_thin_client import is_thin_client
+    from chromadb.is_thin_client import is_thin_client
 except ImportError:
     is_thin_client = False
 from inspect import signature
