@@ -29,11 +29,11 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
     SearchResult,
+    DefaultEmbeddingFunction,
 )
 from chromadb.execution.expression.plan import Search
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant, Collection as CollectionModel
-import chromadb.utils.embedding_functions as ef
 
 
 class AsyncBaseAPI(ABC):
@@ -365,7 +365,7 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> AsyncCollection:
@@ -402,7 +402,7 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
         name: str,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
         """Get a collection with the given name.
@@ -434,7 +434,7 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
         """Get or create a collection with the given name and metadata.

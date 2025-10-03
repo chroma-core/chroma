@@ -27,6 +27,7 @@ from chromadb.api.types import (
     URIs,
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
+    DefaultEmbeddingFunction,
 )
 from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database
@@ -35,7 +36,6 @@ from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
 from chromadb.errors import ChromaAuthError, ChromaError
 from chromadb.types import Database, Tenant, Where, WhereDocument
-import chromadb.utils.embedding_functions as ef
 
 
 class Client(SharedSystemClient, ClientAPI):
@@ -156,7 +156,7 @@ class Client(SharedSystemClient, ClientAPI):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
@@ -195,7 +195,7 @@ class Client(SharedSystemClient, ClientAPI):
         name: str,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         model = self._server.get_collection(
@@ -224,7 +224,7 @@ class Client(SharedSystemClient, ClientAPI):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         if configuration is None:

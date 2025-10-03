@@ -29,7 +29,7 @@ impl ChromaError for HnswParametersFromSegmentError {
 }
 
 #[derive(Default, Debug, PartialEq, Serialize, Deserialize, Clone, ToSchema)]
-pub enum HnswSpace {
+pub enum Space {
     #[default]
     #[serde(rename = "l2")]
     L2,
@@ -39,45 +39,45 @@ pub enum HnswSpace {
     Ip,
 }
 
-fn default_construction_ef() -> usize {
+pub fn default_construction_ef() -> usize {
     100
 }
 
-fn default_search_ef() -> usize {
+pub fn default_search_ef() -> usize {
     100
 }
 
-fn default_m() -> usize {
+pub fn default_m() -> usize {
     16
 }
 
-fn default_num_threads() -> usize {
+pub fn default_num_threads() -> usize {
     std::thread::available_parallelism()
         .unwrap_or(NonZero::new(1).unwrap())
         .get()
 }
 
-fn default_resize_factor() -> f64 {
+pub fn default_resize_factor() -> f64 {
     1.2
 }
 
-fn default_sync_threshold() -> usize {
+pub fn default_sync_threshold() -> usize {
     1000
 }
 
-fn default_batch_size() -> usize {
+pub fn default_batch_size() -> usize {
     100
 }
 
-fn default_space() -> HnswSpace {
-    HnswSpace::L2
+pub fn default_space() -> Space {
+    Space::L2
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InternalHnswConfiguration {
     #[serde(default = "default_space")]
-    pub space: HnswSpace,
+    pub space: Space,
     #[serde(default = "default_construction_ef")]
     pub ef_construction: usize,
     #[serde(default = "default_search_ef")]
@@ -108,7 +108,7 @@ impl Default for InternalHnswConfiguration {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct HnswConfiguration {
-    pub space: Option<HnswSpace>,
+    pub space: Option<Space>,
     pub ef_construction: Option<usize>,
     pub ef_search: Option<usize>,
     pub max_neighbors: Option<usize>,
@@ -167,7 +167,7 @@ impl InternalHnswConfiguration {
             #[serde(deny_unknown_fields)]
             struct LegacyMetadataLocalHnswParameters {
                 #[serde(rename = "hnsw:space", default)]
-                pub space: HnswSpace,
+                pub space: Space,
                 #[serde(rename = "hnsw:construction_ef", default = "default_construction_ef")]
                 pub construction_ef: usize,
                 #[serde(rename = "hnsw:search_ef", default = "default_search_ef")]
