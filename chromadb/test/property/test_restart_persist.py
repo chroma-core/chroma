@@ -1,4 +1,9 @@
-from overrides import overrides
+import sys
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from chromadb.api.client import Client
 from chromadb.config import System
 import hypothesis.strategies as st
@@ -40,7 +45,7 @@ class RestartablePersistedEmbeddingStateMachine(EmbeddingStateMachineBase):
         super().__init__(client)
 
     @initialize(collection=collection_persistent_st)  # type: ignore
-    @overrides
+    @override
     def initialize(self, collection: strategies.Collection):
         self.client.reset()
 
@@ -69,7 +74,7 @@ class RestartablePersistedEmbeddingStateMachine(EmbeddingStateMachineBase):
             self.collection.name, embedding_function=self.embedding_function
         )
 
-    @overrides
+    @override
     def teardown(self) -> None:
         super().teardown()
         # Need to manually stop the system to cleanup resources because we may have created a new system (above rule).

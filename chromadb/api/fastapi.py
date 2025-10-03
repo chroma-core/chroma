@@ -4,8 +4,13 @@ from typing import Any, Dict, Optional, cast, Tuple, List
 from typing import Sequence
 from uuid import UUID
 import httpx
+import sys
 import urllib.parse
-from overrides import override
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,

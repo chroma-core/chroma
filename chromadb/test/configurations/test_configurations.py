@@ -1,5 +1,10 @@
-from overrides import overrides
+import sys
 import pytest
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from chromadb.api.configuration import (
     ConfigurationInternal,
     ConfigurationDefinition,
@@ -26,7 +31,7 @@ class TestConfiguration(ConfigurationInternal):
         ),
     }
 
-    @overrides
+    @override
     def configuration_validator(self) -> None:
         pass
 
@@ -96,7 +101,7 @@ def test_configuration_validation() -> None:
             ),
         }
 
-        @overrides
+        @override
         def configuration_validator(self) -> None:
             if self.parameter_map.get("foo") != "bar":
                 raise InvalidConfigurationError("foo must be 'bar'")

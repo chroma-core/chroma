@@ -1,9 +1,14 @@
 import hypothesis.stateful
 import hypothesis.strategies
-from overrides import overrides
+import sys
 import pytest
 import logging
 import hypothesis
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 import hypothesis.strategies as st
 from hypothesis import given, settings, HealthCheck
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
@@ -112,7 +117,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             ids=[], metadatas=[], documents=[], embeddings=[]
         )
 
-    @overrides
+    @override
     def teardown(self) -> None:
         self.client.delete_collection(self.collection.name)
 

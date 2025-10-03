@@ -1,10 +1,15 @@
 from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict, List
+import sys
 from chromadb.segment import MetadataReader
 from chromadb.ingest import Consumer
 from chromadb.config import System
 from chromadb.types import RequestVersionContext, Segment, InclusionExclusionOperator
 from chromadb.db.impl.sqlite import SqliteDB
-from overrides import override
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from chromadb.db.base import (
     Cursor,
     ParameterValue,

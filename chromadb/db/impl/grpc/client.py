@@ -1,6 +1,11 @@
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
-from overrides import overrides
+import sys
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     create_collection_configuration_to_json_str,
@@ -84,7 +89,7 @@ class GrpcSysDB(SysDB):
         )
         return super().__init__(system)
 
-    @overrides
+    @override
     def start(self) -> None:
         self._channel = grpc.insecure_channel(
             f"{self._coordinator_url}:{self._coordinator_port}",
@@ -95,17 +100,17 @@ class GrpcSysDB(SysDB):
         self._sys_db_stub = SysDBStub(self._channel)  # type: ignore
         return super().start()
 
-    @overrides
+    @override
     def stop(self) -> None:
         self._channel.close()
         return super().stop()
 
-    @overrides
+    @override
     def reset_state(self) -> None:
         self._sys_db_stub.ResetState(Empty())
         return super().reset_state()
 
-    @overrides
+    @override
     def create_database(
         self, id: UUID, name: str, tenant: str = DEFAULT_TENANT
     ) -> None:
@@ -122,7 +127,7 @@ class GrpcSysDB(SysDB):
                 raise UniqueConstraintError()
             raise InternalError()
 
-    @overrides
+    @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
         try:
             request = GetDatabaseRequest(name=name, tenant=tenant)
@@ -142,7 +147,7 @@ class GrpcSysDB(SysDB):
                 raise NotFoundError()
             raise InternalError()
 
-    @overrides
+    @override
     def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
         try:
             request = DeleteDatabaseRequest(name=name, tenant=tenant)
@@ -157,7 +162,7 @@ class GrpcSysDB(SysDB):
                 raise NotFoundError()
             raise InternalError
 
-    @overrides
+    @override
     def list_databases(
         self,
         limit: Optional[int] = None,
@@ -185,7 +190,7 @@ class GrpcSysDB(SysDB):
             )
             raise InternalError()
 
-    @overrides
+    @override
     def create_tenant(self, name: str) -> None:
         try:
             request = CreateTenantRequest(name=name)
@@ -198,7 +203,7 @@ class GrpcSysDB(SysDB):
                 raise UniqueConstraintError()
             raise InternalError()
 
-    @overrides
+    @override
     def get_tenant(self, name: str) -> Tenant:
         try:
             request = GetTenantRequest(name=name)
@@ -214,7 +219,7 @@ class GrpcSysDB(SysDB):
                 raise NotFoundError()
             raise InternalError()
 
-    @overrides
+    @override
     def create_segment(self, segment: Segment) -> None:
         try:
             proto_segment = to_proto_segment(segment)
@@ -230,7 +235,7 @@ class GrpcSysDB(SysDB):
                 raise UniqueConstraintError()
             raise InternalError()
 
-    @overrides
+    @override
     def delete_segment(self, collection: UUID, id: UUID) -> None:
         try:
             request = DeleteSegmentRequest(
@@ -248,7 +253,7 @@ class GrpcSysDB(SysDB):
                 raise NotFoundError()
             raise InternalError()
 
-    @overrides
+    @override
     def get_segments(
         self,
         collection: UUID,
@@ -277,7 +282,7 @@ class GrpcSysDB(SysDB):
             )
             raise InternalError()
 
-    @overrides
+    @override
     def update_segment(
         self,
         collection: UUID,
@@ -310,7 +315,7 @@ class GrpcSysDB(SysDB):
             )
             raise InternalError()
 
-    @overrides
+    @override
     def create_collection(
         self,
         id: UUID,
@@ -350,7 +355,7 @@ class GrpcSysDB(SysDB):
                 raise UniqueConstraintError()
             raise InternalError()
 
-    @overrides
+    @override
     def delete_collection(
         self,
         id: UUID,
@@ -378,7 +383,7 @@ class GrpcSysDB(SysDB):
                 raise NotFoundError()
             raise InternalError()
 
-    @overrides
+    @override
     def get_collections(
         self,
         id: Optional[UUID] = None,
@@ -429,7 +434,7 @@ class GrpcSysDB(SysDB):
             )
             raise InternalError()
 
-    @overrides
+    @override
     def count_collections(
         self,
         tenant: str = DEFAULT_TENANT,
@@ -455,7 +460,7 @@ class GrpcSysDB(SysDB):
             logger.error(f"Failed to count collections due to error: {e}")
             raise InternalError()
 
-    @overrides
+    @override
     def get_collection_size(self, id: UUID) -> int:
         try:
             request = GetCollectionSizeRequest(id=id.hex)
@@ -470,7 +475,7 @@ class GrpcSysDB(SysDB):
     @trace_method(
         "SysDB.get_collection_with_segments", OpenTelemetryGranularity.OPERATION
     )
-    @overrides
+    @override
     def get_collection_with_segments(
         self, collection_id: UUID
     ) -> CollectionAndSegments:
@@ -491,7 +496,7 @@ class GrpcSysDB(SysDB):
             )
             raise InternalError()
 
-    @overrides
+    @override
     def update_collection(
         self,
         id: UUID,

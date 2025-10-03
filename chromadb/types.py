@@ -1,10 +1,14 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Optional, Union, Sequence, Dict, Mapping, Generic
+import sys
 
 from typing_extensions import Self
 
-from overrides import override
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from typing_extensions import TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum

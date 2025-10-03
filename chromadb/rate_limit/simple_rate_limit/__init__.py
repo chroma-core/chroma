@@ -1,6 +1,11 @@
-from overrides import override
+import sys
 from typing import Any, Awaitable, Callable, TypeVar
 from functools import wraps
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 
 from chromadb.rate_limit import RateLimitEnforcer
 from chromadb.config import System

@@ -1,8 +1,13 @@
 from concurrent import futures
 from typing import Any, Dict, List, cast
 from uuid import UUID
-from overrides import overrides
 import json
+import sys
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Component, System
 from chromadb.proto.convert import (
@@ -73,7 +78,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self._server_port = system.settings.require("chroma_server_grpc_port")
         return super().__init__(system)
 
-    @overrides
+    @override
     def start(self) -> None:
         self._server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
         add_SysDBServicer_to_server(self, self._server)  # type: ignore
@@ -81,12 +86,12 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self._server.start()
         return super().start()
 
-    @overrides
+    @override
     def stop(self) -> None:
         self._server.stop(None)
         return super().stop()
 
-    @overrides
+    @override
     def reset_state(self) -> None:
         self._segments = {}
         self._tenants_to_databases_to_collections = {}
@@ -97,7 +102,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self._tenants_to_database_to_id[DEFAULT_TENANT][DEFAULT_DATABASE] = UUID(int=0)
         return super().reset_state()
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def CreateDatabase(
         self, request: CreateDatabaseRequest, context: grpc.ServicerContext
     ) -> CreateDatabaseResponse:
@@ -113,7 +118,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self._tenants_to_database_to_id[tenant][database] = UUID(hex=request.id)
         return CreateDatabaseResponse()
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def GetDatabase(
         self, request: GetDatabaseRequest, context: grpc.ServicerContext
     ) -> GetDatabaseResponse:
@@ -128,7 +133,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
             database=proto.Database(id=id.hex, name=database, tenant=tenant),
         )
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def CreateTenant(
         self, request: CreateTenantRequest, context: grpc.ServicerContext
     ) -> CreateTenantResponse:
@@ -141,7 +146,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self._tenants_to_database_to_id[tenant] = {}
         return CreateTenantResponse()
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def GetTenant(
         self, request: GetTenantRequest, context: grpc.ServicerContext
     ) -> GetTenantResponse:
@@ -155,7 +160,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
     # We are forced to use check_signature=False because the generated proto code
     # does not have type annotations for the request and response objects.
     # TODO: investigate generating types for the request and response objects
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def CreateSegment(
         self, request: CreateSegmentRequest, context: grpc.ServicerContext
     ) -> CreateSegmentResponse:
@@ -173,7 +178,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self._segments[segment["id"].hex] = segment
         return CreateSegmentResponse()
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def DeleteSegment(
         self, request: DeleteSegmentRequest, context: grpc.ServicerContext
     ) -> DeleteSegmentResponse:
@@ -186,7 +191,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
                 grpc.StatusCode.NOT_FOUND, f"Segment {id_to_delete} not found"
             )
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def GetSegments(
         self, request: GetSegmentsRequest, context: grpc.ServicerContext
     ) -> GetSegmentsResponse:
@@ -214,7 +219,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
             segments=[to_proto_segment(segment) for segment in found_segments]
         )
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def UpdateSegment(
         self, request: UpdateSegmentRequest, context: grpc.ServicerContext
     ) -> UpdateSegmentResponse:
@@ -234,7 +239,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
                 segment["metadata"] = {}
             return UpdateSegmentResponse()
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def CreateCollection(
         self, request: CreateCollectionRequest, context: grpc.ServicerContext
     ) -> CreateCollectionResponse:
@@ -324,7 +329,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
             created=True,
         )
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def DeleteCollection(
         self, request: DeleteCollectionRequest, context: grpc.ServicerContext
     ) -> DeleteCollectionResponse:
@@ -349,7 +354,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
                 grpc.StatusCode.NOT_FOUND, f"Collection {collection_id} not found"
             )
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def GetCollections(
         self, request: GetCollectionsRequest, context: grpc.ServicerContext
     ) -> GetCollectionsResponse:
@@ -380,7 +385,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
             ]
         )
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def CountCollections(
         self, request: CountCollectionsRequest, context: grpc.ServicerContext
     ) -> CountCollectionsResponse:
@@ -391,7 +396,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
         collections = self.GetCollections(request, context)
         return CountCollectionsResponse(count=len(collections.collections))
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def GetCollectionSize(
         self, request: GetCollectionSizeRequest, context: grpc.ServicerContext
     ) -> GetCollectionSizeResponse:
@@ -399,7 +404,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
             total_records_post_compaction=0,
         )
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def GetCollectionWithSegments(
         self, request: GetCollectionWithSegmentsRequest, context: grpc.ServicerContext
     ) -> GetCollectionWithSegmentsResponse:
@@ -437,7 +442,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
             segments=[to_proto_segment(segment) for segment in segments],
         )
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def UpdateCollection(
         self, request: UpdateCollectionRequest, context: grpc.ServicerContext
     ) -> UpdateCollectionResponse:
@@ -479,7 +484,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
 
             return UpdateCollectionResponse()
 
-    @overrides(check_signature=False)
+    @override(check_signature=False)
     def ResetState(
         self, request: Empty, context: grpc.ServicerContext
     ) -> ResetStateResponse:

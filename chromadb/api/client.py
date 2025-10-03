@@ -1,7 +1,11 @@
 from typing import Optional, Sequence
 from uuid import UUID
+import sys
 
-from overrides import override
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 import httpx
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
 from chromadb.api.collection_configuration import (

@@ -23,7 +23,11 @@ from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     trace_method,
 )
-from overrides import override
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from typing import Sequence, Optional, cast
 from uuid import UUID
 import logging

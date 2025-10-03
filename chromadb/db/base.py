@@ -3,7 +3,16 @@ from types import TracebackType
 from typing_extensions import Protocol, Self, Literal
 from abc import ABC, abstractmethod
 from threading import local
-from overrides import override, EnforceOverrides
+import sys
+
+if sys.version_info >= (3, 12):
+    from typing import override
+
+    class EnforceOverrides:
+        pass
+else:
+    from overrides import overrides as override
+    from overrides import EnforceOverrides
 import pypika
 import pypika.queries
 from chromadb.config import System, Component

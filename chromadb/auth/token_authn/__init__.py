@@ -2,13 +2,16 @@ import logging
 import random
 import re
 import string
+import sys
 import time
 import traceback
 from enum import Enum
 from typing import cast, Dict, List, Optional, TypedDict, TypeVar
 
-
-from overrides import override
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from pydantic import SecretStr
 import yaml
 

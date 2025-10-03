@@ -2,7 +2,11 @@ import logging
 import sys
 from typing import Optional, Sequence, Any, Tuple, cast, Dict, Union, Set
 from uuid import UUID
-from overrides import override
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from pypika import Table, Column
 from itertools import groupby
 

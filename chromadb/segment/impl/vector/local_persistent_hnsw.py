@@ -1,8 +1,13 @@
 import os
 import shutil
-from overrides import override
+import sys
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from chromadb.config import System
 from chromadb.db.base import ParameterValue, get_sql
 from chromadb.db.impl.sqlite import SqliteDB

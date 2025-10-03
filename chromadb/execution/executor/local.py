@@ -1,6 +1,10 @@
 from typing import Optional, Sequence
+import sys
 
-from overrides import overrides
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 
 from chromadb.api.types import GetResult, Metadata, QueryResult
 from chromadb.config import System
@@ -47,11 +51,11 @@ class LocalExecutor(Executor):
         super().__init__(system)
         self._manager = self.require(LocalSegmentManager)
 
-    @overrides
+    @override
     def count(self, plan: CountPlan) -> int:
         return self._metadata_segment(plan.scan.collection).count(plan.scan.version)
 
-    @overrides
+    @override
     def get(self, plan: GetPlan) -> GetResult:
         records = self._metadata_segment(plan.scan.collection).get_metadata(
             request_version_context=plan.scan.version,
@@ -103,7 +107,7 @@ class LocalExecutor(Executor):
             included=included,
         )
 
-    @overrides
+    @override
     def knn(self, plan: KNNPlan) -> QueryResult:
         prefiltered_ids = None
         if plan.filter.user_ids or plan.filter.where or plan.filter.where_document:

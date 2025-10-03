@@ -14,10 +14,15 @@ from chromadb.segment.impl.manager.cache.cache import (
     SegmentCache,
 )
 import os
+import sys
 
 from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
-from overrides import override
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from chromadb.segment.impl.vector.local_persistent_hnsw import (
     PersistentLocalHnswSegment,
 )

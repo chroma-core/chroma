@@ -1,14 +1,21 @@
 import importlib
 import inspect
 import logging
+import sys
 from abc import ABC
 from enum import Enum
 from graphlib import TopologicalSorter
 from typing import Optional, List, Any, Dict, Set, Iterable, Union
 from typing import Type, TypeVar, cast
 
-from overrides import EnforceOverrides
-from overrides import override
+if sys.version_info >= (3, 12):
+    from typing import override
+
+    class EnforceOverrides:
+        pass
+else:
+    from overrides import overrides as override
+    from overrides import EnforceOverrides
 from typing_extensions import Literal
 import platform
 

@@ -2,8 +2,13 @@ import sqlite3
 import weakref
 from abc import ABC, abstractmethod
 from typing import Any, Set
+import sys
 import threading
-from overrides import override
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from typing_extensions import Annotated
 
 
