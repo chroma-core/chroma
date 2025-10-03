@@ -406,6 +406,7 @@ pub struct Triggerable {
 /// use parking_lot::Mutex;
 ///
 /// struct MyScheduler {
+///     schedules: Mutex<HashMap<Uuid, (Triggerable, DateTime<Utc>, Uuid)>>,
 ///     completed_tasks: Mutex<HashMap<(Uuid, Uuid), bool>>,
 /// }
 ///
@@ -419,13 +420,14 @@ pub struct Triggerable {
 ///             .collect())
 ///     }
 ///
-///     async fn next_times_and_nonces(
+///     async fn get_schedules(
 ///         &self,
-///         items: &[Triggerable],
-///     ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, Error> {
-///         // Determine when to schedule these tasks
-///         Ok(items.iter()
-///             .map(|_| Some((Utc::now() + chrono::Duration::minutes(5), Uuid::new_v4())))
+///         ids: &[Uuid],
+///     ) -> Result<Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>, Error> {
+///         // Retrieve scheduled tasks from your system
+///         let schedules = self.schedules.lock();
+///         Ok(ids.iter()
+///             .map(|id| schedules.get(id).cloned())
 ///             .collect())
 ///     }
 /// }
