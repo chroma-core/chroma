@@ -23,7 +23,7 @@ async fn test_k8s_integration_08_concurrent_pushes() {
     // Setup items for each writer
     for i in 0..(num_writers * items_per_writer) {
         let item = create_test_triggerable(i, &format!("task_{}", i));
-        scheduler.set_next_time(&item, Some((bucket_time, test_nonce(i))));
+        scheduler.set_schedule(item.uuid, Some((item.clone(), bucket_time, test_nonce(i))));
     }
 
     // Launch concurrent writers
@@ -78,7 +78,7 @@ async fn test_k8s_integration_08_concurrent_read_write() {
     let initial_items: Vec<_> = (0..5)
         .map(|i| {
             let item = create_test_triggerable(i, &format!("initial_{}", i));
-            scheduler.set_next_time(&item, Some((bucket_time, test_nonce(i))));
+            scheduler.set_schedule(item.uuid, Some((item.clone(), bucket_time, test_nonce(i))));
             item
         })
         .collect();
@@ -110,7 +110,10 @@ async fn test_k8s_integration_08_concurrent_read_write() {
                 .map(|i| {
                     let idx = 100 + batch * 5 + i;
                     let item = create_test_triggerable(idx, &format!("concurrent_{}", idx));
-                    scheduler_clone.set_next_time(&item, Some((bucket_time, test_nonce(idx))));
+                    scheduler_clone.set_schedule(
+                        item.uuid,
+                        Some((item.clone(), bucket_time, test_nonce(idx))),
+                    );
                     item
                 })
                 .collect();
@@ -172,7 +175,7 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
         .map(|i| {
             let item = create_test_triggerable(i, &format!("item_{}", i));
             let nonce = test_nonce(i);
-            scheduler.set_next_time(&item, Some((bucket_time, nonce)));
+            scheduler.set_schedule(item.uuid, Some((item.clone(), bucket_time, nonce)));
             // Mark even items as done
             if i % 2 == 0 {
                 scheduler.set_done(&item, nonce, true);
@@ -211,7 +214,8 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
         let new_items: Vec<_> = (100..105)
             .map(|i| {
                 let item = create_test_triggerable(i, &format!("new_item_{}", i));
-                scheduler_clone.set_next_time(&item, Some((bucket_time, test_nonce(i))));
+                scheduler_clone
+                    .set_schedule(item.uuid, Some((item.clone(), bucket_time, test_nonce(i))));
                 item
             })
             .collect();

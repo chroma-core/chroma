@@ -24,18 +24,30 @@ async fn test_k8s_integration_07_bucket_rounding() {
     let item3 = create_test_triggerable(3, "at_30_sec");
     let item4 = create_test_triggerable(4, "at_59_sec");
 
-    scheduler.set_next_time(&item1, Some((base_time, test_nonce(1))));
-    scheduler.set_next_time(
-        &item2,
-        Some((base_time + Duration::seconds(15), test_nonce(2))),
+    scheduler.set_schedule(item1.uuid, Some((item1.clone(), base_time, test_nonce(1))));
+    scheduler.set_schedule(
+        item2.uuid,
+        Some((
+            item2.clone(),
+            base_time + Duration::seconds(15),
+            test_nonce(2),
+        )),
     );
-    scheduler.set_next_time(
-        &item3,
-        Some((base_time + Duration::seconds(30), test_nonce(3))),
+    scheduler.set_schedule(
+        item3.uuid,
+        Some((
+            item3.clone(),
+            base_time + Duration::seconds(30),
+            test_nonce(3),
+        )),
     );
-    scheduler.set_next_time(
-        &item4,
-        Some((base_time + Duration::seconds(59), test_nonce(4))),
+    scheduler.set_schedule(
+        item4.uuid,
+        Some((
+            item4.clone(),
+            base_time + Duration::seconds(59),
+            test_nonce(4),
+        )),
     );
 
     // Push all items
@@ -73,11 +85,15 @@ async fn test_k8s_integration_07_bucket_boundaries() {
     let item1 = create_test_triggerable(1, "last_sec_minute1");
     let item2 = create_test_triggerable(2, "first_sec_minute2");
 
-    scheduler.set_next_time(
-        &item1,
-        Some((minute1 + Duration::seconds(59), test_nonce(1))),
+    scheduler.set_schedule(
+        item1.uuid,
+        Some((
+            item1.clone(),
+            minute1 + Duration::seconds(59),
+            test_nonce(1),
+        )),
     );
-    scheduler.set_next_time(&item2, Some((minute2, test_nonce(2))));
+    scheduler.set_schedule(item2.uuid, Some((item2.clone(), minute2, test_nonce(2))));
 
     // Push items
     let writer = HeapWriter::new(
@@ -112,7 +128,10 @@ async fn test_k8s_integration_07_bucket_path_format() {
         .unwrap()
         .with_timezone(&Utc);
 
-    scheduler.set_next_time(&item, Some((scheduled_time, test_nonce(1))));
+    scheduler.set_schedule(
+        item.uuid,
+        Some((item.clone(), scheduled_time, test_nonce(1))),
+    );
 
     // Push item
     let writer = HeapWriter::new(
@@ -153,7 +172,7 @@ async fn test_k8s_integration_07_multiple_buckets_ordering() {
         .map(|i| {
             let item = create_test_triggerable(i as u32, &format!("task_{}", i));
             let time = base_time + Duration::minutes(i * 5);
-            scheduler.set_next_time(&item, Some((time, test_nonce(i as u32))));
+            scheduler.set_schedule(item.uuid, Some((item.clone(), time, test_nonce(i as u32))));
             item
         })
         .collect();

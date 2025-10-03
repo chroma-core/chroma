@@ -39,8 +39,8 @@ async fn test_k8s_integration_06_concurrent_writes_with_retry() {
     let item1 = create_test_triggerable(1, "writer1_task");
     let item2 = create_test_triggerable(2, "writer2_task");
 
-    scheduler.set_next_time(&item1, Some((time, test_nonce(1))));
-    scheduler.set_next_time(&item2, Some((time, test_nonce(2))));
+    scheduler.set_schedule(item1.uuid, Some((item1.clone(), time, test_nonce(1))));
+    scheduler.set_schedule(item2.uuid, Some((item2.clone(), time, test_nonce(2))));
 
     // Push concurrently - retry logic should handle any conflicts
     let handle1 = tokio::spawn(async move { writer1.push(&[item1]).await });
@@ -62,7 +62,10 @@ async fn test_k8s_integration_06_prune_with_retry() {
         let item = create_test_triggerable(1, "task");
         let nonce = test_nonce(1);
         let now = Utc::now();
-        scheduler.set_next_time(&item, Some((test_time_at_minute_offset(now, 3), nonce)));
+        scheduler.set_schedule(
+            item.uuid,
+            Some((item.clone(), test_time_at_minute_offset(now, 3), nonce)),
+        );
         scheduler.set_done(&item, nonce, true);
 
         let writer = HeapWriter::new(

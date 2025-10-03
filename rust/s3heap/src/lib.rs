@@ -467,44 +467,46 @@ pub trait HeapScheduler: Send + Sync {
     /// result[i] = is_done(&items[i])
     async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error>;
 
-    /// Get the next scheduled execution time and nonce for a task.
+    /// Get the schedule for a specific task by its ID.
     ///
     /// # Arguments
-    /// * `item` - The triggerable task to schedule
+    /// * `id` - The unique identifier of the scheduled task
     ///
     /// # Returns
-    /// * `Ok(Some((time, nonce)))` if the task should be scheduled
-    /// * `Ok(None)` if the task should not be scheduled
-    /// * `Err` if there was an error determining the schedule
-    async fn next_time_and_nonce(
+    /// * `Ok(Some((Triggerable, DateTime<Utc>, Uuid)))` if the task exists
+    /// * `Ok(None)` if the task does not exist
+    /// * `Err` if there was an error retrieving the schedule
+    async fn get_schedule(
         &self,
-        item: &Triggerable,
-    ) -> Result<Option<(DateTime<Utc>, Uuid)>, Error> {
-        let results = self.next_times_and_nonces(&[item.clone()]).await?;
+        id: Uuid,
+    ) -> Result<Option<(Triggerable, DateTime<Utc>, Uuid)>, Error> {
+        let mut results = self.get_schedules(&[id]).await?;
         if results.len() != 1 {
             return Err(Error::Internal(format!(
-                "next_times_and_nonces returned {} results for 1 item",
+                "get_schedules returned {} results for 1 item",
                 results.len()
             )));
         }
-        Ok(results[0])
+        // SAFETY(rescrv):  result.len() == 1
+        Ok(results.pop().unwrap())
     }
 
-    /// Get the next scheduled execution times and nonces for multiple tasks.
+    /// Get the schedules for multiple tasks by their IDs.
     ///
     /// # Arguments
-    /// * `items` - The triggerable tasks to schedule
+    /// * `ids` - The unique identifiers of the scheduled tasks
     ///
     /// # Returns
-    /// * `Ok(Vec<Option<(time, nonce)>>)` with one option per item
-    /// * `Err` if there was an error determining the schedules
+    /// * `Ok(Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>)` with one entry per ID
+    /// * `Err` if there was an error retrieving the schedules
     ///
     /// # Implementation Requirements
     /// The returned vector must have exactly the same length as the input slice.
-    async fn next_times_and_nonces(
+    /// result[i] = get_schedule(ids[i])
+    async fn get_schedules(
         &self,
-        items: &[Triggerable],
-    ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, Error>;
+        ids: &[Uuid],
+    ) -> Result<Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>, Error>;
 }
 
 //////////////////////////////////////////// HeapWriter ////////////////////////////////////////////
@@ -644,7 +646,8 @@ impl HeapWriter {
 
         let heap_scheduler = self.internal.heap_scheduler();
         let mut buckets: BTreeMap<DateTime<Utc>, Vec<HeapItem>> = BTreeMap::new();
-        let next_times_and_nonces = heap_scheduler.next_times_and_nonces(items).await?;
+        let ids = items.iter().map(|item| item.uuid).collect::<Vec<_>>();
+        let next_times_and_nonces = heap_scheduler.get_schedules(&ids).await?;
 
         if items.len() != next_times_and_nonces.len() {
             return Err(Error::Internal(format!(
@@ -654,13 +657,9 @@ impl HeapWriter {
             )));
         }
 
-        for (item, next) in items.iter().zip(next_times_and_nonces) {
-            let Some((when, nonce)) = next else {
-                // Skip items that have no next scheduled time
-                continue;
-            };
+        for (triggerable, when, nonce) in next_times_and_nonces.into_iter().flatten() {
             let heap_item = HeapItem {
-                trigger: item.clone(),
+                trigger: triggerable.clone(),
                 nonce,
             };
             let bucket = self.internal.compute_bucket(when)?;

@@ -25,7 +25,7 @@ pub struct MockHeapScheduler {
     #[allow(clippy::type_complexity)]
     done_items: Arc<Mutex<HashMap<(Uuid, String, Uuid), bool>>>,
     #[allow(clippy::type_complexity)]
-    next_times: Arc<Mutex<HashMap<(Uuid, String), Option<(DateTime<Utc>, Uuid)>>>>,
+    schedules: Arc<Mutex<HashMap<Uuid, (Triggerable, DateTime<Utc>, Uuid)>>>,
 }
 
 impl MockHeapScheduler {
@@ -33,7 +33,7 @@ impl MockHeapScheduler {
     pub fn new() -> Self {
         Self {
             done_items: Arc::new(Mutex::new(HashMap::new())),
-            next_times: Arc::new(Mutex::new(HashMap::new())),
+            schedules: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -49,15 +49,18 @@ impl MockHeapScheduler {
         self.done_items.lock().insert(key, done);
     }
 
-    /// Configure when a task should next be scheduled.
+    /// Configure the schedule for a specific task.
     ///
     /// # Arguments
     ///
-    /// * `item` - The triggerable task
-    /// * `when` - The next execution time and nonce, or None if the task shouldn't be scheduled
-    pub fn set_next_time(&self, item: &Triggerable, when: Option<(DateTime<Utc>, Uuid)>) {
-        let key = (item.uuid, item.name.clone());
-        self.next_times.lock().insert(key, when);
+    /// * `id` - The task UUID
+    /// * `schedule` - The task, scheduled time, and nonce, or None to remove the schedule
+    pub fn set_schedule(&self, id: Uuid, schedule: Option<(Triggerable, DateTime<Utc>, Uuid)>) {
+        if let Some(sched) = schedule {
+            self.schedules.lock().insert(id, sched);
+        } else {
+            self.schedules.lock().remove(&id);
+        }
     }
 }
 
@@ -80,18 +83,12 @@ impl HeapScheduler for MockHeapScheduler {
             .collect())
     }
 
-    async fn next_times_and_nonces(
+    async fn get_schedules(
         &self,
-        items: &[Triggerable],
-    ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, Error> {
-        let next_times = self.next_times.lock();
-        Ok(items
-            .iter()
-            .map(|item| {
-                let key = (item.uuid, item.name.clone());
-                next_times.get(&key).cloned().flatten()
-            })
-            .collect())
+        ids: &[Uuid],
+    ) -> Result<Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>, Error> {
+        let schedules = self.schedules.lock();
+        Ok(ids.iter().map(|id| schedules.get(id).cloned()).collect())
     }
 }
 
@@ -262,7 +259,8 @@ impl<'a> TestItemBuilder<'a> {
         let base = self.base_time.unwrap_or_else(Utc::now);
         let time = test_time_at_minute_offset(base, self.time_offset_minutes);
 
-        self.scheduler.set_next_time(&item, Some((time, nonce)));
+        self.scheduler
+            .set_schedule(item.uuid, Some((item.clone(), time, nonce)));
         if let Some(done) = self.is_done {
             self.scheduler.set_done(&item, nonce, done);
         }
@@ -275,7 +273,7 @@ impl<'a> TestItemBuilder<'a> {
     /// indicating it should not be scheduled.
     pub fn build_unscheduled(self) -> Triggerable {
         let item = create_test_triggerable(self.index, &self.name);
-        self.scheduler.set_next_time(&item, None);
+        self.scheduler.set_schedule(item.uuid, None);
         item
     }
 }

@@ -14,10 +14,10 @@ impl HeapScheduler for DummyScheduler {
         Ok(vec![false; items.len()])
     }
 
-    async fn next_times_and_nonces(
+    async fn get_schedules(
         &self,
-        items: &[Triggerable],
-    ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, Error> {
-        Ok(vec![None; items.len()])
+        ids: &[Uuid],
+    ) -> Result<Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>, Error> {
+        Ok(vec![None; ids.len()])
     }
 }

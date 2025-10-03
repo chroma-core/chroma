@@ -11,11 +11,10 @@ use std::time::Duration;
 use uuid::Uuid;
 
 // More sophisticated test scheduler for comprehensive testing
-type ScheduleInfo = Option<(DateTime<Utc>, Uuid)>;
-
 struct ConfigurableScheduler {
     done_items: Arc<Mutex<HashMap<(Uuid, Uuid), bool>>>,
-    scheduled_items: Arc<Mutex<HashMap<Uuid, ScheduleInfo>>>,
+    #[allow(clippy::type_complexity)]
+    scheduled_items: Arc<Mutex<HashMap<Uuid, Option<(Triggerable, DateTime<Utc>, Uuid)>>>>,
     error_on_done: Arc<Mutex<bool>>,
     error_on_schedule: Arc<Mutex<bool>>,
 }
@@ -53,19 +52,19 @@ impl HeapScheduler for ConfigurableScheduler {
             .collect())
     }
 
-    async fn next_times_and_nonces(
+    async fn get_schedules(
         &self,
-        items: &[Triggerable],
-    ) -> Result<Vec<ScheduleInfo>, Error> {
+        ids: &[Uuid],
+    ) -> Result<Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>, Error> {
         if *self.error_on_schedule.lock() {
             return Err(Error::Internal(
-                "Simulated error in next_time_and_nonce".to_string(),
+                "Simulated error in get_schedules".to_string(),
             ));
         }
         let scheduled_items = self.scheduled_items.lock();
-        Ok(items
+        Ok(ids
             .iter()
-            .map(|item| scheduled_items.get(&item.uuid).cloned().flatten())
+            .map(|id| scheduled_items.get(id).cloned().flatten())
             .collect())
     }
 }
