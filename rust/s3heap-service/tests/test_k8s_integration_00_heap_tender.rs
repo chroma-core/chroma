@@ -4,7 +4,8 @@ use chroma_storage::Storage;
 use chroma_types::{CollectionUuid, DirtyMarker};
 use wal3::{CursorStore, CursorStoreOptions, LogPosition, LogReader, LogReaderOptions};
 
-use s3heap::{DummyScheduler, Error, HeapTender, HeapWriter, HEAP_TENDER_CURSOR_NAME};
+use s3heap::{DummyScheduler, Error, HeapWriter};
+use s3heap_service::{HeapTender, HEAP_TENDER_CURSOR_NAME};
 
 fn test_heap_tender(storage: Storage, test_id: &str) -> HeapTender {
     let dirty_log_prefix = format!("test-dirty-log-{}", test_id);

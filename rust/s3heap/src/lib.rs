@@ -75,12 +75,6 @@ use chroma_storage::Storage;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-/// Heap tender service implementation for managing collection compaction scheduling.
-///
-/// This module provides the gRPC service implementation for the heap tender, which
-/// coordinates with the heap to schedule and track compaction operations for collections.
-pub mod tender;
-
 // TODO(rescrv):  Clean this up once the real pieces are doable.
 mod dummy;
 mod internal;
@@ -88,7 +82,6 @@ use internal::Internal;
 
 pub use dummy::DummyScheduler;
 pub use internal::HeapItem;
-pub use tender::{HeapTender, HEAP_TENDER_CURSOR_NAME};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 

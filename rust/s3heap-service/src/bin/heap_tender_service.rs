@@ -3,5 +3,5 @@ fn main() {
         .enable_all()
         .build()
         .unwrap()
-        .block_on(s3heap::tender::entrypoint());
+        .block_on(s3heap_service::entrypoint());
 }

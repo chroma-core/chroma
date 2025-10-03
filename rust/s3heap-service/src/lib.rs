@@ -24,8 +24,8 @@ use wal3::{
     Witness,
 };
 
-use crate::dummy::DummyScheduler;
-use crate::{Configuration, Error, HeapWriter};
+use s3heap::DummyScheduler;
+use s3heap::{Configuration, Error, HeapWriter};
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
 
