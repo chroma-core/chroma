@@ -10,22 +10,42 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Determine rustup home (Unix)
+      if: ${{ runner.os != 'Windows' }}
+      shell: bash
+      run: echo "RUSTUP_CACHE_PATH=$HOME/.rustup" >> "$GITHUB_ENV"
+    - name: Determine rustup home (Windows)
+      if: ${{ runner.os == 'Windows' }}
+      shell: pwsh
+      run: |
+        $rustupHome = Join-Path $env:USERPROFILE '.rustup'
+        "RUSTUP_CACHE_PATH=$rustupHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
     - name: Cache Rust toolchain
       id: cache-rustup
       uses: actions/cache@v4
-      if: ${{ runner.os != 'windows' }}
       with:
-        path: ~/.rustup
+        path: ${{ env.RUSTUP_CACHE_PATH }}
         key: toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}
     - name: Install Rust toolchain
       if: ${{ steps.cache-rustup.outputs.cache-hit != 'true' }}
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         cache: false
-    - name: Set channel in rust-toolchain.toml as default
+    - name: Set channel in rust-toolchain.toml as default (Unix)
+      if: ${{ runner.os != 'Windows' }}
       shell: bash
       run: |
         rustup default $(grep -m1 '^channel' rust-toolchain.toml | cut -d'"' -f2)
+    - name: Set channel in rust-toolchain.toml as default (Windows)
+      if: ${{ runner.os == 'Windows' }}
+      shell: pwsh
+      run: |
+        $channelLine = Select-String -Path rust-toolchain.toml -Pattern '^channel' | Select-Object -First 1
+        if (-not $channelLine) {
+          throw 'Failed to locate channel entry in rust-toolchain.toml'
+        }
+        $channel = ($channelLine.Line -split '"')[1]
+        rustup default $channel
     - name: Install Protoc
       uses: arduino/setup-protoc@v3
       with:
