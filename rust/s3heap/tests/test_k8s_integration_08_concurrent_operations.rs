@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
 use chrono::Utc;
-use s3heap::{HeapPruner, HeapReader, HeapWriter, Limits};
+use s3heap::{HeapPruner, HeapReader, HeapWriter, Limits, Schedule};
 
 mod common;
 
@@ -23,7 +23,14 @@ async fn test_k8s_integration_08_concurrent_pushes() {
     // Setup items for each writer
     for i in 0..(num_writers * items_per_writer) {
         let item = create_test_triggerable(i, &format!("task_{}", i));
-        scheduler.set_schedule(item.uuid, Some((item.clone(), bucket_time, test_nonce(i))));
+        scheduler.set_schedule(
+            item.uuid,
+            Some(Schedule {
+                triggerable: item.clone(),
+                next_scheduled: bucket_time,
+                nonce: test_nonce(i),
+            }),
+        );
     }
 
     // Launch concurrent writers
@@ -35,14 +42,19 @@ async fn test_k8s_integration_08_concurrent_pushes() {
             scheduler.clone(),
         )
         .unwrap();
-        let items: Vec<_> = (0..items_per_writer)
+        let schedules: Vec<_> = (0..items_per_writer)
             .map(|j| {
                 let idx = writer_id * items_per_writer + j;
-                create_test_triggerable(idx, &format!("task_{}", idx))
+                let item = create_test_triggerable(idx, &format!("task_{}", idx));
+                Schedule {
+                    triggerable: item,
+                    next_scheduled: bucket_time,
+                    nonce: test_nonce(idx),
+                }
             })
             .collect();
 
-        handles.push(tokio::spawn(async move { writer.push(&items).await }));
+        handles.push(tokio::spawn(async move { writer.push(&schedules).await }));
     }
 
     // Wait for all writers
@@ -75,11 +87,16 @@ async fn test_k8s_integration_08_concurrent_read_write() {
     let bucket_time = test_time_at_minute_offset(now, 3);
 
     // Start with some initial items
-    let initial_items: Vec<_> = (0..5)
+    let initial_schedules: Vec<_> = (0..5)
         .map(|i| {
             let item = create_test_triggerable(i, &format!("initial_{}", i));
-            scheduler.set_schedule(item.uuid, Some((item.clone(), bucket_time, test_nonce(i))));
-            item
+            let schedule = Schedule {
+                triggerable: item.clone(),
+                next_scheduled: bucket_time,
+                nonce: test_nonce(i),
+            };
+            scheduler.set_schedule(item.uuid, Some(schedule.clone()));
+            schedule
         })
         .collect();
 
@@ -89,7 +106,7 @@ async fn test_k8s_integration_08_concurrent_read_write() {
         scheduler.clone(),
     )
     .unwrap();
-    writer.push(&initial_items).await.unwrap();
+    writer.push(&initial_schedules).await.unwrap();
 
     // Launch concurrent readers and writers
     let mut write_handles = vec![];
@@ -106,18 +123,20 @@ async fn test_k8s_integration_08_concurrent_read_write() {
         let scheduler_clone = scheduler.clone();
 
         write_handles.push(tokio::spawn(async move {
-            let new_items: Vec<_> = (0..5)
+            let new_schedules: Vec<_> = (0..5)
                 .map(|i| {
                     let idx = 100 + batch * 5 + i;
                     let item = create_test_triggerable(idx, &format!("concurrent_{}", idx));
-                    scheduler_clone.set_schedule(
-                        item.uuid,
-                        Some((item.clone(), bucket_time, test_nonce(idx))),
-                    );
-                    item
+                    let schedule = Schedule {
+                        triggerable: item.clone(),
+                        next_scheduled: bucket_time,
+                        nonce: test_nonce(idx),
+                    };
+                    scheduler_clone.set_schedule(item.uuid, Some(schedule.clone()));
+                    schedule
                 })
                 .collect();
-            writer.push(&new_items).await
+            writer.push(&new_schedules).await
         }));
     }
 
@@ -171,16 +190,21 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
     let bucket_time = test_time_at_minute_offset(now, 5);
 
     // Setup initial items (some done, some not)
-    let initial_items: Vec<_> = (0..10)
+    let initial_schedules: Vec<_> = (0..10)
         .map(|i| {
             let item = create_test_triggerable(i, &format!("item_{}", i));
             let nonce = test_nonce(i);
-            scheduler.set_schedule(item.uuid, Some((item.clone(), bucket_time, nonce)));
+            let schedule = Schedule {
+                triggerable: item.clone(),
+                next_scheduled: bucket_time,
+                nonce,
+            };
+            scheduler.set_schedule(item.uuid, Some(schedule.clone()));
             // Mark even items as done
             if i % 2 == 0 {
                 scheduler.set_done(&item, nonce, true);
             }
-            item
+            schedule
         })
         .collect();
 
@@ -190,7 +214,7 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
         scheduler.clone(),
     )
     .unwrap();
-    writer.push(&initial_items).await.unwrap();
+    writer.push(&initial_schedules).await.unwrap();
 
     // Launch concurrent operations
     // Pruner removing completed items
@@ -211,15 +235,19 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
     .unwrap();
     let scheduler_clone = scheduler.clone();
     let write_handle = tokio::spawn(async move {
-        let new_items: Vec<_> = (100..105)
+        let new_schedules: Vec<_> = (100..105)
             .map(|i| {
                 let item = create_test_triggerable(i, &format!("new_item_{}", i));
-                scheduler_clone
-                    .set_schedule(item.uuid, Some((item.clone(), bucket_time, test_nonce(i))));
-                item
+                let schedule = Schedule {
+                    triggerable: item.clone(),
+                    next_scheduled: bucket_time,
+                    nonce: test_nonce(i),
+                };
+                scheduler_clone.set_schedule(item.uuid, Some(schedule.clone()));
+                schedule
             })
             .collect();
-        writer.push(&new_items).await
+        writer.push(&new_schedules).await
     });
 
     // Wait for operations

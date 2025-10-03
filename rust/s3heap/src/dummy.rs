@@ -1,7 +1,6 @@
-use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::{Error, HeapScheduler, Triggerable};
+use crate::{Error, HeapScheduler, Schedule, Triggerable};
 
 /// A dummy scheduler implementation for testing purposes.
 ///
@@ -14,10 +13,7 @@ impl HeapScheduler for DummyScheduler {
         Ok(vec![false; items.len()])
     }
 
-    async fn get_schedules(
-        &self,
-        ids: &[Uuid],
-    ) -> Result<Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>, Error> {
+    async fn get_schedules(&self, ids: &[Uuid]) -> Result<Vec<Option<Schedule>>, Error> {
         Ok(vec![None; ids.len()])
     }
 }

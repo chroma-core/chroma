@@ -42,10 +42,14 @@
 //! let writer = HeapWriter::new("my-heap".to_string(), storage, scheduler);
 //!
 //! // Schedule tasks
-//! let tasks = vec![
-//!     Triggerable { uuid: task_id, name: "process_order".to_string() }
+//! let schedules = vec![
+//!     Schedule {
+//!         triggerable: Triggerable { uuid: task_id, name: "process_order".to_string() },
+//!         next_scheduled: Utc::now(),
+//!         nonce: Uuid::new_v4(),
+//!     }
 //! ];
-//! writer.push(&tasks).await?;
+//! writer.push(&schedules).await?;
 //! ```
 //!
 //! # Concurrency and Safety
@@ -381,6 +385,19 @@ pub struct Triggerable {
     pub name: String,
 }
 
+///////////////////////////////////////////// Schedule /////////////////////////////////////////////
+
+/// A scheduled task with its next execution time and unique identifier.
+#[derive(Clone)]
+pub struct Schedule {
+    /// The task to be executed
+    pub triggerable: Triggerable,
+    /// The next scheduled execution time
+    pub next_scheduled: DateTime<Utc>,
+    /// The unique identifier for this task invocation
+    pub nonce: Uuid,
+}
+
 /////////////////////////////////////////// HeapScheduler //////////////////////////////////////////
 
 /// User-implemented trait that defines the scheduling behavior for heap items.
@@ -399,14 +416,14 @@ pub struct Triggerable {
 /// # Examples
 ///
 /// ```
-/// use s3heap::{HeapScheduler, Triggerable, Error};
+/// use s3heap::{HeapScheduler, Triggerable, Schedule, Error};
 /// use chrono::{DateTime, Utc};
 /// use uuid::Uuid;
 /// use std::collections::HashMap;
 /// use parking_lot::Mutex;
 ///
 /// struct MyScheduler {
-///     schedules: Mutex<HashMap<Uuid, (Triggerable, DateTime<Utc>, Uuid)>>,
+///     schedules: Mutex<HashMap<Uuid, Schedule>>,
 ///     completed_tasks: Mutex<HashMap<(Uuid, Uuid), bool>>,
 /// }
 ///
@@ -423,7 +440,7 @@ pub struct Triggerable {
 ///     async fn get_schedules(
 ///         &self,
 ///         ids: &[Uuid],
-///     ) -> Result<Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>, Error> {
+///     ) -> Result<Vec<Option<Schedule>>, Error> {
 ///         // Retrieve scheduled tasks from your system
 ///         let schedules = self.schedules.lock();
 ///         Ok(ids.iter()
@@ -478,10 +495,7 @@ pub trait HeapScheduler: Send + Sync {
     /// * `Ok(Some((Triggerable, DateTime<Utc>, Uuid)))` if the task exists
     /// * `Ok(None)` if the task does not exist
     /// * `Err` if there was an error retrieving the schedule
-    async fn get_schedule(
-        &self,
-        id: Uuid,
-    ) -> Result<Option<(Triggerable, DateTime<Utc>, Uuid)>, Error> {
+    async fn get_schedule(&self, id: Uuid) -> Result<Option<Schedule>, Error> {
         let mut results = self.get_schedules(&[id]).await?;
         if results.len() != 1 {
             return Err(Error::Internal(format!(
@@ -505,10 +519,7 @@ pub trait HeapScheduler: Send + Sync {
     /// # Implementation Requirements
     /// The returned vector must have exactly the same length as the input slice.
     /// result[i] = get_schedule(ids[i])
-    async fn get_schedules(
-        &self,
-        ids: &[Uuid],
-    ) -> Result<Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>, Error>;
+    async fn get_schedules(&self, ids: &[Uuid]) -> Result<Vec<Option<Schedule>>, Error>;
 }
 
 //////////////////////////////////////////// HeapWriter ////////////////////////////////////////////
@@ -544,18 +555,26 @@ pub trait HeapScheduler: Send + Sync {
 /// );
 ///
 /// // Schedule a batch of tasks
-/// let tasks = vec![
-///     Triggerable {
-///         uuid: Uuid::new_v4(),
-///         name: "process_payment".to_string(),
+/// let schedules = vec![
+///     Schedule {
+///         triggerable: Triggerable {
+///             uuid: Uuid::new_v4(),
+///             name: "process_payment".to_string(),
+///         },
+///         next_scheduled: Utc::now(),
+///         nonce: Uuid::new_v4(),
 ///     },
-///     Triggerable {
-///         uuid: Uuid::new_v4(),
-///         name: "send_notification".to_string(),
+///     Schedule {
+///         triggerable: Triggerable {
+///             uuid: Uuid::new_v4(),
+///             name: "send_notification".to_string(),
+///         },
+///         next_scheduled: Utc::now(),
+///         nonce: Uuid::new_v4(),
 ///     },
 /// ];
 ///
-/// writer.push(&tasks).await?;
+/// writer.push(&schedules).await?;
 /// ```
 pub struct HeapWriter {
     internal: Internal,
@@ -603,21 +622,18 @@ impl HeapWriter {
 
     /// Schedule a batch of tasks in the heap.
     ///
-    /// This method queries the [`HeapScheduler`] for each task to determine when it should
-    /// be executed. Tasks scheduled for the same minute are automatically batched together
-    /// into a single parquet file for efficient storage. Tasks with no scheduled time
-    /// (when the scheduler returns `None`) are silently skipped.
+    /// Tasks scheduled for the same minute are automatically batched together
+    /// into a single parquet file for efficient storage.
     ///
     /// For best performance, batch multiple tasks into a single call rather than
     /// calling this method repeatedly with individual tasks.
     ///
     /// # Arguments
     ///
-    /// * `items` - The tasks to schedule. Empty slices are allowed and will return immediately.
+    /// * `schedules` - The scheduled tasks to add to the heap. Empty slices are allowed and will return immediately.
     ///
     /// # Errors
     ///
-    /// - [`Error::Internal`] if the scheduler returns an error
     /// - [`Error::Storage`] if there's an S3 operation failure
     /// - [`Error::ETagConflict`] if concurrent modifications exhaust retries
     /// - [`Error::Parquet`] if parquet serialization fails
@@ -625,46 +641,39 @@ impl HeapWriter {
     /// # Examples
     ///
     /// ```ignore
-    /// use s3heap::Triggerable;
+    /// use s3heap::{Schedule, Triggerable};
     /// use uuid::Uuid;
+    /// use chrono::Utc;
     ///
-    /// let tasks = vec![
-    ///     Triggerable {
-    ///         uuid: Uuid::new_v4(),
-    ///         name: "daily_report".to_string(),
+    /// let schedules = vec![
+    ///     Schedule {
+    ///         triggerable: Triggerable {
+    ///             uuid: Uuid::new_v4(),
+    ///             name: "daily_report".to_string(),
+    ///         },
+    ///         next_scheduled: Utc::now(),
+    ///         nonce: Uuid::new_v4(),
     ///     },
     /// ];
     ///
-    /// // Schedule tasks - those without a next execution time are skipped
-    /// writer.push(&tasks).await?;
+    /// writer.push(&schedules).await?;
     ///
     /// // Empty push is safe and does nothing
     /// writer.push(&[]).await?;
     /// ```
-    pub async fn push(&self, items: &[Triggerable]) -> Result<(), Error> {
-        if items.is_empty() {
+    pub async fn push(&self, schedules: &[Schedule]) -> Result<(), Error> {
+        if schedules.is_empty() {
             return Ok(());
         }
 
-        let heap_scheduler = self.internal.heap_scheduler();
         let mut buckets: BTreeMap<DateTime<Utc>, Vec<HeapItem>> = BTreeMap::new();
-        let ids = items.iter().map(|item| item.uuid).collect::<Vec<_>>();
-        let next_times_and_nonces = heap_scheduler.get_schedules(&ids).await?;
 
-        if items.len() != next_times_and_nonces.len() {
-            return Err(Error::Internal(format!(
-                "scheduler returned {} results for {} items",
-                next_times_and_nonces.len(),
-                items.len()
-            )));
-        }
-
-        for (triggerable, when, nonce) in next_times_and_nonces.into_iter().flatten() {
+        for schedule in schedules {
             let heap_item = HeapItem {
-                trigger: triggerable.clone(),
-                nonce,
+                trigger: schedule.triggerable.clone(),
+                nonce: schedule.nonce,
             };
-            let bucket = self.internal.compute_bucket(when)?;
+            let bucket = self.internal.compute_bucket(schedule.next_scheduled)?;
             buckets.entry(bucket).or_default().push(heap_item);
         }
 

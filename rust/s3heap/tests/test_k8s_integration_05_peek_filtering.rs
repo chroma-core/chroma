@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
 use chrono::Utc;
-use s3heap::{HeapReader, HeapWriter, Limits};
+use s3heap::{HeapReader, HeapWriter, Limits, Schedule};
 
 mod common;
 
@@ -24,11 +24,36 @@ async fn test_k8s_integration_05_peek_with_filter() {
     // Schedule all items
     let now = Utc::now();
     let time = test_time_at_minute_offset(now, 5);
-    scheduler.set_schedule(item1.uuid, Some((item1.clone(), time, test_nonce(1))));
-    scheduler.set_schedule(item2.uuid, Some((item2.clone(), time, test_nonce(2))));
-    scheduler.set_schedule(item3.uuid, Some((item3.clone(), time, test_nonce(3))));
-    scheduler.set_schedule(item4.uuid, Some((item4.clone(), time, test_nonce(4))));
-    scheduler.set_schedule(item5.uuid, Some((item5.clone(), time, test_nonce(5))));
+    let schedule1 = Schedule {
+        triggerable: item1.clone(),
+        next_scheduled: time,
+        nonce: test_nonce(1),
+    };
+    let schedule2 = Schedule {
+        triggerable: item2.clone(),
+        next_scheduled: time,
+        nonce: test_nonce(2),
+    };
+    let schedule3 = Schedule {
+        triggerable: item3.clone(),
+        next_scheduled: time,
+        nonce: test_nonce(3),
+    };
+    let schedule4 = Schedule {
+        triggerable: item4.clone(),
+        next_scheduled: time,
+        nonce: test_nonce(4),
+    };
+    let schedule5 = Schedule {
+        triggerable: item5.clone(),
+        next_scheduled: time,
+        nonce: test_nonce(5),
+    };
+    scheduler.set_schedule(item1.uuid, Some(schedule1.clone()));
+    scheduler.set_schedule(item2.uuid, Some(schedule2.clone()));
+    scheduler.set_schedule(item3.uuid, Some(schedule3.clone()));
+    scheduler.set_schedule(item4.uuid, Some(schedule4.clone()));
+    scheduler.set_schedule(item5.uuid, Some(schedule5.clone()));
 
     // Push all items
     let writer = HeapWriter::new(
@@ -39,11 +64,11 @@ async fn test_k8s_integration_05_peek_with_filter() {
     .unwrap();
     writer
         .push(&[
-            item1.clone(),
-            item2.clone(),
-            item3.clone(),
-            item4.clone(),
-            item5.clone(),
+            schedule1.clone(),
+            schedule2.clone(),
+            schedule3.clone(),
+            schedule4.clone(),
+            schedule5.clone(),
         ])
         .await
         .unwrap();
@@ -111,9 +136,24 @@ async fn test_k8s_integration_05_peek_filters_completed() {
     let nonce2 = test_nonce(2);
     let nonce3 = test_nonce(3);
 
-    scheduler.set_schedule(item1.uuid, Some((item1.clone(), time, nonce1)));
-    scheduler.set_schedule(item2.uuid, Some((item2.clone(), time, nonce2)));
-    scheduler.set_schedule(item3.uuid, Some((item3.clone(), time, nonce3)));
+    let schedule1 = Schedule {
+        triggerable: item1.clone(),
+        next_scheduled: time,
+        nonce: nonce1,
+    };
+    let schedule2 = Schedule {
+        triggerable: item2.clone(),
+        next_scheduled: time,
+        nonce: nonce2,
+    };
+    let schedule3 = Schedule {
+        triggerable: item3.clone(),
+        next_scheduled: time,
+        nonce: nonce3,
+    };
+    scheduler.set_schedule(item1.uuid, Some(schedule1.clone()));
+    scheduler.set_schedule(item2.uuid, Some(schedule2.clone()));
+    scheduler.set_schedule(item3.uuid, Some(schedule3.clone()));
 
     // Mark some as done
     scheduler.set_done(&item1, nonce1, true);
@@ -128,7 +168,7 @@ async fn test_k8s_integration_05_peek_filters_completed() {
     )
     .unwrap();
     writer
-        .push(&[item1.clone(), item2.clone(), item3.clone()])
+        .push(&[schedule1.clone(), schedule2.clone(), schedule3.clone()])
         .await
         .unwrap();
 
@@ -175,10 +215,30 @@ async fn test_k8s_integration_05_peek_across_buckets() {
     let time1 = test_time_at_minute_offset(now, 5);
     let time2 = test_time_at_minute_offset(now, 10);
 
-    scheduler.set_schedule(item1.uuid, Some((item1.clone(), time1, test_nonce(1))));
-    scheduler.set_schedule(item2.uuid, Some((item2.clone(), time1, test_nonce(2))));
-    scheduler.set_schedule(item3.uuid, Some((item3.clone(), time2, test_nonce(3))));
-    scheduler.set_schedule(item4.uuid, Some((item4.clone(), time2, test_nonce(4))));
+    let schedule1 = Schedule {
+        triggerable: item1.clone(),
+        next_scheduled: time1,
+        nonce: test_nonce(1),
+    };
+    let schedule2 = Schedule {
+        triggerable: item2.clone(),
+        next_scheduled: time1,
+        nonce: test_nonce(2),
+    };
+    let schedule3 = Schedule {
+        triggerable: item3.clone(),
+        next_scheduled: time2,
+        nonce: test_nonce(3),
+    };
+    let schedule4 = Schedule {
+        triggerable: item4.clone(),
+        next_scheduled: time2,
+        nonce: test_nonce(4),
+    };
+    scheduler.set_schedule(item1.uuid, Some(schedule1.clone()));
+    scheduler.set_schedule(item2.uuid, Some(schedule2.clone()));
+    scheduler.set_schedule(item3.uuid, Some(schedule3.clone()));
+    scheduler.set_schedule(item4.uuid, Some(schedule4.clone()));
 
     // Push items
     let writer = HeapWriter::new(
@@ -188,7 +248,12 @@ async fn test_k8s_integration_05_peek_across_buckets() {
     )
     .unwrap();
     writer
-        .push(&[item1.clone(), item2.clone(), item3.clone(), item4.clone()])
+        .push(&[
+            schedule1.clone(),
+            schedule2.clone(),
+            schedule3.clone(),
+            schedule4.clone(),
+        ])
         .await
         .unwrap();
 

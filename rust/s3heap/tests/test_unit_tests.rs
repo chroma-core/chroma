@@ -1,8 +1,7 @@
-use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use s3heap::{
     DummyScheduler, Error, HeapPruner, HeapReader, HeapScheduler, HeapWriter, Limits, PruneStats,
-    RetryConfig, Triggerable,
+    RetryConfig, Schedule, Triggerable,
 };
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -13,8 +12,7 @@ use uuid::Uuid;
 // More sophisticated test scheduler for comprehensive testing
 struct ConfigurableScheduler {
     done_items: Arc<Mutex<HashMap<(Uuid, Uuid), bool>>>,
-    #[allow(clippy::type_complexity)]
-    scheduled_items: Arc<Mutex<HashMap<Uuid, Option<(Triggerable, DateTime<Utc>, Uuid)>>>>,
+    scheduled_items: Arc<Mutex<HashMap<Uuid, Option<Schedule>>>>,
     error_on_done: Arc<Mutex<bool>>,
     error_on_schedule: Arc<Mutex<bool>>,
 }
@@ -52,10 +50,7 @@ impl HeapScheduler for ConfigurableScheduler {
             .collect())
     }
 
-    async fn get_schedules(
-        &self,
-        ids: &[Uuid],
-    ) -> Result<Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>, Error> {
+    async fn get_schedules(&self, ids: &[Uuid]) -> Result<Vec<Option<Schedule>>, Error> {
         if *self.error_on_schedule.lock() {
             return Err(Error::Internal(
                 "Simulated error in get_schedules".to_string(),
@@ -296,13 +291,8 @@ async fn writer_push_with_no_scheduled_items() {
     let scheduler = Arc::new(ConfigurableScheduler::new());
     let writer = HeapWriter::new(storage, "test-no-schedule".to_string(), scheduler).unwrap();
 
-    let item = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: "unscheduled".to_string(),
-    };
-
-    // Item has no schedule, so push should succeed but not create any buckets
-    let result = writer.push(&[item]).await;
+    // Push empty schedules should succeed but not create any buckets
+    let result = writer.push(&[]).await;
     assert!(result.is_ok());
 }
 
@@ -314,18 +304,9 @@ async fn writer_push_with_scheduler_error() {
 
     let writer = HeapWriter::new(storage, "test-error".to_string(), scheduler).unwrap();
 
-    let item = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: "error-item".to_string(),
-    };
-
-    // Should propagate the scheduler error
-    let result = writer.push(&[item]).await;
-    assert!(result.is_err());
-    match result {
-        Err(Error::Internal(msg)) => assert!(msg.contains("Simulated error")),
-        _ => panic!("Expected Internal error"),
-    }
+    // Push with empty schedules should succeed (no scheduler interaction)
+    let result = writer.push(&[]).await;
+    assert!(result.is_ok());
 }
 
 // Async tests for HeapPruner

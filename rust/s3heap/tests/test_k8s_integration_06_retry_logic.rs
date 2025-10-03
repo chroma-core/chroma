@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
 use chrono::Utc;
-use s3heap::{HeapPruner, HeapWriter, Limits};
+use s3heap::{HeapPruner, HeapWriter, Limits, Schedule};
 
 mod common;
 
@@ -39,13 +39,23 @@ async fn test_k8s_integration_06_concurrent_writes_with_retry() {
     let item1 = create_test_triggerable(1, "writer1_task");
     let item2 = create_test_triggerable(2, "writer2_task");
 
-    scheduler.set_schedule(item1.uuid, Some((item1.clone(), time, test_nonce(1))));
-    scheduler.set_schedule(item2.uuid, Some((item2.clone(), time, test_nonce(2))));
+    let schedule1 = Schedule {
+        triggerable: item1.clone(),
+        next_scheduled: time,
+        nonce: test_nonce(1),
+    };
+    let schedule2 = Schedule {
+        triggerable: item2.clone(),
+        next_scheduled: time,
+        nonce: test_nonce(2),
+    };
+    scheduler.set_schedule(item1.uuid, Some(schedule1.clone()));
+    scheduler.set_schedule(item2.uuid, Some(schedule2.clone()));
 
     // Push concurrently - retry logic should handle any conflicts
-    let handle1 = tokio::spawn(async move { writer1.push(&[item1]).await });
+    let handle1 = tokio::spawn(async move { writer1.push(&[schedule1]).await });
 
-    let handle2 = tokio::spawn(async move { writer2.push(&[item2]).await });
+    let handle2 = tokio::spawn(async move { writer2.push(&[schedule2]).await });
 
     // Both should succeed despite potential conflicts
     handle1.await.unwrap().unwrap();
@@ -62,10 +72,12 @@ async fn test_k8s_integration_06_prune_with_retry() {
         let item = create_test_triggerable(1, "task");
         let nonce = test_nonce(1);
         let now = Utc::now();
-        scheduler.set_schedule(
-            item.uuid,
-            Some((item.clone(), test_time_at_minute_offset(now, 3), nonce)),
-        );
+        let schedule = Schedule {
+            triggerable: item.clone(),
+            next_scheduled: test_time_at_minute_offset(now, 3),
+            nonce,
+        };
+        scheduler.set_schedule(item.uuid, Some(schedule.clone()));
         scheduler.set_done(&item, nonce, true);
 
         let writer = HeapWriter::new(
@@ -74,7 +86,7 @@ async fn test_k8s_integration_06_prune_with_retry() {
             scheduler.clone(),
         )
         .unwrap();
-        writer.push(&[item]).await.unwrap();
+        writer.push(&[schedule]).await.unwrap();
 
         // Create multiple pruners that might conflict
         let pruner1 = HeapPruner::new(

@@ -1,5 +1,5 @@
 use chrono::{Duration, DurationRound, TimeDelta, Utc};
-use s3heap::{HeapReader, HeapWriter, Limits};
+use s3heap::{HeapReader, HeapWriter, Limits, Schedule};
 
 mod common;
 
@@ -21,23 +21,24 @@ async fn test_k8s_integration_03_merge_same_bucket() {
     // Schedule all items in the same minute (but different seconds)
     let now = Utc::now().duration_trunc(TimeDelta::minutes(1)).unwrap();
     let base_time = test_time_at_minute_offset(now, 5);
-    scheduler.set_schedule(item1.uuid, Some((item1.clone(), base_time, test_nonce(1))));
-    scheduler.set_schedule(
-        item2.uuid,
-        Some((
-            item2.clone(),
-            base_time + Duration::seconds(10),
-            test_nonce(2),
-        )),
-    );
-    scheduler.set_schedule(
-        item3.uuid,
-        Some((
-            item3.clone(),
-            base_time + Duration::seconds(30),
-            test_nonce(3),
-        )),
-    );
+    let schedule1 = Schedule {
+        triggerable: item1.clone(),
+        next_scheduled: base_time,
+        nonce: test_nonce(1),
+    };
+    let schedule2 = Schedule {
+        triggerable: item2.clone(),
+        next_scheduled: base_time + Duration::seconds(10),
+        nonce: test_nonce(2),
+    };
+    let schedule3 = Schedule {
+        triggerable: item3.clone(),
+        next_scheduled: base_time + Duration::seconds(30),
+        nonce: test_nonce(3),
+    };
+    scheduler.set_schedule(item1.uuid, Some(schedule1.clone()));
+    scheduler.set_schedule(item2.uuid, Some(schedule2.clone()));
+    scheduler.set_schedule(item3.uuid, Some(schedule3.clone()));
 
     // Push items
     let writer = HeapWriter::new(
@@ -47,7 +48,7 @@ async fn test_k8s_integration_03_merge_same_bucket() {
     )
     .unwrap();
     writer
-        .push(&[item1.clone(), item2.clone(), item3.clone()])
+        .push(&[schedule1.clone(), schedule2.clone(), schedule3.clone()])
         .await
         .unwrap();
 
@@ -90,40 +91,45 @@ async fn test_k8s_integration_03_merge_multiple_pushes() {
     let now = Utc::now().duration_trunc(TimeDelta::minutes(1)).unwrap();
     let push_time = test_time_at_minute_offset(now, 10);
 
-    scheduler.set_schedule(item1.uuid, Some((item1.clone(), push_time, test_nonce(1))));
-    scheduler.set_schedule(
-        item2.uuid,
-        Some((
-            item2.clone(),
-            push_time + Duration::seconds(5),
-            test_nonce(2),
-        )),
-    );
+    let schedule1 = Schedule {
+        triggerable: item1.clone(),
+        next_scheduled: push_time,
+        nonce: test_nonce(1),
+    };
+    let schedule2 = Schedule {
+        triggerable: item2.clone(),
+        next_scheduled: push_time + Duration::seconds(5),
+        nonce: test_nonce(2),
+    };
+    scheduler.set_schedule(item1.uuid, Some(schedule1.clone()));
+    scheduler.set_schedule(item2.uuid, Some(schedule2.clone()));
 
-    writer.push(&[item1.clone(), item2.clone()]).await.unwrap();
+    writer
+        .push(&[schedule1.clone(), schedule2.clone()])
+        .await
+        .unwrap();
 
     // Second push - 2 more items to same bucket
     let item3 = create_test_triggerable(3, "task3");
     let item4 = create_test_triggerable(4, "task4");
 
-    scheduler.set_schedule(
-        item3.uuid,
-        Some((
-            item3.clone(),
-            push_time + Duration::seconds(20),
-            test_nonce(3),
-        )),
-    );
-    scheduler.set_schedule(
-        item4.uuid,
-        Some((
-            item4.clone(),
-            push_time + Duration::seconds(40),
-            test_nonce(4),
-        )),
-    );
+    let schedule3 = Schedule {
+        triggerable: item3.clone(),
+        next_scheduled: push_time + Duration::seconds(20),
+        nonce: test_nonce(3),
+    };
+    let schedule4 = Schedule {
+        triggerable: item4.clone(),
+        next_scheduled: push_time + Duration::seconds(40),
+        nonce: test_nonce(4),
+    };
+    scheduler.set_schedule(item3.uuid, Some(schedule3.clone()));
+    scheduler.set_schedule(item4.uuid, Some(schedule4.clone()));
 
-    writer.push(&[item3.clone(), item4.clone()]).await.unwrap();
+    writer
+        .push(&[schedule3.clone(), schedule4.clone()])
+        .await
+        .unwrap();
 
     // Verify still only one bucket
     verify_bucket_count(

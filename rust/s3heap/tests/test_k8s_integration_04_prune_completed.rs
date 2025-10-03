@@ -12,17 +12,17 @@ async fn test_k8s_integration_04_prune_completed_items() {
 
     // Create test items with done states
     let now = Utc::now();
-    let item1 = TestItemBuilder::new(&scheduler, 1, "completed_task")
+    let schedule1 = TestItemBuilder::new(&scheduler, 1, "completed_task")
         .with_base_time(now)
         .at_minute_offset(5)
         .mark_done(true)
         .build();
-    let item2 = TestItemBuilder::new(&scheduler, 2, "incomplete_task")
+    let schedule2 = TestItemBuilder::new(&scheduler, 2, "incomplete_task")
         .with_base_time(now)
         .at_minute_offset(5)
         .mark_done(false)
         .build();
-    let item3 = TestItemBuilder::new(&scheduler, 3, "another_completed")
+    let schedule3 = TestItemBuilder::new(&scheduler, 3, "another_completed")
         .with_base_time(now)
         .at_minute_offset(5)
         .mark_done(true)
@@ -36,7 +36,7 @@ async fn test_k8s_integration_04_prune_completed_items() {
     )
     .unwrap();
     writer
-        .push(&[item1.clone(), item2.clone(), item3.clone()])
+        .push(&[schedule1.clone(), schedule2.clone(), schedule3.clone()])
         .await
         .unwrap();
 
@@ -63,7 +63,7 @@ async fn test_k8s_integration_04_prune_completed_items() {
         "Only incomplete item should remain after pruning"
     );
     assert_eq!(
-        items[0].trigger.uuid, item2.uuid,
+        items[0].trigger.uuid, schedule2.triggerable.uuid,
         "Should be the incomplete item"
     );
 }
@@ -75,12 +75,12 @@ async fn test_k8s_integration_04_prune_empty_bucket() {
 
     // Create test items all marked as done
     let now = Utc::now();
-    let item1 = TestItemBuilder::new(&scheduler, 1, "done1")
+    let schedule1 = TestItemBuilder::new(&scheduler, 1, "done1")
         .with_base_time(now)
         .at_minute_offset(3)
         .mark_done(true)
         .build();
-    let item2 = TestItemBuilder::new(&scheduler, 2, "done2")
+    let schedule2 = TestItemBuilder::new(&scheduler, 2, "done2")
         .with_base_time(now)
         .at_minute_offset(3)
         .mark_done(true)
@@ -93,7 +93,10 @@ async fn test_k8s_integration_04_prune_empty_bucket() {
         scheduler.clone(),
     )
     .unwrap();
-    writer.push(&[item1.clone(), item2.clone()]).await.unwrap();
+    writer
+        .push(&[schedule1.clone(), schedule2.clone()])
+        .await
+        .unwrap();
 
     // Verify bucket exists
     verify_bucket_count(&storage, prefix, 1, "Should have 1 bucket after push").await;
@@ -129,22 +132,22 @@ async fn test_k8s_integration_04_prune_multiple_buckets() {
 
     // Create items for different buckets
     let now = Utc::now();
-    let item1 = TestItemBuilder::new(&scheduler, 1, "bucket1_done")
+    let schedule1 = TestItemBuilder::new(&scheduler, 1, "bucket1_done")
         .with_base_time(now)
         .at_minute_offset(5)
         .mark_done(true)
         .build();
-    let item2 = TestItemBuilder::new(&scheduler, 2, "bucket1_keep")
+    let schedule2 = TestItemBuilder::new(&scheduler, 2, "bucket1_keep")
         .with_base_time(now)
         .at_minute_offset(5)
         .mark_done(false)
         .build();
-    let item3 = TestItemBuilder::new(&scheduler, 3, "bucket2_done")
+    let schedule3 = TestItemBuilder::new(&scheduler, 3, "bucket2_done")
         .with_base_time(now)
         .at_minute_offset(10)
         .mark_done(true)
         .build();
-    let item4 = TestItemBuilder::new(&scheduler, 4, "bucket2_keep")
+    let schedule4 = TestItemBuilder::new(&scheduler, 4, "bucket2_keep")
         .with_base_time(now)
         .at_minute_offset(10)
         .mark_done(false)
@@ -158,7 +161,12 @@ async fn test_k8s_integration_04_prune_multiple_buckets() {
     )
     .unwrap();
     writer
-        .push(&[item1.clone(), item2.clone(), item3.clone(), item4.clone()])
+        .push(&[
+            schedule1.clone(),
+            schedule2.clone(),
+            schedule3.clone(),
+            schedule4.clone(),
+        ])
         .await
         .unwrap();
 
@@ -182,6 +190,12 @@ async fn test_k8s_integration_04_prune_multiple_buckets() {
     assert_eq!(items.len(), 2, "Two incomplete items should remain");
 
     let uuids: Vec<_> = items.iter().map(|i| i.trigger.uuid).collect();
-    assert!(uuids.contains(&item2.uuid), "item2 should remain");
-    assert!(uuids.contains(&item4.uuid), "item4 should remain");
+    assert!(
+        uuids.contains(&schedule2.triggerable.uuid),
+        "item2 should remain"
+    );
+    assert!(
+        uuids.contains(&schedule4.triggerable.uuid),
+        "item4 should remain"
+    );
 }

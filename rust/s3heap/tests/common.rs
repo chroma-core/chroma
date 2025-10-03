@@ -13,7 +13,7 @@ use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use s3heap::{Error, HeapScheduler, Triggerable};
+use s3heap::{Error, HeapScheduler, Schedule, Triggerable};
 
 /// Mock implementation of HeapScheduler for testing.
 ///
@@ -24,8 +24,7 @@ use s3heap::{Error, HeapScheduler, Triggerable};
 pub struct MockHeapScheduler {
     #[allow(clippy::type_complexity)]
     done_items: Arc<Mutex<HashMap<(Uuid, String, Uuid), bool>>>,
-    #[allow(clippy::type_complexity)]
-    schedules: Arc<Mutex<HashMap<Uuid, (Triggerable, DateTime<Utc>, Uuid)>>>,
+    schedules: Arc<Mutex<HashMap<Uuid, Schedule>>>,
 }
 
 impl MockHeapScheduler {
@@ -54,8 +53,8 @@ impl MockHeapScheduler {
     /// # Arguments
     ///
     /// * `id` - The task UUID
-    /// * `schedule` - The task, scheduled time, and nonce, or None to remove the schedule
-    pub fn set_schedule(&self, id: Uuid, schedule: Option<(Triggerable, DateTime<Utc>, Uuid)>) {
+    /// * `schedule` - The task schedule, or None to remove the schedule
+    pub fn set_schedule(&self, id: Uuid, schedule: Option<Schedule>) {
         if let Some(sched) = schedule {
             self.schedules.lock().insert(id, sched);
         } else {
@@ -83,10 +82,7 @@ impl HeapScheduler for MockHeapScheduler {
             .collect())
     }
 
-    async fn get_schedules(
-        &self,
-        ids: &[Uuid],
-    ) -> Result<Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>, Error> {
+    async fn get_schedules(&self, ids: &[Uuid]) -> Result<Vec<Option<Schedule>>, Error> {
         let schedules = self.schedules.lock();
         Ok(ids.iter().map(|id| schedules.get(id).cloned()).collect())
     }
@@ -253,18 +249,23 @@ impl<'a> TestItemBuilder<'a> {
     ///
     /// Creates the triggerable, sets up scheduling, and optionally
     /// marks it as done.
-    pub fn build(self) -> Triggerable {
+    pub fn build(self) -> Schedule {
         let item = create_test_triggerable(self.index, &self.name);
         let nonce = test_nonce(self.index);
         let base = self.base_time.unwrap_or_else(Utc::now);
         let time = test_time_at_minute_offset(base, self.time_offset_minutes);
 
+        let schedule = Schedule {
+            triggerable: item.clone(),
+            next_scheduled: time,
+            nonce,
+        };
         self.scheduler
-            .set_schedule(item.uuid, Some((item.clone(), time, nonce)));
+            .set_schedule(item.uuid, Some(schedule.clone()));
         if let Some(done) = self.is_done {
             self.scheduler.set_done(&item, nonce, done);
         }
-        item
+        schedule
     }
 
     /// Build the triggerable without scheduling.
