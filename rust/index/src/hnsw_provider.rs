@@ -324,6 +324,7 @@ impl HnswIndexProvider {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let s3_fetch_span =
             tracing::trace_span!(parent: Span::current(), "Read hnsw files from s3 into index");
+        let s3_fetch_span_clone = s3_fetch_span.clone();
         let result = self
             .storage
             .fetch_batch(
@@ -355,7 +356,9 @@ impl HnswIndexProvider {
                         hnsw_data.map_err(|e| chroma_storage::StorageError::CallbackError {
                             info: e.to_string(),
                         })?;
-                    hnsw_data_processor(hnsw_data).await
+                    let span =
+                        tracing::trace_span!(parent: s3_fetch_span_clone, "Process hnsw data");
+                    hnsw_data_processor(hnsw_data).instrument(span).await
                 },
             )
             .instrument(s3_fetch_span)
