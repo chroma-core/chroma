@@ -63,3 +63,15 @@ func (s *Server) GetOperators(ctx context.Context, req *coordinatorpb.GetOperato
 
 	return res, nil
 }
+
+func (s *Server) PeekScheduleByCollectionId(ctx context.Context, req *coordinatorpb.PeekScheduleByCollectionIdRequest) (*coordinatorpb.PeekScheduleByCollectionIdResponse, error) {
+	log.Info("PeekScheduleByCollectionId", zap.Int64("num_collections", int64(len(req.CollectionId))))
+
+	res, err := s.coordinator.PeekScheduleByCollectionId(ctx, req)
+	if err != nil {
+		log.Error("PeekScheduleByCollectionId failed", zap.Error(err))
+		return nil, err
+	}
+
+	return res, nil
+}

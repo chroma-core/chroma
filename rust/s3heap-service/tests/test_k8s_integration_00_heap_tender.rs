@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use chroma_storage::Storage;
+use chroma_sysdb::{SysDb, TestSysDb};
 use chroma_types::{CollectionUuid, DirtyMarker};
 use wal3::{CursorStore, CursorStoreOptions, LogPosition, LogReader, LogReaderOptions};
 
@@ -14,6 +15,7 @@ fn test_heap_tender(storage: Storage, test_id: &str) -> HeapTender {
 }
 
 fn create_heap_tender(storage: Storage, dirty_log_prefix: &str, heap_prefix: &str) -> HeapTender {
+    let sysdb = SysDb::Test(TestSysDb::new());
     let reader = LogReader::new(
         LogReaderOptions::default(),
         Arc::new(storage.clone()),
@@ -26,8 +28,8 @@ fn create_heap_tender(storage: Storage, dirty_log_prefix: &str, heap_prefix: &st
         "test-tender".to_string(),
     );
     let scheduler = Arc::new(DummyScheduler) as _;
-    let writer = HeapWriter::new(storage, heap_prefix.to_string(), scheduler).unwrap();
-    HeapTender::new(reader, cursor, writer)
+    let writer = HeapWriter::new(storage, heap_prefix.to_string(), Arc::clone(&scheduler)).unwrap();
+    HeapTender::new(sysdb, reader, cursor, writer)
 }
 
 #[tokio::test]

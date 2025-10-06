@@ -288,3 +288,31 @@ func (s *Coordinator) GetOperators(ctx context.Context, req *coordinatorpb.GetOp
 		Operators: protoOperators,
 	}, nil
 }
+
+func (s *Coordinator) PeekScheduleByCollectionId(ctx context.Context, req *coordinatorpb.PeekScheduleByCollectionIdRequest) (*coordinatorpb.PeekScheduleByCollectionIdResponse, error) {
+	tasks, err := s.catalog.metaDomain.TaskDb(ctx).PeekScheduleByCollectionId(req.CollectionId)
+	if err != nil {
+		log.Error("PeekScheduleByCollectionId failed", zap.Error(err))
+		return nil, err
+	}
+
+	scheduleEntries := make([]*coordinatorpb.ScheduleEntry, 0, len(tasks))
+	for _, task := range tasks {
+		task_id := task.ID.String()
+		entry := &coordinatorpb.ScheduleEntry{
+			CollectionId:  &task.InputCollectionID,
+			TaskId:        &task_id,
+			TaskRunNonce:  proto.String(task.NextNonce.String()),
+			WhenToRun:     nil,
+		}
+		if task.NextRun != nil {
+			whenToRun := uint64(task.NextRun.UnixMilli())
+			entry.WhenToRun = &whenToRun
+		}
+		scheduleEntries = append(scheduleEntries, entry)
+	}
+
+	return &coordinatorpb.PeekScheduleByCollectionIdResponse{
+		Schedule: scheduleEntries,
+	}, nil
+}

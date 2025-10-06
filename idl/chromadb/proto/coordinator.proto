@@ -583,6 +583,21 @@ message GetOperatorsResponse {
   repeated Operator operators = 1;
 }
 
+message PeekScheduleByCollectionIdRequest {
+  repeated string collection_id = 1;
+}
+
+message ScheduleEntry {
+  optional string collection_id = 1;
+  optional string task_id = 2;
+  optional string task_run_nonce = 3;
+  optional uint64 when_to_run = 4;
+}
+
+message PeekScheduleByCollectionIdResponse {
+  repeated ScheduleEntry schedule = 1;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -624,4 +639,5 @@ service SysDB {
   rpc GetTaskByName(GetTaskByNameRequest) returns (GetTaskByNameResponse) {}
   rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse) {}
   rpc GetOperators(GetOperatorsRequest) returns (GetOperatorsResponse) {}
+  rpc PeekScheduleByCollectionId(PeekScheduleByCollectionIdRequest) returns (PeekScheduleByCollectionIdResponse) {}
 }

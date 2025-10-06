@@ -40,4 +40,5 @@ type ITaskDb interface {
 	GetByName(inputCollectionID string, taskName string) (*Task, error)
 	SoftDelete(inputCollectionID string, taskName string) error
 	DeleteAll() error
+	PeekScheduleByCollectionId(collectionIDs []string) ([]*Task, error)
 }
