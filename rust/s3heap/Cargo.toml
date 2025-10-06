@@ -22,5 +22,6 @@ chroma-sysdb = { workspace = true }
 wal3 = { workspace = true }
 
 [dev-dependencies]
+guacamole = { version = "0.11", default-features = false }
 parking_lot = { workspace = true }
 tokio = { workspace = true }

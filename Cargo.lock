@@ -7141,6 +7141,7 @@ dependencies = [
  "chroma-sysdb",
  "chrono",
  "futures",
+ "guacamole",
  "parking_lot",
  "parquet",
  "serde",
