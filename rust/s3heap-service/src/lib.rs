@@ -161,7 +161,11 @@ impl HeapTender {
                         let collection_position = collections.entry(collection_id).or_default();
                         *collection_position = std::cmp::max(
                             *collection_position,
-                            LogPosition::from_offset(log_position.saturating_add(num_records)),
+                            LogPosition::from_offset(
+                                log_position
+                                    .checked_add(num_records)
+                                    .ok_or(Error::Internal("log position overflow".to_string()))?,
+                            ),
                         );
                     }
                 }
@@ -259,7 +263,7 @@ impl Configurable<HeapTenderServerConfig> for HeapTenderServer {
         let tender = Arc::new(HeapTender {
             reader,
             cursor,
-            writer,
+            _writer: writer,
         });
         Ok(Self {
             config: config.clone(),

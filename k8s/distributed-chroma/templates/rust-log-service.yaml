@@ -129,7 +129,7 @@ spec:
             periodSeconds: 1
             failureThreshold: 30 # 30 seconds to allow for initial startup
             grpc:
-              port: 50051
+              port: 50052
           volumeMounts:
             {{if .Values.heapTenderService.configuration}}
             - name: heap-tender-service-config
