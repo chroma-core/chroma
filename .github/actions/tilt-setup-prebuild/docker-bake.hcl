@@ -6,7 +6,7 @@ target "rust-log-service" {
 
 target "heap-tender-service" {
   dockerfile = "rust/Dockerfile"
-  target = "log_service"
+  target = "heap_tender_service"
   tags = [ "heap-tender-service:ci" ]
 }
 
