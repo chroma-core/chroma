@@ -206,7 +206,7 @@ pub enum CompactionError {
     Register(#[from] RegisterError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
-    #[error("Error creaitng spann writer: {0}")]
+    #[error("Error creating spann writer: {0}")]
     SpannSegment(#[from] SpannSegmentWriterError),
     #[error("Error sourcing record segment: {0}")]
     SourceRecordSegment(#[from] SourceRecordSegmentError),

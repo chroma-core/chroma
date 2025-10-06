@@ -73,6 +73,8 @@ pub enum KnnError {
     InvalidDistanceFunction,
     #[error("Operation aborted because resources exhausted")]
     Aborted,
+    #[error("Invalid schema")]
+    InvalidSchema,
 }
 
 impl ChromaError for KnnError {
@@ -96,6 +98,7 @@ impl ChromaError for KnnError {
             KnnError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
             KnnError::Aborted => ErrorCodes::ResourceExhausted,
             KnnError::SpannSegmentReaderCreationError(e) => e.code(),
+            KnnError::InvalidSchema => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -408,9 +411,13 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                 .ok_or_terminate(
                     self.collection_and_segments
                         .collection
-                        .config
-                        .get_spann_config()
-                        .ok_or(KnnError::InvalidDistanceFunction),
+                        .schema
+                        .as_ref()
+                        .ok_or(KnnError::InvalidSchema)
+                        .and_then(|s| {
+                            s.get_internal_spann_config()
+                                .ok_or(KnnError::InvalidDistanceFunction)
+                        }),
                     ctx,
                 )
                 .await

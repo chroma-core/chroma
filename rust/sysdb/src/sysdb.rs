@@ -241,15 +241,9 @@ impl SysDb {
                 if let Some(hnsw_params) = hnsw_params {
                     config.vector_index = VectorIndexConfiguration::Hnsw(hnsw_params);
                 }
-                config
+                Some(config)
             }
-            None => metadata
-                .clone()
-                .map(|m| {
-                    InternalCollectionConfiguration::from_legacy_metadata(m).map_err(|e| e.boxed())
-                })
-                .transpose()?
-                .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
+            None => None,
         };
 
         match self {
@@ -276,7 +270,7 @@ impl SysDb {
                         collection_id,
                         name,
                         segments,
-                        configuration,
+                        configuration.unwrap_or(InternalCollectionConfiguration::default_hnsw()),
                         metadata,
                         dimension,
                         get_or_create,
@@ -287,7 +281,8 @@ impl SysDb {
                 let collection = Collection {
                     collection_id,
                     name,
-                    config: configuration,
+                    config: configuration
+                        .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
                     schema,
                     metadata,
                     dimension,
@@ -1026,12 +1021,17 @@ impl GrpcSysDb {
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
-        configuration: InternalCollectionConfiguration,
+        configuration: Option<InternalCollectionConfiguration>,
         schema: Option<InternalSchema>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
     ) -> Result<Collection, CreateCollectionError> {
+        let configuration_json_str = match configuration {
+            Some(configuration) => serde_json::to_string(&configuration)
+                .map_err(CreateCollectionError::Configuration)?,
+            None => "{}".to_string(),
+        };
         let res = self
             .client
             .create_collection(chroma_proto::CreateCollectionRequest {
@@ -1043,8 +1043,7 @@ impl GrpcSysDb {
                     .into_iter()
                     .map(chroma_proto::Segment::from)
                     .collect(),
-                configuration_json_str: serde_json::to_string(&configuration)
-                    .map_err(CreateCollectionError::Configuration)?,
+                configuration_json_str,
                 metadata: metadata.map(|metadata| metadata.into()),
                 dimension,
                 get_or_create: Some(get_or_create),

@@ -16,7 +16,8 @@ use crate::{
     default_num_threads, default_reassign_neighbor_count, default_resize_factor, default_search_ef,
     default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
     default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
-    default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor, KnnIndex,
+    default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor,
+    InternalSpannConfiguration, KnnIndex,
 };
 
 impl ChromaError for SchemaError {
@@ -365,6 +366,30 @@ impl InternalSchema {
             defaults,
             key_overrides,
         }
+    }
+
+    pub fn get_internal_spann_config(&self) -> Option<InternalSpannConfiguration> {
+        let to_internal = |vector_index: &VectorIndexType| {
+            let space = vector_index.config.space.clone();
+            vector_index
+                .config
+                .spann
+                .clone()
+                .map(|config| config.into_internal_configuration(space))
+        };
+
+        self.key_overrides
+            .get("$embedding")
+            .and_then(|value_types| value_types.float_list.as_ref())
+            .and_then(|float_list| float_list.vector_index.as_ref())
+            .and_then(to_internal)
+            .or_else(|| {
+                self.defaults
+                    .float_list
+                    .as_ref()
+                    .and_then(|float_list| float_list.vector_index.as_ref())
+                    .and_then(to_internal)
+            })
     }
 
     /// Reconcile user-provided schema with system defaults
@@ -1275,6 +1300,47 @@ pub struct SpannIndexConfig {
     pub max_neighbors: Option<usize>,
 }
 
+impl SpannIndexConfig {
+    pub fn into_internal_configuration(
+        self,
+        vector_space: Option<Space>,
+    ) -> InternalSpannConfiguration {
+        InternalSpannConfiguration {
+            search_nprobe: self.search_nprobe.unwrap_or(default_search_nprobe()),
+            search_rng_factor: self
+                .search_rng_factor
+                .unwrap_or(default_search_rng_factor()),
+            search_rng_epsilon: self
+                .search_rng_epsilon
+                .unwrap_or(default_search_rng_epsilon()),
+            nreplica_count: self.nreplica_count.unwrap_or(default_nreplica_count()),
+            write_rng_factor: self.write_rng_factor.unwrap_or(default_write_rng_factor()),
+            write_rng_epsilon: self
+                .write_rng_epsilon
+                .unwrap_or(default_write_rng_epsilon()),
+            split_threshold: self.split_threshold.unwrap_or(default_split_threshold()),
+            num_samples_kmeans: self
+                .num_samples_kmeans
+                .unwrap_or(default_num_samples_kmeans()),
+            initial_lambda: self.initial_lambda.unwrap_or(default_initial_lambda()),
+            reassign_neighbor_count: self
+                .reassign_neighbor_count
+                .unwrap_or(default_reassign_neighbor_count()),
+            merge_threshold: self.merge_threshold.unwrap_or(default_merge_threshold()),
+            num_centers_to_merge_to: self
+                .num_centers_to_merge_to
+                .unwrap_or(default_num_centers_to_merge_to()),
+            write_nprobe: self.write_nprobe.unwrap_or(default_write_nprobe()),
+            ef_construction: self
+                .ef_construction
+                .unwrap_or(default_construction_ef_spann()),
+            ef_search: self.ef_search.unwrap_or(default_search_ef_spann()),
+            max_neighbors: self.max_neighbors.unwrap_or(default_m_spann()),
+            space: vector_space.unwrap_or(default_space()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SparseVectorIndexConfig {
@@ -1700,6 +1766,45 @@ mod tests {
         assert_eq!(result.search_rng_factor, Some(2.0));
         assert_eq!(result.nreplica_count, Some(3));
         assert_eq!(result.initial_lambda, Some(0.5));
+    }
+
+    #[test]
+    fn test_spann_index_config_into_internal_configuration() {
+        let config = SpannIndexConfig {
+            search_nprobe: Some(33),
+            search_rng_factor: Some(1.2),
+            search_rng_epsilon: None,
+            nreplica_count: None,
+            write_rng_factor: Some(1.5),
+            write_rng_epsilon: None,
+            split_threshold: Some(75),
+            num_samples_kmeans: None,
+            initial_lambda: Some(0.9),
+            reassign_neighbor_count: Some(40),
+            merge_threshold: None,
+            num_centers_to_merge_to: Some(4),
+            write_nprobe: Some(60),
+            ef_construction: Some(180),
+            ef_search: Some(170),
+            max_neighbors: Some(32),
+        };
+
+        let with_space = config
+            .clone()
+            .into_internal_configuration(Some(Space::Cosine));
+        assert_eq!(with_space.space, Space::Cosine);
+        assert_eq!(with_space.search_nprobe, 33);
+        assert_eq!(with_space.search_rng_factor, 1.2);
+        assert_eq!(with_space.search_rng_epsilon, default_search_rng_epsilon());
+        assert_eq!(with_space.write_rng_factor, 1.5);
+        assert_eq!(with_space.write_nprobe, 60);
+        assert_eq!(with_space.ef_construction, 180);
+        assert_eq!(with_space.ef_search, 170);
+        assert_eq!(with_space.max_neighbors, 32);
+        assert_eq!(with_space.merge_threshold, default_merge_threshold());
+
+        let default_space_config = config.into_internal_configuration(None);
+        assert_eq!(default_space_config.space, default_space());
     }
 
     #[test]

@@ -3,7 +3,10 @@ use chroma_cache::{AysncPartitionedMutex, Cache, CacheError, Weighted};
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
-use chroma_types::{CollectionAndSegments, CollectionUuid, GetCollectionWithSegmentsError};
+use chroma_types::{
+    CollectionAndSegments, CollectionUuid, GetCollectionWithSegmentsError, InternalSchema,
+    SchemaError,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     sync::Arc,
@@ -118,6 +121,8 @@ pub(crate) enum CollectionsWithSegmentsProviderError {
     Cache(#[from] CacheError),
     #[error(transparent)]
     SysDB(#[from] GetCollectionWithSegmentsError),
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
 }
 
 impl ChromaError for CollectionsWithSegmentsProviderError {
@@ -125,6 +130,7 @@ impl ChromaError for CollectionsWithSegmentsProviderError {
         match self {
             CollectionsWithSegmentsProviderError::Cache(e) => e.code(),
             CollectionsWithSegmentsProviderError::SysDB(e) => e.code(),
+            CollectionsWithSegmentsProviderError::InvalidSchema(e) => e.code(),
         }
     }
 }
@@ -137,6 +143,7 @@ impl CollectionsWithSegmentsProvider {
     pub(crate) async fn get_collection_with_segments(
         &mut self,
         collection_id: CollectionUuid,
+        enable_schema: bool,
     ) -> Result<CollectionAndSegments, CollectionsWithSegmentsProviderError> {
         if let Some(collection_and_segments_with_ttl) = self
             .collections_with_segments_cache
@@ -152,7 +159,7 @@ impl CollectionsWithSegmentsProvider {
             }
         }
 
-        let collection_and_segments_sysdb = {
+        let mut collection_and_segments_sysdb = {
             // We acquire a lock to prevent the sysdb from experiencing a thundering herd.
             // This can happen when a large number of threads try to get the same collection
             // at the same time.
@@ -178,6 +185,19 @@ impl CollectionsWithSegmentsProvider {
                 .await?
         };
 
+        // reconcile schema and config
+        if enable_schema {
+            let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+                collection_and_segments_sysdb.collection.schema.clone(),
+                Some(collection_and_segments_sysdb.collection.config.clone()),
+            )
+            .map_err(|reason| {
+                CollectionsWithSegmentsProviderError::InvalidSchema(SchemaError::InvalidSchema {
+                    reason,
+                })
+            })?;
+            collection_and_segments_sysdb.collection.schema = Some(reconciled_schema);
+        }
         self.set_collection_with_segments(collection_and_segments_sysdb.clone())
             .await;
         Ok(collection_and_segments_sysdb)

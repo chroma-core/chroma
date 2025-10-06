@@ -640,6 +640,8 @@ pub type GetCollectionResponse = Collection;
 
 #[derive(Debug, Error)]
 pub enum GetCollectionError {
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Collection [{0}] does not exist")]
@@ -649,6 +651,7 @@ pub enum GetCollectionError {
 impl ChromaError for GetCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GetCollectionError::InvalidSchema(e) => e.code(),
             GetCollectionError::Internal(err) => err.code(),
             GetCollectionError::NotFound(_) => ErrorCodes::NotFound,
         }
