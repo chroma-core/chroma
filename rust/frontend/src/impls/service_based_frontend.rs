@@ -1,3 +1,4 @@
+use super::utils::to_records;
 use crate::{
     config::FrontendConfig, executor::Executor, types::errors::ValidationError,
     CollectionsWithSegmentsProvider,
@@ -47,8 +48,6 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-use super::utils::to_records;
 
 #[derive(Debug)]
 struct Metrics {
@@ -1069,6 +1068,17 @@ impl ServiceBasedFrontend {
                 .get_collection_with_segments(collection_id, self.enable_schema)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            if self.enable_schema {
+                if let Some(ref schema) = collection_and_segments.collection.schema {
+                    schema
+                        .is_metadata_where_indexing_enabled(&where_clause)
+                        .map_err(|err| {
+                            DeleteCollectionRecordsError::Internal(
+                                Box::new(err) as Box<dyn ChromaError>
+                            )
+                        })?;
+                }
+            }
             let latest_collection_logical_size_bytes = collection_and_segments
                 .collection
                 .size_bytes_post_compaction;
@@ -1383,6 +1393,15 @@ impl ServiceBasedFrontend {
             .get_collection_with_segments(collection_id, self.enable_schema)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        if self.enable_schema {
+            if let Some(ref schema) = collection_and_segments.collection.schema {
+                if let Some(ref where_clause) = r#where {
+                    schema
+                        .is_metadata_where_indexing_enabled(where_clause)
+                        .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
+                }
+            }
+        }
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
@@ -1519,6 +1538,15 @@ impl ServiceBasedFrontend {
             .get_collection_with_segments(collection_id, self.enable_schema)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        if self.enable_schema {
+            if let Some(ref schema) = collection_and_segments.collection.schema {
+                if let Some(ref where_clause) = r#where {
+                    schema
+                        .is_metadata_where_indexing_enabled(where_clause)
+                        .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
+                }
+            }
+        }
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
@@ -1618,7 +1646,7 @@ impl ServiceBasedFrontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.retryable_query(request_clone).await;
+                let res = Box::pin(self_clone.retryable_query(request_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -1667,6 +1695,19 @@ impl ServiceBasedFrontend {
             .get_collection_with_segments(request.collection_id, self.enable_schema)
             .await
             .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
+        if self.enable_schema {
+            if let Some(ref schema) = collection_and_segments.collection.schema {
+                for payload in &request.searches {
+                    if let Some(ref where_clause) = payload.filter.where_clause {
+                        schema
+                            .is_metadata_where_indexing_enabled(where_clause)
+                            .map_err(|err| {
+                                QueryError::Other(Box::new(err) as Box<dyn ChromaError>)
+                            })?;
+                    }
+                }
+            }
+        }
 
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
