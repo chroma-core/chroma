@@ -82,3 +82,17 @@ func (s *taskDb) SoftDelete(inputCollectionID string, taskName string) error {
 
 	return nil
 }
+
+func (s *taskDb) PeekScheduleByCollectionId(collectionIDs []string) ([]*dbmodel.Task, error) {
+	var tasks []*dbmodel.Task
+	err := s.db.
+		Where("input_collection_id IN ?", collectionIDs).
+		Where("is_deleted = ?", false).
+		Find(&tasks).Error
+
+	if err != nil {
+		log.Error("PeekScheduleByCollectionId failed", zap.Error(err))
+		return nil, err
+	}
+	return tasks, nil
+}
