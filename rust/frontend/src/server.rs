@@ -1085,8 +1085,11 @@ async fn get_collection(
             },
         )
         .await?;
-    let _guard =
-        server.scorecard_request(&["op:get_collection", format!("tenant:{}", tenant).as_str()])?;
+    let _guard = server.scorecard_request(&[
+        "op:get_collection",
+        format!("tenant:{}", tenant).as_str(),
+        format!("requester:{}", tenant).as_str(),
+    ])?;
     let request = GetCollectionRequest::try_new(tenant, database, collection_name)?;
     let collection = server.frontend.get_collection(request).await?;
     Ok(Json(collection))
@@ -1113,7 +1116,7 @@ async fn get_collection_by_crn(
 ) -> Result<Json<Collection>, ServerError> {
     server.metrics.get_collection_by_crn.add(1, &[]);
     tracing::info!(name: "get_collection_by_crn", crn = %crn);
-    server
+    let details = server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::GetCollectionByCrn,
@@ -1124,6 +1127,16 @@ async fn get_collection_by_crn(
             },
         )
         .await?;
+    let tenant = crn
+        .split_once(':')
+        .map(|(t, _)| t)
+        .unwrap_or("default_tenant");
+    let _guard = server.scorecard_request(&[
+        "op:get_collection_by_crn",
+        format!("tenant:{}", tenant).as_str(),
+        format!("requester:{}", details.tenant).as_str(),
+        format!("crn:{}", crn).as_str(),
+    ])?;
     let request = GetCollectionByCrnRequest::try_new(crn)?;
     let collection = server.frontend.get_collection_by_crn(request).await?;
     Ok(Json(collection))
