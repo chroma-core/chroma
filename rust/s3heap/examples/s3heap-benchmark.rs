@@ -3,12 +3,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, DurationRound, Timelike, Utc};
+use chrono::{DurationRound, Utc};
 use guacamole::combinators::*;
 use guacamole::Guacamole;
 
 use chroma_storage::s3::s3_client_for_test_with_bucket_name;
-use chroma_storage::Storage;
 use uuid::Uuid;
 
 use s3heap::{HeapWriter, Schedule, Triggerable};
@@ -26,8 +25,8 @@ impl Default for Options {
     fn default() -> Self {
         Options {
             runtime: 60,
-            target_throughput: 1_000,
-            max_tokio_tasks: 100_000,
+            target_throughput: 100_000,
+            max_tokio_tasks: 10_000_000,
         }
     }
 }
