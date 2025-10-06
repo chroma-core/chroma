@@ -10,6 +10,7 @@ type Collection struct {
 	ID                         types.UniqueID
 	Name                       string
 	ConfigurationJsonStr       string
+	SchemaStr                  *string
 	Dimension                  *int32
 	Metadata                   *CollectionMetadata[CollectionMetadataValueType]
 	TenantID                   string
@@ -41,6 +42,7 @@ type CreateCollection struct {
 	ID                         types.UniqueID
 	Name                       string
 	ConfigurationJsonStr       string
+	SchemaStr                  *string
 	Dimension                  *int32
 	Metadata                   *CollectionMetadata[CollectionMetadataValueType]
 	GetOrCreate                bool
