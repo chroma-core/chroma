@@ -56,6 +56,7 @@ target "load-service" {
 group "default" {
   targets = [
     "rust-log-service",
+    "heap-tender-service",
     "sysdb",
     "sysdb-migration",
     "rust-frontend-service",
