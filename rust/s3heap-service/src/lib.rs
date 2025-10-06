@@ -48,7 +48,7 @@ pub static HEAP_TENDER_CURSOR_NAME: CursorName =
 pub struct HeapTender {
     reader: LogReader,
     cursor: CursorStore,
-    writer: HeapWriter,
+    _writer: HeapWriter,
 }
 
 impl HeapTender {
@@ -57,7 +57,7 @@ impl HeapTender {
         Self {
             reader,
             cursor,
-            writer,
+            _writer: writer,
         }
     }
 
