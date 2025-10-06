@@ -206,7 +206,7 @@ impl FrontendServerConfig {
     }
 
     pub fn single_node_default() -> Self {
-        // TOOD: unify this with load_from_path to get the env overrides
+        // TODO: unify this with load_from_path to get the env overrides
         let config = DefaultConfigurationsFolder::get(DEFAULT_SINGLE_NODE_CONFIG_FILENAME)
             .expect("Failed to load default single node frontend config");
         let config_data = config.data;

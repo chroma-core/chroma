@@ -571,7 +571,7 @@ impl IntoSqliteExpr for MetadataExpression {
                     MetadataValue::Float(f) => (EmbeddingMetadata::FloatValue, Expr::val(*f)),
                     MetadataValue::Str(s) => (EmbeddingMetadata::StringValue, Expr::val(s)),
                     MetadataValue::SparseVector(_) => {
-                        unimplemented!("Comparision with sparse vector is not allowed")
+                        unimplemented!("Comparison with sparse vector is not allowed")
                     }
                 };
                 let scol = Expr::col((EmbeddingMetadata::Table, col));

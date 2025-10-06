@@ -105,7 +105,7 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data [u32
         let start = list_array.value_offsets()[index] as usize;
         let end = list_array.value_offsets()[index + 1] as usize;
 
-        // 9/17 In order to support backwards compatability before #2729 (https://github.com/chroma-core/chroma/pull/2729)
+        // 9/17 In order to support backwards compatibility before #2729 (https://github.com/chroma-core/chroma/pull/2729)
         // which had this stored as a Int32Array, we first try to downcast to a UInt32Array and then if that fails
         // we downcast to a Int32Array, if that fails we panic.
         let u32array = list_array.values().as_any().downcast_ref::<UInt32Array>();

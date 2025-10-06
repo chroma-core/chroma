@@ -11,7 +11,7 @@ use crate::arrow::root::CURRENT_VERSION;
 use crate::arrow::sparse_index::SparseIndexWriter;
 use crate::key::CompositeKey;
 use crate::key::KeyWrapper;
-use chroma_cache::AysncPartitionedMutex;
+use chroma_cache::AsyncPartitionedMutex;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
@@ -33,7 +33,7 @@ pub struct ArrowUnorderedBlockfileWriter {
     block_deltas: Arc<Mutex<HashMap<Uuid, UnorderedBlockDelta>>>,
     root: RootWriter,
     id: Uuid,
-    deltas_mutex: Arc<AysncPartitionedMutex<Uuid>>,
+    deltas_mutex: Arc<AsyncPartitionedMutex<Uuid>>,
 }
 // TODO: method visibility should not be pub(crate)
 
@@ -87,7 +87,7 @@ impl ArrowUnorderedBlockfileWriter {
             block_deltas,
             root: root_writer,
             id,
-            deltas_mutex: Arc::new(AysncPartitionedMutex::new(())),
+            deltas_mutex: Arc::new(AsyncPartitionedMutex::new(())),
         }
     }
 
@@ -106,7 +106,7 @@ impl ArrowUnorderedBlockfileWriter {
             block_deltas,
             root: new_root,
             id,
-            deltas_mutex: Arc::new(AysncPartitionedMutex::new(())),
+            deltas_mutex: Arc::new(AsyncPartitionedMutex::new(())),
         }
     }
 
@@ -811,7 +811,7 @@ mod tests {
         arrow::config::TEST_MAX_BLOCK_SIZE_BYTES, arrow::provider::ArrowBlockfileProvider,
     };
     use crate::{BlockfileReader, BlockfileWriter, BlockfileWriterOptions};
-    use chroma_cache::{new_cache_for_test, AysncPartitionedMutex};
+    use chroma_cache::{new_cache_for_test, AsyncPartitionedMutex};
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{CollectionUuid, DataRecord, DatabaseUuid, MetadataValue, SegmentUuid};
     use futures::{StreamExt, TryStreamExt};
@@ -1883,13 +1883,13 @@ mod tests {
         let n = 2000;
         for i in 0..n {
             let key = format!("{:04}", i);
-            let mut metdata = HashMap::new();
-            metdata.insert("key".to_string(), MetadataValue::Str("value".to_string()));
+            let mut metadata = HashMap::new();
+            metadata.insert("key".to_string(), MetadataValue::Str("value".to_string()));
             let value = DataRecord {
                 id: &key,
                 embedding: &[i as f32],
                 document: None,
-                metadata: Some(metdata),
+                metadata: Some(metadata),
             };
             writer.set("key", key.as_str(), &value).await.unwrap();
         }
@@ -2265,7 +2265,7 @@ mod tests {
             block_deltas,
             root: root_writer,
             id: Uuid::new_v4(),
-            deltas_mutex: Arc::new(AysncPartitionedMutex::new(())),
+            deltas_mutex: Arc::new(AsyncPartitionedMutex::new(())),
         };
 
         let n = 2000;

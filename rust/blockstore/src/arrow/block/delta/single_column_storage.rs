@@ -181,7 +181,7 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
                 let key_offset_bytes = K::offset_size(item_count);
                 let value_offset_bytes = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
 
-                // validitiy sizing
+                // validity sizing
                 let value_validity_bytes = V::validity_size(item_count);
 
                 let total_size = bit_util::round_upto_multiple_of_64(prefix_size)

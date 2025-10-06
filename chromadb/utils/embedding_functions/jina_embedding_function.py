@@ -144,7 +144,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
         if self.normalized is not None:
             payload["normalized"] = self.normalized
 
-        # overwrite parameteres when query payload is used
+        # overwrite parameters when query payload is used
         if is_query and self.query_config is not None:
             for key, value in self.query_config.items():
                 payload[key] = value

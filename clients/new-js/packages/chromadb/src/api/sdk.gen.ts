@@ -300,7 +300,7 @@ export class DefaultService {
     }
     
     /**
-     * Search records from a collection with hybrid criterias.
+     * Search records from a collection with hybrid criteria.
      */
     public static collectionSearch<ThrowOnError extends boolean = true>(options: Options<CollectionSearchData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).post<CollectionSearchResponse, CollectionSearchError, ThrowOnError>({

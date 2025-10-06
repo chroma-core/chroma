@@ -2174,7 +2174,7 @@ impl RootConfig {
     /// # Notes
     /// The default location is the current working directory, with the filename chroma_config.yaml.
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
-    /// Values in the envionment variables take precedence over values in the YAML file.
+    /// Values in the environment variables take precedence over values in the YAML file.
     pub fn load() -> Self {
         Self::load_from_path(DEFAULT_CONFIG_PATH)
     }
@@ -2193,7 +2193,7 @@ impl RootConfig {
     /// - If the environment variables contain invalid values.
     /// # Notes
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
-    /// Values in the envionment variables take precedence over values in the YAML file.
+    /// Values in the environment variables take precedence over values in the YAML file.
     // NOTE:  Copied to ../load/src/config.rs.
     pub fn load_from_path(path: &str) -> Self {
         println!("loading config from {path}");

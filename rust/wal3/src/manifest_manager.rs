@@ -100,7 +100,7 @@ impl Staging {
                 }
                 Err(err) => {
                     notifiers.push(notifier);
-                    tracing::error!("could not apply garabage: {err:?}");
+                    tracing::error!("could not apply garbage: {err:?}");
                     for notifier in notifiers {
                         let _ = notifier.send(Some(err.clone()));
                     }
@@ -156,7 +156,7 @@ impl Staging {
                     return None;
                 }
                 Err(err) => {
-                    tracing::error!("could not apply garabage: {err:?}");
+                    tracing::error!("could not apply garbage: {err:?}");
                     let _ = notifier.send(Some(err));
                     return None;
                 }

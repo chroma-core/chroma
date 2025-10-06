@@ -866,7 +866,7 @@ impl OnceLogWriter {
         }
     }
 
-    /// Perform phase 2 of grabage collection.
+    /// Perform phase 2 of garbage collection.
     ///
     /// Pre-conditions:
     /// - manifest/MANIFEST exists.

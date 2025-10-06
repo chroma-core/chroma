@@ -231,7 +231,7 @@ impl From<Space> for DistanceFunction {
 }
 
 impl DistanceFunction {
-    // TOOD: Should we error if mismatched dimensions?
+    // TODO: Should we error if mismatched dimensions?
     pub fn distance(&self, a: &[f32], b: &[f32]) -> f32 {
         // TODO: Figure out why the compiler is not auto vectorizing these
         // by default.

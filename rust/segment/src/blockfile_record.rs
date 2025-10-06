@@ -796,7 +796,7 @@ impl RecordSegmentReader<'_> {
                     let id_to_user_id = id_to_user_id_result?;
                     let id_to_data = id_to_data_result?;
 
-                    let exising_max_offset_id =
+                    let existing_max_offset_id =
                         match max_offset_id_bf_reader.get("", MAX_OFFSET_ID).await {
                             Ok(Some(max_offset_id)) => max_offset_id,
                             Ok(None) | Err(_) => 0,
@@ -806,7 +806,7 @@ impl RecordSegmentReader<'_> {
                         user_id_to_id,
                         id_to_user_id,
                         id_to_data,
-                        exising_max_offset_id,
+                        existing_max_offset_id,
                     )
                 }
                 0 => {

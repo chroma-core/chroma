@@ -7,7 +7,7 @@ use std::{
 };
 
 #[derive(Clone, Debug)]
-pub struct AysncPartitionedMutex<K, V = (), H = DefaultHasher>
+pub struct AsyncPartitionedMutex<K, V = (), H = DefaultHasher>
 where
     K: Hash + Eq,
     H: Hasher + Default,
@@ -21,7 +21,7 @@ where
 // TODO: A sensible value for this.
 const DEFAULT_NUM_PARTITIONS: usize = 32768;
 
-impl<K, V, H> AysncPartitionedMutex<K, V, H>
+impl<K, V, H> AsyncPartitionedMutex<K, V, H>
 where
     K: Hash + Eq,
     H: Hasher + Default,

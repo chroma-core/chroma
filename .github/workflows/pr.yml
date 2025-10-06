@@ -199,6 +199,18 @@ jobs:
     uses: ./.github/workflows/_go-tests.yml
     secrets: inherit
 
+  typo-check:
+    name: Check for typos
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+    - name: Checkout chroma-core/chroma
+      uses: actions/checkout@v4
+
+    - name: Run typo check
+      uses: crate-ci/typos@v1.36.2
+      with:
+        config: typos.toml
+
   lint:
     name: Lint
     runs-on: blacksmith-4vcpu-ubuntu-2404

@@ -251,7 +251,7 @@ class CollectionCommon(Generic[ClientT]):
             validate_ids(ids=unpacked_ids)
 
         validate_filter_set(filter_set=filters)
-        validate_include(include=include, dissalowed=["distances"])
+        validate_include(include=include, disallowed=["distances"])
 
         if "data" in include and self._data_loader is None:
             raise ValueError(
@@ -260,7 +260,7 @@ class CollectionCommon(Generic[ClientT]):
 
         # Prepare
         request_include = include
-        # We need to include uris in the result from the API to load datas
+        # We need to include uris in the result from the API to load data
         if "data" in include and "uris" not in include:
             request_include.append("uris")
 
@@ -322,7 +322,7 @@ class CollectionCommon(Generic[ClientT]):
         request_where = filters["where"]
         request_where_document = filters["where_document"]
 
-        # We need to manually include uris in the result from the API to load datas
+        # We need to manually include uris in the result from the API to load data
         request_include = include
         if "data" in request_include and "uris" not in request_include:
             request_include.append("uris")

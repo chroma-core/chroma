@@ -106,7 +106,7 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         self.client.set_tenant(tenant, database)
 
     # For calls to create_database, and create_tenant we may want to override the tenant and database
-    # This is a leaky abstraction that exists soley for the purpose of
+    # This is a leaky abstraction that exists solely for the purpose of
     # test_collections_with_database_tenant_override.py
     def overwrite_tenant(self, tenant: str) -> str:
         return tenant

@@ -36,7 +36,7 @@ Memberlist = List[Member]
 
 
 class MemberlistProvider(Component, EnforceOverrides):
-    """Returns the latest memberlist and provdes a callback for when it changes. This
+    """Returns the latest memberlist and provides a callback for when it changes. This
     callback may be called from a different thread than the one that called. Callers should ensure
     that they are thread-safe."""
 

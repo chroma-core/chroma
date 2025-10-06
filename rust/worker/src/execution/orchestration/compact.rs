@@ -172,7 +172,7 @@ pub enum CompactionError {
     ApplyLog(#[from] ApplyLogToSegmentWriterOperatorError),
     #[error("Error sending message through channel: {0}")]
     Channel(#[from] ChannelError),
-    #[error("Error commiting segment writers: {0}")]
+    #[error("Error committing segment writers: {0}")]
     Commit(#[from] CommitSegmentWriterOperatorError),
     #[error("Error fetching logs: {0}")]
     FetchLog(#[from] FetchLogError),
@@ -952,7 +952,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                 tracing::info!("Pulled Logs Up To Offset: {:?}", self.pulled_log_offset);
             }
             None => {
-                tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behing the sysdb.");
+                tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behind the sysdb.");
                 if let Some(collection) = self.collection.get() {
                     self.terminate_with_result(
                         Ok(CompactionResponse::RequireCompactionOffsetRepair {
@@ -994,7 +994,7 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
             None => return,
         };
         tracing::info!("Sourced Records: {}", output.len());
-        // Each record should corresond to a log
+        // Each record should correspond to a log
         self.total_records_post_compaction = output.len() as u64;
         if output.is_empty() {
             let writers = match self.ok_or_terminate(self.get_segment_writers(), ctx).await {
@@ -1132,7 +1132,7 @@ impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorEr
             None => return,
         };
 
-        // If the flusher recieved is a record segment flusher, get the number of keys for the blockfile and set it on the orchestrator
+        // If the flusher received is a record segment flusher, get the number of keys for the blockfile and set it on the orchestrator
         if let ChromaSegmentFlusher::RecordSegment(record_segment_flusher) = &message.flusher {
             self.total_records_post_compaction = record_segment_flusher.count();
         }
@@ -1247,7 +1247,7 @@ mod tests {
                 false,
             )
             .await
-            .expect("Colleciton create should be successful");
+            .expect("Collection create should be successful");
         let mut in_memory_log = InMemoryLog::new();
         add_delete_generator
             .generate_vec(1..=120)

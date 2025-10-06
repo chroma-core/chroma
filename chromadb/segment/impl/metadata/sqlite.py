@@ -159,7 +159,7 @@ class SqliteMetadataSegment(MetadataReader):
         )
 
         # If there is a query that touches the metadata table, it uses
-        # where and where_document filters, we treat this case seperately
+        # where and where_document filters, we treat this case separately
         if where is not None or where_document is not None:
             metadata_q = (
                 self._db.querybuilder()
