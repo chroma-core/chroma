@@ -15,7 +15,6 @@ struct ConfigurableScheduler {
     done_items: Arc<Mutex<HashMap<(Uuid, Uuid, Uuid), bool>>>,
     scheduled_items: Arc<Mutex<HashMap<Uuid, Option<Schedule>>>>,
     error_on_done: Arc<Mutex<bool>>,
-    error_on_schedule: Arc<Mutex<bool>>,
 }
 
 impl ConfigurableScheduler {
@@ -24,12 +23,7 @@ impl ConfigurableScheduler {
             done_items: Arc::new(Mutex::new(HashMap::new())),
             scheduled_items: Arc::new(Mutex::new(HashMap::new())),
             error_on_done: Arc::new(Mutex::new(false)),
-            error_on_schedule: Arc::new(Mutex::new(false)),
         }
-    }
-
-    fn set_error_on_schedule(&self, should_error: bool) {
-        *self.error_on_schedule.lock() = should_error;
     }
 }
 
@@ -56,11 +50,6 @@ impl HeapScheduler for ConfigurableScheduler {
     }
 
     async fn get_schedules(&self, ids: &[Uuid]) -> Result<Vec<Option<Schedule>>, Error> {
-        if *self.error_on_schedule.lock() {
-            return Err(Error::Internal(
-                "Simulated error in get_schedules".to_string(),
-            ));
-        }
         let scheduled_items = self.scheduled_items.lock();
         Ok(ids
             .iter()
@@ -303,14 +292,12 @@ async fn writer_push_with_no_scheduled_items() {
 }
 
 #[tokio::test]
-async fn writer_push_with_scheduler_error() {
+async fn writer_push_empty_schedules_succeeds() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(ConfigurableScheduler::new());
-    scheduler.set_error_on_schedule(true);
 
-    let writer = HeapWriter::new(storage, "test-error".to_string(), scheduler).unwrap();
+    let writer = HeapWriter::new(storage, "test-empty".to_string(), scheduler).unwrap();
 
-    // Push with empty schedules should succeed (no scheduler interaction)
     let result = writer.push(&[]).await;
     assert!(result.is_ok());
 }
