@@ -24,14 +24,19 @@ async fn test_k8s_integration_05_peek_with_filter() {
     // Schedule all items
     let now = Utc::now();
     let time = test_time_at_minute_offset(now, 5);
-    scheduler.set_next_time(&item1, Some((time, test_nonce(1))));
-    scheduler.set_next_time(&item2, Some((time, test_nonce(2))));
-    scheduler.set_next_time(&item3, Some((time, test_nonce(3))));
-    scheduler.set_next_time(&item4, Some((time, test_nonce(4))));
-    scheduler.set_next_time(&item5, Some((time, test_nonce(5))));
+    scheduler.set_schedule(item1.uuid, Some((item1.clone(), time, test_nonce(1))));
+    scheduler.set_schedule(item2.uuid, Some((item2.clone(), time, test_nonce(2))));
+    scheduler.set_schedule(item3.uuid, Some((item3.clone(), time, test_nonce(3))));
+    scheduler.set_schedule(item4.uuid, Some((item4.clone(), time, test_nonce(4))));
+    scheduler.set_schedule(item5.uuid, Some((item5.clone(), time, test_nonce(5))));
 
     // Push all items
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     writer
         .push(&[
             item1.clone(),
@@ -43,7 +48,12 @@ async fn test_k8s_integration_05_peek_with_filter() {
         .await
         .unwrap();
 
-    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let reader = HeapReader::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
 
     // Filter for payment processing tasks
     let payment_items = reader
@@ -101,9 +111,9 @@ async fn test_k8s_integration_05_peek_filters_completed() {
     let nonce2 = test_nonce(2);
     let nonce3 = test_nonce(3);
 
-    scheduler.set_next_time(&item1, Some((time, nonce1)));
-    scheduler.set_next_time(&item2, Some((time, nonce2)));
-    scheduler.set_next_time(&item3, Some((time, nonce3)));
+    scheduler.set_schedule(item1.uuid, Some((item1.clone(), time, nonce1)));
+    scheduler.set_schedule(item2.uuid, Some((item2.clone(), time, nonce2)));
+    scheduler.set_schedule(item3.uuid, Some((item3.clone(), time, nonce3)));
 
     // Mark some as done
     scheduler.set_done(&item1, nonce1, true);
@@ -111,14 +121,24 @@ async fn test_k8s_integration_05_peek_filters_completed() {
     scheduler.set_done(&item3, nonce3, true);
 
     // Push items
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     writer
         .push(&[item1.clone(), item2.clone(), item3.clone()])
         .await
         .unwrap();
 
     // Peek should automatically filter out completed items
-    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let reader = HeapReader::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 1, "Should only return incomplete items");
     assert_eq!(
@@ -155,19 +175,29 @@ async fn test_k8s_integration_05_peek_across_buckets() {
     let time1 = test_time_at_minute_offset(now, 5);
     let time2 = test_time_at_minute_offset(now, 10);
 
-    scheduler.set_next_time(&item1, Some((time1, test_nonce(1))));
-    scheduler.set_next_time(&item2, Some((time1, test_nonce(2))));
-    scheduler.set_next_time(&item3, Some((time2, test_nonce(3))));
-    scheduler.set_next_time(&item4, Some((time2, test_nonce(4))));
+    scheduler.set_schedule(item1.uuid, Some((item1.clone(), time1, test_nonce(1))));
+    scheduler.set_schedule(item2.uuid, Some((item2.clone(), time1, test_nonce(2))));
+    scheduler.set_schedule(item3.uuid, Some((item3.clone(), time2, test_nonce(3))));
+    scheduler.set_schedule(item4.uuid, Some((item4.clone(), time2, test_nonce(4))));
 
     // Push items
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     writer
         .push(&[item1.clone(), item2.clone(), item3.clone(), item4.clone()])
         .await
         .unwrap();
 
-    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let reader = HeapReader::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
 
     // Filter across buckets
     let type_a_items = reader

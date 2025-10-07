@@ -7135,16 +7135,41 @@ dependencies = [
  "async-trait",
  "backon",
  "bytes",
+ "chroma-error",
  "chroma-storage",
  "chrono",
  "futures",
  "parking_lot",
  "parquet",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "uuid",
+ "wal3",
+]
+
+[[package]]
+name = "s3heap-service"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chroma-config",
+ "chroma-error",
+ "chroma-storage",
+ "chroma-tracing",
+ "chroma-types",
+ "figment",
+ "futures",
+ "s3heap",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonic",
+ "tonic-health",
  "tracing",
  "uuid",
+ "wal3",
 ]
 
 [[package]]

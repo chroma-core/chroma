@@ -23,7 +23,12 @@ async fn test_k8s_integration_02_basic_push() {
         .build();
 
     // Push items
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     writer.push(&[item1.clone(), item2.clone()]).await.unwrap();
 
     // Verify buckets were created
@@ -36,7 +41,12 @@ async fn test_k8s_integration_02_basic_push() {
     .await;
 
     // Verify we can read the items back
-    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let reader = HeapReader::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 2, "Should read 2 items back");
 
@@ -61,7 +71,12 @@ async fn test_k8s_integration_02_push_with_no_schedule() {
     let item3 = TestItemBuilder::new(&scheduler, 3, "unscheduled2").build_unscheduled();
 
     // Push all items
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     writer.push(&[item1, item2.clone(), item3]).await.unwrap();
 
     // Verify only one bucket was created
@@ -74,7 +89,12 @@ async fn test_k8s_integration_02_push_with_no_schedule() {
     .await;
 
     // Verify only scheduled item is in heap
-    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let reader = HeapReader::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 1, "Should have only 1 scheduled item");
     assert_eq!(

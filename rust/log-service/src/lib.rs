@@ -32,7 +32,8 @@ use chroma_types::chroma_proto::{
     UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
-use chroma_types::CollectionUuid;
+use chroma_types::dirty_log_path_from_hostname;
+use chroma_types::{CollectionUuid, DirtyMarker};
 use figment::providers::{Env, Format, Yaml};
 use futures::stream::StreamExt;
 use opentelemetry::metrics::Meter;
@@ -413,7 +414,7 @@ impl RollupPerCollection {
     fn dirty_marker(&self, collection_id: CollectionUuid) -> DirtyMarker {
         DirtyMarker::MarkDirty {
             collection_id,
-            log_position: self.start_log_position,
+            log_position: self.start_log_position.offset(),
             num_records: self
                 .limit_log_position
                 .offset()
@@ -442,89 +443,44 @@ struct Rollup {
 
 //////////////////////////////////////////// DirtyMarker ///////////////////////////////////////////
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-// NOTE(rescrv):  This is intentionally an enum for easy forwards/backwards compatibility.  Add a
-// new variant, handle both variants, cycle logs, stop handling old variant.
-pub enum DirtyMarker {
-    #[serde(rename = "mark_dirty")]
-    MarkDirty {
-        collection_id: CollectionUuid,
-        log_position: LogPosition,
-        num_records: u64,
-        reinsert_count: u64,
-        initial_insertion_epoch_us: u64,
-    },
-    #[serde(rename = "purge")]
-    Purge { collection_id: CollectionUuid },
-    // A Cleared marker is a no-op.  It exists so that a log consisting of mark-dirty markers that
-    // map onto purge markers will be cleared and can be erased.
-    #[serde(rename = "clear")]
-    Cleared,
-}
-
-impl DirtyMarker {
-    /// The collection ID for a given dirty marker.
-    pub fn collection_id(&self) -> CollectionUuid {
-        match self {
-            DirtyMarker::MarkDirty { collection_id, .. } => *collection_id,
-            DirtyMarker::Purge { collection_id } => *collection_id,
-            DirtyMarker::Cleared => CollectionUuid::default(),
-        }
-    }
-
-    /// Increment any reinsert counter on the variant.
-    pub fn reinsert(&mut self) {
-        if let DirtyMarker::MarkDirty {
-            collection_id: _,
-            log_position: _,
-            num_records: _,
-            reinsert_count,
-            initial_insertion_epoch_us: _,
-        } = self
-        {
-            *reinsert_count = reinsert_count.saturating_add(1);
-        }
-    }
-
-    fn coalesce_markers(
-        markers: &[(LogPosition, DirtyMarker)],
-        rollups: &mut HashMap<CollectionUuid, RollupPerCollection>,
-        forget: &mut HashSet<CollectionUuid>,
-    ) -> Result<(), wal3::Error> {
-        for (_, marker) in markers {
-            match marker {
-                DirtyMarker::MarkDirty {
-                    collection_id,
-                    log_position,
-                    num_records,
-                    reinsert_count,
-                    initial_insertion_epoch_us,
-                } => {
-                    let position = rollups.entry(*collection_id).or_insert_with(|| {
-                        RollupPerCollection::new(
-                            *log_position,
-                            *num_records,
-                            *initial_insertion_epoch_us,
-                        )
-                    });
-                    position.observe_dirty_marker(
-                        *log_position,
+fn coalesce_markers(
+    markers: &[(LogPosition, DirtyMarker)],
+    rollups: &mut HashMap<CollectionUuid, RollupPerCollection>,
+    forget: &mut HashSet<CollectionUuid>,
+) -> Result<(), wal3::Error> {
+    for (_, marker) in markers {
+        match marker {
+            DirtyMarker::MarkDirty {
+                collection_id,
+                log_position,
+                num_records,
+                reinsert_count,
+                initial_insertion_epoch_us,
+            } => {
+                let position = rollups.entry(*collection_id).or_insert_with(|| {
+                    RollupPerCollection::new(
+                        LogPosition::from_offset(*log_position),
                         *num_records,
-                        *reinsert_count,
                         *initial_insertion_epoch_us,
-                    );
-                }
-                DirtyMarker::Purge { collection_id } => {
-                    forget.insert(*collection_id);
-                }
-                DirtyMarker::Cleared => {}
+                    )
+                });
+                position.observe_dirty_marker(
+                    LogPosition::from_offset(*log_position),
+                    *num_records,
+                    *reinsert_count,
+                    *initial_insertion_epoch_us,
+                );
             }
+            DirtyMarker::Purge { collection_id } => {
+                forget.insert(*collection_id);
+            }
+            DirtyMarker::Cleared => {}
         }
-        for collection_id in forget.iter() {
-            rollups.remove(collection_id);
-        }
-        Ok(())
     }
+    for collection_id in forget.iter() {
+        rollups.remove(collection_id);
+    }
+    Ok(())
 }
 
 ///////////////////////////////////////////// MarkDirty ////////////////////////////////////////////
@@ -537,7 +493,7 @@ pub struct MarkDirty {
 
 impl MarkDirty {
     pub fn path_for_hostname(hostname: &str) -> String {
-        format!("dirty-{}", hostname)
+        dirty_log_path_from_hostname(hostname)
     }
 }
 
@@ -556,7 +512,7 @@ impl wal3::MarkDirty for MarkDirty {
                 .as_micros() as u64;
             let dirty_marker = DirtyMarker::MarkDirty {
                 collection_id: self.collection_id,
-                log_position,
+                log_position: log_position.offset(),
                 num_records,
                 reinsert_count: 0,
                 initial_insertion_epoch_us,
@@ -995,7 +951,7 @@ impl LogServer {
                 // twice.  Further, we need to track every forget call to remove down below before
                 // we return the rollup.
                 let mut forget = HashSet::default();
-                DirtyMarker::coalesce_markers(&records, &mut rollup.rollups, &mut forget)?;
+                coalesce_markers(&records, &mut rollup.rollups, &mut forget)?;
                 rollup.forget.extend(forget);
                 Ok::<(), Error>(())
             })
@@ -2474,7 +2430,7 @@ mod tests {
                 LogPosition::from_offset(45),
                 DirtyMarker::MarkDirty {
                     collection_id,
-                    log_position: LogPosition::from_offset(1),
+                    log_position: 1,
                     num_records: 1,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now,
@@ -2484,7 +2440,7 @@ mod tests {
                 LogPosition::from_offset(46),
                 DirtyMarker::MarkDirty {
                     collection_id,
-                    log_position: LogPosition::from_offset(2),
+                    log_position: 2,
                     num_records: 1,
                     reinsert_count: 2,
                     initial_insertion_epoch_us: now,
@@ -2493,7 +2449,7 @@ mod tests {
         ];
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        DirtyMarker::coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
         assert_eq!(1, rollups.len());
         let rollup = rollups.get(&collection_id).unwrap();
@@ -2518,7 +2474,7 @@ mod tests {
                 LogPosition::from_offset(0),
                 DirtyMarker::MarkDirty {
                     collection_id: collection_id_blocking,
-                    log_position: LogPosition::from_offset(1),
+                    log_position: 1,
                     num_records: 1,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now,
@@ -2528,7 +2484,7 @@ mod tests {
                 LogPosition::from_offset(1),
                 DirtyMarker::MarkDirty {
                     collection_id: collection_id_acting,
-                    log_position: LogPosition::from_offset(1),
+                    log_position: 1,
                     num_records: 100,
                     reinsert_count: 1,
                     initial_insertion_epoch_us: now,
@@ -2537,7 +2493,7 @@ mod tests {
         ];
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        DirtyMarker::coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
         assert_eq!(2, rollups.len());
         let rollup_blocking = rollups.get(&collection_id_blocking).unwrap();
@@ -2575,7 +2531,7 @@ mod tests {
         // Test MarkDirty serialization
         let mark_dirty = DirtyMarker::MarkDirty {
             collection_id,
-            log_position: LogPosition::from_offset(42),
+            log_position: 42,
             num_records: 100,
             reinsert_count: 5,
             initial_insertion_epoch_us: now,
@@ -2602,7 +2558,7 @@ mod tests {
 
         let mark_dirty = DirtyMarker::MarkDirty {
             collection_id,
-            log_position: LogPosition::from_offset(1),
+            log_position: 1,
             num_records: 1,
             reinsert_count: 0,
             initial_insertion_epoch_us: now,
@@ -2623,7 +2579,7 @@ mod tests {
 
         let mut mark_dirty = DirtyMarker::MarkDirty {
             collection_id,
-            log_position: LogPosition::from_offset(1),
+            log_position: 1,
             num_records: 1,
             reinsert_count: 0,
             initial_insertion_epoch_us: now,
@@ -2655,7 +2611,7 @@ mod tests {
                 LogPosition::from_offset(1),
                 DirtyMarker::MarkDirty {
                     collection_id,
-                    log_position: LogPosition::from_offset(1),
+                    log_position: 1,
                     num_records: 10,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now,
@@ -2669,7 +2625,7 @@ mod tests {
                 LogPosition::from_offset(3),
                 DirtyMarker::MarkDirty {
                     collection_id,
-                    log_position: LogPosition::from_offset(20),
+                    log_position: 20,
                     num_records: 5,
                     reinsert_count: 1,
                     initial_insertion_epoch_us: now + 1000,
@@ -2679,7 +2635,7 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        DirtyMarker::coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
         // The purge should remove all markers for the collection, even ones that come after
         assert_eq!(1, forget.len());
         assert!(forget.contains(&collection_id));
@@ -2704,7 +2660,7 @@ mod tests {
                 LogPosition::from_offset(1),
                 DirtyMarker::MarkDirty {
                     collection_id: collection_id1,
-                    log_position: LogPosition::from_offset(1),
+                    log_position: 1,
                     num_records: 10,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now,
@@ -2714,7 +2670,7 @@ mod tests {
                 LogPosition::from_offset(2),
                 DirtyMarker::MarkDirty {
                     collection_id: collection_id2,
-                    log_position: LogPosition::from_offset(10),
+                    log_position: 10,
                     num_records: 5,
                     reinsert_count: 1,
                     initial_insertion_epoch_us: now,
@@ -2730,7 +2686,7 @@ mod tests {
                 LogPosition::from_offset(4),
                 DirtyMarker::MarkDirty {
                     collection_id: collection_id1,
-                    log_position: LogPosition::from_offset(20),
+                    log_position: 20,
                     num_records: 3,
                     reinsert_count: 2,
                     initial_insertion_epoch_us: now + 1000,
@@ -2740,7 +2696,7 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        DirtyMarker::coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
         // collection_id1 should be completely removed due to purge
         // collection_id2 should remain
         assert_eq!(1, forget.len());
@@ -2830,7 +2786,7 @@ mod tests {
                 initial_insertion_epoch_us,
             } => {
                 assert_eq!(collection_id, cid);
-                assert_eq!(LogPosition::from_offset(10), log_position);
+                assert_eq!(10, log_position);
                 assert_eq!(5, num_records);
                 assert_eq!(3, reinsert_count);
                 assert_eq!(now, initial_insertion_epoch_us);
@@ -2882,7 +2838,7 @@ mod tests {
         // Create the expected marker manually
         let expected_marker = DirtyMarker::MarkDirty {
             collection_id,
-            log_position,
+            log_position: log_position.offset(),
             num_records: num_records as u64,
             reinsert_count: 0,
             initial_insertion_epoch_us: SystemTime::now()
@@ -2909,7 +2865,7 @@ mod tests {
         } = deserialized
         {
             assert_eq!(collection_id, cid);
-            assert_eq!(log_position, pos);
+            assert_eq!(42, pos);
             assert_eq!(100, count);
             assert_eq!(0, reinsert_count);
         } else {
@@ -2921,7 +2877,7 @@ mod tests {
     fn dirty_marker_coalesce_empty_markers() {
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        DirtyMarker::coalesce_markers(&[], &mut rollups, &mut forget).unwrap();
+        coalesce_markers(&[], &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
         assert!(rollups.is_empty());
     }
@@ -2940,7 +2896,7 @@ mod tests {
                 LogPosition::from_offset(1),
                 DirtyMarker::MarkDirty {
                     collection_id: collection_id1,
-                    log_position: LogPosition::from_offset(10),
+                    log_position: 10,
                     num_records: 5,
                     reinsert_count: 1,
                     initial_insertion_epoch_us: now,
@@ -2950,7 +2906,7 @@ mod tests {
                 LogPosition::from_offset(2),
                 DirtyMarker::MarkDirty {
                     collection_id: collection_id2,
-                    log_position: LogPosition::from_offset(20),
+                    log_position: 20,
                     num_records: 10,
                     reinsert_count: 2,
                     initial_insertion_epoch_us: now + 1000,
@@ -2960,7 +2916,7 @@ mod tests {
                 LogPosition::from_offset(3),
                 DirtyMarker::MarkDirty {
                     collection_id: collection_id1,
-                    log_position: LogPosition::from_offset(30),
+                    log_position: 30,
                     num_records: 3,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now - 1000,
@@ -2970,7 +2926,7 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        DirtyMarker::coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
         assert_eq!(2, rollups.len());
 
@@ -3043,7 +2999,7 @@ mod tests {
             LogPosition::from_offset(1),
             DirtyMarker::MarkDirty {
                 collection_id,
-                log_position: LogPosition::from_offset(u64::MAX - 1),
+                log_position: u64::MAX - 1,
                 num_records: 100,
                 reinsert_count: 0,
                 initial_insertion_epoch_us: now,
@@ -3052,7 +3008,7 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        DirtyMarker::coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
         let collection_rollup = rollups.get(&collection_id).unwrap();
         assert_eq!(
@@ -3077,7 +3033,7 @@ mod tests {
             LogPosition::from_offset(1),
             DirtyMarker::MarkDirty {
                 collection_id,
-                log_position: LogPosition::from_offset(10),
+                log_position: 10,
                 num_records: 0,
                 reinsert_count: 0,
                 initial_insertion_epoch_us: now,
@@ -3086,7 +3042,7 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        DirtyMarker::coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
         let collection_rollup = rollups.get(&collection_id).unwrap();
         assert_eq!(
@@ -3113,7 +3069,7 @@ mod tests {
                 LogPosition::from_offset(1),
                 DirtyMarker::MarkDirty {
                     collection_id,
-                    log_position: LogPosition::from_offset(10),
+                    log_position: 10,
                     num_records: 1,
                     reinsert_count: u64::MAX,
                     initial_insertion_epoch_us: now,
@@ -3123,7 +3079,7 @@ mod tests {
                 LogPosition::from_offset(2),
                 DirtyMarker::MarkDirty {
                     collection_id,
-                    log_position: LogPosition::from_offset(11),
+                    log_position: 11,
                     num_records: 1,
                     reinsert_count: 5,
                     initial_insertion_epoch_us: now,
@@ -3133,7 +3089,7 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        DirtyMarker::coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
         let collection_rollup = rollups.get(&collection_id).unwrap();
         assert_eq!(u64::MAX, collection_rollup.reinsert_count);
@@ -3243,7 +3199,7 @@ mod tests {
                 LogPosition::from_offset(1),
                 DirtyMarker::MarkDirty {
                     collection_id,
-                    log_position: LogPosition::from_offset(1),
+                    log_position: 1,
                     num_records: 10,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now,
@@ -3253,7 +3209,7 @@ mod tests {
                 LogPosition::from_offset(2),
                 DirtyMarker::MarkDirty {
                     collection_id,
-                    log_position: LogPosition::from_offset(11),
+                    log_position: 11,
                     num_records: 10,
                     reinsert_count: 1,
                     initial_insertion_epoch_us: now + 1000,
@@ -3263,7 +3219,7 @@ mod tests {
                 LogPosition::from_offset(3),
                 DirtyMarker::MarkDirty {
                     collection_id,
-                    log_position: LogPosition::from_offset(21),
+                    log_position: 21,
                     num_records: 10,
                     reinsert_count: 2,
                     initial_insertion_epoch_us: now + 2000,
@@ -3277,7 +3233,7 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        DirtyMarker::coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
         assert_eq!(1, forget.len());
         assert!(forget.contains(&collection_id));
         for collection_id in &forget {
@@ -3296,7 +3252,7 @@ mod tests {
 
         let mut mark_dirty = DirtyMarker::MarkDirty {
             collection_id,
-            log_position: LogPosition::from_offset(1),
+            log_position: 1,
             num_records: 1,
             reinsert_count: u64::MAX - 1,
             initial_insertion_epoch_us: now,
@@ -3361,7 +3317,7 @@ mod tests {
                 LogPosition::from_offset(i),
                 DirtyMarker::MarkDirty {
                     collection_id,
-                    log_position: LogPosition::from_offset(i * 10),
+                    log_position: i * 10,
                     num_records: 1,
                     reinsert_count: i % 100,
                     initial_insertion_epoch_us: now + i,
@@ -3371,7 +3327,7 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        DirtyMarker::coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
         assert_eq!(1, rollups.len());
         let collection_rollup = rollups.get(&collection_id).unwrap();
@@ -3400,7 +3356,7 @@ mod tests {
                 LogPosition::from_offset(1),
                 DirtyMarker::MarkDirty {
                     collection_id,
-                    log_position: LogPosition::from_offset(1),
+                    log_position: 1,
                     num_records: 10,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now,
@@ -3414,7 +3370,7 @@ mod tests {
                 LogPosition::from_offset(3),
                 DirtyMarker::MarkDirty {
                     collection_id,
-                    log_position: LogPosition::from_offset(20),
+                    log_position: 20,
                     num_records: 5,
                     reinsert_count: 1,
                     initial_insertion_epoch_us: now + 1000,
@@ -3428,7 +3384,7 @@ mod tests {
                 LogPosition::from_offset(5),
                 DirtyMarker::MarkDirty {
                     collection_id,
-                    log_position: LogPosition::from_offset(30),
+                    log_position: 30,
                     num_records: 3,
                     reinsert_count: 2,
                     initial_insertion_epoch_us: now + 2000,
@@ -3438,7 +3394,7 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        DirtyMarker::coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
         assert_eq!(1, forget.len());
         assert!(forget.contains(&collection_id));
         for collection_id in &forget {

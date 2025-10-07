@@ -269,7 +269,7 @@ pub async fn headless_login(args: LoginArgs) -> Result<(), CliError> {
         config.current_profile = profile_name.clone();
         write_config(&config)?;
     }
-    
+
     if !config.current_profile.eq(&profile_name) {
         println!("{}", set_profile_message(&profile_name));
     }

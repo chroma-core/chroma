@@ -63,7 +63,6 @@
 
 #![deny(missing_docs)]
 #![warn(clippy::all)]
-#![deny(unsafe_code)]
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -76,10 +75,13 @@ use chroma_storage::Storage;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+// TODO(rescrv):  Clean this up once the real pieces are doable.
+mod dummy;
 mod internal;
-
-pub use internal::HeapItem;
 use internal::Internal;
+
+pub use dummy::DummyScheduler;
+pub use internal::HeapItem;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -111,6 +113,9 @@ pub enum Error {
     /// Storage backend error
     #[error("storage error: {0}")]
     Storage(#[from] chroma_storage::StorageError),
+    /// wal3 error
+    #[error("wal3 error: {0}")]
+    Wal3(#[from] wal3::Error),
     /// UUID parsing error
     #[error("uuid error: {0}")]
     Uuid(#[from] uuid::Error),
@@ -120,12 +125,38 @@ pub enum Error {
     /// Arrow data processing error
     #[error("arrow error: {0}")]
     Arrow(String),
+    /// JSON data processing error
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+    /// Date parsing error
     /// Date parsing error
     #[error("invalid date: {0}")]
     ParseDate(#[from] chrono::ParseError),
     /// Date rounding error
     #[error("could not round date: {0}")]
     RoundError(#[from] chrono::RoundingError),
+}
+
+impl chroma_error::ChromaError for Error {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        use chroma_error::ErrorCodes;
+        match self {
+            Error::ETagConflict => ErrorCodes::FailedPrecondition,
+            Error::MissingETag(_) => ErrorCodes::FailedPrecondition,
+            Error::Internal(_) => ErrorCodes::Internal,
+            Error::InvalidBucket(_) => ErrorCodes::InvalidArgument,
+            Error::PartialLoadFailure(..) => ErrorCodes::Internal,
+            Error::InvalidPrefix(_) => ErrorCodes::InvalidArgument,
+            Error::Storage(e) => e.code(),
+            Error::Wal3(e) => e.code(),
+            Error::Uuid(_) => ErrorCodes::InvalidArgument,
+            Error::Parquet(_) => ErrorCodes::Internal,
+            Error::Json(_) => ErrorCodes::Internal,
+            Error::Arrow(_) => ErrorCodes::Internal,
+            Error::ParseDate(_) => ErrorCodes::InvalidArgument,
+            Error::RoundError(_) => ErrorCodes::Internal,
+        }
+    }
 }
 
 /////////////////////////////////////////// Configuration //////////////////////////////////////////
@@ -375,6 +406,7 @@ pub struct Triggerable {
 /// use parking_lot::Mutex;
 ///
 /// struct MyScheduler {
+///     schedules: Mutex<HashMap<Uuid, (Triggerable, DateTime<Utc>, Uuid)>>,
 ///     completed_tasks: Mutex<HashMap<(Uuid, Uuid), bool>>,
 /// }
 ///
@@ -388,13 +420,14 @@ pub struct Triggerable {
 ///             .collect())
 ///     }
 ///
-///     async fn next_times_and_nonces(
+///     async fn get_schedules(
 ///         &self,
-///         items: &[Triggerable],
-///     ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, Error> {
-///         // Determine when to schedule these tasks
-///         Ok(items.iter()
-///             .map(|_| Some((Utc::now() + chrono::Duration::minutes(5), Uuid::new_v4())))
+///         ids: &[Uuid],
+///     ) -> Result<Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>, Error> {
+///         // Retrieve scheduled tasks from your system
+///         let schedules = self.schedules.lock();
+///         Ok(ids.iter()
+///             .map(|id| schedules.get(id).cloned())
 ///             .collect())
 ///     }
 /// }
@@ -436,44 +469,46 @@ pub trait HeapScheduler: Send + Sync {
     /// result[i] = is_done(&items[i])
     async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error>;
 
-    /// Get the next scheduled execution time and nonce for a task.
+    /// Get the schedule for a specific task by its ID.
     ///
     /// # Arguments
-    /// * `item` - The triggerable task to schedule
+    /// * `id` - The unique identifier of the scheduled task
     ///
     /// # Returns
-    /// * `Ok(Some((time, nonce)))` if the task should be scheduled
-    /// * `Ok(None)` if the task should not be scheduled
-    /// * `Err` if there was an error determining the schedule
-    async fn next_time_and_nonce(
+    /// * `Ok(Some((Triggerable, DateTime<Utc>, Uuid)))` if the task exists
+    /// * `Ok(None)` if the task does not exist
+    /// * `Err` if there was an error retrieving the schedule
+    async fn get_schedule(
         &self,
-        item: &Triggerable,
-    ) -> Result<Option<(DateTime<Utc>, Uuid)>, Error> {
-        let results = self.next_times_and_nonces(&[item.clone()]).await?;
+        id: Uuid,
+    ) -> Result<Option<(Triggerable, DateTime<Utc>, Uuid)>, Error> {
+        let mut results = self.get_schedules(&[id]).await?;
         if results.len() != 1 {
             return Err(Error::Internal(format!(
-                "next_times_and_nonces returned {} results for 1 item",
+                "get_schedules returned {} results for 1 item",
                 results.len()
             )));
         }
-        Ok(results[0])
+        // SAFETY(rescrv):  result.len() == 1
+        Ok(results.pop().unwrap())
     }
 
-    /// Get the next scheduled execution times and nonces for multiple tasks.
+    /// Get the schedules for multiple tasks by their IDs.
     ///
     /// # Arguments
-    /// * `items` - The triggerable tasks to schedule
+    /// * `ids` - The unique identifiers of the scheduled tasks
     ///
     /// # Returns
-    /// * `Ok(Vec<Option<(time, nonce)>>)` with one option per item
-    /// * `Err` if there was an error determining the schedules
+    /// * `Ok(Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>)` with one entry per ID
+    /// * `Err` if there was an error retrieving the schedules
     ///
     /// # Implementation Requirements
     /// The returned vector must have exactly the same length as the input slice.
-    async fn next_times_and_nonces(
+    /// result[i] = get_schedule(ids[i])
+    async fn get_schedules(
         &self,
-        items: &[Triggerable],
-    ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, Error>;
+        ids: &[Uuid],
+    ) -> Result<Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>, Error>;
 }
 
 //////////////////////////////////////////// HeapWriter ////////////////////////////////////////////
@@ -554,14 +589,14 @@ impl HeapWriter {
     /// )?;
     /// ```
     pub fn new(
-        prefix: String,
         storage: Storage,
+        prefix: String,
         heap_scheduler: Arc<dyn HeapScheduler>,
     ) -> Result<Self, Error> {
         let config = Configuration::default();
         validate_prefix(&prefix)?;
         Ok(Self {
-            internal: Internal::new(prefix, storage, heap_scheduler, config.backoff.clone()),
+            internal: Internal::new(storage, prefix, heap_scheduler, config.backoff.clone()),
             config,
         })
     }
@@ -613,7 +648,8 @@ impl HeapWriter {
 
         let heap_scheduler = self.internal.heap_scheduler();
         let mut buckets: BTreeMap<DateTime<Utc>, Vec<HeapItem>> = BTreeMap::new();
-        let next_times_and_nonces = heap_scheduler.next_times_and_nonces(items).await?;
+        let ids = items.iter().map(|item| item.uuid).collect::<Vec<_>>();
+        let next_times_and_nonces = heap_scheduler.get_schedules(&ids).await?;
 
         if items.len() != next_times_and_nonces.len() {
             return Err(Error::Internal(format!(
@@ -623,13 +659,9 @@ impl HeapWriter {
             )));
         }
 
-        for (item, next) in items.iter().zip(next_times_and_nonces) {
-            let Some((when, nonce)) = next else {
-                // Skip items that have no next scheduled time
-                continue;
-            };
+        for (triggerable, when, nonce) in next_times_and_nonces.into_iter().flatten() {
             let heap_item = HeapItem {
-                trigger: item.clone(),
+                trigger: triggerable.clone(),
                 nonce,
             };
             let bucket = self.internal.compute_bucket(when)?;
@@ -752,14 +784,14 @@ impl HeapPruner {
     /// )?;
     /// ```
     pub fn new(
-        prefix: String,
         storage: Storage,
+        prefix: String,
         heap_scheduler: Arc<dyn HeapScheduler>,
     ) -> Result<Self, Error> {
         let config = Configuration::default();
         validate_prefix(&prefix)?;
         Ok(Self {
-            internal: Internal::new(prefix, storage, heap_scheduler, config.backoff.clone()),
+            internal: Internal::new(storage, prefix, heap_scheduler, config.backoff.clone()),
             config,
         })
     }
@@ -964,14 +996,14 @@ impl HeapReader {
     /// )?;
     /// ```
     pub fn new(
-        prefix: String,
         storage: Storage,
+        prefix: String,
         heap_scheduler: Arc<dyn HeapScheduler>,
     ) -> Result<Self, Error> {
         let config = Configuration::default();
         validate_prefix(&prefix)?;
         Ok(Self {
-            internal: Internal::new(prefix, storage, heap_scheduler, config.backoff),
+            internal: Internal::new(storage, prefix, heap_scheduler, config.backoff),
         })
     }
 

@@ -29,18 +29,33 @@ async fn test_k8s_integration_04_prune_completed_items() {
         .build();
 
     // Push items
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     writer
         .push(&[item1.clone(), item2.clone(), item3.clone()])
         .await
         .unwrap();
 
     // Prune completed items
-    let pruner = HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let pruner = HeapPruner::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     pruner.prune(Limits::default()).await.unwrap();
 
     // Verify only incomplete item remains
-    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let reader = HeapReader::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(
         items.len(),
@@ -72,18 +87,33 @@ async fn test_k8s_integration_04_prune_empty_bucket() {
         .build();
 
     // Push items
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     writer.push(&[item1.clone(), item2.clone()]).await.unwrap();
 
     // Verify bucket exists
     verify_bucket_count(&storage, prefix, 1, "Should have 1 bucket after push").await;
 
     // Prune - should clear the bucket
-    let pruner = HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let pruner = HeapPruner::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     pruner.prune(Limits::default()).await.unwrap();
 
     // Verify bucket was cleared
-    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let reader = HeapReader::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(
         items.len(),
@@ -121,18 +151,33 @@ async fn test_k8s_integration_04_prune_multiple_buckets() {
         .build();
 
     // Push all items
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     writer
         .push(&[item1.clone(), item2.clone(), item3.clone(), item4.clone()])
         .await
         .unwrap();
 
     // Prune
-    let pruner = HeapPruner::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let pruner = HeapPruner::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     pruner.prune(Limits::default()).await.unwrap();
 
     // Verify correct items remain
-    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let reader = HeapReader::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 2, "Two incomplete items should remain");
 

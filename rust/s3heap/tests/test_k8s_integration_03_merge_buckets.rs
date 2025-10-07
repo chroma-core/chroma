@@ -21,18 +21,31 @@ async fn test_k8s_integration_03_merge_same_bucket() {
     // Schedule all items in the same minute (but different seconds)
     let now = Utc::now().duration_trunc(TimeDelta::minutes(1)).unwrap();
     let base_time = test_time_at_minute_offset(now, 5);
-    scheduler.set_next_time(&item1, Some((base_time, test_nonce(1))));
-    scheduler.set_next_time(
-        &item2,
-        Some((base_time + Duration::seconds(10), test_nonce(2))),
+    scheduler.set_schedule(item1.uuid, Some((item1.clone(), base_time, test_nonce(1))));
+    scheduler.set_schedule(
+        item2.uuid,
+        Some((
+            item2.clone(),
+            base_time + Duration::seconds(10),
+            test_nonce(2),
+        )),
     );
-    scheduler.set_next_time(
-        &item3,
-        Some((base_time + Duration::seconds(30), test_nonce(3))),
+    scheduler.set_schedule(
+        item3.uuid,
+        Some((
+            item3.clone(),
+            base_time + Duration::seconds(30),
+            test_nonce(3),
+        )),
     );
 
     // Push items
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     writer
         .push(&[item1.clone(), item2.clone(), item3.clone()])
         .await
@@ -48,7 +61,12 @@ async fn test_k8s_integration_03_merge_same_bucket() {
     .await;
 
     // Verify all items are in the heap
-    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let reader = HeapReader::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 3, "Should read all 3 items from single bucket");
 }
@@ -59,7 +77,12 @@ async fn test_k8s_integration_03_merge_multiple_pushes() {
     let (storage, scheduler) = setup_test_environment().await;
 
     // Create writer
-    let writer = HeapWriter::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
 
     // First push - 2 items to same bucket
     let item1 = create_test_triggerable(1, "task1");
@@ -67,10 +90,14 @@ async fn test_k8s_integration_03_merge_multiple_pushes() {
     let now = Utc::now().duration_trunc(TimeDelta::minutes(1)).unwrap();
     let push_time = test_time_at_minute_offset(now, 10);
 
-    scheduler.set_next_time(&item1, Some((push_time, test_nonce(1))));
-    scheduler.set_next_time(
-        &item2,
-        Some((push_time + Duration::seconds(5), test_nonce(2))),
+    scheduler.set_schedule(item1.uuid, Some((item1.clone(), push_time, test_nonce(1))));
+    scheduler.set_schedule(
+        item2.uuid,
+        Some((
+            item2.clone(),
+            push_time + Duration::seconds(5),
+            test_nonce(2),
+        )),
     );
 
     writer.push(&[item1.clone(), item2.clone()]).await.unwrap();
@@ -79,13 +106,21 @@ async fn test_k8s_integration_03_merge_multiple_pushes() {
     let item3 = create_test_triggerable(3, "task3");
     let item4 = create_test_triggerable(4, "task4");
 
-    scheduler.set_next_time(
-        &item3,
-        Some((push_time + Duration::seconds(20), test_nonce(3))),
+    scheduler.set_schedule(
+        item3.uuid,
+        Some((
+            item3.clone(),
+            push_time + Duration::seconds(20),
+            test_nonce(3),
+        )),
     );
-    scheduler.set_next_time(
-        &item4,
-        Some((push_time + Duration::seconds(40), test_nonce(4))),
+    scheduler.set_schedule(
+        item4.uuid,
+        Some((
+            item4.clone(),
+            push_time + Duration::seconds(40),
+            test_nonce(4),
+        )),
     );
 
     writer.push(&[item3.clone(), item4.clone()]).await.unwrap();
@@ -100,7 +135,12 @@ async fn test_k8s_integration_03_merge_multiple_pushes() {
     .await;
 
     // Verify all 4 items are in the heap
-    let reader = HeapReader::new(prefix.to_string(), storage.clone(), scheduler.clone()).unwrap();
+    let reader = HeapReader::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 4, "Should have all 4 items after merging");
 
