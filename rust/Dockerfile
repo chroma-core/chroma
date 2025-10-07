@@ -25,8 +25,6 @@ COPY idl/ idl/
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 COPY rust/ rust/
-# Copy Go constants file needed by Rust build script for operator code generation
-COPY go/pkg/sysdb/metastore/db/dbmodel/constants.go go/pkg/sysdb/metastore/db/dbmodel/constants.go
 
 # Skip building these as they're not needed by images (and if Python bindings are built, the final binaries are unnecessarily linked against Python).
 ENV EXCLUDED_PACKAGES="chromadb_rust_bindings chromadb-js-bindings chroma-benchmark "
