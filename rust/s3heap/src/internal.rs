@@ -251,24 +251,23 @@ impl Internal {
         let mut items = vec![];
         for batch in reader {
             let batch = batch.map_err(|err| Error::Arrow(err.to_string()))?;
-            // TOOD(claude): rename columns
-            let uuid = get_string_column(&batch, COLUMN_PARTITIONING_UUIDS, &path)?;
-            let name = get_string_column(&batch, COLUMN_SCHEDULING_UUIDS, &path)?;
-            let nonce = get_string_column(&batch, COLUMN_NONCES, &path)?;
+            let partitioning_uuids = get_string_column(&batch, COLUMN_PARTITIONING_UUIDS, &path)?;
+            let scheduling_uuids = get_string_column(&batch, COLUMN_SCHEDULING_UUIDS, &path)?;
+            let nonces = get_string_column(&batch, COLUMN_NONCES, &path)?;
             let mut errors = Vec::new();
             for i in 0..batch.num_rows() {
-                if uuid.is_null(i) || name.is_null(i) || nonce.is_null(i) {
+                if partitioning_uuids.is_null(i) || scheduling_uuids.is_null(i) || nonces.is_null(i)
+                {
                     errors.push(format!("null value at row {}", i));
                     continue;
                 }
-                // TOOD(claude): rename columns
-                let uuid_str = uuid.value(i);
-                let name_str = name.value(i);
-                let nonce_str = nonce.value(i);
+                let partitioning_uuid_str = partitioning_uuids.value(i);
+                let scheduling_uuid_str = scheduling_uuids.value(i);
+                let nonce_str = nonces.value(i);
 
                 match (
-                    Uuid::from_str(uuid_str),
-                    Uuid::from_str(name_str),
+                    Uuid::from_str(partitioning_uuid_str),
+                    Uuid::from_str(scheduling_uuid_str),
                     Uuid::from_str(nonce_str),
                 ) {
                     (Ok(partitioning_uuid), Ok(scheduling_uuid), Ok(nonce)) => {
