@@ -9,7 +9,7 @@ name: GCP
 
 **Chroma Cloud**
 
-Chroma Cloud, our fully managed hosted service is here. [Sign up here](https://trychroma.com/signup) for free.
+Chroma Cloud, our fully managed hosted service is here. [Sign up here](https://trychroma.com/signup?utm_source=docs-gcp) for free.
 
 {% /Banner %}
 

@@ -5,7 +5,7 @@ name: Intro to Retrieval
 
 # Introduction to Retrieval
 
-Large language models like GPT-4, Claude, or Llama can write code, answer questions, generate content, and solve complex problems with remarkable sophistication. You can build chatbots, content generators, code assistants, and analysis tools by crafting good prompts and calling AI APIs.
+Large language models like GPT-5, Claude, or Gemini can write code, answer questions, generate content, and solve complex problems with remarkable sophistication. You can build chatbots, content generators, coding assistants, and analysis tools by crafting good prompts and calling AI APIs.
 
 However, as you start to build more sophisticated applications, especially those that require knowledge not available to an LLM, you'll quickly run into some fundamental limitations.
 
@@ -23,11 +23,11 @@ The AI is likely to return a generic answer, because it doesn't know about your 
 
 We can get around this problem, by providing useful information or context for the AI. This often called "context engineering":
 
-> What is your return policy for tooth brushes? Use the following information for context: Tooth brushes can be returned up to 360 days after purchase if unopened.
+> What is your return policy for tooth brushes? Use the following information for context: Tooth brushes can be returned up to 360 days after purchase if unopened. Tooth brushes are unable to be returned if they are used. Tooth brushes can be returned if they suffer manufacturing defects discovered after opening.
 
 Now the AI has the information it needs to answer the user question correctly:
 
-> Based on the information provided, our return policy for toothbrushes allows returns up to 360 days after purchase, as long as the toothbrush remains unopened and in its original packaging. This gives you nearly a full year to return an unopened toothbrush if needed. Once a toothbrush has been opened, it would not be eligible for return under this policy.
+> Based on the information provided, our return policy for toothbrushes allows returns up to 360 days after purchase, as long as the toothbrush remains unopened and in its original packaging. This gives you nearly a full year to return an unopened toothbrush if needed. Once a toothbrush has been opened, it wouid not be eligible for return under this policy unless it has manufacturing defects.
 
 But what happens if we want our AI chatbot to be able to answer questions about shipping, product specifications, troubleshooting, or any other topic? We will have to include our entire knowledge base in our context, which leads to several technical problems.
 
@@ -52,7 +52,8 @@ Here's how a typical retrieval pipeline is built:
 1. **Converting information into searchable formats** - this is done by using **embedding models**. They create mathematical representations of your data, called "embeddings", that capture the semantic meaning of text, not just keywords.
 2. **Storing these representations** in a retrieval system, optimized for quickly finding similar embeddings for an input query.
 3. **Processing user queries** into embeddings, so they can be used as inputs to your retrieval system.
-4. **Combining the retrieved results** with the original user query to serve to an AI model.
+4. **Query and retrieve** results from the database.
+5. **Combining the retrieved results** with the original user query to serve to an AI model.
 
 **Chroma** is a powerful retrieval system that handles most of this process out-of-the-box. It also allows you to customize these steps to get the best performance in your AI application. Let's see it in action for our customer support example.
 
@@ -338,3 +339,10 @@ const response = await client.messages.create({
 {% /Tab %}
 
 {% /CustomTabs %}
+
+There's a lot left to consider, but the core building blocks are here. Some next steps to consider:
+
+- **Embedding Model** There are many embedding models on the market, some optimized for code, others for english and others still for various languages. Embedding model selection plays a big role in retrieval accuracy.
+- **Chunking** Chunking strategies are very unique to the data. Deciding how large or small to make chunks is critical to the performance of the system.
+- **n_results** varying the number of results balances token usage with correctness. The more results, the likely the better answer from the LLM but at the expense of more token usage.
+

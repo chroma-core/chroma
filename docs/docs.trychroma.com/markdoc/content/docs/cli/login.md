@@ -9,7 +9,7 @@ The Chroma CLI allows you to perform various operations with your Chroma Cloud a
 
 Use the `login` command, to authenticate the CLI with your Chroma Cloud account, to enable these features.
 
-First, in your browser [create](https://trychroma.com/signup) a Chroma Cloud account or [login](https:trychroma.com/login) into your existing account.
+First, in your browser [create](https://trychroma.com/signup?utm_source=docs-cli-login) a Chroma Cloud account or [login](https:trychroma.com/login) into your existing account.
 
 Then, in your terminal, run
 

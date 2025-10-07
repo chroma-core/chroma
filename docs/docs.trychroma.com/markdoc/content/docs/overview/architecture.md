@@ -17,7 +17,7 @@ Chroma runs wherever you need it to, supporting you in everything from local exp
 - **Single Node**: as a single-node server - great for small to medium scale workloads of < 10M records in a handful of collections.
 - **Distributed**: as a scalable distributed system - great for large scale production workloads, supporting millions of collections.
 
-You can use [Chroma Cloud](https://www.trychroma.com/signup), which is a managed offering of distributed Chroma.
+You can use [Chroma Cloud](https://www.trychroma.com/signup?utm_source=docs-architecture), which is a managed offering of distributed Chroma.
 
 ## Core Components
 

@@ -9,7 +9,7 @@ name: Azure
 
 **Chroma Cloud**
 
-Chroma Cloud, our fully managed hosted service is here. [Sign up for free](https://trychroma.com/signup).
+Chroma Cloud, our fully managed hosted service is here. [Sign up for free](https://trychroma.com/signup?utm_source=docs-azure).
 
 {% /Banner %}
 
