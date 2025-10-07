@@ -711,8 +711,8 @@ impl HeapWriter {
     /// let schedules = vec![
     ///     Schedule {
     ///         triggerable: Triggerable {
-    ///             uuid: Uuid::new_v4(),
-    ///             name: "daily_report".to_string(),
+    ///             partitioning: Uuid::new_v4().into(),
+    ///             scheduling: Uuid::new_v4().into(),
     ///         },
     ///         next_scheduled: Utc::now(),
     ///         nonce: Uuid::new_v4(),
