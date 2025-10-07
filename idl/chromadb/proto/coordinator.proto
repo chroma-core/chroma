@@ -524,6 +524,61 @@ message BatchGetCollectionSoftDeleteStatusResponse {
   map<string, bool> collection_id_to_is_soft_deleted = 1;
 }
 
+message CreateTaskRequest {
+  string name = 1;
+  string operator_name = 2;
+  string input_collection_id = 3;
+  string output_collection_name = 4;
+  string params = 5;
+  string tenant_id = 6;
+  string database = 7;
+  uint64 min_records_for_task = 8;
+}
+
+message CreateTaskResponse {
+  string task_id = 1;
+}
+
+message GetTaskByNameRequest {
+  string input_collection_id = 1;
+  string task_name = 2;
+}
+
+message GetTaskByNameResponse {
+  optional string task_id = 1;
+  optional string name = 2;
+  optional string operator_name = 3;
+  optional string input_collection_id = 4;
+  optional string output_collection_name = 5;
+  optional string output_collection_id = 6;
+  optional string params = 7;
+  optional int64 completion_offset = 8;
+  optional uint64 min_records_for_task = 9;
+}
+
+message DeleteTaskRequest {
+  string input_collection_id = 1;
+  string task_name = 2;
+  bool delete_output = 3; // If true and output_collection_id is not null, atomically soft-delete the output collection
+}
+
+message DeleteTaskResponse {
+  bool success = 1;
+}
+
+message Operator {
+  string id = 1;
+  string name = 2;
+}
+
+message GetOperatorsRequest {
+  // Empty request - returns all operators
+}
+
+message GetOperatorsResponse {
+  repeated Operator operators = 1;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -561,4 +616,8 @@ service SysDB {
   rpc DeleteCollectionVersion(DeleteCollectionVersionRequest) returns (DeleteCollectionVersionResponse) {}
   rpc BatchGetCollectionVersionFilePaths(BatchGetCollectionVersionFilePathsRequest) returns (BatchGetCollectionVersionFilePathsResponse) {}
   rpc BatchGetCollectionSoftDeleteStatus(BatchGetCollectionSoftDeleteStatusRequest) returns (BatchGetCollectionSoftDeleteStatusResponse) {}
+  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse) {}
+  rpc GetTaskByName(GetTaskByNameRequest) returns (GetTaskByNameResponse) {}
+  rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse) {}
+  rpc GetOperators(GetOperatorsRequest) returns (GetOperatorsResponse) {}
 }
