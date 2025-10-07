@@ -75,6 +75,7 @@ async fn main() {
     let mut next = Duration::ZERO;
     loop {
         let gap = interarrival_duration(options.target_throughput as f64)(&mut guac);
+        let future = interarrival_duration(1.0 / 60.0)(&mut guac);
         next += gap;
         let elapsed = start.elapsed();
         if elapsed > Duration::from_secs(options.runtime as u64) {
@@ -92,7 +93,7 @@ async fn main() {
                 },
                 nonce,
                 next_scheduled: Utc::now()
-                    .duration_round(chrono::TimeDelta::minutes(1))
+                    .duration_round(chrono::TimeDelta::from_std(future).unwrap())
                     .unwrap(),
             })
             .is_err()
