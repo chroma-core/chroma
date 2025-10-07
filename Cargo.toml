@@ -63,7 +63,7 @@ bytemuck = "1.21.0"
 rayon = "1.10.0"
 validator = { version = "0.19", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
-hnswlib = { version = "0.8.1", git = "https://github.com/chroma-core/hnswlib.git", rev = "7cb7befea40d8cf858580eb06f06cf76467755f9" }
+hnswlib = { version = "0.8.1", git = "https://github.com/chroma-core/hnswlib.git", branch = "master" }
 reqwest = { version = "0.12.9", features = ["rustls-tls-native-roots", "http2"], default-features = false }
 random-port = "0.1.1"
 ndarray = { version = "0.16.1", features = ["approx"] }

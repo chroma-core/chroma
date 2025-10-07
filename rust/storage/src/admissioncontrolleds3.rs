@@ -571,7 +571,7 @@ impl AdmissionControlledS3Storage {
         }
         let is_parallel = options.request_parallelism;
 
-        // Create a dedup key
+        // Create a dedup key.
         let composite_key = keys.join("|");
 
         let (any_res, _guard);
