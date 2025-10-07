@@ -3807,7 +3807,11 @@ dependencies = [
 [[package]]
 name = "hnswlib"
 version = "0.8.1"
+<<<<<<< HEAD
 source = "git+https://github.com/chroma-core/hnswlib.git?branch=master#7cb7befea40d8cf858580eb06f06cf76467755f9"
+=======
+source = "git+https://github.com/chroma-core/hnswlib.git?branch=master#9b60aa3598ed6077e2a337143a1a64fa7b91b0bf"
+>>>>>>> 62dc14666 ([BUG]: Restructure HNSW file fetch synchronization (#5561))
 dependencies = [
  "cc",
  "thiserror 1.0.69",
