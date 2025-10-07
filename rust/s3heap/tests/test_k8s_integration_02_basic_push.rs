@@ -13,11 +13,11 @@ async fn test_k8s_integration_02_basic_push() {
 
     // Create test items using builder
     let now = Utc::now();
-    let item1 = TestItemBuilder::new(&scheduler, 1, "task1")
+    let schedule1 = TestItemBuilder::new(&scheduler, 1, 1)
         .with_base_time(now)
         .at_minute_offset(5)
         .build();
-    let item2 = TestItemBuilder::new(&scheduler, 2, "task2")
+    let schedule2 = TestItemBuilder::new(&scheduler, 2, 2)
         .with_base_time(now)
         .at_minute_offset(10)
         .build();
@@ -29,7 +29,10 @@ async fn test_k8s_integration_02_basic_push() {
         scheduler.clone(),
     )
     .unwrap();
-    writer.push(&[item1.clone(), item2.clone()]).await.unwrap();
+    writer
+        .push(&[schedule1.clone(), schedule2.clone()])
+        .await
+        .unwrap();
 
     // Verify buckets were created
     verify_bucket_count(
@@ -51,9 +54,18 @@ async fn test_k8s_integration_02_basic_push() {
     assert_eq!(items.len(), 2, "Should read 2 items back");
 
     // Verify items have correct data
-    let uuids: Vec<Uuid> = items.iter().map(|i| i.trigger.uuid).collect();
-    assert!(uuids.contains(&item1.uuid), "Should contain item1");
-    assert!(uuids.contains(&item2.uuid), "Should contain item2");
+    let partitioning_uuids: Vec<Uuid> = items
+        .iter()
+        .map(|i| *i.trigger.partitioning.as_uuid())
+        .collect();
+    assert!(
+        partitioning_uuids.contains(schedule1.triggerable.partitioning.as_uuid()),
+        "Should contain item1"
+    );
+    assert!(
+        partitioning_uuids.contains(schedule2.triggerable.partitioning.as_uuid()),
+        "Should contain item2"
+    );
 }
 
 #[tokio::test]
@@ -62,22 +74,20 @@ async fn test_k8s_integration_02_push_with_no_schedule() {
     let (storage, scheduler) = setup_test_environment().await;
 
     // Create test items with no schedule
-    let item1 = TestItemBuilder::new(&scheduler, 1, "unscheduled1").build_unscheduled();
     let now = Utc::now();
-    let item2 = TestItemBuilder::new(&scheduler, 2, "scheduled")
+    let schedule2 = TestItemBuilder::new(&scheduler, 2, 2)
         .with_base_time(now)
         .at_minute_offset(5)
         .build();
-    let item3 = TestItemBuilder::new(&scheduler, 3, "unscheduled2").build_unscheduled();
 
-    // Push all items
+    // Push only scheduled item
     let writer = HeapWriter::new(
         storage.clone(),
         prefix.to_string().clone(),
         scheduler.clone(),
     )
     .unwrap();
-    writer.push(&[item1, item2.clone(), item3]).await.unwrap();
+    writer.push(&[schedule2.clone()]).await.unwrap();
 
     // Verify only one bucket was created
     verify_bucket_count(
@@ -98,7 +108,8 @@ async fn test_k8s_integration_02_push_with_no_schedule() {
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 1, "Should have only 1 scheduled item");
     assert_eq!(
-        items[0].trigger.uuid, item2.uuid,
+        items[0].trigger.partitioning.as_uuid(),
+        schedule2.triggerable.partitioning.as_uuid(),
         "Should be the scheduled item"
     );
 }

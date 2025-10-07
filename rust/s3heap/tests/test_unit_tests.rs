@@ -1,8 +1,7 @@
-use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use s3heap::{
     DummyScheduler, Error, HeapPruner, HeapReader, HeapScheduler, HeapWriter, Limits, PruneStats,
-    RetryConfig, Triggerable,
+    RetryConfig, Schedule, Triggerable,
 };
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -12,11 +11,10 @@ use uuid::Uuid;
 
 // More sophisticated test scheduler for comprehensive testing
 struct ConfigurableScheduler {
-    done_items: Arc<Mutex<HashMap<(Uuid, Uuid), bool>>>,
     #[allow(clippy::type_complexity)]
-    scheduled_items: Arc<Mutex<HashMap<Uuid, Option<(Triggerable, DateTime<Utc>, Uuid)>>>>,
+    done_items: Arc<Mutex<HashMap<(Uuid, Uuid, Uuid), bool>>>,
+    scheduled_items: Arc<Mutex<HashMap<Uuid, Option<Schedule>>>>,
     error_on_done: Arc<Mutex<bool>>,
-    error_on_schedule: Arc<Mutex<bool>>,
 }
 
 impl ConfigurableScheduler {
@@ -25,12 +23,7 @@ impl ConfigurableScheduler {
             done_items: Arc::new(Mutex::new(HashMap::new())),
             scheduled_items: Arc::new(Mutex::new(HashMap::new())),
             error_on_done: Arc::new(Mutex::new(false)),
-            error_on_schedule: Arc::new(Mutex::new(false)),
         }
-    }
-
-    fn set_error_on_schedule(&self, should_error: bool) {
-        *self.error_on_schedule.lock() = should_error;
     }
 }
 
@@ -45,22 +38,18 @@ impl HeapScheduler for ConfigurableScheduler {
             .iter()
             .map(|(item, nonce)| {
                 done_items
-                    .get(&(item.uuid, *nonce))
+                    .get(&(
+                        *item.partitioning.as_uuid(),
+                        *item.scheduling.as_uuid(),
+                        *nonce,
+                    ))
                     .copied()
                     .unwrap_or(false)
             })
             .collect())
     }
 
-    async fn get_schedules(
-        &self,
-        ids: &[Uuid],
-    ) -> Result<Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>, Error> {
-        if *self.error_on_schedule.lock() {
-            return Err(Error::Internal(
-                "Simulated error in get_schedules".to_string(),
-            ));
-        }
+    async fn get_schedules(&self, ids: &[Uuid]) -> Result<Vec<Option<Schedule>>, Error> {
         let scheduled_items = self.scheduled_items.lock();
         Ok(ids
             .iter()
@@ -209,22 +198,23 @@ fn limits_clone() {
 // Tests for Triggerable
 #[test]
 fn triggerable_creation_and_equality() {
-    let uuid = Uuid::new_v4();
+    let uuid1 = Uuid::new_v4();
+    let uuid2 = Uuid::new_v4();
     let t1 = Triggerable {
-        uuid,
-        name: "test-task".to_string(),
+        partitioning: uuid1.into(),
+        scheduling: uuid2.into(),
     };
     let t2 = Triggerable {
-        uuid,
-        name: "test-task".to_string(),
+        partitioning: uuid1.into(),
+        scheduling: uuid2.into(),
     };
     let t3 = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: "test-task".to_string(),
+        partitioning: Uuid::new_v4().into(),
+        scheduling: uuid2.into(),
     };
     let t4 = Triggerable {
-        uuid,
-        name: "different-task".to_string(),
+        partitioning: uuid1.into(),
+        scheduling: Uuid::new_v4().into(),
     };
 
     assert_eq!(t1, t2);
@@ -235,20 +225,20 @@ fn triggerable_creation_and_equality() {
 #[test]
 fn triggerable_clone() {
     let original = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: "clone-test".to_string(),
+        partitioning: Uuid::new_v4().into(),
+        scheduling: Uuid::new_v4().into(),
     };
     let cloned = original.clone();
     assert_eq!(original, cloned);
-    assert_eq!(original.uuid, cloned.uuid);
-    assert_eq!(original.name, cloned.name);
+    assert_eq!(original.partitioning, cloned.partitioning);
+    assert_eq!(original.scheduling, cloned.scheduling);
 }
 
 #[test]
 fn triggerable_default() {
     let t = Triggerable::default();
-    assert_eq!(t.uuid, Uuid::nil());
-    assert_eq!(t.name, "");
+    assert_eq!(t.partitioning.as_uuid(), &Uuid::nil());
+    assert_eq!(t.scheduling.as_uuid(), &Uuid::nil());
 }
 
 // Tests for Error enum
@@ -296,36 +286,20 @@ async fn writer_push_with_no_scheduled_items() {
     let scheduler = Arc::new(ConfigurableScheduler::new());
     let writer = HeapWriter::new(storage, "test-no-schedule".to_string(), scheduler).unwrap();
 
-    let item = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: "unscheduled".to_string(),
-    };
-
-    // Item has no schedule, so push should succeed but not create any buckets
-    let result = writer.push(&[item]).await;
+    // Push empty schedules should succeed but not create any buckets
+    let result = writer.push(&[]).await;
     assert!(result.is_ok());
 }
 
 #[tokio::test]
-async fn writer_push_with_scheduler_error() {
+async fn writer_push_empty_schedules_succeeds() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(ConfigurableScheduler::new());
-    scheduler.set_error_on_schedule(true);
 
-    let writer = HeapWriter::new(storage, "test-error".to_string(), scheduler).unwrap();
+    let writer = HeapWriter::new(storage, "test-empty".to_string(), scheduler).unwrap();
 
-    let item = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: "error-item".to_string(),
-    };
-
-    // Should propagate the scheduler error
-    let result = writer.push(&[item]).await;
-    assert!(result.is_err());
-    match result {
-        Err(Error::Internal(msg)) => assert!(msg.contains("Simulated error")),
-        _ => panic!("Expected Internal error"),
-    }
+    let result = writer.push(&[]).await;
+    assert!(result.is_ok());
 }
 
 // Async tests for HeapPruner
@@ -394,30 +368,6 @@ async fn reader_respects_limits() {
     // Should respect the bucket limit
     let items = reader.peek(|_| true, limits).await;
     assert!(items.is_ok());
-}
-
-// Edge case tests
-#[test]
-fn triggerable_with_empty_name() {
-    let t = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: String::new(),
-    };
-    assert_eq!(t.name, "");
-
-    let t2 = t.clone();
-    assert_eq!(t, t2);
-}
-
-#[test]
-fn triggerable_with_very_long_name() {
-    let long_name = "a".repeat(10000);
-    let t = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: long_name.clone(),
-    };
-    assert_eq!(t.name.len(), 10000);
-    assert_eq!(t.name, long_name);
 }
 
 #[test]
