@@ -10,7 +10,7 @@ use guacamole::Guacamole;
 use chroma_storage::s3::s3_client_for_test_with_bucket_name;
 use uuid::Uuid;
 
-use s3heap::{HeapWriter, Schedule, Triggerable};
+use s3heap::{HeapWriter, Schedule, Triggerable, UnitOfPartitioningUuid, UnitOfSchedulingUuid};
 
 ///////////////////////////////////////////// benchmark ////////////////////////////////////////////
 
@@ -88,8 +88,8 @@ async fn main() {
         if tx
             .try_send(Schedule {
                 triggerable: Triggerable {
-                    uuid,
-                    name: "demo".to_string(),
+                    partitioning: UnitOfPartitioningUuid::new(Uuid::new_v4()),
+                    scheduling: UnitOfSchedulingUuid::new(uuid),
                 },
                 nonce,
                 next_scheduled: Utc::now()
