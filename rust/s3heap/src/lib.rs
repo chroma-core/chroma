@@ -487,7 +487,7 @@ pub struct Schedule {
 ///
 /// struct MyScheduler {
 ///     schedules: Mutex<HashMap<Uuid, Schedule>>,
-///     completed_tasks: Mutex<HashMap<(Uuid, Uuid), bool>>,
+///     completed_tasks: Mutex<HashMap<(Uuid, Uuid, Uuid), bool>>,
 /// }
 ///
 /// #[async_trait::async_trait]
@@ -496,7 +496,7 @@ pub struct Schedule {
 ///         // Check if tasks are complete in your system
 ///         let completed = self.completed_tasks.lock();
 ///         Ok(items.iter()
-///             .map(|(item, nonce)| completed.get(&(*item.scheduling.as_uuid(), *nonce)).copied().unwrap_or(false))
+///             .map(|(item, nonce)| completed.get(&(*item.partitioning.as_uuid(), *item.scheduling.as_uuid(), *nonce)).copied().unwrap_or(false))
 ///             .collect())
 ///     }
 ///
