@@ -27,16 +27,16 @@ The `path` is where Chroma will store its database files on disk, and load them 
 
 To connect with the JS/TS client, you must connect to a Chroma server.
 
-To run a Chroma server locally that will persist your data, install Chroma via `pip`:
+To run a Chroma server locally that will persist your data, install Chroma from npm using any npm compatible client.
 
 ```terminal
-pip install chromadb
+npm install chromadb
 ```
 
 And run the server using our CLI:
 
 ```terminal
-chroma run --path ./getting-started
+npx chroma run --path ./getting-started
 ```
 
 The `path` is where Chroma will store its database files on disk, and load them on start. The default is `.chroma`.
@@ -62,13 +62,11 @@ By default, the `ChromaClient` is wired to connect to a Chroma server at `http:/
 const client = new ChromaClient({
   ssl: false,
   host: "localhost",
-  port: 9000,
+  port: 9000, // non-standard port based on your server config
   database: "my-db",
   headers: {},
 });
 ```
-
-See [Running Chroma in client-server mode](../client-server-mode) for more.
 
 {% /Tab %}
 

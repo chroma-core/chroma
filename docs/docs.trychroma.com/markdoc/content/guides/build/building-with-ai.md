@@ -160,3 +160,5 @@ export async function extractNames(text: string): Promise<string[]> {
 {% /Tab %}
 
 {% /CustomTabs %}
+
+Building with AI allows new type of work to be done by software. LLMs are capable of understanding abstract ideas and take action. Given access to retrieval systems and tools, LLMs can operate on tasks autonomously in ways that wasn't possible with classical software.
