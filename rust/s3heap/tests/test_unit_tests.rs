@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 // More sophisticated test scheduler for comprehensive testing
 struct ConfigurableScheduler {
-    done_items: Arc<Mutex<HashMap<(Uuid, Uuid), bool>>>,
+    #[allow(clippy::type_complexity)]
+    done_items: Arc<Mutex<HashMap<(Uuid, Uuid, Uuid), bool>>>,
     scheduled_items: Arc<Mutex<HashMap<Uuid, Option<Schedule>>>>,
     error_on_done: Arc<Mutex<bool>>,
     error_on_schedule: Arc<Mutex<bool>>,
@@ -43,7 +44,11 @@ impl HeapScheduler for ConfigurableScheduler {
             .iter()
             .map(|(item, nonce)| {
                 done_items
-                    .get(&(item.uuid, *nonce))
+                    .get(&(
+                        *item.partitioning.as_uuid(),
+                        *item.scheduling.as_uuid(),
+                        *nonce,
+                    ))
                     .copied()
                     .unwrap_or(false)
             })
@@ -204,22 +209,23 @@ fn limits_clone() {
 // Tests for Triggerable
 #[test]
 fn triggerable_creation_and_equality() {
-    let uuid = Uuid::new_v4();
+    let uuid1 = Uuid::new_v4();
+    let uuid2 = Uuid::new_v4();
     let t1 = Triggerable {
-        uuid,
-        name: "test-task".to_string(),
+        partitioning: uuid1.into(),
+        scheduling: uuid2.into(),
     };
     let t2 = Triggerable {
-        uuid,
-        name: "test-task".to_string(),
+        partitioning: uuid1.into(),
+        scheduling: uuid2.into(),
     };
     let t3 = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: "test-task".to_string(),
+        partitioning: Uuid::new_v4().into(),
+        scheduling: uuid2.into(),
     };
     let t4 = Triggerable {
-        uuid,
-        name: "different-task".to_string(),
+        partitioning: uuid1.into(),
+        scheduling: Uuid::new_v4().into(),
     };
 
     assert_eq!(t1, t2);
@@ -230,20 +236,20 @@ fn triggerable_creation_and_equality() {
 #[test]
 fn triggerable_clone() {
     let original = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: "clone-test".to_string(),
+        partitioning: Uuid::new_v4().into(),
+        scheduling: Uuid::new_v4().into(),
     };
     let cloned = original.clone();
     assert_eq!(original, cloned);
-    assert_eq!(original.uuid, cloned.uuid);
-    assert_eq!(original.name, cloned.name);
+    assert_eq!(original.partitioning, cloned.partitioning);
+    assert_eq!(original.scheduling, cloned.scheduling);
 }
 
 #[test]
 fn triggerable_default() {
     let t = Triggerable::default();
-    assert_eq!(t.uuid, Uuid::nil());
-    assert_eq!(t.name, "");
+    assert_eq!(t.partitioning.as_uuid(), &Uuid::nil());
+    assert_eq!(t.scheduling.as_uuid(), &Uuid::nil());
 }
 
 // Tests for Error enum
@@ -375,30 +381,6 @@ async fn reader_respects_limits() {
     // Should respect the bucket limit
     let items = reader.peek(|_| true, limits).await;
     assert!(items.is_ok());
-}
-
-// Edge case tests
-#[test]
-fn triggerable_with_empty_name() {
-    let t = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: String::new(),
-    };
-    assert_eq!(t.name, "");
-
-    let t2 = t.clone();
-    assert_eq!(t, t2);
-}
-
-#[test]
-fn triggerable_with_very_long_name() {
-    let long_name = "a".repeat(10000);
-    let t = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: long_name.clone(),
-    };
-    assert_eq!(t.name.len(), 10000);
-    assert_eq!(t.name, long_name);
 }
 
 #[test]

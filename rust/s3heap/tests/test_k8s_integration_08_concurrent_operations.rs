@@ -22,9 +22,9 @@ async fn test_k8s_integration_08_concurrent_pushes() {
 
     // Setup items for each writer
     for i in 0..(num_writers * items_per_writer) {
-        let item = create_test_triggerable(i, &format!("task_{}", i));
+        let item = create_test_triggerable(i, i);
         scheduler.set_schedule(
-            item.uuid,
+            *item.scheduling.as_uuid(),
             Some(Schedule {
                 triggerable: item.clone(),
                 next_scheduled: bucket_time,
@@ -45,7 +45,7 @@ async fn test_k8s_integration_08_concurrent_pushes() {
         let schedules: Vec<_> = (0..items_per_writer)
             .map(|j| {
                 let idx = writer_id * items_per_writer + j;
-                let item = create_test_triggerable(idx, &format!("task_{}", idx));
+                let item = create_test_triggerable(idx, idx);
                 Schedule {
                     triggerable: item,
                     next_scheduled: bucket_time,
@@ -89,13 +89,13 @@ async fn test_k8s_integration_08_concurrent_read_write() {
     // Start with some initial items
     let initial_schedules: Vec<_> = (0..5)
         .map(|i| {
-            let item = create_test_triggerable(i, &format!("initial_{}", i));
+            let item = create_test_triggerable(i, i);
             let schedule = Schedule {
                 triggerable: item.clone(),
                 next_scheduled: bucket_time,
                 nonce: test_nonce(i),
             };
-            scheduler.set_schedule(item.uuid, Some(schedule.clone()));
+            scheduler.set_schedule(*item.scheduling.as_uuid(), Some(schedule.clone()));
             schedule
         })
         .collect();
@@ -126,13 +126,14 @@ async fn test_k8s_integration_08_concurrent_read_write() {
             let new_schedules: Vec<_> = (0..5)
                 .map(|i| {
                     let idx = 100 + batch * 5 + i;
-                    let item = create_test_triggerable(idx, &format!("concurrent_{}", idx));
+                    let item = create_test_triggerable(idx, idx);
                     let schedule = Schedule {
                         triggerable: item.clone(),
                         next_scheduled: bucket_time,
                         nonce: test_nonce(idx),
                     };
-                    scheduler_clone.set_schedule(item.uuid, Some(schedule.clone()));
+                    scheduler_clone
+                        .set_schedule(*item.scheduling.as_uuid(), Some(schedule.clone()));
                     schedule
                 })
                 .collect();
@@ -192,14 +193,14 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
     // Setup initial items (some done, some not)
     let initial_schedules: Vec<_> = (0..10)
         .map(|i| {
-            let item = create_test_triggerable(i, &format!("item_{}", i));
+            let item = create_test_triggerable(i, i);
             let nonce = test_nonce(i);
             let schedule = Schedule {
                 triggerable: item.clone(),
                 next_scheduled: bucket_time,
                 nonce,
             };
-            scheduler.set_schedule(item.uuid, Some(schedule.clone()));
+            scheduler.set_schedule(*item.scheduling.as_uuid(), Some(schedule.clone()));
             // Mark even items as done
             if i % 2 == 0 {
                 scheduler.set_done(&item, nonce, true);
@@ -237,13 +238,13 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
     let write_handle = tokio::spawn(async move {
         let new_schedules: Vec<_> = (100..105)
             .map(|i| {
-                let item = create_test_triggerable(i, &format!("new_item_{}", i));
+                let item = create_test_triggerable(i, i);
                 let schedule = Schedule {
                     triggerable: item.clone(),
                     next_scheduled: bucket_time,
                     nonce: test_nonce(i),
                 };
-                scheduler_clone.set_schedule(item.uuid, Some(schedule.clone()));
+                scheduler_clone.set_schedule(*item.scheduling.as_uuid(), Some(schedule.clone()));
                 schedule
             })
             .collect();

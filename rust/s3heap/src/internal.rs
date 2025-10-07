@@ -17,8 +17,8 @@ use uuid::Uuid;
 use crate::{Error, HeapScheduler, RetryConfig, Triggerable};
 
 /// Column name constants for the parquet schema
-const COLUMN_UUIDS: &str = "uuids";
-const COLUMN_NAMES: &str = "names";
+const COLUMN_PARTITIONING_UUIDS: &str = "partitioning_uuids";
+const COLUMN_SCHEDULING_UUIDS: &str = "scheduling_uuids";
 const COLUMN_NONCES: &str = "nonces";
 
 /// Helper function to extract and validate a string column from a parquet record batch.
@@ -56,13 +56,13 @@ fn get_string_column<'a>(
 /// # Examples
 ///
 /// ```
-/// use s3heap::{HeapItem, Triggerable};
+/// use s3heap::{HeapItem, Triggerable, UnitOfPartitioningUuid, UnitOfSchedulingUuid};
 /// use uuid::Uuid;
 ///
 /// let item = HeapItem {
 ///     trigger: Triggerable {
-///         uuid: Uuid::new_v4(),
-///         name: "send_email".to_string(),
+///         partitioning: UnitOfPartitioningUuid::new(Uuid::new_v4()),
+///         scheduling: UnitOfSchedulingUuid::new(Uuid::new_v4()),
 ///     },
 ///     nonce: Uuid::new_v4(),
 /// };
@@ -251,8 +251,9 @@ impl Internal {
         let mut items = vec![];
         for batch in reader {
             let batch = batch.map_err(|err| Error::Arrow(err.to_string()))?;
-            let uuid = get_string_column(&batch, COLUMN_UUIDS, &path)?;
-            let name = get_string_column(&batch, COLUMN_NAMES, &path)?;
+            // TOOD(claude): rename columns
+            let uuid = get_string_column(&batch, COLUMN_PARTITIONING_UUIDS, &path)?;
+            let name = get_string_column(&batch, COLUMN_SCHEDULING_UUIDS, &path)?;
             let nonce = get_string_column(&batch, COLUMN_NONCES, &path)?;
             let mut errors = Vec::new();
             for i in 0..batch.num_rows() {
@@ -260,22 +261,32 @@ impl Internal {
                     errors.push(format!("null value at row {}", i));
                     continue;
                 }
+                // TOOD(claude): rename columns
                 let uuid_str = uuid.value(i);
                 let name_str = name.value(i);
                 let nonce_str = nonce.value(i);
 
-                match (Uuid::from_str(uuid_str), Uuid::from_str(nonce_str)) {
-                    (Ok(uuid), Ok(nonce)) => {
-                        let name = name_str.to_string();
+                match (
+                    Uuid::from_str(uuid_str),
+                    Uuid::from_str(name_str),
+                    Uuid::from_str(nonce_str),
+                ) {
+                    (Ok(partitioning_uuid), Ok(scheduling_uuid), Ok(nonce)) => {
                         items.push(HeapItem {
-                            trigger: Triggerable { uuid, name },
+                            trigger: Triggerable {
+                                partitioning: partitioning_uuid.into(),
+                                scheduling: scheduling_uuid.into(),
+                            },
                             nonce,
                         });
                     }
-                    (Err(e), _) => {
-                        errors.push(format!("invalid UUID at row {}: {}", i, e));
+                    (Err(e), _, _) => {
+                        errors.push(format!("invalid partitioning UUID at row {}: {}", i, e));
                     }
-                    (_, Err(e)) => {
+                    (_, Err(e), _) => {
+                        errors.push(format!("invalid scheduling UUID at row {}: {}", i, e));
+                    }
+                    (_, _, Err(e)) => {
                         errors.push(format!("invalid nonce at row {}: {}", i, e));
                     }
                 }
@@ -494,25 +505,31 @@ impl Internal {
 /// - All columns are non-nullable strings
 /// - Empty input produces a valid parquet file with no rows
 fn construct_parquet(items: &[HeapItem]) -> Result<Vec<u8>, Error> {
-    let uuids = items
+    let partitioning_uuids = items
         .iter()
-        .map(|x| x.trigger.uuid.to_string())
+        .map(|x| x.trigger.partitioning.to_string())
         .collect::<Vec<_>>();
-    let names = items
+    let scheduling_uuids = items
         .iter()
-        .map(|x| x.trigger.name.clone())
+        .map(|x| x.trigger.scheduling.to_string())
         .collect::<Vec<_>>();
     let nonces = items
         .iter()
         .map(|x| x.nonce.to_string())
         .collect::<Vec<_>>();
     // Create an Arrow record batch
-    let uuids = StringArray::from(uuids);
-    let names = StringArray::from(names);
+    let partitioning_uuids = StringArray::from(partitioning_uuids);
+    let scheduling_uuids = StringArray::from(scheduling_uuids);
     let nonces = StringArray::from(nonces);
     let batch = RecordBatch::try_from_iter(vec![
-        (COLUMN_UUIDS, Arc::new(uuids) as ArrayRef),
-        (COLUMN_NAMES, Arc::new(names) as ArrayRef),
+        (
+            COLUMN_PARTITIONING_UUIDS,
+            Arc::new(partitioning_uuids) as ArrayRef,
+        ),
+        (
+            COLUMN_SCHEDULING_UUIDS,
+            Arc::new(scheduling_uuids) as ArrayRef,
+        ),
         (COLUMN_NONCES, Arc::new(nonces) as ArrayRef),
     ])
     .map_err(|err| Error::Arrow(format!("Failed to create RecordBatch: {}", err)))?;
@@ -541,8 +558,8 @@ mod tests {
     #[test]
     fn heap_item_creation_and_equality() {
         let trigger = crate::Triggerable {
-            uuid: Uuid::new_v4(),
-            name: "test-task".to_string(),
+            partitioning: Uuid::new_v4().into(),
+            scheduling: Uuid::new_v4().into(),
         };
         let nonce = Uuid::new_v4();
 
@@ -565,8 +582,8 @@ mod tests {
     fn heap_item_clone() {
         let item = HeapItem {
             trigger: crate::Triggerable {
-                uuid: Uuid::new_v4(),
-                name: "clone-test".to_string(),
+                partitioning: Uuid::new_v4().into(),
+                scheduling: Uuid::new_v4().into(),
             },
             nonce: Uuid::new_v4(),
         };
@@ -580,8 +597,8 @@ mod tests {
     #[test]
     fn heap_item_default() {
         let item = HeapItem::default();
-        assert_eq!(item.trigger.uuid, Uuid::nil());
-        assert_eq!(item.trigger.name, "");
+        assert_eq!(item.trigger.partitioning.as_uuid(), &Uuid::nil());
+        assert_eq!(item.trigger.scheduling.as_uuid(), &Uuid::nil());
         assert_eq!(item.nonce, Uuid::nil());
     }
 
@@ -780,15 +797,15 @@ mod tests {
         let items = vec![
             HeapItem {
                 trigger: Triggerable {
-                    uuid: uuid1,
-                    name: "test-task-1".to_string(),
+                    partitioning: uuid1.into(),
+                    scheduling: uuid2.into(),
                 },
                 nonce: nonce1,
             },
             HeapItem {
                 trigger: Triggerable {
-                    uuid: uuid2,
-                    name: "test-task-2".to_string(),
+                    partitioning: uuid2.into(),
+                    scheduling: uuid1.into(),
                 },
                 nonce: nonce2,
             },
@@ -814,19 +831,25 @@ mod tests {
             total_rows += batch.num_rows();
 
             // Verify columns exist
-            let uuids = batch.column_by_name(COLUMN_UUIDS).unwrap();
-            let names = batch.column_by_name(COLUMN_NAMES).unwrap();
+            let partitioning_uuids = batch.column_by_name(COLUMN_PARTITIONING_UUIDS).unwrap();
+            let scheduling_uuids = batch.column_by_name(COLUMN_SCHEDULING_UUIDS).unwrap();
             let nonces = batch.column_by_name(COLUMN_NONCES).unwrap();
 
             // Extract and verify data
-            let uuids = uuids.as_any().downcast_ref::<StringArray>().unwrap();
-            let names = names.as_any().downcast_ref::<StringArray>().unwrap();
+            let partitioning_uuids = partitioning_uuids
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let scheduling_uuids = scheduling_uuids
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
             let nonces = nonces.as_any().downcast_ref::<StringArray>().unwrap();
 
             for i in 0..batch.num_rows() {
                 found_items.push((
-                    uuids.value(i).to_string(),
-                    names.value(i).to_string(),
+                    partitioning_uuids.value(i).to_string(),
+                    scheduling_uuids.value(i).to_string(),
                     nonces.value(i).to_string(),
                 ));
             }
@@ -837,10 +860,10 @@ mod tests {
 
         // Verify the data matches what we put in
         assert!(found_items.iter().any(|(u, n, nc)| u == &uuid1.to_string()
-            && n == "test-task-1"
+            && n == &uuid2.to_string()
             && nc == &nonce1.to_string()));
         assert!(found_items.iter().any(|(u, n, nc)| u == &uuid2.to_string()
-            && n == "test-task-2"
+            && n == &uuid1.to_string()
             && nc == &nonce2.to_string()));
     }
 
@@ -848,10 +871,11 @@ mod tests {
     fn construct_parquet_single_item() {
         use crate::Triggerable;
 
+        let scheduling_id = Uuid::new_v4();
         let item = HeapItem {
             trigger: Triggerable {
-                uuid: Uuid::new_v4(),
-                name: "single-task".to_string(),
+                partitioning: Uuid::new_v4().into(),
+                scheduling: scheduling_id.into(),
             },
             nonce: Uuid::new_v4(),
         };
@@ -872,13 +896,13 @@ mod tests {
             let batch = batch.unwrap();
             total_rows += batch.num_rows();
 
-            let names = batch
-                .column_by_name(COLUMN_NAMES)
+            let scheduling_uuids = batch
+                .column_by_name(COLUMN_SCHEDULING_UUIDS)
                 .unwrap()
                 .as_any()
                 .downcast_ref::<StringArray>()
                 .unwrap();
-            assert_eq!(names.value(0), "single-task");
+            assert_eq!(scheduling_uuids.value(0), scheduling_id.to_string());
         }
         assert_eq!(total_rows, 1);
     }
@@ -890,22 +914,22 @@ mod tests {
         let items = vec![
             HeapItem {
                 trigger: Triggerable {
-                    uuid: Uuid::new_v4(),
-                    name: "task-with-😀-emoji".to_string(),
+                    partitioning: Uuid::new_v4().into(),
+                    scheduling: Uuid::new_v4().into(),
                 },
                 nonce: Uuid::new_v4(),
             },
             HeapItem {
                 trigger: Triggerable {
-                    uuid: Uuid::new_v4(),
-                    name: "task/with\\special|chars<>&\"'".to_string(),
+                    partitioning: Uuid::new_v4().into(),
+                    scheduling: Uuid::new_v4().into(),
                 },
                 nonce: Uuid::new_v4(),
             },
             HeapItem {
                 trigger: Triggerable {
-                    uuid: Uuid::new_v4(),
-                    name: "".to_string(), // empty name
+                    partitioning: Uuid::new_v4().into(),
+                    scheduling: Uuid::new_v4().into(),
                 },
                 nonce: Uuid::new_v4(),
             },
@@ -922,25 +946,30 @@ mod tests {
         .unwrap();
         let reader = builder.build().unwrap();
 
-        let mut found_names = vec![];
+        let mut found_scheduling_uuids = vec![];
         for batch in reader {
             let batch = batch.unwrap();
-            let names = batch
-                .column_by_name(COLUMN_NAMES)
+            let scheduling_uuids = batch
+                .column_by_name(COLUMN_SCHEDULING_UUIDS)
                 .unwrap()
                 .as_any()
                 .downcast_ref::<StringArray>()
                 .unwrap();
 
             for i in 0..batch.num_rows() {
-                found_names.push(names.value(i).to_string());
+                found_scheduling_uuids.push(scheduling_uuids.value(i).to_string());
             }
         }
 
-        assert_eq!(found_names.len(), 3);
-        assert!(found_names.contains(&"task-with-😀-emoji".to_string()));
-        assert!(found_names.contains(&"task/with\\special|chars<>&\"'".to_string()));
-        assert!(found_names.contains(&"".to_string()));
+        assert_eq!(found_scheduling_uuids.len(), 3);
+        // Verify all scheduling UUIDs are valid UUIDs
+        for scheduling_uuid in found_scheduling_uuids {
+            assert!(
+                Uuid::from_str(&scheduling_uuid).is_ok(),
+                "Expected valid UUID, got: {}",
+                scheduling_uuid
+            );
+        }
     }
 
     #[test]
@@ -949,10 +978,10 @@ mod tests {
 
         // Create a large batch of items
         let items: Vec<HeapItem> = (0..1000)
-            .map(|i| HeapItem {
+            .map(|_| HeapItem {
                 trigger: Triggerable {
-                    uuid: Uuid::new_v4(),
-                    name: format!("task-{}", i),
+                    partitioning: Uuid::new_v4().into(),
+                    scheduling: Uuid::new_v4().into(),
                 },
                 nonce: Uuid::new_v4(),
             })

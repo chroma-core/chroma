@@ -37,7 +37,6 @@ async fn test_k8s_integration_empty_dirty_log_returns_empty_list() {
 
     let result = tender.read_and_coalesce_dirty_log().await;
     if let Err(ref e) = result {
-        eprintln!("TODO(claude): cleanup this output");
         println!("Error: {:?}", e);
     }
     assert!(result.is_ok());

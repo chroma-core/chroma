@@ -13,11 +13,11 @@ async fn test_k8s_integration_02_basic_push() {
 
     // Create test items using builder
     let now = Utc::now();
-    let schedule1 = TestItemBuilder::new(&scheduler, 1, "task1")
+    let schedule1 = TestItemBuilder::new(&scheduler, 1, 1)
         .with_base_time(now)
         .at_minute_offset(5)
         .build();
-    let schedule2 = TestItemBuilder::new(&scheduler, 2, "task2")
+    let schedule2 = TestItemBuilder::new(&scheduler, 2, 2)
         .with_base_time(now)
         .at_minute_offset(10)
         .build();
@@ -54,13 +54,16 @@ async fn test_k8s_integration_02_basic_push() {
     assert_eq!(items.len(), 2, "Should read 2 items back");
 
     // Verify items have correct data
-    let uuids: Vec<Uuid> = items.iter().map(|i| i.trigger.uuid).collect();
+    let partitioning_uuids: Vec<Uuid> = items
+        .iter()
+        .map(|i| *i.trigger.partitioning.as_uuid())
+        .collect();
     assert!(
-        uuids.contains(&schedule1.triggerable.uuid),
+        partitioning_uuids.contains(schedule1.triggerable.partitioning.as_uuid()),
         "Should contain item1"
     );
     assert!(
-        uuids.contains(&schedule2.triggerable.uuid),
+        partitioning_uuids.contains(schedule2.triggerable.partitioning.as_uuid()),
         "Should contain item2"
     );
 }
@@ -72,7 +75,7 @@ async fn test_k8s_integration_02_push_with_no_schedule() {
 
     // Create test items with no schedule
     let now = Utc::now();
-    let schedule2 = TestItemBuilder::new(&scheduler, 2, "scheduled")
+    let schedule2 = TestItemBuilder::new(&scheduler, 2, 2)
         .with_base_time(now)
         .at_minute_offset(5)
         .build();
@@ -105,7 +108,8 @@ async fn test_k8s_integration_02_push_with_no_schedule() {
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 1, "Should have only 1 scheduled item");
     assert_eq!(
-        items[0].trigger.uuid, schedule2.triggerable.uuid,
+        items[0].trigger.partitioning.as_uuid(),
+        schedule2.triggerable.partitioning.as_uuid(),
         "Should be the scheduled item"
     );
 }

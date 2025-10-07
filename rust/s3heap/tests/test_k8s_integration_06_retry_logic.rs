@@ -36,8 +36,8 @@ async fn test_k8s_integration_06_concurrent_writes_with_retry() {
     let now = Utc::now();
     let time = test_time_at_minute_offset(now, 5);
 
-    let item1 = create_test_triggerable(1, "writer1_task");
-    let item2 = create_test_triggerable(2, "writer2_task");
+    let item1 = create_test_triggerable(1, 1);
+    let item2 = create_test_triggerable(2, 2);
 
     let schedule1 = Schedule {
         triggerable: item1.clone(),
@@ -49,8 +49,8 @@ async fn test_k8s_integration_06_concurrent_writes_with_retry() {
         next_scheduled: time,
         nonce: test_nonce(2),
     };
-    scheduler.set_schedule(item1.uuid, Some(schedule1.clone()));
-    scheduler.set_schedule(item2.uuid, Some(schedule2.clone()));
+    scheduler.set_schedule(*item1.scheduling.as_uuid(), Some(schedule1.clone()));
+    scheduler.set_schedule(*item2.scheduling.as_uuid(), Some(schedule2.clone()));
 
     // Push concurrently - retry logic should handle any conflicts
     let handle1 = tokio::spawn(async move { writer1.push(&[schedule1]).await });
@@ -69,7 +69,7 @@ async fn test_k8s_integration_06_prune_with_retry() {
     let scheduler = Arc::new(MockHeapScheduler::new());
     for _ in 0..1000 {
         // Setup data
-        let item = create_test_triggerable(1, "task");
+        let item = create_test_triggerable(1, 1);
         let nonce = test_nonce(1);
         let now = Utc::now();
         let schedule = Schedule {
@@ -77,7 +77,7 @@ async fn test_k8s_integration_06_prune_with_retry() {
             next_scheduled: test_time_at_minute_offset(now, 3),
             nonce,
         };
-        scheduler.set_schedule(item.uuid, Some(schedule.clone()));
+        scheduler.set_schedule(*item.scheduling.as_uuid(), Some(schedule.clone()));
         scheduler.set_done(&item, nonce, true);
 
         let writer = HeapWriter::new(

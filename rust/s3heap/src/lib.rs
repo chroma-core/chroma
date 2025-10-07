@@ -22,7 +22,7 @@
 //! ## Data Model
 //!
 //! Each task in the heap is represented by a [`HeapItem`] containing:
-//! - A [`Triggerable`] with a UUID and name identifying the task
+//! - A [`Triggerable`] with partitioning and scheduling UUIDs
 //! - A nonce (UUID) uniquely identifying each invocation
 //!
 //! ## Usage Example
@@ -44,7 +44,10 @@
 //! // Schedule tasks
 //! let schedules = vec![
 //!     Schedule {
-//!         triggerable: Triggerable { uuid: task_id, name: "process_order".to_string() },
+//!         triggerable: Triggerable {
+//!             partitioning: UnitOfPartitioningUuid::new(collection_id),
+//!             scheduling: UnitOfSchedulingUuid::new(task_id),
+//!         },
 //!         next_scheduled: Utc::now(),
 //!         nonce: Uuid::new_v4(),
 //!     }
@@ -355,34 +358,94 @@ impl Limits {
     }
 }
 
+//////////////////////////////////////////// Uuid types ////////////////////////////////////////////
+
+/// The UnitOfPartitioning is e.g. a Chroma collection or some other unit of work that is a
+/// functional dependency of the key used for partitioning.  Always a UUID.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct UnitOfPartitioningUuid(Uuid);
+
+impl UnitOfPartitioningUuid {
+    /// Create a new UnitOfPartitioningUuid from a Uuid.
+    pub fn new(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+
+    /// Get the inner Uuid.
+    pub fn as_uuid(&self) -> &Uuid {
+        &self.0
+    }
+}
+
+impl From<Uuid> for UnitOfPartitioningUuid {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl fmt::Display for UnitOfPartitioningUuid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// The UnitOfScheduling is the identifier for the individual thing to push and pop off the heap.  A
+/// given UnitOfPartitioning may have many UnitOfScheduling UUIDs assigned to it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct UnitOfSchedulingUuid(Uuid);
+
+impl UnitOfSchedulingUuid {
+    /// Create a new UnitOfSchedulingUuid from a Uuid.
+    pub fn new(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+
+    /// Get the inner Uuid.
+    pub fn as_uuid(&self) -> &Uuid {
+        &self.0
+    }
+}
+
+impl From<Uuid> for UnitOfSchedulingUuid {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl fmt::Display for UnitOfSchedulingUuid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 //////////////////////////////////////////// Triggerable ///////////////////////////////////////////
 
 /// Represents a task that can be scheduled and triggered in the heap.
 ///
 /// A `Triggerable` consists of two parts:
-/// - A UUID identifying the schedulable unit (e.g., a document, job, or entity)
-/// - A name specifying which task to execute on that unit
+/// - A partitioning UUID identifying the unit for partitioning (e.g., a collection)
+/// - A scheduling UUID identifying the specific task to execute
 ///
-/// This allows multiple different tasks to be scheduled for the same entity,
-/// each identified by its name.
+/// This allows the heap to partition tasks by the partitioning unit while
+/// scheduling individual tasks within those partitions.
 ///
 /// # Examples
 ///
 /// ```
-/// use s3heap::Triggerable;
+/// use s3heap::{Triggerable, UnitOfPartitioningUuid, UnitOfSchedulingUuid};
 /// use uuid::Uuid;
 ///
 /// let task = Triggerable {
-///     uuid: Uuid::new_v4(),
-///     name: "index_document".to_string(),
+///     partitioning: UnitOfPartitioningUuid::new(Uuid::new_v4()),
+///     scheduling: UnitOfSchedulingUuid::new(Uuid::new_v4()),
 /// };
 /// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Triggerable {
-    /// The UUID identifying the schedulable unit
-    pub uuid: Uuid,
-    /// The name of the specific task to execute
-    pub name: String,
+    /// The UUID identifying the partitioning unit
+    pub partitioning: UnitOfPartitioningUuid,
+    /// The UUID identifying the specific schedulable task
+    pub scheduling: UnitOfSchedulingUuid,
 }
 
 ///////////////////////////////////////////// Schedule /////////////////////////////////////////////
@@ -433,7 +496,7 @@ pub struct Schedule {
 ///         // Check if tasks are complete in your system
 ///         let completed = self.completed_tasks.lock();
 ///         Ok(items.iter()
-///             .map(|(item, nonce)| completed.get(&(item.uuid, *nonce)).copied().unwrap_or(false))
+///             .map(|(item, nonce)| completed.get(&(*item.scheduling.as_uuid(), *nonce)).copied().unwrap_or(false))
 ///             .collect())
 ///     }
 ///

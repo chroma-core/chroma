@@ -23,7 +23,7 @@ use s3heap::{Error, HeapScheduler, Schedule, Triggerable};
 #[derive(Clone)]
 pub struct MockHeapScheduler {
     #[allow(clippy::type_complexity)]
-    done_items: Arc<Mutex<HashMap<(Uuid, String, Uuid), bool>>>,
+    done_items: Arc<Mutex<HashMap<(Uuid, Uuid, Uuid), bool>>>,
     schedules: Arc<Mutex<HashMap<Uuid, Schedule>>>,
 }
 
@@ -44,7 +44,11 @@ impl MockHeapScheduler {
     /// * `nonce` - The invocation nonce
     /// * `done` - Whether this invocation is complete
     pub fn set_done(&self, item: &Triggerable, nonce: Uuid, done: bool) {
-        let key = (item.uuid, item.name.clone(), nonce);
+        let key = (
+            *item.partitioning.as_uuid(),
+            *item.scheduling.as_uuid(),
+            nonce,
+        );
         self.done_items.lock().insert(key, done);
     }
 
@@ -76,7 +80,11 @@ impl HeapScheduler for MockHeapScheduler {
         Ok(items
             .iter()
             .map(|(item, nonce)| {
-                let key = (item.uuid, item.name.clone(), *nonce);
+                let key = (
+                    *item.partitioning.as_uuid(),
+                    *item.scheduling.as_uuid(),
+                    *nonce,
+                );
                 done_items.get(&key).copied().unwrap_or(false)
             })
             .collect())
@@ -90,26 +98,29 @@ impl HeapScheduler for MockHeapScheduler {
 
 /// Create a test triggerable with a predictable UUID.
 ///
-/// This helper generates UUIDs deterministically based on an index,
+/// This helper generates UUIDs deterministically based on indices,
 /// making tests reproducible and debuggable.
 ///
 /// # Arguments
 ///
-/// * `index` - A unique index for this triggerable
-/// * `name` - The task name
+/// * `partitioning_index` - Index for the partitioning UUID
+/// * `scheduling_index` - Index for the scheduling UUID
 ///
 /// # Examples
 ///
 /// ```
-/// let task = create_test_triggerable(1, "test_task");
-/// // UUID will always be 00000000-0000-0000-0000-000000000001
+/// let task = create_test_triggerable(1, 2);
+/// // Partitioning UUID will be 00000000-0000-0000-0000-000000000001
+/// // Scheduling UUID will be 00000000-0000-0000-0000-000000000002
 /// ```
-pub fn create_test_triggerable(index: u32, name: &str) -> Triggerable {
-    let mut bytes = [0u8; 16];
-    bytes[12..16].copy_from_slice(&index.to_be_bytes());
+pub fn create_test_triggerable(partitioning_index: u32, scheduling_index: u32) -> Triggerable {
+    let mut partitioning_bytes = [0u8; 16];
+    partitioning_bytes[12..16].copy_from_slice(&partitioning_index.to_be_bytes());
+    let mut scheduling_bytes = [0u8; 16];
+    scheduling_bytes[12..16].copy_from_slice(&scheduling_index.to_be_bytes());
     Triggerable {
-        uuid: Uuid::from_bytes(bytes),
-        name: name.to_string(),
+        partitioning: Uuid::from_bytes(partitioning_bytes).into(),
+        scheduling: Uuid::from_bytes(scheduling_bytes).into(),
     }
 }
 
@@ -201,8 +212,8 @@ pub async fn verify_bucket_count(
 /// and completion states.
 pub struct TestItemBuilder<'a> {
     scheduler: &'a MockHeapScheduler,
-    index: u32,
-    name: String,
+    partitioning_index: u32,
+    scheduling_index: u32,
     time_offset_minutes: i64,
     is_done: Option<bool>,
     base_time: Option<DateTime<Utc>>,
@@ -214,13 +225,17 @@ impl<'a> TestItemBuilder<'a> {
     /// # Arguments
     ///
     /// * `scheduler` - The mock scheduler to configure
-    /// * `index` - Unique index for this item
-    /// * `name` - Task name
-    pub fn new(scheduler: &'a MockHeapScheduler, index: u32, name: &str) -> Self {
+    /// * `partitioning_index` - Unique index for the partitioning UUID
+    /// * `scheduling_index` - Unique index for the scheduling UUID
+    pub fn new(
+        scheduler: &'a MockHeapScheduler,
+        partitioning_index: u32,
+        scheduling_index: u32,
+    ) -> Self {
         Self {
             scheduler,
-            index,
-            name: name.to_string(),
+            partitioning_index,
+            scheduling_index,
             time_offset_minutes: 0,
             is_done: None,
             base_time: None,
@@ -250,8 +265,8 @@ impl<'a> TestItemBuilder<'a> {
     /// Creates the triggerable, sets up scheduling, and optionally
     /// marks it as done.
     pub fn build(self) -> Schedule {
-        let item = create_test_triggerable(self.index, &self.name);
-        let nonce = test_nonce(self.index);
+        let item = create_test_triggerable(self.partitioning_index, self.scheduling_index);
+        let nonce = test_nonce(self.scheduling_index);
         let base = self.base_time.unwrap_or_else(Utc::now);
         let time = test_time_at_minute_offset(base, self.time_offset_minutes);
 
@@ -261,7 +276,7 @@ impl<'a> TestItemBuilder<'a> {
             nonce,
         };
         self.scheduler
-            .set_schedule(item.uuid, Some(schedule.clone()));
+            .set_schedule(*item.scheduling.as_uuid(), Some(schedule.clone()));
         if let Some(done) = self.is_done {
             self.scheduler.set_done(&item, nonce, done);
         }
@@ -273,8 +288,9 @@ impl<'a> TestItemBuilder<'a> {
     /// Creates the triggerable but sets its next_time to None,
     /// indicating it should not be scheduled.
     pub fn build_unscheduled(self) -> Triggerable {
-        let item = create_test_triggerable(self.index, &self.name);
-        self.scheduler.set_schedule(item.uuid, None);
+        let item = create_test_triggerable(self.partitioning_index, self.scheduling_index);
+        self.scheduler
+            .set_schedule(*item.scheduling.as_uuid(), None);
         item
     }
 }
