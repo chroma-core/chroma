@@ -475,17 +475,6 @@ impl SysDb {
         }
     }
 
-    // Only meant for testing.
-    pub async fn get_all_operators(
-        &mut self,
-    ) -> Result<Vec<(String, uuid::Uuid)>, Box<dyn std::error::Error>> {
-        match self {
-            SysDb::Grpc(grpc) => grpc.get_all_operators().await,
-            SysDb::Sqlite(_) => unimplemented!("get_all_operators not implemented for sqlite"),
-            SysDb::Test(_) => unimplemented!("get_all_operators not implemented for test"),
-        }
-    }
-
     pub async fn batch_get_collection_version_file_paths(
         &mut self,
         collection_ids: Vec<CollectionUuid>,
@@ -1372,23 +1361,6 @@ impl GrpcSysDb {
                 .ok_or(GetCollectionWithSegmentsError::Field("vector".to_string()))?
                 .try_into()?,
         })
-    }
-
-    async fn get_all_operators(
-        &mut self,
-    ) -> Result<Vec<(String, uuid::Uuid)>, Box<dyn std::error::Error>> {
-        let res = self
-            .client
-            .get_operators(chroma_proto::GetOperatorsRequest {})
-            .await?;
-
-        let operators = res.into_inner().operators;
-        let mut result = Vec::new();
-        for op in operators {
-            let id = uuid::Uuid::parse_str(&op.id)?;
-            result.push((op.name, id));
-        }
-        Ok(result)
     }
 
     async fn batch_get_collection_version_file_paths(
