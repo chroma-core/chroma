@@ -52,6 +52,18 @@ func (s *Server) DeleteTask(ctx context.Context, req *coordinatorpb.DeleteTaskRe
 	return res, nil
 }
 
+func (s *Server) DoneTask(ctx context.Context, req *coordinatorpb.DoneTaskRequest) (*coordinatorpb.DoneTaskResponse, error) {
+	log.Info("DoneTask", zap.String("collection_id", req.GetCollectionId()), zap.String("task_id", req.GetTaskId()))
+
+	res, err := s.coordinator.DoneTask(ctx, req)
+	if err != nil {
+		log.Error("DoneTask failed", zap.Error(err))
+		return nil, err
+	}
+
+	return res, nil
+}
+
 func (s *Server) GetOperators(ctx context.Context, req *coordinatorpb.GetOperatorsRequest) (*coordinatorpb.GetOperatorsResponse, error) {
 	log.Info("GetOperators")
 

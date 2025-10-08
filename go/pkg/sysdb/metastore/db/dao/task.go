@@ -2,9 +2,11 @@ package dao
 
 import (
 	"errors"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -56,6 +58,55 @@ func (s *taskDb) GetByName(inputCollectionID string, taskName string) (*dbmodel.
 		return nil, err
 	}
 	return &task, nil
+}
+
+func (s *taskDb) GetByID(taskID uuid.UUID) (*dbmodel.Task, error) {
+	var task dbmodel.Task
+	err := s.db.
+		Where("task_id = ?", taskID).
+		Where("is_deleted = ?", false).
+		First(&task).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		log.Error("GetByID failed", zap.Error(err), zap.String("task_id", taskID.String()))
+		return nil, err
+	}
+	return &task, nil
+}
+
+func (s *taskDb) DoneTask(taskID uuid.UUID, taskRunNonce uuid.UUID) error {
+	nextNonce, err := uuid.NewV7()
+	if err != nil {
+		log.Error("DoneTask: failed to generate next nonce", zap.Error(err))
+		return err
+	}
+
+	now := time.Now()
+	result := s.db.Exec(`
+		UPDATE tasks
+		SET last_run = ?,
+			next_nonce = ?,
+			current_attempts = 0,
+			updated_at = ?
+		WHERE task_id = ?
+			AND next_nonce = ?
+			AND is_deleted = false
+	`, now, nextNonce, now, taskID, taskRunNonce)
+
+	if result.Error != nil {
+		log.Error("DoneTask failed", zap.Error(result.Error), zap.String("task_id", taskID.String()))
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		log.Warn("DoneTask: no rows affected", zap.String("task_id", taskID.String()), zap.String("task_run_nonce", taskRunNonce.String()))
+		return common.ErrTaskNotFound
+	}
+
+	return nil
 }
 
 func (s *taskDb) SoftDelete(inputCollectionID string, taskName string) error {

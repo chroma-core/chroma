@@ -312,6 +312,144 @@ func (suite *TaskDbTestSuite) TestTaskDb_DeleteAll() {
 	}
 }
 
+func (suite *TaskDbTestSuite) TestTaskDb_GetByID() {
+	taskID := uuid.New()
+	operatorID := dbmodel.OperatorRecordCounter
+	nextNonce, _ := uuid.NewV7()
+
+	task := &dbmodel.Task{
+		ID:                   taskID,
+		Name:                 "test-get-by-id-task",
+		OperatorID:           operatorID,
+		InputCollectionID:    "input_col_id",
+		OutputCollectionName: "output_col_name",
+		OperatorParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		MinRecordsForTask:    100,
+		NextNonce:            nextNonce,
+	}
+
+	err := suite.Db.Insert(task)
+	suite.Require().NoError(err)
+
+	retrieved, err := suite.Db.GetByID(taskID)
+	suite.Require().NoError(err)
+	suite.Require().NotNil(retrieved)
+	suite.Require().Equal(task.ID, retrieved.ID)
+	suite.Require().Equal(task.Name, retrieved.Name)
+	suite.Require().Equal(task.OperatorID, retrieved.OperatorID)
+
+	suite.db.Unscoped().Delete(&dbmodel.Task{}, "task_id = ?", task.ID)
+}
+
+func (suite *TaskDbTestSuite) TestTaskDb_GetByID_NotFound() {
+	retrieved, err := suite.Db.GetByID(uuid.New())
+	suite.Require().NoError(err)
+	suite.Require().Nil(retrieved)
+}
+
+func (suite *TaskDbTestSuite) TestTaskDb_GetByID_IgnoresDeleted() {
+	taskID := uuid.New()
+	operatorID := dbmodel.OperatorRecordCounter
+	nextNonce, _ := uuid.NewV7()
+
+	task := &dbmodel.Task{
+		ID:                   taskID,
+		Name:                 "test-get-by-id-deleted",
+		OperatorID:           operatorID,
+		InputCollectionID:    "input1",
+		OutputCollectionName: "output1",
+		OperatorParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		MinRecordsForTask:    100,
+		NextNonce:            nextNonce,
+	}
+
+	err := suite.Db.Insert(task)
+	suite.Require().NoError(err)
+
+	err = suite.Db.SoftDelete("input1", "test-get-by-id-deleted")
+	suite.Require().NoError(err)
+
+	retrieved, err := suite.Db.GetByID(taskID)
+	suite.Require().NoError(err)
+	suite.Require().Nil(retrieved)
+
+	suite.db.Unscoped().Delete(&dbmodel.Task{}, "task_id = ?", task.ID)
+}
+
+func (suite *TaskDbTestSuite) TestTaskDb_DoneTask() {
+	taskID := uuid.New()
+	operatorID := dbmodel.OperatorRecordCounter
+	originalNonce, _ := uuid.NewV7()
+
+	task := &dbmodel.Task{
+		ID:                   taskID,
+		Name:                 "test-done-task",
+		OperatorID:           operatorID,
+		InputCollectionID:    "input_col_id",
+		OutputCollectionName: "output_col_name",
+		OperatorParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		MinRecordsForTask:    100,
+		NextNonce:            originalNonce,
+		CurrentAttempts:      3,
+	}
+
+	err := suite.Db.Insert(task)
+	suite.Require().NoError(err)
+
+	err = suite.Db.DoneTask(taskID, originalNonce)
+	suite.Require().NoError(err)
+
+	retrieved, err := suite.Db.GetByID(taskID)
+	suite.Require().NoError(err)
+	suite.Require().NotNil(retrieved)
+	suite.Require().NotEqual(originalNonce, retrieved.NextNonce)
+	suite.Require().NotNil(retrieved.LastRun)
+	suite.Require().Equal(int32(0), retrieved.CurrentAttempts)
+
+	suite.db.Unscoped().Delete(&dbmodel.Task{}, "task_id = ?", task.ID)
+}
+
+func (suite *TaskDbTestSuite) TestTaskDb_DoneTask_InvalidNonce() {
+	taskID := uuid.New()
+	operatorID := dbmodel.OperatorRecordCounter
+	correctNonce, _ := uuid.NewV7()
+	wrongNonce, _ := uuid.NewV7()
+
+	task := &dbmodel.Task{
+		ID:                   taskID,
+		Name:                 "test-done-task-wrong-nonce",
+		OperatorID:           operatorID,
+		InputCollectionID:    "input_col_id",
+		OutputCollectionName: "output_col_name",
+		OperatorParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		MinRecordsForTask:    100,
+		NextNonce:            correctNonce,
+	}
+
+	err := suite.Db.Insert(task)
+	suite.Require().NoError(err)
+
+	err = suite.Db.DoneTask(taskID, wrongNonce)
+	suite.Require().Error(err)
+	suite.Require().Equal(common.ErrTaskNotFound, err)
+
+	suite.db.Unscoped().Delete(&dbmodel.Task{}, "task_id = ?", task.ID)
+}
+
+func (suite *TaskDbTestSuite) TestTaskDb_DoneTask_NotFound() {
+	err := suite.Db.DoneTask(uuid.New(), uuid.Must(uuid.NewV7()))
+	suite.Require().Error(err)
+	suite.Require().Equal(common.ErrTaskNotFound, err)
+}
+
 // TestOperatorConstantsMatchSeededDatabase verifies that operator constants in
 // dbmodel/constants.go match what we seed in the test database (which should match migrations).
 // This catches drift between constants and migrations at test time.
