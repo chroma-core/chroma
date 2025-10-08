@@ -162,6 +162,10 @@ impl Scheduler {
             .insert(collection_id, offset_in_sysdb);
     }
 
+    pub(crate) fn get_dead_jobs(&self) -> Vec<CollectionUuid> {
+        self.dead_jobs.iter().cloned().collect()
+    }
+
     async fn get_collections_with_new_data(&mut self) -> Vec<CollectionInfo> {
         let collections = self
             .log
@@ -186,6 +190,21 @@ impl Scheduler {
     ) -> Vec<CollectionRecord> {
         let mut collection_records = Vec::new();
         for collection_info in collections {
+            let failure_count = self
+                .failing_jobs
+                .get(&collection_info.collection_id)
+                .map(|job| job.failure_count())
+                .unwrap_or(0);
+
+            if failure_count >= self.max_failure_count {
+                tracing::warn!(
+                    "Job for collection {} failed more than {} times, moving this to dead jobs and skipping compaction for it",
+                    collection_info.collection_id,
+                    self.max_failure_count
+                );
+                self.kill_collection(collection_info.collection_id);
+                continue;
+            }
             if self
                 .disabled_collections
                 .contains(&collection_info.collection_id)
@@ -406,15 +425,6 @@ impl Scheduler {
                     failed_job.failure_count(),
                     self.max_failure_count
                 );
-
-                if failed_job.failure_count() >= self.max_failure_count {
-                    tracing::warn!(
-                        "Job for collection {} failed {} times, moving this to dead jobs",
-                        collection_id,
-                        failed_job.failure_count()
-                    );
-                    self.kill_collection(collection_id);
-                }
             }
             None => {
                 self.failing_jobs.insert(collection_id, FailedJob::new());

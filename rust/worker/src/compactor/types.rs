@@ -1,4 +1,5 @@
 use chroma_types::CollectionUuid;
+use tokio::sync::oneshot;
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub(crate) struct CompactionJob {
@@ -16,4 +17,9 @@ pub struct OneOffCompactMessage {
 #[derive(Clone, Debug)]
 pub struct RebuildMessage {
     pub collection_ids: Vec<CollectionUuid>,
+}
+
+#[derive(Debug)]
+pub struct ListDeadJobsMessage {
+    pub response_tx: oneshot::Sender<Vec<CollectionUuid>>,
 }
