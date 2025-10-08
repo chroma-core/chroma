@@ -145,6 +145,7 @@ message ScrubLogResponse {
   string calculated_setsum = 1;
   uint64 bytes_read = 2;
   repeated string errors = 3;
+  bool short_read = 4; // true if read was truncated due to limits
 }
 
 message GarbageCollectPhase2Request {

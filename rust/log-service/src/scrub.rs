@@ -44,17 +44,12 @@ impl LogServer {
         let result = reader.scrub(limits).await;
 
         match result {
-            Ok(success) => {
-                let mut errors = vec![];
-                if success.short_read {
-                    errors.push("short read".to_string());
-                }
-                Ok(Response::new(ScrubLogResponse {
-                    calculated_setsum: success.calculated_setsum.hexdigest(),
-                    bytes_read: success.bytes_read,
-                    errors,
-                }))
-            }
+            Ok(success) => Ok(Response::new(ScrubLogResponse {
+                calculated_setsum: success.calculated_setsum.hexdigest(),
+                bytes_read: success.bytes_read,
+                errors: vec![],
+                short_read: success.short_read,
+            })),
             Err(errors) => {
                 let errors = errors
                     .into_iter()
@@ -64,6 +59,7 @@ impl LogServer {
                     calculated_setsum: "<not calculated; bytes_read will be off>".to_string(),
                     bytes_read: 0,
                     errors,
+                    short_read: false,
                 }))
             }
         }
