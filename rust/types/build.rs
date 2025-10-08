@@ -25,5 +25,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .emit_rerun_if_changed(true)
         .compile(&proto_paths, &["idl/"])?;
 
+    // Note: Operator constants are now generated via bin/generate_operator_constants.sh
+    // and committed to git as rust/types/src/operators_generated.rs.
+    // This avoids needing Go source files in Docker builds.
+
     Ok(())
 }
