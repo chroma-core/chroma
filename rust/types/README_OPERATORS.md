@@ -19,4 +19,4 @@
    - `go/pkg/sysdb/metastore/db/dbmodel/constants.go`
    - `rust/types/src/operators_generated.rs`
 
-The test `test_operator_constants_match_database` will verify everything is in sync.
+The test `test_k8s_integration_operator_constants` will verify everything is in sync.
