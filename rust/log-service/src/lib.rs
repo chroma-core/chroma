@@ -20,16 +20,15 @@ use chroma_tracing::OtelFilter;
 use chroma_tracing::OtelFilterLevel;
 use chroma_types::chroma_proto::{
     garbage_collect_phase2_request::LogToCollect, log_service_server::LogService,
-    purge_from_cache_request::EntryToEvict, scrub_log_request::LogToScrub, CollectionInfo,
-    GarbageCollectPhase2Request, GarbageCollectPhase2Response,
-    GetAllCollectionInfoToCompactRequest, GetAllCollectionInfoToCompactResponse,
-    InspectDirtyLogRequest, InspectDirtyLogResponse, InspectLogStateRequest,
-    InspectLogStateResponse, LogRecord, MigrateLogRequest, MigrateLogResponse, OperationRecord,
-    PullLogsRequest, PullLogsResponse, PurgeDirtyForCollectionRequest,
-    PurgeDirtyForCollectionResponse, PurgeFromCacheRequest, PurgeFromCacheResponse,
-    PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse, ScrubLogRequest,
-    ScrubLogResponse, SealLogRequest, SealLogResponse, UpdateCollectionLogOffsetRequest,
-    UpdateCollectionLogOffsetResponse,
+    purge_from_cache_request::EntryToEvict, CollectionInfo, GarbageCollectPhase2Request,
+    GarbageCollectPhase2Response, GetAllCollectionInfoToCompactRequest,
+    GetAllCollectionInfoToCompactResponse, InspectDirtyLogRequest, InspectDirtyLogResponse,
+    InspectLogStateRequest, InspectLogStateResponse, LogRecord, MigrateLogRequest,
+    MigrateLogResponse, OperationRecord, PullLogsRequest, PullLogsResponse,
+    PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse, PurgeFromCacheRequest,
+    PurgeFromCacheResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
+    ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
+    UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::dirty_log_path_from_hostname;
@@ -51,6 +50,7 @@ use wal3::{
     ManifestAndETag, MarkDirty as MarkDirtyTrait, Witness,
 };
 
+mod scrub;
 pub mod state_hash_table;
 
 use crate::state_hash_table::StateHashTable;
@@ -1701,59 +1701,6 @@ impl LogServer {
         }))
     }
 
-    async fn scrub_log(
-        &self,
-        request: Request<ScrubLogRequest>,
-    ) -> Result<Response<ScrubLogResponse>, Status> {
-        let scrub_log = request.into_inner();
-
-        let path = match scrub_log.log_to_scrub {
-            Some(LogToScrub::CollectionId(x)) => {
-                let collection_id = Uuid::parse_str(&x)
-                    .map(CollectionUuid)
-                    .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-                collection_id.storage_prefix_for_log()
-            }
-            Some(LogToScrub::DirtyLog(host)) => MarkDirty::path_for_hostname(&host),
-            None => {
-                return Err(Status::not_found("log not found because it's null"));
-            }
-        };
-        let reader = LogReader::open(LogReaderOptions::default(), Arc::clone(&self.storage), path)
-            .await
-            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
-        let limits = Limits {
-            max_files: Some(scrub_log.max_files_to_read.into()),
-            max_bytes: Some(scrub_log.max_bytes_to_read),
-            max_records: None,
-        };
-        let result = reader.scrub(limits).await;
-        match result {
-            Ok(success) => {
-                let mut errors = vec![];
-                if success.short_read {
-                    errors.push("short read".to_string())
-                }
-                Ok(Response::new(ScrubLogResponse {
-                    calculated_setsum: success.calculated_setsum.hexdigest(),
-                    bytes_read: success.bytes_read,
-                    errors,
-                }))
-            }
-            Err(errors) => {
-                let errors = errors
-                    .into_iter()
-                    .map(|err| err.to_string())
-                    .collect::<Vec<_>>();
-                Ok(Response::new(ScrubLogResponse {
-                    calculated_setsum: "<not calculated; bytes_read will be off>".to_string(),
-                    bytes_read: 0,
-                    errors,
-                }))
-            }
-        }
-    }
-
     async fn garbage_collect_phase2(
         &self,
         request: Request<GarbageCollectPhase2Request>,
@@ -2130,7 +2077,7 @@ impl RootConfig {
     /// # Notes
     /// The default location is the current working directory, with the filename chroma_config.yaml.
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
-    /// Values in the envionment variables take precedence over values in the YAML file.
+    /// Values in the environment variables take precedence over values in the YAML file.
     pub fn load() -> Self {
         Self::load_from_path(DEFAULT_CONFIG_PATH)
     }
@@ -2149,7 +2096,7 @@ impl RootConfig {
     /// - If the environment variables contain invalid values.
     /// # Notes
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
-    /// Values in the envionment variables take precedence over values in the YAML file.
+    /// Values in the environment variables take precedence over values in the YAML file.
     // NOTE:  Copied to ../load/src/config.rs.
     pub fn load_from_path(path: &str) -> Self {
         println!("loading config from {path}");
