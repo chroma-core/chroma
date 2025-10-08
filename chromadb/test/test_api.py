@@ -286,7 +286,7 @@ def test_collection_add_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist"):
         collection.add(**batch_records)
 
 
@@ -343,7 +343,7 @@ def test_collection_get_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist"):
         collection.get()
 
 
@@ -435,7 +435,7 @@ def test_collection_delete_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist"):
         collection.delete(ids=["id1"])
 
 
@@ -452,7 +452,7 @@ def test_collection_count_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist"):
         collection.count()
 
 
@@ -470,7 +470,7 @@ def test_collection_modify_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist"):
         collection.modify(name="test2")
 
 
@@ -633,7 +633,7 @@ def test_collection_peek_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist"):
         collection.peek()
 
 
@@ -642,7 +642,7 @@ def test_collection_query_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist"):
         collection.query(query_texts=["test"])
 
 
@@ -651,7 +651,7 @@ def test_collection_update_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist"):
         collection.update(ids=["id1"], documents=["test"])
 
 
@@ -1581,7 +1581,7 @@ def test_collection_upsert_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist"):
         collection.upsert(**initial_records)
 
 
@@ -3040,7 +3040,7 @@ class TestRoundTripConversion:
         dict_form = original.to_dict()
         restored = Rank.from_dict(dict_form)
         restored_dict = restored.to_dict()
-        
+
         # Compare with float32 precision tolerance for KNN queries
         # The normalize_embeddings function converts to float32, causing precision differences
         def compare_dicts(d1, d2):
@@ -3059,7 +3059,7 @@ class TestRoundTripConversion:
                             if key != "query" and knn1[key] != knn2.get(key):
                                 return False
                         return True
-                
+
                 # Recursively compare other dict structures
                 if set(d1.keys()) != set(d2.keys()):
                     return False
@@ -3073,7 +3073,7 @@ class TestRoundTripConversion:
                 return all(compare_dicts(a, b) for a, b in zip(d1, d2))
             else:
                 return d1 == d2
-        
+
         assert compare_dicts(restored_dict, dict_form)
 
     def test_limit_round_trip(self):
@@ -3121,7 +3121,7 @@ class TestRoundTripConversion:
 
         # Get new dict
         new_dict = new_search.to_dict()
-        
+
         # Compare with float32 tolerance for KNN queries
         # Use the same comparison function as test_rank_round_trip
         def compare_search_dicts(d1, d2):
@@ -3146,7 +3146,7 @@ class TestRoundTripConversion:
                                     if key != "rank" and d1[key] != d2.get(key):
                                         return False
                                 return True
-                
+
                 # Normal dict comparison
                 if set(d1.keys()) != set(d2.keys()):
                     return False
@@ -3159,5 +3159,5 @@ class TestRoundTripConversion:
                 return True
             else:
                 return d1 == d2
-        
+
         assert compare_search_dicts(new_dict, search_dict)
