@@ -1922,6 +1922,7 @@ dependencies = [
  "chroma-tracing",
  "chroma-types",
  "chrono",
+ "clap",
  "derivative",
  "futures",
  "parking_lot",

@@ -24,6 +24,7 @@ sea-query-binder = { workspace = true, features = ["sqlx-sqlite"] }
 chrono = { workspace = true }
 prost = { workspace = true }
 derivative = "2.2.0"
+clap = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true, features = ["tonic", "sqlx"] }
