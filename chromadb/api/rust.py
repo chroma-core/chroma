@@ -44,7 +44,7 @@ from chromadb.execution.expression.plan import Search
 import chromadb_rust_bindings
 
 
-from typing import Optional, Sequence, List
+from typing import Optional, Sequence, List, Dict, Any
 from overrides import override
 from uuid import UUID
 import json
@@ -586,6 +586,38 @@ class RustBindingsAPI(ServerAPI):
     @override
     def get_max_batch_size(self) -> int:
         return self.bindings.get_max_batch_size()
+
+    @override
+    def create_task(
+        self,
+        task_name: str,
+        operator_name: str,
+        input_collection_id: UUID,
+        output_collection_name: str,
+        params: Optional[Dict[str, Any]] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> tuple[bool, str]:
+        """Tasks are not supported in the Rust bindings (local embedded mode)."""
+        raise NotImplementedError(
+            "Tasks are only supported when connecting to a Chroma server via HttpClient. "
+            "The Rust bindings (embedded mode) do not support task operations."
+        )
+
+    @override
+    def remove_task(
+        self,
+        task_name: str,
+        input_collection_id: UUID,
+        delete_output: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """Tasks are not supported in the Rust bindings (local embedded mode)."""
+        raise NotImplementedError(
+            "Tasks are only supported when connecting to a Chroma server via HttpClient. "
+            "The Rust bindings (embedded mode) do not support task operations."
+        )
 
     # TODO: Remove this if it's not planned to be used
     @override
