@@ -350,37 +350,8 @@ impl HnswIndexProvider {
                 key_refs,
                 GetOptions::new(StorageRequestPriority::P0).with_parallelism(),
                 |bufs| async move {
-<<<<<<< HEAD
-                    if bufs.len() != 4 {
-                        return Err(chroma_storage::StorageError::CallbackError {
-                            info: format!("Expected 4 HNSW files, but got {}", bufs.len()),
-                        });
-                    }
-                    let unwrapped_buffers = bufs
-                        .iter()
-                        .map(|wrapped| {
-                            wrapped.as_ref().map_err(|e| {
-                                chroma_storage::StorageError::CallbackError {
-                                    info: e.to_string(),
-                                }
-                            })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    let hnsw_data = hnswlib::HnswData::builder()
-                        .header_buffer(unwrapped_buffers[0].clone())
-                        .data_level0_buffer(unwrapped_buffers[1].clone())
-                        .length_buffer(unwrapped_buffers[2].clone())
-                        .link_list_buffer(unwrapped_buffers[3].clone())
-                        .build();
-                    let hnsw_data =
-                        hnsw_data.map_err(|e| chroma_storage::StorageError::CallbackError {
-                            info: e.to_string(),
-                        })?;
-                    hnsw_data_processor(hnsw_data).await
-=======
                     let hnsw_data = Self::build_hnsw_data_from_buffers(bufs)?;
                     Ok(Arc::new(hnsw_data))
->>>>>>> 62dc14666 ([BUG]: Restructure HNSW file fetch synchronization (#5561))
                 },
             )
             .instrument(s3_fetch_span)
