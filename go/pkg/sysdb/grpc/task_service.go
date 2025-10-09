@@ -52,12 +52,12 @@ func (s *Server) DeleteTask(ctx context.Context, req *coordinatorpb.DeleteTaskRe
 	return res, nil
 }
 
-func (s *Server) DoneTask(ctx context.Context, req *coordinatorpb.DoneTaskRequest) (*coordinatorpb.DoneTaskResponse, error) {
-	log.Info("DoneTask", zap.String("collection_id", req.GetCollectionId()), zap.String("task_id", req.GetTaskId()))
+func (s *Server) FinishTask(ctx context.Context, req *coordinatorpb.FinishTaskRequest) (*coordinatorpb.FinishTaskResponse, error) {
+	log.Info("FinishTask", zap.String("collection_id", req.GetCollectionId()), zap.String("task_id", req.GetTaskId()))
 
-	res, err := s.coordinator.DoneTask(ctx, req)
+	res, err := s.coordinator.FinishTask(ctx, req)
 	if err != nil {
-		log.Error("DoneTask failed", zap.Error(err))
+		log.Error("FinishTask failed", zap.Error(err))
 		return nil, err
 	}
 

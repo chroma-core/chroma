@@ -39,7 +39,7 @@ type ITaskDb interface {
 	Insert(task *Task) error
 	GetByName(inputCollectionID string, taskName string) (*Task, error)
 	GetByID(taskID uuid.UUID) (*Task, error)
-	DoneTask(taskID uuid.UUID, taskRunNonce uuid.UUID) error
+	FinishTask(taskID uuid.UUID, taskRunNonce uuid.UUID) error
 	SoftDelete(inputCollectionID string, taskName string) error
 	DeleteAll() error
 	PeekScheduleByCollectionId(collectionIDs []string) ([]*Task, error)

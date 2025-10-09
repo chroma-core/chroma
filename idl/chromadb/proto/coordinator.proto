@@ -570,13 +570,13 @@ message DeleteTaskResponse {
   bool success = 1;
 }
 
-message DoneTaskRequest {
+message FinishTaskRequest {
   optional string collection_id = 1;
   optional string task_id = 2;
   optional string task_run_nonce = 3;
 }
 
-message DoneTaskResponse {}
+message FinishTaskResponse {}
 
 message Operator {
   string id = 1;
@@ -646,7 +646,7 @@ service SysDB {
   rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse) {}
   rpc GetTaskByName(GetTaskByNameRequest) returns (GetTaskByNameResponse) {}
   rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse) {}
-  rpc DoneTask(DoneTaskRequest) returns (DoneTaskResponse) {}
+  rpc FinishTask(FinishTaskRequest) returns (FinishTaskResponse) {}
   rpc GetOperators(GetOperatorsRequest) returns (GetOperatorsResponse) {}
   rpc PeekScheduleByCollectionId(PeekScheduleByCollectionIdRequest) returns (PeekScheduleByCollectionIdResponse) {}
 }
