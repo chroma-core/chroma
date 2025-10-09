@@ -77,10 +77,10 @@ func (s *taskDb) GetByID(taskID uuid.UUID) (*dbmodel.Task, error) {
 	return &task, nil
 }
 
-func (s *taskDb) DoneTask(taskID uuid.UUID, taskRunNonce uuid.UUID) error {
+func (s *taskDb) FinishTask(taskID uuid.UUID, taskRunNonce uuid.UUID) error {
 	nextNonce, err := uuid.NewV7()
 	if err != nil {
-		log.Error("DoneTask: failed to generate next nonce", zap.Error(err))
+		log.Error("FinishTask: failed to generate next nonce", zap.Error(err))
 		return err
 	}
 
@@ -97,12 +97,12 @@ func (s *taskDb) DoneTask(taskID uuid.UUID, taskRunNonce uuid.UUID) error {
 	`, now, nextNonce, now, taskID, taskRunNonce)
 
 	if result.Error != nil {
-		log.Error("DoneTask failed", zap.Error(result.Error), zap.String("task_id", taskID.String()))
+		log.Error("FinishTask failed", zap.Error(result.Error), zap.String("task_id", taskID.String()))
 		return result.Error
 	}
 
 	if result.RowsAffected == 0 {
-		log.Warn("DoneTask: no rows affected", zap.String("task_id", taskID.String()), zap.String("task_run_nonce", taskRunNonce.String()))
+		log.Warn("FinishTask: no rows affected", zap.String("task_id", taskID.String()), zap.String("task_run_nonce", taskRunNonce.String()))
 		return common.ErrTaskNotFound
 	}
 
