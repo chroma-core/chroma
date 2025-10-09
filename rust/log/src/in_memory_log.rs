@@ -53,7 +53,7 @@ impl InMemoryLog {
                 next_offset, log.log_offset
             );
         }
-        logs.push(log);
+        logs.push(log.clone());
     }
 }
 

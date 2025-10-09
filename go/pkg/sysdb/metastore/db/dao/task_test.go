@@ -445,9 +445,78 @@ func (suite *TaskDbTestSuite) TestTaskDb_AdvanceTask_InvalidNonce() {
 }
 
 func (suite *TaskDbTestSuite) TestTaskDb_AdvanceTask_NotFound() {
-	err := suite.Db.AdvanceTask(uuid.New(), uuid.Must(uuid.NewV7()))
+	err := suite.Db.AdvanceTask(uuid.New(), uuid.Must(uuid.NewV7()), 0, 0)
 	suite.Require().Error(err)
 	suite.Require().Equal(common.ErrTaskNotFound, err)
+}
+
+func (suite *TaskDbTestSuite) TestTaskDb_UpdateCompletionOffset() {
+	taskID := uuid.New()
+	operatorID := dbmodel.OperatorRecordCounter
+	originalNonce, _ := uuid.NewV7()
+
+	task := &dbmodel.Task{
+		ID:                  taskID,
+		Name:                "test_update_completion_task",
+		OperatorID:          operatorID,
+		InputCollectionID:   "input_collection_1",
+		OutputCollectionID:  nil,
+		OutputCollectionName: "output_collection_1",
+		TenantID:            "tenant_1",
+		DatabaseID:          "database_1",
+		CompletionOffset:    100,
+		MinRecordsForTask:   10,
+		NextNonce:           originalNonce,
+		LowestLiveNonce:     &originalNonce,
+	}
+
+	err := suite.Db.Insert(task)
+	suite.Require().NoError(err)
+
+	// Update completion offset to 200
+	err = suite.Db.UpdateCompletionOffset(taskID, originalNonce, 200)
+	suite.Require().NoError(err)
+
+	// Verify the update
+	retrieved, err := suite.Db.GetByID(taskID)
+	suite.Require().NoError(err)
+	suite.Require().Equal(int64(200), retrieved.CompletionOffset)
+	// next_nonce should remain unchanged
+	suite.Require().Equal(originalNonce, retrieved.NextNonce)
+
+	suite.db.Unscoped().Delete(&dbmodel.Task{}, "task_id = ?", task.ID)
+}
+
+func (suite *TaskDbTestSuite) TestTaskDb_UpdateCompletionOffset_InvalidNonce() {
+	taskID := uuid.New()
+	operatorID := dbmodel.OperatorRecordCounter
+	correctNonce, _ := uuid.NewV7()
+	wrongNonce, _ := uuid.NewV7()
+
+	task := &dbmodel.Task{
+		ID:                  taskID,
+		Name:                "test_update_wrong_nonce",
+		OperatorID:          operatorID,
+		InputCollectionID:   "input_collection_1",
+		OutputCollectionID:  nil,
+		OutputCollectionName: "output_collection_1",
+		TenantID:            "tenant_1",
+		DatabaseID:          "database_1",
+		CompletionOffset:    100,
+		MinRecordsForTask:   10,
+		NextNonce:           correctNonce,
+		LowestLiveNonce:     &correctNonce,
+	}
+
+	err := suite.Db.Insert(task)
+	suite.Require().NoError(err)
+
+	// Try to update with wrong nonce
+	err = suite.Db.UpdateCompletionOffset(taskID, wrongNonce, 200)
+	suite.Require().Error(err)
+	suite.Require().Equal(common.ErrTaskNotFound, err)
+
+	suite.db.Unscoped().Delete(&dbmodel.Task{}, "task_id = ?", task.ID)
 }
 
 // TestOperatorConstantsMatchSeededDatabase verifies that operator constants in
