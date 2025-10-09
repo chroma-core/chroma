@@ -9,12 +9,22 @@ async fn test_k8s_integration_01_empty_heap() {
     let prefix = "test_k8s_integration_01_empty_heap";
     let (storage, scheduler) = setup_test_environment().await;
 
+    // Initialize heap with writer first
+    let _writer = HeapWriter::new(
+        storage.clone(),
+        prefix.to_string().clone(),
+        scheduler.clone(),
+    )
+    .await
+    .unwrap();
+
     // Create reader and verify empty heap
     let reader = HeapReader::new(
         storage.clone(),
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
 
     // Peek should return empty results
@@ -36,6 +46,7 @@ async fn test_k8s_integration_01_empty_writer() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
 
     // Push empty list should succeed

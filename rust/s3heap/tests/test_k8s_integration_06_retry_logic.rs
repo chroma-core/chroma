@@ -24,12 +24,14 @@ async fn test_k8s_integration_06_concurrent_writes_with_retry() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     let writer2 = HeapWriter::new(
         storage.clone(),
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
 
     // Create items that go to same bucket
@@ -85,6 +87,7 @@ async fn test_k8s_integration_06_prune_with_retry() {
             prefix.to_string().clone(),
             scheduler.clone(),
         )
+        .await
         .unwrap();
         writer.push(&[schedule]).await.unwrap();
 

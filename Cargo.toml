@@ -95,6 +95,7 @@ chroma-cli = { path = "rust/cli" }
 chroma-jemalloc-pprof-server = { path = "rust/jemalloc-pprof-server" }
 mdac = { path = "rust/mdac" }
 s3heap = { path = "rust/s3heap" }
+s3heap-service = { path = "rust/s3heap-service" }
 wal3 = { path = "rust/wal3" }
 worker = { path = "rust/worker" }
 
