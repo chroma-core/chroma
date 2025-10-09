@@ -34,6 +34,7 @@ async fn test_k8s_integration_04_prune_completed_items() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer
         .push(&[schedule1.clone(), schedule2.clone(), schedule3.clone()])
@@ -55,6 +56,7 @@ async fn test_k8s_integration_04_prune_completed_items() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(
@@ -93,6 +95,7 @@ async fn test_k8s_integration_04_prune_empty_bucket() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer
         .push(&[schedule1.clone(), schedule2.clone()])
@@ -117,6 +120,7 @@ async fn test_k8s_integration_04_prune_empty_bucket() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(
@@ -160,6 +164,7 @@ async fn test_k8s_integration_04_prune_multiple_buckets() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer
         .push(&[
@@ -186,6 +191,7 @@ async fn test_k8s_integration_04_prune_multiple_buckets() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 2, "Two incomplete items should remain");

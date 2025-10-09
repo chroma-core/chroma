@@ -200,6 +200,7 @@ impl Internal {
             .await?;
         first_1k
             .into_iter()
+            .filter(|x| !x.ends_with("INIT"))
             .map(|p| -> Result<_, Error> {
                 let Some(dt) = p
                     .strip_prefix(&self.prefix)
@@ -563,10 +564,25 @@ fn construct_parquet(items: &[HeapItem]) -> Result<Vec<u8>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Schedule;
     use chrono::TimeZone;
     use std::time::Duration;
 
-    use crate::DummyScheduler;
+    /// A dummy scheduler implementation for testing purposes.
+    ///
+    /// This scheduler always reports that items are not done and have no scheduled times.
+    pub struct DummyScheduler;
+
+    #[async_trait::async_trait]
+    impl HeapScheduler for DummyScheduler {
+        async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error> {
+            Ok(vec![false; items.len()])
+        }
+
+        async fn get_schedules(&self, _ids: &[Uuid]) -> Result<Vec<Schedule>, Error> {
+            Ok(vec![])
+        }
+    }
 
     // HeapItem tests
     #[test]

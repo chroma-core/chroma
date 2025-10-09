@@ -20,22 +20,76 @@ use chroma_types::chroma_proto::heap_tender_service_server::{
 };
 use chroma_types::chroma_proto::{HeapSummaryRequest, HeapSummaryResponse};
 use chroma_types::{dirty_log_path_from_hostname, CollectionUuid, DirtyMarker, ScheduleEntry};
-use s3heap::{Configuration, DummyScheduler, Error, HeapWriter, Schedule, Triggerable};
+use s3heap::{heap_path_from_hostname, Configuration, HeapWriter, Schedule, Triggerable};
 use wal3::{
     Cursor, CursorName, CursorStore, CursorStoreOptions, LogPosition, LogReader, LogReaderOptions,
     Witness,
 };
+
+mod scheduler;
+
+pub use scheduler::SysDbScheduler;
+
+/////////////////////////////////////////////// Error //////////////////////////////////////////////
+
+/// Custom error type that can handle errors from multiple sources.
+#[derive(Debug)]
+pub enum Error {
+    /// Error from s3heap operations.
+    S3Heap(s3heap::Error),
+    /// Error from wal3 operations.
+    Wal3(wal3::Error),
+    /// Error from sysdb operations.
+    SysDb(chroma_sysdb::PeekScheduleError),
+    /// Error from JSON serialization/deserialization.
+    Json(serde_json::Error),
+    /// Internal error with a message.
+    Internal(String),
+}
+
+impl From<s3heap::Error> for Error {
+    fn from(e: s3heap::Error) -> Self {
+        Error::S3Heap(e)
+    }
+}
+
+impl From<wal3::Error> for Error {
+    fn from(e: wal3::Error) -> Self {
+        Error::Wal3(e)
+    }
+}
+
+impl From<chroma_sysdb::PeekScheduleError> for Error {
+    fn from(e: chroma_sysdb::PeekScheduleError) -> Self {
+        Error::SysDb(e)
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Self {
+        Error::Json(e)
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::S3Heap(e) => write!(f, "s3heap error: {}", e),
+            Error::Wal3(e) => write!(f, "wal3 error: {}", e),
+            Error::SysDb(e) => write!(f, "sysdb error: {}", e),
+            Error::Json(e) => write!(f, "json error: {}", e),
+            Error::Internal(msg) => write!(f, "internal error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
-
-/// The path for the heap tended to on behalf of this hostname.
-pub fn heap_path_from_hostname(hostname: &str) -> String {
-    format!("heap/{}", hostname)
-}
 
 /// The cursor name used by HeapTender to track its position in the dirty log.
 pub static HEAP_TENDER_CURSOR_NAME: CursorName =
@@ -295,8 +349,9 @@ impl Configurable<HeapTenderServerConfig> for HeapTenderServer {
             "s3heap-tender".to_string(),
         );
         let heap_prefix = heap_path_from_hostname(&config.my_member_id);
-        let scheduler = Arc::new(DummyScheduler) as _;
+        let scheduler = Arc::new(SysDbScheduler::new(sysdb.clone())) as _;
         let writer = HeapWriter::new(storage, heap_prefix, Arc::clone(&scheduler))
+            .await
             .map_err(|e| -> Box<dyn chroma_error::ChromaError> { Box::new(e) })?;
         let tender = Arc::new(HeapTender {
             sysdb,

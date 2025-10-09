@@ -41,6 +41,7 @@ async fn test_k8s_integration_08_concurrent_pushes() {
             prefix.to_string().clone(),
             scheduler.clone(),
         )
+        .await
         .unwrap();
         let schedules: Vec<_> = (0..items_per_writer)
             .map(|j| {
@@ -68,6 +69,7 @@ async fn test_k8s_integration_08_concurrent_pushes() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(
@@ -105,6 +107,7 @@ async fn test_k8s_integration_08_concurrent_read_write() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer.push(&initial_schedules).await.unwrap();
 
@@ -119,6 +122,7 @@ async fn test_k8s_integration_08_concurrent_read_write() {
             prefix.to_string().clone(),
             scheduler.clone(),
         )
+        .await
         .unwrap();
         let scheduler_clone = scheduler.clone();
 
@@ -148,6 +152,7 @@ async fn test_k8s_integration_08_concurrent_read_write() {
             prefix.to_string().clone(),
             scheduler.clone(),
         )
+        .await
         .unwrap();
 
         read_handles.push(tokio::spawn(async move {
@@ -172,6 +177,7 @@ async fn test_k8s_integration_08_concurrent_read_write() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     let final_items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(
@@ -214,6 +220,7 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer.push(&initial_schedules).await.unwrap();
 
@@ -233,6 +240,7 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     let scheduler_clone = scheduler.clone();
     let write_handle = tokio::spawn(async move {
@@ -261,6 +269,7 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     let final_items = reader.peek(|_| true, Limits::default()).await.unwrap();
 
