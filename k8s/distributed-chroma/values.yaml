@@ -37,6 +37,7 @@ rustLogService:
     hostPath: '/local/cache/chroma-log-service'
     mountPath: '/cache/'
 heapTenderService:
+  enabled: true
   image:
     repository: 'heap-tender-service'
     tag: 'latest'
