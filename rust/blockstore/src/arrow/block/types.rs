@@ -286,15 +286,15 @@ impl Block {
     */
 
     /// Get all key-value pairs for a specific prefix in the block
-    /// Returns a vector of (key, value) pairs for better performance when collecting all values
+    /// Returns an iterator of (key, value) pairs for better performance when collecting all values
     pub fn get_prefix<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
         prefix: &str,
-    ) -> Vec<(K, V)> {
+    ) -> impl Iterator<Item = (K, V)> {
         // Find the start index for this prefix
         let offset = self.find_smallest_index_of_prefix::<K>(prefix);
         if offset >= self.len() {
-            return Vec::new();
+            return Vec::new().into_iter().zip(Vec::new());
         }
 
         // Find the end index (first element with a different prefix)
@@ -306,7 +306,7 @@ impl Block {
         let values = V::get_range(self.data.column(2), offset, length);
 
         // Zip and collect
-        keys.into_iter().zip(values).collect()
+        keys.into_iter().zip(values)
     }
 
     /// Get the value for a given key in the block

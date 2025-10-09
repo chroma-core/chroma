@@ -452,7 +452,8 @@ impl NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'_> {
     async fn lookup_ngram<'me>(
         &'me self,
         ngram: &'me str,
-    ) -> Result<Vec<(u32, &'me [u32])>, FullTextIndexError> {
+    ) -> Result<Box<dyn Iterator<Item = (u32, &'me [u32])> + Send + Sync + 'me>, FullTextIndexError>
+    {
         Ok(self
             .posting_lists_blockfile_reader
             .get_prefix(ngram)

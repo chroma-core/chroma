@@ -86,7 +86,10 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
     }
 
     // Return the (ngram, doc_id, positions) for a range of ngrams
-    async fn lookup_ngram<'me>(&'me self, ngram: &'me str) -> Result<Vec<(u32, &'me [u32])>, E>;
+    async fn lookup_ngram<'me>(
+        &'me self,
+        ngram: &'me str,
+    ) -> Result<Box<dyn Iterator<Item = (u32, &'me [u32])> + Send + Sync + 'me>, E>;
 
     // Return the documents containing the literals. The search space is restricted to the documents in the mask if specified
     //
@@ -187,7 +190,6 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         // Retrieve all ngram posting lists
         let ngram_doc_pos_len = ngram_vec.iter().map(Vec::len).sum();
         let mut ngram_doc_pos_vec = Vec::with_capacity(ngram_doc_pos_len);
-        let mut ngram_doc_idx_vec = vec![0; ngram_doc_pos_len];
         let mut lookup_table_vec = Vec::<PrefixSuffixLookupTable>::with_capacity(ngram_vec.len());
         let mut min_lookup_table_size = usize::MAX;
         let mut min_lookup_table_index = 0;
@@ -195,14 +197,14 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
             let mut lookup_table = PrefixSuffixLookupTable::default();
             let mut lookup_table_size = 0;
             for ngram in ngrams {
-                let doc_pos = self.lookup_ngram(ngram).await?;
+                let mut doc_pos = self.lookup_ngram(ngram).await?.peekable();
 
-                if doc_pos.is_empty() {
+                if doc_pos.peek().is_none() {
                     continue;
                 }
 
                 let ngram_doc_pos_index = ngram_doc_pos_vec.len();
-                lookup_table_size += doc_pos.len();
+                lookup_table_size += doc_pos.size_hint().0;
                 ngram_doc_pos_vec.push((ngram, doc_pos));
 
                 let prefix = &ngram[..ngram.char_indices().next_back().unwrap_or_default().0];
@@ -210,8 +212,8 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                 lookup_table.prefix.push((prefix, ngram_doc_pos_index));
                 lookup_table.suffix.push((suffix, ngram_doc_pos_index));
             }
-            lookup_table.prefix.sort();
-            lookup_table.suffix.sort();
+            lookup_table.prefix.sort_unstable();
+            lookup_table.suffix.sort_unstable();
             let lookup_table_index = lookup_table_vec.len();
             lookup_table_vec.push(lookup_table);
             if lookup_table_size < min_lookup_table_size {
@@ -221,18 +223,14 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         }
 
         // Gather candidate documents
-        let mut candidates = lookup_table_vec[min_lookup_table_index]
-            .prefix
-            .iter()
-            .flat_map(|(_, idx)| {
-                let (ngram, doc_pos) = &ngram_doc_pos_vec[*idx];
-                doc_pos.iter().filter_map(move |(doc, pos)| {
-                    (mask.is_none() || mask.is_some_and(|m| m.contains(doc)))
-                        .then_some((ngram, doc, pos))
-                })
-            })
-            .collect::<Vec<_>>();
-        candidates.sort_unstable_by_key(|(_, doc, _)| **doc);
+        let mut candidates = Vec::with_capacity(min_lookup_table_size);
+        for ngram in &ngram_vec[min_lookup_table_index] {
+            candidates.extend(self.lookup_ngram(ngram).await?.filter_map(|(doc, pos)| {
+                (mask.is_none() || mask.is_some_and(|m| m.contains(&doc)))
+                    .then_some((ngram, doc, pos))
+            }));
+        }
+        candidates.sort_unstable_by_key(|(_, doc, _)| *doc);
 
         // Find a valid trace across lookup tables
         let mut result = HashSet::with_capacity(
@@ -242,7 +240,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         {
             for (ngram, doc, pos) in pivot_ngram_pos_vec
                 .iter()
-                .flat_map(|(ngram, doc, pos)| pos.iter().map(move |p| (ngram, **doc, *p)))
+                .flat_map(|(ngram, doc, pos)| pos.iter().map(move |p| (ngram, *doc, *p)))
             {
                 // Trace to the right of pivot
                 // `suffix_pos_idx_stack` stores a stack of (
@@ -294,21 +292,16 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                         Some(focus_ngram_prefix_index + 1),
                     ));
                     // Find the document and search for expected position
-                    let (focus_ngram, focus_doc_pos_vec) =
-                        &ngram_doc_pos_vec[focus_ngram_doc_pos_idx];
-                    let pos = match focus_doc_pos_vec
-                        .get(ngram_doc_idx_vec[focus_ngram_doc_pos_idx])
-                        .cloned()
-                    {
-                        Some((d, pos)) if d == doc => pos,
-                        _ => match focus_doc_pos_vec.binary_search_by_key(&doc, |(d, _)| *d) {
-                            Ok(idx) => {
-                                let (_, pos) = focus_doc_pos_vec[idx];
-                                ngram_doc_idx_vec[focus_ngram_doc_pos_idx] = idx;
-                                pos
-                            }
-                            Err(_) => continue,
-                        },
+                    let (focus_ngram, focus_doc_pos_iter) =
+                        &mut ngram_doc_pos_vec[focus_ngram_doc_pos_idx];
+                    while focus_doc_pos_iter.peek().is_some_and(|(d, _)| *d < doc) {
+                        focus_doc_pos_iter.next();
+                    }
+                    let Some(pos) = focus_doc_pos_iter
+                        .peek()
+                        .and_then(|(d, p)| (*d == doc).then_some(*p))
+                    else {
+                        continue;
                     };
                     if pos.binary_search(&match_pos).is_ok() {
                         let suffix_offset = focus_ngram.char_indices().nth(1).unwrap_or_default().0;
@@ -372,21 +365,16 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                         Some(focus_ngram_suffix_index + 1),
                     ));
                     // Find the document and search for expected position
-                    let (focus_ngram, focus_doc_pos_vec) =
-                        &ngram_doc_pos_vec[focus_ngram_doc_pos_idx];
-                    let pos = match focus_doc_pos_vec
-                        .get(ngram_doc_idx_vec[focus_ngram_doc_pos_idx])
-                        .cloned()
-                    {
-                        Some((d, pos)) if d == doc => pos,
-                        _ => match focus_doc_pos_vec.binary_search_by_key(&doc, |(d, _)| *d) {
-                            Ok(idx) => {
-                                let (_, pos) = focus_doc_pos_vec[idx];
-                                ngram_doc_idx_vec[focus_ngram_doc_pos_idx] = idx;
-                                pos
-                            }
-                            Err(_) => continue,
-                        },
+                    let (focus_ngram, focus_doc_pos_iter) =
+                        &mut ngram_doc_pos_vec[focus_ngram_doc_pos_idx];
+                    while focus_doc_pos_iter.peek().is_some_and(|(d, _)| *d < doc) {
+                        focus_doc_pos_iter.next();
+                    }
+                    let Some(pos) = focus_doc_pos_iter
+                        .peek()
+                        .and_then(|(d, p)| (*d == doc).then_some(*p))
+                    else {
+                        continue;
                     };
                     let match_pos = match match_pos_with_offset
                         .checked_sub(focus_ngram.char_indices().nth(1).unwrap_or_default().0 as u32)
@@ -507,17 +495,18 @@ mod tests {
         async fn lookup_ngram<'me>(
             &'me self,
             ngram: &'me str,
-        ) -> Result<Vec<(u32, &'me [u32])>, ()> {
+        ) -> Result<Box<dyn Iterator<Item = (u32, &'me [u32])> + Send + Sync + 'me>, ()> {
             match self
                 .inverted_literal_index
                 .binary_search_by_key(&ngram, |(n, _)| n)
             {
-                Ok(index) => Ok(self.inverted_literal_index[index]
-                    .1
-                    .iter()
-                    .map(|(doc, pos)| (*doc, pos.as_slice()))
-                    .collect()),
-                Err(_) => Ok(Vec::new()),
+                Ok(index) => Ok(Box::new(
+                    self.inverted_literal_index[index]
+                        .1
+                        .iter()
+                        .map(|(doc, pos)| (*doc, pos.as_slice())),
+                )),
+                Err(_) => Ok(Box::new(Vec::new().into_iter())),
             }
         }
     }

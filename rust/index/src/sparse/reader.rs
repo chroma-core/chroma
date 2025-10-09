@@ -86,7 +86,6 @@ impl<'me> SparseReader<'me> {
             .max_reader
             .get_prefix(DIMENSION_PREFIX)
             .await?
-            .into_iter()
             .collect())
     }
 
@@ -105,11 +104,7 @@ impl<'me> SparseReader<'me> {
         &'me self,
         encoded_dimension_id: &'me str,
     ) -> Result<impl Iterator<Item = (u32, f32)> + 'me, SparseReaderError> {
-        Ok(self
-            .max_reader
-            .get_prefix(encoded_dimension_id)
-            .await?
-            .into_iter())
+        Ok(self.max_reader.get_prefix(encoded_dimension_id).await?)
     }
 
     pub async fn get_offset_values(
@@ -119,8 +114,7 @@ impl<'me> SparseReader<'me> {
         Ok(self
             .offset_value_reader
             .get_prefix(encoded_dimension_id)
-            .await?
-            .into_iter())
+            .await?)
     }
 
     pub async fn wand(

@@ -579,12 +579,12 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     pub(crate) async fn get_prefix(
         &'me self,
         prefix: &str,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<impl Iterator<Item = (K, V)>, Box<dyn ChromaError>> {
         // Get all block IDs that might contain this prefix
         let block_ids = self.root.sparse_index.get_block_ids_range(prefix..=prefix);
 
         if block_ids.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new().into_iter().flatten());
         }
 
         // Fetch blocks AND extract prefix data in parallel
@@ -605,9 +605,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .instrument(Span::current())
         });
 
-        let block_results = try_join_all(block_futures).await?;
+        let block_iters = try_join_all(block_futures).await?;
 
-        Ok(block_results.into_iter().flatten().collect())
+        Ok(block_iters.into_iter().flatten())
     }
 
     // Returns all Arrow records in the specified range.
