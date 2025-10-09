@@ -2034,3 +2034,29 @@ class TestNewSchema:
         # Others are None (sparse override)
         assert des_field.string is None
         assert des_field.int_value is None
+
+
+def test_sparse_vector_cannot_be_created_globally() -> None:
+    """Test that sparse vector index cannot be created globally (without a key)."""
+    schema = Schema()
+    sparse_config = SparseVectorIndexConfig()
+
+    # Try to enable sparse vector globally - should fail
+    with pytest.raises(ValueError, match="Sparse vector index must be created on a specific key"):
+        schema.create_index(config=sparse_config)
+
+
+def test_sparse_vector_cannot_be_deleted() -> None:
+    """Test that sparse vector index cannot be deleted (temporarily disallowed)."""
+    schema = Schema()
+    sparse_config = SparseVectorIndexConfig()
+
+    # Create sparse vector on a key first
+    schema.create_index(config=sparse_config, key="my_key")
+    assert schema.key_overrides["my_key"].sparse_vector is not None
+    assert schema.key_overrides["my_key"].sparse_vector.sparse_vector_index is not None
+    assert schema.key_overrides["my_key"].sparse_vector.sparse_vector_index.enabled is True
+
+    # Try to delete it - should fail
+    with pytest.raises(ValueError, match="Deleting sparse vector index is not currently supported"):
+        schema.delete_index(config=sparse_config, key="my_key")
