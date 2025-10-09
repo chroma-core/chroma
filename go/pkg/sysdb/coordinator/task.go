@@ -110,7 +110,7 @@ func (s *Coordinator) CreateTask(ctx context.Context, req *coordinatorpb.CreateT
 			OperatorParams:       req.Params,
 			CompletionOffset:     0,
 			LastRun:              nil,
-			NextRun:              nil, // Will be set to zero initially, scheduled by task scheduler
+			NextRun:              &now,
 			MinRecordsForTask:    int64(req.MinRecordsForTask),
 			CurrentAttempts:      0,
 			CreatedAt:            now,
@@ -309,10 +309,10 @@ func (s *Coordinator) PeekScheduleByCollectionId(ctx context.Context, req *coord
 	for _, task := range tasks {
 		task_id := task.ID.String()
 		entry := &coordinatorpb.ScheduleEntry{
-			CollectionId:  &task.InputCollectionID,
-			TaskId:        &task_id,
-			TaskRunNonce:  proto.String(task.NextNonce.String()),
-			WhenToRun:     nil,
+			CollectionId: &task.InputCollectionID,
+			TaskId:       &task_id,
+			TaskRunNonce: proto.String(task.NextNonce.String()),
+			WhenToRun:    nil,
 		}
 		if task.NextRun != nil {
 			whenToRun := uint64(task.NextRun.UnixMilli())

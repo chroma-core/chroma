@@ -39,7 +39,7 @@
 //!
 //! // Create heap components
 //! let scheduler = Arc::new(MyScheduler);
-//! let writer = HeapWriter::new("my-heap".to_string(), storage, scheduler);
+//! let writer = HeapWriter::new(storage, "my-heap".to_string(), scheduler).await?;
 //!
 //! // Schedule tasks
 //! let schedules = vec![
@@ -82,13 +82,34 @@ use chroma_storage::Storage;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-// TODO(rescrv):  Clean this up once the real pieces are doable.
-mod dummy;
 mod internal;
 use internal::Internal;
 
-pub use dummy::DummyScheduler;
 pub use internal::HeapItem;
+
+////////////////////////////////////////////// heap_path ///////////////////////////////////////////
+
+/// Compute the heap path from a hostname.
+///
+/// This function generates the S3 prefix for a heap based on the hostname
+/// of the service instance managing it. The format is `heap/{hostname}`.
+///
+/// # Arguments
+/// * `hostname` - The hostname of the service instance
+///
+/// # Returns
+/// The S3 prefix path for the heap
+///
+/// # Examples
+/// ```
+/// use s3heap::heap_path_from_hostname;
+///
+/// let path = heap_path_from_hostname("rust-log-service-0");
+/// assert_eq!(path, "heap/rust-log-service-0");
+/// ```
+pub fn heap_path_from_hostname(hostname: &str) -> String {
+    format!("heap/{}", hostname)
+}
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -117,12 +138,12 @@ pub enum Error {
     /// Invalid prefix format
     #[error("invalid prefix: {0}")]
     InvalidPrefix(String),
+    /// Uninitialized heap
+    #[error("uninitialized heap: {0}")]
+    UninitializedHeap(String),
     /// Storage backend error
     #[error("storage error: {0}")]
     Storage(#[from] chroma_storage::StorageError),
-    /// wal3 error
-    #[error("wal3 error: {0}")]
-    Wal3(#[from] wal3::Error),
     /// UUID parsing error
     #[error("uuid error: {0}")]
     Uuid(#[from] uuid::Error),
@@ -142,9 +163,6 @@ pub enum Error {
     /// Date rounding error
     #[error("could not round date: {0}")]
     RoundError(#[from] chrono::RoundingError),
-    /// SysDb error
-    #[error("sysdb error: {0}")]
-    SysDb(#[from] chroma_sysdb::PeekScheduleError),
 }
 
 impl chroma_error::ChromaError for Error {
@@ -157,15 +175,14 @@ impl chroma_error::ChromaError for Error {
             Error::InvalidBucket(_) => ErrorCodes::InvalidArgument,
             Error::PartialLoadFailure(..) => ErrorCodes::Internal,
             Error::InvalidPrefix(_) => ErrorCodes::InvalidArgument,
+            Error::UninitializedHeap(_) => ErrorCodes::FailedPrecondition,
             Error::Storage(e) => e.code(),
-            Error::Wal3(e) => e.code(),
             Error::Uuid(_) => ErrorCodes::InvalidArgument,
             Error::Parquet(_) => ErrorCodes::Internal,
             Error::Json(_) => ErrorCodes::Internal,
             Error::Arrow(_) => ErrorCodes::Internal,
             Error::ParseDate(_) => ErrorCodes::InvalidArgument,
             Error::RoundError(_) => ErrorCodes::Internal,
-            Error::SysDb(e) => e.code(),
         }
     }
 }
@@ -293,7 +310,7 @@ impl RetryConfig {
 /// // Create custom limits
 /// let custom_limits = Limits::default().with_buckets(100);
 /// ```
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Limits {
     /// Maximum number of buckets to read during a scan operation.
     /// If None, defaults to 1000 buckets.
@@ -506,11 +523,11 @@ pub struct Schedule {
 ///     async fn get_schedules(
 ///         &self,
 ///         ids: &[Uuid],
-///     ) -> Result<Vec<Option<Schedule>>, Error> {
+///     ) -> Result<Vec<Schedule>, Error> {
 ///         // Retrieve scheduled tasks from your system
 ///         let schedules = self.schedules.lock();
 ///         Ok(ids.iter()
-///             .map(|id| schedules.get(id).cloned())
+///             .filter_map(|id| schedules.get(id).cloned())
 ///             .collect())
 ///     }
 /// }
@@ -558,19 +575,19 @@ pub trait HeapScheduler: Send + Sync {
     /// * `id` - The unique identifier of the scheduled task
     ///
     /// # Returns
-    /// * `Ok(Some((Triggerable, DateTime<Utc>, Uuid)))` if the task exists
-    /// * `Ok(None)` if the task does not exist
-    /// * `Err` if there was an error retrieving the schedule
+    /// * `Ok(Some(Schedule))` if exactly one schedule exists for the task
+    /// * `Ok(None)` if no schedules exist for the task
+    /// * `Err` if there was an error retrieving the schedule or if multiple schedules exist
     async fn get_schedule(&self, id: Uuid) -> Result<Option<Schedule>, Error> {
-        let mut results = self.get_schedules(&[id]).await?;
-        if results.len() != 1 {
-            return Err(Error::Internal(format!(
-                "get_schedules returned {} results for 1 item",
-                results.len()
-            )));
+        let results = self.get_schedules(&[id]).await?;
+        match results.len() {
+            0 => Ok(None),
+            1 => Ok(Some(results.into_iter().next().unwrap())),
+            n => Err(Error::Internal(format!(
+                "get_schedules returned {} schedules for 1 id (expected 0 or 1)",
+                n
+            ))),
         }
-        // SAFETY(rescrv):  result.len() == 1
-        Ok(results.pop().unwrap())
     }
 
     /// Get the schedules for multiple tasks by their IDs.
@@ -579,13 +596,13 @@ pub trait HeapScheduler: Send + Sync {
     /// * `ids` - The unique identifiers of the scheduled tasks
     ///
     /// # Returns
-    /// * `Ok(Vec<Option<(Triggerable, DateTime<Utc>, Uuid)>>)` with one entry per ID
+    /// * `Ok(Vec<Schedule>)` containing all schedules for the given IDs
     /// * `Err` if there was an error retrieving the schedules
     ///
-    /// # Implementation Requirements
-    /// The returned vector must have exactly the same length as the input slice.
-    /// result[i] = get_schedule(ids[i])
-    async fn get_schedules(&self, ids: &[Uuid]) -> Result<Vec<Option<Schedule>>, Error>;
+    /// # Implementation Notes
+    /// The returned vector may contain zero, one, or many schedules per ID.
+    /// The length of the returned vector is not required to match the input slice length.
+    async fn get_schedules(&self, ids: &[Uuid]) -> Result<Vec<Schedule>, Error>;
 }
 
 //////////////////////////////////////////// HeapWriter ////////////////////////////////////////////
@@ -615,10 +632,10 @@ pub trait HeapScheduler: Send + Sync {
 /// use uuid::Uuid;
 ///
 /// let writer = HeapWriter::new(
-///     "my-heap".to_string(),
 ///     storage,
+///     "my-heap".to_string(),
 ///     scheduler,
-/// );
+/// ).await?;
 ///
 /// // Schedule a batch of tasks
 /// let schedules = vec![
@@ -671,15 +688,21 @@ impl HeapWriter {
     ///     "production/task-queue".to_string(),
     ///     storage,
     ///     Arc::new(scheduler),
-    /// )?;
+    /// ).await?;
     /// ```
-    pub fn new(
+    pub async fn new(
         storage: Storage,
         prefix: String,
         heap_scheduler: Arc<dyn HeapScheduler>,
     ) -> Result<Self, Error> {
         let config = Configuration::default();
         validate_prefix(&prefix)?;
+
+        let init_path = format!("{}/INIT", prefix);
+        storage
+            .put_bytes(&init_path, vec![], chroma_storage::PutOptions::default())
+            .await?;
+
         Ok(Self {
             internal: Internal::new(storage, prefix, heap_scheduler, config.backoff.clone()),
             config,
@@ -1057,6 +1080,7 @@ impl HeapReader {
     ///
     /// - Returns [`Error::InvalidPrefix`] if `prefix` is empty
     /// - Returns [`Error::InvalidPrefix`] if `prefix` contains "//" (double slashes)
+    /// - Returns [`Error::UninitializedHeap`] if the heap has not been initialized with a HeapWriter
     ///
     /// # Examples
     ///
@@ -1068,15 +1092,31 @@ impl HeapReader {
     ///     "production/task-queue".to_string(),
     ///     storage,
     ///     Arc::new(scheduler),
-    /// )?;
+    /// ).await?;
     /// ```
-    pub fn new(
+    pub async fn new(
         storage: Storage,
         prefix: String,
         heap_scheduler: Arc<dyn HeapScheduler>,
     ) -> Result<Self, Error> {
         let config = Configuration::default();
         validate_prefix(&prefix)?;
+
+        let init_path = format!("{}/INIT", prefix);
+        match storage
+            .get(&init_path, chroma_storage::GetOptions::default())
+            .await
+        {
+            Ok(_) => {}
+            Err(chroma_storage::StorageError::NotFound { .. }) => {
+                return Err(Error::UninitializedHeap(format!(
+                    "heap at prefix '{}' has not been initialized",
+                    prefix
+                )));
+            }
+            Err(e) => return Err(Error::Storage(e)),
+        }
+
         Ok(Self {
             internal: Internal::new(storage, prefix, heap_scheduler, config.backoff),
         })

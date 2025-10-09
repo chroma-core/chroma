@@ -28,6 +28,7 @@ async fn test_k8s_integration_02_basic_push() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer
         .push(&[schedule1.clone(), schedule2.clone()])
@@ -49,6 +50,7 @@ async fn test_k8s_integration_02_basic_push() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 2, "Should read 2 items back");
@@ -86,6 +88,7 @@ async fn test_k8s_integration_02_push_with_no_schedule() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer.push(&[schedule2.clone()]).await.unwrap();
 
@@ -104,6 +107,7 @@ async fn test_k8s_integration_02_push_with_no_schedule() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     let items = reader.peek(|_| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 1, "Should have only 1 scheduled item");
