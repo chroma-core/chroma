@@ -93,7 +93,6 @@ impl HeapTender {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let triggerables: Vec<Schedule> = triggerables.into_iter().flatten().collect();
-            tracing::info!("JUST {} TRIGGERABLES", triggerables.len());
             if !triggerables.is_empty() {
                 self.writer.push(&triggerables).await?;
             }

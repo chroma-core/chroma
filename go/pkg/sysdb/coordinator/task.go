@@ -322,7 +322,7 @@ func (s *Coordinator) GetOperators(ctx context.Context, req *coordinatorpb.GetOp
 	}, nil
 }
 
-// PeekScheduleByCOllectionId gives, for a vector of collection IDs, a vector of schedule entries,
+// PeekScheduleByCollectionId gives, for a vector of collection IDs, a vector of schedule entries,
 // including when to run and the nonce to use for said run.
 func (s *Coordinator) PeekScheduleByCollectionId(ctx context.Context, req *coordinatorpb.PeekScheduleByCollectionIdRequest) (*coordinatorpb.PeekScheduleByCollectionIdResponse, error) {
 	tasks, err := s.catalog.metaDomain.TaskDb(ctx).PeekScheduleByCollectionId(req.CollectionId)
