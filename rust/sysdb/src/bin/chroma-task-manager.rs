@@ -53,6 +53,8 @@ enum Command {
     #[command(about = "Mark a task run as complete")]
     DoneTask {
         #[arg(long)]
+        collection_id: String,
+        #[arg(long)]
         task_id: String,
         #[arg(long)]
         task_run_nonce: String,
@@ -136,12 +138,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Task deleted: {}", response.into_inner().success);
         }
         Command::DoneTask {
+            collection_id,
             task_id,
             task_run_nonce,
         } => {
             let request = chroma_proto::DoneTaskRequest {
-                // TODO(claude):  Pass an actual collection id.
-                collection_id: None,
+                collection_id: Some(collection_id),
                 task_id: Some(task_id),
                 task_run_nonce: Some(task_run_nonce),
             };
@@ -155,7 +157,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let response = client.get_operators(request).await?;
             let operators = response.into_inner().operators;
 
-            println!("Operators:");
             for op in operators {
                 println!("  {} - {}", op.id, op.name);
             }
