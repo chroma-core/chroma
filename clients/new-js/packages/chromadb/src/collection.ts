@@ -290,14 +290,18 @@ export class CollectionImpl implements Collection {
     };
   }
 
-  private async embed(documents: string[]): Promise<number[][]> {
+  private async embed(inputs: string[], isQuery: boolean): Promise<number[][]> {
     if (!this._embeddingFunction) {
       throw new ChromaValueError(
         "Embedding function must be defined for operations requiring embeddings.",
       );
     }
 
-    return await this._embeddingFunction.generate(documents);
+	if (this._embeddingFunction.generateForQueries && isQuery) {
+		return await this._embeddingFunction.generateForQueries(inputs);
+	} else {
+    	return await this._embeddingFunction.generate(inputs);
+	}
   }
 
   private async prepareRecords<T extends boolean = false>({

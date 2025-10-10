@@ -18,6 +18,14 @@ export interface EmbeddingFunction {
    * @returns Promise resolving to array of embedding vectors
    */
   generate(texts: string[]): Promise<number[][]>;
+  /**
+   * Generates embeddings specifically for query texts.
+   * Default implementation calls generate().
+   * Can be overridden to provide query-specific embedding logic.
+   * @param texts - Array of query text strings to embed
+   * @returns Promise resolving to array of embedding vectors
+   */
+  generateForQueries?(texts: string[]): Promise<number[][]>;
   /** Optional name identifier for the embedding function */
   name?: string;
   /** Returns the default vector space for this embedding function */
