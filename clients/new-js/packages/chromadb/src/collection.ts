@@ -319,7 +319,7 @@ export class CollectionImpl implements Collection {
     validateMaxBatchSize(recordSet.ids.length, maxBatchSize);
 
     if (!recordSet.embeddings && recordSet.documents) {
-      recordSet.embeddings = await this.embed(recordSet.documents);
+      recordSet.embeddings = await this.embed(recordSet.documents, false);
     }
 
     const preparedRecordSet: PreparedRecordSet = { ...recordSet };
@@ -368,7 +368,7 @@ export class CollectionImpl implements Collection {
 
     let embeddings: number[][];
     if (!recordSet.embeddings) {
-      embeddings = await this.embed(recordSet.documents!);
+      embeddings = await this.embed(recordSet.documents!, true);
     } else {
       embeddings = recordSet.embeddings;
     }
