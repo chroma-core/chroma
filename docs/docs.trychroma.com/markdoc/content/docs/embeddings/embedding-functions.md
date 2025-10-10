@@ -168,7 +168,7 @@ import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 collection = await client.createCollection({
   name: "my_collection",
   embedding_function: new OpenAIEmbeddingFunction({
-    model_name: "text-embedding-3-small",
+    modelName: "text-embedding-3-small",
   }),
 });
 

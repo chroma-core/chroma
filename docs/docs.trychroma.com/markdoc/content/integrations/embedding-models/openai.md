@@ -58,8 +58,8 @@ You can pass in an optional `model` argument, which lets you choose which OpenAI
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 
 const embeddingFunction = new OpenAIEmbeddingFunction({
-  openai_api_key: "apiKey",
-  openai_model: "text-embedding-3-small",
+  apiKey: "apiKey",
+  modelName: "text-embedding-3-small",
 });
 
 // use directly
