@@ -296,7 +296,7 @@ mod tests {
             OneMessageComponent {
                 queue_size,
                 counter,
-                handles_empty_after: handles_empty_after,
+                handles_empty_after,
             }
         }
     }
