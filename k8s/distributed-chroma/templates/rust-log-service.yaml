@@ -11,7 +11,7 @@ data:
 
 ---
 
-{{if .Values.heapTenderService.configuration }}
+{{if .Values.heapTenderService.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -118,7 +118,7 @@ spec:
               cpu: {{ .Values.rustLogService.resources.requests.cpu }}
               memory: {{ .Values.rustLogService.resources.requests.memory }}
           {{ end }}
-        {{ if .Values.heapTenderService }}
+        {{ if .Values.heapTenderService.enabled }}
         - name: heap-tender
           {{ if .Values.heapTenderService.command }}
           command: {{ .Values.heapTenderService.command }}
@@ -156,6 +156,7 @@ spec:
               cpu: {{ .Values.heapTenderService.resources.requests.cpu }}
               memory: {{ .Values.heapTenderService.resources.requests.memory }}
           {{ end }}
+        {{ end }}
       {{if .Values.rustLogService.tolerations}}
       tolerations:
         {{ toYaml .Values.rustLogService.tolerations | nindent 8 }}
@@ -171,7 +172,6 @@ spec:
           labelSelector:
             matchLabels:
               member-type: rust-log-service
-        {{ end }}
 
 ---
 

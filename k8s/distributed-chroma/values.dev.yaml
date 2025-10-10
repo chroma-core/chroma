@@ -37,5 +37,8 @@ compactionService:
 rustLogService:
   replicaCount: 1
 
+heapTenderService:
+  enabled: true
+
 garbageCollector:
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
