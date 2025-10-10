@@ -21,6 +21,7 @@ use crate::DistributedSpannParametersFromSegmentError;
 use crate::HnswParametersFromSegmentError;
 use crate::InternalSchema;
 use crate::Metadata;
+use crate::SchemaError;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
 use crate::UpdateMetadata;
@@ -711,7 +712,7 @@ pub enum CreateCollectionError {
     #[error("Could not deserialize configuration: {0}")]
     Configuration(serde_json::Error),
     #[error("Could not serialize schema: {0}")]
-    Schema(serde_json::Error),
+    Schema(#[from] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("The operation was aborted, {0}")]
@@ -742,7 +743,7 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
             CreateCollectionError::DatabaseIdParseError => ErrorCodes::Internal,
             CreateCollectionError::InvalidSchema(_) => ErrorCodes::InvalidArgument,
-            CreateCollectionError::Schema(_) => ErrorCodes::Internal,
+            CreateCollectionError::Schema(e) => e.code(),
         }
     }
 }

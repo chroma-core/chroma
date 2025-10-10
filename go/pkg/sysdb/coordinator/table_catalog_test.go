@@ -469,6 +469,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 		uint64(1),
 		mock.Anything,
 		mock.Anything,
+		mock.Anything,
 	).Return(int64(1), nil)
 
 	mockTenantDb.On("UpdateTenantLastCompactionTime", tenantID, mock.Anything).Return(nil)
@@ -499,6 +500,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 		FlushSegmentCompactions:    flushSegment,
 		TotalRecordsPostCompaction: 1,
 		SizeBytesPostCompaction:    1,
+		SchemaStr:                  func() *string { s := "{}"; return &s }(),
 	}
 
 	// Execute test
@@ -676,6 +678,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollectionWithEmptyFilePat
 		uint64(1),
 		mock.Anything,
 		mock.Anything,
+		mock.Anything,
 	).Return(int64(1), nil)
 
 	mockTenantDb.On("UpdateTenantLastCompactionTime", tenantID, mock.Anything).Return(nil)
@@ -698,6 +701,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollectionWithEmptyFilePat
 		FlushSegmentCompactions:    flushSegment,
 		TotalRecordsPostCompaction: 1,
 		SizeBytesPostCompaction:    1,
+		SchemaStr:                  func() *string { s := "{}"; return &s }(),
 	}
 
 	// Execute test

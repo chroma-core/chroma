@@ -577,8 +577,10 @@ impl<'me> MetadataSegmentWriter<'me> {
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized: &MaterializeLogsResult,
         schema: Option<InternalSchema>,
-    ) -> Result<(), ApplyMaterializedLogError> {
+    ) -> Result<Option<InternalSchema>, ApplyMaterializedLogError> {
         let mut count = 0u64;
+        let mut schema = schema;
+        let mut schema_modified = false;
 
         let mut full_text_writer_batch = vec![];
         for record in materialized {
@@ -643,10 +645,11 @@ impl<'me> MetadataSegmentWriter<'me> {
                     // for fresh adds. TODO on whether to propagate error.
                     if let Some(metadata) = record.get_metadata_to_be_merged() {
                         for (key, value) in metadata.iter() {
-                            // everywhere that we check for schema will not affect legacy, since this function gets the schema directly
-                            // from sysdb -> legacy collections will have none for schema
-                            if let Some(ref schema) = schema {
-                                if !schema.is_metadata_type_index_enabled(key, value.value_type())? {
+                            if let Some(schema_mut) = schema.as_mut() {
+                                if schema_mut.ensure_key_from_metadata(key, value.value_type()) {
+                                    schema_modified = true;
+                                }
+                                if !schema_mut.is_metadata_type_index_enabled(key, value.value_type())? {
                                     continue;
                                 }
                             }
@@ -687,14 +690,17 @@ impl<'me> MetadataSegmentWriter<'me> {
 
                     // Metadata updates.
                     for (update_key, (old_value, new_value)) in metadata_delta.metadata_to_update {
-                        if let Some(ref schema) = schema {
+                        if let Some(schema_mut) = schema.as_mut() {
+                            if schema_mut.ensure_key_from_metadata(update_key, new_value.value_type()) {
+                                schema_modified = true;
+                            }
                             // theres basically 4 cases:
                             // 1.old value & new value are not indexed -> noop
                             // 2.old value is indexed & new value is not indexed -> delete old value
                             // 3.old value is not indexed & new value is indexed -> insert new value
                             // 4.old value is indexed & new value is indexed -> update old value
-                            let old_is_indexed = schema.is_metadata_type_index_enabled(update_key, old_value.value_type())?;
-                            let new_is_indexed = schema.is_metadata_type_index_enabled(update_key, new_value.value_type())?;
+                            let old_is_indexed = schema_mut.is_metadata_type_index_enabled(update_key, old_value.value_type())?;
+                            let new_is_indexed = schema_mut.is_metadata_type_index_enabled(update_key, new_value.value_type())?;
                             if !old_is_indexed && !new_is_indexed {
                                 continue;
                             }
@@ -742,8 +748,11 @@ impl<'me> MetadataSegmentWriter<'me> {
 
                     // Metadata inserts.
                     for (insert_key, new_value) in metadata_delta.metadata_to_insert {
-                        if let Some(ref schema) = schema {
-                            if !schema.is_metadata_type_index_enabled(insert_key, new_value.value_type())? {
+                        if let Some(schema_mut) = schema.as_mut() {
+                            if schema_mut.ensure_key_from_metadata(insert_key, new_value.value_type()) {
+                                schema_modified = true;
+                            }
+                            if !schema_mut.is_metadata_type_index_enabled(insert_key, new_value.value_type())? {
                                 continue;
                             }
                         }
@@ -806,8 +815,11 @@ impl<'me> MetadataSegmentWriter<'me> {
                     // Add new.
                     if let Some(metadata) = record.get_metadata_to_be_merged() {
                         for (key, value) in metadata.iter() {
-                            if let Some(ref schema) = schema {
-                                if !schema.is_metadata_type_index_enabled(key, value.value_type())? {
+                            if let Some(schema_mut) = schema.as_mut() {
+                                if schema_mut.ensure_key_from_metadata(key, value.value_type()) {
+                                    schema_modified = true;
+                                }
+                                if !schema_mut.is_metadata_type_index_enabled(key, value.value_type())? {
                                     continue;
                                 }
                             }
@@ -824,7 +836,8 @@ impl<'me> MetadataSegmentWriter<'me> {
             }
         }
         tracing::info!("Applied {} records to metadata segment", count,);
-        Ok(())
+        // return the schema only if it was modified (so will not affect legacy paths)
+        Ok(if schema_modified { schema } else { None })
     }
 
     pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {

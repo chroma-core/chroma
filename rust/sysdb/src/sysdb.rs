@@ -23,7 +23,8 @@ use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
     FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
-    ForkCollectionError, InternalSchema, Segment, SegmentConversionError, SegmentScope, Tenant,
+    ForkCollectionError, InternalSchema, SchemaError, Segment, SegmentConversionError,
+    SegmentScope, Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -541,6 +542,7 @@ impl SysDb {
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
+        schema: Option<InternalSchema>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -552,6 +554,7 @@ impl SysDb {
                     segment_flush_info,
                     total_records_post_compaction,
                     size_bytes_post_compaction,
+                    schema,
                 )
                 .await
             }
@@ -1048,7 +1051,11 @@ impl GrpcSysDb {
                 schema_str: schema
                     .map(|s| serde_json::to_string(&s))
                     .transpose()
-                    .map_err(CreateCollectionError::Schema)?,
+                    .map_err(|e| {
+                        CreateCollectionError::Schema(SchemaError::InvalidSchema {
+                            reason: e.to_string(),
+                        })
+                    })?,
             })
             .await
             .map_err(|err| match err.code() {
@@ -1480,6 +1487,7 @@ impl GrpcSysDb {
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
+        schema: Option<InternalSchema>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let segment_compaction_info =
             segment_flush_info
@@ -1497,6 +1505,14 @@ impl GrpcSysDb {
             }
         };
 
+        let schema_str = schema
+            .map(|s| serde_json::to_string(&s))
+            .transpose()
+            .map_err(|e| {
+                FlushCompactionError::Schema(SchemaError::InvalidSchema {
+                    reason: e.to_string(),
+                })
+            })?;
         let req = chroma_proto::FlushCollectionCompactionRequest {
             tenant_id,
             collection_id: collection_id.0.to_string(),
@@ -1505,6 +1521,7 @@ impl GrpcSysDb {
             segment_compaction_info,
             total_records_post_compaction,
             size_bytes_post_compaction,
+            schema_str,
         };
 
         let res = self.client.flush_collection_compaction(req).await;
@@ -1602,6 +1619,8 @@ pub enum FlushCompactionError {
     CollectionNotFound,
     #[error("Segment not found in sysdb")]
     SegmentNotFound,
+    #[error("Failed to serialize schema")]
+    Schema(#[from] SchemaError),
 }
 
 impl ChromaError for FlushCompactionError {
@@ -1618,6 +1637,7 @@ impl ChromaError for FlushCompactionError {
             FlushCompactionError::FlushCompactionResponseConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::CollectionNotFound => ErrorCodes::Internal,
             FlushCompactionError::SegmentNotFound => ErrorCodes::Internal,
+            FlushCompactionError::Schema(e) => e.code(),
         }
     }
 

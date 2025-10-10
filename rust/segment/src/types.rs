@@ -1009,23 +1009,21 @@ impl ChromaSegmentWriter<'_> {
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized: &MaterializeLogsResult,
         schema: Option<InternalSchema>,
-    ) -> Result<(), ApplyMaterializedLogError> {
+    ) -> Result<Option<InternalSchema>, ApplyMaterializedLogError> {
         match self {
-            ChromaSegmentWriter::RecordSegment(writer) => {
-                writer
-                    .apply_materialized_log_chunk(record_segment_reader, materialized)
-                    .await
-            }
+            ChromaSegmentWriter::RecordSegment(writer) => writer
+                .apply_materialized_log_chunk(record_segment_reader, materialized)
+                .await
+                .map(|_| None),
             ChromaSegmentWriter::MetadataSegment(writer) => {
                 writer
                     .apply_materialized_log_chunk(record_segment_reader, materialized, schema)
                     .await
             }
-            ChromaSegmentWriter::VectorSegment(writer) => {
-                writer
-                    .apply_materialized_log_chunk(record_segment_reader, materialized)
-                    .await
-            }
+            ChromaSegmentWriter::VectorSegment(writer) => writer
+                .apply_materialized_log_chunk(record_segment_reader, materialized)
+                .await
+                .map(|_| None),
         }
     }
 

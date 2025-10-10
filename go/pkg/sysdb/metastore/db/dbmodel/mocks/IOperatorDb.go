@@ -14,6 +14,36 @@ type IOperatorDb struct {
 	mock.Mock
 }
 
+// GetAll provides a mock function with no fields
+func (_m *IOperatorDb) GetAll() ([]*dbmodel.Operator, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAll")
+	}
+
+	var r0 []*dbmodel.Operator
+	var r1 error
+	if rf, ok := ret.Get(0).(func() ([]*dbmodel.Operator, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() []*dbmodel.Operator); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*dbmodel.Operator)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetByID provides a mock function with given fields: operatorID
 func (_m *IOperatorDb) GetByID(operatorID uuid.UUID) (*dbmodel.Operator, error) {
 	ret := _m.Called(operatorID)

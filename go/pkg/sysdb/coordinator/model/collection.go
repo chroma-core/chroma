@@ -91,6 +91,7 @@ type FlushCollectionCompaction struct {
 	FlushSegmentCompactions    []*FlushSegmentCompaction
 	TotalRecordsPostCompaction uint64
 	SizeBytesPostCompaction    uint64
+	SchemaStr                  *string
 }
 
 type FlushCollectionInfo struct {
