@@ -17,7 +17,7 @@ export interface EmbeddingFunction {
    * @param texts - Array of text strings to embed
    * @returns Promise resolving to array of embedding vectors
    */
-  generate(texts: string[]): Promise<number[][]>;
+  generate(texts: string[], isQuery?: boolean): Promise<number[][]>;
   /** Optional name identifier for the embedding function */
   name?: string;
   /** Returns the default vector space for this embedding function */
