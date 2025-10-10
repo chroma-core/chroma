@@ -24,6 +24,7 @@ from chromadb.api.types import (
     Embeddings,
     IDs,
     Include,
+    Schema,
     Metadatas,
     URIs,
     Where,
@@ -249,6 +250,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     def create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
@@ -256,17 +258,20 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         """Creates a collection"""
+        config_json = (
+            create_collection_configuration_to_json(configuration, metadata)
+            if configuration
+            else None
+        )
+        serialized_schema = schema.serialize_to_json() if schema else None
         resp_json = self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections",
             json={
                 "name": name,
                 "metadata": metadata,
-                "configuration": create_collection_configuration_to_json(
-                    configuration, metadata
-                )
-                if configuration
-                else None,
+                "configuration": config_json,
+                "schema": serialized_schema,
                 "get_or_create": get_or_create,
             },
         )
@@ -298,6 +303,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     def get_or_create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
@@ -307,6 +313,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             name=name,
             metadata=metadata,
             configuration=configuration,
+            schema=schema,
             get_or_create=True,
             tenant=tenant,
             database=database,

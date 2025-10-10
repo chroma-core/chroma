@@ -13,6 +13,7 @@ from typing import (
     TYPE_CHECKING,
     Final,
 )
+from copy import deepcopy
 from typing_extensions import TypeAlias
 from dataclasses import dataclass
 from numpy.typing import NDArray
@@ -1585,6 +1586,7 @@ EMBEDDING_KEY: Final[str] = "$embedding"
 
 # Index Type Classes
 
+
 @dataclass
 class FtsIndexType:
     enabled: bool
@@ -1628,6 +1630,7 @@ class BoolInvertedIndexType:
 
 
 # Individual Value Type Classes
+
 
 @dataclass
 class StringValueType:
@@ -1766,15 +1769,11 @@ class Schema:
         # TODO: Consider removing these checks in the future to allow disabling vector and FTS indexes
         # Temporarily disallow deleting vector index (both globally and per-key)
         if isinstance(config, VectorIndexConfig):
-            raise ValueError(
-                "Deleting vector index is not currently supported."
-            )
+            raise ValueError("Deleting vector index is not currently supported.")
 
         # Temporarily disallow deleting FTS index (both globally and per-key)
         if isinstance(config, FtsIndexConfig):
-            raise ValueError(
-                "Deleting FTS index is not currently supported."
-            )
+            raise ValueError("Deleting FTS index is not currently supported.")
 
         # TODO: Consider removing this check in the future to allow disabling all indexes for a key
         # Disallow disabling all index types for a key (config=None, key="some_key")
@@ -1822,7 +1821,7 @@ class Schema:
             embedding_function=config.embedding_function,
             hnsw=config.hnsw,
             spann=config.spann,
-            source_key=current_source_key  # Preserve original source_key (should be "$document")
+            source_key=current_source_key,  # Preserve original source_key (should be "$document")
         )
         self.key_overrides[EMBEDDING_KEY].float_list.vector_index = VectorIndexType(enabled=current_enabled, config=embedding_config)  # type: ignore[union-attr]
 
@@ -1847,37 +1846,51 @@ class Schema:
         if config_name == "FtsIndexConfig":
             if self.defaults.string is None:
                 self.defaults.string = StringValueType()
-            self.defaults.string.fts_index = FtsIndexType(enabled=enabled, config=cast(FtsIndexConfig, config))
+            self.defaults.string.fts_index = FtsIndexType(
+                enabled=enabled, config=cast(FtsIndexConfig, config)
+            )
 
         elif config_name == "StringInvertedIndexConfig":
             if self.defaults.string is None:
                 self.defaults.string = StringValueType()
-            self.defaults.string.string_inverted_index = StringInvertedIndexType(enabled=enabled, config=cast(StringInvertedIndexConfig, config))
+            self.defaults.string.string_inverted_index = StringInvertedIndexType(
+                enabled=enabled, config=cast(StringInvertedIndexConfig, config)
+            )
 
         elif config_name == "VectorIndexConfig":
             if self.defaults.float_list is None:
                 self.defaults.float_list = FloatListValueType()
-            self.defaults.float_list.vector_index = VectorIndexType(enabled=enabled, config=cast(VectorIndexConfig, config))
+            self.defaults.float_list.vector_index = VectorIndexType(
+                enabled=enabled, config=cast(VectorIndexConfig, config)
+            )
 
         elif config_name == "SparseVectorIndexConfig":
             if self.defaults.sparse_vector is None:
                 self.defaults.sparse_vector = SparseVectorValueType()
-            self.defaults.sparse_vector.sparse_vector_index = SparseVectorIndexType(enabled=enabled, config=cast(SparseVectorIndexConfig, config))
+            self.defaults.sparse_vector.sparse_vector_index = SparseVectorIndexType(
+                enabled=enabled, config=cast(SparseVectorIndexConfig, config)
+            )
 
         elif config_name == "IntInvertedIndexConfig":
             if self.defaults.int_value is None:
                 self.defaults.int_value = IntValueType()
-            self.defaults.int_value.int_inverted_index = IntInvertedIndexType(enabled=enabled, config=cast(IntInvertedIndexConfig, config))
+            self.defaults.int_value.int_inverted_index = IntInvertedIndexType(
+                enabled=enabled, config=cast(IntInvertedIndexConfig, config)
+            )
 
         elif config_name == "FloatInvertedIndexConfig":
             if self.defaults.float_value is None:
                 self.defaults.float_value = FloatValueType()
-            self.defaults.float_value.float_inverted_index = FloatInvertedIndexType(enabled=enabled, config=cast(FloatInvertedIndexConfig, config))
+            self.defaults.float_value.float_inverted_index = FloatInvertedIndexType(
+                enabled=enabled, config=cast(FloatInvertedIndexConfig, config)
+            )
 
         elif config_name == "BoolInvertedIndexConfig":
             if self.defaults.boolean is None:
                 self.defaults.boolean = BoolValueType()
-            self.defaults.boolean.bool_inverted_index = BoolInvertedIndexType(enabled=enabled, config=cast(BoolInvertedIndexConfig, config))
+            self.defaults.boolean.bool_inverted_index = BoolInvertedIndexType(
+                enabled=enabled, config=cast(BoolInvertedIndexConfig, config)
+            )
 
     def _set_index_for_key(self, key: str, config: IndexConfig, enabled: bool) -> None:
         """Set an index configuration for a specific key."""
@@ -1929,22 +1942,32 @@ class Schema:
         # Enable all index types with default configs
         self.key_overrides[key].string = StringValueType(
             fts_index=FtsIndexType(enabled=True, config=FtsIndexConfig()),
-            string_inverted_index=StringInvertedIndexType(enabled=True, config=StringInvertedIndexConfig())
+            string_inverted_index=StringInvertedIndexType(
+                enabled=True, config=StringInvertedIndexConfig()
+            ),
         )
         self.key_overrides[key].float_list = FloatListValueType(
             vector_index=VectorIndexType(enabled=True, config=VectorIndexConfig())
         )
         self.key_overrides[key].sparse_vector = SparseVectorValueType(
-            sparse_vector_index=SparseVectorIndexType(enabled=True, config=SparseVectorIndexConfig())
+            sparse_vector_index=SparseVectorIndexType(
+                enabled=True, config=SparseVectorIndexConfig()
+            )
         )
         self.key_overrides[key].int_value = IntValueType(
-            int_inverted_index=IntInvertedIndexType(enabled=True, config=IntInvertedIndexConfig())
+            int_inverted_index=IntInvertedIndexType(
+                enabled=True, config=IntInvertedIndexConfig()
+            )
         )
         self.key_overrides[key].float_value = FloatValueType(
-            float_inverted_index=FloatInvertedIndexType(enabled=True, config=FloatInvertedIndexConfig())
+            float_inverted_index=FloatInvertedIndexType(
+                enabled=True, config=FloatInvertedIndexConfig()
+            )
         )
         self.key_overrides[key].boolean = BoolValueType(
-            bool_inverted_index=BoolInvertedIndexType(enabled=True, config=BoolInvertedIndexConfig())
+            bool_inverted_index=BoolInvertedIndexType(
+                enabled=True, config=BoolInvertedIndexConfig()
+            )
         )
 
     def _disable_all_indexes_for_key(self, key: str) -> None:
@@ -1955,50 +1978,74 @@ class Schema:
         # Disable all index types with default configs
         self.key_overrides[key].string = StringValueType(
             fts_index=FtsIndexType(enabled=False, config=FtsIndexConfig()),
-            string_inverted_index=StringInvertedIndexType(enabled=False, config=StringInvertedIndexConfig())
+            string_inverted_index=StringInvertedIndexType(
+                enabled=False, config=StringInvertedIndexConfig()
+            ),
         )
         self.key_overrides[key].float_list = FloatListValueType(
             vector_index=VectorIndexType(enabled=False, config=VectorIndexConfig())
         )
         self.key_overrides[key].sparse_vector = SparseVectorValueType(
-            sparse_vector_index=SparseVectorIndexType(enabled=False, config=SparseVectorIndexConfig())
+            sparse_vector_index=SparseVectorIndexType(
+                enabled=False, config=SparseVectorIndexConfig()
+            )
         )
         self.key_overrides[key].int_value = IntValueType(
-            int_inverted_index=IntInvertedIndexType(enabled=False, config=IntInvertedIndexConfig())
+            int_inverted_index=IntInvertedIndexType(
+                enabled=False, config=IntInvertedIndexConfig()
+            )
         )
         self.key_overrides[key].float_value = FloatValueType(
-            float_inverted_index=FloatInvertedIndexType(enabled=False, config=FloatInvertedIndexConfig())
+            float_inverted_index=FloatInvertedIndexType(
+                enabled=False, config=FloatInvertedIndexConfig()
+            )
         )
         self.key_overrides[key].boolean = BoolValueType(
-            bool_inverted_index=BoolInvertedIndexType(enabled=False, config=BoolInvertedIndexConfig())
+            bool_inverted_index=BoolInvertedIndexType(
+                enabled=False, config=BoolInvertedIndexConfig()
+            )
         )
 
     def _initialize_defaults(self) -> None:
         """Initialize defaults with base structure and standard configuration."""
         # Initialize all value types with default configurations
         self.defaults.string = StringValueType(
-            fts_index=FtsIndexType(enabled=False, config=FtsIndexConfig()),  # Disabled for performance
-            string_inverted_index=StringInvertedIndexType(enabled=True, config=StringInvertedIndexConfig())
+            fts_index=FtsIndexType(
+                enabled=False, config=FtsIndexConfig()
+            ),  # Disabled for performance
+            string_inverted_index=StringInvertedIndexType(
+                enabled=True, config=StringInvertedIndexConfig()
+            ),
         )
 
         self.defaults.float_list = FloatListValueType(
-            vector_index=VectorIndexType(enabled=False, config=VectorIndexConfig())  # Disabled by default
+            vector_index=VectorIndexType(
+                enabled=False, config=VectorIndexConfig()
+            )  # Disabled by default
         )
 
         self.defaults.sparse_vector = SparseVectorValueType(
-            sparse_vector_index=SparseVectorIndexType(enabled=False, config=SparseVectorIndexConfig())  # Disabled for performance
+            sparse_vector_index=SparseVectorIndexType(
+                enabled=False, config=SparseVectorIndexConfig()
+            )  # Disabled for performance
         )
 
         self.defaults.int_value = IntValueType(
-            int_inverted_index=IntInvertedIndexType(enabled=True, config=IntInvertedIndexConfig())
+            int_inverted_index=IntInvertedIndexType(
+                enabled=True, config=IntInvertedIndexConfig()
+            )
         )
 
         self.defaults.float_value = FloatValueType(
-            float_inverted_index=FloatInvertedIndexType(enabled=True, config=FloatInvertedIndexConfig())
+            float_inverted_index=FloatInvertedIndexType(
+                enabled=True, config=FloatInvertedIndexConfig()
+            )
         )
 
         self.defaults.boolean = BoolValueType(
-            bool_inverted_index=BoolInvertedIndexType(enabled=True, config=BoolInvertedIndexConfig())
+            bool_inverted_index=BoolInvertedIndexType(
+                enabled=True, config=BoolInvertedIndexConfig()
+            )
         )
 
     def _initialize_key_overrides(self) -> None:
@@ -2007,7 +2054,9 @@ class Schema:
         self.key_overrides[DOCUMENT_KEY] = ValueTypes(
             string=StringValueType(
                 fts_index=FtsIndexType(enabled=True, config=FtsIndexConfig()),
-                string_inverted_index=StringInvertedIndexType(enabled=False, config=StringInvertedIndexConfig())
+                string_inverted_index=StringInvertedIndexType(
+                    enabled=False, config=StringInvertedIndexConfig()
+                ),
             )
         )
 
@@ -2054,10 +2103,14 @@ class Schema:
             result["#string"] = self._serialize_string_value_type(value_types.string)
 
         if value_types.float_list is not None:
-            result["#float_list"] = self._serialize_float_list_value_type(value_types.float_list)
+            result["#float_list"] = self._serialize_float_list_value_type(
+                value_types.float_list
+            )
 
         if value_types.sparse_vector is not None:
-            result["#sparse_vector"] = self._serialize_sparse_vector_value_type(value_types.sparse_vector)
+            result["#sparse_vector"] = self._serialize_sparse_vector_value_type(
+                value_types.sparse_vector
+            )
 
         if value_types.int_value is not None:
             result["#int"] = self._serialize_int_value_type(value_types.int_value)
@@ -2070,44 +2123,54 @@ class Schema:
 
         return result
 
-    def _serialize_string_value_type(self, string_type: StringValueType) -> Dict[str, Any]:
+    def _serialize_string_value_type(
+        self, string_type: StringValueType
+    ) -> Dict[str, Any]:
         """Serialize StringValueType to JSON format."""
         result: Dict[str, Any] = {}
 
         if string_type.fts_index is not None:
             result["$fts_index"] = {
                 "enabled": string_type.fts_index.enabled,
-                "config": self._serialize_config(string_type.fts_index.config)
+                "config": self._serialize_config(string_type.fts_index.config),
             }
 
         if string_type.string_inverted_index is not None:
             result["$string_inverted_index"] = {
                 "enabled": string_type.string_inverted_index.enabled,
-                "config": self._serialize_config(string_type.string_inverted_index.config)
+                "config": self._serialize_config(
+                    string_type.string_inverted_index.config
+                ),
             }
 
         return result
 
-    def _serialize_float_list_value_type(self, float_list_type: FloatListValueType) -> Dict[str, Any]:
+    def _serialize_float_list_value_type(
+        self, float_list_type: FloatListValueType
+    ) -> Dict[str, Any]:
         """Serialize FloatListValueType to JSON format."""
         result: Dict[str, Any] = {}
 
         if float_list_type.vector_index is not None:
             result["$vector_index"] = {
                 "enabled": float_list_type.vector_index.enabled,
-                "config": self._serialize_config(float_list_type.vector_index.config)
+                "config": self._serialize_config(float_list_type.vector_index.config),
             }
 
         return result
 
-    def _serialize_sparse_vector_value_type(self, sparse_vector_type: SparseVectorValueType) -> Dict[str, Any]:
+    def _serialize_sparse_vector_value_type(
+        self, sparse_vector_type: SparseVectorValueType
+    ) -> Dict[str, Any]:
         """Serialize SparseVectorValueType to JSON format."""
         result: Dict[str, Any] = {}
 
         if sparse_vector_type.sparse_vector_index is not None:
             result["$sparse_vector_index"] = {
                 "enabled": sparse_vector_type.sparse_vector_index.enabled,
-                "config": self._serialize_config(sparse_vector_type.sparse_vector_index.config)
+                "config": self._serialize_config(
+                    sparse_vector_type.sparse_vector_index.config
+                ),
             }
 
         return result
@@ -2119,7 +2182,7 @@ class Schema:
         if int_type.int_inverted_index is not None:
             result["$int_inverted_index"] = {
                 "enabled": int_type.int_inverted_index.enabled,
-                "config": self._serialize_config(int_type.int_inverted_index.config)
+                "config": self._serialize_config(int_type.int_inverted_index.config),
             }
 
         return result
@@ -2131,7 +2194,9 @@ class Schema:
         if float_type.float_inverted_index is not None:
             result["$float_inverted_index"] = {
                 "enabled": float_type.float_inverted_index.enabled,
-                "config": self._serialize_config(float_type.float_inverted_index.config)
+                "config": self._serialize_config(
+                    float_type.float_inverted_index.config
+                ),
             }
 
         return result
@@ -2143,7 +2208,7 @@ class Schema:
         if bool_type.bool_inverted_index is not None:
             result["$bool_inverted_index"] = {
                 "enabled": bool_type.bool_inverted_index.enabled,
-                "config": self._serialize_config(bool_type.bool_inverted_index.config)
+                "config": self._serialize_config(bool_type.bool_inverted_index.config),
             }
 
         return result
@@ -2176,7 +2241,10 @@ class Schema:
                             if hasattr(config, "space") and config.space is None:
                                 config_dict["space"] = embedding_func.default_space()
                             elif hasattr(config, "space") and config.space is not None:
-                                if config.space not in embedding_func.supported_spaces():
+                                if (
+                                    config.space
+                                    not in embedding_func.supported_spaces()
+                                ):
                                     warnings.warn(
                                         f"space {config.space} is not supported by {embedding_func.name()}. Supported spaces: {embedding_func.supported_spaces()}",
                                         UserWarning,
@@ -2207,19 +2275,27 @@ class Schema:
 
         # Deserialize each value type if present
         if "#string" in value_types_json:
-            result.string = cls._deserialize_string_value_type(value_types_json["#string"])
+            result.string = cls._deserialize_string_value_type(
+                value_types_json["#string"]
+            )
 
         if "#float_list" in value_types_json:
-            result.float_list = cls._deserialize_float_list_value_type(value_types_json["#float_list"])
+            result.float_list = cls._deserialize_float_list_value_type(
+                value_types_json["#float_list"]
+            )
 
         if "#sparse_vector" in value_types_json:
-            result.sparse_vector = cls._deserialize_sparse_vector_value_type(value_types_json["#sparse_vector"])
+            result.sparse_vector = cls._deserialize_sparse_vector_value_type(
+                value_types_json["#sparse_vector"]
+            )
 
         if "#int" in value_types_json:
             result.int_value = cls._deserialize_int_value_type(value_types_json["#int"])
 
         if "#float" in value_types_json:
-            result.float_value = cls._deserialize_float_value_type(value_types_json["#float"])
+            result.float_value = cls._deserialize_float_value_type(
+                value_types_json["#float"]
+            )
 
         if "#bool" in value_types_json:
             result.boolean = cls._deserialize_bool_value_type(value_types_json["#bool"])
@@ -2227,7 +2303,9 @@ class Schema:
         return result
 
     @classmethod
-    def _deserialize_string_value_type(cls, string_json: Dict[str, Any]) -> StringValueType:
+    def _deserialize_string_value_type(
+        cls, string_json: Dict[str, Any]
+    ) -> StringValueType:
         """Deserialize StringValueType from JSON format."""
         fts_index = None
         string_inverted_index = None
@@ -2244,19 +2322,25 @@ class Schema:
             string_enabled = string_index_data.get("enabled", True)
             string_config_data = string_index_data.get("config", {})
             string_config = StringInvertedIndexConfig(**string_config_data)
-            string_inverted_index = StringInvertedIndexType(enabled=string_enabled, config=string_config)
+            string_inverted_index = StringInvertedIndexType(
+                enabled=string_enabled, config=string_config
+            )
 
-        return StringValueType(fts_index=fts_index, string_inverted_index=string_inverted_index)
+        return StringValueType(
+            fts_index=fts_index, string_inverted_index=string_inverted_index
+        )
 
     @classmethod
-    def _deserialize_float_list_value_type(cls, float_list_json: Dict[str, Any]) -> FloatListValueType:
+    def _deserialize_float_list_value_type(
+        cls, float_list_json: Dict[str, Any]
+    ) -> FloatListValueType:
         """Deserialize FloatListValueType from JSON format."""
         vector_index = None
 
         if "$vector_index" in float_list_json:
             index_data = float_list_json["$vector_index"]
             enabled = index_data.get("enabled", True)
-            config_data = index_data.get("config", {})
+            config_data = deepcopy(index_data.get("config", {}))
 
             # Handle embedding function deserialization
             if "embedding_function" in config_data:
@@ -2265,14 +2349,21 @@ class Schema:
                     config_data["embedding_function"] = None
                 else:
                     try:
-                        from chromadb.utils.embedding_functions import known_embedding_functions
+                        from chromadb.utils.embedding_functions import (
+                            known_embedding_functions,
+                        )
+
                         ef_name = ef_config["name"]
                         ef = known_embedding_functions[ef_name]
-                        config_data["embedding_function"] = ef.build_from_config(ef_config["config"])
+                        config_data["embedding_function"] = ef.build_from_config(
+                            ef_config["config"]
+                        )
 
                         # Handle space deserialization
                         if "space" not in config_data or config_data["space"] is None:
-                            config_data["space"] = config_data["embedding_function"].default_space()
+                            config_data["space"] = config_data[
+                                "embedding_function"
+                            ].default_space()
                     except Exception as e:
                         warnings.warn(
                             f"Could not reconstruct embedding function {ef_config.get('name', 'unknown')}: {e}. Setting to None.",
@@ -2287,14 +2378,16 @@ class Schema:
         return FloatListValueType(vector_index=vector_index)
 
     @classmethod
-    def _deserialize_sparse_vector_value_type(cls, sparse_vector_json: Dict[str, Any]) -> SparseVectorValueType:
+    def _deserialize_sparse_vector_value_type(
+        cls, sparse_vector_json: Dict[str, Any]
+    ) -> SparseVectorValueType:
         """Deserialize SparseVectorValueType from JSON format."""
         sparse_vector_index = None
 
         if "$sparse_vector_index" in sparse_vector_json:
             index_data = sparse_vector_json["$sparse_vector_index"]
             enabled = index_data.get("enabled", True)
-            config_data = index_data.get("config", {})
+            config_data = deepcopy(index_data.get("config", {}))
 
             # Handle embedding function deserialization
             if "embedding_function" in config_data:
@@ -2303,10 +2396,15 @@ class Schema:
                     config_data["embedding_function"] = None
                 else:
                     try:
-                        from chromadb.utils.embedding_functions import known_embedding_functions
+                        from chromadb.utils.embedding_functions import (
+                            sparse_known_embedding_functions,
+                        )
+
                         ef_name = ef_config["name"]
-                        ef = known_embedding_functions[ef_name]
-                        config_data["embedding_function"] = ef.build_from_config(ef_config["config"])
+                        ef = sparse_known_embedding_functions[ef_name]
+                        config_data["embedding_function"] = ef.build_from_config(
+                            ef_config["config"]
+                        )
                     except Exception as e:
                         warnings.warn(
                             f"Could not reconstruct sparse embedding function {ef_config.get('name', 'unknown')}: {e}. Setting to None.",
@@ -2335,7 +2433,9 @@ class Schema:
         return IntValueType(int_inverted_index=int_inverted_index)
 
     @classmethod
-    def _deserialize_float_value_type(cls, float_json: Dict[str, Any]) -> FloatValueType:
+    def _deserialize_float_value_type(
+        cls, float_json: Dict[str, Any]
+    ) -> FloatValueType:
         """Deserialize FloatValueType from JSON format."""
         float_inverted_index = None
 
@@ -2344,7 +2444,9 @@ class Schema:
             enabled = index_data.get("enabled", True)
             config_data = index_data.get("config", {})
             config = FloatInvertedIndexConfig(**config_data)
-            float_inverted_index = FloatInvertedIndexType(enabled=enabled, config=config)
+            float_inverted_index = FloatInvertedIndexType(
+                enabled=enabled, config=config
+            )
 
         return FloatValueType(float_inverted_index=float_inverted_index)
 

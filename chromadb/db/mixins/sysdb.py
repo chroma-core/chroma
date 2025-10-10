@@ -6,6 +6,7 @@ from overrides import override
 from pypika import Table, Column
 from itertools import groupby
 
+from chromadb.api.types import Schema
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import Cursor, SqlDB, ParameterValue, get_sql
 from chromadb.db.system import SysDB
@@ -278,6 +279,7 @@ class SqlSysDB(SqlDB, SysDB):
         self,
         id: UUID,
         name: str,
+        schema: Optional[Schema],
         configuration: CreateCollectionConfiguration,
         segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
@@ -315,6 +317,7 @@ class SqlSysDB(SqlDB, SysDB):
             configuration_json=create_collection_configuration_to_json(
                 configuration, cast(CollectionMetadata, metadata)
             ),
+            serialized_schema=None,
             metadata=metadata,
             dimension=dimension,
             tenant=tenant,
@@ -548,6 +551,7 @@ class SqlSysDB(SqlDB, SysDB):
                         configuration_json=collection_configuration_to_json(
                             configuration
                         ),
+                        serialized_schema=None,
                         metadata=metadata,
                         dimension=dimension,
                         tenant=str(rows[0][5]),
