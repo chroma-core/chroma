@@ -12,7 +12,6 @@ data:
 ---
 
 {{if .Values.heapTenderService.enabled }}
-{{if .Values.heapTenderService.configuration }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -21,7 +20,6 @@ metadata:
 data:
   config.yaml: |
 {{  .Values.heapTenderService.configuration | indent 4 }}
-{{ end }}
 {{ end }}
 
 ---
