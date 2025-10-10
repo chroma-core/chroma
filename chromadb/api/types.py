@@ -1729,6 +1729,13 @@ class Schema:
                     "FTS index cannot be enabled on specific keys. Use create_index(config=FtsIndexConfig(...)) without specifying a key to configure the FTS index globally."
                 )
 
+        # Disallow sparse vector index without a specific key
+        if isinstance(config, SparseVectorIndexConfig) and key is None:
+            raise ValueError(
+                "Sparse vector index must be created on a specific key. "
+                "Please specify a key using: create_index(config=SparseVectorIndexConfig(...), key='your_key')"
+            )
+
         # TODO: Consider removing this check in the future to allow enabling all indexes for a key
         # Disallow enabling all index types for a key (config=None, key="some_key")
         if config is None and key is not None:
@@ -1766,7 +1773,7 @@ class Schema:
                 f"Cannot delete index on special key '{key}'. These keys are managed automatically by the system."
             )
 
-        # TODO: Consider removing these checks in the future to allow disabling vector and FTS indexes
+        # TODO: Consider removing these checks in the future to allow disabling vector, FTS, and sparse vector indexes
         # Temporarily disallow deleting vector index (both globally and per-key)
         if isinstance(config, VectorIndexConfig):
             raise ValueError("Deleting vector index is not currently supported.")
@@ -1774,6 +1781,12 @@ class Schema:
         # Temporarily disallow deleting FTS index (both globally and per-key)
         if isinstance(config, FtsIndexConfig):
             raise ValueError("Deleting FTS index is not currently supported.")
+
+        # Temporarily disallow deleting sparse vector index (both globally and per-key)
+        if isinstance(config, SparseVectorIndexConfig):
+            raise ValueError(
+                "Deleting sparse vector index is not currently supported."
+            )
 
         # TODO: Consider removing this check in the future to allow disabling all indexes for a key
         # Disallow disabling all index types for a key (config=None, key="some_key")
@@ -1892,12 +1905,35 @@ class Schema:
                 enabled=enabled, config=cast(BoolInvertedIndexConfig, config)
             )
 
+    def _validate_single_sparse_vector_index(self, key: str) -> None:
+        """
+        Validate that only one sparse vector index is enabled per collection.
+
+        Raises ValueError if another key already has a sparse vector index enabled.
+        """
+        for existing_key, value_types in self.key_overrides.items():
+            if existing_key == key:
+                continue  # Skip the current key being updated
+            if value_types.sparse_vector is not None:
+                if value_types.sparse_vector.sparse_vector_index is not None:
+                    if value_types.sparse_vector.sparse_vector_index.enabled:
+                        raise ValueError(
+                            f"Cannot enable sparse vector index on key '{key}'. "
+                            f"A sparse vector index is already enabled on key '{existing_key}'. "
+                            f"Only one sparse vector index is allowed per collection."
+                        )
+
     def _set_index_for_key(self, key: str, config: IndexConfig, enabled: bool) -> None:
         """Set an index configuration for a specific key."""
+        config_name = self._get_config_class_name(config)
+
+        # Validate sparse vector index - only one is allowed per collection
+        # Do this BEFORE creating the key entry
+        if config_name == "SparseVectorIndexConfig" and enabled:
+            self._validate_single_sparse_vector_index(key)
+
         if key not in self.key_overrides:
             self.key_overrides[key] = ValueTypes()
-
-        config_name = self._get_config_class_name(config)
 
         if config_name == "FtsIndexConfig":
             if self.key_overrides[key].string is None:

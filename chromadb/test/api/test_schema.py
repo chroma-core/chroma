@@ -1074,9 +1074,9 @@ class TestNewSchema:
             int_config = IntInvertedIndexConfig()
             original.delete_index(config=int_config, key="count")
 
-            # 5. Enable sparse vector on another key "secondary_embeddings"
-            sparse_config2 = SparseVectorIndexConfig(source_key="description")
-            original.create_index(config=sparse_config2, key="secondary_embeddings")
+            # 5. Disable float_inverted_index on "price" key
+            float_config = FloatInvertedIndexConfig()
+            original.delete_index(config=float_config, key="price")
 
             # Serialize to JSON
             json_data = original.serialize_to_json()
@@ -1094,7 +1094,7 @@ class TestNewSchema:
             assert "embeddings_field" in key_overrides
             assert "tags" in key_overrides
             assert "count" in key_overrides
-            assert "secondary_embeddings" in key_overrides
+            assert "price" in key_overrides
             assert "$document" in key_overrides  # Default key
             assert "$embedding" in key_overrides  # Default key with vector config
 
@@ -1139,19 +1139,17 @@ class TestNewSchema:
             assert "#float" not in count_json
             assert "#bool" not in count_json
 
-            # Exhaustive validation of secondary_embeddings
-            secondary_json = key_overrides["secondary_embeddings"]
-            assert "#sparse_vector" in secondary_json
-            assert secondary_json["#sparse_vector"]["$sparse_vector_index"]["enabled"] is True
-            assert secondary_json["#sparse_vector"]["$sparse_vector_index"]["config"]["source_key"] == "description"
-            # No embedding function specified, should use legacy
-            assert secondary_json["#sparse_vector"]["$sparse_vector_index"]["config"]["embedding_function"]["type"] == "legacy"
-            # Verify sparse override: only sparse_vector should be present
-            assert "#string" not in secondary_json
-            assert "#float_list" not in secondary_json
-            assert "#int" not in secondary_json
-            assert "#float" not in secondary_json
-            assert "#bool" not in secondary_json
+            # Exhaustive validation of price
+            price_json = key_overrides["price"]
+            assert "#float" in price_json
+            assert price_json["#float"]["$float_inverted_index"]["enabled"] is False
+            assert price_json["#float"]["$float_inverted_index"]["config"] == {}
+            # Verify sparse override: only float should be present
+            assert "#string" not in price_json
+            assert "#sparse_vector" not in price_json
+            assert "#float_list" not in price_json
+            assert "#int" not in price_json
+            assert "#bool" not in price_json
 
             # Exhaustive validation of $embedding
             embedding_json = key_overrides["$embedding"]
@@ -1229,12 +1227,14 @@ class TestNewSchema:
             assert deserialized.key_overrides["count"].string is None
             assert deserialized.key_overrides["count"].float_list is None
 
-            # 5. Check secondary_embeddings sparse vector
-            assert "secondary_embeddings" in deserialized.key_overrides
-            assert deserialized.key_overrides["secondary_embeddings"].sparse_vector is not None
-            assert deserialized.key_overrides["secondary_embeddings"].sparse_vector.sparse_vector_index is not None
-            assert deserialized.key_overrides["secondary_embeddings"].sparse_vector.sparse_vector_index.enabled is True
-            assert deserialized.key_overrides["secondary_embeddings"].sparse_vector.sparse_vector_index.config.source_key == "description"
+            # 5. Check price has float_inverted_index disabled
+            assert "price" in deserialized.key_overrides
+            assert deserialized.key_overrides["price"].float_value is not None
+            assert deserialized.key_overrides["price"].float_value.float_inverted_index is not None
+            assert deserialized.key_overrides["price"].float_value.float_inverted_index.enabled is False
+            # Sparse override: other value types should be None
+            assert deserialized.key_overrides["price"].string is None
+            assert deserialized.key_overrides["price"].sparse_vector is None
 
             # 6. Check $embedding has updated vector config
             assert "$embedding" in deserialized.key_overrides
@@ -1314,41 +1314,41 @@ class TestNewSchema:
         """Test that disabling an index reverts to default behavior (key may still exist with disabled state)."""
         schema = Schema()
 
-        # Enable sparse vector on "temp_field"
-        sparse_config = SparseVectorIndexConfig(source_key="temp_source")
-        schema.create_index(config=sparse_config, key="temp_field")
+        # Enable string_inverted_index on "temp_field"
+        string_config = StringInvertedIndexConfig()
+        schema.create_index(config=string_config, key="temp_field")
 
         # Verify it's enabled
         assert "temp_field" in schema.key_overrides
         temp_field_initial = schema.key_overrides["temp_field"]
-        assert temp_field_initial.sparse_vector is not None
-        assert temp_field_initial.sparse_vector.sparse_vector_index is not None
-        assert temp_field_initial.sparse_vector.sparse_vector_index.enabled is True
+        assert temp_field_initial.string is not None
+        assert temp_field_initial.string.string_inverted_index is not None
+        assert temp_field_initial.string.string_inverted_index.enabled is True
 
         # Now disable it
-        schema.delete_index(config=sparse_config, key="temp_field")
+        schema.delete_index(config=string_config, key="temp_field")
 
         # Verify it's now disabled (key still exists but with disabled state)
         assert "temp_field" in schema.key_overrides
         temp_field = schema.key_overrides["temp_field"]
-        assert temp_field.sparse_vector is not None
-        assert temp_field.sparse_vector.sparse_vector_index is not None
-        assert temp_field.sparse_vector.sparse_vector_index.enabled is False
+        assert temp_field.string is not None
+        assert temp_field.string.string_inverted_index is not None
+        assert temp_field.string.string_inverted_index.enabled is False
 
         # Serialize and verify disabled state is preserved
         json_data = schema.serialize_to_json()
         assert "temp_field" in json_data["key_overrides"]
         temp_field_json = json_data["key_overrides"]["temp_field"]
-        assert "#sparse_vector" in temp_field_json
-        assert temp_field_json["#sparse_vector"]["$sparse_vector_index"]["enabled"] is False
+        assert "#string" in temp_field_json
+        assert temp_field_json["#string"]["$string_inverted_index"]["enabled"] is False
 
         # Deserialize and verify disabled state survives roundtrip
         deserialized = Schema.deserialize_from_json(json_data)
         assert "temp_field" in deserialized.key_overrides
         des_temp_field = deserialized.key_overrides["temp_field"]
-        assert des_temp_field.sparse_vector is not None
-        assert des_temp_field.sparse_vector.sparse_vector_index is not None
-        assert des_temp_field.sparse_vector.sparse_vector_index.enabled is False
+        assert des_temp_field.string is not None
+        assert des_temp_field.string.string_inverted_index is not None
+        assert des_temp_field.string.string_inverted_index.enabled is False
 
     def test_error_handling_invalid_operations(self) -> None:
         """Test that invalid operations raise appropriate errors."""
@@ -1511,10 +1511,10 @@ class TestNewSchema:
         # Create 50 key overrides with different configurations
         for i in range(50):
             key_name = f"field_{i}"
-            if i % 3 == 0:
-                # Enable sparse vector
+            if i == 0:
+                # Enable sparse vector on ONE key only
                 schema.create_index(config=SparseVectorIndexConfig(source_key=f"source_{i}"), key=key_name)
-            elif i % 3 == 1:
+            elif i % 2 == 1:
                 # Disable string inverted index
                 schema.delete_index(config=StringInvertedIndexConfig(), key=key_name)
             else:
@@ -1552,24 +1552,24 @@ class TestNewSchema:
         assert len(deserialized.key_overrides) == 52
 
         # Spot check deserialized values
-        assert "field_0" in deserialized.key_overrides  # 0 % 3 == 0 -> sparse vector
+        assert "field_0" in deserialized.key_overrides  # i == 0 -> sparse vector
         des_field_0 = deserialized.key_overrides["field_0"]
         assert des_field_0.sparse_vector is not None
         assert des_field_0.sparse_vector.sparse_vector_index is not None
         assert des_field_0.sparse_vector.sparse_vector_index.enabled is True
         assert des_field_0.sparse_vector.sparse_vector_index.config.source_key == "source_0"
 
-        assert "field_49" in deserialized.key_overrides  # 49 % 3 == 1 -> string disabled
+        assert "field_49" in deserialized.key_overrides  # 49 % 2 == 1 -> string disabled
         des_field_49 = deserialized.key_overrides["field_49"]
         assert des_field_49.string is not None
         assert des_field_49.string.string_inverted_index is not None
         assert des_field_49.string.string_inverted_index.enabled is False
 
-        assert "field_47" in deserialized.key_overrides  # 47 % 3 == 2 -> int disabled
-        des_field_47 = deserialized.key_overrides["field_47"]
-        assert des_field_47.int_value is not None
-        assert des_field_47.int_value.int_inverted_index is not None
-        assert des_field_47.int_value.int_inverted_index.enabled is False
+        assert "field_48" in deserialized.key_overrides  # 48 % 2 == 0 -> int disabled
+        des_field_48 = deserialized.key_overrides["field_48"]
+        assert des_field_48.int_value is not None
+        assert des_field_48.int_value.int_inverted_index is not None
+        assert des_field_48.int_value.int_inverted_index.enabled is False
 
     def test_chained_operations(self) -> None:
         """Test chaining multiple create_index and delete_index operations."""
@@ -1578,7 +1578,7 @@ class TestNewSchema:
         # Chain multiple operations
         result = (schema
                   .create_index(config=SparseVectorIndexConfig(source_key="text"), key="field1")
-                  .create_index(config=SparseVectorIndexConfig(source_key="content"), key="field2")
+                  .delete_index(config=StringInvertedIndexConfig(), key="field2")
                   .delete_index(config=StringInvertedIndexConfig(), key="field3")
                   .delete_index(config=IntInvertedIndexConfig(), key="field4"))
 
@@ -1594,9 +1594,9 @@ class TestNewSchema:
 
         assert "field2" in schema.key_overrides
         field2 = schema.key_overrides["field2"]
-        assert field2.sparse_vector is not None
-        assert field2.sparse_vector.sparse_vector_index is not None
-        assert field2.sparse_vector.sparse_vector_index.enabled is True
+        assert field2.string is not None
+        assert field2.string.string_inverted_index is not None
+        assert field2.string.string_inverted_index.enabled is False
 
         assert "field3" in schema.key_overrides
         field3 = schema.key_overrides["field3"]
@@ -1830,17 +1830,16 @@ class TestNewSchema:
         assert field1.sparse_vector.sparse_vector_index.enabled is True
         assert field1.sparse_vector.sparse_vector_index.config.source_key == "default_source"
 
-        # Now create another key with a DIFFERENT config
-        sparse_config2 = SparseVectorIndexConfig(source_key="different_source")
-        schema.create_index(config=sparse_config2, key="field2")
+        # Now create another key with a DIFFERENT config (use string_inverted_index instead)
+        string_config = StringInvertedIndexConfig()
+        schema.create_index(config=string_config, key="field2")
 
         # Verify field2 has its own config
         assert "field2" in schema.key_overrides
         field2 = schema.key_overrides["field2"]
-        assert field2.sparse_vector is not None
-        assert field2.sparse_vector.sparse_vector_index is not None
-        assert field2.sparse_vector.sparse_vector_index.enabled is True
-        assert field2.sparse_vector.sparse_vector_index.config.source_key == "different_source"
+        assert field2.string is not None
+        assert field2.string.string_inverted_index is not None
+        assert field2.string.string_inverted_index.enabled is True
 
         # Verify field1 is unchanged
         assert field1.sparse_vector.sparse_vector_index.config.source_key == "default_source"
@@ -1906,21 +1905,21 @@ class TestNewSchema:
         """Test that modifying one key's overrides doesn't affect other keys."""
         schema = Schema()
 
-        # Create sparse vector on multiple keys with different configs
+        # Create sparse vector on one key and string indexes on others
         schema.create_index(config=SparseVectorIndexConfig(source_key="source_a"), key="key_a")
-        schema.create_index(config=SparseVectorIndexConfig(source_key="source_b"), key="key_b")
-        schema.create_index(config=SparseVectorIndexConfig(source_key="source_c"), key="key_c")
+        schema.create_index(config=StringInvertedIndexConfig(), key="key_b")
+        schema.create_index(config=StringInvertedIndexConfig(), key="key_c")
 
         # Verify each key has its own config
         assert schema.key_overrides["key_a"].sparse_vector.sparse_vector_index.config.source_key == "source_a"  # type: ignore[union-attr]
-        assert schema.key_overrides["key_b"].sparse_vector.sparse_vector_index.config.source_key == "source_b"  # type: ignore[union-attr]
-        assert schema.key_overrides["key_c"].sparse_vector.sparse_vector_index.config.source_key == "source_c"  # type: ignore[union-attr]
+        assert schema.key_overrides["key_b"].string.string_inverted_index.enabled is True  # type: ignore[union-attr]
+        assert schema.key_overrides["key_c"].string.string_inverted_index.enabled is True  # type: ignore[union-attr]
 
-        # Now disable sparse vector on key_b
-        schema.delete_index(config=SparseVectorIndexConfig(), key="key_b")
+        # Now disable string inverted index on key_b
+        schema.delete_index(config=StringInvertedIndexConfig(), key="key_b")
 
         # Verify key_b is disabled
-        assert schema.key_overrides["key_b"].sparse_vector.sparse_vector_index.enabled is False  # type: ignore[union-attr]
+        assert schema.key_overrides["key_b"].string.string_inverted_index.enabled is False  # type: ignore[union-attr]
 
         # Verify key_a and key_c are unaffected
         key_a = schema.key_overrides["key_a"]
@@ -1930,19 +1929,18 @@ class TestNewSchema:
         assert key_a.sparse_vector.sparse_vector_index.config.source_key == "source_a"
 
         key_c = schema.key_overrides["key_c"]
-        assert key_c.sparse_vector is not None
-        assert key_c.sparse_vector.sparse_vector_index is not None
-        assert key_c.sparse_vector.sparse_vector_index.enabled is True
-        assert key_c.sparse_vector.sparse_vector_index.config.source_key == "source_c"
+        assert key_c.string is not None
+        assert key_c.string.string_inverted_index is not None
+        assert key_c.string.string_inverted_index.enabled is True
 
         # Serialize and deserialize to ensure independence is preserved
         json_data = schema.serialize_to_json()
         deserialized = Schema.deserialize_from_json(json_data)
 
         # Verify after roundtrip
-        assert deserialized.key_overrides["key_a"].sparse_vector.sparse_vector_index.config.source_key == "source_a"  # type: ignore[union-attr]
-        assert deserialized.key_overrides["key_b"].sparse_vector.sparse_vector_index.enabled is False  # type: ignore[union-attr]
-        assert deserialized.key_overrides["key_c"].sparse_vector.sparse_vector_index.config.source_key == "source_c"  # type: ignore[union-attr]
+        assert deserialized.key_overrides["key_a"].sparse_vector.sparse_vector_index.config.source_key == "source_a"
+        assert deserialized.key_overrides["key_b"].string.string_inverted_index.enabled is False
+        assert deserialized.key_overrides["key_c"].string.string_inverted_index.enabled is True
 
     def test_global_default_disable_then_key_enable(self) -> None:
         """Test disabling an index globally, then enabling it on specific keys."""
@@ -2034,3 +2032,29 @@ class TestNewSchema:
         # Others are None (sparse override)
         assert des_field.string is None
         assert des_field.int_value is None
+
+
+def test_sparse_vector_cannot_be_created_globally() -> None:
+    """Test that sparse vector index cannot be created globally (without a key)."""
+    schema = Schema()
+    sparse_config = SparseVectorIndexConfig()
+
+    # Try to enable sparse vector globally - should fail
+    with pytest.raises(ValueError, match="Sparse vector index must be created on a specific key"):
+        schema.create_index(config=sparse_config)
+
+
+def test_sparse_vector_cannot_be_deleted() -> None:
+    """Test that sparse vector index cannot be deleted (temporarily disallowed)."""
+    schema = Schema()
+    sparse_config = SparseVectorIndexConfig()
+
+    # Create sparse vector on a key first
+    schema.create_index(config=sparse_config, key="my_key")
+    assert schema.key_overrides["my_key"].sparse_vector is not None
+    assert schema.key_overrides["my_key"].sparse_vector.sparse_vector_index is not None
+    assert schema.key_overrides["my_key"].sparse_vector.sparse_vector_index.enabled is True
+
+    # Try to delete it - should fail
+    with pytest.raises(ValueError, match="Deleting sparse vector index is not currently supported"):
+        schema.delete_index(config=sparse_config, key="my_key")

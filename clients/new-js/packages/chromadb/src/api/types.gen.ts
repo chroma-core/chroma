@@ -356,11 +356,7 @@ export type SparseVector = {
 };
 
 export type SparseVectorIndexConfig = {
-    /**
-     * Embedding function configuration (flexible JSON for dynamic configurations)
-     * TODO(Sanket): Strongly type ef.
-     */
-    embedding_function?: unknown;
+    embedding_function?: null | EmbeddingFunctionConfiguration;
     /**
      * Key to source the sparse vector from
      */

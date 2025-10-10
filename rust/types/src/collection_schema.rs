@@ -307,9 +307,8 @@ impl InternalSchema {
             sparse_vector: Some(SparseVectorValueType {
                 sparse_vector_index: Some(SparseVectorIndexType {
                     enabled: false,
-                    // TODO(Sanket): Add a strong type here.
                     config: SparseVectorIndexConfig {
-                        embedding_function: Some(serde_json::json!({"type": "legacy"})),
+                        embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
                         source_key: None,
                     },
                 }),
@@ -1066,11 +1065,19 @@ impl InternalSchema {
             },
         };
 
-        // Just overwrite the vector_index in the existing $embedding key override
+        // Update defaults (keep enabled=false, just update the config)
+        // This serves as the template for any new float_list fields
+        if let Some(float_list) = &mut schema.defaults.float_list {
+            if let Some(vector_index) = &mut float_list.vector_index {
+                vector_index.config = vector_config.clone();
+            }
+        }
+
+        // Update the vector_index in the existing $embedding key override
+        // Keep enabled=true (already set by new_default) and update the config
         if let Some(embedding_types) = schema.key_overrides.get_mut("$embedding") {
             if let Some(float_list) = &mut embedding_types.float_list {
                 if let Some(vector_index) = &mut float_list.vector_index {
-                    // Keep enabled=true (already set by new_default) and just update the config
                     vector_index.config = vector_config;
                 }
             }
@@ -1396,10 +1403,9 @@ impl SpannIndexConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SparseVectorIndexConfig {
-    /// Embedding function configuration (flexible JSON for dynamic configurations)
-    /// TODO(Sanket): Strongly type ef.
+    /// Embedding function configuration
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub embedding_function: Option<serde_json::Value>,
+    pub embedding_function: Option<EmbeddingFunctionConfiguration>,
     /// Key to source the sparse vector from
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
@@ -1982,13 +1988,13 @@ mod tests {
     fn test_merge_sparse_vector_index_config() {
         // Test sparse vector index config merging
         let default_config = SparseVectorIndexConfig {
-            embedding_function: Some(serde_json::json!({"type": "legacy"})),
+            embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
             source_key: Some("default_sparse_key".to_string()),
         };
 
         let user_config = SparseVectorIndexConfig {
-            embedding_function: Some(serde_json::json!({"type": "custom", "model": "test"})), // Override
-            source_key: None, // Will use default
+            embedding_function: None,                        // Will use default
+            source_key: Some("user_sparse_key".to_string()), // Override
         };
 
         let result =
@@ -1996,12 +2002,12 @@ mod tests {
                 .unwrap();
 
         // Check user override
+        assert_eq!(result.source_key, Some("user_sparse_key".to_string()));
+        // Check default preserved
         assert_eq!(
             result.embedding_function,
-            Some(serde_json::json!({"type": "custom", "model": "test"}))
+            Some(EmbeddingFunctionConfiguration::Legacy)
         );
-        // Check default preserved
-        assert_eq!(result.source_key, Some("default_sparse_key".to_string()));
     }
 
     #[test]
@@ -2323,6 +2329,82 @@ mod tests {
         assert_eq!(spann_config.ef_construction, Some(400));
         assert_eq!(spann_config.ef_search, Some(60));
         assert_eq!(spann_config.max_neighbors, Some(24));
+    }
+
+    #[test]
+    fn test_reconcile_with_collection_config_updates_both_defaults_and_embedding() {
+        // Test that collection config updates BOTH defaults.float_list.vector_index
+        // AND key_overrides["$embedding"].float_list.vector_index
+        let schema = InternalSchema::new_default(KnnIndex::Hnsw);
+
+        let collection_config = InternalCollectionConfiguration {
+            vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
+                ef_construction: 300,
+                max_neighbors: 32,
+                ef_search: 50,
+                num_threads: 8,
+                batch_size: 200,
+                sync_threshold: 2000,
+                resize_factor: 1.5,
+                space: Space::L2,
+            }),
+            embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+        };
+
+        let result =
+            InternalSchema::reconcile_with_collection_config(schema, collection_config).unwrap();
+
+        // Check that defaults.float_list.vector_index was updated
+        let defaults_vector_index = result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+
+        // Should be disabled in defaults (template for new keys)
+        assert!(!defaults_vector_index.enabled);
+        // But config should be updated
+        assert_eq!(defaults_vector_index.config.space, Some(Space::L2));
+        assert_eq!(
+            defaults_vector_index.config.embedding_function,
+            Some(EmbeddingFunctionConfiguration::Legacy)
+        );
+        assert_eq!(
+            defaults_vector_index.config.source_key,
+            Some("$document".to_string())
+        );
+        let defaults_hnsw = defaults_vector_index.config.hnsw.as_ref().unwrap();
+        assert_eq!(defaults_hnsw.ef_construction, Some(300));
+        assert_eq!(defaults_hnsw.max_neighbors, Some(32));
+
+        // Check that $embedding key override was also updated
+        let embedding_override = result.key_overrides.get("$embedding").unwrap();
+        let embedding_vector_index = embedding_override
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+
+        // Should be enabled on $embedding
+        assert!(embedding_vector_index.enabled);
+        // Config should match defaults
+        assert_eq!(embedding_vector_index.config.space, Some(Space::L2));
+        assert_eq!(
+            embedding_vector_index.config.embedding_function,
+            Some(EmbeddingFunctionConfiguration::Legacy)
+        );
+        assert_eq!(
+            embedding_vector_index.config.source_key,
+            Some("$document".to_string())
+        );
+        let embedding_hnsw = embedding_vector_index.config.hnsw.as_ref().unwrap();
+        assert_eq!(embedding_hnsw.ef_construction, Some(300));
+        assert_eq!(embedding_hnsw.max_neighbors, Some(32));
     }
 
     #[test]
