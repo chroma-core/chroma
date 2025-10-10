@@ -1705,6 +1705,17 @@ impl ServiceBasedFrontend {
                                 QueryError::Other(Box::new(err) as Box<dyn ChromaError>)
                             })?;
                     }
+                    // for rank expressions, if knn has a key, check if the key is enabled
+                    if let Some(rank_expr) = &payload.rank.expr {
+                        let knn_queries = rank_expr.knn_queries();
+                        for knn_query in knn_queries {
+                            schema
+                                .is_knn_key_indexing_enabled(&knn_query.key, &knn_query.query)
+                                .map_err(|err| {
+                                    QueryError::Other(Box::new(err) as Box<dyn ChromaError>)
+                                })?;
+                        }
+                    }
                 }
             }
         }

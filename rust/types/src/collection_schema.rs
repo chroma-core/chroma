@@ -9,6 +9,7 @@ use crate::collection_configuration::{
 };
 use crate::hnsw_configuration::Space;
 use crate::metadata::{MetadataComparison, MetadataValueType, Where};
+use crate::operator::QueryVector;
 use crate::{
     default_batch_size, default_construction_ef, default_construction_ef_spann,
     default_initial_lambda, default_m, default_m_spann, default_merge_threshold,
@@ -1239,6 +1240,32 @@ impl InternalSchema {
         }
     }
 
+    pub fn is_knn_key_indexing_enabled(
+        &self,
+        key: &str,
+        query: &QueryVector,
+    ) -> Result<(), FilterValidationError> {
+        match query {
+            QueryVector::Sparse(_) => {
+                let is_enabled = self
+                    .is_metadata_type_index_enabled(key, MetadataValueType::SparseVector)
+                    .map_err(FilterValidationError::Schema)?;
+                if !is_enabled {
+                    return Err(FilterValidationError::IndexingDisabled {
+                        key: key.to_string(),
+                        value_type: MetadataValueType::SparseVector,
+                    });
+                }
+                Ok(())
+            }
+            QueryVector::Dense(_) => {
+                // TODO: once we allow turning off dense vector indexing, we need to check if the key is enabled
+                // Dense vectors are always indexed
+                Ok(())
+            }
+        }
+    }
+
     pub fn ensure_key_from_metadata(&mut self, key: &str, value_type: MetadataValueType) -> bool {
         let value_types = self.key_overrides.entry(key.to_string()).or_default();
         match value_type {
@@ -1445,6 +1472,7 @@ pub struct BoolInvertedIndexConfig {
 mod tests {
     use super::*;
     use crate::hnsw_configuration::Space;
+    use crate::metadata::SparseVector;
     use crate::{InternalHnswConfiguration, InternalSpannConfiguration};
 
     #[test]
@@ -1731,6 +1759,60 @@ mod tests {
             .expect("expected key override to exist after ensure call");
         assert!(entry.string.is_some());
         assert_eq!(entry.boolean, schema.defaults.boolean);
+    }
+
+    #[test]
+    fn test_is_knn_key_indexing_enabled_sparse_disabled_errors() {
+        let schema = InternalSchema::new_default(KnnIndex::Spann);
+        let result = schema.is_knn_key_indexing_enabled(
+            "custom_sparse",
+            &QueryVector::Sparse(SparseVector::new(vec![0_u32], vec![1.0_f32])),
+        );
+
+        let err = result.expect_err("expected indexing disabled error");
+        match err {
+            FilterValidationError::IndexingDisabled { key, value_type } => {
+                assert_eq!(key, "custom_sparse");
+                assert_eq!(value_type, crate::metadata::MetadataValueType::SparseVector);
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_is_knn_key_indexing_enabled_sparse_enabled_succeeds() {
+        let mut schema = InternalSchema::new_default(KnnIndex::Spann);
+        schema.key_overrides.insert(
+            "sparse_enabled".to_string(),
+            ValueTypes {
+                sparse_vector: Some(SparseVectorValueType {
+                    sparse_vector_index: Some(SparseVectorIndexType {
+                        enabled: true,
+                        config: SparseVectorIndexConfig {
+                            embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+                            source_key: None,
+                        },
+                    }),
+                }),
+                ..Default::default()
+            },
+        );
+
+        let result = schema.is_knn_key_indexing_enabled(
+            "sparse_enabled",
+            &QueryVector::Sparse(SparseVector::new(vec![0_u32], vec![1.0_f32])),
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_is_knn_key_indexing_enabled_dense_succeeds() {
+        let schema = InternalSchema::new_default(KnnIndex::Spann);
+        let result = schema
+            .is_knn_key_indexing_enabled("$embedding", &QueryVector::Dense(vec![0.1_f32, 0.2_f32]));
+
+        assert!(result.is_ok());
     }
 
     #[test]
