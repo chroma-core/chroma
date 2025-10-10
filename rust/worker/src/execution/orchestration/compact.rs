@@ -419,6 +419,7 @@ impl CompactOrchestrator {
                 writer,
                 materialized_logs.clone(),
                 writers.record_reader.clone(),
+                None,
             );
             let task = wrap(
                 operator,
@@ -447,6 +448,7 @@ impl CompactOrchestrator {
                 writer,
                 materialized_logs.clone(),
                 writers.record_reader.clone(),
+                self.collection.get().and_then(|c| c.schema.clone()),
             );
             let task = wrap(
                 operator,
@@ -471,8 +473,12 @@ impl CompactOrchestrator {
             let writer = ChromaSegmentWriter::VectorSegment(writers.vector_writer);
             let span = self.get_segment_writer_span(&writer);
             let operator = ApplyLogToSegmentWriterOperator::new();
-            let input =
-                ApplyLogToSegmentWriterInput::new(writer, materialized_logs, writers.record_reader);
+            let input = ApplyLogToSegmentWriterInput::new(
+                writer,
+                materialized_logs,
+                writers.record_reader,
+                None,
+            );
             let task = wrap(
                 operator,
                 input,

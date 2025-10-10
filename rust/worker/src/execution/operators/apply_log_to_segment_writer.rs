@@ -8,7 +8,7 @@ use chroma_segment::{
     types::{ChromaSegmentWriter, LogMaterializerError, MaterializeLogsResult},
 };
 use chroma_system::Operator;
-use chroma_types::SegmentUuid;
+use chroma_types::{InternalSchema, SegmentUuid};
 use thiserror::Error;
 use tracing::Instrument;
 
@@ -56,6 +56,7 @@ pub struct ApplyLogToSegmentWriterInput<'bf> {
     segment_writer: ChromaSegmentWriter<'bf>,
     materialized_logs: MaterializeLogsResult,
     record_segment_reader: Option<RecordSegmentReader<'bf>>,
+    schema: Option<InternalSchema>,
 }
 
 impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
@@ -63,11 +64,13 @@ impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
         segment_writer: ChromaSegmentWriter<'bf>,
         materialized_logs: MaterializeLogsResult,
         record_segment_reader: Option<RecordSegmentReader<'bf>>,
+        schema: Option<InternalSchema>,
     ) -> Self {
         ApplyLogToSegmentWriterInput {
             segment_writer,
             materialized_logs,
             record_segment_reader,
+            schema,
         }
     }
 }
@@ -98,7 +101,11 @@ impl Operator<ApplyLogToSegmentWriterInput<'_>, ApplyLogToSegmentWriterOutput>
         // Apply materialized records.
         match input
             .segment_writer
-            .apply_materialized_log_chunk(&input.record_segment_reader, &input.materialized_logs)
+            .apply_materialized_log_chunk(
+                &input.record_segment_reader,
+                &input.materialized_logs,
+                input.schema.clone(),
+            )
             .instrument(tracing::trace_span!(
                 "Apply materialized logs",
                 otel.name = format!(

@@ -1329,7 +1329,7 @@ mod tests {
                 .await
                 .expect("Log materialization failed");
             metadata_writer
-                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records, None)
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
@@ -1406,7 +1406,7 @@ mod tests {
             .await
             .expect("Log materialization failed");
         metadata_writer
-            .apply_materialized_log_chunk(&some_reader, &mat_records)
+            .apply_materialized_log_chunk(&some_reader, &mat_records, None)
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer

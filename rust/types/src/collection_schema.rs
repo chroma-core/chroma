@@ -1,11 +1,14 @@
+use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::collection_configuration::{
     EmbeddingFunctionConfiguration, InternalCollectionConfiguration, VectorIndexConfiguration,
 };
 use crate::hnsw_configuration::Space;
+use crate::metadata::MetadataValueType;
 use crate::{
     default_batch_size, default_construction_ef, default_construction_ef_spann,
     default_initial_lambda, default_m, default_m_spann, default_merge_threshold,
@@ -15,6 +18,20 @@ use crate::{
     default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
     default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor, KnnIndex,
 };
+
+impl ChromaError for SchemaError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum SchemaError {
+    #[error("Schema is malformed: missing index configuration for metadata key '{key}' with type '{value_type}'")]
+    MissingIndexConfiguration { key: String, value_type: String },
+    #[error("Schema reconciliation failed: {reason}")]
+    InvalidSchema { reason: String },
+}
 
 /// Internal schema representation for collection index configurations
 /// This represents the server-side schema structure used for index management
@@ -825,6 +842,128 @@ impl InternalSchema {
         }
 
         Ok(schema)
+    }
+
+    /// Check if a specific metadata key-value should be indexed based on schema configuration
+    pub fn is_metadata_type_index_enabled(
+        &self,
+        key: &str,
+        value_type: MetadataValueType,
+    ) -> Result<bool, SchemaError> {
+        let v_type = self.key_overrides.get(key).unwrap_or(&self.defaults);
+
+        match value_type {
+            MetadataValueType::Bool => match &v_type.boolean {
+                Some(bool_type) => match &bool_type.bool_inverted_index {
+                    Some(bool_inverted_index) => Ok(bool_inverted_index.enabled),
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "bool".to_string(),
+                    }),
+                },
+                None => match &self.defaults.boolean {
+                    Some(bool_type) => match &bool_type.bool_inverted_index {
+                        Some(bool_inverted_index) => Ok(bool_inverted_index.enabled),
+                        None => Err(SchemaError::MissingIndexConfiguration {
+                            key: key.to_string(),
+                            value_type: "bool".to_string(),
+                        }),
+                    },
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "bool".to_string(),
+                    }),
+                },
+            },
+            MetadataValueType::Int => match &v_type.int {
+                Some(int_type) => match &int_type.int_inverted_index {
+                    Some(int_inverted_index) => Ok(int_inverted_index.enabled),
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "int".to_string(),
+                    }),
+                },
+                None => match &self.defaults.int {
+                    Some(int_type) => match &int_type.int_inverted_index {
+                        Some(int_inverted_index) => Ok(int_inverted_index.enabled),
+                        None => Err(SchemaError::MissingIndexConfiguration {
+                            key: key.to_string(),
+                            value_type: "int".to_string(),
+                        }),
+                    },
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "int".to_string(),
+                    }),
+                },
+            },
+            MetadataValueType::Float => match &v_type.float {
+                Some(float_type) => match &float_type.float_inverted_index {
+                    Some(float_inverted_index) => Ok(float_inverted_index.enabled),
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "float".to_string(),
+                    }),
+                },
+                None => match &self.defaults.float {
+                    Some(float_type) => match &float_type.float_inverted_index {
+                        Some(float_inverted_index) => Ok(float_inverted_index.enabled),
+                        None => Err(SchemaError::MissingIndexConfiguration {
+                            key: key.to_string(),
+                            value_type: "float".to_string(),
+                        }),
+                    },
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "float".to_string(),
+                    }),
+                },
+            },
+            MetadataValueType::Str => match &v_type.string {
+                Some(string_type) => match &string_type.string_inverted_index {
+                    Some(string_inverted_index) => Ok(string_inverted_index.enabled),
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "string".to_string(),
+                    }),
+                },
+                None => match &self.defaults.string {
+                    Some(string_type) => match &string_type.string_inverted_index {
+                        Some(string_inverted_index) => Ok(string_inverted_index.enabled),
+                        None => Err(SchemaError::MissingIndexConfiguration {
+                            key: key.to_string(),
+                            value_type: "string".to_string(),
+                        }),
+                    },
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "string".to_string(),
+                    }),
+                },
+            },
+            MetadataValueType::SparseVector => match &v_type.sparse_vector {
+                Some(sparse_vector_type) => match &sparse_vector_type.sparse_vector_index {
+                    Some(sparse_vector_index) => Ok(sparse_vector_index.enabled),
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "sparse_vector".to_string(),
+                    }),
+                },
+                None => match &self.defaults.sparse_vector {
+                    Some(sparse_vector_type) => match &sparse_vector_type.sparse_vector_index {
+                        Some(sparse_vector_index) => Ok(sparse_vector_index.enabled),
+                        None => Err(SchemaError::MissingIndexConfiguration {
+                            key: key.to_string(),
+                            value_type: "sparse_vector".to_string(),
+                        }),
+                    },
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "sparse_vector".to_string(),
+                    }),
+                },
+            },
+        }
     }
 }
 
