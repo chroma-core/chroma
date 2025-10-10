@@ -143,7 +143,6 @@ impl CollectionsWithSegmentsProvider {
     pub(crate) async fn get_collection_with_segments(
         &mut self,
         collection_id: CollectionUuid,
-        enable_schema: bool,
     ) -> Result<CollectionAndSegments, CollectionsWithSegmentsProviderError> {
         if let Some(collection_and_segments_with_ttl) = self
             .collections_with_segments_cache
@@ -186,18 +185,16 @@ impl CollectionsWithSegmentsProvider {
         };
 
         // reconcile schema and config
-        if enable_schema {
-            let reconciled_schema = InternalSchema::reconcile_schema_and_config(
-                collection_and_segments_sysdb.collection.schema.clone(),
-                Some(collection_and_segments_sysdb.collection.config.clone()),
-            )
-            .map_err(|reason| {
-                CollectionsWithSegmentsProviderError::InvalidSchema(SchemaError::InvalidSchema {
-                    reason,
-                })
-            })?;
-            collection_and_segments_sysdb.collection.schema = Some(reconciled_schema);
-        }
+        let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+            collection_and_segments_sysdb.collection.schema.clone(),
+            Some(collection_and_segments_sysdb.collection.config.clone()),
+        )
+        .map_err(|reason| {
+            CollectionsWithSegmentsProviderError::InvalidSchema(SchemaError::InvalidSchema {
+                reason,
+            })
+        })?;
+        collection_and_segments_sysdb.collection.schema = Some(reconciled_schema);
         self.set_collection_with_segments(collection_and_segments_sysdb.clone())
             .await;
         Ok(collection_and_segments_sysdb)

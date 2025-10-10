@@ -167,8 +167,6 @@ pub struct FrontendServerConfig {
     pub cors_allow_origins: Option<Vec<String>>,
     #[serde(default = "default_enable_span_indexing")]
     pub enable_span_indexing: bool,
-    #[serde(default = "default_enable_schema")]
-    pub enable_schema: bool,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "sample_configs/distributed.yaml";
@@ -198,9 +196,9 @@ impl FrontendServerConfig {
         if std::path::Path::new(path).exists() {
             f = figment::Figment::from(Yaml::file(path)).merge(f);
         }
-        let res: Result<Self, _> = f.extract();
+        let res = f.extract();
         match res {
-            Ok(config) => config.propogate_frontend_enable_schema(),
+            Ok(config) => config,
             Err(e) => panic!("Error loading config: {}", e),
         }
     }
@@ -212,21 +210,11 @@ impl FrontendServerConfig {
         let config_data = config.data;
         let config_str = std::str::from_utf8(&config_data).expect("Failed to parse config data");
         let f = figment::Figment::from(Yaml::string(config_str));
-        let res: Result<Self, _> = f.extract();
+        let res = f.extract();
         match res {
-            Ok(config) => config.propogate_frontend_enable_schema(),
+            Ok(config) => config,
             Err(e) => panic!("Error loading config: {}", e),
         }
-    }
-}
-
-impl FrontendServerConfig {
-    fn propogate_frontend_enable_schema(mut self) -> Self {
-        // Propagate the top-level toggle into the flattened frontend config for backward compatibility.
-        if self.enable_schema {
-            self.frontend.enable_schema = true;
-        }
-        self
     }
 }
 
@@ -267,7 +255,6 @@ mod tests {
             CacheConfig::Nop => {}
             _ => {}
         }
-        assert!(config.enable_schema);
         assert!(config.frontend.enable_schema);
     }
 
