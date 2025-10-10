@@ -20,7 +20,7 @@ impl Debug for SchedulerTaskHandle {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub struct TaskId(u64);
+pub(crate) struct TaskId(u64);
 
 pub struct HandleGuard {
     weak_handles: Weak<RwLock<HashMap<TaskId, SchedulerTaskHandle>>>,
