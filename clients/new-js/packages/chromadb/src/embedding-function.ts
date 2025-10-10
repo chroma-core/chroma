@@ -20,8 +20,8 @@ export interface EmbeddingFunction {
   generate(texts: string[]): Promise<number[][]>;
   /**
    * Generates embeddings specifically for query texts.
-   * Default implementation calls generate().
-   * Can be overridden to provide query-specific embedding logic.
+   * The client will fall back to using the implementation of `generate`
+   * if this function is not provided.
    * @param texts - Array of query text strings to embed
    * @returns Promise resolving to array of embedding vectors
    */
