@@ -52,7 +52,38 @@ third_search_ids = results.ids[2]     # IDs from Search 3
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Search, K, Knn } from 'chromadb';
+
+// Execute multiple searches in one call
+const searches = [
+  // Search 1: Recent articles
+  new Search()
+    .where(K("type").eq("article").and(K("year").gte(2024)))
+    .rank(Knn({ query: queryVector1 }))
+    .limit(5)
+    .select(K.DOCUMENT, K.SCORE, "title"),
+  
+  // Search 2: Papers by specific authors
+  new Search()
+    .where(K("author").isIn(["Smith", "Jones"]))
+    .rank(Knn({ query: queryVector2 }))
+    .limit(10)
+    .select(K.DOCUMENT, K.SCORE, "title", "author"),
+  
+  // Search 3: Featured content (no ranking)
+  new Search()
+    .where(K("status").eq("featured"))
+    .limit(20)
+    .select("title", "date")
+];
+
+// Execute all searches in one request
+const results = await collection.search(searches);
+
+// Access results by index
+const firstSearchIds = results.ids[0];     // IDs from Search 1
+const secondSearchIds = results.ids[1];    // IDs from Search 2
+const thirdSearchIds = results.ids[2];     // IDs from Search 3
 ```
 {% /Tab %}
 
@@ -98,7 +129,29 @@ for search_index, rows in enumerate(all_rows):
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Single search returns single result set
+const result = await collection.search(singleSearch);
+const ids = result.ids[0];  // Single list of IDs
+
+// Batch search returns multiple result sets
+const results = await collection.search([search1, search2, search3]);
+const ids1 = results.ids[0];    // IDs from search1
+const ids2 = results.ids[1];    // IDs from search2
+const ids3 = results.ids[2];    // IDs from search3
+
+// Using rows() for easier processing
+const allRows = results.rows();  // Returns list of lists
+const rows1 = allRows[0];       // Rows from search1
+const rows2 = allRows[1];       // Rows from search2
+const rows3 = allRows[2];       // Rows from search3
+
+// Process each search's results
+for (const [searchIndex, rows] of allRows.entries()) {
+  console.log(`Results from search ${searchIndex + 1}:`);
+  for (const row of rows) {
+    console.log(`  - ${row.id}: ${row.metadata?.title ?? 'N/A'}`);
+  }
+}
 ```
 {% /Tab %}
 
@@ -148,7 +201,25 @@ for i, query_name in enumerate(["Original", "Expanded", "Refined"]):
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Compare different query embeddings
+const queryVariations = [originalQuery, expandedQuery, refinedQuery];
+
+const searches = queryVariations.map(q =>
+  new Search()
+    .rank(Knn({ query: q }))
+    .limit(10)
+    .select(K.DOCUMENT, K.SCORE, "title")
+);
+
+const results = await collection.search(searches);
+
+// Compare top results from each variation
+["Original", "Expanded", "Refined"].forEach((queryName, i) => {
+  console.log(`${queryName} Query Top Result:`);
+  if (results.scores[i] && results.scores[i].length > 0) {
+    console.log(`  Score: ${results.scores[i][0].toFixed(3)}`);
+  }
+});
 ```
 {% /Tab %}
 
@@ -191,7 +262,33 @@ results = collection.search(searches)
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Test different ranking strategies
+const searches = [
+  // Strategy A: Pure KNN
+  new Search()
+    .rank(Knn({ query: queryVector }))
+    .limit(10)
+    .select(K.SCORE, "title"),
+  
+  // Strategy B: Weighted KNN
+  new Search()
+    .rank(Knn({ query: queryVector }).multiply(0.8).add(0.2))
+    .limit(10)
+    .select(K.SCORE, "title"),
+  
+  // Strategy C: Hybrid with RRF
+  new Search()
+    .rank(Rrf({
+      ranks: [
+        Knn({ query: queryVector, returnRank: true }),
+        Knn({ query: sparseVector, key: "sparse_embedding", returnRank: true })
+      ]
+    }))
+    .limit(10)
+    .select(K.SCORE, "title")
+];
+
+const results = await collection.search(searches);
 ```
 {% /Tab %}
 
@@ -222,7 +319,18 @@ results = collection.search(searches)
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Different category filters
+const categories = ["technology", "science", "business"];
+
+const searches = categories.map(category =>
+  new Search()
+    .where(K("category").eq(category))
+    .rank(Knn({ query: queryVector }))
+    .limit(5)
+    .select("title", "category", K.SCORE)
+);
+
+const results = await collection.search(searches);
 ```
 {% /Tab %}
 
@@ -249,7 +357,15 @@ results = collection.search(searches)  # Single API call for all
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// ❌ Sequential execution (slow)
+const results = [];
+for (const search of searches) {
+  const result = await collection.search(search);  // Separate API call each time
+  results.push(result);
+}
+
+// ✅ Batch execution (fast)
+const results2 = await collection.search(searches);  // Single API call for all
 ```
 {% /Tab %}
 
@@ -287,7 +403,16 @@ results = collection.search(searches)
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+const searches = [
+  new Search().limit(5).select(K.DOCUMENT),       // Only documents
+  new Search().limit(5).select(K.SCORE, "title"), // Scores and title
+  new Search().limit(5).selectAll()               // Everything
+];
+
+const results = await collection.search(searches);
+// results.documents[0] will have values
+// results.documents[1] will be null (not selected)
+// results.documents[2] will have values
 ```
 {% /Tab %}
 
@@ -364,7 +489,71 @@ Top results in science:
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Search, K, Knn } from 'chromadb';
+
+async function compareCategoryRelevance(
+  collection: any,
+  queryVector: number[],
+  categories: string[]
+) {
+  // Find top results in each category for the same query
+  
+  // Build searches for each category
+  const searches = categories.map(cat =>
+    new Search()
+      .where(K("category").eq(cat))
+      .rank(Knn({ query: queryVector }))
+      .limit(3)
+      .select(K.DOCUMENT, K.SCORE, "title", "category")
+  );
+  
+  // Execute batch search
+  const results = await collection.search(searches);
+  const allRows = results.rows();
+  
+  // Process and display results
+  for (const [catIndex, category] of categories.entries()) {
+    console.log(`\nTop results in ${category}:`);
+    const rows = allRows[catIndex];
+    
+    if (!rows || rows.length === 0) {
+      console.log("  No results found");
+      continue;
+    }
+        
+    for (const [i, row] of rows.entries()) {
+      const title = row.metadata?.title ?? 'Untitled';
+      const score = row.score ?? 0;
+      const preview = row.document?.substring(0, 100) ?? '';
+      
+      console.log(`  ${i+1}. ${title}`);
+      console.log(`     Score: ${score.toFixed(3)}`);
+      console.log(`     Preview: ${preview}...`);
+    }
+  }
+}
+
+// Usage
+const categories = ["technology", "science", "business", "health"];
+const queryVector = embeddingModel.encode("artificial intelligence applications");
+
+await compareCategoryRelevance(collection, queryVector, categories);
+```
+
+Example output:
+```
+Top results in technology:
+  1. AI in Software Development
+     Score: 0.234
+     Preview: The integration of artificial intelligence in modern software development has revolutionized...
+  2. Machine Learning Frameworks
+     Score: 0.312
+     Preview: Popular frameworks for building AI applications include TensorFlow, PyTorch, and...
+
+Top results in science:
+  1. Neural Networks Research
+     Score: 0.289
+     Preview: Recent advances in neural network architectures have enabled breakthrough applications...
 ```
 {% /Tab %}
 

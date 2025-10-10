@@ -31,7 +31,17 @@ K.ID.is_in(["doc1", "doc2", "doc3"])
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { K } from 'chromadb';
+
+// K is an alias for Key - use K for more concise code
+// Filter by metadata field
+K("status").eq("active");
+
+// Filter by document content
+K.DOCUMENT.contains("machine learning");
+
+// Filter by document IDs
+K.ID.isIn(["doc1", "doc2", "doc3"]);
 ```
 {% /Tab %}
 
@@ -74,7 +84,16 @@ K("discount") <= 0.25          # Less than or equal
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Equality and inequality (all types)
+K("status").eq("published");     // String equality
+K("views").ne(0);                // Numeric inequality
+K("featured").eq(true);          // Boolean equality
+
+// Numeric comparisons (numbers only)
+K("price").gt(100);              // Greater than
+K("rating").gte(4.5);            // Greater than or equal
+K("stock").lt(10);               // Less than
+K("discount").lte(0.25);         // Less than or equal
 ```
 {% /Tab %}
 
@@ -116,7 +135,19 @@ K.DOCUMENT.regex(r"\bAPI\b")                   # Match whole word "API" in docum
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Set membership operators (works on all fields)
+K.ID.isIn(["doc1", "doc2", "doc3"]);           // Match any ID in list
+K("category").isIn(["tech", "science"]);       // Match any category
+K("status").notIn(["draft", "deleted"]);       // Exclude specific values
+
+// String content operators (currently K.DOCUMENT only)
+K.DOCUMENT.contains("machine learning");       // Substring search in document
+K.DOCUMENT.notContains("deprecated");          // Exclude documents with text
+K.DOCUMENT.regex("\\bAPI\\b");                 // Match whole word "API" in document
+
+// Note: String pattern matching on metadata fields not yet supported
+// K("title").contains("Python")               // NOT YET SUPPORTED
+// K("email").regex(".*@company\\.com$")       // NOT YET SUPPORTED
 ```
 {% /Tab %}
 
@@ -159,7 +190,22 @@ Combine multiple conditions using these operators. Always use parentheses to ens
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// AND operator - all conditions must match
+K("status").eq("published").and(K("year").gte(2020));
+
+// OR operator - any condition can match
+K("category").eq("tech").or(K("category").eq("science"));
+
+// Combining with document and ID filters
+K.DOCUMENT.contains("AI").and(K("author").eq("Smith"));
+K.ID.isIn(["id1", "id2"]).or(K("featured").eq(true));
+
+// Complex nesting - use chaining for clarity
+K("status").eq("published")
+  .and(
+    K("category").eq("tech").or(K("category").eq("science"))
+  )
+  .and(K("rating").gte(4.0));
 ```
 {% /Tab %}
 
@@ -245,7 +291,58 @@ You can also use dictionary syntax instead of K expressions. This is useful when
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Direct equality (shorthand)
+{ status: "active" }                        // Same as K("status").eq("active")
+
+// Comparison operators
+{ status: { $eq: "published" } }            // Same as K("status").eq("published")
+{ count: { $ne: 0 } }                       // Same as K("count").ne(0)
+{ price: { $gt: 100 } }                     // Same as K("price").gt(100) (numbers only)
+{ rating: { $gte: 4.5 } }                   // Same as K("rating").gte(4.5) (numbers only)
+{ stock: { $lt: 10 } }                      // Same as K("stock").lt(10) (numbers only)
+{ discount: { $lte: 0.25 } }                // Same as K("discount").lte(0.25) (numbers only)
+
+// Set membership operators
+{ "#id": { $in: ["id1", "id2"] } }          // Same as K.ID.isIn(["id1", "id2"])
+{ category: { $in: ["tech", "ai"] } }       // Same as K("category").isIn(["tech", "ai"])
+{ status: { $nin: ["draft", "deleted"] } }  // Same as K("status").notIn(["draft", "deleted"])
+
+// String operators
+{ "#document": { $contains: "API" } }       // Same as K.DOCUMENT.contains("API")
+{ title: { $not_contains: "draft" } }       // Same as K("title").notContains("draft")
+{ email: { $regex: ".*@example\\.com" } }   // Same as K("email").regex(".*@example\\.com")
+{ version: { $not_regex: "^beta" } }        // Same as K("version").notRegex("^beta")
+
+// Logical operators
+{
+  $and: [
+    { status: "published" },
+    { year: { $gte: 2020 } },
+    { "#document": { $contains: "AI" } }
+  ]
+}                                           // Combines multiple conditions with AND
+
+{
+  $or: [
+    { category: "tech" },
+    { category: "science" },
+    { featured: true }
+  ]
+}                                           // Combines multiple conditions with OR
+
+// Complex nested example
+{
+  $and: [
+    {
+      $or: [
+        { category: "tech" },
+        { category: "science" }
+      ]
+    },
+    { status: "published" },
+    { quality_score: { $gte: 0.8 } }
+  ]
+}
 ```
 {% /Tab %}
 
@@ -294,7 +391,34 @@ search = Search().where(
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Filter by specific document IDs
+const search1 = new Search().where(K.ID.isIn(["doc_001", "doc_002", "doc_003"]));
+
+// Exclude already processed documents
+const processedIds = ["doc_100", "doc_101"];
+const search2 = new Search().where(K.ID.notIn(processedIds));
+
+// Full-text search in documents
+const search3 = new Search().where(K.DOCUMENT.contains("quantum computing"));
+
+// Combine document search with metadata
+const search4 = new Search().where(
+  K.DOCUMENT.contains("machine learning")
+    .and(K("language").eq("en"))
+);
+
+// Price range filtering
+const search5 = new Search().where(
+  K("price").gte(100)
+    .and(K("price").lte(500))
+);
+
+// Multi-field filtering
+const search6 = new Search().where(
+  K("status").eq("active")
+    .and(K("category").isIn(["tech", "ai", "ml"]))
+    .and(K("score").gte(0.8))
+);
 ```
 {% /Tab %}
 
@@ -328,7 +452,11 @@ K("category").not_in(["tech"])  # true - will match
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// If a document doesn't have a "category" field:
+K("category").eq("tech");        // false - won't match
+K("category").ne("tech");        // true - will match
+K("category").isIn(["tech"]);    // false - won't match  
+K("category").notIn(["tech"]);   // true - will match
 ```
 {% /Tab %}
 
@@ -355,7 +483,15 @@ K("score") > 90  # Undefined results when mixed types exist
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// DON'T DO THIS - undefined behavior
+// Document 1: {score: 95}       (numeric)
+// Document 2: {score: "95"}     (string)
+// Document 3: {score: true}     (boolean)
+
+K("score").gt(90);  // Undefined results when mixed types exist
+
+// DO THIS - consistent types
+// All documents: {score: <numeric>} or all {score: <string>}
 ```
 {% /Tab %}
 
@@ -389,7 +525,19 @@ K.DOCUMENT.regex(r"\d+")                # ✗ No literal characters - may give i
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Currently supported - K.DOCUMENT only
+K.DOCUMENT.contains("API");              // ✓ Works
+K.DOCUMENT.regex("v\\d\\.\\d\\.\\d");    // ✓ Works
+K.DOCUMENT.contains("machine learning"); // ✓ Works
+
+// NOT YET SUPPORTED - metadata fields
+K("title").contains("Python");           // ✗ Not supported yet
+K("description").regex("API.*");         // ✗ Not supported yet
+
+// Pattern length requirements (for K.DOCUMENT)
+K.DOCUMENT.contains("API");              // ✓ 3 characters - good
+K.DOCUMENT.contains("AI");               // ✗ Only 2 characters - may give incorrect results
+K.DOCUMENT.regex("\\d+");                // ✗ No literal characters - may give incorrect results
 ```
 {% /Tab %}
 
@@ -442,7 +590,31 @@ results = collection.search(search)
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Search, K, Knn } from 'chromadb';
+
+// Complex filter combining IDs, document content, and metadata
+const search = new Search()
+  .where(
+    // Exclude specific documents
+    K.ID.notIn(["excluded_001", "excluded_002"])
+      
+      // Must contain specific content
+      .and(K.DOCUMENT.contains("artificial intelligence"))
+      
+      // Metadata conditions
+      .and(K("status").eq("published"))
+      .and(K("quality_score").gte(0.75))
+      .and(
+        K("category").eq("research")
+          .or(K("category").eq("tutorial"))
+      )
+      .and(K("year").gte(2023))
+  )
+  .rank(Knn({ query: embeddingVector }))
+  .limit(10)
+  .select(K.DOCUMENT, "title", "author", "year");
+
+const results = await collection.search(search);
 ```
 {% /Tab %}
 

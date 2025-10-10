@@ -30,7 +30,16 @@ search = Search()  # Be careful with large collections!
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Search } from 'chromadb';
+
+// Limit results
+const search1 = new Search().limit(10);  // Return top 10 results
+
+// Pagination with offset
+const search2 = new Search().limit(10, 20);  // Skip first 20, return next 10
+
+// No limit - returns all matching results
+const search3 = new Search();  // Be careful with large collections!
 ```
 {% /Tab %}
 
@@ -73,7 +82,22 @@ def get_page(page_number, page_size=10):
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Page through results (0-indexed)
+const pageSize = 10;
+
+// Page 0: Results 1-10
+const page0 = new Search().limit(pageSize, 0);
+
+// Page 1: Results 11-20  
+const page1 = new Search().limit(pageSize, 10);
+
+// Page 2: Results 21-30
+const page2 = new Search().limit(pageSize, 20);
+
+// General formula
+function getPage(pageNumber: number, pageSize = 10) {
+  return new Search().limit(pageSize, pageNumber * pageSize);
+}
 ```
 {% /Tab %}
 
@@ -113,7 +137,23 @@ search = Search().select_all()
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Search, K } from 'chromadb';
+
+// Default - returns IDs only
+const search1 = new Search();
+
+// Select specific fields
+const search2 = new Search().select(K.DOCUMENT, K.SCORE);
+
+// Select metadata fields
+const search3 = new Search().select("title", "author", "date");
+
+// Mix predefined and metadata fields
+const search4 = new Search().select(K.DOCUMENT, K.SCORE, "title", "author");
+
+// Select all available fields
+const search5 = new Search().selectAll();
+// Returns: IDs, documents, embeddings, metadata, scores
 ```
 {% /Tab %}
 
@@ -163,7 +203,17 @@ search = Search().limit(100).select_all()
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Fast - minimal data
+const search1 = new Search().limit(100);  // IDs only
+
+// Moderate - just what you need
+const search2 = new Search().limit(100).select(K.SCORE, "title", "date");
+
+// Slower - large fields
+const search3 = new Search().limit(100).select(K.DOCUMENT, K.EMBEDDING);
+
+// Slowest - everything
+const search4 = new Search().limit(100).selectAll();
 ```
 {% /Tab %}
 
@@ -186,7 +236,9 @@ search = Search().where(K("status") == "active")  # No limit()
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Attempts to return ALL matching documents
+const search = new Search().where(K("status").eq("active"));  // No limit()
+// Chroma Cloud: Results capped by quota
 ```
 {% /Tab %}
 
@@ -212,7 +264,11 @@ search = Search().select("title", "non_existent_field")
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// If "non_existent_field" doesn't exist
+const search = new Search().select("title", "non_existent_field");
+
+// Result metadata will only contain "title" if it exists
+// "non_existent_field" will not appear in the metadata object at all
 ```
 {% /Tab %}
 
@@ -263,7 +319,56 @@ def search_with_pagination(collection, query_vector, page_size=20):
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Search, K, Knn } from 'chromadb';
+import * as readline from 'readline';
+
+// Paginated search with field selection
+async function searchWithPagination(
+  collection: any, 
+  queryVector: number[], 
+  pageSize = 20
+) {
+  let currentPage = 0;
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+  
+  while (true) {
+    const search = new Search()
+      .where(K("status").eq("published"))
+      .rank(Knn({ query: queryVector }))
+      .limit(pageSize, currentPage * pageSize)
+      .select(K.DOCUMENT, K.SCORE, "title", "author", "date");
+    
+    const results = await collection.search(search);
+    const rows = results.rows()[0];  // Get first (and only) search results
+    
+    if (!rows || rows.length === 0) {  // No more results
+      break;
+    }
+        
+    console.log(`\n--- Page ${currentPage + 1} ---`);
+    for (const [i, row] of rows.entries()) {
+      console.log(`${i+1}. ${row.metadata?.title} by ${row.metadata?.author}`);
+      console.log(`   Score: ${row.score?.toFixed(3)}, Date: ${row.metadata?.date}`);
+      console.log(`   Preview: ${row.document?.substring(0, 100)}...`);
+    }
+    
+    // Check if we want to continue
+    const userInput = await new Promise<string>(resolve => {
+      rl.question("\nPress Enter for next page, or 'q' to quit: ", resolve);
+    });
+    
+    if (userInput.toLowerCase() === 'q') {
+      break;
+    }
+        
+    currentPage += 1;
+  }
+  
+  rl.close();
+}
 ```
 {% /Tab %}
 
