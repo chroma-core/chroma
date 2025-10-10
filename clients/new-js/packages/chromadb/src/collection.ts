@@ -290,14 +290,17 @@ export class CollectionImpl implements Collection {
     };
   }
 
-  private async embed(documents: string[]): Promise<number[][]> {
+  private async embed(
+    documents: string[],
+    isQuery: boolean,
+  ): Promise<number[][]> {
     if (!this._embeddingFunction) {
       throw new ChromaValueError(
         "Embedding function must be defined for operations requiring embeddings.",
       );
     }
 
-    return await this._embeddingFunction.generate(documents);
+    return await this._embeddingFunction.generate(documents, isQuery);
   }
 
   private async prepareRecords<T extends boolean = false>({
@@ -315,7 +318,7 @@ export class CollectionImpl implements Collection {
     validateMaxBatchSize(recordSet.ids.length, maxBatchSize);
 
     if (!recordSet.embeddings && recordSet.documents) {
-      recordSet.embeddings = await this.embed(recordSet.documents);
+      recordSet.embeddings = await this.embed(recordSet.documents, false);
     }
 
     const preparedRecordSet: PreparedRecordSet = { ...recordSet };
@@ -327,7 +330,9 @@ export class CollectionImpl implements Collection {
       );
     }
 
-    return preparedRecordSet as T extends true ? PreparedRecordSet : PreparedInsertRecordSet;
+    return preparedRecordSet as T extends true
+      ? PreparedRecordSet
+      : PreparedInsertRecordSet;
   }
 
   private validateGet(
@@ -364,7 +369,7 @@ export class CollectionImpl implements Collection {
 
     let embeddings: number[][];
     if (!recordSet.embeddings) {
-      embeddings = await this.embed(recordSet.documents!);
+      embeddings = await this.embed(recordSet.documents!, true);
     } else {
       embeddings = recordSet.embeddings;
     }
@@ -537,11 +542,15 @@ export class CollectionImpl implements Collection {
     });
   }
 
-  public async search(searches: SearchLike | SearchLike[]): Promise<SearchResult> {
+  public async search(
+    searches: SearchLike | SearchLike[],
+  ): Promise<SearchResult> {
     const items = Array.isArray(searches) ? searches : [searches];
 
     if (items.length === 0) {
-      throw new ChromaValueError("At least one search payload must be provided.");
+      throw new ChromaValueError(
+        "At least one search payload must be provided.",
+      );
     }
 
     const payloads = items.map((search) => toSearch(search).toPayload());

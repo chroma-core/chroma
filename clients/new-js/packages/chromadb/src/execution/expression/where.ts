@@ -32,7 +32,9 @@ export abstract class WhereExpression extends WhereExpressionBase {
       return undefined;
     }
     if (!isPlainObject(input)) {
-      throw new TypeError("Where input must be a WhereExpression or plain object");
+      throw new TypeError(
+        "Where input must be a WhereExpression or plain object",
+      );
     }
     return parseWhereDict(input);
   }
@@ -51,7 +53,10 @@ class AndWhere extends WhereExpression {
     return this.conditions.slice();
   }
 
-  public static combine(left: WhereExpression, right: WhereExpression): WhereExpression {
+  public static combine(
+    left: WhereExpression,
+    right: WhereExpression,
+  ): WhereExpression {
     const flattened: WhereExpression[] = [];
 
     const add = (expr: WhereExpression) => {
@@ -86,7 +91,10 @@ class OrWhere extends WhereExpression {
     return this.conditions.slice();
   }
 
-  public static combine(left: WhereExpression, right: WhereExpression): WhereExpression {
+  public static combine(
+    left: WhereExpression,
+    right: WhereExpression,
+  ): WhereExpression {
     const flattened: WhereExpression[] = [];
 
     const add = (expr: WhereExpression) => {
@@ -126,7 +134,10 @@ class ComparisonWhere extends WhereExpression {
   }
 }
 
-const comparisonOperatorMap = new Map<string, (key: string, value: unknown) => WhereExpression>([
+const comparisonOperatorMap = new Map<
+  string,
+  (key: string, value: unknown) => WhereExpression
+>([
   ["$eq", (key, value) => new ComparisonWhere(key, "$eq", value)],
   ["$ne", (key, value) => new ComparisonWhere(key, "$ne", value)],
   ["$gt", (key, value) => new ComparisonWhere(key, "$gt", value)],
@@ -136,7 +147,10 @@ const comparisonOperatorMap = new Map<string, (key: string, value: unknown) => W
   ["$in", (key, value) => new ComparisonWhere(key, "$in", value)],
   ["$nin", (key, value) => new ComparisonWhere(key, "$nin", value)],
   ["$contains", (key, value) => new ComparisonWhere(key, "$contains", value)],
-  ["$not_contains", (key, value) => new ComparisonWhere(key, "$not_contains", value)],
+  [
+    "$not_contains",
+    (key, value) => new ComparisonWhere(key, "$not_contains", value),
+  ],
   ["$regex", (key, value) => new ComparisonWhere(key, "$regex", value)],
   ["$not_regex", (key, value) => new ComparisonWhere(key, "$not_regex", value)],
 ]);
@@ -160,7 +174,12 @@ const parseWhereDict = (data: Record<string, unknown>): WhereExpression => {
     if (conditions.length === 1) {
       return conditions[0];
     }
-    return conditions.slice(1).reduce((acc, condition) => AndWhere.combine(acc, condition), conditions[0]);
+    return conditions
+      .slice(1)
+      .reduce(
+        (acc, condition) => AndWhere.combine(acc, condition),
+        conditions[0],
+      );
   }
 
   if ("$or" in data) {
@@ -181,7 +200,12 @@ const parseWhereDict = (data: Record<string, unknown>): WhereExpression => {
     if (conditions.length === 1) {
       return conditions[0];
     }
-    return conditions.slice(1).reduce((acc, condition) => OrWhere.combine(acc, condition), conditions[0]);
+    return conditions
+      .slice(1)
+      .reduce(
+        (acc, condition) => OrWhere.combine(acc, condition),
+        conditions[0],
+      );
   }
 
   const entries = Object.entries(data);
@@ -196,7 +220,9 @@ const parseWhereDict = (data: Record<string, unknown>): WhereExpression => {
 
   const operatorEntries = Object.entries(value);
   if (operatorEntries.length !== 1) {
-    throw new Error(`Operator dictionary for field "${field}" must contain exactly one operator`);
+    throw new Error(
+      `Operator dictionary for field "${field}" must contain exactly one operator`,
+    );
   }
 
   const [operator, operand] = operatorEntries[0];

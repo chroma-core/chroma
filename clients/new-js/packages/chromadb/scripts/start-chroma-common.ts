@@ -138,7 +138,9 @@ export const startChromaServer = async (buildContextDir: string) => {
   });
 
   serverProcess.stderr?.on("data", (data) => {
-    const message = chalk.red(`🔧 rust-server-error: ${data.toString().trim()}`)
+    const message = chalk.red(
+      `🔧 rust-server-error: ${data.toString().trim()}`,
+    );
     if (is_exiting) {
       process.stderr.write(message + "\n");
     } else {
@@ -172,12 +174,12 @@ export const startChromaServer = async (buildContextDir: string) => {
 
         is_exiting = true;
 
-        serverProcess.on('exit', () => {
+        serverProcess.on("exit", () => {
           resolve();
         });
 
         serverProcess.kill();
       });
-    }
+    },
   };
 };
