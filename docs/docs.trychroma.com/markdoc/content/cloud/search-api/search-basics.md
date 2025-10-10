@@ -35,7 +35,18 @@ search = Search(
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Search } from 'chromadb';
+
+// Create an empty search
+const search = new Search();
+
+// Direct construction with parameters
+const search2 = new Search({
+  where: { status: "active" },
+  rank: { $knn: { query: [0.1, 0.2] } },
+  limit: 10,
+  select: ["#document", "#score"]
+});
 ```
 {% /Tab %}
 
@@ -102,7 +113,26 @@ search = search.select(K.DOCUMENT, K.METADATA)
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Search, K, Knn } from 'chromadb';
+
+// Basic method chaining
+const search = new Search()
+  .where(K("status").eq("published"))
+  .rank(Knn({ query: [0.1, 0.2, 0.3] }))
+  .limit(10)
+  .select(K.DOCUMENT, K.SCORE);
+
+// Each method returns a new instance
+const baseSearch = new Search().where(K("category").eq("science"));
+const searchV1 = baseSearch.limit(5);  // New instance
+const searchV2 = baseSearch.limit(10); // Different instance
+
+// Progressive building
+let search2 = new Search();
+search2 = search2.where(K("status").eq("active"));
+search2 = search2.rank(Knn({ query: embedding }));
+search2 = search2.limit(20);
+search2 = search2.select(K.DOCUMENT, K.METADATA);
 ```
 {% /Tab %}
 
@@ -161,7 +191,40 @@ search = Search(rank=Knn(query=embedding))
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Search, K, Knn, Limit, Select } from 'chromadb';
+
+// With expression objects
+const search1 = new Search({
+  where: K("status").eq("active"),
+  rank: Knn({ query: [0.1, 0.2, 0.3] }),
+  limit: new Limit({ limit: 10, offset: 0 }),
+  select: new Select([K.DOCUMENT, K.SCORE])
+});
+
+// With dictionaries (MongoDB-style)
+const search2 = new Search({
+  where: { status: "active" },
+  rank: { $knn: { query: [0.1, 0.2, 0.3] } },
+  limit: { limit: 10, offset: 0 },
+  select: { keys: ["#document", "#score"] }
+});
+
+// Mixed types
+const search3 = new Search({
+  where: K("category").eq("science"),      // Expression
+  rank: { $knn: { query: embedding } },    // Dictionary
+  limit: 10,                               // Number
+  select: [K.DOCUMENT, K.SCORE, "author"]  // Array
+});
+
+// Minimal search (IDs only)
+const search4 = new Search();
+
+// Just filtering
+const search5 = new Search({ where: K("status").eq("published") });
+
+// Just ranking
+const search6 = new Search({ rank: Knn({ query: embedding }) });
 ```
 {% /Tab %}
 
@@ -254,7 +317,78 @@ search = Search(
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Where dictionary (MongoDB-style operators)
+// Note: Each dict can only have one field or one logical operator
+
+// Simple equality
+let whereDict = { status: "active" };
+
+// Comparison operator
+whereDict = { score: { $gt: 0.5 } };
+
+// Logical AND combination
+whereDict = {
+  $and: [
+    { status: "active" },
+    { category: "science" },
+    { year: { $gte: 2020 } }
+  ]
+};
+
+// Logical OR combination  
+whereDict = {
+  $or: [
+    { category: "science" },
+    { category: "technology" }
+  ]
+};
+
+// Rank dictionary
+const rankDict = {
+  $knn: {
+    query: [0.1, 0.2, 0.3],         // Query vector
+    key: "#embedding",              // Optional: field to search
+    limit: 128                      // Optional: max candidates
+  }
+};
+
+// Limit dictionary
+const limitDict = {
+  limit: 10,                        // Number of results
+  offset: 20                        // Skip first N results
+};
+
+// Select dictionary
+// Keys can be predefined fields (with # prefix) or custom metadata fields
+let selectDict = {
+  keys: [
+    "#id",          // Document ID (always returned)
+    "#document",    // Document content
+    "#embedding",   // Embedding vectors
+    "#metadata",    // All metadata (includes all custom fields)
+    "#score",       // Search score (when ranking is used)
+  ]
+};
+
+// Or select specific metadata fields only (without #metadata)
+selectDict = {
+  keys: [
+    "#document",
+    "#score",
+    "title",        // Specific metadata field
+    "author"        // Specific metadata field
+  ]
+};
+// Note: Using #metadata returns ALL metadata fields, so no need to list individual fields
+// For more details on field selection, see: ./pagination-selection#field-selection
+
+// Complete search with dictionaries
+const search = new Search({
+  where: whereDict,
+  rank: rankDict,
+  limit: limitDict,
+  select: selectDict
+});
 ```
 {% /Tab %}
 
@@ -289,7 +423,22 @@ result = collection.search(search)
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Empty search
+const search = new Search();
+
+// Equivalent to:
+// - where: undefined (returns all documents)
+// - rank: undefined (natural storage order)
+// - limit: undefined (no limit on results)
+// - select: empty (returns IDs only)
+
+const result = await collection.search(search);
+// Result contains only IDs, no documents/embeddings/metadata/scores
+
+// Add selection to get more fields
+const search2 = new Search().select(K.DOCUMENT, K.METADATA);
+const result2 = await collection.search(search2);
+// Now includes documents and metadata
 ```
 {% /Tab %}
 
@@ -359,7 +508,58 @@ featured_search = base_search.where(K("featured") == True).limit(5)
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Search, K, Knn } from 'chromadb';
+
+// Pattern 1: Filter-first approach (narrow down, then rank)
+function searchRecentScience(queryVector: number[]) {
+  return new Search()
+    .where(K("category").eq("science").and(K("year").gte(2023)))
+    .rank(Knn({ query: queryVector }))
+    .limit(10)
+    .select(K.DOCUMENT, K.SCORE);
+}
+
+// Pattern 2: Rank-first approach (score all, filter high-quality)
+function searchHighQuality(queryVector: number[], minQuality = 0.8) {
+  return new Search()
+    .rank(Knn({ query: queryVector }))
+    .where(K("quality_score").gte(minQuality))
+    .limit(5)
+    .selectAll();
+}
+
+// Pattern 3: Conditional building
+function buildSearch(queryVector?: number[], category?: string, limit = 10) {
+  let search = new Search();
+  
+  // Add filtering if category specified
+  if (category) {
+    search = search.where(K("category").eq(category));
+  }
+  
+  // Add ranking if query vector provided
+  if (queryVector !== undefined) {
+    search = search.rank(Knn({ query: queryVector }));
+    // TODO: When collection schema is ready:
+    // search = search.rank(Knn({ query: "text query" }))
+  }
+  
+  // Always limit results
+  search = search.limit(limit);
+  
+  // Select common fields
+  search = search.select(K.DOCUMENT, K.METADATA);
+  
+  return search;
+}
+
+// Pattern 4: Base query with variations
+const baseSearch = new Search().where(K("status").eq("published"));
+
+// Create variations
+const recentSearch = baseSearch.where(K("year").eq("2025")).limit(20);
+const popularSearch = baseSearch.where(K("views").gt(1000)).limit(10);
+const featuredSearch = baseSearch.where(K("featured").eq(true)).limit(5);
 ```
 {% /Tab %}
 

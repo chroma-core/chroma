@@ -54,7 +54,27 @@ rank = Knn(query=v1, limit=100) * 0.5 + Knn(query=v2, limit=50, default=1000.0) 
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Example 1: Single Knn - scores top 128 documents
+const rank1 = Knn({ query: vector, limit: 128 });
+// Only the 128 nearest documents get scored
+
+// Example 2: Multiple Knn with default=None
+const rank2 = Knn({ query: v1, limit: 100 })
+  .add(Knn({ query: v2, limit: 100, key: "sparse_embedding" }));
+// Both Knn have default undefined (the default)
+// Documents must appear in BOTH top-100 lists to be scored
+// Documents in only one list are excluded
+
+// Example 3: Mixed default values
+const rank3 = Knn({ query: v1, limit: 100 }).multiply(0.5)
+  .add(Knn({ query: v2, limit: 50, default: 1000.0 }).multiply(0.5));
+// v1 has default undefined, v2 has default 1000.0
+// Documents in v1's top-100 but not in v2's top-50:
+//   - Get v1's distance * 0.5 + 1000.0 * 0.5 (v2's default)
+// Documents in v2's top-50 but not in v1's top-100:
+//   - Excluded (must appear in all Knn where default is undefined)
+// Documents in both lists:
+//   - Get v1's distance * 0.5 + v2's distance * 0.5
 ```
 {% /Tab %}
 
@@ -95,7 +115,24 @@ Knn(query=sparse_vector, key="sparse_embedding")
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Knn } from 'chromadb';
+
+// Basic vector search on default embedding field
+Knn({ query: [0.1, 0.2, 0.3] });
+
+// TODO: When collection schema is supported, you'll be able to pass text directly:
+// Knn({ query: "What is machine learning?" })
+
+// Search with custom parameters
+Knn({
+  query: [0.1, 0.2, 0.3],
+  key: "#embedding",      // Field to search (default: "#embedding")
+  limit: 128,            // Max candidates to consider (default: 128)
+  returnRank: false      // Return rank position vs distance (default: false)
+});
+
+// Search custom embedding field in metadata
+Knn({ query: sparseVector, key: "sparse_embedding" });
 ```
 {% /Tab %}
 
@@ -140,7 +177,16 @@ Knn(query=normalized)
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Array (most common)
+Knn({ query: [0.1, 0.2, 0.3, 0.4] });
+
+// Float32Array or other typed arrays
+const embedding = new Float32Array([0.1, 0.2, 0.3, 0.4]);
+Knn({ query: embedding });
+
+// Any iterable of numbers
+const embeddingIterable = [0.1, 0.2, 0.3, 0.4];
+Knn({ query: embeddingIterable });
 ```
 {% /Tab %}
 
@@ -165,7 +211,14 @@ Knn(query=sparse_vector, key="sparse_embedding")
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Sparse vector format: object with indices and values
+const sparseVector = {
+  indices: [1, 5, 10, 50],         // Non-zero indices
+  values: [0.5, 0.3, 0.8, 0.2]     // Corresponding values
+};
+
+// Search using sparse vector (must specify the metadata field)
+Knn({ query: sparseVector, key: "sparse_embedding" });
 ```
 {% /Tab %}
 
@@ -206,7 +259,26 @@ Knn(query=sparse_vector, key="sparse_embedding")  # Search sparse embeddings in 
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Dense embeddings - use the default embedding field
+Knn({ query: denseVector });                     // Implicitly uses key "#embedding"
+Knn({ query: denseVector, key: "#embedding" });  // Explicit
+Knn({ query: denseVector, key: K.EMBEDDING });   // Using constant (same as "#embedding")
+
+// Sparse embeddings - store in metadata under a consistent key
+// The sparse vector should be stored under the same metadata key across all documents
+const sparseVector = {
+  indices: [1, 5, 10, 50],
+  values: [0.5, 0.3, 0.8, 0.2]
+};
+Knn({ query: sparseVector, key: "sparse_embedding" });  // Search sparse embeddings in metadata
+
+// NOT SUPPORTED: Dense embeddings in metadata
+// Knn({ query: denseVector, key: "some_metadata_field" })  // ✗ Not supported
+
+// TODO: When collection schema is supported:
+// - You'll be able to store multiple dense embeddings
+// - You'll be able to declare metadata fields as embedding fields
+// - This will enable optimized indexing for additional embeddings
 ```
 {% /Tab %}
 
@@ -249,7 +321,21 @@ final_score = (Knn(query=v1) * 0.5 + Knn(query=v2) * 0.3) / 1.8
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Weighted combination of two embeddings
+const textScore = Knn({ query: textVector });
+const imageScore = Knn({ query: imageVector, key: "image_embedding" });
+const combined = textScore.multiply(0.7).add(imageScore.multiply(0.3));
+
+// Scaling scores
+const normalized = Knn({ query: vector }).divide(100.0);
+
+// Adding baseline score
+const withBaseline = Knn({ query: vector }).add(0.5);
+
+// Complex expressions (use chaining for clarity)
+const finalScore = Knn({ query: v1 }).multiply(0.5)
+  .add(Knn({ query: v2 }).multiply(0.3))
+  .divide(1.8);
 ```
 {% /Tab %}
 
@@ -293,7 +379,22 @@ positive_only = Knn(query=vector).min(0.0)
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Exponential - amplifies differences between scores
+const score = Knn({ query: vector }).exp();
+
+// Logarithm - compresses score range
+// Add constant to avoid log(0)
+const compressed = Knn({ query: vector }).add(1).log();
+
+// Absolute value - useful for difference calculations
+const diff = Knn({ query: v1 }).subtract(Knn({ query: v2 })).abs();
+
+// Clamping scores to a range
+const score2 = Knn({ query: vector });
+const clamped = score2.min(0.0).max(1.0);  // Clamp to [0, 1]
+
+// Ensuring non-negative scores
+const positiveOnly = Knn({ query: vector }).min(0.0);
 ```
 {% /Tab %}
 
@@ -327,7 +428,21 @@ adjusted = Knn(query=vector).max(threshold) - penalty
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Val, Knn } from 'chromadb';
+
+// Automatic conversion (these are equivalent)
+const score1 = Knn({ query: vector }).multiply(0.5);
+const score2 = Knn({ query: vector }).multiply(Val(0.5));
+
+// Explicit Val for named constants
+const baseline = Val(0.1);
+const boostFactor = Val(2.0);
+const finalScore = Knn({ query: vector }).add(baseline).multiply(boostFactor);
+
+// Using Val in complex expressions
+const threshold = Val(0.8);
+const penalty = Val(0.5);
+const adjusted = Knn({ query: vector }).max(threshold).subtract(penalty);
 ```
 {% /Tab %}
 
@@ -360,7 +475,20 @@ final_score = base_score * (1 + Val(0.1))  # Fixed 10% boost
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Linear combination - weighted average of different embeddings
+const textScore = Knn({ query: textVector });
+const titleScore = Knn({ query: titleVector, key: "title_embedding" });
+const combined = textScore.multiply(0.8).add(titleScore.multiply(0.2));
+
+// Multi-modal search - image and text
+const imageScore = Knn({ query: imageVector, key: "image_embedding" });
+const textScore2 = Knn({ query: textVector });
+const multiModal = imageScore.multiply(0.4).add(textScore2.multiply(0.6));
+
+// Boosting with metadata
+const baseScore = Knn({ query: vector });
+// Note: K("boost") would need to be part of select() to use in ranking
+const finalScore = baseScore.multiply(Val(1).add(Val(0.1)));  // Fixed 10% boost
 ```
 {% /Tab %}
 
@@ -440,7 +568,54 @@ search = Search(rank=rank_dict)
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Knn as dictionary
+const rankDict = {
+  $knn: {
+    query: [0.1, 0.2, 0.3],
+    key: "#embedding",  // Optional, defaults to "#embedding"
+    limit: 128,         // Optional, defaults to 128
+    return_rank: false  // Optional, defaults to false
+  }
+};
+
+// Val as dictionary
+const constDict = { $val: 0.5 };
+
+// Arithmetic operations
+const sumDict = {
+  $sum: [
+    { $knn: { query: [0.1, 0.2, 0.3] } },
+    { $val: 0.5 }
+  ]
+};  // Same as Knn({ query: [0.1, 0.2, 0.3] }).add(0.5)
+
+const mulDict = {
+  $mul: [
+    { $knn: { query: [0.1, 0.2, 0.3] } },
+    { $val: 0.8 }
+  ]
+};  // Same as Knn({ query: [0.1, 0.2, 0.3] }).multiply(0.8)
+
+// Complex expression
+const weightedCombo = {
+  $sum: [
+    {
+      $mul: [
+        { $knn: { query: textVector } },
+        { $val: 0.7 }
+      ]
+    },
+    {
+      $mul: [
+        { $knn: { query: imageVector, key: "image_embedding" } },
+        { $val: 0.3 }
+      ]
+    }
+  ]
+};  // Same as Knn({ query: textVector }).multiply(0.7).add(Knn({ query: imageVector, key: "image_embedding" }).multiply(0.3))
+
+// Use in Search
+const search = new Search({ rank: rankDict });
 ```
 {% /Tab %}
 
@@ -470,7 +645,9 @@ search = Search().where(K("status") == "active").limit(10)
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// No ranking - results in index order
+const search = new Search().where(K("status").eq("active")).limit(10);
+// Score for each document is simply its index position
 ```
 {% /Tab %}
 
@@ -500,7 +677,17 @@ rank = (
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Problem: Restrictive filtering with default undefined
+const rank1 = Knn({ query: v1, limit: 100 }).multiply(0.7)
+  .add(Knn({ query: v2, limit: 100 }).multiply(0.3));
+// Both have default undefined
+// Only documents in BOTH top-100 lists get scored
+
+// Solution: Set default values for more inclusive results
+const rank2 = Knn({ query: v1, limit: 100, default: 10.0 }).multiply(0.7)
+  .add(Knn({ query: v2, limit: 100, default: 10.0 }).multiply(0.3));
+// Now documents in either top-100 list can be scored
+// Documents get default score (10.0) for Knn where they don't appear
 ```
 {% /Tab %}
 
@@ -521,7 +708,9 @@ Knn(query=[0.1] * 384)      # ✓ Correct - 384 dimensions
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// If your embeddings are 384-dimensional
+Knn({ query: [0.1, 0.2, 0.3] });         // ✗ Error - only 3 dimensions
+Knn({ query: Array(384).fill(0.1) });   // ✓ Correct - 384 dimensions
 ```
 {% /Tab %}
 
@@ -544,7 +733,11 @@ Knn(query=vector, return_rank=True)  # Returns: 0, 1, 2...
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// For regular scoring - use distances
+Knn({ query: vector });  // Returns: 0.23, 0.45, 0.67...
+
+// For RRF - use rank positions
+Knn({ query: vector, returnRank: true });  // Returns: 0, 1, 2...
 ```
 {% /Tab %}
 
@@ -567,7 +760,11 @@ search = Search().rank(rank).limit(10)  # Return top 10 results
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Knn.limit - candidates to consider for scoring
+const rank = Knn({ query: vector, limit: 1000 });  // Score top 1000 candidates
+
+// Search.limit - results to return
+const search = new Search().rank(rank).limit(10);  // Return top 10 results
 ```
 {% /Tab %}
 
@@ -616,7 +813,35 @@ for i, row in enumerate(rows):
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Search, K, Knn, Val } from 'chromadb';
+
+// Complex ranking with filtering and mathematical functions
+const search = new Search()
+  .where(
+    K("status").eq("published")
+      .and(K("category").isIn(["tech", "science"]))
+  )
+  .rank(
+    // Combine two embeddings with weights
+    Knn({ query: contentVector }).multiply(0.7)
+      .add(Knn({ query: titleVector, key: "title_embedding" }).multiply(0.3))
+      .exp()  // Amplify score differences
+      .min(0.0)  // Ensure non-negative
+  )
+  .limit(20)
+  .select(K.DOCUMENT, K.SCORE, "title", "category");
+
+const results = await collection.search(search);
+
+// Process results using rows() for cleaner access
+const rows = results.rows()[0];  // Get first (and only) search results
+for (const [i, row] of rows.entries()) {
+  console.log(`${i+1}. ${row.metadata?.title}`);
+  console.log(`   Score: ${row.score?.toFixed(3)}`);
+  console.log(`   Category: ${row.metadata?.category}`);
+  console.log(`   Preview: ${row.document?.substring(0, 100)}...`);
+  console.log();
+}
 ```
 {% /Tab %}
 

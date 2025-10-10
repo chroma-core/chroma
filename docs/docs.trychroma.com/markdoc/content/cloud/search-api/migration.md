@@ -75,7 +75,21 @@ results = collection.search(
 {% /Tab %}
 {% Tab label="typescript" %}
 ```typescript
-// TODO: TypeScript examples will be updated when the client is available
+// Legacy API
+const results = await collection.query({
+  queryEmbeddings: [[0.1, 0.2, 0.3]],
+  nResults: 10
+});
+
+// Search API
+import { Search } from 'chromadb';
+
+const results2 = await collection.search(
+  new Search({
+    rank: { $knn: { query: [0.1, 0.2, 0.3] } },
+    limit: 10
+  })
+);
 ```
 {% /Tab %}
 {% /TabbedCodeBlock %}
@@ -104,7 +118,21 @@ results = collection.search(
 {% /Tab %}
 {% Tab label="typescript" %}
 ```typescript
-// TODO: TypeScript examples will be updated when the client is available
+// Legacy API
+const results = await collection.query({
+  queryEmbeddings: [[0.1, 0.2, 0.3]],
+  nResults: 5,
+  whereDocument: { $contains: "quantum" }
+});
+
+// Search API
+const results2 = await collection.search(
+  new Search({
+    rank: { $knn: { query: [0.1, 0.2, 0.3] } },
+    where: { "#document": { $contains: "quantum" } },
+    limit: 5
+  })
+);
 ```
 {% /Tab %}
 {% /TabbedCodeBlock %}
@@ -137,7 +165,27 @@ results = collection.search(
 {% /Tab %}
 {% Tab label="typescript" %}
 ```typescript
-// TODO: TypeScript examples will be updated when the client is available
+// Legacy API
+const results = await collection.query({
+  queryEmbeddings: [[0.1, 0.2, 0.3]],
+  nResults: 10,
+  where: { category: "science" },
+  whereDocument: { $contains: "quantum" }
+});
+
+// Search API - combine filters with $and
+const results2 = await collection.search(
+  new Search({
+    where: {
+      $and: [
+        { category: "science" },
+        { "#document": { $contains: "quantum" } }
+      ]
+    },
+    rank: { $knn: { query: [0.1, 0.2, 0.3] } },
+    limit: 10
+  })
+);
 ```
 {% /Tab %}
 {% /TabbedCodeBlock %}
@@ -162,7 +210,17 @@ results = collection.search(
 {% /Tab %}
 {% Tab label="typescript" %}
 ```typescript
-// TODO: TypeScript examples will be updated when the client is available
+// Legacy API
+const results = await collection.get({
+  ids: ["id1", "id2", "id3"]
+});
+
+// Search API  
+const results2 = await collection.search(
+  new Search({
+    where: { "#id": { $in: ["id1", "id2", "id3"] } }
+  })
+);
 ```
 {% /Tab %}
 {% /TabbedCodeBlock %}
@@ -190,7 +248,20 @@ results = collection.search(
 {% /Tab %}
 {% Tab label="typescript" %}
 ```typescript
-// TODO: TypeScript examples will be updated when the client is available
+// Legacy API
+const results = await collection.get({
+  where: { status: "active" },
+  limit: 100,
+  offset: 50
+});
+
+// Search API
+const results2 = await collection.search(
+  new Search({
+    where: { status: "active" },
+    limit: { limit: 100, offset: 50 }
+  })
+);
 ```
 {% /Tab %}
 {% /TabbedCodeBlock %}
@@ -201,6 +272,9 @@ results = collection.search(
 
 The Search API currently requires embeddings. Text query support is coming when collection schema support is available.
 
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
 # Legacy - automatic embedding
 collection.query(query_texts=["search text"])
@@ -209,6 +283,22 @@ collection.query(query_texts=["search text"])
 embedding = embedding_function(["search text"])[0]
 collection.search(Search(rank={"$knn": {"query": embedding}}))
 ```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+// Legacy - automatic embedding
+await collection.query({ queryTexts: ["search text"] });
+
+// Search API - manual embedding (temporary)
+const embedding = await embeddingFunction.generate(["search text"])[0];
+await collection.search(
+  new Search({ rank: { $knn: { query: embedding } } })
+);
+```
+{% /Tab %}
+
+{% /Tabs %}
 
 ### New Capabilities
 
@@ -222,6 +312,9 @@ collection.search(Search(rank={"$knn": {"query": embedding}}))
 
 The Search API allows different parameters for each search in a batch:
 
+{% Tabs %}
+
+{% Tab label="python" %}
 ```python
 # Legacy - same parameters for all queries
 results = collection.query(
@@ -238,6 +331,28 @@ searches = [
 ]
 results = collection.search(searches)
 ```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+// Legacy - same parameters for all queries
+const results = await collection.query({
+  queryEmbeddings: [emb1, emb2, emb3],
+  nResults: 10,
+  where: { category: "science" }  // Same filter for all
+});
+
+// Search API - different parameters per search
+const searches = [
+  new Search({ rank: { $knn: { query: emb1 } }, limit: 10, where: { category: "science" } }),
+  new Search({ rank: { $knn: { query: emb2 } }, limit: 5, where: { category: "tech" } }),
+  new Search({ rank: { $knn: { query: emb3 } }, limit: 20 })  // No filter
+];
+const results2 = await collection.search(searches);
+```
+{% /Tab %}
+
+{% /Tabs %}
 
 ## Migration Tips
 

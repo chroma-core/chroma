@@ -37,7 +37,25 @@ rrf = Rrf(
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Rrf, Knn } from 'chromadb';
+
+// Basic RRF - equal weights for both rankings
+const rrf1 = Rrf({
+  ranks: [
+    Knn({ query: denseVector, returnRank: true }),
+    Knn({ query: sparseVector, key: "sparse_embedding", returnRank: true })
+  ]
+});
+
+// Weighted RRF - adjust importance of each ranking
+const rrf2 = Rrf({
+  ranks: [
+    Knn({ query: denseVector, returnRank: true }),
+    Knn({ query: sparseVector, key: "sparse_embedding", returnRank: true })
+  ],
+  weights: [2.0, 1.0],  // Dense embedding 2x more important
+  k: 60                 // Smoothing parameter (default: 60)
+});
 ```
 {% /Tab %}
 
@@ -79,7 +97,14 @@ The score is negative because Chroma uses ascending order (lower scores = better
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Example: How RRF calculates scores
+// Document A: rank 0 in first Knn, rank 2 in second Knn
+// Document B: rank 1 in first Knn, rank 0 in second Knn
+
+// With equal weights (1.0, 1.0) and k=60:
+// Document A score = -(1.0/(60+0) + 1.0/(60+2)) = -(0.0167 + 0.0161) = -0.0328
+// Document B score = -(1.0/(60+1) + 1.0/(60+0)) = -(0.0164 + 0.0167) = -0.0331
+// Document A ranks higher (smaller negative score)
 ```
 {% /Tab %}
 
@@ -118,7 +143,17 @@ linear = Knn(query=dense_vec) * 0.7 + Knn(query=other_dense, key="other") * 0.3
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// RRF - works well with different scales
+const rrf = Rrf({
+  ranks: [
+    Knn({ query: denseVec, returnRank: true }),      // Distance scale: 0.1-2.0
+    Knn({ query: sparseVec, key: "sparse_embedding", returnRank: true })  // Different scale: 0-100
+  ]
+});
+
+// Linear combination - better when scales are similar
+const linear = Knn({ query: denseVec }).multiply(0.7)
+  .add(Knn({ query: otherDense, key: "other" }).multiply(0.3));
 ```
 {% /Tab %}
 
@@ -149,7 +184,22 @@ rrf = Rrf([
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// ✓ CORRECT - returns rank positions
+const rrf1 = Rrf({
+  ranks: [
+    Knn({ query: v1, returnRank: true }),  // Returns: 0, 1, 2, 3...
+    Knn({ query: v2, key: "sparse_embedding", returnRank: true })
+  ]
+});
+
+// ✗ INCORRECT - returns distances
+const rrf2 = Rrf({
+  ranks: [
+    Knn({ query: v1 }),  // Returns: 0.23, 0.45, 0.67... (distances)
+    Knn({ query: v2, key: "sparse_embedding" })
+  ]
+});
+// This will produce incorrect results!
 ```
 {% /Tab %}
 
@@ -190,7 +240,32 @@ rrf = Rrf(
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Equal weights (default) - each ranking equally important
+const rrf1 = Rrf({
+  ranks: [
+    Knn({ query: denseVec, returnRank: true }),
+    Knn({ query: sparseVec, key: "sparse_embedding", returnRank: true })
+  ]
+});  // Implicit weights: [1.0, 1.0]
+
+// Custom weights - adjust relative importance
+const rrf2 = Rrf({
+  ranks: [
+    Knn({ query: denseVec, returnRank: true }),
+    Knn({ query: sparseVec, key: "sparse_embedding", returnRank: true })
+  ],
+  weights: [3.0, 1.0]  // Dense 3x more important than sparse
+});
+
+// Normalized weights - ensures weights sum to 1.0
+const rrf3 = Rrf({
+  ranks: [
+    Knn({ query: denseVec, returnRank: true }),
+    Knn({ query: sparseVec, key: "sparse_embedding", returnRank: true })
+  ],
+  weights: [75, 25],     // Will be normalized to [0.75, 0.25]
+  normalize: true
+});
 ```
 {% /Tab %}
 
@@ -226,7 +301,20 @@ rrf = Rrf(ranks=[...], k=200)
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Small k - top results heavily weighted
+const rrf1 = Rrf({ ranks: [...], k: 10 });
+// Rank 0 gets weight/(10+0) = weight/10
+// Rank 10 gets weight/(10+10) = weight/20 (half as important)
+
+// Default k - balanced
+const rrf2 = Rrf({ ranks: [...], k: 60 });
+// Rank 0 gets weight/(60+0) = weight/60
+// Rank 10 gets weight/(60+10) = weight/70 (still significant)
+
+// Large k - more uniform
+const rrf3 = Rrf({ ranks: [...], k: 200 });
+// Rank 0 gets weight/(200+0) = weight/200
+// Rank 10 gets weight/(200+10) = weight/210 (almost equal importance)
 ```
 {% /Tab %}
 
@@ -279,7 +367,39 @@ results = collection.search(search)
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Search, K, Knn, Rrf } from 'chromadb';
+
+// Dense semantic embeddings (e.g., from sentence-transformers)
+const denseRank = Knn({
+  query: denseVector,        // Your dense embedding
+  key: "#embedding",         // Default embedding field
+  returnRank: true,
+  limit: 200                 // Consider top 200 candidates
+});
+
+// Sparse keyword embeddings (e.g., BM25 or SPLADE)
+const sparseRank = Knn({
+  query: sparseVector,       // {indices: [...], values: [...]}
+  key: "sparse_embedding",   // Metadata field for sparse vectors
+  returnRank: true,
+  limit: 200
+});
+
+// Combine with RRF
+const hybridRank = Rrf({
+  ranks: [denseRank, sparseRank],
+  weights: [0.7, 0.3],       // 70% semantic, 30% keyword
+  k: 60
+});
+
+// Use in search
+const search = new Search()
+  .where(K("status").eq("published"))  // Optional filtering
+  .rank(hybridRank)
+  .limit(20)
+  .select(K.DOCUMENT, K.SCORE, "title");
+
+const results = await collection.search(search);
 ```
 {% /Tab %}
 
@@ -304,7 +424,13 @@ rrf = Rrf([
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// If sparseRank returns no results, denseRank results are still used
+const rrf = Rrf({
+  ranks: [
+    Knn({ query: denseVec, returnRank: true, limit: 100 }),
+    Knn({ query: sparseVec, key: "sparse_embedding", returnRank: true, limit: 100 })
+  ]
+});
 ```
 {% /Tab %}
 
@@ -339,7 +465,22 @@ rrf = Rrf([
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Without default: only documents in BOTH rankings are scored
+const rrf1 = Rrf({
+  ranks: [
+    Knn({ query: denseVec, returnRank: true, limit: 100 }),
+    Knn({ query: sparseVec, key: "sparse_embedding", returnRank: true, limit: 100 })
+  ]
+});
+
+// With default: documents in EITHER ranking can be scored
+const rrf2 = Rrf({
+  ranks: [
+    Knn({ query: denseVec, returnRank: true, limit: 100, default: 1000 }),
+    Knn({ query: sparseVec, key: "sparse_embedding", returnRank: true, limit: 100, default: 1000 })
+  ]
+});
+// Documents missing from one ranking get default rank of 1000
 ```
 {% /Tab %}
 
@@ -369,7 +510,19 @@ manual_rrf = -0.7 / (60 + rank1) - 0.3 / (60 + rank2)
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+// Using Rrf wrapper (recommended)
+const rrf = Rrf({
+  ranks: [rank1, rank2],
+  weights: [0.7, 0.3],
+  k: 60
+});
+
+// Manual construction (equivalent)
+// RRF formula: -sum(weight_i / (k + rank_i))
+const manualRrf = Val(-0.7).divide(Val(60).add(rank1))
+  .subtract(Val(0.3).divide(Val(60).add(rank2)));
+
+// Both produce the same ranking expression
 ```
 {% /Tab %}
 
@@ -438,7 +591,56 @@ Example output:
 
 {% Tab label="typescript" %}
 ```typescript
-// TypeScript implementation coming soon
+import { Search, K, Knn, Rrf } from 'chromadb';
+
+// Prepare your vectors
+const denseEmbedding = model.encode("machine learning applications");  // Your dense model
+const sparseEmbedding = {
+  indices: [42, 128, 512, 1024],
+  values: [0.8, 0.6, 0.4, 0.3]
+};  // Your sparse model output
+
+// Create RRF ranking
+const hybridRank = Rrf({
+  ranks: [
+    Knn({ query: denseEmbedding, returnRank: true, limit: 300 }),
+    Knn({ query: sparseEmbedding, key: "sparse_embedding", returnRank: true, limit: 300 })
+  ],
+  weights: [2.0, 1.0],  // Dense 2x more important
+  k: 60
+});
+
+// Build complete search
+const search = new Search()
+  .where(
+    K("language").eq("en")
+      .and(K("year").gte(2020))
+  )
+  .rank(hybridRank)
+  .limit(10)
+  .select(K.DOCUMENT, K.SCORE, "title", "year");
+
+// Execute and process results
+const results = await collection.search(search);
+const rows = results.rows()[0];  // Get first (and only) search results
+
+for (const [i, row] of rows.entries()) {
+  console.log(`${i+1}. ${row.metadata?.title} (${row.metadata?.year})`);
+  console.log(`   RRF Score: ${row.score?.toFixed(4)}`);
+  console.log(`   Preview: ${row.document?.substring(0, 100)}...`);
+  console.log();
+}
+```
+
+Example output:
+```
+1. Introduction to Neural Networks (2023)
+   RRF Score: -0.0428
+   Preview: Neural networks are computational models inspired by biological neural networks...
+
+2. Deep Learning Fundamentals (2022)
+   RRF Score: -0.0385
+   Preview: This comprehensive guide covers the fundamental concepts of deep learning...
 ```
 {% /Tab %}
 
