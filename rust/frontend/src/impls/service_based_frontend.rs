@@ -34,7 +34,7 @@ use chroma_types::{
     HeartbeatError, HeartbeatResponse, Include, InternalSchema, KnnIndex, ListCollectionsRequest,
     ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
     Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
+    SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
     UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
     UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
     UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
@@ -172,7 +172,7 @@ impl ServiceBasedFrontend {
     ) -> Result<Collection, GetCollectionError> {
         Ok(self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(collection_id, self.enable_schema)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?
             .collection)
@@ -184,7 +184,7 @@ impl ServiceBasedFrontend {
     ) -> Result<Option<u32>, GetCollectionError> {
         Ok(self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(collection_id, self.enable_schema)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?
             .collection
@@ -408,6 +408,18 @@ impl ServiceBasedFrontend {
             })
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        if self.enable_schema {
+            for collection in &mut collections {
+                let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+                    collection.schema.clone(),
+                    Some(collection.config.clone()),
+                )
+                .map_err(|reason| {
+                    GetCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
+                })?;
+                collection.schema = Some(reconciled_schema);
+            }
+        }
         collections
             .pop()
             .ok_or(GetCollectionError::NotFound(collection_name))
@@ -437,7 +449,7 @@ impl ServiceBasedFrontend {
             database_name,
             name,
             metadata,
-            configuration,
+            mut configuration,
             schema,
             get_or_create,
             ..
@@ -484,7 +496,11 @@ impl ServiceBasedFrontend {
         }
 
         let reconciled_schema = if self.enable_schema {
-            match InternalSchema::reconcile_schema_and_config(schema.clone(), configuration.clone())
+            // its safe to take here, bc we're moving all config info to schema
+            // when configuration is None, we then populate in sysdb with empty config {}
+            // this allows for easier migration paths in the future
+            let config_for_reconcile = configuration.take();
+            match InternalSchema::reconcile_schema_and_config(schema.clone(), config_for_reconcile)
             {
                 Ok(schema) => Some(schema),
                 Err(e) => return Err(CreateCollectionError::InvalidSchema(e)),
@@ -496,6 +512,13 @@ impl ServiceBasedFrontend {
         let segments = match self.executor {
             Executor::Distributed(_) => {
                 let mut vector_segment_type = SegmentType::HnswDistributed;
+                if self.enable_schema {
+                    if let Some(schema) = reconciled_schema.as_ref() {
+                        if schema.get_internal_spann_config().is_some() {
+                            vector_segment_type = SegmentType::Spann;
+                        }
+                    }
+                }
                 if let Some(config) = configuration.as_ref() {
                     if matches!(config.vector_index, VectorIndexConfiguration::Spann(_)) {
                         vector_segment_type = SegmentType::Spann;
@@ -551,7 +574,7 @@ impl ServiceBasedFrontend {
             }
         };
 
-        let collection = self
+        let mut collection = self
             .sysdb_client
             .create_collection(
                 tenant_id.clone(),
@@ -571,6 +594,16 @@ impl ServiceBasedFrontend {
             .collections_with_segments_cache
             .remove(&collection_id)
             .await;
+        // this is done in the case that get_or_create was a get, in which case we should reconcile the schema and config
+        // that was retrieved from sysdb, rather than the one that was passed in
+        if self.enable_schema {
+            let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+                collection.schema.clone(),
+                Some(collection.config.clone()),
+            )
+            .map_err(CreateCollectionError::InvalidSchema)?;
+            collection.schema = Some(reconciled_schema);
+        }
         Ok(collection)
     }
 
@@ -1033,7 +1066,7 @@ impl ServiceBasedFrontend {
         let read_event = if let Some(where_clause) = r#where {
             let collection_and_segments = self
                 .collections_with_segments_provider
-                .get_collection_with_segments(collection_id)
+                .get_collection_with_segments(collection_id, self.enable_schema)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
             let latest_collection_logical_size_bytes = collection_and_segments
@@ -1232,7 +1265,7 @@ impl ServiceBasedFrontend {
     ) -> Result<CountResponse, QueryError> {
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(collection_id, self.enable_schema)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         let latest_collection_logical_size_bytes = collection_and_segments
@@ -1347,7 +1380,7 @@ impl ServiceBasedFrontend {
     ) -> Result<GetResponse, QueryError> {
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(collection_id, self.enable_schema)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         let latest_collection_logical_size_bytes = collection_and_segments
@@ -1483,7 +1516,7 @@ impl ServiceBasedFrontend {
     ) -> Result<QueryResponse, QueryError> {
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(collection_id, self.enable_schema)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         let latest_collection_logical_size_bytes = collection_and_segments
@@ -1631,7 +1664,7 @@ impl ServiceBasedFrontend {
         // Get collection and segments once for all queries
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(request.collection_id)
+            .get_collection_with_segments(request.collection_id, self.enable_schema)
             .await
             .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
 
