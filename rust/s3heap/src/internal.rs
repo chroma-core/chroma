@@ -67,7 +67,7 @@ fn get_string_column<'a>(
 ///     nonce: Uuid::new_v4(),
 /// };
 /// ```
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd)]
 pub struct HeapItem {
     /// The triggerable task to be executed
     pub trigger: Triggerable,
@@ -156,6 +156,8 @@ impl Internal {
         (|| async {
             let (mut on_s3, e_tag) = self.load_bucket_or_empty(bucket).await?;
             on_s3.extend(entries.iter().cloned());
+            on_s3.sort();
+            on_s3.dedup();
             self.store_bucket(bucket, &on_s3, e_tag).await
         })
         .retry(backoff)

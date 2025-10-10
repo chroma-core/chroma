@@ -239,6 +239,39 @@ func (s *Coordinator) DeleteTask(ctx context.Context, req *coordinatorpb.DeleteT
 	}, nil
 }
 
+// Mark a task run as complete and set the nonce for the next task run.
+func (s *Coordinator) FinishTask(ctx context.Context, req *coordinatorpb.FinishTaskRequest) (*coordinatorpb.FinishTaskResponse, error) {
+	if req.TaskId == nil {
+		log.Error("FinishTask: task_id is required")
+		return nil, status.Errorf(codes.InvalidArgument, "task_id is required")
+	}
+
+	if req.TaskRunNonce == nil {
+		log.Error("FinishTask: task_run_nonce is required")
+		return nil, status.Errorf(codes.InvalidArgument, "task_run_nonce is required")
+	}
+
+	taskID, err := uuid.Parse(*req.TaskId)
+	if err != nil {
+		log.Error("FinishTask: invalid task_id", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid task_id: %v", err)
+	}
+
+	taskRunNonce, err := uuid.Parse(*req.TaskRunNonce)
+	if err != nil {
+		log.Error("FinishTask: invalid task_run_nonce", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid task_run_nonce: %v", err)
+	}
+
+	err = s.catalog.metaDomain.TaskDb(ctx).FinishTask(taskID, taskRunNonce)
+	if err != nil {
+		log.Error("FinishTask failed", zap.Error(err), zap.String("task_id", taskID.String()))
+		return nil, err
+	}
+
+	return &coordinatorpb.FinishTaskResponse{}, nil
+}
+
 // GetOperators retrieves all operators from the database
 func (s *Coordinator) GetOperators(ctx context.Context, req *coordinatorpb.GetOperatorsRequest) (*coordinatorpb.GetOperatorsResponse, error) {
 	operators, err := s.catalog.metaDomain.OperatorDb(ctx).GetAll()
@@ -260,5 +293,35 @@ func (s *Coordinator) GetOperators(ctx context.Context, req *coordinatorpb.GetOp
 
 	return &coordinatorpb.GetOperatorsResponse{
 		Operators: protoOperators,
+	}, nil
+}
+
+// PeekScheduleByCollectionId gives, for a vector of collection IDs, a vector of schedule entries,
+// including when to run and the nonce to use for said run.
+func (s *Coordinator) PeekScheduleByCollectionId(ctx context.Context, req *coordinatorpb.PeekScheduleByCollectionIdRequest) (*coordinatorpb.PeekScheduleByCollectionIdResponse, error) {
+	tasks, err := s.catalog.metaDomain.TaskDb(ctx).PeekScheduleByCollectionId(req.CollectionId)
+	if err != nil {
+		log.Error("PeekScheduleByCollectionId failed", zap.Error(err))
+		return nil, err
+	}
+
+	scheduleEntries := make([]*coordinatorpb.ScheduleEntry, 0, len(tasks))
+	for _, task := range tasks {
+		task_id := task.ID.String()
+		entry := &coordinatorpb.ScheduleEntry{
+			CollectionId:  &task.InputCollectionID,
+			TaskId:        &task_id,
+			TaskRunNonce:  proto.String(task.NextNonce.String()),
+			WhenToRun:     nil,
+		}
+		if task.NextRun != nil {
+			whenToRun := uint64(task.NextRun.UnixMilli())
+			entry.WhenToRun = &whenToRun
+		}
+		scheduleEntries = append(scheduleEntries, entry)
+	}
+
+	return &coordinatorpb.PeekScheduleByCollectionIdResponse{
+		Schedule: scheduleEntries,
 	}, nil
 }
