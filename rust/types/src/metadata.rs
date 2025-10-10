@@ -1215,6 +1215,17 @@ pub enum MetadataSetValue {
     Str(Vec<String>),
 }
 
+impl MetadataSetValue {
+    pub fn value_type(&self) -> MetadataValueType {
+        match self {
+            MetadataSetValue::Bool(_) => MetadataValueType::Bool,
+            MetadataSetValue::Int(_) => MetadataValueType::Int,
+            MetadataSetValue::Float(_) => MetadataValueType::Float,
+            MetadataSetValue::Str(_) => MetadataValueType::Str,
+        }
+    }
+}
+
 // TODO: Deprecate where_document
 impl TryFrom<chroma_proto::WhereDocument> for Where {
     type Error = WhereConversionError;

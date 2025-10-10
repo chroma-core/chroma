@@ -8,7 +8,7 @@ use crate::collection_configuration::{
     EmbeddingFunctionConfiguration, InternalCollectionConfiguration, VectorIndexConfiguration,
 };
 use crate::hnsw_configuration::Space;
-use crate::metadata::MetadataValueType;
+use crate::metadata::{MetadataComparison, MetadataValueType, Where};
 use crate::{
     default_batch_size, default_construction_ef, default_construction_ef_spann,
     default_initial_lambda, default_m, default_m_spann, default_merge_threshold,
@@ -32,6 +32,28 @@ pub enum SchemaError {
     MissingIndexConfiguration { key: String, value_type: String },
     #[error("Schema reconciliation failed: {reason}")]
     InvalidSchema { reason: String },
+}
+
+#[derive(Debug, Error)]
+pub enum FilterValidationError {
+    #[error(
+        "Cannot filter using metadata key '{key}' with type '{value_type:?}' because indexing is disabled"
+    )]
+    IndexingDisabled {
+        key: String,
+        value_type: MetadataValueType,
+    },
+    #[error(transparent)]
+    Schema(#[from] SchemaError),
+}
+
+impl ChromaError for FilterValidationError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            FilterValidationError::IndexingDisabled { .. } => ErrorCodes::InvalidArgument,
+            FilterValidationError::Schema(_) => ErrorCodes::Internal,
+        }
+    }
 }
 
 /// Internal schema representation for collection index configurations
@@ -1179,7 +1201,37 @@ impl InternalSchema {
         }
     }
 
-    /// Ensure a single metadata key/value-type has an override, inserting from defaults when missing.
+    pub fn is_metadata_where_indexing_enabled(
+        &self,
+        where_clause: &Where,
+    ) -> Result<(), FilterValidationError> {
+        match where_clause {
+            Where::Composite(composite) => {
+                for child in &composite.children {
+                    self.is_metadata_where_indexing_enabled(child)?;
+                }
+                Ok(())
+            }
+            Where::Document(_) => Ok(()),
+            Where::Metadata(expression) => {
+                let value_type = match &expression.comparison {
+                    MetadataComparison::Primitive(_, value) => value.value_type(),
+                    MetadataComparison::Set(_, set_value) => set_value.value_type(),
+                };
+                let is_enabled = self
+                    .is_metadata_type_index_enabled(expression.key.as_str(), value_type)
+                    .map_err(FilterValidationError::Schema)?;
+                if !is_enabled {
+                    return Err(FilterValidationError::IndexingDisabled {
+                        key: expression.key.clone(),
+                        value_type,
+                    });
+                }
+                Ok(())
+            }
+        }
+    }
+
     pub fn ensure_key_from_metadata(&mut self, key: &str, value_type: MetadataValueType) -> bool {
         let value_types = self.key_overrides.entry(key.to_string()).or_default();
         match value_type {
