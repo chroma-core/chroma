@@ -50,6 +50,19 @@ impl<
         }
     }
 
+    pub async fn get_prefix(
+        &'referred_data self,
+        prefix: &'referred_data str,
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_prefix(prefix).await,
+            BlockfileReader::MemoryBlockfileReader(reader) => Ok(reader
+                .get_range_iter(prefix..=prefix, ..)?
+                .map(|(_, k, v)| (k, v))
+                .collect()),
+        }
+    }
+
     pub async fn count(&'referred_data self) -> Result<usize, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.count(),
