@@ -171,7 +171,7 @@ impl ServiceBasedFrontend {
     ) -> Result<Collection, GetCollectionError> {
         Ok(self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id, self.enable_schema)
+            .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?
             .collection)
@@ -183,7 +183,7 @@ impl ServiceBasedFrontend {
     ) -> Result<Option<u32>, GetCollectionError> {
         Ok(self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id, self.enable_schema)
+            .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?
             .collection
@@ -1065,7 +1065,7 @@ impl ServiceBasedFrontend {
         let read_event = if let Some(where_clause) = r#where {
             let collection_and_segments = self
                 .collections_with_segments_provider
-                .get_collection_with_segments(collection_id, self.enable_schema)
+                .get_collection_with_segments(collection_id)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
             if self.enable_schema {
@@ -1275,7 +1275,7 @@ impl ServiceBasedFrontend {
     ) -> Result<CountResponse, QueryError> {
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id, self.enable_schema)
+            .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         let latest_collection_logical_size_bytes = collection_and_segments
@@ -1390,7 +1390,7 @@ impl ServiceBasedFrontend {
     ) -> Result<GetResponse, QueryError> {
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id, self.enable_schema)
+            .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
@@ -1535,7 +1535,7 @@ impl ServiceBasedFrontend {
     ) -> Result<QueryResponse, QueryError> {
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id, self.enable_schema)
+            .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
@@ -1692,7 +1692,7 @@ impl ServiceBasedFrontend {
         // Get collection and segments once for all queries
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(request.collection_id, self.enable_schema)
+            .get_collection_with_segments(request.collection_id)
             .await
             .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
         if self.enable_schema {
