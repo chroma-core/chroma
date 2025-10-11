@@ -53,7 +53,7 @@ pub struct Task {
     pub id: TaskUuid,
     /// Human-readable name for the task instance
     pub name: String,
-    /// Identifier for the operator/built-in definition this task uses
+    /// Name of the operator/built-in definition this task uses (despite field name, this is a name not a UUID)
     pub operator_id: String,
     /// Source collection that triggers the task
     pub input_collection_id: CollectionUuid,
@@ -63,9 +63,9 @@ pub struct Task {
     pub output_collection_id: Option<String>,
     /// Optional JSON parameters for the operator
     pub params: Option<String>,
-    /// Tenant this task belongs to
+    /// Tenant name this task belongs to (despite field name, this is a name not a UUID)
     pub tenant_id: String,
-    /// Database this task belongs to
+    /// Database name this task belongs to (despite field name, this is a name not a UUID)
     pub database_id: String,
     /// Timestamp of the last successful task run
     #[serde(skip, default)]

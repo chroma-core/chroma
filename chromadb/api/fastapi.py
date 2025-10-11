@@ -702,3 +702,49 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         pre_flight_checks = self.get_pre_flight_checks()
         max_batch_size = cast(int, pre_flight_checks.get("max_batch_size", -1))
         return max_batch_size
+
+    @trace_method("FastAPI.create_task", OpenTelemetryGranularity.ALL)
+    @override
+    def create_task(
+        self,
+        task_name: str,
+        operator_name: str,
+        input_collection_id: UUID,
+        output_collection_name: str,
+        params: Optional[Dict[str, Any]] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> tuple[bool, str]:
+        """Register a recurring task on a collection."""
+        resp_json = self._make_request(
+            "post",
+            f"/tenants/{tenant}/databases/{database}/collections/{input_collection_id}/tasks/create",
+            json={
+                "task_name": task_name,
+                "operator_name": operator_name,
+                "output_collection_name": output_collection_name,
+                "params": params,
+            },
+        )
+        return cast(bool, resp_json["success"]), cast(str, resp_json["task_id"])
+
+    @trace_method("FastAPI.remove_task", OpenTelemetryGranularity.ALL)
+    @override
+    def remove_task(
+        self,
+        task_name: str,
+        input_collection_id: UUID,
+        delete_output: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """Delete a task and prevent any further runs."""
+        resp_json = self._make_request(
+            "post",
+            f"/tenants/{tenant}/databases/{database}/collections/{input_collection_id}/tasks/delete",
+            json={
+                "task_name": task_name,
+                "delete_output": delete_output,
+            },
+        )
+        return cast(bool, resp_json["success"])

@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // CreateTask creates a new task in the database
@@ -37,9 +38,8 @@ func (s *Coordinator) CreateTask(ctx context.Context, req *coordinatorpb.CreateT
 			return err
 		}
 		if existingTask != nil {
-			log.Info("CreateTask: task already exists, returning existing")
-			taskID = existingTask.ID
-			return nil
+			log.Error("CreateTask: task already exists", zap.String("task_name", req.Name))
+			return common.ErrTaskAlreadyExists
 		}
 
 		// Generate new task UUID
@@ -98,6 +98,19 @@ func (s *Coordinator) CreateTask(ctx context.Context, req *coordinatorpb.CreateT
 			return common.ErrCollectionUniqueConstraintViolation
 		}
 
+		// Serialize params from protobuf Struct to JSON string for database storage
+		var paramsJSON string
+		if req.Params != nil {
+			paramsBytes, err := req.Params.MarshalJSON()
+			if err != nil {
+				log.Error("CreateTask: failed to marshal params", zap.Error(err))
+				return err
+			}
+			paramsJSON = string(paramsBytes)
+		} else {
+			paramsJSON = "{}"
+		}
+
 		now := time.Now()
 		task := &dbmodel.Task{
 			ID:                   taskID,
@@ -107,7 +120,7 @@ func (s *Coordinator) CreateTask(ctx context.Context, req *coordinatorpb.CreateT
 			InputCollectionID:    req.InputCollectionId,
 			OutputCollectionName: req.OutputCollectionName,
 			OperatorID:           operatorID,
-			OperatorParams:       req.Params,
+			OperatorParams:       paramsJSON,
 			CompletionOffset:     0,
 			LastRun:              nil,
 			NextRun:              nil, // Will be set to zero initially, scheduled by task scheduler
@@ -171,6 +184,16 @@ func (s *Coordinator) GetTaskByName(ctx context.Context, req *coordinatorpb.GetT
 	// Debug logging
 	log.Info("Found task", zap.String("task_id", task.ID.String()), zap.String("name", task.Name), zap.String("input_collection_id", task.InputCollectionID), zap.String("output_collection_name", task.OutputCollectionName))
 
+	// Deserialize params from JSON string to protobuf Struct
+	var paramsStruct *structpb.Struct
+	if task.OperatorParams != "" {
+		paramsStruct = &structpb.Struct{}
+		if err := paramsStruct.UnmarshalJSON([]byte(task.OperatorParams)); err != nil {
+			log.Error("GetTaskByName: failed to unmarshal params", zap.Error(err))
+			return nil, err
+		}
+	}
+
 	// Convert task to response
 	response := &coordinatorpb.GetTaskByNameResponse{
 		TaskId:               proto.String(task.ID.String()),
@@ -178,9 +201,11 @@ func (s *Coordinator) GetTaskByName(ctx context.Context, req *coordinatorpb.GetT
 		OperatorName:         proto.String(operator.OperatorName),
 		InputCollectionId:    proto.String(task.InputCollectionID),
 		OutputCollectionName: proto.String(task.OutputCollectionName),
-		Params:               proto.String(task.OperatorParams),
+		Params:               paramsStruct,
 		CompletionOffset:     proto.Int64(task.CompletionOffset),
 		MinRecordsForTask:    proto.Uint64(uint64(task.MinRecordsForTask)),
+		TenantId:             proto.String(task.TenantID),
+		DatabaseId:           proto.String(task.DatabaseID),
 	}
 	// Add output_collection_id if it's set
 	if task.OutputCollectionID != nil {
@@ -211,9 +236,10 @@ func (s *Coordinator) DeleteTask(ctx context.Context, req *coordinatorpb.DeleteT
 		}
 
 		deleteCollection := &model.DeleteCollection{
-			ID:           collectionUUID,
-			TenantID:     task.TenantID,
-			DatabaseName: task.DatabaseID,
+			ID:       collectionUUID,
+			TenantID: task.TenantID,
+			// Database name isn't available but also isn't needed since we supplied a collection id
+			DatabaseName: "",
 		}
 
 		err = s.SoftDeleteCollection(ctx, deleteCollection)

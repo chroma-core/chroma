@@ -5,6 +5,7 @@ option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
 
 import "chromadb/proto/chroma.proto";
 import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
 message CreateDatabaseRequest {
@@ -530,7 +531,7 @@ message CreateTaskRequest {
   string operator_name = 2;
   string input_collection_id = 3;
   string output_collection_name = 4;
-  string params = 5;
+  optional google.protobuf.Struct params = 5;
   string tenant_id = 6;
   string database = 7;
   uint64 min_records_for_task = 8;
@@ -552,9 +553,11 @@ message GetTaskByNameResponse {
   optional string input_collection_id = 4;
   optional string output_collection_name = 5;
   optional string output_collection_id = 6;
-  optional string params = 7;
+  optional google.protobuf.Struct params = 7;
   optional int64 completion_offset = 8;
   optional uint64 min_records_for_task = 9;
+  optional string tenant_id = 10;
+  optional string database_id = 11;
 }
 
 message DeleteTaskRequest {

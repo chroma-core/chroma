@@ -141,6 +141,7 @@ jobs:
           - "chromadb/test/distributed/test_sanity.py"
           - "chromadb/test/distributed/test_log_backpressure.py"
           - "chromadb/test/distributed/test_repair_collection_log_offset.py"
+          - "chromadb/test/distributed/test_task_api.py"
         include:
           - test-glob: "chromadb/test/property/test_add.py"
             parallelized: false

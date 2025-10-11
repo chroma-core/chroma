@@ -73,6 +73,18 @@ export type CreateDatabaseResponse = {
     [key: string]: unknown;
 };
 
+export type CreateTaskRequest = {
+    operator_name: string;
+    output_collection_name: string;
+    params?: unknown;
+    task_name: string;
+};
+
+export type CreateTaskResponse = {
+    success: boolean;
+    task_id: string;
+};
+
 export type CreateTenantPayload = {
     name: string;
 };
@@ -271,6 +283,18 @@ export type QueryResponse = {
 export type RawWhereFields = {
     where?: unknown;
     where_document?: unknown;
+};
+
+export type RemoveTaskRequest = {
+    /**
+     * Whether to delete the output collection as well
+     */
+    delete_output?: boolean;
+    task_name: string;
+};
+
+export type RemoveTaskResponse = {
+    success: boolean;
 };
 
 export type SearchPayload = {
@@ -1471,6 +1495,90 @@ export type CollectionSearchResponses = {
 };
 
 export type CollectionSearchResponse = CollectionSearchResponses[keyof CollectionSearchResponses];
+
+export type CreateTaskData = {
+    body: CreateTaskRequest;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Collection ID
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/tasks/create';
+};
+
+export type CreateTaskErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type CreateTaskError = CreateTaskErrors[keyof CreateTaskErrors];
+
+export type CreateTaskResponses = {
+    /**
+     * Task created successfully
+     */
+    200: CreateTaskResponse;
+};
+
+export type CreateTaskResponse2 = CreateTaskResponses[keyof CreateTaskResponses];
+
+export type RemoveTaskData = {
+    body: RemoveTaskRequest;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Collection ID
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/tasks/delete';
+};
+
+export type RemoveTaskErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type RemoveTaskError = RemoveTaskErrors[keyof RemoveTaskErrors];
+
+export type RemoveTaskResponses = {
+    /**
+     * Task removed successfully
+     */
+    200: RemoveTaskResponse;
+};
+
+export type RemoveTaskResponse2 = RemoveTaskResponses[keyof RemoveTaskResponses];
 
 export type CollectionUpdateData = {
     body: UpdateCollectionRecordsPayload;

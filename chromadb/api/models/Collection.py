@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Union, List, cast
+from typing import TYPE_CHECKING, Optional, Union, List, cast, Dict, Any
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
 from chromadb.api.types import (
@@ -327,29 +327,29 @@ class Collection(CollectionCommon["ServerAPI"]):
             from chromadb.execution.expression import (
                 Search, Key, K, Knn, Val
             )
-            
+
             # Note: K is an alias for Key, so K.DOCUMENT == Key.DOCUMENT
             search = (Search()
                 .where((K("category") == "science") & (K("score") > 0.5))
                 .rank(Knn(query=[0.1, 0.2, 0.3]) * 0.8 + Val(0.5) * 0.2)
                 .limit(10, offset=0)
                 .select(K.DOCUMENT, K.SCORE, "title"))
-            
+
             # Direct construction
             from chromadb.execution.expression import (
                 Search, Eq, And, Gt, Knn, Limit, Select, Key
             )
-            
+
             search = Search(
                 where=And([Eq("category", "science"), Gt("score", 0.5)]),
                 rank=Knn(query=[0.1, 0.2, 0.3]),
                 limit=Limit(offset=0, limit=10),
                 select=Select(keys={Key.DOCUMENT, Key.SCORE, "title"})
             )
-            
+
             # Single search
             result = collection.search(search)
-            
+
             # Multiple searches at once
             searches = [
                 Search().where(K("type") == "article").rank(Knn(query=[0.1, 0.2])),
@@ -487,6 +487,67 @@ class Collection(CollectionCommon["ServerAPI"]):
             ids=delete_request["ids"],
             where=delete_request["where"],
             where_document=delete_request["where_document"],
+            tenant=self.tenant,
+            database=self.database,
+        )
+
+    def create_task(
+        self,
+        task_name: str,
+        operator_name: str,
+        output_collection_name: str,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> tuple[bool, str]:
+        """Create a recurring task that processes this collection.
+
+        Args:
+            task_name: Unique name for this task instance
+            operator_name: Built-in operator name (e.g., "record_counter")
+            output_collection_name: Name of the collection where task output will be stored
+            params: Optional dictionary with operator-specific parameters
+
+        Returns:
+            tuple: (success: bool, task_id: str)
+
+        Example:
+            >>> success, task_id = collection.create_task(
+            ...     task_name="count_docs",
+            ...     operator_name="record_counter",
+            ...     output_collection_name="doc_counts",
+            ...     params={"threshold": 100}
+            ... )
+        """
+        return self._client.create_task(
+            task_name=task_name,
+            operator_name=operator_name,
+            input_collection_id=self.id,
+            output_collection_name=output_collection_name,
+            params=params,
+            tenant=self.tenant,
+            database=self.database,
+        )
+
+    def remove_task(
+        self,
+        task_name: str,
+        delete_output: bool = False,
+    ) -> bool:
+        """Delete a task and prevent any further runs.
+
+        Args:
+            task_name: Name of the task to remove
+            delete_output: Whether to also delete the output collection. Defaults to False.
+
+        Returns:
+            bool: True if successful
+
+        Example:
+            >>> success = collection.remove_task("count_docs", delete_output=True)
+        """
+        return self._client.remove_task(
+            task_name=task_name,
+            input_collection_id=self.id,
+            delete_output=delete_output,
             tenant=self.tenant,
             database=self.database,
         )

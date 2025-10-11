@@ -3,6 +3,7 @@ use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_frontend::{
+    config::default_min_records_for_task,
     executor::config::{ExecutorConfig, LocalExecutorConfig},
     get_collection_with_segments_provider::{
         CacheInvalidationRetryConfig, CollectionsWithSegmentsProviderConfig,
@@ -126,6 +127,7 @@ impl Bindings {
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
             enable_schema,
+            min_records_for_task: default_min_records_for_task(),
         };
 
         let frontend = runtime.block_on(async {
