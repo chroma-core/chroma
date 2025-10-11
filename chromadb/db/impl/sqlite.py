@@ -11,7 +11,12 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 import sqlite3
-from overrides import override
+import sys
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 import pypika
 from typing import Sequence, cast, Optional, Type, Any
 from typing_extensions import Literal

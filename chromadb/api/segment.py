@@ -70,13 +70,18 @@ from typing import (
     Callable,
     TypeVar,
 )
-from overrides import override
 from uuid import UUID, uuid4
 from functools import wraps
 import time
 import logging
 import re
+import sys
 from chromadb.execution.expression.plan import Search
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 
 T = TypeVar("T", bound=Callable[..., Any])
 

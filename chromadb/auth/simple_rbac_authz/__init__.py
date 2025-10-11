@@ -1,7 +1,12 @@
 import logging
 from typing import Dict, Set
-from overrides import override
+import sys
 import yaml
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from chromadb.auth import (
     AuthzAction,
     AuthzResource,

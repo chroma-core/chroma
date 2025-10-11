@@ -1,8 +1,16 @@
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, List
+import sys
 
-from overrides import EnforceOverrides, overrides
+if sys.version_info >= (3, 12):
+    from typing import override
+
+    class EnforceOverrides:
+        pass
+else:
+    from overrides import overrides as override
+    from overrides import EnforceOverrides
 from chromadb.config import Component, System
 from chromadb.types import Segment
 
@@ -56,7 +64,7 @@ class MemberlistProvider(Component, EnforceOverrides):
         """Sets the memberlist that this provider will watch"""
         pass
 
-    @overrides
+    @override
     def stop(self) -> None:
         """Stops watching the memberlist"""
         self.callbacks = []

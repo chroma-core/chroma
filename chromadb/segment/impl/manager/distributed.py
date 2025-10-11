@@ -1,8 +1,12 @@
 from threading import Lock
 from typing import Dict, List, Sequence
 from uuid import UUID, uuid4
+import sys
 
-from overrides import override
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 
 from chromadb.config import System
 from chromadb.db.system import SysDB

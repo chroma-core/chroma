@@ -1,6 +1,11 @@
-from overrides import override
+import sys
 from typing import Any, Callable, TypeVar, Dict, Optional
 from uuid import UUID
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 
 from chromadb.api.types import (
     Embeddings,

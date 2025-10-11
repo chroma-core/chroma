@@ -1,7 +1,12 @@
 import httpx
 from typing import Optional, Sequence
 from uuid import UUID
-from overrides import override
+import sys
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 
 from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database

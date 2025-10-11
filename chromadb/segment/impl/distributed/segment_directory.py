@@ -1,9 +1,18 @@
+import sys
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, cast
 from kubernetes import client, config, watch
 from kubernetes.client.rest import ApiException
-from overrides import EnforceOverrides, override
+
+if sys.version_info >= (3, 12):
+    from typing import override
+
+    class EnforceOverrides:
+        pass
+else:
+    from overrides import overrides as override
+    from overrides import EnforceOverrides
 from chromadb.config import RoutingMode, System
 from chromadb.segment.distributed import (
     Member,

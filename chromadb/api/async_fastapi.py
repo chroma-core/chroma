@@ -5,7 +5,12 @@ import orjson
 from typing import Any, Optional, cast, Tuple, Sequence, Dict, List
 import logging
 import httpx
-from overrides import override
+import sys
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from chromadb import __version__
 from chromadb.auth import UserIdentity
 from chromadb.api.async_api import AsyncServerAPI

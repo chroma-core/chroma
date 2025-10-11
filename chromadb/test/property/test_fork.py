@@ -5,6 +5,7 @@ import copy
 import hypothesis.strategies as hyst
 import logging
 import pytest
+import sys
 
 from chromadb.api.models.Collection import Collection
 from chromadb.test.conftest import reset, skip_if_not_cluster
@@ -19,7 +20,11 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
     MultipleResults,
 )
-from overrides import overrides
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from typing import Dict, cast, Union, Tuple, Set
 
 collection_st = hyst.shared(strategies.collections(with_hnsw_params=True), key="source")
@@ -53,7 +58,7 @@ class ForkStateMachine(RuleBasedStateMachine):
             ids=[], metadatas=[], documents=[], embeddings=[]
         )
 
-    @overrides
+    @override
     def teardown(self) -> None:
         reset(self.client)
 

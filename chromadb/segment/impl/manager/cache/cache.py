@@ -1,10 +1,15 @@
+import sys
 import threading
 import uuid
 from typing import Any, Callable
 from chromadb.types import Segment
-from overrides import override
 from typing import Dict, Optional
 from abc import ABC, abstractmethod
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 
 
 class SegmentCache(ABC):

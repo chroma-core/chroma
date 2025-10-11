@@ -1,6 +1,11 @@
 from typing import Dict
+import sys
 from fastapi import HTTPException
-from overrides import override
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from chromadb.auth import (
     AuthzAction,
     AuthzResource,

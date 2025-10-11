@@ -2,12 +2,16 @@ import posthog
 import logging
 import sys
 from typing import Any, Dict, Set
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from chromadb.config import System
 from chromadb.telemetry.product import (
     ProductTelemetryClient,
     ProductTelemetryEvent,
 )
-from overrides import override
 
 logger = logging.getLogger(__name__)
 

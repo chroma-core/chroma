@@ -1,7 +1,12 @@
 from chromadb.config import Component, System, Settings
-from overrides import overrides
 from threading import local
 import random
+import sys
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 
 data = local()  # use thread local just in case tests ever run in parallel
 
@@ -20,11 +25,11 @@ class ComponentA(Component):
         self.require(ComponentB)
         self.require(ComponentC)
 
-    @overrides
+    @override
     def start(self) -> None:
         data.starts += "A"
 
-    @overrides
+    @override
     def stop(self) -> None:
         data.stops += "A"
 
@@ -36,11 +41,11 @@ class ComponentB(Component):
         self.require(ComponentC)
         self.require(ComponentD)
 
-    @overrides
+    @override
     def start(self) -> None:
         data.starts += "B"
 
-    @overrides
+    @override
     def stop(self) -> None:
         data.stops += "B"
 
@@ -51,11 +56,11 @@ class ComponentC(Component):
         super().__init__(system)
         self.require(ComponentD)
 
-    @overrides
+    @override
     def start(self) -> None:
         data.starts += "C"
 
-    @overrides
+    @override
     def stop(self) -> None:
         data.stops += "C"
 
@@ -65,11 +70,11 @@ class ComponentD(Component):
         data.inits += "D"
         super().__init__(system)
 
-    @overrides
+    @override
     def start(self) -> None:
         data.starts += "D"
 
-    @overrides
+    @override
     def stop(self) -> None:
         data.stops += "D"
 
@@ -165,11 +170,11 @@ class ComponentZ(Component):
         super().__init__(system)
         self.require(ComponentC)
 
-    @overrides
+    @override
     def start(self) -> None:
         pass
 
-    @overrides
+    @override
     def stop(self) -> None:
         pass
 

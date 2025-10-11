@@ -45,10 +45,15 @@ import chromadb_rust_bindings
 
 
 from typing import Optional, Sequence, List
-from overrides import override
 from uuid import UUID
 import json
 import platform
+import sys
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 
 if platform.system() != "Windows":
     import resource

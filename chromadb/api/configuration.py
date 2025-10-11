@@ -1,6 +1,6 @@
 from abc import abstractmethod
 import json
-from overrides import override
+import sys
 from typing import (
     Any,
     ClassVar,
@@ -14,6 +14,11 @@ from typing import (
 )
 from typing_extensions import Self
 from multiprocessing import cpu_count
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 
 from chromadb.serde import JSONSerializable
 

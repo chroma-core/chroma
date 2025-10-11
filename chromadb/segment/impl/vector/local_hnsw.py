@@ -1,6 +1,11 @@
-from overrides import override
+import sys
 from typing import Optional, Sequence, Dict, Set, List, cast
 from uuid import UUID
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from chromadb.segment import VectorReader
 from chromadb.ingest import Consumer
 from chromadb.config import System, Settings

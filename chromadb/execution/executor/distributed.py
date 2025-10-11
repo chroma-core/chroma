@@ -2,7 +2,12 @@ import threading
 import random
 from typing import Callable, Dict, List, Optional, TypeVar
 import grpc
-from overrides import overrides
+import sys
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from chromadb.api.types import GetResult, Metadata, QueryResult
 from chromadb.config import System
 from chromadb.execution.executor.abstract import Executor
@@ -109,7 +114,7 @@ class DistributedExecutor(Executor):
         # NOTE(hammadb) because Retrying() will always either return or raise an exception, this line should never be reached
         raise Exception("Unreachable code error - should never reach here")
 
-    @overrides
+    @override
     def count(self, plan: CountPlan) -> int:
         endpoints = self._get_grpc_endpoints(plan.scan)
         count_funcs = [self._get_stub(endpoint).Count for endpoint in endpoints]
@@ -118,7 +123,7 @@ class DistributedExecutor(Executor):
         )
         return convert.from_proto_count_result(count_result)
 
-    @overrides
+    @override
     def get(self, plan: GetPlan) -> GetResult:
         endpoints = self._get_grpc_endpoints(plan.scan)
         get_funcs = [self._get_stub(endpoint).Get for endpoint in endpoints]
@@ -158,7 +163,7 @@ class DistributedExecutor(Executor):
             included=plan.projection.included,
         )
 
-    @overrides
+    @override
     def knn(self, plan: KNNPlan) -> QueryResult:
         endpoints = self._get_grpc_endpoints(plan.scan)
         knn_funcs = [self._get_stub(endpoint).KNN for endpoint in endpoints]

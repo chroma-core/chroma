@@ -1,8 +1,12 @@
 from abc import ABC, abstractmethod
 from typing import Sequence, Optional, List
 from uuid import UUID
+import sys
 
-from overrides import override
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,

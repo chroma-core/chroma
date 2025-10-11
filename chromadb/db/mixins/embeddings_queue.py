@@ -1,5 +1,11 @@
 from functools import cached_property
 import json
+import sys
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from overrides import overrides as override
 from chromadb.api.configuration import (
     ConfigurationParameter,
     EmbeddingsQueueConfigurationInternal,
@@ -26,7 +32,6 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
-from overrides import override
 from collections import defaultdict
 from typing import Sequence, Optional, Dict, Set, Tuple, cast
 from uuid import UUID
