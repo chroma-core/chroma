@@ -25,11 +25,11 @@ That gives this chart
 
 More abstractly, view it like this:
 
-                    | On Heap    | Not On Heap |
---------------------|------------|-------------|
-Not in sysdb        | A_1        | A_2         |
-In sysdb, scheduled | B_1        | B_2         |
-In sysdb, waiting   | C_1        | C_2         |
+|                     | On Heap    | Not On Heap |
+|---------------------|------------|-------------|
+| Not in sysdb        | A_1        | A_2         |
+| In sysdb, scheduled | B_1        | B_2         |
+| In sysdb, waiting   | C_1        | C_2         |
 
 When viewed like this, we can establish rules for state transitions in our system.  Each operation
 operates on either the sysdb or the heap, never both because there is no transactionality between S3
@@ -48,26 +48,16 @@ another column within the same row.
 |     | C_1  | IMP2 | X    | YES2 | X    | -    | IMP4 |
 |     | C_2  | X    | NO1  | X    | YES2 | IMP3 | -    |
 
-GC1:  Item gets a perpetual "is-done" from the sysdb and transitions to A_2.
-GC2:  Garbage collection.
-
-NEW1:  Create a new task in the sysdb.
-NEW2:  Finish the new operation by primiing the task and putting it on the heap.
-
-YES1:  Task gets deleted from sysdb.
-YES2:  This implies that we move from scheduled to waiting while the task is on heap.  This happens
-       when a job completes and reads all data from the log.
-YES3:  There was a write, the heap needed to schedule, so it picked a time and updated sysdb.
-
-NO1:  This implies that the state transitioned from being not-in-sysdb to in-sysdb.   A new task
-      will always run straight away, so it should not be put into waiting state.
-
-IMP1:  The item is not on heap or in the database.  First transition is to B_2 or C_2.
-IMP2:  Task UUIDs are not re-used.  Starting from A_1 implies the task was created and then put on
-       the heap and subsequently removed from sysdb.  There should be no means by which it reappears
-       in the sysdb.  Therefore this path is impossible.
-IMP3:  We never take something off the heap until the sysdb is updated to reflect the job being
-       done.  Therefore we don't take this transition.
-IMP4:  We don't add something to the heap until it has been scheduled.
-
-X:  Impossible.
+- GC1:  Item gets a perpetual "is-done" from the sysdb and transitions to A_2.
+- GC2:  Garbage collection.
+- NEW1:  Create a new task in the sysdb.
+- NEW2:  Finish the new operation by primiing the task and putting it on the heap.
+- YES1:  Task gets deleted from sysdb.
+- YES2:  This implies that we move from scheduled to waiting while the task is on heap.  This happens when a job completes and reads all data from the log.
+- YES3:  There was a write, the heap needed to schedule, so it picked a time and updated sysdb.
+- NO1:  This implies that the state transitioned from being not-in-sysdb to in-sysdb.   A new task will always run straight away, so it should not be put into waiting state.
+- IMP1:  The item is not on heap or in the database.  First transition is to B_2 or C_2.
+- IMP2:  Task UUIDs are not re-used.  Starting from A_1 implies the task was created and then put on the heap and subsequently removed from sysdb.  There should be no means by which it reappears in the sysdb.  Therefore this path is impossible.
+- IMP3:  We never take something off the heap until the sysdb is updated to reflect the job being done.  Therefore we don't take this transition.
+- IMP4:  We don't add something to the heap until it has been scheduled.
+- X:  Impossible.
