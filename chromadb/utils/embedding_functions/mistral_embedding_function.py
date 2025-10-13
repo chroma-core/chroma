@@ -52,6 +52,7 @@ class MistralEmbeddingFunction(EmbeddingFunction[Documents]):
             self.client.embeddings.create(model=self.model, inputs=c) for c in chunks
         )
 
+
         # Extract embeddings from the response
         return [np.array(d.embedding) for e in embeddings_response for d in e.data]
 
@@ -69,15 +70,17 @@ class MistralEmbeddingFunction(EmbeddingFunction[Documents]):
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         model = config.get("model")
         api_key_env_var = config.get("api_key_env_var")
+        max_chunk_size = config.get("max_chunk_size")
 
-        if model is None or api_key_env_var is None:
+        if model is None or api_key_env_var is None or max_chunk_size is None:
             assert False, "This code should not be reached"  # this is for type checking
-        return MistralEmbeddingFunction(model=model, api_key_env_var=api_key_env_var)
+        return MistralEmbeddingFunction(model=model, api_key_env_var=api_key_env_var, max_chunk_size=max_chunk_size)
 
     def get_config(self) -> Dict[str, Any]:
         return {
             "model": self.model,
             "api_key_env_var": self.api_key_env_var,
+            "max_chunk_size": self.max_chunk_size
         }
 
     def validate_config_update(
