@@ -3,6 +3,7 @@ from chromadb.api.types import (
     SparseEmbeddings,
     Documents,
 )
+from chromadb.base_types import SparseVector
 from typing import Dict, Any, TypedDict, Optional
 import numpy as np
 from typing import cast, Literal
@@ -96,7 +97,7 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
 
             nz = np.where(vec_dense != 0)[0]
             sparse_embeddings.append(
-                {"indices": nz.tolist(), "values": vec_dense[nz].tolist()}
+                SparseVector(indices=nz.tolist(), values=vec_dense[nz].tolist())
             )
 
         _sort_sparse_vectors(sparse_embeddings)
@@ -133,7 +134,7 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
 
                 nz = np.where(vec_dense != 0)[0]
                 sparse_embeddings.append(
-                    {"indices": nz.tolist(), "values": vec_dense[nz].tolist()}
+                    SparseVector(indices=nz.tolist(), values=vec_dense[nz].tolist())
                 )
 
             _sort_sparse_vectors(sparse_embeddings)
