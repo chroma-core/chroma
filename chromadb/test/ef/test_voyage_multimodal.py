@@ -6,20 +6,11 @@ import chromadb
 from chromadb.api.types import (
     Embeddable,
     EmbeddingFunction,
-    Image,
-    Document,
 )
 from chromadb.test.property.invariants import _exact_distances
 from chromadb.config import Settings
 from chromadb.utils.embedding_functions import VoyageAIEmbeddingFunction
-
-
-def random_image() -> Image:
-    return np.random.randint(0, 255, size=(10, 10, 3), dtype=np.int64)
-
-
-def random_document() -> Document:
-    return str(random_image())
+from chromadb.test.ef.test_multimodal_ef import random_image, random_document
 
 
 @pytest.fixture
