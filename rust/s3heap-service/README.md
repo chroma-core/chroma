@@ -39,14 +39,14 @@ another column within the same row.
 ## State space diagram
 
                      From
-     |      | A_1  | A_2  | B_1  | B_2  | C_1  | C_2  |
------|------|------|------|------|------|------|------|
-     | A_1  | -    | IMP1 | YES1 | X    | YES1 | X    |
-     | A_2  | GC1  | -    | X    | GC2  | X    | YES1 |
-To   | B_1  | IMP2 | X    |-     | NEW2 | YES3 | X    |
-     | B_2  | X    | NEW1 | IMP3 | -    | X    | YES3 |
-     | C_1  | IMP2 | X    | YES2 | X    | -    | IMP4 |
-     | C_2  | X    | NO1  | X    | YES2 | IMP3 | -    |
+|     |      | A_1  | A_2  | B_1  | B_2  | C_1  | C_2  |
+|-----|------|------|------|------|------|------|------|
+|     | A_1  | -    | IMP1 | YES1 | X    | YES1 | X    |
+|     | A_2  | GC1  | -    | X    | GC2  | X    | YES1 |
+| To  | B_1  | IMP2 | X    |-     | NEW2 | YES3 | X    |
+|     | B_2  | X    | NEW1 | IMP3 | -    | X    | YES3 |
+|     | C_1  | IMP2 | X    | YES2 | X    | -    | IMP4 |
+|     | C_2  | X    | NO1  | X    | YES2 | IMP3 | -    |
 
 GC1:  Item gets a perpetual "is-done" from the sysdb and transitions to A_2.
 GC2:  Garbage collection.
