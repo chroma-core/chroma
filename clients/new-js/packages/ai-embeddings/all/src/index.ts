@@ -5,6 +5,7 @@ export * from "@chroma-core/google-gemini";
 export * from "@chroma-core/huggingface-server";
 export * from "@chroma-core/jina";
 export * from "@chroma-core/mistral";
+export * from "@chroma-core/morph";
 export * from "@chroma-core/ollama";
 export * from "@chroma-core/openai";
 export * from "@chroma-core/together-ai";

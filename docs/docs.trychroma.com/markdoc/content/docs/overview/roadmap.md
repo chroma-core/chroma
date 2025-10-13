@@ -1,22 +1,28 @@
+---
+id: roadmap
+name: Roadmap
+---
+
 # Roadmap
 
-The goal of this doc is to align *core* and *community* efforts for the project and to share what's in store for this year!
+The goal of this doc is to align _core_ and _community_ efforts for the project and to share what's in store for this year!
 
 ## What is the core Chroma team working on right now?
 
-- Extending the search and retrieval capabilities for [Chroma Cloud](https://trychroma.com/signup). [Email us your feedback and ideas](mailto:support@trychroma.com).
+- Extending the search and retrieval capabilities for [Chroma Cloud](https://trychroma.com/signup?utm_source=docs-roadmap). [Email us your feedback and ideas](mailto:support@trychroma.com).
 
 ## What did the Chroma team just complete?
 
 Features like:
-- *New* - [Chroma 1.0.0](https://trychroma.com/project/1.0.0) - a complete rewrite of Chroma in Rust, giving users up to x4 performance boost.
+
+- [Chroma 1.0.0](https://trychroma.com/project/1.0.0) - a complete rewrite of Chroma in Rust, giving users up to x4 performance boost.
 - A rewrite of our [JS/TS client](https://www.youtube.com/watch?v=Hq3Rk84eGiY), with better DX and many quality of life improvements.
 - [Persistent collection configuration](https://www.youtube.com/watch?v=zQg5peYd7b0) on the server, unlocking many new features. For example, you no longer need to provide your embedding function on every `get_collection`.
 - The new [Chroma CLI](https://www.youtube.com/watch?v=lHassGpmvK8) that lets you browse your collections locally, manage your Chroma Cloud DBs, and more!
+- [Chroma Cloud](https://www.trychroma.com/cloud)!
+- [Package Search MCP](https://www.trychroma.com/package-search) - Allow your coding agent to search and understand the source code of thousands of dependencies from npm, pypi and crates.
 
 ## What will Chroma prioritize over the next 6mo?
-
-**Next Milestone: ☁️ Launch Chroma Cloud**
 
 **Areas we will invest in**
 
@@ -41,6 +47,7 @@ If you're unsure about your contribution idea, feel free to chat with us (@chrom
 We can always use [more integrations](../../integrations/chroma-integrations) with the rest of the AI ecosystem. Please let us know if you're working on one and need help!
 
 Other great starting points for Chroma:
+
 - [Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing)
 
 For those integrations we do have, like LangChain and LlamaIndex, we do always want more tutorials, demos, workshops, videos, and podcasts (we've done some pods [on our blog](https://trychroma.com/interviews)).

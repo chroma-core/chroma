@@ -1,101 +1,334 @@
-import multiprocessing
-from typing import Any, Dict, Generator, Optional, Tuple
 import pytest
+from unittest.mock import patch
 from chromadb import CloudClient
-from chromadb.api import ServerAPI
-from chromadb.auth.token_authn import TokenTransportHeader
-from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
-from chromadb.errors import ChromaAuthError
-
-from chromadb.test.conftest import _await_server, _run_server, find_free_port
-
-TOKEN_TRANSPORT_HEADER = TokenTransportHeader.X_CHROMA_TOKEN
-TEST_CLOUD_HOST = "localhost"
+from chromadb.errors import ChromaAuthError, NotFoundError
+from chromadb.auth import UserIdentity
+from chromadb.types import Tenant, Database
+from uuid import uuid4
 
 
-@pytest.fixture(scope="module")
-def valid_token() -> str:
-    return "valid_token"
-
-
-@pytest.fixture(scope="module")
-def mock_cloud_server(valid_token: str) -> Generator[System, None, None]:
-    chroma_server_authn_provider: str = (
-        "chromadb.auth.token_authn.TokenAuthenticationServerProvider"
-    )
-    chroma_server_authn_credentials: str = valid_token
-    chroma_auth_token_transport_header: str = TOKEN_TRANSPORT_HEADER
-
-    port = find_free_port()
-
-    args: Tuple[
-        int,
-        bool,
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        Optional[Dict[str, Any]],
-    ] = (
-        port,
-        False,
-        None,
-        chroma_server_authn_provider,
-        None,
-        chroma_server_authn_credentials,
-        chroma_auth_token_transport_header,
-        None,
-        None,
-        None,
-    )
-    ctx = multiprocessing.get_context("spawn")
-    proc = ctx.Process(target=_run_server, args=args, daemon=True)
-    proc.start()
-
-    settings = Settings(
-        chroma_api_impl="chromadb.api.fastapi.FastAPI",
-        chroma_server_host=TEST_CLOUD_HOST,
-        chroma_server_http_port=port,
-        chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
-        chroma_client_auth_credentials=valid_token,
-        chroma_auth_token_transport_header=TOKEN_TRANSPORT_HEADER,
-    )
-
-    system = System(settings)
-    api = system.instance(ServerAPI)
-    system.start()
-    _await_server(api)
-    yield system
-    system.stop()
-    proc.kill()
-
-
-def test_valid_key(mock_cloud_server: System, valid_token: str) -> None:
-    valid_client = CloudClient(
-        tenant=DEFAULT_TENANT,
-        database=DEFAULT_DATABASE,
-        api_key=valid_token,
-        cloud_host=TEST_CLOUD_HOST,
-        cloud_port=mock_cloud_server.settings.chroma_server_http_port or 8000,
-        enable_ssl=False,
-    )
-
-    assert valid_client.heartbeat()
-
-
-def test_invalid_key(mock_cloud_server: System, valid_token: str) -> None:
-    # Try to connect to the default tenant and database with an invalid token
-    invalid_token = valid_token + "_invalid"
-    with pytest.raises(ChromaAuthError):
-        client = CloudClient(
-            tenant=DEFAULT_TENANT,
-            database=DEFAULT_DATABASE,
-            api_key=invalid_token,
-            cloud_host=TEST_CLOUD_HOST,
-            cloud_port=mock_cloud_server.settings.chroma_server_http_port or 8000,
-            enable_ssl=False,
+def test_valid_key() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity, patch(
+        "chromadb.api.client.AdminClient.get_tenant"
+    ) as mock_get_tenant, patch(
+        "chromadb.api.client.AdminClient.get_database"
+    ) as mock_get_database, patch(
+        "chromadb.api.fastapi.FastAPI.heartbeat"
+    ) as mock_heartbeat:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="default_tenant", databases=["testdb"]
         )
-        client.heartbeat()
+        mock_get_tenant.return_value = Tenant(name="default_tenant")
+        mock_get_database.return_value = Database(
+            id=uuid4(), name="testdb", tenant="default_tenant"
+        )
+        mock_heartbeat.return_value = 1234567890
+
+        client = CloudClient(database="testdb", api_key="valid_token")
+
+        assert client.get_user_identity().user_id == "test_user"
+        assert client.get_user_identity().tenant == "default_tenant"
+        assert client.get_user_identity().databases == ["testdb"]
+
+        settings = client.get_settings()
+        assert settings.chroma_client_auth_credentials == "valid_token"
+        assert (
+            settings.chroma_client_auth_provider
+            == "chromadb.auth.token_authn.TokenAuthClientProvider"
+        )
+
+        assert client.heartbeat() == 1234567890
+
+
+def test_invalid_key() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity:
+        mock_get_user_identity.side_effect = ChromaAuthError("Authentication failed")
+
+        with pytest.raises(ChromaAuthError):
+            CloudClient(database="testdb", api_key="invalid_token")
+
+
+# Scoped API key to 1 database tests
+def test_scoped_api_key_to_single_db_with_api_key_only() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity, patch(
+        "chromadb.api.client.AdminClient.get_tenant"
+    ) as mock_get_tenant, patch(
+        "chromadb.api.client.AdminClient.get_database"
+    ) as mock_get_database:
+        # mock single db scoped api key
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="123-456-789", databases=["right-db"]
+        )
+        mock_get_tenant.return_value = Tenant(name="123-456-789")
+        mock_get_database.return_value = Database(
+            id=uuid4(), name="right-db", tenant="123-456-789"
+        )
+
+        client = CloudClient(api_key="valid_token")
+
+        # should resolve to single db
+        assert client.database == "right-db"
+        assert client.tenant == "123-456-789"
+
+
+def test_scoped_api_key_to_single_db_with_correct_tenant() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity, patch(
+        "chromadb.api.client.AdminClient.get_tenant"
+    ) as mock_get_tenant, patch(
+        "chromadb.api.client.AdminClient.get_database"
+    ) as mock_get_database:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="123-456-789", databases=["right-db"]
+        )
+        mock_get_tenant.return_value = Tenant(name="123-456-789")
+        mock_get_database.return_value = Database(
+            id=uuid4(), name="right-db", tenant="123-456-789"
+        )
+
+        client = CloudClient(tenant="123-456-789", api_key="valid_token")
+
+        assert client.tenant == "123-456-789"
+        assert client.database == "right-db"
+
+
+def test_scoped_api_key_to_single_db_with_correct_db() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity, patch(
+        "chromadb.api.client.AdminClient.get_tenant"
+    ) as mock_get_tenant, patch(
+        "chromadb.api.client.AdminClient.get_database"
+    ) as mock_get_database:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="123-456-789", databases=["right-db"]
+        )
+        mock_get_tenant.return_value = Tenant(name="123-456-789")
+        mock_get_database.return_value = Database(
+            id=uuid4(), name="right-db", tenant="123-456-789"
+        )
+
+        client = CloudClient(database="right-db", api_key="valid_token")
+
+        assert client.tenant == "123-456-789"
+        assert client.database == "right-db"
+
+
+def test_scoped_api_key_to_single_db_with_correct_tenant_and_db() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity, patch(
+        "chromadb.api.client.AdminClient.get_tenant"
+    ) as mock_get_tenant, patch(
+        "chromadb.api.client.AdminClient.get_database"
+    ) as mock_get_database:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="123-456-789", databases=["right-db"]
+        )
+        mock_get_tenant.return_value = Tenant(name="123-456-789")
+        mock_get_database.return_value = Database(
+            id=uuid4(), name="right-db", tenant="123-456-789"
+        )
+
+        client = CloudClient(
+            tenant="123-456-789", database="right-db", api_key="valid_token"
+        )
+
+        assert client.tenant == "123-456-789"
+        assert client.database == "right-db"
+
+
+def test_scoped_api_key_to_single_db_with_wrong_tenant() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="123-456-789", databases=["right-db"]
+        )
+
+        with pytest.raises(
+            ChromaAuthError,
+            match="Tenant wrong-tenant does not match 123-456-789 from the server. Are you sure the tenant is correct?",
+        ):
+            CloudClient(tenant="wrong-tenant", api_key="valid_token")
+
+
+def test_scoped_api_key_to_single_db_with_wrong_database() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="123-456-789", databases=["right-db"]
+        )
+
+        with pytest.raises(
+            ChromaAuthError,
+            match="Database wrong-db does not match right-db from the server. Are you sure the database is correct?",
+        ):
+            CloudClient(database="wrong-db", api_key="valid_token")
+
+
+def test_scoped_api_key_to_single_db_with_wrong_api_key() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity:
+        mock_get_user_identity.side_effect = ChromaAuthError("Permission denied.")
+
+        with pytest.raises(ChromaAuthError, match="Permission denied."):
+            CloudClient(database="right-db", api_key="wrong-api-key")
+
+
+# Scoped API key to multiple databases tests
+def test_scoped_api_key_to_multiple_dbs_with_wrong_tenant() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user",
+            tenant="123-456-789",
+            databases=["right-db", "another-db"],
+        )
+
+        with pytest.raises(
+            ChromaAuthError,
+            match="Tenant wrong-tenant does not match 123-456-789 from the server. Are you sure the tenant is correct?",
+        ):
+            CloudClient(
+                tenant="wrong-tenant", database="right-db", api_key="valid_token"
+            )
+
+
+def test_scoped_api_key_to_multiple_dbs_with_correct_tenant_and_db() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity, patch(
+        "chromadb.api.client.AdminClient.get_tenant"
+    ) as mock_get_tenant, patch(
+        "chromadb.api.client.AdminClient.get_database"
+    ) as mock_get_database:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user",
+            tenant="123-456-789",
+            databases=["right-db", "another-db"],
+        )
+        mock_get_tenant.return_value = Tenant(name="123-456-789")
+        mock_get_database.return_value = Database(
+            id=uuid4(), name="right-db", tenant="123-456-789"
+        )
+
+        client = CloudClient(
+            tenant="123-456-789", database="right-db", api_key="valid_token"
+        )
+
+        assert client.tenant == "123-456-789"
+        assert client.database == "right-db"
+
+
+def test_scoped_api_key_to_multiple_dbs_with_nonexistent_database() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity, patch(
+        "chromadb.api.client.AdminClient.get_tenant"
+    ) as mock_get_tenant, patch(
+        "chromadb.api.client.AdminClient.get_database"
+    ) as mock_get_database:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user",
+            tenant="123-456-789",
+            databases=["right-db", "another-db"],
+        )
+        mock_get_tenant.return_value = Tenant(name="123-456-789")
+        mock_get_database.side_effect = NotFoundError(
+            "Database [wrong-db] not found. Are you sure it exists?"
+        )
+
+        with pytest.raises(
+            NotFoundError,
+            match="Database \\[wrong-db\\] not found. Are you sure it exists?",
+        ):
+            CloudClient(database="wrong-db", api_key="valid_token")
+
+
+def test_scoped_api_key_to_multiple_dbs_with_api_key_only() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user",
+            tenant="123-456-789",
+            databases=["right-db", "another-db"],
+        )
+
+        with pytest.raises(
+            ChromaAuthError,
+            match="Could not determine a database name from the current authentication method. Please provide a database name.",
+        ):
+            CloudClient(api_key="valid_token")
+
+
+# Unscoped API key tests
+def test_api_key_with_unscoped_tenant() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="*", databases=["right-db"]
+        )
+
+        with pytest.raises(
+            ChromaAuthError,
+            match="Could not determine a tenant from the current authentication method. Please provide a tenant.",
+        ):
+            CloudClient(api_key="valid_token")
+
+
+def test_api_key_with_unscoped_db() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="123-456-789", databases=["*"]
+        )
+
+        with pytest.raises(
+            ChromaAuthError,
+            match="Could not determine a database name from the current authentication method. Please provide a database name.",
+        ):
+            CloudClient(api_key="valid_token")
+
+
+def test_api_key_with_no_db_access() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="123-456-789", databases=[]
+        )
+
+        with pytest.raises(
+            ChromaAuthError,
+            match="Could not determine a database name from the current authentication method. Please provide a database name.",
+        ):
+            CloudClient(api_key="valid_token")
+
+
+def test_api_key_with_no_tenant_access() -> None:
+    with patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant=None, databases=["right-db"]
+        )
+
+        with pytest.raises(
+            ChromaAuthError,
+            match="Could not determine a tenant from the current authentication method. Please provide a tenant.",
+        ):
+            CloudClient(api_key="valid_token")

@@ -9,6 +9,7 @@ from chromadb.api.types import (
     Embeddings,
     Space,
     Embeddable,
+    SparseEmbeddingFunction,
 )
 from chromadb.api.models.CollectionCommon import validation_context
 
@@ -37,6 +38,7 @@ def test_get_builtins_holds() -> None:
         "InstructorEmbeddingFunction",
         "JinaEmbeddingFunction",
         "MistralEmbeddingFunction",
+        "MorphEmbeddingFunction",
         "ONNXMiniLM_L6_V2",
         "OllamaEmbeddingFunction",
         "OpenAIEmbeddingFunction",
@@ -47,6 +49,9 @@ def test_get_builtins_holds() -> None:
         "ChromaLangchainEmbeddingFunction",
         "TogetherAIEmbeddingFunction",
         "DefaultEmbeddingFunction",
+        "HuggingFaceSparseEmbeddingFunction",
+        "FastembedSparseEmbeddingFunction",
+        "Bm25EmbeddingFunction",
     }
 
     assert expected_builtins == embedding_functions.get_builtins()
@@ -57,7 +62,9 @@ def test_default_ef_exists() -> None:
     default_ef = embedding_functions.DefaultEmbeddingFunction()
 
     assert default_ef is not None
-    assert isinstance(default_ef, EmbeddingFunction)
+    assert isinstance(default_ef, EmbeddingFunction) or isinstance(
+        default_ef, SparseEmbeddingFunction
+    )
 
 
 def test_ef_imports() -> None:
@@ -67,7 +74,9 @@ def test_ef_imports() -> None:
             continue
         assert hasattr(embedding_functions, ef)
         assert isinstance(getattr(embedding_functions, ef), type)
-        assert issubclass(getattr(embedding_functions, ef), EmbeddingFunction)
+        assert issubclass(
+            getattr(embedding_functions, ef), EmbeddingFunction
+        ) or issubclass(getattr(embedding_functions, ef), SparseEmbeddingFunction)
 
 
 @register_embedding_function

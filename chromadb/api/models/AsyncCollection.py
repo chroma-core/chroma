@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union, List, cast
 
 from chromadb.api.types import (
     URI,
@@ -16,10 +16,13 @@ from chromadb.api.types import (
     ID,
     OneOrMany,
     WhereDocument,
+    SearchResult,
+    maybe_cast_one_to_many,
 )
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
 from chromadb.api.collection_configuration import UpdateCollectionConfiguration
+from chromadb.execution.expression.plan import Search
 
 if TYPE_CHECKING:
     from chromadb.api import AsyncServerAPI  # noqa: F401
@@ -286,6 +289,79 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             model=model,
             embedding_function=self._embedding_function,
             data_loader=self._data_loader,
+        )
+
+    async def search(
+        self,
+        searches: OneOrMany[Search],
+    ) -> SearchResult:
+        """Perform hybrid search on the collection.
+        This is an experimental API that only works for Hosted Chroma for now.
+
+        Args:
+            searches: A single Search object or a list of Search objects, each containing:
+                - where: Where expression for filtering
+                - rank: Ranking expression for hybrid search (defaults to Val(0.0))
+                - limit: Limit configuration for pagination (defaults to no limit)
+                - select: Select configuration for keys to return (defaults to empty)
+
+        Returns:
+            SearchResult: Column-major format response with:
+                - ids: List of result IDs for each search payload
+                - documents: Optional documents for each payload
+                - embeddings: Optional embeddings for each payload
+                - metadatas: Optional metadata for each payload
+                - scores: Optional scores for each payload
+                - select: List of selected keys for each payload
+
+        Raises:
+            NotImplementedError: For local/segment API implementations
+
+        Examples:
+            # Using builder pattern with Key constants
+            from chromadb.execution.expression import (
+                Search, Key, K, Knn, Val
+            )
+
+            # Note: K is an alias for Key, so K.DOCUMENT == Key.DOCUMENT
+            search = (Search()
+                .where((K("category") == "science") & (K("score") > 0.5))
+                .rank(Knn(query=[0.1, 0.2, 0.3]) * 0.8 + Val(0.5) * 0.2)
+                .limit(10, offset=0)
+                .select(K.DOCUMENT, K.SCORE, "title"))
+
+            # Direct construction
+            from chromadb.execution.expression import (
+                Search, Eq, And, Gt, Knn, Limit, Select, Key
+            )
+
+            search = Search(
+                where=And([Eq("category", "science"), Gt("score", 0.5)]),
+                rank=Knn(query=[0.1, 0.2, 0.3]),
+                limit=Limit(offset=0, limit=10),
+                select=Select(keys={Key.DOCUMENT, Key.SCORE, "title"})
+            )
+
+            # Single search
+            result = await collection.search(search)
+            
+            # Multiple searches at once
+            searches = [
+                Search().where(K("type") == "article").rank(Knn(query=[0.1, 0.2])),
+                Search().where(K("type") == "paper").rank(Knn(query=[0.3, 0.4]))
+            ]
+            results = await collection.search(searches)
+        """
+        # Convert single search to list for consistent handling
+        searches_list = maybe_cast_one_to_many(searches)
+        if searches_list is None:
+            searches_list = []
+
+        return await self._client._search(
+            collection_id=self.id,
+            searches=cast(List[Search], searches_list),
+            tenant=self.tenant,
+            database=self.database,
         )
 
     async def update(

@@ -1,6 +1,6 @@
 ---
-name: OpenAI
 id: openai
+name: OpenAI
 ---
 
 # OpenAI
@@ -34,6 +34,7 @@ openai_ef = embedding_functions.OpenAIEmbeddingFunction(
 ```
 
 To use the OpenAI embedding models on other platforms such as Azure, you can use the `api_base` and `api_type` parameters:
+
 ```python
 import chromadb.utils.embedding_functions as embedding_functions
 openai_ef = embedding_functions.OpenAIEmbeddingFunction(
@@ -54,25 +55,25 @@ You can pass in an optional `model` argument, which lets you choose which OpenAI
 ```typescript
 // npm install @chroma-core/openai
 
-import { OpenAIEmbeddingFunction } from '@chroma-core/openai';
+import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 
 const embeddingFunction = new OpenAIEmbeddingFunction({
-    openai_api_key: "apiKey",
-    openai_model: "text-embedding-3-small"
-})
+  apiKey: "apiKey",
+  modelName: "text-embedding-3-small",
+});
 
 // use directly
-const embeddings = embeddingFunction.generate(["document1","document2"])
+const embeddings = embeddingFunction.generate(["document1", "document2"]);
 
 // pass documents to query for .add and .query
 let collection = await client.createCollection({
-    name: "name",
-    embeddingFunction: embeddingFunction
-})
+  name: "name",
+  embeddingFunction: embeddingFunction,
+});
 collection = await client.getCollection({
-    name: "name",
-    embeddingFunction: embeddingFunction
-})
+  name: "name",
+  embeddingFunction: embeddingFunction,
+});
 ```
 
 {% /Tab %}

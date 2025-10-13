@@ -12,7 +12,7 @@ use crate::{
     BlockfileWriterMutationOrdering,
 };
 use arrow::{
-    array::{Array, BinaryArray, BinaryBuilder},
+    array::{Array, AsArray, BinaryArray, BinaryBuilder},
     datatypes::Field,
     util::bit_util,
 };
@@ -97,6 +97,18 @@ impl ArrowReadableValue<'_> for RoaringBitmap {
         let bytes = arr.value(index);
         // TODO: proper error handling
         RoaringBitmap::deserialize_from(bytes).unwrap()
+    }
+
+    fn get_range(array: &std::sync::Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+        array
+            .as_binary::<i32>()
+            .slice(offset, length)
+            .iter()
+            .map(|data| {
+                data.map(|bytes| RoaringBitmap::deserialize_from(bytes).unwrap_or_default())
+                    .unwrap_or_default()
+            })
+            .collect()
     }
 
     fn add_to_delta<K: ArrowWriteableKey>(

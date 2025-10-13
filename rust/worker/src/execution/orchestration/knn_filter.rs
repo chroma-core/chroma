@@ -12,11 +12,13 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    operator::Filter, CollectionAndSegments, HnswParametersFromSegmentError, Segment, SegmentType,
+    operator::Filter, CollectionAndSegments, HnswParametersFromSegmentError, SegmentType,
 };
+use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
@@ -71,6 +73,8 @@ pub enum KnnError {
     InvalidDistanceFunction,
     #[error("Operation aborted because resources exhausted")]
     Aborted,
+    #[error("Invalid schema")]
+    InvalidSchema,
 }
 
 impl ChromaError for KnnError {
@@ -94,6 +98,7 @@ impl ChromaError for KnnError {
             KnnError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
             KnnError::Aborted => ErrorCodes::ResourceExhausted,
             KnnError::SpannSegmentReaderCreationError(e) => e.code(),
+            KnnError::InvalidSchema => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -114,13 +119,11 @@ where
 #[derive(Clone, Debug)]
 pub struct KnnFilterOutput {
     pub logs: FetchLogOutput,
-    pub distance_function: DistanceFunction,
-    pub filter_output: FilterOutput,
-    pub hnsw_reader: Option<Box<DistributedHNSWSegmentReader>>,
-    pub record_segment: Segment,
-    pub vector_segment: Segment,
-    pub dimension: usize,
     pub fetch_log_bytes: u64,
+    pub filter_output: FilterOutput,
+    pub dimension: usize,
+    pub distance_function: DistanceFunction,
+    pub hnsw_reader: Option<Box<DistributedHNSWSegmentReader>>,
 }
 
 type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
@@ -236,6 +239,7 @@ impl Orchestrator for KnnFilterOrchestrator {
         );
         // Prefetch task is detached from the orchestrator
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch spann segment", segment_id = %self.collection_and_segments.vector_segment.id);
+        Span::current().add_link(prefetch_span.context().span().span_context().clone());
         tasks.push((prefetch_task, Some(prefetch_span)));
 
         // prefetch record segment
@@ -250,6 +254,7 @@ impl Orchestrator for KnnFilterOrchestrator {
         );
         // Prefetch task is detached from the orchestrator
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.collection_and_segments.record_segment.id);
+        Span::current().add_link(prefetch_span.context().span().span_context().clone());
         tasks.push((prefetch_record_segment_task, Some(prefetch_span)));
 
         // Prefetch metadata segment.
@@ -263,6 +268,7 @@ impl Orchestrator for KnnFilterOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch metadata segment", segment_id = %self.collection_and_segments.metadata_segment.id);
+        Span::current().add_link(prefetch_span.context().span().span_context().clone());
         tasks.push((prefetch_metadata_task, Some(prefetch_span)));
 
         // Fetch log task.
@@ -285,10 +291,8 @@ impl Orchestrator for KnnFilterOrchestrator {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Sender<KnnFilterResult> {
-        self.result_channel
-            .take()
-            .expect("The result channel should be set before take")
+    fn take_result_channel(&mut self) -> Option<Sender<KnnFilterResult>> {
+        self.result_channel.take()
     }
 }
 
@@ -407,9 +411,13 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                 .ok_or_terminate(
                     self.collection_and_segments
                         .collection
-                        .config
-                        .get_spann_config()
-                        .ok_or(KnnError::InvalidDistanceFunction),
+                        .schema
+                        .as_ref()
+                        .ok_or(KnnError::InvalidSchema)
+                        .and_then(|s| {
+                            s.get_internal_spann_config()
+                                .ok_or(KnnError::InvalidDistanceFunction)
+                        }),
                     ctx,
                 )
                 .await
@@ -429,13 +437,11 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
 
         let output = KnnFilterOutput {
             logs,
-            distance_function,
-            filter_output: output,
-            hnsw_reader,
-            record_segment: self.collection_and_segments.record_segment.clone(),
-            vector_segment: self.collection_and_segments.vector_segment.clone(),
-            dimension: collection_dimension as usize,
             fetch_log_bytes,
+            filter_output: output,
+            dimension: collection_dimension as usize,
+            distance_function,
+            hnsw_reader,
         };
         self.terminate_with_result(Ok(output), ctx).await;
     }

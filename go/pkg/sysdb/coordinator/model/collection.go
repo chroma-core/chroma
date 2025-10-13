@@ -10,6 +10,7 @@ type Collection struct {
 	ID                         types.UniqueID
 	Name                       string
 	ConfigurationJsonStr       string
+	SchemaStr                  *string
 	Dimension                  *int32
 	Metadata                   *CollectionMetadata[CollectionMetadataValueType]
 	TenantID                   string
@@ -41,6 +42,7 @@ type CreateCollection struct {
 	ID                         types.UniqueID
 	Name                       string
 	ConfigurationJsonStr       string
+	SchemaStr                  *string
 	Dimension                  *int32
 	Metadata                   *CollectionMetadata[CollectionMetadataValueType]
 	GetOrCreate                bool
@@ -89,6 +91,7 @@ type FlushCollectionCompaction struct {
 	FlushSegmentCompactions    []*FlushSegmentCompaction
 	TotalRecordsPostCompaction uint64
 	SizeBytesPostCompaction    uint64
+	SchemaStr                  *string
 }
 
 type FlushCollectionInfo struct {

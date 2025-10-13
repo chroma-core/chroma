@@ -22,6 +22,8 @@ pub struct CompactorConfig {
     pub fetch_log_batch_size: u32,
     #[serde(default = "CompactorConfig::default_purge_dirty_log_timeout_seconds")]
     pub purge_dirty_log_timeout_seconds: u64,
+    #[serde(default = "CompactorConfig::default_repair_log_offsets_timeout_seconds")]
+    pub repair_log_offsets_timeout_seconds: u64,
     #[serde(default = "CompactorConfig::default_max_failure_count")]
     pub max_failure_count: u8,
 }
@@ -67,6 +69,10 @@ impl CompactorConfig {
         60
     }
 
+    fn default_repair_log_offsets_timeout_seconds() -> u64 {
+        60
+    }
+
     fn default_max_failure_count() -> u8 {
         5
     }
@@ -86,6 +92,8 @@ impl Default for CompactorConfig {
             fetch_log_batch_size: CompactorConfig::default_fetch_log_batch_size(),
             purge_dirty_log_timeout_seconds:
                 CompactorConfig::default_purge_dirty_log_timeout_seconds(),
+            repair_log_offsets_timeout_seconds:
+                CompactorConfig::default_repair_log_offsets_timeout_seconds(),
             max_failure_count: CompactorConfig::default_max_failure_count(),
         }
     }

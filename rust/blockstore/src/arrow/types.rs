@@ -54,6 +54,7 @@ pub trait ArrowWriteableValue: Value {
 
 pub trait ArrowReadableKey<'referred_data>: Key + PartialOrd {
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self;
+    fn get_range(array: &'referred_data Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self>;
     fn add_to_delta<'external, V: ArrowReadableValue<'external>>(
         prefix: &str,
         key: Self,
@@ -64,6 +65,7 @@ pub trait ArrowReadableKey<'referred_data>: Key + PartialOrd {
 
 pub trait ArrowReadableValue<'referred_data>: Sized {
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self;
+    fn get_range(array: &'referred_data Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self>;
     fn add_to_delta<K: ArrowWriteableKey>(
         prefix: &str,
         key: K,

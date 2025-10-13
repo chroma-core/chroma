@@ -10,14 +10,16 @@ from typing import (
     TypeVar,
     Union,
     cast,
+    List,
 )
 from chromadb.types import Metadata
 import numpy as np
 from uuid import UUID
 
-import chromadb.utils.embedding_functions as ef
 from chromadb.api.types import (
     URI,
+    Schema,
+    SparseVectorIndexConfig,
     URIs,
     AddRequest,
     BaseRecordSet,
@@ -39,6 +41,7 @@ from chromadb.api.types import (
     QueryResult,
     IDs,
     EmbeddingFunction,
+    SparseEmbeddingFunction,
     ID,
     OneOrMany,
     UpdateRequest,
@@ -52,11 +55,14 @@ from chromadb.api.types import (
     validate_include,
     validate_insert_record_set,
     validate_metadata,
+    validate_metadatas,
     validate_embedding_function,
+    validate_sparse_embedding_function,
     validate_n_results,
     validate_record_set_contains_any,
     validate_record_set_for_embedding,
     validate_filter_set,
+    DefaultEmbeddingFunction,
 )
 from chromadb.api.collection_configuration import (
     UpdateCollectionConfiguration,
@@ -117,7 +123,7 @@ class CollectionCommon(Generic[ClientT]):
         model: CollectionModel,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ):
         """Initializes a new instance of the Collection class."""
@@ -151,6 +157,12 @@ class CollectionCommon(Generic[ClientT]):
         return self._model.configuration_json
 
     @property
+    def schema(self) -> Optional[Schema]:
+        return Schema.deserialize_from_json(
+            self._model.serialized_schema if self._model.serialized_schema else {}
+        )
+
+    @property
     def metadata(self) -> CollectionMetadata:
         return cast(CollectionMetadata, self._model.metadata)
 
@@ -168,6 +180,7 @@ class CollectionCommon(Generic[ClientT]):
         id_match = self.id == other.id
         name_match = self.name == other.name
         configuration_match = self.configuration_json == other.configuration_json
+        schema_match = self.schema == other.schema
         metadata_match = self.metadata == other.metadata
         tenant_match = self.tenant == other.tenant
         database_match = self.database == other.database
@@ -177,6 +190,7 @@ class CollectionCommon(Generic[ClientT]):
             id_match
             and name_match
             and configuration_match
+            and schema_match
             and metadata_match
             and tenant_match
             and database_match
@@ -226,10 +240,14 @@ class CollectionCommon(Generic[ClientT]):
         else:
             add_embeddings = add_records["embeddings"]
 
+        add_metadatas = self._apply_sparse_embeddings_to_metadatas(
+            add_records["metadatas"]
+        )
+
         return AddRequest(
             ids=add_records["ids"],
             embeddings=add_embeddings,
-            metadatas=add_records["metadatas"],
+            metadatas=add_metadatas,
             documents=add_records["documents"],
             uris=add_records["uris"],
         )
@@ -313,7 +331,9 @@ class CollectionCommon(Generic[ClientT]):
         # Prepare
         if query_records["embeddings"] is None:
             validate_record_set_for_embedding(record_set=query_records)
-            request_embeddings = self._embed_record_set(record_set=query_records)
+            request_embeddings = self._embed_record_set(
+                record_set=query_records, is_query=True
+            )
         else:
             request_embeddings = query_records["embeddings"]
 
@@ -378,10 +398,14 @@ class CollectionCommon(Generic[ClientT]):
         else:
             update_embeddings = update_records["embeddings"]
 
+        update_metadatas = self._apply_sparse_embeddings_to_metadatas(
+            update_records["metadatas"]
+        )
+
         return UpdateRequest(
             ids=update_records["ids"],
             embeddings=update_embeddings,
-            metadatas=update_records["metadatas"],
+            metadatas=update_metadatas,
             documents=update_records["documents"],
             uris=update_records["uris"],
         )
@@ -423,9 +447,13 @@ class CollectionCommon(Generic[ClientT]):
         else:
             upsert_embeddings = upsert_records["embeddings"]
 
+        upsert_metadatas = self._apply_sparse_embeddings_to_metadatas(
+            upsert_records["metadatas"]
+        )
+
         return UpsertRequest(
             ids=upsert_records["ids"],
-            metadatas=upsert_records["metadatas"],
+            metadatas=upsert_metadatas,
             embeddings=upsert_embeddings,
             documents=upsert_records["documents"],
             uris=upsert_records["uris"],
@@ -530,8 +558,87 @@ class CollectionCommon(Generic[ClientT]):
                 )
             )
 
+    def _get_sparse_embedding_targets(self) -> Dict[str, "SparseVectorIndexConfig"]:
+        schema = self.schema
+        if schema is None:
+            return {}
+
+        targets: Dict[str, "SparseVectorIndexConfig"] = {}
+        for key, value_types in schema.key_overrides.items():
+            if value_types.sparse_vector is None:
+                continue
+            sparse_index = value_types.sparse_vector.sparse_vector_index
+            if sparse_index is None or not sparse_index.enabled:
+                continue
+            config = sparse_index.config
+            if config.embedding_function is None or config.source_key is None:
+                continue
+            targets[key] = config
+
+        return targets
+
+    def _apply_sparse_embeddings_to_metadatas(
+        self, metadatas: Optional[List[Metadata]]
+    ) -> Optional[List[Metadata]]:
+        if metadatas is None:
+            return None
+
+        sparse_targets = self._get_sparse_embedding_targets()
+        if not sparse_targets:
+            return metadatas
+
+        updated_metadatas: List[Dict[str, Any]] = [
+            dict(metadata) for metadata in metadatas
+        ]
+
+        for target_key, config in sparse_targets.items():
+            source_key = config.source_key
+            embedding_func = config.embedding_function
+            if source_key is None or embedding_func is None:
+                continue
+
+            if not isinstance(embedding_func, SparseEmbeddingFunction):
+                embedding_func = cast(SparseEmbeddingFunction[Any], embedding_func)
+            validate_sparse_embedding_function(embedding_func)
+
+            inputs: List[str] = []
+            positions: List[int] = []
+
+            for idx, metadata in enumerate(updated_metadatas):
+                if target_key in metadata:
+                    continue
+
+                source_value = metadata.get(source_key)
+                if not isinstance(source_value, str):
+                    continue
+
+                inputs.append(source_value)
+                positions.append(idx)
+
+            if not inputs:
+                continue
+
+            sparse_embeddings = self._sparse_embed(
+                input=inputs,
+                sparse_embedding_function=embedding_func,
+            )
+
+            if len(sparse_embeddings) != len(positions):
+                raise ValueError(
+                    "Sparse embedding function returned unexpected number of embeddings."
+                )
+
+            for position, embedding in zip(positions, sparse_embeddings):
+                updated_metadatas[position][target_key] = embedding
+
+        validate_metadatas(cast(List[Metadata], updated_metadatas))
+        return cast(List[Metadata], updated_metadatas)
+
     def _embed_record_set(
-        self, record_set: BaseRecordSet, embeddable_fields: Optional[Set[str]] = None
+        self,
+        record_set: BaseRecordSet,
+        embeddable_fields: Optional[Set[str]] = None,
+        is_query: bool = False,
     ) -> Embeddings:
         if embeddable_fields is None:
             embeddable_fields = get_default_embeddable_record_set_fields()
@@ -545,27 +652,51 @@ class CollectionCommon(Generic[ClientT]):
                             "You must set a data loader on the collection if loading from URIs."
                         )
                     return self._embed(
-                        input=self._data_loader(uris=cast(URIs, record_set[field]))  # type: ignore[literal-required]
+                        input=self._data_loader(uris=cast(URIs, record_set[field])),  # type: ignore[literal-required]
+                        is_query=is_query,
                     )
                 else:
-                    return self._embed(input=record_set[field])  # type: ignore[literal-required]
+                    return self._embed(
+                        input=record_set[field],  # type: ignore[literal-required]
+                        is_query=is_query,
+                    )
         raise ValueError(
             "Record does not contain any non-None fields that can be embedded."
             f"Embeddable Fields: {embeddable_fields}"
             f"Record Fields: {record_set}"
         )
 
-    def _embed(self, input: Any) -> Embeddings:
+    def _embed(self, input: Any, is_query: bool = False) -> Embeddings:
         if self._embedding_function is not None and not isinstance(
-            self._embedding_function, ef.DefaultEmbeddingFunction
+            self._embedding_function, DefaultEmbeddingFunction
         ):
-            return self._embedding_function(input=input)
+            if is_query:
+                return self._embedding_function.embed_query(input=input)
+            else:
+                return self._embedding_function(input=input)
+
         config_ef = self.configuration.get("embedding_function")
         if config_ef is not None:
-            return config_ef(input=input)
+            if is_query:
+                return config_ef.embed_query(input=input)
+            else:
+                return config_ef(input=input)
         if self._embedding_function is None:
             raise ValueError(
                 "You must provide an embedding function to compute embeddings."
                 "https://docs.trychroma.com/guides/embeddings"
             )
-        return self._embedding_function(input=input)
+        if is_query:
+            return self._embedding_function.embed_query(input=input)
+        else:
+            return self._embedding_function(input=input)
+
+    def _sparse_embed(
+        self,
+        input: Any,
+        sparse_embedding_function: SparseEmbeddingFunction[Any],
+        is_query: bool = False,
+    ) -> Any:
+        if is_query:
+            return sparse_embedding_function.embed_query(input=input)
+        return sparse_embedding_function(input=input)

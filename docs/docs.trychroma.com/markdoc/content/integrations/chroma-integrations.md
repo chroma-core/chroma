@@ -1,3 +1,8 @@
+---
+id: integrations
+name: Integrations
+---
+
 # Integrations
 
 ### Embedding Integrations
@@ -23,7 +28,8 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Ollama Embeddings](./embedding-models/ollama)                          | ✓      | ✓          |
 | [Cloudflare Workers AI](./embedding-models/cloudflare-workers-ai.md)    | ✓      | ✓          |
 | [Together AI](./embedding-models/together-ai.md)                        | ✓      | ✓          |
-| [Mistral](./embedding-models/mistral.md)                                | ✓      | -          |
+| [Mistral](./embedding-models/mistral.md)                                | ✓      | ✓          |
+| [Morph](./embedding-models/morph.md)                                    | ✓      | ✓          |
 
 ---
 
@@ -48,3 +54,4 @@ We welcome pull requests to add new Integrations to the community.
 | [OpenLIT](./frameworks/openlit)             | ✓      | Coming Soon! |
 | [Anthropic MCP](./frameworks/anthropic-mcp) | ✓      | Coming Soon! |
 | [VoltAgent](./frameworks/voltagent)         | -      | ✓            |
+| [Mem0](./frameworks/mem0)                   | ✓      | -            |

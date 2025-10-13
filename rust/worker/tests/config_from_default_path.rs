@@ -1,3 +1,4 @@
+use chroma_blockstore::config::BlockfileProviderConfig;
 use chroma_index::config::{HnswGarbageCollectionPolicyConfig, PlGarbageCollectionPolicyConfig};
 use figment::Jail;
 use serial_test::serial;
@@ -63,6 +64,7 @@ fn test_config_from_default_path() {
                             block_cache_config:
                                 memory:
                                     capacity: 1000
+                            num_concurrent_block_flushes: 100
                         sparse_index_manager_config:
                             sparse_index_cache_config:
                                 memory:
@@ -133,6 +135,7 @@ fn test_config_from_default_path() {
                             block_cache_config:
                                 memory:
                                     capacity: 1000
+                            num_concurrent_block_flushes: 100
                         sparse_index_manager_config:
                             sparse_index_cache_config:
                                 memory:
@@ -183,6 +186,17 @@ fn test_config_from_default_path() {
             Uuid::parse_str(&config.compaction_service.compactor.disabled_collections[1]).unwrap(),
             Uuid::parse_str("496db4aa-fbe1-498a-b60b-81ec0fe59792").unwrap()
         );
+        match config.compaction_service.blockfile_provider {
+            BlockfileProviderConfig::Arrow(arrow_config) => {
+                assert_eq!(
+                    arrow_config
+                        .block_manager_config
+                        .num_concurrent_block_flushes,
+                    100
+                );
+            }
+            _ => panic!("Expected Arrow blockfile provider config"),
+        }
         assert!(
             config
                 .compaction_service

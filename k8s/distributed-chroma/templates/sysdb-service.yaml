@@ -3,6 +3,10 @@ kind: Deployment
 metadata:
   name: sysdb
   namespace: {{ .Values.namespace }}
+  annotations:
+  {{ range .Values.sysdb.annotations }}
+    {{ .name }}: {{ .value }}
+  {{ end }}
 spec:
   replicas: {{ .Values.sysdb.replicaCount }}
   selector:
@@ -37,6 +41,8 @@ spec:
           image: "{{ .Values.sysdb.image.repository }}:{{ .Values.sysdb.image.tag }}"
           imagePullPolicy: IfNotPresent
           readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 30 # 30 seconds to allow for initial startup
             grpc:
               port: 50051
           name: sysdb
@@ -50,6 +56,14 @@ spec:
             requests:
               cpu: {{ .Values.sysdb.resources.requests.cpu }}
               memory: {{ .Values.sysdb.resources.requests.memory }}
+      {{if .Values.sysdb.tolerations}}
+      tolerations:
+        {{ toYaml .Values.sysdb.tolerations | nindent 8 }}
+      {{ end }}
+      {{if .Values.sysdb.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.sysdb.nodeSelector | nindent 8 }}
+      {{ end }}
 
 ---
 

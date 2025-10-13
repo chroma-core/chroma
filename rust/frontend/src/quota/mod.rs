@@ -6,7 +6,7 @@ use std::{
 };
 
 use chroma_error::ChromaError;
-use chroma_types::{CollectionUuid, Metadata, UpdateMetadata, Where};
+use chroma_types::{plan::SearchPayload, CollectionUuid, Metadata, UpdateMetadata, Where};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use thiserror::Error;
@@ -24,6 +24,7 @@ pub enum Action {
     Update,
     Upsert,
     Query,
+    Search,
     ForkCollection,
 }
 
@@ -40,6 +41,7 @@ impl fmt::Display for Action {
             Action::Update => write!(f, "Update"),
             Action::Upsert => write!(f, "Upsert"),
             Action::Query => write!(f, "Query"),
+            Action::Search => write!(f, "Search"),
             Action::ForkCollection => write!(f, "Fork Collection"),
         }
     }
@@ -60,6 +62,7 @@ impl TryFrom<&str> for Action {
             "update" => Ok(Action::Update),
             "upsert" => Ok(Action::Upsert),
             "query" => Ok(Action::Query),
+            "search" => Ok(Action::Search),
             "fork_collection" => Ok(Action::ForkCollection),
             _ => Err(format!("Invalid Action: {}", value)),
         }
@@ -91,6 +94,7 @@ pub struct QuotaPayload<'other> {
     pub query_embeddings: Option<&'other [Vec<f32>]>,
     pub query_ids: Option<&'other [String]>,
     pub collection_uuid: Option<CollectionUuid>,
+    pub search_payloads: &'other [SearchPayload],
 }
 
 impl<'other> QuotaPayload<'other> {
@@ -117,6 +121,7 @@ impl<'other> QuotaPayload<'other> {
             query_embeddings: None,
             query_ids: None,
             collection_uuid: None,
+            search_payloads: &[],
         }
     }
 
@@ -221,32 +226,41 @@ impl<'other> QuotaPayload<'other> {
         self.collection_uuid = Some(collection_uuid);
         self
     }
+
+    pub fn with_search_payloads(mut self, payloads: &'other [SearchPayload]) -> Self {
+        self.search_payloads = payloads;
+        self
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, EnumIter)]
 pub enum UsageType {
-    MetadataKeySizeBytes,       // Max metadata key size in bytes
-    MetadataValueSizeBytes,     // Max metadata value size in bytes
-    NumMetadataKeys,            // Number of keys in the metadata
-    NumWherePredicates,         // Number of predicates in the where
-    WhereValueSizeBytes,        // Max where clause value size in bytes
-    NumWhereDocumentPredicates, // Number of predicates in the where_document
-    WhereDocumentValueLength,   // Max where_document value length
-    NumRecords,                 // Number of records
-    EmbeddingDimensions,        // Number of ints/floats in the embedding
-    DocumentSizeBytes,          // Max document size in bytes
-    UriSizeBytes,               // Max uri size in bytes
-    IdSizeBytes,                // Max id size in bytes
-    NameSizeBytes,              // Max name size in bytes (e.g. collection, database)
-    LimitValue,
-    NumResults,
-    NumQueryEmbeddings,    // Number of query embeddings
-    CollectionSizeRecords, // Number of records in the collection
-    NumCollections,        // Total number of collections for a tenant
-    NumDatabases,          // Total number of databases for a tenant
-    NumQueryIDs,           // Number of IDs to filter by in a query
-    RegexPatternLength,    // Length of regex pattern specified in filter
-    NumForks,              // Number of forks a root collection may have
+    MetadataKeySizeBytes,            // Max metadata key size in bytes
+    MetadataValueSizeBytes,          // Max metadata value size in bytes
+    NumMetadataKeys,                 // Number of keys in the metadata
+    NumWherePredicates,              // Number of predicates in the where
+    WhereValueSizeBytes,             // Max where clause value size in bytes
+    NumWhereDocumentPredicates,      // Number of predicates in the where_document
+    WhereDocumentValueLength,        // Max where_document value length
+    NumRecords,                      // Number of records
+    EmbeddingDimensions,             // Number of ints/floats in the embedding
+    SparseVectorPopulatedDimensions, // Number of ints/floats in the sparse vector
+    DocumentSizeBytes,               // Max document size in bytes
+    UriSizeBytes,                    // Max uri size in bytes
+    IdSizeBytes,                     // Max id size in bytes
+    NameSizeBytes,                   // Max name size in bytes (e.g. collection, database)
+    LimitValue,                      // Max number of results to return
+    RankKnnLimit,                    // Max limit in rank knn expresion
+    NumResults,                      // Number of results
+    NumQueryEmbeddings,              // Number of query embeddings
+    CollectionSizeRecords,           // Number of records in the collection
+    NumCollections,                  // Total number of collections for a tenant
+    NumDatabases,                    // Total number of databases for a tenant
+    NumQueryIDs,                     // Number of IDs to filter by in a query
+    RegexPatternLength,              // Length of regex pattern specified in filter
+    NumForks,                        // Number of forks a root collection may have
+    NumSearchPayloads,               // Number of search payloads in a search
+    NumRankKnn,                      // Number of knns in a rank expression
 }
 
 impl fmt::Display for UsageType {
@@ -265,11 +279,15 @@ impl fmt::Display for UsageType {
             UsageType::WhereDocumentValueLength => write!(f, "Length of where document value"),
             UsageType::NumRecords => write!(f, "Number of records"),
             UsageType::EmbeddingDimensions => write!(f, "Embedding dimension"),
+            UsageType::SparseVectorPopulatedDimensions => {
+                write!(f, "Sparse vector populated dimension")
+            }
             UsageType::DocumentSizeBytes => write!(f, "Document size (bytes)"),
             UsageType::UriSizeBytes => write!(f, "URI size (bytes)"),
             UsageType::IdSizeBytes => write!(f, "ID size (bytes)"),
             UsageType::NameSizeBytes => write!(f, "Name size (bytes)"),
             UsageType::LimitValue => write!(f, "Limit value"),
+            UsageType::RankKnnLimit => write!(f, "Limit value in rank expression"),
             UsageType::NumResults => write!(f, "Number of results"),
             UsageType::NumQueryEmbeddings => write!(f, "Number of query embeddings"),
             UsageType::CollectionSizeRecords => write!(f, "Collection size (records)"),
@@ -278,6 +296,8 @@ impl fmt::Display for UsageType {
             UsageType::NumQueryIDs => write!(f, "Number of IDs to filter by in a query"),
             UsageType::RegexPatternLength => write!(f, "Length of regex pattern"),
             UsageType::NumForks => write!(f, "Number of forks"),
+            UsageType::NumSearchPayloads => write!(f, "Number of search payloads in a search"),
+            UsageType::NumRankKnn => write!(f, "Number of knn searches in a rank expression"),
         }
     }
 }
@@ -296,11 +316,13 @@ impl TryFrom<&str> for UsageType {
             "where_document_value_length" => Ok(UsageType::WhereDocumentValueLength),
             "num_records" => Ok(UsageType::NumRecords),
             "embedding_dimensions" => Ok(UsageType::EmbeddingDimensions),
+            "sparse_vector_populated_dimensions" => Ok(UsageType::SparseVectorPopulatedDimensions),
             "document_size_bytes" => Ok(UsageType::DocumentSizeBytes),
             "uri_size_bytes" => Ok(UsageType::UriSizeBytes),
             "id_size_bytes" => Ok(UsageType::IdSizeBytes),
             "name_size_bytes" => Ok(UsageType::NameSizeBytes),
             "limit_value" => Ok(UsageType::LimitValue),
+            "rank_knn_limit" => Ok(UsageType::RankKnnLimit),
             "num_results" => Ok(UsageType::NumResults),
             "num_query_embeddings" => Ok(UsageType::NumQueryEmbeddings),
             "collection_size_records" => Ok(UsageType::CollectionSizeRecords),
@@ -309,6 +331,8 @@ impl TryFrom<&str> for UsageType {
             "num_query_ids" => Ok(UsageType::NumQueryIDs),
             "regex_pattern_length" => Ok(UsageType::RegexPatternLength),
             "num_forks" => Ok(UsageType::NumForks),
+            "num_search_payloads" => Ok(UsageType::NumSearchPayloads),
+            "num_rank_knn" => Ok(UsageType::NumRankKnn),
             _ => Err(format!("Invalid UsageType: {}", value)),
         }
     }
@@ -325,24 +349,28 @@ impl DefaultQuota for UsageType {
             UsageType::MetadataValueSizeBytes => 36,
             UsageType::NumMetadataKeys => 16,
             UsageType::NumWherePredicates => 8,
-            UsageType::WhereValueSizeBytes => 36, // Same as METADATA_VALUE_SIZE
+            UsageType::WhereValueSizeBytes => 36,
             UsageType::NumWhereDocumentPredicates => 8,
             UsageType::WhereDocumentValueLength => 130,
             UsageType::NumRecords => 100,
-            UsageType::EmbeddingDimensions => 3072,
+            UsageType::EmbeddingDimensions => 4096,
+            UsageType::SparseVectorPopulatedDimensions => 4096,
             UsageType::DocumentSizeBytes => 5000,
             UsageType::UriSizeBytes => 32,
             UsageType::IdSizeBytes => 128,
             UsageType::NameSizeBytes => 128,
-            UsageType::LimitValue => 1000,
+            UsageType::LimitValue => 384,
+            UsageType::RankKnnLimit => 384,
             UsageType::NumResults => 100,
-            UsageType::NumQueryEmbeddings => 100,
+            UsageType::NumQueryEmbeddings => 20,
             UsageType::CollectionSizeRecords => 1_000_000,
             UsageType::NumCollections => 1_000_000,
             UsageType::NumDatabases => 10,
             UsageType::NumQueryIDs => 1000,
             UsageType::RegexPatternLength => 256,
             UsageType::NumForks => 256,
+            UsageType::NumSearchPayloads => 5,
+            UsageType::NumRankKnn => 5,
         }
     }
 }

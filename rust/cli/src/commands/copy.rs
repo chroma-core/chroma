@@ -13,7 +13,10 @@ use clap::Parser;
 use crossterm::style::Stylize;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::Select;
+use futures::{stream, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::task::JoinHandle;
 
@@ -59,6 +62,20 @@ pub struct CopyArgs {
     host: Option<String>,
     #[clap(long = "path", help = "Data path for your local Chroma server")]
     path: Option<String>,
+    #[clap(
+        long = "batch",
+        default_value_t = 100,
+        value_parser = clap::value_parser!(u32).range(1..=300),
+        help = "Batch size for records when copying (min 1, max 300)"
+    )]
+    batch: u32,
+    #[clap(
+        long = "concurrent",
+        default_value_t = 5,
+        value_parser = clap::value_parser!(u32).range(1..=8),
+        help = "Number of concurrent processes when copying (min 1, max 8)"
+    )]
+    concurrent: u32,
 }
 
 fn select_chroma_server_prompt() -> &'static str {
@@ -174,6 +191,8 @@ async fn copy_collections(
     target: ChromaClient,
     collections: Vec<String>,
     all: bool,
+    step: u32,
+    concurrent: u32,
 ) -> Result<(), CliError> {
     let collections = if all {
         source
@@ -198,6 +217,7 @@ async fn copy_collections(
 
     println!("{}", start_copy_prompt(collections.len()).bold().blue());
 
+    println!("Verifying collections...");
     // Verify that collections don't exist on target
     for collection in collections.clone() {
         if target.get_collection(collection.name.clone()).await.is_ok() {
@@ -205,20 +225,14 @@ async fn copy_collections(
         }
     }
 
-    let progress = ProgressBar::new_spinner();
-    progress.set_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner:.green} {msg}")
-            .unwrap(),
-    );
-    progress.set_message(String::from("Verifying collections..."));
-    progress.enable_steady_tick(std::time::Duration::from_millis(100));
-
     for collection in collections {
         let size = collection
             .count()
             .await
             .map_err(|_| CollectionAPIError::Count(collection.name.clone()))?;
+
+        let offsets: Vec<u32> = (0..size).step_by(step as usize).collect();
+        let records_added = Arc::new(AtomicUsize::new(0));
 
         let target_collection = target
             .create_collection(
@@ -229,43 +243,76 @@ async fn copy_collections(
             .await
             .map_err(|_| ChromaClientError::CreateCollection(collection.name.clone()))?;
 
-        let message = format!("Copying collection: {} ({} records)", collection.name, size);
-        progress.set_message(message);
+        println!("Copying collection: {}", collection.name);
 
-        for i in (0..(size + 1)).step_by(100) {
-            let records = collection
-                .get(
-                    None,
-                    None,
-                    None,
-                    Some(IncludeList::all()),
-                    Some(100),
-                    Some(i),
-                )
-                .await
-                .map_err(|_| ChromaClientError::CollectionGet(collection.name.clone()))?;
+        let collection_progress = ProgressBar::new(size as u64);
+        collection_progress.set_style(
+            ProgressStyle::default_bar()
+                .template("{bar:40.cyan/blue} {pos}/{len}")
+                .unwrap()
+                .progress_chars("◼◼-"),
+        );
 
-            target_collection
-                .add(
-                    records.ids,
-                    records
-                        .embeddings
-                        .ok_or_else(|| CollectionAPIError::Add(collection.name.clone()))?,
-                    records.documents,
-                    records.uris,
-                    records.metadatas,
-                )
-                .await
-                .map_err(|e| {
-                    if e.to_string().contains("Quota") {
-                        let msg = serde_json::from_str::<ErrorResponse>(&e.to_string())
-                            .unwrap_or_default()
-                            .message;
-                        return CliError::Utils(UtilsError::Quota(msg));
-                    }
-                    CliError::Collection(CollectionAPIError::Add(collection.name.clone()))
-                })?;
-        }
+        stream::iter(offsets.into_iter().map(|offset| {
+            let collection = collection.clone();
+            let target_collection = target_collection.clone();
+            let records_added = records_added.clone();
+            let collection_progress = collection_progress.clone();
+
+            async move {
+                let records = collection
+                    .get(
+                        None,
+                        None,
+                        None,
+                        Some(IncludeList::all()),
+                        Some(step),
+                        Some(offset),
+                    )
+                    .await
+                    .map_err(|_| ChromaClientError::CollectionGet(collection.name.clone()))?;
+
+                if records.ids.is_empty() {
+                    return Ok::<(), CliError>(());
+                }
+
+                let num_records = records.ids.len();
+
+                target_collection
+                    .add(
+                        records.ids,
+                        records
+                            .embeddings
+                            .ok_or_else(|| CollectionAPIError::Add(collection.name.clone()))?,
+                        records.documents,
+                        records.uris,
+                        records.metadatas,
+                    )
+                    .await
+                    .map_err(|e| {
+                        if e.to_string().to_lowercase().contains("quota") {
+                            let msg = serde_json::from_str::<ErrorResponse>(&e.to_string())
+                                .unwrap_or_default()
+                                .message;
+                            return CliError::Utils(UtilsError::Quota(msg));
+                        }
+                        CliError::Collection(CollectionAPIError::Add(collection.name.clone()))
+                    })?;
+
+                let current_added =
+                    records_added.fetch_add(num_records, Ordering::Relaxed) + num_records;
+                collection_progress.set_position(current_added as u64);
+
+                Ok(())
+            }
+        }))
+        .buffer_unordered(concurrent as usize)
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<Result<(), CliError>>()?;
+
+        collection_progress.finish();
     }
 
     println!("Copy Completed!");
@@ -284,7 +331,15 @@ pub fn copy(args: CopyArgs) -> Result<(), CliError> {
         let (source, target) = get_target_and_destination(&args)?;
         let (source_client, target_client, _handle) =
             get_chroma_clients(&args, source, target, profile).await?;
-        copy_collections(source_client, target_client, args.collections, args.all).await?;
+        copy_collections(
+            source_client,
+            target_client,
+            args.collections,
+            args.all,
+            args.batch,
+            args.concurrent,
+        )
+        .await?;
         Ok::<(), CliError>(())
     })?;
     Ok(())

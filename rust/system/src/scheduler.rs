@@ -126,9 +126,9 @@ impl Scheduler {
     // Note: this method holds the lock on the handles, should call it only after stop is
     // called.
     pub(crate) async fn join(&self) {
-        // NOTE(rescrv):  Leaving this clippy in place until we can re-arch our way out.
-        // Do NOT simply silence this warning.
         let mut handles = {
+            // NOTE(rescrv):  We take the handles in a block so the lock is released prior to
+            // awaiting the handles.
             let mut handles = self.handles.write();
             handles
                 .iter_mut()

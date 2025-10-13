@@ -217,10 +217,8 @@ impl Orchestrator for GarbageCollectorOrchestrator {
 
     fn take_result_channel(
         &mut self,
-    ) -> Sender<Result<GarbageCollectorResponse, GarbageCollectorError>> {
-        self.result_channel
-            .take()
-            .expect("The result channel should be set before take")
+    ) -> Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>> {
+        self.result_channel.take()
     }
 }
 
@@ -478,7 +476,6 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
                 epoch_id,
                 sysdb_client: self.sysdb_client.clone(),
                 versions_to_delete,
-                unused_s3_files: output.deleted_files.clone(),
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -555,6 +552,7 @@ mod tests {
             tracing::info!(
                 attempt,
                 max_attempts,
+                collection_id,
                 "Waiting for new version to be created..."
             );
 

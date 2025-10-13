@@ -28,7 +28,7 @@ use crate::operators::mark_versions_at_sysdb::{
 };
 use crate::types::{
     version_graph_to_collection_dependency_graph, CleanupMode, GarbageCollectorResponse,
-    VersionGraph,
+    VersionGraph, VersionGraphNode,
 };
 use async_trait::async_trait;
 use chroma_blockstore::RootManager;
@@ -84,6 +84,8 @@ pub struct GarbageCollectorOrchestrator {
 
     num_files_deleted: u32,
     num_versions_deleted: u32,
+
+    enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -103,6 +105,7 @@ impl GarbageCollectorOrchestrator {
         cleanup_mode: CleanupMode,
         min_versions_to_keep: u32,
         enable_log_gc: bool,
+        enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
     ) -> Self {
         Self {
             collection_id,
@@ -135,6 +138,8 @@ impl GarbageCollectorOrchestrator {
 
             num_files_deleted: 0,
             num_versions_deleted: 0,
+
+            enable_dangerous_option_to_ignore_min_versions_for_wal3,
         }
     }
 }
@@ -232,10 +237,8 @@ impl Orchestrator for GarbageCollectorOrchestrator {
 
     fn take_result_channel(
         &mut self,
-    ) -> Sender<Result<GarbageCollectorResponse, GarbageCollectorError>> {
-        self.result_channel
-            .take()
-            .expect("The result channel should be set before take")
+    ) -> Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>> {
+        self.result_channel.take()
     }
 }
 
@@ -524,6 +527,8 @@ impl GarbageCollectorOrchestrator {
                 mode: self.cleanup_mode,
                 storage: self.storage.clone(),
                 logs: self.logs.clone(),
+                enable_dangerous_option_to_ignore_min_versions_for_wal3: self
+                    .enable_dangerous_option_to_ignore_min_versions_for_wal3,
             }),
             DeleteUnusedLogsInput {
                 collections_to_destroy,
@@ -544,6 +549,12 @@ impl GarbageCollectorOrchestrator {
         output: ListFilesAtVersionOutput,
         ctx: &ComponentContext<Self>,
     ) -> Result<(), GarbageCollectorError> {
+        let version_file = self.version_files.get(&output.collection_id).ok_or(
+            GarbageCollectorError::InvariantViolation(format!(
+                "Expected version file to be set for collection {}",
+                output.collection_id
+            )),
+        )?;
         let version_action = self
             .versions_to_delete_output
             .as_ref()
@@ -571,7 +582,11 @@ impl GarbageCollectorOrchestrator {
         );
 
         if output.file_paths.is_empty() {
-            // We only allow empty file paths if the version is 0 and all ancestors are also at v0. Otherwise, compaction should have flushed new file paths. This check is defensive and should never fail.
+            // We only allow empty file paths until the first version with file paths. After that version, all subsequent versions must have file paths. This check is defensive and should never fail. What we expect:
+            // v0: no data has been compacted, so there are no file paths.
+            // v1-N: a compaction has occurred, but it was a no-op (e.g. all log entries were deletions of non-existent IDs), so there are no file paths.
+            // vN+1..: a compaction has occurred with at least 1 valid log entry after materializing the logs, so there must be file paths.
+
             let graph = self
                 .graph
                 .as_ref()
@@ -603,7 +618,7 @@ impl GarbageCollectorOrchestrator {
                 ))?;
             let root = graph.node_weight(root_index).expect("Node should exist");
 
-            let versions_from_root_to_this_node = petgraph::algo::astar(
+            let nodes_from_root_to_this_node = petgraph::algo::astar(
                 graph,
                 root_index,
                 |finish| finish == this_node,
@@ -618,17 +633,61 @@ impl GarbageCollectorOrchestrator {
             .into_iter()
             .map(|i| {
                 let node = graph.node_weight(i).expect("Node should exist");
-                node.version
+                node.clone()
             })
             .collect::<Vec<_>>();
-            let are_all_versions_v0 = versions_from_root_to_this_node
-                .iter()
-                .all(|&version| version == 0);
 
-            if !are_all_versions_v0 {
+            fn extract_paths(
+                version_file: &CollectionVersionFile,
+                node: &VersionGraphNode,
+                output: &ListFilesAtVersionOutput,
+            ) -> Result<bool, GarbageCollectorError> {
+                let Some(version_history) = version_file.version_history.as_ref() else {
+                    return Err(GarbageCollectorError::InvariantViolation(format!(
+                        "Version {} of collection {} not found in version file.",
+                        output.version, output.collection_id
+                    )));
+                };
+                for version in version_history.versions.iter() {
+                    if version.version == 0 {
+                        continue;
+                    }
+                    if version.version == node.version {
+                        let Some(segment_info) = version.segment_info.as_ref() else {
+                            return Err(GarbageCollectorError::InvariantViolation(format!(
+                                "Version {} of collection {} has no segment info.",
+                                output.version, output.collection_id
+                            )));
+                        };
+                        let mut all_segments_have_paths =
+                            !segment_info.segment_compaction_info.is_empty();
+                        for segment in segment_info.segment_compaction_info.iter() {
+                            if segment.file_paths.is_empty() {
+                                all_segments_have_paths = false;
+                            }
+                        }
+                        return Ok(all_segments_have_paths);
+                    }
+                }
+                Ok(false)
+            }
+            let extracted_paths = nodes_from_root_to_this_node
+                .iter()
+                .map(|node| extract_paths(version_file, node, &output).map(|x| (node.version, x)))
+                .collect::<Vec<_>>();
+            let mut have_paths = Vec::with_capacity(extracted_paths.len());
+            for res in extracted_paths.into_iter() {
+                have_paths.push(res?);
+            }
+            let has_no_paths_at_version = have_paths
+                .into_iter()
+                .skip_while(|&(_version, has_paths)| !has_paths)
+                .find(|(_version, has_paths)| !has_paths);
+
+            if let Some((version, _)) = has_no_paths_at_version {
                 return Err(GarbageCollectorError::InvariantViolation(format!(
-                    "Version {} of collection {} has no file paths, but has non-v0 ancestors. This should never happen.",
-                    output.version, output.collection_id
+                    "Version {} of collection {} has no file paths, but has ancestors with file paths. This should never happen.",
+                    version, output.collection_id
                 )));
             }
         }
@@ -856,7 +915,6 @@ impl GarbageCollectorOrchestrator {
                         collection_id: collection_id.to_string(),
                         versions,
                     },
-                    unused_s3_files: output.deleted_files.clone(),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
@@ -1154,6 +1212,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
                 false,
             )
             .await
@@ -1162,7 +1221,7 @@ mod tests {
         // Create v1 with no file paths
         sysdb
             .flush_compaction(
-                tenant,
+                tenant.clone(),
                 root_collection_id,
                 0,
                 0,
@@ -1172,6 +1231,46 @@ mod tests {
                 }]),
                 0,
                 0,
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Create v2 with file paths
+        sysdb
+            .flush_compaction(
+                tenant.clone(),
+                root_collection_id,
+                0,
+                1,
+                Arc::new([SegmentFlushInfo {
+                    segment_id,
+                    file_paths: HashMap::from([(
+                        "foo".to_string(),
+                        vec![uuid::Uuid::new_v4().to_string()],
+                    )]),
+                }]),
+                0,
+                0,
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Create v3 with no file paths
+        sysdb
+            .flush_compaction(
+                tenant,
+                root_collection_id,
+                0,
+                2,
+                Arc::new([SegmentFlushInfo {
+                    segment_id,
+                    file_paths: HashMap::new(),
+                }]),
+                0,
+                0,
+                None,
             )
             .await
             .unwrap();
@@ -1209,9 +1308,11 @@ mod tests {
             crate::types::CleanupMode::Delete,
             1,
             true,
+            false,
         );
         let result = orchestrator.run(system).await;
         assert!(result.is_err());
+        println!("{:?}", result);
         assert!(format!("{:?}", result).contains("no file paths"));
     }
 }

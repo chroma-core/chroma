@@ -1,13 +1,17 @@
 use crate::collection_configuration::InternalCollectionConfiguration;
-use crate::collection_configuration::UpdateCollectionConfiguration;
+use crate::collection_configuration::InternalUpdateCollectionConfiguration;
 use crate::error::QueryConversionError;
 use crate::operator::GetResult;
+use crate::operator::Key;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
+use crate::operator::SearchResult;
 use crate::plan::PlanToProtoError;
+use crate::plan::SearchPayload;
 use crate::validators::{
-    validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
+    validate_metadata_vec, validate_name, validate_non_empty_collection_update_metadata,
+    validate_optional_metadata, validate_update_metadata_vec,
 };
 use crate::Collection;
 use crate::CollectionConfigurationToInternalConfigurationError;
@@ -15,7 +19,9 @@ use crate::CollectionConversionError;
 use crate::CollectionUuid;
 use crate::DistributedSpannParametersFromSegmentError;
 use crate::HnswParametersFromSegmentError;
+use crate::InternalSchema;
 use crate::Metadata;
+use crate::SchemaError;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
 use crate::UpdateMetadata;
@@ -69,7 +75,7 @@ pub enum GetCollectionWithSegmentsError {
     GetSegmentsError(#[from] GetSegmentsError),
     #[error("Grpc error: {0}")]
     Grpc(#[from] Status),
-    #[error("Collection [{0}] does not exists.")]
+    #[error("Collection [{0}] does not exist.")]
     NotFound(String),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
@@ -92,6 +98,14 @@ impl ChromaError for GetCollectionWithSegmentsError {
             }
             GetCollectionWithSegmentsError::NotFound(_) => ErrorCodes::NotFound,
             GetCollectionWithSegmentsError::Internal(err) => err.code(),
+        }
+    }
+
+    fn should_trace_error(&self) -> bool {
+        if let Self::Grpc(status) = self {
+            status.code() != ErrorCodes::NotFound.into()
+        } else {
+            true
         }
     }
 }
@@ -244,6 +258,7 @@ impl GetTenantRequest {
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetTenantResponse {
     pub name: String,
+    pub resource_name: Option<String>,
 }
 
 #[cfg(feature = "pyo3")]
@@ -252,6 +267,11 @@ impl GetTenantResponse {
     #[getter]
     pub fn name(&self) -> &String {
         &self.name
+    }
+
+    #[getter]
+    pub fn resource_name(&self) -> Option<String> {
+        self.resource_name.clone()
     }
 }
 
@@ -268,6 +288,55 @@ impl ChromaError for GetTenantError {
         match self {
             GetTenantError::Internal(err) => err.code(),
             GetTenantError::NotFound(_) => ErrorCodes::NotFound,
+        }
+    }
+}
+
+#[non_exhaustive]
+#[derive(Validate, Serialize, ToSchema)]
+pub struct UpdateTenantRequest {
+    pub tenant_id: String,
+    pub resource_name: String,
+}
+
+impl UpdateTenantRequest {
+    pub fn try_new(
+        tenant_id: String,
+        resource_name: String,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            resource_name,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+#[derive(Serialize, ToSchema)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
+pub struct UpdateTenantResponse {}
+
+#[cfg(feature = "pyo3")]
+#[pyo3::pymethods]
+impl UpdateTenantResponse {}
+
+#[derive(Error, Debug)]
+pub enum UpdateTenantError {
+    #[error("Failed to set resource name")]
+    FailedToSetResourceName(#[from] tonic::Status),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Tenant [{0}] not found")]
+    NotFound(String),
+}
+
+impl ChromaError for UpdateTenantError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            UpdateTenantError::FailedToSetResourceName(_) => ErrorCodes::AlreadyExists,
+            UpdateTenantError::Internal(err) => err.code(),
+            UpdateTenantError::NotFound(_) => ErrorCodes::NotFound,
         }
     }
 }
@@ -571,15 +640,18 @@ pub type GetCollectionResponse = Collection;
 
 #[derive(Debug, Error)]
 pub enum GetCollectionError {
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
 }
 
 impl ChromaError for GetCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GetCollectionError::InvalidSchema(e) => e.code(),
             GetCollectionError::Internal(err) => err.code(),
             GetCollectionError::NotFound(_) => ErrorCodes::NotFound,
         }
@@ -593,9 +665,10 @@ pub struct CreateCollectionRequest {
     pub database_name: String,
     #[validate(custom(function = "validate_name"))]
     pub name: String,
-    #[validate(custom(function = "validate_non_empty_metadata"))]
+    #[validate(custom(function = "validate_optional_metadata"))]
     pub metadata: Option<Metadata>,
     pub configuration: Option<InternalCollectionConfiguration>,
+    pub schema: Option<InternalSchema>,
     pub get_or_create: bool,
 }
 
@@ -606,6 +679,7 @@ impl CreateCollectionRequest {
         name: String,
         metadata: Option<Metadata>,
         configuration: Option<InternalCollectionConfiguration>,
+        schema: Option<InternalSchema>,
         get_or_create: bool,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
@@ -614,6 +688,7 @@ impl CreateCollectionRequest {
             name,
             metadata,
             configuration,
+            schema,
             get_or_create,
         };
         request.validate().map_err(ChromaValidationError::from)?;
@@ -638,7 +713,9 @@ pub enum CreateCollectionError {
     #[error("Could not fetch collections: {0}")]
     Get(#[from] GetCollectionsError),
     #[error("Could not deserialize configuration: {0}")]
-    Configuration(#[from] serde_json::Error),
+    Configuration(serde_json::Error),
+    #[error("Could not serialize schema: {0}")]
+    Schema(#[from] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("The operation was aborted, {0}")]
@@ -649,6 +726,8 @@ pub enum CreateCollectionError {
     HnswNotSupported,
     #[error("Failed to parse db id")]
     DatabaseIdParseError,
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(String),
 }
 
 impl ChromaError for CreateCollectionError {
@@ -666,6 +745,8 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
             CreateCollectionError::DatabaseIdParseError => ErrorCodes::Internal,
+            CreateCollectionError::InvalidSchema(_) => ErrorCodes::InvalidArgument,
+            CreateCollectionError::Schema(e) => e.code(),
         }
     }
 }
@@ -707,6 +788,65 @@ impl ChromaError for GetCollectionsError {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct ChromaResourceName {
+    pub tenant_resource_name: String,
+    pub database_name: String,
+    pub collection_name: String,
+}
+#[non_exhaustive]
+#[derive(Clone, Serialize, ToSchema)]
+pub struct GetCollectionByCrnRequest {
+    pub parsed_crn: ChromaResourceName,
+}
+
+impl GetCollectionByCrnRequest {
+    pub fn try_new(crn: String) -> Result<Self, ChromaValidationError> {
+        let parsed_crn = parse_and_validate_crn(&crn)?;
+        Ok(Self { parsed_crn })
+    }
+}
+
+fn parse_and_validate_crn(crn: &str) -> Result<ChromaResourceName, ChromaValidationError> {
+    let mut parts = crn.splitn(4, ':');
+    if let (Some(p1), Some(p2), Some(p3), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    {
+        if !p1.is_empty() && !p2.is_empty() && !p3.is_empty() {
+            return Ok(ChromaResourceName {
+                tenant_resource_name: p1.to_string(),
+                database_name: p2.to_string(),
+                collection_name: p3.to_string(),
+            });
+        }
+    }
+    let mut err = ValidationError::new("invalid_crn_format");
+    err.message = Some(
+        "CRN must be in the format <tenant_resource_name>:<database_name>:<collection_name> with non-empty parts"
+            .into(),
+    );
+    Err(ChromaValidationError::from(("crn", err)))
+}
+
+pub type GetCollectionByCrnResponse = Collection;
+
+#[derive(Debug, Error)]
+pub enum GetCollectionByCrnError {
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Collection [{0}] does not exist")]
+    NotFound(String),
+}
+
+impl ChromaError for GetCollectionByCrnError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetCollectionByCrnError::Internal(err) => err.code(),
+            GetCollectionByCrnError::NotFound(_) => ErrorCodes::NotFound,
+        }
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
 pub enum CollectionMetadataUpdate {
     ResetMetadata,
@@ -721,7 +861,7 @@ pub struct UpdateCollectionRequest {
     pub new_name: Option<String>,
     #[validate(custom(function = "validate_non_empty_collection_update_metadata"))]
     pub new_metadata: Option<CollectionMetadataUpdate>,
-    pub new_configuration: Option<UpdateCollectionConfiguration>,
+    pub new_configuration: Option<InternalUpdateCollectionConfiguration>,
 }
 
 impl UpdateCollectionRequest {
@@ -729,7 +869,7 @@ impl UpdateCollectionRequest {
         collection_id: CollectionUuid,
         new_name: Option<String>,
         new_metadata: Option<CollectionMetadataUpdate>,
-        new_configuration: Option<UpdateCollectionConfiguration>,
+        new_configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             collection_id,
@@ -747,7 +887,7 @@ pub struct UpdateCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpdateCollectionError {
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
     #[error("Metadata reset unsupported")]
     MetadataResetUnsupported,
@@ -803,7 +943,7 @@ pub struct DeleteCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum DeleteCollectionError {
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
     #[error(transparent)]
     Validation(#[from] ChromaValidationError),
@@ -873,7 +1013,7 @@ pub enum ForkCollectionError {
     Local,
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
     #[error("Failed to convert proto segment")]
     SegmentConversionError(#[from] SegmentConversionError),
@@ -882,18 +1022,14 @@ pub enum ForkCollectionError {
 impl ChromaError for ForkCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            ForkCollectionError::NotFound(_) => ErrorCodes::NotFound,
             ForkCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
-            ForkCollectionError::CollectionConversionError(collection_conversion_error) => {
-                collection_conversion_error.code()
-            }
+            ForkCollectionError::CollectionConversionError(e) => e.code(),
             ForkCollectionError::DuplicateSegment => ErrorCodes::Internal,
             ForkCollectionError::Field(_) => ErrorCodes::FailedPrecondition,
             ForkCollectionError::Local => ErrorCodes::Unimplemented,
-            ForkCollectionError::Internal(chroma_error) => chroma_error.code(),
-            ForkCollectionError::NotFound(_) => ErrorCodes::NotFound,
-            ForkCollectionError::SegmentConversionError(segment_conversion_error) => {
-                segment_conversion_error.code()
-            }
+            ForkCollectionError::Internal(e) => e.code(),
+            ForkCollectionError::SegmentConversionError(e) => e.code(),
         }
     }
 }
@@ -922,7 +1058,7 @@ impl ChromaError for CountForksError {
 pub enum GetCollectionSizeError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
 }
 
@@ -939,7 +1075,7 @@ impl ChromaError for GetCollectionSizeError {
 pub enum ListCollectionVersionsError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
 }
 
@@ -967,10 +1103,11 @@ pub struct AddCollectionRecordsRequest {
     pub database_name: String,
     pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
-    #[validate(custom(function = "Self::validate_embeddings"))]
+    #[validate(custom(function = "validate_embeddings"))]
     pub embeddings: Vec<Vec<f32>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
+    #[validate(custom(function = "validate_metadata_vec"))]
     pub metadatas: Option<Vec<Option<Metadata>>>,
 }
 
@@ -999,14 +1136,14 @@ impl AddCollectionRecordsRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+}
 
-    fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
-        if embeddings.iter().any(|e| e.is_empty()) {
-            return Err(ValidationError::new("embedding_minimum_dimensions")
-                .with_message("Each embedding must have at least 1 dimension".into()));
-        }
-        Ok(())
+fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
+    if embeddings.iter().any(|e| e.is_empty()) {
+        return Err(ValidationError::new("embedding_minimum_dimensions")
+            .with_message("Each embedding must have at least 1 dimension".into()));
     }
+    Ok(())
 }
 
 #[derive(Serialize, ToSchema, Default, Deserialize)]
@@ -1026,7 +1163,7 @@ impl ChromaError for AddCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             AddCollectionRecordsError::Collection(err) => err.code(),
-            AddCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
+            AddCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
             AddCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1044,6 +1181,7 @@ pub struct UpdateCollectionRecordsRequest {
     pub embeddings: Option<Vec<Option<Vec<f32>>>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
+    #[validate(custom(function = "validate_update_metadata_vec"))]
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
@@ -1088,7 +1226,7 @@ pub enum UpdateCollectionRecordsError {
 impl ChromaError for UpdateCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpdateCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
+            UpdateCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
             UpdateCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1103,9 +1241,11 @@ pub struct UpsertCollectionRecordsRequest {
     pub database_name: String,
     pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
-    pub embeddings: Option<Vec<Vec<f32>>>,
+    #[validate(custom(function = "validate_embeddings"))]
+    pub embeddings: Vec<Vec<f32>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
+    #[validate(custom(function = "validate_update_metadata_vec"))]
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
@@ -1116,7 +1256,7 @@ impl UpsertCollectionRecordsRequest {
         database_name: String,
         collection_id: CollectionUuid,
         ids: Vec<String>,
-        embeddings: Option<Vec<Vec<f32>>>,
+        embeddings: Vec<Vec<f32>>,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
@@ -1150,7 +1290,7 @@ pub enum UpsertCollectionRecordsError {
 impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpsertCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
+            UpsertCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
             UpsertCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1213,7 +1353,7 @@ impl ChromaError for DeleteCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             DeleteCollectionRecordsError::Get(err) => err.code(),
-            DeleteCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
+            DeleteCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
             DeleteCollectionRecordsError::Internal(err) => err.code(),
         }
     }
@@ -1715,6 +1855,115 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
     }
 }
 
+#[non_exhaustive]
+#[derive(Clone, Debug, Serialize, ToSchema, Validate)]
+pub struct SearchRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: CollectionUuid,
+    pub searches: Vec<SearchPayload>,
+}
+
+impl SearchRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        collection_id: CollectionUuid,
+        searches: Vec<SearchPayload>,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            collection_id,
+            searches,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize, ToSchema, Debug)]
+pub struct SearchResponse {
+    pub ids: Vec<Vec<String>>,
+    pub documents: Vec<Option<Vec<Option<String>>>>,
+    pub embeddings: Vec<Option<Vec<Option<Vec<f32>>>>>,
+    pub metadatas: Vec<Option<Vec<Option<Metadata>>>>,
+    pub scores: Vec<Option<Vec<Option<f32>>>>,
+    pub select: Vec<Vec<Key>>,
+}
+
+impl From<(SearchResult, Vec<SearchPayload>)> for SearchResponse {
+    fn from((result, payloads): (SearchResult, Vec<SearchPayload>)) -> Self {
+        let num_payloads = payloads.len();
+        let mut res = Self {
+            ids: Vec::with_capacity(num_payloads),
+            documents: Vec::with_capacity(num_payloads),
+            embeddings: Vec::with_capacity(num_payloads),
+            metadatas: Vec::with_capacity(num_payloads),
+            scores: Vec::with_capacity(num_payloads),
+            select: Vec::with_capacity(num_payloads),
+        };
+
+        for (payload_result, payload) in result.results.into_iter().zip(payloads) {
+            // Get the sorted keys for this payload
+            let mut payload_select = Vec::from_iter(payload.select.keys.iter().cloned());
+            payload_select.sort();
+
+            let num_records = payload_result.records.len();
+            let mut ids = Vec::with_capacity(num_records);
+            let mut documents = Vec::with_capacity(num_records);
+            let mut embeddings = Vec::with_capacity(num_records);
+            let mut metadatas = Vec::with_capacity(num_records);
+            let mut scores = Vec::with_capacity(num_records);
+
+            for record in payload_result.records {
+                ids.push(record.id);
+                documents.push(record.document);
+                embeddings.push(record.embedding);
+                metadatas.push(record.metadata);
+                scores.push(record.score);
+            }
+
+            res.ids.push(ids);
+            res.select.push(payload_select.clone());
+
+            // Push documents if requested by this payload, otherwise None
+            res.documents.push(
+                payload_select
+                    .binary_search(&Key::Document)
+                    .is_ok()
+                    .then_some(documents),
+            );
+
+            // Push embeddings if requested by this payload, otherwise None
+            res.embeddings.push(
+                payload_select
+                    .binary_search(&Key::Embedding)
+                    .is_ok()
+                    .then_some(embeddings),
+            );
+
+            // Push metadatas if requested by this payload, otherwise None
+            // Include if either Key::Metadata is present or any Key::MetadataField(_)
+            let has_metadata = payload_select.binary_search(&Key::Metadata).is_ok()
+                || payload_select
+                    .last()
+                    .is_some_and(|field| matches!(field, Key::MetadataField(_)));
+            res.metadatas.push(has_metadata.then_some(metadatas));
+
+            // Push scores if requested by this payload, otherwise None
+            res.scores.push(
+                payload_select
+                    .binary_search(&Key::Score)
+                    .is_ok()
+                    .then_some(scores),
+            );
+        }
+
+        res
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum QueryError {
     #[error("Error executing plan: {0}")]
@@ -1764,6 +2013,8 @@ pub enum ExecutorError {
     Internal(Box<dyn ChromaError>),
     #[error("Error sending backfill request to compactor: {0}")]
     BackfillError(Box<dyn ChromaError>),
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
 }
 
 impl ChromaError for ExecutorError {
@@ -1776,6 +2027,7 @@ impl ChromaError for ExecutorError {
             ExecutorError::CollectionMissingHnswConfiguration => ErrorCodes::Internal,
             ExecutorError::Internal(e) => e.code(),
             ExecutorError::BackfillError(e) => e.code(),
+            ExecutorError::NotImplemented(_) => ErrorCodes::Unimplemented,
         }
     }
 }
@@ -1783,6 +2035,8 @@ impl ChromaError for ExecutorError {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::{MetadataValue, SparseVector, UpdateMetadataValue};
+    use std::collections::HashMap;
 
     #[test]
     fn test_create_database_min_length() {
@@ -1794,5 +2048,83 @@ mod test {
     fn test_create_tenant_min_length() {
         let request = CreateTenantRequest::try_new("a".to_string());
         assert!(request.is_err());
+    }
+
+    #[test]
+    fn test_add_request_validates_sparse_vectors() {
+        let mut metadata = HashMap::new();
+        // Add unsorted sparse vector - should fail validation
+        metadata.insert(
+            "sparse".to_string(),
+            MetadataValue::SparseVector(SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2])),
+        );
+
+        let result = AddCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            vec![vec![0.1, 0.2]],
+            None,
+            None,
+            Some(vec![Some(metadata)]),
+        );
+
+        // Should fail because sparse vector is not sorted
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_update_request_validates_sparse_vectors() {
+        let mut metadata = HashMap::new();
+        // Add unsorted sparse vector - should fail validation
+        metadata.insert(
+            "sparse".to_string(),
+            UpdateMetadataValue::SparseVector(SparseVector::new(
+                vec![3, 1, 2],
+                vec![0.3, 0.1, 0.2],
+            )),
+        );
+
+        let result = UpdateCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            None,
+            None,
+            None,
+            Some(vec![Some(metadata)]),
+        );
+
+        // Should fail because sparse vector is not sorted
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_upsert_request_validates_sparse_vectors() {
+        let mut metadata = HashMap::new();
+        // Add unsorted sparse vector - should fail validation
+        metadata.insert(
+            "sparse".to_string(),
+            UpdateMetadataValue::SparseVector(SparseVector::new(
+                vec![3, 1, 2],
+                vec![0.3, 0.1, 0.2],
+            )),
+        );
+
+        let result = UpsertCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            vec![vec![0.1, 0.2]],
+            None,
+            None,
+            Some(vec![Some(metadata)]),
+        );
+
+        // Should fail because sparse vector is not sorted
+        assert!(result.is_err());
     }
 }

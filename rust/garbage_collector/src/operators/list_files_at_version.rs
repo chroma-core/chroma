@@ -71,6 +71,10 @@ impl ChromaError for ListFilesAtVersionError {
             ListFilesAtVersionError::VersionFileMissingCollectionId => ErrorCodes::InvalidArgument,
         }
     }
+
+    fn should_trace_error(&self) -> bool {
+        self.code() != ErrorCodes::NotFound
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -1,8 +1,11 @@
 use chroma_config::assignment;
+use chroma_config::helpers::deserialize_duration_from_seconds;
+use chroma_index::config::SpannProviderConfig;
 use chroma_sysdb::SysDbConfig;
 use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use figment::providers::{Env, Format, Yaml};
 use serde::{Deserialize, Serialize};
+use std::{collections::HashSet, time::Duration};
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
@@ -139,7 +142,19 @@ pub struct QueryServiceConfig {
     #[serde(default = "QueryServiceConfig::default_fetch_log_batch_size")]
     pub fetch_log_batch_size: u32,
     #[serde(default)]
+    pub spann_provider: SpannProviderConfig,
+    #[serde(default)]
     pub jemalloc_pprof_server_port: Option<u16>,
+    #[serde(
+        rename = "grpc_shutdown_grace_period_seconds",
+        deserialize_with = "deserialize_duration_from_seconds",
+        default = "QueryServiceConfig::default_grpc_shutdown_grace_period"
+    )]
+    pub grpc_shutdown_grace_period: Duration,
+    // TODO: This is a temporary config to enable bm25 for certain tenants.
+    // This should be removed once we have collection schema ready.
+    #[serde(default)]
+    pub bm25_tenant: HashSet<String>,
 }
 
 impl QueryServiceConfig {
@@ -168,6 +183,10 @@ impl QueryServiceConfig {
 
     fn default_fetch_log_batch_size() -> u32 {
         100
+    }
+
+    fn default_grpc_shutdown_grace_period() -> Duration {
+        Duration::from_secs(1)
     }
 }
 

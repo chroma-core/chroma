@@ -2,39 +2,45 @@ use axum::{
     extract::{DefaultBodyLimit, Path, Query, State},
     http::{header::HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, patch, post},
     Json, Router, ServiceExt,
 };
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
-    MeteredFutureExt, ReadAction, StartRequest, WriteAction,
+    ExternalCollectionReadContext, MeteredFutureExt, ReadAction, StartRequest, WriteAction,
 };
 use chroma_system::System;
+use chroma_tracing::add_tracing_middleware;
+use chroma_types::{plan::SearchPayload, InternalSchema};
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
     CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
     CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
-    InternalCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
+    GetCollectionByCrnRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
+    GetRequest, GetResponse, GetTenantRequest, GetTenantResponse, GetUserIdentityResponse,
+    HeartbeatResponse, IncludeList, InternalCollectionConfiguration,
+    InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
-    UpdateMetadata, UpsertCollectionRecordsResponse,
+    SearchRequest, SearchResponse, UpdateCollectionConfiguration, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateMetadata, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
-use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
 use std::{str::FromStr, time::Instant};
-use tokio::{select, signal};
+#[cfg(unix)]
+use tokio::signal::unix::{signal, SignalKind};
+#[cfg(windows)]
+use tokio::signal::windows::ctrl_c;
 use tower_http::cors::CorsLayer;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::ToSchema;
@@ -53,7 +59,6 @@ use crate::{
     config::FrontendServerConfig,
     quota::{Action, QuotaEnforcer, QuotaPayload},
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
-    tower_tracing::add_tracing_middleware,
     traced_json::TracedJson,
     types::errors::{ErrorResponse, ServerError, ValidationError},
     Frontend,
@@ -83,14 +88,36 @@ impl chroma_error::ChromaError for RateLimitError {
 }
 
 async fn graceful_shutdown(system: System) {
-    select! {
-        // Kubernetes will send SIGTERM to stop the pod gracefully
-        // TODO: add more signal handling
-        _ = signal::ctrl_c() => {
-            system.stop().await;
-            system.join().await;
-        },
+    #[cfg(unix)]
+    {
+        match signal(SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                sigterm.recv().await;
+                tracing::info!("Received SIGTERM, shutting down service");
+            }
+            Err(err) => {
+                tracing::error!("Failed to create SIGTERM handler: {err}");
+                return;
+            }
+        }
     }
+
+    #[cfg(windows)]
+    {
+        match ctrl_c() {
+            Ok(mut ctrl_c_signal) => {
+                ctrl_c_signal.recv().await;
+                tracing::info!("Received Ctrl+C, shutting down service");
+            }
+            Err(err) => {
+                tracing::error!("Failed to create Ctrl+C handler: {err}");
+                return;
+            }
+        }
+    }
+
+    system.stop().await;
+    system.join().await;
 }
 
 pub struct Metrics {
@@ -102,6 +129,7 @@ pub struct Metrics {
     get_user_identity: Counter<u64>,
     create_tenant: Counter<u64>,
     get_tenant: Counter<u64>,
+    update_tenant: Counter<u64>,
     list_databases: Counter<u64>,
     create_database: Counter<u64>,
     get_database: Counter<u64>,
@@ -110,6 +138,7 @@ pub struct Metrics {
     list_collections: Counter<u64>,
     count_collections: Counter<u64>,
     get_collection: Counter<u64>,
+    get_collection_by_crn: Counter<u64>,
     update_collection: Counter<u64>,
     delete_collection: Counter<u64>,
     fork_collection: Counter<u64>,
@@ -120,6 +149,7 @@ pub struct Metrics {
     collection_count: Counter<u64>,
     collection_get: Counter<u64>,
     collection_query: Counter<u64>,
+    collection_search: Counter<u64>,
 }
 
 impl Metrics {
@@ -133,6 +163,7 @@ impl Metrics {
             get_user_identity: meter.u64_counter("get_user_identity").build(),
             create_tenant: meter.u64_counter("create_tenant").build(),
             get_tenant: meter.u64_counter("get_tenant").build(),
+            update_tenant: meter.u64_counter("update_tenant").build(),
             list_databases: meter.u64_counter("list_databases").build(),
             create_database: meter.u64_counter("create_database").build(),
             get_database: meter.u64_counter("get_database").build(),
@@ -141,6 +172,7 @@ impl Metrics {
             list_collections: meter.u64_counter("list_collections").build(),
             count_collections: meter.u64_counter("count_collections").build(),
             get_collection: meter.u64_counter("get_collection").build(),
+            get_collection_by_crn: meter.u64_counter("get_collection_by_crn").build(),
             update_collection: meter.u64_counter("update_collection").build(),
             delete_collection: meter.u64_counter("delete_collection").build(),
             fork_collection: meter.u64_counter("fork_collection").build(),
@@ -151,6 +183,7 @@ impl Metrics {
             collection_count: meter.u64_counter("collection_count").build(),
             collection_get: meter.u64_counter("collection_get").build(),
             collection_query: meter.u64_counter("collection_query").build(),
+            collection_search: meter.u64_counter("collection_search").build(),
         }
     }
 }
@@ -230,8 +263,10 @@ impl FrontendServer {
             .route("/api/v2/reset", post(reset))
             .route("/api/v2/version", get(version))
             .route("/api/v2/auth/identity", get(get_user_identity))
+            .route("/api/v2/collections/{crn}", get(get_collection_by_crn))
             .route("/api/v2/tenants", post(create_tenant))
             .route("/api/v2/tenants/{tenant_name}", get(get_tenant))
+            .route("/api/v2/tenants/{tenant_name}", patch(update_tenant))
             .route(
                 "/api/v2/tenants/{tenant}/databases",
                 get(list_databases).post(create_database),
@@ -286,6 +321,10 @@ impl FrontendServer {
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
                 post(collection_query),
             )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
+                post(collection_search),
+            )
             .merge(docs_router)
             .with_state(self)
             .layer(DefaultBodyLimit::max(max_payload_size_bytes))
@@ -318,9 +357,8 @@ impl FrontendServer {
             app = app.layer(cors_builder);
         }
 
-        // TODO: tracing
         let addr = format!("{}:{}", listen_address, port);
-        println!("Listening on {addr}");
+        tracing::info!(%addr, "Frontend server listening on address");
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         let bound_port = listener
             .local_addr()
@@ -372,7 +410,7 @@ impl FrontendServer {
         headers: &HeaderMap,
         action: AuthzAction,
         resource: AuthzResource,
-    ) -> Result<(), ServerError> {
+    ) -> Result<GetUserIdentityResponse, ServerError> {
         Ok(self
             .auth
             .authenticate_and_authorize(headers, action, resource)
@@ -387,7 +425,7 @@ impl FrontendServer {
         action: AuthzAction,
         resource: AuthzResource,
         collection_id: CollectionUuid,
-    ) -> Result<(), ServerError> {
+    ) -> Result<GetUserIdentityResponse, ServerError> {
         let collection = self.frontend.get_cached_collection(collection_id).await?;
         Ok(self
             .auth
@@ -559,7 +597,7 @@ async fn create_tenant(
     get,
     path = "/api/v2/tenants/{tenant_name}",
     params(
-        ("tenant_name" = String, Path, description = "Tenant name or ID to retrieve")
+        ("tenant_name" = String, Path, description = "Tenant to retrieve")
     ),
     responses(
         (status = 200, description = "Tenant found", body = GetTenantResponse),
@@ -591,6 +629,50 @@ async fn get_tenant(
 }
 
 #[derive(Deserialize, Serialize, ToSchema, Debug)]
+pub struct UpdateTenantPayload {
+    pub resource_name: String,
+}
+
+/// Updates an existing tenant by name.
+#[utoipa::path(
+    patch,
+    path = "/api/v2/tenants/{tenant_name}",
+    params(
+        ("tenant_name" = String, Path, description = "Tenant to update")
+    ),
+    request_body = UpdateTenantPayload,
+    responses(
+        (status = 200, description = "Tenant updated successfully", body = UpdateTenantResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Tenant not found", body = ErrorResponse),
+        (status = 409, description = "Tenant resource name already set", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
+async fn update_tenant(
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<UpdateTenantPayload>,
+) -> Result<Json<UpdateTenantResponse>, ServerError> {
+    server.metrics.update_tenant.add(1, &[]);
+    tracing::info!(name: "update_tenant", tenant_name = %name);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::UpdateTenant,
+            AuthzResource {
+                tenant: Some(name.clone()),
+                database: None,
+                collection: None,
+            },
+        )
+        .await?;
+    let request = UpdateTenantRequest::try_new(name, payload.resource_name)?;
+    Ok(Json(server.frontend.update_tenant(request).await?))
+}
+
+#[derive(Deserialize, Serialize, ToSchema, Debug)]
 pub struct CreateDatabasePayload {
     pub name: String,
 }
@@ -615,10 +697,7 @@ async fn create_database(
     State(mut server): State<FrontendServer>,
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
-    server
-        .metrics
-        .create_database
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.create_database.add(1, &[]);
     tracing::info!(name: "create_database", tenant_name = %tenant, database_name = %name);
     server
         .authenticate_and_authorize(
@@ -677,10 +756,7 @@ async fn list_databases(
     Query(ListDatabasesParams { limit, offset }): Query<ListDatabasesParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
-    server
-        .metrics
-        .list_databases
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.list_databases.add(1, &[]);
     tracing::info!(name: "list_databases", tenant_name = %tenant);
     server
         .authenticate_and_authorize(
@@ -720,10 +796,7 @@ async fn get_database(
     Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetDatabaseResponse>, ServerError> {
-    server
-        .metrics
-        .get_database
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.get_database.add(1, &[]);
     tracing::info!(name: "get_database", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
@@ -763,10 +836,7 @@ async fn delete_database(
     Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<DeleteDatabaseResponse>, ServerError> {
-    server
-        .metrics
-        .delete_database
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.delete_database.add(1, &[]);
     tracing::info!(name: "delete_database", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
@@ -814,10 +884,7 @@ async fn list_collections(
     Query(ListCollectionsParams { limit, offset }): Query<ListCollectionsParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListCollectionsResponse>, ServerError> {
-    server
-        .metrics
-        .list_collections
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.list_collections.add(1, &[]);
     tracing::info!(name: "list_collections", tenant_name = %tenant, database_name = %database, limit = ?limit, offset = ?offset);
     server
         .authenticate_and_authorize(
@@ -874,10 +941,7 @@ async fn count_collections(
     Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountCollectionsResponse>, ServerError> {
-    server
-        .metrics
-        .count_collections
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.count_collections.add(1, &[]);
     tracing::info!(name: "count_collections", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
@@ -902,6 +966,7 @@ async fn count_collections(
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct CreateCollectionPayload {
     pub name: String,
+    pub schema: Option<InternalSchema>,
     pub configuration: Option<CollectionConfiguration>,
     pub metadata: Option<Metadata>,
     #[serde(default)]
@@ -929,10 +994,7 @@ async fn create_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<CreateCollectionPayload>,
 ) -> Result<Json<Collection>, ServerError> {
-    server
-        .metrics
-        .create_collection
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.create_collection.add(1, &[]);
     tracing::info!(name: "create_collection", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
@@ -981,6 +1043,7 @@ async fn create_collection(
         payload.name,
         payload.metadata,
         configuration,
+        payload.schema,
         payload.get_or_create,
     )?;
     let collection = server.frontend.create_collection(request).await?;
@@ -1009,10 +1072,7 @@ async fn get_collection(
     Path((tenant, database, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<Collection>, ServerError> {
-    server
-        .metrics
-        .get_collection
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.get_collection.add(1, &[]);
     tracing::info!(name: "get_collection", tenant_name = %tenant, database_name = %database, collection_name = %collection_name);
     server
         .authenticate_and_authorize(
@@ -1029,6 +1089,43 @@ async fn get_collection(
         server.scorecard_request(&["op:get_collection", format!("tenant:{}", tenant).as_str()])?;
     let request = GetCollectionRequest::try_new(tenant, database, collection_name)?;
     let collection = server.frontend.get_collection(request).await?;
+    Ok(Json(collection))
+}
+
+/// Retrieves a collection by Chroma Resource Name.
+#[utoipa::path(
+    get,
+    path = "/api/v2/collections/{crn}",
+    responses(
+        (status = 200, description = "Collection found", body = Collection),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("crn" = String, Path, description = "Chroma Resource Name")
+    )
+)]
+async fn get_collection_by_crn(
+    headers: HeaderMap,
+    Path(crn): Path<String>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<Collection>, ServerError> {
+    server.metrics.get_collection_by_crn.add(1, &[]);
+    tracing::info!(name: "get_collection_by_crn", crn = %crn);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::GetCollectionByCrn,
+            AuthzResource {
+                tenant: None,
+                database: None,
+                collection: Some(crn.clone()),
+            },
+        )
+        .await?;
+    let request = GetCollectionByCrnRequest::try_new(crn)?;
+    let collection = server.frontend.get_collection_by_crn(request).await?;
     Ok(Json(collection))
 }
 
@@ -1062,13 +1159,7 @@ async fn update_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionPayload>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
-    server.metrics.update_collection.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server.metrics.update_collection.add(1, &[]);
     tracing::info!(name: "update_collection", tenant_name = %tenant, database_name = %database, collection_id = %collection_id);
     server
         .authenticate_and_authorize_collection(
@@ -1101,13 +1192,18 @@ async fn update_collection(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
+    let configuration = match payload.new_configuration {
+        Some(c) => Some(InternalUpdateCollectionConfiguration::try_from(c)?),
+        None => None,
+    };
+
     let request = chroma_types::UpdateCollectionRequest::try_new(
         collection_id,
         payload.new_name,
         payload
             .new_metadata
             .map(CollectionMetadataUpdate::UpdateMetadata),
-        payload.new_configuration,
+        configuration,
     )?;
 
     server.frontend.update_collection(request).await?;
@@ -1136,10 +1232,7 @@ async fn delete_collection(
     Path((tenant, database, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
-    server
-        .metrics
-        .delete_collection
-        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
+    server.metrics.delete_collection.add(1, &[]);
     tracing::info!(name: "delete_collection", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
@@ -1191,13 +1284,7 @@ async fn fork_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<ForkCollectionPayload>,
 ) -> Result<Json<ForkCollectionResponse>, ServerError> {
-    server.metrics.fork_collection.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server.metrics.fork_collection.add(1, &[]);
     tracing::info!(name: "fork_collection", tenant_name = %tenant, database_name = %database, collection_id = %collection_id);
     server
         .authenticate_and_authorize(
@@ -1230,8 +1317,11 @@ async fn fork_collection(
             collection_id.0.to_string(),
         ));
 
-    let _guard =
-        server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()])?;
+    let _guard = server.scorecard_request(&[
+        "op:fork_collection",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ])?;
 
     let request = chroma_types::ForkCollectionRequest::try_new(
         tenant,
@@ -1286,19 +1376,17 @@ impl AddCollectionRecordsPayload {
         (status = 400, description = "Invalid data for collection addition")
     )
 )]
+// NOTE(hammadb) collection_[add, upsert, update] can have large payloads, so we trace
+// the individual method since the overall handler span includes buffering
+// the body.
+#[tracing::instrument(name = "collection_add", skip_all)]
 async fn collection_add(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     TracedJson(payload): TracedJson<AddCollectionRecordsPayload>,
 ) -> Result<(StatusCode, Json<AddCollectionRecordsResponse>), ServerError> {
-    server.metrics.collection_add.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server.metrics.collection_add.add(1, &[]);
     server
         .authenticate_and_authorize_collection(
             &headers,
@@ -1394,19 +1482,17 @@ pub struct UpdateCollectionRecordsPayload {
         (status = 404, description = "Collection not found")
     )
 )]
+// NOTE(hammadb) collection_[add, upsert, update] can have large payloads, so we trace
+// the individual method since the overall handler span includes buffering
+// the body.
+#[tracing::instrument(name = "collection_update", skip_all)]
 async fn collection_update(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     TracedJson(payload): TracedJson<UpdateCollectionRecordsPayload>,
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
-    server.metrics.collection_update.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server.metrics.collection_update.add(1, &[]);
     server
         .authenticate_and_authorize_collection(
             &headers,
@@ -1487,7 +1573,7 @@ async fn collection_update(
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
 pub struct UpsertCollectionRecordsPayload {
     ids: Vec<String>,
-    embeddings: Option<EmbeddingsPayload>,
+    embeddings: EmbeddingsPayload,
     documents: Option<Vec<Option<String>>>,
     uris: Option<Vec<Option<String>>>,
     metadatas: Option<Vec<Option<UpdateMetadata>>>,
@@ -1510,19 +1596,17 @@ pub struct UpsertCollectionRecordsPayload {
         ("collection_id" = String, Path, description = "Collection ID"),
     )
 )]
+// NOTE(hammadb) collection_[add, upsert, update] can have large payloads, so we trace
+// the individual method since the overall handler span includes buffering
+// the body.
+#[tracing::instrument(name = "collection_upsert", skip_all)]
 async fn collection_upsert(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     TracedJson(payload): TracedJson<UpsertCollectionRecordsPayload>,
 ) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
-    server.metrics.collection_upsert.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server.metrics.collection_upsert.add(1, &[]);
     server
         .authenticate_and_authorize_collection(
             &headers,
@@ -1543,13 +1627,8 @@ async fn collection_upsert(
         .map(|val| val.to_string());
     let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
-    let payload_embeddings: Option<Vec<Vec<f32>>> = match payload.embeddings {
-        Some(embeddings) => Some(decode_embeddings(embeddings)?),
-        None => None,
-    };
-    if let Some(embeddings) = payload_embeddings.as_ref() {
-        quota_payload = quota_payload.with_add_embeddings(embeddings);
-    }
+    let payload_embeddings: Vec<Vec<f32>> = decode_embeddings(payload.embeddings)?;
+    quota_payload = quota_payload.with_add_embeddings(&payload_embeddings);
     if let Some(metadatas) = &payload.metadatas {
         quota_payload = quota_payload.with_update_metadatas(metadatas);
     }
@@ -1633,14 +1712,8 @@ async fn collection_delete(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<DeleteCollectionRecordsPayload>,
 ) -> Result<Json<DeleteCollectionRecordsResponse>, ServerError> {
-    server.metrics.collection_delete.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
-    server
+    server.metrics.collection_delete.add(1, &[]);
+    let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Delete,
@@ -1677,7 +1750,7 @@ async fn collection_delete(
     // NOTE(c-gamble): This is a read context because read happens first on delete, then write.
     let metering_context_container =
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
-            tenant.clone(),
+            requester_identity.tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::GetForDelete,
@@ -1722,20 +1795,14 @@ async fn collection_count(
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountResponse>, ServerError> {
-    server.metrics.collection_count.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server.metrics.collection_count.add(1, &[]);
     tracing::info!(
         name: "collection_count",
         tenant = tenant,
         database = database,
         collection_id = collection_id
     );
-    server
+    let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Count,
@@ -1751,16 +1818,27 @@ async fn collection_count(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
+        format!("requester:{}", requester_identity.tenant).as_str(),
     ])?;
 
     // Create a metering context
-    let metering_context_container =
+    let metering_context_container = if requester_identity.tenant == tenant {
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
-            tenant.clone(),
+            requester_identity.tenant.clone(),
             database.clone(),
             collection_id.clone(),
             ReadAction::Count,
-        ));
+        ))
+    } else {
+        chroma_metering::create::<ExternalCollectionReadContext>(
+            ExternalCollectionReadContext::new(
+                requester_identity.tenant.clone(),
+                database.clone(),
+                collection_id.clone(),
+                ReadAction::Count,
+            ),
+        )
+    };
 
     let request = CountRequest::try_new(
         tenant,
@@ -1811,14 +1889,8 @@ async fn collection_get(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<GetRequestPayload>,
 ) -> Result<Json<GetResponse>, ServerError> {
-    server.metrics.collection_get.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
-    server
+    server.metrics.collection_get.add(1, &[]);
+    let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Get,
@@ -1859,16 +1931,27 @@ async fn collection_get(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
+        format!("requester:{}", requester_identity.tenant).as_str(),
     ])?;
 
     // Create a metering context
-    let metering_context_container =
+    let metering_context_container = if requester_identity.tenant == tenant {
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
-            tenant.clone(),
+            requester_identity.tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Get,
-        ));
+        ))
+    } else {
+        chroma_metering::create::<ExternalCollectionReadContext>(
+            ExternalCollectionReadContext::new(
+                requester_identity.tenant.clone(),
+                database.clone(),
+                collection_id.0.to_string(),
+                ReadAction::Get,
+            ),
+        )
+    };
 
     metering_context_container.enter();
 
@@ -1939,14 +2022,8 @@ async fn collection_query(
     State(mut server): State<FrontendServer>,
     TracedJson(payload): TracedJson<QueryRequestPayload>,
 ) -> Result<Json<QueryResponse>, ServerError> {
-    server.metrics.collection_query.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
-    server
+    server.metrics.collection_query.add(1, &[]);
+    let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Query,
@@ -1984,16 +2061,27 @@ async fn collection_query(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
+        format!("requester:{}", requester_identity.tenant).as_str(),
     ])?;
 
     // Create a metering context
-    let metering_context_container =
+    let metering_context_container = if requester_identity.tenant == tenant {
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
-            tenant.clone(),
+            requester_identity.tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Query,
-        ));
+        ))
+    } else {
+        chroma_metering::create::<ExternalCollectionReadContext>(
+            ExternalCollectionReadContext::new(
+                requester_identity.tenant.clone(),
+                database.clone(),
+                collection_id.0.to_string(),
+                ReadAction::Query,
+            ),
+        )
+    };
 
     metering_context_container.enter();
 
@@ -2019,12 +2107,128 @@ async fn collection_query(
         payload.include,
     )?;
 
+    // pin the request since future exceeds size limit (16KB)
+    // Box::pin is required to avoid stack overflow by moving future to heap
+    let res = Box::pin(
+        server
+            .frontend
+            .query(request)
+            .meter(metering_context_container),
+    )
+    .await?;
+
+    Ok(Json(res))
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct SearchRequestPayload {
+    searches: Vec<SearchPayload>,
+}
+
+/// Search records from a collection with hybrid criterias.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
+    request_body = SearchRequestPayload,
+    responses(
+        (status = 200, description = "Records searched from the collection", body = SearchResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name for the collection"),
+        ("collection_id" = String, Path, description = "Collection ID to search records from")
+    )
+)]
+async fn collection_search(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    TracedJson(payload): TracedJson<SearchRequestPayload>,
+) -> Result<Json<SearchResponse>, ServerError> {
+    server.metrics.collection_search.add(1, &[]);
+    let requester_identity = server
+        .authenticate_and_authorize_collection(
+            &headers,
+            AuthzAction::Search,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.clone()),
+            },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
+        )
+        .await?;
+    let collection_id =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+
+    let quota_payload = QuotaPayload::new(Action::Search, tenant.clone(), api_token)
+        .with_search_payloads(payload.searches.as_slice());
+    let quota_override = server.quota_enforcer.enforce(&quota_payload).await?;
+    let _guard = server.scorecard_request(&[
+        // TODO: Make this a read operation once we stablize this
+        // "op:read",
+        "op:search",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+        format!("requester:{}", requester_identity.tenant).as_str(),
+    ])?;
+
+    // Create a metering context
+    let metering_context_container = if requester_identity.tenant == tenant {
+        chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            requester_identity.tenant.clone(),
+            database.clone(),
+            collection_id.0.to_string(),
+            ReadAction::Search,
+        ))
+    } else {
+        chroma_metering::create::<ExternalCollectionReadContext>(
+            ExternalCollectionReadContext::new(
+                requester_identity.tenant.clone(),
+                database.clone(),
+                collection_id.0.to_string(),
+                ReadAction::Search,
+            ),
+        )
+    };
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
+
+    tracing::info!(
+        name: "collection_search",
+        num_queries = payload.searches.len(),
+    );
+
+    // Override limit by quota
+    let mut searches = payload.searches;
+    if let Some(quota_override) = quota_override {
+        for payload in &mut searches {
+            let override_limit = match payload.limit.limit {
+                Some(limit) => quota_override.limit.min(limit),
+                None => quota_override.limit,
+            };
+            payload.limit.limit = Some(override_limit);
+        }
+    }
+
+    let request = SearchRequest::try_new(tenant, database, collection_id, searches)?;
     let res = server
         .frontend
-        .query(request)
+        .search(request)
         .meter(metering_context_container)
         .await?;
-
     Ok(Json(res))
 }
 
@@ -2065,6 +2269,7 @@ impl Modify for ChromaTokenSecurityAddon {
         get_user_identity,
         create_tenant,
         get_tenant,
+        update_tenant,
         list_databases,
         create_database,
         get_database,
@@ -2073,6 +2278,7 @@ impl Modify for ChromaTokenSecurityAddon {
         list_collections,
         count_collections,
         get_collection,
+        get_collection_by_crn,
         update_collection,
         delete_collection,
         fork_collection,
@@ -2082,7 +2288,8 @@ impl Modify for ChromaTokenSecurityAddon {
         collection_delete,
         collection_count,
         collection_get,
-        collection_query
+        collection_query,
+        collection_search,
     ),
     // Apply our new security scheme here
     modifiers(&ChromaTokenSecurityAddon)

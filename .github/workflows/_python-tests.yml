@@ -15,7 +15,7 @@ on:
       runner:
         description: 'Runner to test on (string)'
         required: false
-        default: 'blacksmith-8vcpu-ubuntu-2204'
+        default: 'blacksmith-8vcpu-ubuntu-2404'
         type: string
 
 jobs:
@@ -31,9 +31,7 @@ jobs:
           - "chromadb/test/property/test_cross_version_persist.py"
         include:
           - test-glob: "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
-            parallelized: true
-          - test-glob: "chromadb/test/property/test_cross_version_persist.py"
-            parallelized: true
+            parallelized: false  # Disabled to fix INTERNALERROR crashes in CI
 
     runs-on: ${{ inputs.runner }}
     steps:
@@ -142,13 +140,13 @@ jobs:
           - "chromadb/test/property/test_collections_with_database_tenant_overwrite.py"
           - "chromadb/test/distributed/test_sanity.py"
           - "chromadb/test/distributed/test_log_backpressure.py"
-          - "chromadb/test/distributed/test_log_failover.py"
+          - "chromadb/test/distributed/test_repair_collection_log_offset.py"
         include:
           - test-glob: "chromadb/test/property/test_add.py"
-            parallelized: true
+            parallelized: false
           - test-glob: "chromadb/test/property/test_embeddings.py"
             parallelized: true
-    runs-on: blacksmith-8vcpu-ubuntu-2204
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     # OIDC token auth for AWS
     permissions:
       contents: read
@@ -186,7 +184,7 @@ jobs:
 
   merge-cluster-logs:
     if: ${{ contains(inputs.runner, 'ubuntu') }}
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: test-cluster-rust-frontend
     steps:
       - name: Merge
@@ -285,7 +283,7 @@ jobs:
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Run tests
-        run: python -m pytest chromadb/test/test_api.py -n auto --dist worksteal -v --color=yes --durations 10
+        run: python -m pytest chromadb/test/test_api.py ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes --durations 10
         shell: bash
         env:
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"

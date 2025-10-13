@@ -11,18 +11,20 @@ use chroma_types::{
     chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments,
     CollectionMetadataUpdate, CountCollectionsError, CreateCollectionError, CreateDatabaseError,
     CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
-    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionSizeError,
-    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
-    GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
+    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionByCrnError,
+    GetCollectionSizeError, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
+    GetDatabaseResponse, GetSegmentsError, GetTenantError, GetTenantResponse,
+    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
     ListCollectionVersionsError, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
     ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
-    UpdateCollectionConfiguration, UpdateCollectionError, VectorIndexConfiguration,
+    UpdateCollectionError, UpdateTenantError, UpdateTenantResponse, VectorIndexConfiguration,
 };
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
     FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
-    ForkCollectionError, Segment, SegmentConversionError, SegmentScope, Tenant,
+    ForkCollectionError, InternalSchema, SchemaError, Segment, SegmentConversionError,
+    SegmentScope, Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -64,6 +66,18 @@ impl SysDb {
             SysDb::Grpc(grpc) => grpc.get_tenant(tenant_name).await,
             SysDb::Sqlite(sqlite) => sqlite.get_tenant(&tenant_name).await,
             SysDb::Test(_) => todo!(),
+        }
+    }
+
+    pub async fn update_tenant(
+        &mut self,
+        tenant_id: String,
+        resource_name: String,
+    ) -> Result<UpdateTenantResponse, UpdateTenantError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.update_tenant(tenant_id, resource_name).await,
+            SysDb::Sqlite(sqlite) => sqlite.update_tenant(tenant_id, resource_name).await,
+            SysDb::Test(test) => test.update_tenant(tenant_id, resource_name).await,
         }
     }
 
@@ -148,6 +162,25 @@ impl SysDb {
         }
     }
 
+    pub async fn get_collection_by_crn(
+        &mut self,
+        tenant_resource_name: String,
+        database: String,
+        name: String,
+    ) -> Result<Collection, GetCollectionByCrnError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.get_collection_by_crn(tenant_resource_name, database, name)
+                    .await
+            }
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(test) => {
+                test.get_collection_by_crn(tenant_resource_name, database, name)
+                    .await
+            }
+        }
+    }
+
     pub async fn count_collections(
         &mut self,
         tenant: String,
@@ -197,6 +230,7 @@ impl SysDb {
         name: String,
         segments: Vec<Segment>,
         configuration: Option<InternalCollectionConfiguration>,
+        schema: Option<InternalSchema>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -207,15 +241,9 @@ impl SysDb {
                 if let Some(hnsw_params) = hnsw_params {
                     config.vector_index = VectorIndexConfiguration::Hnsw(hnsw_params);
                 }
-                config
+                Some(config)
             }
-            None => metadata
-                .clone()
-                .map(|m| {
-                    InternalCollectionConfiguration::from_legacy_metadata(m).map_err(|e| e.boxed())
-                })
-                .transpose()?
-                .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
+            None => None,
         };
 
         match self {
@@ -227,6 +255,7 @@ impl SysDb {
                     name,
                     segments,
                     configuration,
+                    schema,
                     metadata,
                     dimension,
                     get_or_create,
@@ -241,7 +270,7 @@ impl SysDb {
                         collection_id,
                         name,
                         segments,
-                        configuration,
+                        configuration.unwrap_or(InternalCollectionConfiguration::default_hnsw()),
                         metadata,
                         dimension,
                         get_or_create,
@@ -252,7 +281,9 @@ impl SysDb {
                 let collection = Collection {
                     collection_id,
                     name,
-                    config: configuration,
+                    config: configuration
+                        .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
+                    schema,
                     metadata,
                     dimension,
                     tenant: tenant.clone(),
@@ -284,7 +315,7 @@ impl SysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        configuration: Option<UpdateCollectionConfiguration>,
+        configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -396,6 +427,17 @@ impl SysDb {
         }
     }
 
+    pub async fn get_collection_to_gc(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<CollectionToGcInfo, GetCollectionsToGcError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_collection_to_gc(collection_id).await,
+            SysDb::Sqlite(_) => unimplemented!("Garbage collection does not work for local chroma"),
+            SysDb::Test(_) => todo!(),
+        }
+    }
+
     pub async fn get_segments(
         &mut self,
         id: Option<SegmentUuid>,
@@ -426,6 +468,17 @@ impl SysDb {
                     .get_collection_with_segments(collection_id)
                     .await
             }
+        }
+    }
+
+    // Only meant for testing.
+    pub async fn get_all_operators(
+        &mut self,
+    ) -> Result<Vec<(String, uuid::Uuid)>, Box<dyn std::error::Error>> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_all_operators().await,
+            SysDb::Sqlite(_) => unimplemented!("get_all_operators not implemented for sqlite"),
+            SysDb::Test(_) => unimplemented!("get_all_operators not implemented for test"),
         }
     }
 
@@ -484,6 +537,7 @@ impl SysDb {
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
+        schema: Option<InternalSchema>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -495,6 +549,7 @@ impl SysDb {
                     segment_flush_info,
                     total_records_post_compaction,
                     size_bytes_post_compaction,
+                    schema,
                 )
                 .await
             }
@@ -579,7 +634,7 @@ impl SysDb {
 // one inflight request at a time, so we need to clone the client for each requester.
 pub struct GrpcSysDb {
     #[allow(clippy::type_complexity)]
-    client: SysDbClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
+    client: SysDbClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>,
 }
 
 #[derive(Error, Debug)]
@@ -618,7 +673,7 @@ impl Configurable<GrpcSysDbConfig> for GrpcSysDb {
 
         let channel = Channel::balance_list((0..my_config.num_channels).map(|_| endpoint.clone()));
         let channel = ServiceBuilder::new()
-            .layer(chroma_tracing::GrpcTraceLayer)
+            .layer(chroma_tracing::GrpcClientTraceLayer)
             .service(channel);
         let client = SysDbClient::new(channel);
         Ok(GrpcSysDb { client })
@@ -636,17 +691,23 @@ pub struct CollectionToGcInfo {
 
 #[derive(Debug, Error)]
 pub enum GetCollectionsToGcError {
+    #[error("No such collection")]
+    NoSuchCollection,
     #[error("Failed to parse uuid")]
     ParsingError(#[from] Error),
     #[error("Grpc request failed")]
     RequestFailed(#[from] tonic::Status),
+    #[error("Internal error: {0}")]
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for GetCollectionsToGcError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GetCollectionsToGcError::NoSuchCollection => ErrorCodes::NotFound,
             GetCollectionsToGcError::ParsingError(_) => ErrorCodes::Internal,
             GetCollectionsToGcError::RequestFailed(_) => ErrorCodes::Internal,
+            GetCollectionsToGcError::Internal(e) => e.code(),
         }
     }
 }
@@ -695,13 +756,16 @@ impl GrpcSysDb {
             name: tenant_name.clone(),
         };
         match self.client.get_tenant(req).await {
-            Ok(resp) => Ok(GetTenantResponse {
-                name: resp
+            Ok(resp) => {
+                let tenant = resp
                     .into_inner()
                     .tenant
-                    .ok_or(GetTenantError::NotFound(tenant_name))?
-                    .name,
-            }),
+                    .ok_or(GetTenantError::NotFound(tenant_name))?;
+                Ok(GetTenantResponse {
+                    name: tenant.name,
+                    resource_name: tenant.resource_name,
+                })
+            }
             Err(err) => Err(GetTenantError::Internal(err.into())),
         }
     }
@@ -884,6 +948,41 @@ impl GrpcSysDb {
         }
     }
 
+    async fn get_collection_by_crn(
+        &mut self,
+        tenant_resource_name: String,
+        database: String,
+        name: String,
+    ) -> Result<Collection, GetCollectionByCrnError> {
+        let req = chroma_proto::GetCollectionByResourceNameRequest {
+            tenant_resource_name: tenant_resource_name.clone(),
+            database: database.clone(),
+            name: name.clone(),
+        };
+        let res = self.client.get_collection_by_resource_name(req).await;
+
+        match res {
+            Ok(res) => {
+                let collection = match res.into_inner().collection {
+                    Some(collection) => collection,
+                    None => {
+                        return Err(GetCollectionByCrnError::NotFound(format!(
+                            "{}:{}:{}",
+                            tenant_resource_name, database, name
+                        )));
+                    }
+                };
+
+                Ok(collection
+                    .try_into()
+                    .map_err(|e: CollectionConversionError| {
+                        GetCollectionByCrnError::Internal(e.boxed())
+                    })?)
+            }
+            Err(e) => Err(GetCollectionByCrnError::Internal(e.into())),
+        }
+    }
+
     async fn count_collections(
         &mut self,
         tenant: String,
@@ -922,11 +1021,17 @@ impl GrpcSysDb {
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
-        configuration: InternalCollectionConfiguration,
+        configuration: Option<InternalCollectionConfiguration>,
+        schema: Option<InternalSchema>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
     ) -> Result<Collection, CreateCollectionError> {
+        let configuration_json_str = match configuration {
+            Some(configuration) => serde_json::to_string(&configuration)
+                .map_err(CreateCollectionError::Configuration)?,
+            None => "{}".to_string(),
+        };
         let res = self
             .client
             .create_collection(chroma_proto::CreateCollectionRequest {
@@ -938,11 +1043,18 @@ impl GrpcSysDb {
                     .into_iter()
                     .map(chroma_proto::Segment::from)
                     .collect(),
-                configuration_json_str: serde_json::to_string(&configuration)
-                    .map_err(CreateCollectionError::Configuration)?,
+                configuration_json_str,
                 metadata: metadata.map(|metadata| metadata.into()),
                 dimension,
                 get_or_create: Some(get_or_create),
+                schema_str: schema
+                    .map(|s| serde_json::to_string(&s))
+                    .transpose()
+                    .map_err(|e| {
+                        CreateCollectionError::Schema(SchemaError::InvalidSchema {
+                            reason: e.to_string(),
+                        })
+                    })?,
             })
             .await
             .map_err(|err| match err.code() {
@@ -959,7 +1071,6 @@ impl GrpcSysDb {
             ))?
             .try_into()
             .map_err(|e: CollectionConversionError| CreateCollectionError::Internal(e.boxed()))?;
-
         Ok(collection)
     }
 
@@ -969,7 +1080,7 @@ impl GrpcSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        configuration: Option<UpdateCollectionConfiguration>,
+        configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         let mut configuration_json_str = None;
         if let Some(configuration) = configuration {
@@ -1151,6 +1262,46 @@ impl GrpcSysDb {
         }
     }
 
+    pub async fn get_collection_to_gc(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<CollectionToGcInfo, GetCollectionsToGcError> {
+        let mut collections = self
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| {
+                if e.code() == ErrorCodes::NotFound {
+                    GetCollectionsToGcError::NoSuchCollection
+                } else {
+                    GetCollectionsToGcError::Internal(e.boxed())
+                }
+            })?;
+
+        if collections.is_empty() {
+            return Err(GetCollectionsToGcError::NoSuchCollection);
+        }
+        if collections.len() > 1 {
+            tracing::error!(
+                "Multiple collections returned when querying for ID: {}",
+                collection_id
+            );
+            return Err(GetCollectionsToGcError::NoSuchCollection);
+        }
+
+        let collection = collections.remove(0);
+
+        Ok(CollectionToGcInfo {
+            id: collection.collection_id,
+            tenant: collection.tenant,
+            name: collection.name,
+            version_file_path: collection.version_file_path.unwrap_or_default(),
+            lineage_file_path: collection.lineage_file_path,
+        })
+    }
+
     async fn get_segments(
         &mut self,
         id: Option<SegmentUuid>,
@@ -1227,6 +1378,23 @@ impl GrpcSysDb {
                 .ok_or(GetCollectionWithSegmentsError::Field("vector".to_string()))?
                 .try_into()?,
         })
+    }
+
+    async fn get_all_operators(
+        &mut self,
+    ) -> Result<Vec<(String, uuid::Uuid)>, Box<dyn std::error::Error>> {
+        let res = self
+            .client
+            .get_operators(chroma_proto::GetOperatorsRequest {})
+            .await?;
+
+        let operators = res.into_inner().operators;
+        let mut result = Vec::new();
+        for op in operators {
+            let id = uuid::Uuid::parse_str(&op.id)?;
+            result.push((op.name, id));
+        }
+        Ok(result)
     }
 
     async fn batch_get_collection_version_file_paths(
@@ -1318,6 +1486,7 @@ impl GrpcSysDb {
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
+        schema: Option<InternalSchema>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let segment_compaction_info =
             segment_flush_info
@@ -1335,6 +1504,14 @@ impl GrpcSysDb {
             }
         };
 
+        let schema_str = schema
+            .map(|s| serde_json::to_string(&s))
+            .transpose()
+            .map_err(|e| {
+                FlushCompactionError::Schema(SchemaError::InvalidSchema {
+                    reason: e.to_string(),
+                })
+            })?;
         let req = chroma_proto::FlushCollectionCompactionRequest {
             tenant_id,
             collection_id: collection_id.0.to_string(),
@@ -1343,6 +1520,7 @@ impl GrpcSysDb {
             segment_compaction_info,
             total_records_post_compaction,
             size_bytes_post_compaction,
+            schema_str,
         };
 
         let res = self.client.flush_collection_compaction(req).await;
@@ -1387,6 +1565,20 @@ impl GrpcSysDb {
         Ok(res.into_inner().collection_id_to_success)
     }
 
+    async fn update_tenant(
+        &mut self,
+        tenant_id: String,
+        resource_name: String,
+    ) -> Result<UpdateTenantResponse, UpdateTenantError> {
+        let req = chroma_proto::SetTenantResourceNameRequest {
+            id: tenant_id,
+            resource_name,
+        };
+
+        self.client.set_tenant_resource_name(req).await?;
+        Ok(UpdateTenantResponse {})
+    }
+
     async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
         self.client
             .reset_state(())
@@ -1426,17 +1618,30 @@ pub enum FlushCompactionError {
     CollectionNotFound,
     #[error("Segment not found in sysdb")]
     SegmentNotFound,
+    #[error("Failed to serialize schema")]
+    Schema(#[from] SchemaError),
 }
 
 impl ChromaError for FlushCompactionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            FlushCompactionError::FailedToFlushCompaction(_) => ErrorCodes::Internal,
+            FlushCompactionError::FailedToFlushCompaction(status) => {
+                if status.code() == Code::FailedPrecondition {
+                    ErrorCodes::FailedPrecondition
+                } else {
+                    ErrorCodes::Internal
+                }
+            }
             FlushCompactionError::SegmentFlushInfoConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::FlushCompactionResponseConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::CollectionNotFound => ErrorCodes::Internal,
             FlushCompactionError::SegmentNotFound => ErrorCodes::Internal,
+            FlushCompactionError::Schema(e) => e.code(),
         }
+    }
+
+    fn should_trace_error(&self) -> bool {
+        self.code() == ErrorCodes::Internal
     }
 }
 
@@ -1465,5 +1670,33 @@ impl ChromaError for DeleteCollectionVersionError {
         match self {
             DeleteCollectionVersionError::FailedToDeleteVersion(e) => e.code().into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tonic::Status;
+
+    use super::*;
+
+    #[test]
+    fn flush_compaction_error() {
+        let fce = FlushCompactionError::FailedToFlushCompaction(Status::failed_precondition(
+            "collection soft deleted",
+        ));
+        assert!(!fce.should_trace_error());
+    }
+
+    #[test]
+    fn get_collections_to_gc_error_internal_propagation() {
+        // Test that Internal errors are properly propagated with their original error code
+        let internal_error = GetCollectionsToGcError::Internal(Box::new(chroma_error::TonicError(
+            Status::internal("database error"),
+        )));
+        assert_eq!(internal_error.code(), ErrorCodes::Internal);
+
+        // Test that NoSuchCollection returns NotFound
+        let not_found_error = GetCollectionsToGcError::NoSuchCollection;
+        assert_eq!(not_found_error.code(), ErrorCodes::NotFound);
     }
 }

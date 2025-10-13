@@ -58,8 +58,8 @@ class LocalExecutor(Executor):
             where=plan.filter.where,
             where_document=plan.filter.where_document,
             ids=plan.filter.user_ids,
-            limit=plan.limit.fetch,
-            offset=plan.limit.skip,
+            limit=plan.limit.limit,
+            offset=plan.limit.offset,
             include_metadata=True,
         )
 

@@ -51,7 +51,7 @@ pub enum TaskError<Err> {
     Aborted,
 }
 
-impl<Err> ChromaError for TaskError<Err>
+impl<Err: ChromaError> ChromaError for TaskError<Err>
 where
     Err: Debug + ChromaError + 'static,
 {
@@ -62,14 +62,22 @@ where
             TaskError::Aborted => ErrorCodes::ResourceExhausted,
         }
     }
+
+    fn should_trace_error(&self) -> bool {
+        match self {
+            TaskError::Panic(_) => true,
+            TaskError::TaskFailed(e) => e.should_trace_error(),
+            TaskError::Aborted => true,
+        }
+    }
 }
 
 /// A task result is a wrapper around the result of a task.
 /// It contains the task id for tracking purposes.
 #[derive(Debug)]
 pub struct TaskResult<Output, Error> {
-    result: Result<Output, TaskError<Error>>,
-    task_id: Uuid,
+    pub(crate) result: Result<Output, TaskError<Error>>,
+    pub(crate) task_id: Uuid,
 }
 
 impl<Output, Error> TaskResult<Output, Error> {
@@ -409,5 +417,33 @@ mod tests {
         assert!(result.is_err());
         let err = result.as_ref().unwrap_err();
         assert!(err.to_string().contains("MockOperator panicking"));
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("should trace: {0}")]
+    struct MockError(bool);
+
+    impl ChromaError for MockError {
+        fn code(&self) -> chroma_error::ErrorCodes {
+            chroma_error::ErrorCodes::InvalidArgument
+        }
+
+        fn should_trace_error(&self) -> bool {
+            self.0
+        }
+    }
+
+    #[test]
+    fn should_trace_flush_compaction_error() {
+        let fce = MockError(true);
+        let te: TaskError<MockError> = fce.into();
+        assert!(te.should_trace_error());
+    }
+
+    #[test]
+    fn should_not_trace_flush_compaction_error() {
+        let fce = MockError(false);
+        let te: TaskError<MockError> = fce.into();
+        assert!(!te.should_trace_error());
     }
 }

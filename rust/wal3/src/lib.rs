@@ -23,7 +23,9 @@ pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, Witness};
 pub use destroy::destroy;
 pub use gc::{Garbage, GarbageCollector};
-pub use manifest::{unprefixed_snapshot_path, Manifest, Snapshot, SnapshotPointer};
+pub use manifest::{
+    unprefixed_snapshot_path, Manifest, ManifestAndETag, Snapshot, SnapshotPointer,
+};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
 pub use snapshot_cache::SnapshotCache;
@@ -88,6 +90,8 @@ pub enum Error {
     NoSuchCursor(String),
     #[error("garbage collection: {0}")]
     GarbageCollection(String),
+    #[error("garbage collection precondition failed: manifest missing this: {0}")]
+    GarbageCollectionPrecondition(SnapshotPointerOrFragmentSeqNo),
     #[error("scrub error: {0}")]
     ScrubError(#[from] Box<ScrubError>),
     #[error("parquet error: {0}")]
@@ -118,9 +122,41 @@ impl chroma_error::ChromaError for Error {
             Self::CorruptGarbage(_) => chroma_error::ErrorCodes::DataLoss,
             Self::NoSuchCursor(_) => chroma_error::ErrorCodes::Unknown,
             Self::GarbageCollection(_) => chroma_error::ErrorCodes::Unknown,
+            Self::GarbageCollectionPrecondition(_) => chroma_error::ErrorCodes::FailedPrecondition,
             Self::ScrubError(_) => chroma_error::ErrorCodes::DataLoss,
             Self::ParquetError(_) => chroma_error::ErrorCodes::Unknown,
             Self::StorageError(storage) => storage.code(),
+        }
+    }
+}
+
+///////////////////////////////////// SnapshotPointerOrFragment ////////////////////////////////////
+
+#[derive(Clone, Debug)]
+pub enum SnapshotPointerOrFragmentSeqNo {
+    SnapshotPointer(SnapshotPointer),
+    FragmentSeqNo(u64),
+    Stringy(String),
+}
+
+impl From<SnapshotPointer> for SnapshotPointerOrFragmentSeqNo {
+    fn from(inner: SnapshotPointer) -> Self {
+        Self::SnapshotPointer(inner)
+    }
+}
+
+impl From<u64> for SnapshotPointerOrFragmentSeqNo {
+    fn from(inner: u64) -> Self {
+        Self::FragmentSeqNo(inner)
+    }
+}
+
+impl std::fmt::Display for SnapshotPointerOrFragmentSeqNo {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::SnapshotPointer(ptr) => write!(f, "Snapshot({:?})", ptr.path_to_snapshot),
+            Self::FragmentSeqNo(seq) => write!(f, "Fragment({})", *seq),
+            Self::Stringy(s) => write!(f, "Stringy({s})"),
         }
     }
 }

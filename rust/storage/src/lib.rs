@@ -9,7 +9,6 @@ use chroma_error::{ChromaError, ErrorCodes};
 pub mod admissioncontrolleds3;
 pub mod config;
 pub mod local;
-pub mod object_store;
 pub mod s3;
 pub mod stream;
 use local::LocalStorage;
@@ -145,6 +144,17 @@ pub enum StorageError {
         /// The configuration key used
         key: String,
     },
+
+    /// Error when a callback returning a ChromaError fails
+    #[error("Storage callback error: {info}")]
+    CallbackError {
+        /// The wrapped error
+        info: String,
+    },
+
+    // Back off and retry---usually indicates an explicit 429/SlowDown.
+    #[error("Back off and retry---usually indicates an explicit 429/SlowDown.")]
+    Backoff,
 }
 
 impl ChromaError for StorageError {
@@ -163,6 +173,8 @@ impl ChromaError for StorageError {
             StorageError::PermissionDenied { .. } => ErrorCodes::PermissionDenied,
             StorageError::Unauthenticated { .. } => ErrorCodes::Unauthenticated,
             StorageError::UnknownConfigurationKey { .. } => ErrorCodes::InvalidArgument,
+            StorageError::Backoff { .. } => ErrorCodes::ResourceExhausted,
+            StorageError::CallbackError { .. } => ErrorCodes::Internal,
         }
     }
 }
@@ -192,8 +204,8 @@ pub enum StorageConfigError {
 }
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum Storage {
-    ObjectStore(object_store::ObjectStore),
     S3(s3::S3Storage),
     Local(local::LocalStorage),
     AdmissionControlledS3(admissioncontrolleds3::AdmissionControlledS3Storage),
@@ -202,7 +214,6 @@ pub enum Storage {
 impl std::fmt::Debug for Storage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Storage::ObjectStore(_) => f.debug_tuple("ObjectStore").finish(),
             Storage::S3(_) => f.debug_tuple("S3").finish(),
             Storage::Local(_) => f.debug_tuple("Local").finish(),
             Storage::AdmissionControlledS3(_) => f.debug_tuple("AdmissionControlledS3").finish(),
@@ -222,8 +233,7 @@ impl ChromaError for StorageConfigError {
 impl Storage {
     pub async fn get(&self, key: &str, options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => Ok(object_store.get(key).await?),
-            Storage::S3(s3) => s3.get(key).await,
+            Storage::S3(s3) => s3.get(key, options).await,
             Storage::Local(local) => local.get(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage.get(key, options).await
@@ -238,16 +248,11 @@ impl Storage {
         fetch_fn: FetchFn,
     ) -> Result<(FetchReturn, Option<ETag>), StorageError>
     where
-        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut,
+        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut + Send + 'static,
         FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
         FetchReturn: Clone + Any + Sync + Send,
     {
         match self {
-            Storage::ObjectStore(object_store) => {
-                let res = object_store.get_with_e_tag(key).await?;
-                let fetch_result = fetch_fn(Ok(res.0)).await?;
-                Ok((fetch_result, res.1))
-            }
             Storage::S3(s3) => {
                 let res = s3.get_with_e_tag(key).await?;
                 let fetch_result = fetch_fn(Ok(res.0)).await?;
@@ -266,13 +271,59 @@ impl Storage {
         }
     }
 
+    async fn fetch_batch_generic<FetchReturn, FetchFn, FetchFut>(
+        &self,
+        keys: Vec<&str>,
+        options: GetOptions,
+        fetch_fn: FetchFn,
+    ) -> Result<(FetchReturn, Vec<Option<ETag>>), StorageError>
+    where
+        FetchFn: FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut + Send + 'static,
+        FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
+        FetchReturn: Clone + Any + Sync + Send,
+    {
+        let mut results = Vec::new();
+        for key in keys {
+            let result = self.get_with_e_tag(key, options.clone()).await?;
+            results.push(result);
+        }
+        let bufs = results
+            .iter()
+            .map(|res| Ok(res.0.clone()))
+            .collect::<Vec<_>>();
+        let e_tags = results.iter().map(|res| res.1.clone()).collect();
+        let fetch_result = fetch_fn(bufs).await?;
+        Ok((fetch_result, e_tags))
+    }
+
+    pub async fn fetch_batch<FetchReturn, FetchFn, FetchFut>(
+        &self,
+        keys: Vec<&str>,
+        options: GetOptions,
+        fetch_fn: FetchFn,
+    ) -> Result<(FetchReturn, Vec<Option<ETag>>), StorageError>
+    where
+        FetchFn: FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut + Send + 'static,
+        FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
+        FetchReturn: Clone + Any + Sync + Send,
+    {
+        match self {
+            Storage::S3(_) => self.fetch_batch_generic(keys, options, fetch_fn).await,
+            Storage::Local(_) => self.fetch_batch_generic(keys, options, fetch_fn).await,
+            Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                admission_controlled_storage
+                    .fetch_batch(keys, options, fetch_fn)
+                    .await
+            }
+        }
+    }
+
     pub async fn get_with_e_tag(
         &self,
         key: &str,
         options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.get_with_e_tag(key).await,
             Storage::S3(s3) => s3.get_with_e_tag(key).await,
             Storage::Local(local) => local.get_with_e_tag(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
@@ -283,20 +334,15 @@ impl Storage {
         }
     }
 
-    pub async fn get_parallel(
-        &self,
-        key: &str,
-        options: GetOptions,
-    ) -> Result<Arc<Vec<u8>>, StorageError> {
+    // NOTE(rescrv):  Returns Ok(true) if the file is definitely the same.  Returns Ok(false) if
+    // the file cannot be confirmed to be the same but it exists.  Returns Err on error.  It is up
+    // to the user to know how they are confirming the same and to react to Ok(false) even if the
+    // file is definitely the same file on storage.
+    pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.get_parallel(key).await,
-            Storage::S3(s3) => s3.get_parallel(key).await.map(|res| res.0),
-            Storage::Local(local) => local.get(key).await,
-            Storage::AdmissionControlledS3(admission_controlled_storage) => {
-                admission_controlled_storage
-                    .get_parallel(key.to_string(), options)
-                    .await
-            }
+            Storage::S3(s3) => s3.confirm_same(key, e_tag).await,
+            Storage::Local(local) => local.confirm_same(key, e_tag).await,
+            Storage::AdmissionControlledS3(as3) => as3.confirm_same(key, e_tag).await,
         }
     }
 
@@ -307,7 +353,6 @@ impl Storage {
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.put_file(key, path, options).await,
             Storage::S3(s3) => s3.put_file(key, path, options).await,
             Storage::Local(local) => local.put_file(key, path, options).await,
             Storage::AdmissionControlledS3(as3) => as3.put_file(key, path, options).await,
@@ -321,7 +366,6 @@ impl Storage {
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.put_bytes(key, bytes, options).await,
             Storage::S3(s3) => s3.put_bytes(key, bytes, options).await,
             Storage::Local(local) => local.put_bytes(key, &bytes, options).await,
             Storage::AdmissionControlledS3(as3) => as3.put_bytes(key, bytes, options).await,
@@ -330,14 +374,6 @@ impl Storage {
 
     pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => {
-                if options.if_match.is_some() {
-                    return Err(StorageError::Message {
-                        message: "if match not supported for object store backend".to_string(),
-                    });
-                }
-                object_store.delete(key).await
-            }
             Storage::S3(s3) => s3.delete(key, options).await,
             Storage::Local(local) => {
                 if options.if_match.is_some() {
@@ -356,7 +392,6 @@ impl Storage {
         keys: I,
     ) -> Result<crate::s3::DeletedObjects, StorageError> {
         match self {
-            Storage::ObjectStore(_) => Err(StorageError::NotImplemented),
             Storage::S3(s3) => s3.delete_many(keys).await,
             Storage::Local(local) => local.delete_many(keys).await,
             Storage::AdmissionControlledS3(ac) => ac.delete_many(keys).await,
@@ -365,7 +400,6 @@ impl Storage {
 
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.rename(src_key, dst_key).await,
             Storage::S3(s3) => s3.rename(src_key, dst_key).await,
             Storage::Local(local) => local.rename(src_key, dst_key).await,
             Storage::AdmissionControlledS3(_) => Err(StorageError::NotImplemented),
@@ -374,7 +408,6 @@ impl Storage {
 
     pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         match self {
-            Storage::ObjectStore(_) => Err(StorageError::NotImplemented),
             Storage::S3(s3) => s3.copy(src_key, dst_key).await,
             Storage::Local(local) => local.copy(src_key, dst_key).await,
             Storage::AdmissionControlledS3(ac) => ac.copy(src_key, dst_key).await,
@@ -389,7 +422,6 @@ impl Storage {
         match self {
             Storage::Local(local) => local.list_prefix(prefix).await,
             Storage::S3(s3) => s3.list_prefix(prefix).await,
-            Storage::ObjectStore(object_store) => object_store.list_prefix(prefix).await,
             Storage::AdmissionControlledS3(acs3) => acs3.list_prefix(prefix, options).await,
         }
     }
@@ -402,9 +434,6 @@ impl Configurable<StorageConfig> for Storage {
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         match &config {
-            StorageConfig::ObjectStore(config) => Ok(Storage::ObjectStore(
-                object_store::ObjectStore::try_from_config(config).await?,
-            )),
             StorageConfig::S3(_) => Ok(Storage::S3(
                 s3::S3Storage::try_from_config(config, registry).await?,
             )),
@@ -481,6 +510,9 @@ impl PutOptions {
 pub struct GetOptions {
     priority: StorageRequestPriority,
     requires_strong_consistency: bool,
+    // If the underlying storage system would benefit from parallel requests
+    // this requests parallel loading of the object.
+    request_parallelism: bool,
 }
 
 impl GetOptions {
@@ -488,11 +520,17 @@ impl GetOptions {
         Self {
             priority,
             requires_strong_consistency: false,
+            request_parallelism: false,
         }
     }
 
     pub fn with_strong_consistency(mut self) -> Self {
         self.requires_strong_consistency = true;
+        self
+    }
+
+    pub fn with_parallelism(mut self) -> Self {
+        self.request_parallelism = true;
         self
     }
 }

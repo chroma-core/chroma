@@ -1,6 +1,6 @@
 ---
-id: 'mistral'
-name: 'Mistral'
+id: mistral
+name: Mistral
 ---
 
 # Mistral
@@ -28,11 +28,11 @@ mistral_ef(input=["document1","document2"])
 ```typescript
 // npm install @chroma-core/mistral
 
-import { MistralEmbeddingFunction } from '@chroma-core/mistral';
+import { MistralEmbeddingFunction } from "@chroma-core/mistral";
 
 const embedder = new MistralEmbeddingFunction({
-    apiKey: 'your-api-key', // Or set MISTRAL_API_KEY env var
-    model: 'mistral-embed',
+  apiKey: "your-api-key", // Or set MISTRAL_API_KEY env var
+  model: "mistral-embed",
 });
 ```
 

@@ -1,6 +1,6 @@
 ---
 id: google-gemini
-name: "Google Gemini"
+name: Google Gemini
 ---
 
 # Google Gemini
@@ -40,9 +40,9 @@ For more info - please visit the [official Google python docs](https://ai.google
 // npm install @chroma-core/google-gemini
 
 import { ChromaClient } from "chromadb";
-import { GoogleGenerativeAiEmbeddingFunction } from "@chroma-core/google-gemini";
+import { GoogleGeminiEmbeddingFunction } from "@chroma-core/google-gemini";
 
-const embedder = new GoogleGenerativeAiEmbeddingFunction({
+const embedder = new GoogleGeminiEmbeddingFunction({
   apiKey: "<YOUR API KEY>",
 });
 

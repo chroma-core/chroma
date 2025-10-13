@@ -1,69 +1,8 @@
 use opentelemetry::{
-    trace::{SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState},
+    trace::{TraceContextExt, TraceId},
     KeyValue,
 };
-use tonic::metadata::MetadataMap;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-
-const TRACE_ID_HEADER_KEY: &str = "chroma-traceid";
-const SPAN_ID_HEADER_KEY: &str = "chroma-spanid";
-
-pub fn try_parse_tracecontext(metadata: &MetadataMap) -> (Option<TraceId>, Option<SpanId>) {
-    let mut traceid: Option<TraceId> = None;
-    let mut spanid: Option<SpanId> = None;
-    if metadata.contains_key(TRACE_ID_HEADER_KEY) {
-        let id_res = metadata.get(TRACE_ID_HEADER_KEY).unwrap().to_str();
-        // Failure is not fatal.
-        match id_res {
-            Ok(id) => {
-                let trace_id = TraceId::from_hex(id);
-                match trace_id {
-                    Ok(id) => traceid = Some(id),
-                    Err(_) => traceid = None,
-                }
-            }
-            Err(_) => traceid = None,
-        }
-    }
-    if metadata.contains_key(SPAN_ID_HEADER_KEY) {
-        let id_res = metadata.get(SPAN_ID_HEADER_KEY).unwrap().to_str();
-        // Failure is not fatal.
-        match id_res {
-            Ok(id) => {
-                let span_id = SpanId::from_hex(id);
-                match span_id {
-                    Ok(id) => spanid = Some(id),
-                    Err(_) => spanid = None,
-                }
-            }
-            Err(_) => spanid = None,
-        }
-    }
-    (traceid, spanid)
-}
-
-pub fn wrap_span_with_parent_context(
-    request_span: tracing::Span,
-    metadata: &MetadataMap,
-) -> tracing::Span {
-    let (traceid, spanid) = try_parse_tracecontext(metadata);
-    // Attach context passed by FE as parent.
-    if traceid.is_some() && spanid.is_some() {
-        let span_context = SpanContext::new(
-            traceid.unwrap(),
-            spanid.unwrap(),
-            TraceFlags::new(1),
-            true,
-            TraceState::default(),
-        );
-        let context = request_span
-            .context()
-            .with_remote_span_context(span_context)
-            .clone();
-        request_span.set_parent(context);
-    }
-    request_span
-}
 
 pub enum StopWatchUnit {
     Micros,
@@ -90,6 +29,17 @@ impl<'a> Stopwatch<'a> {
     pub fn elapsed_micros(&self) -> u64 {
         self.2.elapsed().as_micros() as u64
     }
+
+    pub fn finish(self) -> std::time::Duration {
+        let duration = self.2.elapsed();
+        let elapsed = match self.3 {
+            StopWatchUnit::Micros => duration.as_micros() as u64,
+            StopWatchUnit::Millis => duration.as_millis() as u64,
+            StopWatchUnit::Seconds => duration.as_secs(),
+        };
+        self.0.record(elapsed, self.1);
+        duration
+    }
 }
 
 impl Drop for Stopwatch<'_> {
@@ -106,4 +56,34 @@ impl Drop for Stopwatch<'_> {
 pub fn get_current_trace_id() -> TraceId {
     let span = tracing::Span::current();
     span.context().span().span_context().trace_id()
+}
+
+pub struct LogSlowOperation {
+    start_time: std::time::Instant,
+    operation_name: String,
+    threshold: std::time::Duration,
+}
+
+impl LogSlowOperation {
+    pub fn new(operation_name: String, threshold: std::time::Duration) -> Self {
+        Self {
+            start_time: std::time::Instant::now(),
+            operation_name,
+            threshold,
+        }
+    }
+}
+
+impl Drop for LogSlowOperation {
+    fn drop(&mut self) {
+        let elapsed = self.start_time.elapsed();
+        if elapsed > self.threshold {
+            tracing::warn!(
+                "Operation '{}' took {:?}, which exceeds the threshold of {:?}",
+                self.operation_name,
+                elapsed,
+                self.threshold
+            );
+        }
+    }
 }

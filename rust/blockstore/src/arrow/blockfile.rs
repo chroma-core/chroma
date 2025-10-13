@@ -23,6 +23,7 @@ use std::mem::transmute;
 use std::ops::RangeBounds;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
+use tracing::{Instrument, Span};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -573,6 +574,42 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
     }
 
+    /// Get all key-value pairs for a specific prefix
+    /// Optimized for retrieving all entries under a single prefix
+    pub(crate) async fn get_prefix(
+        &'me self,
+        prefix: &str,
+    ) -> Result<impl Iterator<Item = (K, V)>, Box<dyn ChromaError>> {
+        // Get all block IDs that might contain this prefix
+        let block_ids = self.root.sparse_index.get_block_ids_range(prefix..=prefix);
+
+        if block_ids.is_empty() {
+            return Ok(Vec::new().into_iter().flatten());
+        }
+
+        // Fetch blocks AND extract prefix data in parallel
+        let block_futures = block_ids.into_iter().map(|block_id| {
+            async move {
+                match self.get_block(block_id, StorageRequestPriority::P0).await {
+                    Ok(Some(block)) => {
+                        // Extract prefix data while we're in the async context
+                        let prefix_data = block.get_prefix::<K, V>(prefix);
+                        Ok(prefix_data)
+                    }
+                    Ok(None) => {
+                        Err(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)
+                    }
+                    Err(e) => Err(Box::new(e) as Box<dyn ChromaError>),
+                }
+            }
+            .instrument(Span::current())
+        });
+
+        let block_iters = try_join_all(block_futures).await?;
+
+        Ok(block_iters.into_iter().flatten())
+    }
+
     // Returns all Arrow records in the specified range.
     pub(crate) fn get_range_stream<'prefix, PrefixRange, KeyRange>(
         &'me self,
@@ -615,33 +652,33 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         &'me self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> Result<Vec<(&'me str, K, V)>, Box<dyn ChromaError>>
+    ) -> Result<impl Iterator<Item = (&'me str, K, V)> + 'me, Box<dyn ChromaError>>
     where
-        PrefixRange: RangeBounds<&'prefix str> + Clone,
-        KeyRange: RangeBounds<K> + Clone,
+        PrefixRange: RangeBounds<&'prefix str> + Clone + 'me,
+        KeyRange: RangeBounds<K> + Clone + 'me,
     {
         let block_ids = self
             .root
             .sparse_index
             .get_block_ids_range(prefix_range.clone());
 
-        let block_futures = block_ids.into_iter().map(|block_id| async move {
-            match self.get_block(block_id, StorageRequestPriority::P0).await {
-                Ok(Some(block)) => Ok(block),
-                Ok(None) => {
-                    Err(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)
+        let block_futures = block_ids.into_iter().map(|block_id| {
+            async move {
+                match self.get_block(block_id, StorageRequestPriority::P0).await {
+                    Ok(Some(block)) => Ok(block),
+                    Ok(None) => {
+                        Err(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)
+                    }
+                    Err(e) => Err(Box::new(e) as Box<dyn ChromaError>),
                 }
-                Err(e) => Err(Box::new(e) as Box<dyn ChromaError>),
             }
+            .instrument(Span::current())
         });
 
         let blocks = try_join_all(block_futures).await?;
-        let mut result: Vec<(&str, K, V)> = vec![];
-        for block in blocks {
-            result.extend(block.get_range(prefix_range.clone(), key_range.clone()));
-        }
-
-        Ok(result)
+        Ok(blocks
+            .into_iter()
+            .flat_map(move |block| block.get_range(prefix_range.clone(), key_range.clone())))
     }
 
     pub(crate) async fn contains(
@@ -801,6 +838,7 @@ mod tests {
     use crate::arrow::block::delta::UnorderedBlockDelta;
     use crate::arrow::block::Block;
     use crate::arrow::blockfile::ArrowUnorderedBlockfileWriter;
+    use crate::arrow::config::BlockManagerConfig;
     use crate::arrow::provider::{BlockManager, BlockfileReaderOptions, RootManager};
     use crate::arrow::root::{RootWriter, Version};
     use crate::arrow::sparse_index::SparseIndexWriter;
@@ -834,6 +872,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -879,6 +918,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let tenant = "test_tenant";
         let db_id = DatabaseUuid::new();
@@ -998,6 +1038,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
 
@@ -1072,6 +1113,7 @@ mod tests {
                 TEST_MAX_BLOCK_SIZE_BYTES,
                 block_cache,
                 sparse_index_cache,
+                BlockManagerConfig::default_num_concurrent_block_flushes(),
             );
             let prefix_path = String::from("");
             let writer = blockfile_provider
@@ -1144,6 +1186,7 @@ mod tests {
                 TEST_MAX_BLOCK_SIZE_BYTES,
                 block_cache,
                 sparse_index_cache,
+                BlockManagerConfig::default_num_concurrent_block_flushes(),
             );
             let prefix_path = String::from("");
             let writer = blockfile_provider
@@ -1189,40 +1232,39 @@ mod tests {
             };
 
             let materialized_range = match operation {
-                ComparisonOperation::GreaterThan => {
-                    reader
-                        .get_range(
-                            prefix..=prefix,
-                            (Bound::Excluded(query.as_str()), Bound::Unbounded),
-                        )
-                        .await
-                }
-                ComparisonOperation::GreaterThanOrEquals => {
-                    reader
-                        .get_range(
-                            prefix..=prefix,
-                            (Bound::Included(query.as_str()), Bound::Unbounded),
-                        )
-                        .await
-                }
-                ComparisonOperation::LessThan => {
-                    reader
-                        .get_range(
-                            prefix..=prefix,
-                            (Bound::Unbounded, Bound::Excluded(query.as_str())),
-                        )
-                        .await
-                }
-                ComparisonOperation::LessThanOrEquals => {
-                    reader
-                        .get_range(
-                            prefix..=prefix,
-                            (Bound::Unbounded, Bound::Included(query.as_str())),
-                        )
-                        .await
-                }
-            }
-            .unwrap();
+                ComparisonOperation::GreaterThan => reader
+                    .get_range(
+                        prefix..=prefix,
+                        (Bound::Excluded(query.as_str()), Bound::Unbounded),
+                    )
+                    .await
+                    .unwrap()
+                    .collect::<Vec<_>>(),
+                ComparisonOperation::GreaterThanOrEquals => reader
+                    .get_range(
+                        prefix..=prefix,
+                        (Bound::Included(query.as_str()), Bound::Unbounded),
+                    )
+                    .await
+                    .unwrap()
+                    .collect(),
+                ComparisonOperation::LessThan => reader
+                    .get_range(
+                        prefix..=prefix,
+                        (Bound::Unbounded, Bound::Excluded(query.as_str())),
+                    )
+                    .await
+                    .unwrap()
+                    .collect(),
+                ComparisonOperation::LessThanOrEquals => reader
+                    .get_range(
+                        prefix..=prefix,
+                        (Bound::Unbounded, Bound::Included(query.as_str())),
+                    )
+                    .await
+                    .unwrap()
+                    .collect(),
+            };
 
             let stream_result = range_stream.try_collect::<Vec<_>>().await.unwrap();
             assert_eq!(
@@ -1306,6 +1348,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -1351,6 +1394,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -1468,8 +1512,13 @@ mod tests {
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         // Set a very small block size for the block manager
-        let blockfile_provider =
-            ArrowBlockfileProvider::new(storage, 10, block_cache, sparse_index_cache);
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            10,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let prefix_path = String::from("");
         let custom_block_size = 100 * 1024 * 1024; // 100 MiB
         let writer = blockfile_provider
@@ -1627,6 +1676,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -1674,6 +1724,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
 
@@ -1719,6 +1770,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
 
@@ -1758,6 +1810,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
 
         let prefix_path = String::from("");
@@ -1810,6 +1863,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
 
         let prefix_path = String::from("");
@@ -1852,6 +1906,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
 
         let prefix_path = String::from("");
@@ -1909,6 +1964,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
 
         let prefix_path = String::from("");
@@ -1955,6 +2011,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -2034,6 +2091,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -2075,6 +2133,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -2173,6 +2232,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
 
@@ -2208,7 +2268,12 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let root_manager = RootManager::new(storage.clone(), root_cache);
-        let block_manager = BlockManager::new(storage.clone(), 16384, block_cache);
+        let block_manager = BlockManager::new(
+            storage.clone(),
+            16384,
+            block_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
 
         // Manually create a v1 blockfile with no counts
         let initial_block = block_manager.create::<&str, String, UnorderedBlockDelta>();
@@ -2275,8 +2340,12 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let root_manager = RootManager::new(storage.clone(), root_cache);
-        let block_manager =
-            BlockManager::new(storage.clone(), TEST_MAX_BLOCK_SIZE_BYTES, block_cache);
+        let block_manager = BlockManager::new(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
 
         // This test is rather fragile, but it is the best way to test the migration
         // without a lot of logic duplication. We will create a v1 blockfile with
@@ -2344,6 +2413,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
 
         let read_options = BlockfileReaderOptions::new(first_write_id, prefix_path.to_string());
@@ -2440,7 +2510,12 @@ mod tests {
         let root_manager = RootManager::new(storage.clone(), root_cache);
         // 8MiB blocks in V1.1.
         let max_block_size_bytes = 8 * 1024 * 1024;
-        let block_manager = BlockManager::new(storage.clone(), max_block_size_bytes, block_cache);
+        let block_manager = BlockManager::new(
+            storage.clone(),
+            max_block_size_bytes,
+            block_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
 
         ////////////////////////// STEP 1 //////////////////////////
 
@@ -2503,6 +2578,7 @@ mod tests {
             max_block_size_bytes,
             block_cache,
             root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
 
         let read_options = BlockfileReaderOptions::new(first_write_id, prefix_path.to_string());
@@ -2593,8 +2669,13 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         // Create a block manager with max_block_size_bytes = 10
-        let blockfile_provider =
-            ArrowBlockfileProvider::new(storage.clone(), 10, block_cache, root_cache);
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage.clone(),
+            10,
+            block_cache,
+            root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
 
         let writer = blockfile_provider
             .write::<&str, String>(
@@ -2655,7 +2736,12 @@ mod tests {
         let root_manager = RootManager::new(storage.clone(), root_cache);
         // 8MiB blocks in V1.
         let max_block_size_bytes = 8 * 1024 * 1024;
-        let block_manager = BlockManager::new(storage.clone(), max_block_size_bytes, block_cache);
+        let block_manager = BlockManager::new(
+            storage.clone(),
+            max_block_size_bytes,
+            block_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
 
         ////////////////////////// STEP 1 //////////////////////////
 
@@ -2718,6 +2804,7 @@ mod tests {
             max_block_size_bytes,
             block_cache,
             root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
 
         let read_options = BlockfileReaderOptions::new(first_write_id, prefix_path.to_string());
@@ -2808,8 +2895,13 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         // Create a block manager with max_block_size_bytes = 10
-        let blockfile_provider =
-            ArrowBlockfileProvider::new(storage.clone(), 10, block_cache, root_cache);
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage.clone(),
+            10,
+            block_cache,
+            root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
 
         let writer = blockfile_provider
             .write::<&str, String>(

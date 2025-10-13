@@ -6,7 +6,7 @@ use chroma_blockstore::RootManager;
 use chroma_cache::nop::NopCache;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
-use chroma_log::config::LogConfig;
+use chroma_log::config::{GrpcLogConfig, LogConfig};
 use chroma_log::Log;
 use chroma_storage::s3::s3_client_for_test_with_bucket_name;
 use chroma_storage::{DeleteOptions, GetOptions, Storage};
@@ -117,7 +117,8 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                 .await
                 .unwrap();
             let system = System::new();
-            let logs = Log::try_from_config(&(LogConfig::default(), system), &registry)
+            let log_config = LogConfig::Grpc(GrpcLogConfig::default());
+            let logs = Log::try_from_config(&(log_config, system), &registry)
                 .await
                 .unwrap();
 
@@ -197,6 +198,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                             None,
                             None,
                             None,
+                            None,
                             false,
                         )
                         .await
@@ -227,6 +229,12 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                 ref_state.runtime.block_on(async {
                     next_segments.write_files(&state.storage).await;
 
+                    let segment_flush_info = next_segments.into_segment_flushes(segment_ids);
+
+                    for sfi in segment_flush_info.iter() {
+                        assert!(!sfi.file_paths.is_empty());
+                    }
+
                     state
                         .sysdb
                         .flush_compaction(
@@ -234,9 +242,10 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                             collection_id,
                             0,
                             ref_state.max_version_for_collection(collection_id).unwrap() as i32 - 1,
-                            next_segments.into_segment_flushes(segment_ids),
+                            segment_flush_info,
                             0,
                             0,
+                            None,
                         )
                         .await
                         .unwrap();
@@ -321,7 +330,8 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                                 state.root_manager.clone(),
                                 CleanupMode::Delete,
                                 min_versions_to_keep as u32,
-                                true
+                                true,
+                                false,
                             );
                             let result = orchestrator.run(system.clone()).await;
 
@@ -340,10 +350,6 @@ impl StateMachineTest for GarbageCollectorUnderTest {
         tracing::debug!(
             "Graph after transition: \n{}",
             ref_state.get_graphviz_of_graph()
-        );
-        println!(
-            "Collection statuses after transition: {:#?}",
-            ref_state.collection_status
         );
 
         state

@@ -19,9 +19,9 @@ use chroma_types::{
     CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
     DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
     GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
-    InternalCollectionConfiguration, KnnIndex, ListCollectionsRequest, ListDatabasesRequest,
-    Metadata, QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRequest,
-    UpdateMetadata, WrappedSerdeJsonError,
+    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, KnnIndex,
+    ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse,
+    UpdateCollectionConfiguration, UpdateCollectionRequest, UpdateMetadata, WrappedSerdeJsonError,
 };
 use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;
@@ -112,6 +112,7 @@ impl Bindings {
         let executor_config = ExecutorConfig::Local(LocalExecutorConfig {});
 
         let knn_index = KnnIndex::Hnsw;
+        let enable_schema = false;
 
         let frontend_config = FrontendConfig {
             allow_reset,
@@ -124,6 +125,7 @@ impl Bindings {
             default_knn_index: knn_index,
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
+            enable_schema,
         };
 
         let frontend = runtime.block_on(async {
@@ -293,6 +295,7 @@ impl Bindings {
             name,
             metadata,
             configuration,
+            None,
             get_or_create,
         )?;
 
@@ -344,11 +347,16 @@ impl Bindings {
             None => None,
         };
 
+        let configuration = match configuration_json {
+            Some(c) => Some(InternalUpdateCollectionConfiguration::try_from(c)?),
+            None => None,
+        };
+
         let request = UpdateCollectionRequest::try_new(
             collection_id,
             new_name,
             new_metadata.map(CollectionMetadataUpdate::UpdateMetadata),
-            configuration_json,
+            configuration,
         )?;
 
         let mut frontend = self.frontend.clone();
@@ -466,14 +474,14 @@ impl Bindings {
     }
 
     #[pyo3(
-        signature = (collection_id, ids, embeddings = None, metadatas = None, documents = None, uris = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+        signature = (collection_id, ids, embeddings, metadatas = None, documents = None, uris = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
     )]
     #[allow(clippy::too_many_arguments)]
     fn upsert(
         &self,
         collection_id: String,
         ids: Vec<String>,
-        embeddings: Option<Vec<Vec<f32>>>,
+        embeddings: Vec<Vec<f32>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,

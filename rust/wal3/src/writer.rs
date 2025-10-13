@@ -7,16 +7,19 @@ use std::time::{Duration, Instant, SystemTime};
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{GetOptions, PutOptions, Storage, StorageError};
+use opentelemetry::trace::TraceContextExt;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use setsum::Setsum;
-use tracing::Instrument;
+use tracing::{Instrument, Level, Span};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::{
     unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
     ExponentialBackoff, Fragment, FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition,
-    LogReader, LogReaderOptions, LogWriterOptions, Manifest, ManifestManager, ThrottleOptions,
+    LogReader, LogReaderOptions, LogWriterOptions, Manifest, ManifestAndETag, ManifestManager,
+    ThrottleOptions,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -273,6 +276,10 @@ impl LogWriter {
     }
 
     pub fn manifest(&self) -> Option<Manifest> {
+        self.manifest_and_etag().map(|m| m.manifest)
+    }
+
+    pub fn manifest_and_etag(&self) -> Option<ManifestAndETag> {
         // SAFETY(rescrv):  Mutex poisoning.
         let inner = self.inner.lock().unwrap();
         inner
@@ -383,6 +390,9 @@ impl LogWriter {
                             writer.shutdown();
                         }
                     }
+                }
+                Err(Error::Backoff) => {
+                    return Err(Error::Backoff);
                 }
                 Err(err) => {
                     let mut inner = self.inner.lock().unwrap();
@@ -625,34 +635,38 @@ impl OnceLogWriter {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self, messages))]
     async fn append(self: &Arc<Self>, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
         if messages.is_empty() {
             return Err(Error::EmptyBatch);
         }
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.batch_manager.push_work(messages, tx);
-        match self.batch_manager.take_work(&self.manifest_manager) {
-            Ok(Some(work)) => {
-                let (fragment_seq_no, log_position, work) = work;
-                {
-                    tokio::task::spawn(Arc::clone(self).append_batch(
-                        fragment_seq_no,
-                        log_position,
-                        work,
-                    ));
+        let append_span = tracing::info_span!("append_span");
+        let append_span_clone = append_span.clone();
+        async move {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            self.batch_manager.push_work(messages, tx, append_span);
+            match self.batch_manager.take_work(&self.manifest_manager) {
+                Ok(Some(work)) => {
+                    let (fragment_seq_no, log_position, work) = work;
+                    {
+                        tokio::task::spawn(Arc::clone(self).append_batch(
+                            fragment_seq_no,
+                            log_position,
+                            work,
+                        ));
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    tracing::error!(error = %err, "batch manager failed");
                 }
             }
-            Ok(None) => {}
-            Err(err) => {
-                tracing::error!(error = %err, "batch manager failed");
-            }
+            let span = tracing::info_span!("wait_for_durability");
+            rx.instrument(span).await.map_err(|_| Error::Internal)?
         }
-        let span = tracing::info_span!("wait_for_durability");
-        rx.instrument(span).await.map_err(|_| Error::Internal)?
+        .instrument(append_span_clone)
+        .await
     }
 
-    #[tracing::instrument(skip(self, work))]
     #[allow(clippy::type_complexity)]
     async fn append_batch(
         self: Arc<Self>,
@@ -661,38 +675,49 @@ impl OnceLogWriter {
         work: Vec<(
             Vec<Vec<u8>>,
             tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
+            Span,
         )>,
     ) {
+        let append_batch_span = tracing::info_span!("append_batch");
         let mut messages = Vec::with_capacity(work.len());
         let mut notifies = Vec::with_capacity(work.len());
         for work in work.into_iter() {
             notifies.push((work.0.len(), work.1));
             messages.extend(work.0);
+            // NOTE(rescrv):  This returns a context that returns a reference to the span, from
+            // which we get a span context that we clone.  My initial read of this was to interpret
+            // it as creating a span and that is not the case.
+            work.2
+                .add_link(append_batch_span.context().span().span_context().clone());
         }
-        if notifies.is_empty() {
-            tracing::error!("somehow got empty messages");
-            return;
-        }
-        match self
-            .append_batch_internal(fragment_seq_no, log_position, messages)
-            .await
-        {
-            Ok(mut log_position) => {
-                for (num_messages, notify) in notifies.into_iter() {
-                    if notify.send(Ok(log_position)).is_err() {
-                        // TODO(rescrv):  Counter this.
+        async move {
+            if notifies.is_empty() {
+                tracing::error!("somehow got empty messages");
+                return;
+            }
+            match self
+                .append_batch_internal(fragment_seq_no, log_position, messages)
+                .await
+            {
+                Ok(mut log_position) => {
+                    for (num_messages, notify) in notifies.into_iter() {
+                        if notify.send(Ok(log_position)).is_err() {
+                            // TODO(rescrv):  Counter this.
+                        }
+                        log_position += num_messages;
                     }
-                    log_position += num_messages;
+                }
+                Err(e) => {
+                    for (_, notify) in notifies.into_iter() {
+                        if notify.send(Err(e.clone())).is_err() {
+                            // TODO(rescrv):  Counter this.
+                        }
+                    }
                 }
             }
-            Err(e) => {
-                for (_, notify) in notifies.into_iter() {
-                    if notify.send(Err(e.clone())).is_err() {
-                        // TODO(rescrv):  Counter this.
-                    }
-                }
-            }
         }
+        .instrument(append_batch_span)
+        .await
     }
 
     #[tracing::instrument(skip(self, messages))]
@@ -761,7 +786,6 @@ impl OnceLogWriter {
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
     ) -> Result<bool, Error> {
-        self.manifest_manager.heartbeat().await?;
         let cutoff = self.garbage_collection_cutoff().await?;
         let cutoff = if let Some(keep_at_least) = keep_at_least {
             keep_at_least.min(cutoff)
@@ -774,16 +798,39 @@ impl OnceLogWriter {
             if attempts > 3 {
                 return Err(Error::LogContentionFailure);
             }
-            let garbage_and_e_tag =
-                match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix)
-                    .await
-                {
-                    Ok(Some((garbage, e_tag))) => Some((garbage, e_tag)),
-                    Ok(None) => None,
-                    Err(err) => {
-                        return Err(err);
+            let garbage_and_e_tag = match Garbage::load(
+                &self.options.throttle_manifest,
+                &self.storage,
+                &self.prefix,
+            )
+            .await
+            {
+                Ok(Some((garbage, e_tag))) => {
+                    if garbage.is_empty() || self.manifest_manager.garbage_applies_cleanly(&garbage)
+                    {
+                        Some((garbage, e_tag))
+                    } else if let Some(e_tag) = e_tag {
+                        tracing::info!("resetting garbage because a concurrent snapshot write invalidated prior garbage");
+                        garbage
+                            .reset(
+                                &self.options.throttle_manifest,
+                                &self.storage,
+                                &self.prefix,
+                                &e_tag,
+                            )
+                            .await?;
+                        continue;
+                    } else {
+                        return Err(Error::GarbageCollection(
+                            "non-empty garbage without ETag".to_string(),
+                        ));
                     }
-                };
+                }
+                Ok(None) => None,
+                Err(err) => {
+                    return Err(err);
+                }
+            };
             let e_tag = if let Some((garbage, e_tag)) = garbage_and_e_tag {
                 if !garbage.is_empty() {
                     return Ok(true);
@@ -842,7 +889,11 @@ impl OnceLogWriter {
                 }
             };
         if !garbage.is_empty() {
-            self.manifest_manager.apply_garbage(garbage.clone()).await?;
+            self.manifest_manager.apply_garbage(garbage.clone()).await.inspect_err(|err| {
+                if let Error::GarbageCollectionPrecondition(_) = err {
+                    tracing::event!(Level::ERROR, name = "garbage collection precondition failed", manifest =? self.manifest_manager.latest(), garbage =? garbage);
+                }
+            })?;
         }
         Ok(())
     }

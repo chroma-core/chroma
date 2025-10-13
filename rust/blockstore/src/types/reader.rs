@@ -50,6 +50,23 @@ impl<
         }
     }
 
+    pub async fn get_prefix(
+        &'referred_data self,
+        prefix: &'referred_data str,
+    ) -> Result<Box<dyn Iterator<Item = (K, V)> + Send + Sync + 'referred_data>, Box<dyn ChromaError>>
+    {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                Ok(Box::new(reader.get_prefix(prefix).await?))
+            }
+            BlockfileReader::MemoryBlockfileReader(reader) => Ok(Box::new(
+                reader
+                    .get_range_iter(prefix..=prefix, ..)?
+                    .map(|(_, k, v)| (k, v)),
+            )),
+        }
+    }
+
     pub async fn count(&'referred_data self) -> Result<usize, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.count(),
@@ -94,18 +111,22 @@ impl<
         &'referred_data self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> Result<Vec<(&'referred_data str, K, V)>, Box<dyn ChromaError>>
+    ) -> Result<
+        Box<dyn Iterator<Item = (&'referred_data str, K, V)> + Send + 'referred_data>,
+        Box<dyn ChromaError>,
+    >
     where
-        PrefixRange: RangeBounds<&'prefix str> + Clone,
-        KeyRange: RangeBounds<K> + Clone,
+        PrefixRange: RangeBounds<&'prefix str> + Clone + Send + 'referred_data,
+        KeyRange: RangeBounds<K> + Clone + Send + 'referred_data,
     {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader
                 .get_range_iter(prefix_range, key_range)
-                .map(|i| i.collect()),
-            BlockfileReader::ArrowBlockfileReader(reader) => {
-                reader.get_range(prefix_range, key_range).await
-            }
+                .map(|iter| Box::new(iter) as Box<dyn Iterator<Item = _> + Send + 'referred_data>),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader
+                .get_range(prefix_range, key_range)
+                .await
+                .map(|iter| Box::new(iter) as Box<dyn Iterator<Item = _> + Send + 'referred_data>),
         }
     }
 

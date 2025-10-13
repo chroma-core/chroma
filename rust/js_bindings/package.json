@@ -1,6 +1,6 @@
 {
   "name": "chromadb-js-bindings",
-  "version": "1.0.1",
+  "version": "1.0.7",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
@@ -27,7 +27,7 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release",
+    "build": "napi build --platform --release --strip",
     "build:debug": "napi build --platform",
     "prepublishOnly": "napi prepublish -t npm-scoped",
     "test": "ava",

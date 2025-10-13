@@ -1,7 +1,8 @@
-FROM rust:1.81.0 AS builder
+FROM rust:1.85.0 AS builder
 
 ARG RELEASE_MODE=
 ARG PROTOC_VERSION=31.1
+ARG ENABLE_AVX512=
 
 WORKDIR /chroma
 
@@ -28,8 +29,18 @@ COPY rust/ rust/
 # Skip building these as they're not needed by images (and if Python bindings are built, the final binaries are unnecessarily linked against Python).
 ENV EXCLUDED_PACKAGES="chromadb_rust_bindings chromadb-js-bindings chroma-benchmark "
 
+# Note: Using flag ENABLE_AVX512 to build AVX512 optimizations for hnswlib, and AVX for Rust.
+# Once Rust supports AVX512, the target-features will be updated to use AVX512.
 RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
+  if [ "$ENABLE_AVX512" = "1" ]; then \
+    export CXXFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
+    export CFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
+    export RUSTFLAGS="-C target-feature=+avx,+fma" && \
+    echo "Building with AVX512 optimizations for hnswlib and AVX for Rust"; \
+  else \
+    echo "Building without AVX512 optimizations"; \
+  fi && \
   if [ "$RELEASE_MODE" = "1" ]; then cargo build --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES) --release; else cargo build --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES); fi && \
   # Move CLI binary
   if [ "$RELEASE_MODE" = "1" ]; then mv target/release/chroma ./chroma; else mv target/debug/chroma ./chroma; fi && \
@@ -40,6 +51,8 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   if [ "$RELEASE_MODE" = "1" ]; then mv target/release/chroma-load ./chroma-load; else mv target/debug/chroma-load ./chroma-load; fi && \
   # Move log service binary
   if [ "$RELEASE_MODE" = "1" ]; then mv target/release/log_service ./log_service; else mv target/debug/log_service ./log_service; fi && \
+  # Move heap tender binary
+  if [ "$RELEASE_MODE" = "1" ]; then mv target/release/heap_tender_service ./heap_tender_service; else mv target/debug/heap_tender_service ./heap_tender_service; fi && \
   # Move query service binary
   if [ "$RELEASE_MODE" = "1" ]; then mv target/release/query_service ./query_service; else mv target/debug/query_service ./query_service; fi && \
   # Move compaction service binary
@@ -53,7 +66,7 @@ RUN apt-get update && apt-get install -y dumb-init libssl-dev ca-certificates &&
 FROM runner AS cli
 
 COPY --from=builder /chroma/rust/frontend/sample_configs/docker_single_node.yaml /config.yaml
-COPY --from=builder /chroma/rust/frontend/sample_configs/tilt_config.yaml /tilt_config.yaml
+COPY --from=builder /chroma/rust/frontend/sample_configs/distributed.yaml /chroma_config.yaml
 COPY --from=builder /chroma/chroma /usr/local/bin/chroma
 
 EXPOSE 8000
@@ -63,29 +76,27 @@ CMD [ "run", "/config.yaml" ]
 
 FROM runner AS garbage_collector
 COPY --from=builder /chroma/garbage_collector_service .
-ENTRYPOINT [ "./garbage_collector_service" ]
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./garbage_collector_service" ]
 
 FROM runner AS load_service
 COPY --from=builder /chroma/chroma-load .
 COPY --from=builder /chroma/chroma-load-start .
-ENTRYPOINT [ "./chroma-load" ]
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./chroma-load" ]
 
 FROM runner AS log_service
 COPY --from=builder /chroma/log_service .
-ENTRYPOINT [ "./log_service" ]
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./log_service" ]
+
+FROM runner AS heap_tender_service
+COPY --from=builder /chroma/heap_tender_service .
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./heap_tender_service" ]
 
 FROM runner AS query_service
 COPY --from=builder /chroma/rust/worker/chroma_config.yaml .
-# NOTE(rescrv): We need the tilt config in the docker file.  This is temporary.
-COPY --from=builder /chroma/rust/worker/tilt_config.yaml .
-
 COPY --from=builder /chroma/query_service .
-ENTRYPOINT [ "./query_service" ]
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./query_service" ]
 
 FROM runner AS compaction_service
 COPY --from=builder /chroma/rust/worker/chroma_config.yaml .
-# NOTE(rescrv): We need the tilt config in the docker file.  This is temporary.
-COPY --from=builder /chroma/rust/worker/tilt_config.yaml .
-
 COPY --from=builder /chroma/compaction_service .
-ENTRYPOINT [ "./compaction_service" ]
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./compaction_service" ]

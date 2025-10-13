@@ -1,3 +1,8 @@
+---
+id: run-client-server-mode
+name: Client-Server Mode
+---
+
 # Running Chroma in Client-Server Mode
 
 Chroma can also be configured to run in client/server mode. In this mode, the Chroma client connects to a Chroma server running in a separate process.
@@ -60,9 +65,9 @@ If you run your Chroma server using a different configuration, or [deploy](../..
 import { ChromaClient } from "chromadb";
 
 const client = new ChromaClient({
-    host: "YOUR-HOST",
-    port: "YOUR-PORT",
-    ssl: true
+  host: "YOUR-HOST",
+  port: "YOUR-PORT",
+  ssl: true,
 });
 ```
 

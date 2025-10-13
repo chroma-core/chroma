@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use super::{distributed::DistributedExecutor, local::LocalExecutor, Executor};
+use crate::executor::distributed::ClientSelectionConfig;
 use async_trait::async_trait;
 use backon::ExponentialBuilder;
 use chroma_config::{registry::Registry, Configurable};
@@ -33,6 +34,8 @@ pub struct DistributedExecutorConfig {
     pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
     #[serde(default = "default_max_query_service_response_size_bytes")]
     pub max_query_service_response_size_bytes: usize,
+    #[serde(default = "ClientSelectionConfig::default")]
+    pub client_selection_config: ClientSelectionConfig,
 }
 
 #[derive(Deserialize, Clone, Serialize, Debug)]

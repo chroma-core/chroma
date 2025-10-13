@@ -1,12 +1,26 @@
-from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
+from chromadb.api.types import (
+    Embeddings,
+    EmbeddingFunction,
+    Space,
+    Embeddable,
+    is_image,
+    is_document,
+)
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
-from typing import List, Dict, Any, Union, Optional
+from typing import List, Dict, Any, Union, Optional, TypedDict
 import os
 import numpy as np
 import warnings
+import importlib
+import base64
+import io
 
 
-class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
+class JinaQueryConfig(TypedDict):
+    task: str
+
+
+class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
     """
     This class is used to get embeddings for a list of texts using the Jina AI API.
     It requires an API key and a model name. The default model name is "jina-embeddings-v2-base-en".
@@ -23,6 +37,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         dimensions: Optional[int] = None,
         embedding_type: Optional[str] = None,
         normalized: Optional[bool] = None,
+        query_config: Optional[JinaQueryConfig] = None,
     ):
         """
         Initialize the JinaEmbeddingFunction.
@@ -52,6 +67,12 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             raise ValueError(
                 "The httpx python package is not installed. Please install it with `pip install httpx`"
             )
+        try:
+            self._PILImage = importlib.import_module("PIL.Image")
+        except ImportError:
+            raise ValueError(
+                "The PIL python package is not installed. Please install it with `pip install pillow`"
+            )
 
         if api_key is not None:
             warnings.warn(
@@ -74,6 +95,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         self.dimensions = dimensions
         self.embedding_type = embedding_type
         self.normalized = normalized
+        self.query_config = query_config
 
         self._api_url = "https://api.jina.ai/v1/embeddings"
         self._session = httpx.Client()
@@ -81,50 +103,64 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             {"Authorization": f"Bearer {self.api_key}", "Accept-Encoding": "identity"}
         )
 
-    def __call__(self, input: Documents) -> Embeddings:
-        """
-        Get the embeddings for a list of texts.
-
-        Args:
-            input (Documents): A list of texts to get embeddings for.
-
-        Returns:
-            Embeddings: The embeddings for the texts.
-
-        Example:
-            >>> jina_ai_fn = JinaEmbeddingFunction(api_key_env_var="CHROMA_JINA_API_KEY")
-            >>> input = ["Hello, world!", "How are you?"]
-        """
-        # Jina AI only works with text documents
-        if not all(isinstance(item, str) for item in input):
-            raise ValueError("Jina AI only supports text documents, not images")
-
+    def _build_payload(self, input: Embeddable, is_query: bool) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
-            "input": input,
+            "input": [],
             "model": self.model_name,
         }
+        if all(is_document(item) for item in input):
+            payload["input"] = input
+        else:
+            for item in input:
+                if is_document(item):
+                    payload["input"].append({"text": item})
+                elif is_image(item):
+                    try:
+                        pil_image = self._PILImage.fromarray(item)
+
+                        buffer = io.BytesIO()
+                        pil_image.save(buffer, format="PNG")
+                        img_bytes = buffer.getvalue()
+
+                        # Encode bytes to base64 string
+                        base64_string = base64.b64encode(img_bytes).decode("utf-8")
+
+                    except Exception as e:
+                        raise ValueError(
+                            f"Failed to convert image numpy array to base64 data URI: {e}"
+                        ) from e
+                    payload["input"].append({"image": base64_string})
 
         if self.task is not None:
             payload["task"] = self.task
-
         if self.late_chunking is not None:
             payload["late_chunking"] = self.late_chunking
-
         if self.truncate is not None:
             payload["truncate"] = self.truncate
-
         if self.dimensions is not None:
             payload["dimensions"] = self.dimensions
-
         if self.embedding_type is not None:
             payload["embedding_type"] = self.embedding_type
-
         if self.normalized is not None:
             payload["normalized"] = self.normalized
 
-        # Call Jina AI Embedding API
-        resp = self._session.post(self._api_url, json=payload).json()
+        # overwrite parameteres when query payload is used
+        if is_query and self.query_config is not None:
+            for key, value in self.query_config.items():
+                payload[key] = value
 
+        return payload
+
+    def _convert_resp(self, resp: Any, is_query: bool = False) -> Embeddings:
+        """
+        Convert the response from the Jina AI API to a list of numpy arrays.
+
+        Args:
+            resp (Any): The response from the Jina AI API.
+
+        Returns:
+            Embeddings: A list of numpy arrays representing the embeddings.
+        """
         if "data" not in resp:
             raise RuntimeError(resp.get("detail", "Unknown error"))
 
@@ -139,6 +175,36 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             for result in sorted_embeddings
         ]
 
+    def __call__(self, input: Embeddable) -> Embeddings:
+        """
+        Get the embeddings for a list of texts.
+
+        Args:
+            input (Embeddable): A list of texts and/or images to get embeddings for.
+
+        Returns:
+            Embeddings: The embeddings for the texts.
+
+        Example:
+            >>> jina_ai_fn = JinaEmbeddingFunction(api_key_env_var="CHROMA_JINA_API_KEY")
+            >>> input = ["Hello, world!", "How are you?"]
+        """
+
+        payload = self._build_payload(input, is_query=False)
+
+        # Call Jina AI Embedding API
+        resp = self._session.post(self._api_url, json=payload, timeout=60).json()
+
+        return self._convert_resp(resp)
+
+    def embed_query(self, input: Embeddable) -> Embeddings:
+        payload = self._build_payload(input, is_query=True)
+
+        # Call Jina AI Embedding API
+        resp = self._session.post(self._api_url, json=payload, timeout=60).json()
+
+        return self._convert_resp(resp, is_query=True)
+
     @staticmethod
     def name() -> str:
         return "jina"
@@ -150,7 +216,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")
         task = config.get("task")
@@ -159,6 +225,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         dimensions = config.get("dimensions")
         embedding_type = config.get("embedding_type")
         normalized = config.get("normalized")
+        query_config = config.get("query_config")
 
         if api_key_env_var is None or model_name is None:
             assert False, "This code should not be reached"  # this is for type checking
@@ -172,6 +239,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             dimensions=dimensions,
             embedding_type=embedding_type,
             normalized=normalized,
+            query_config=query_config,
         )
 
     def get_config(self) -> Dict[str, Any]:
@@ -184,6 +252,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             "dimensions": self.dimensions,
             "embedding_type": self.embedding_type,
             "normalized": self.normalized,
+            "query_config": self.query_config,
         }
 
     def validate_config_update(

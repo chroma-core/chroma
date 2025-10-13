@@ -9,7 +9,7 @@ on:
 
 jobs:
   check-tag:
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       tag_matches: ${{ steps.check-tag.outputs.tag_matches }}
     steps:
@@ -24,7 +24,7 @@ jobs:
           fi
 
   get-version:
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -109,7 +109,7 @@ jobs:
 
   release-thin-pypi:
     name: Publish thin client to PyPI
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs:
       - check-tag
       - python-tests-linux
@@ -147,7 +147,7 @@ jobs:
 
   release-github:
     name: Make GitHub release
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs:
       - check-tag
       - get-version
@@ -207,29 +207,17 @@ jobs:
           removeArtifacts: true
           prerelease: true
 
-  release-hosted-control-plane:
-    name: Release to Chroma Cloud control plane
+  deploy-staging:
+    name: Deploy to staging
     # depends on release-github because it updates the tag to latest, which is what will get deployed
     needs:
       - release-github
     uses: ./.github/workflows/_deploy.yml
-    with:
-      plane: control
-    secrets: inherit
-
-  release-hosted-data-plane:
-    name: Release to Chroma Cloud data plane
-    # depends on release-github because it updates the tag to latest, which is what will get deployed
-    needs:
-      - release-github
-    uses: ./.github/workflows/_deploy.yml
-    with:
-      plane: data
     secrets: inherit
 
   release-docs:
     name: Deploy docs to Vercel
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs:
       - check-tag
     steps:
@@ -257,10 +245,9 @@ jobs:
       - release-pypi
       - release-thin-pypi
       - release-github
-      - release-hosted-control-plane
-      - release-hosted-data-plane
+      - deploy-staging
       - release-docs
-    runs-on: blacksmith-2vcpu-ubuntu-2204
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Notify Slack
         uses: slackapi/slack-github-action@v2.0.0
@@ -273,5 +260,5 @@ jobs:
               :x: *ChromaDB release failure!*
               *Workflow:* ${{ github.workflow }}
               *Run:* <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+              *Ref:* <https://github.com/${{ github.repository }}/tree/${{ github.ref_name }}|${{ github.ref_name }}>
               *Author:* ${{ github.actor }}
-              *Ref:* ${{ github.ref_name }}

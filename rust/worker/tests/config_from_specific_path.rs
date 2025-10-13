@@ -1,3 +1,4 @@
+use chroma_blockstore::config::BlockfileProviderConfig;
 use chroma_index::config::{HnswGarbageCollectionPolicyConfig, PlGarbageCollectionPolicyConfig};
 use figment::Jail;
 use serial_test::serial;
@@ -167,6 +168,17 @@ fn test_config_from_specific_path() {
             config.compaction_service.jemalloc_pprof_server_port,
             Some(6060)
         );
+        match config.compaction_service.blockfile_provider {
+            BlockfileProviderConfig::Arrow(arrow_config) => {
+                assert_eq!(
+                    arrow_config
+                        .block_manager_config
+                        .num_concurrent_block_flushes,
+                    40
+                );
+            }
+            _ => panic!("Expected Arrow blockfile provider config"),
+        }
         assert!(
             config
                 .compaction_service

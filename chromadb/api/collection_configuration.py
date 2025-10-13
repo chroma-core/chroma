@@ -99,7 +99,6 @@ def load_collection_configuration_from_json(
                 raise ValueError(
                     f"Could not build embedding function {ef_config['name']} from config {ef_config['config']}: {e}"
                 )
-
     else:
         ef = None
 
@@ -148,11 +147,6 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
     if ef is None:
         ef = None
         ef_config = {"type": "legacy"}
-        return {
-            "hnsw": hnsw_config,
-            "spann": spann_config,
-            "embedding_function": ef_config,
-        }
 
     if ef is not None:
         try:
@@ -260,16 +254,6 @@ class CreateCollectionConfiguration(TypedDict, total=False):
     embedding_function: Optional[EmbeddingFunction]  # type: ignore
 
 
-def load_collection_configuration_from_create_collection_configuration(
-    config: CreateCollectionConfiguration,
-) -> CollectionConfiguration:
-    return CollectionConfiguration(
-        hnsw=config.get("hnsw"),
-        spann=config.get("spann"),
-        embedding_function=config.get("embedding_function"),
-    )
-
-
 def create_collection_configuration_from_legacy_collection_metadata(
     metadata: CollectionMetadata,
 ) -> CreateCollectionConfiguration:
@@ -299,13 +283,6 @@ def create_collection_configuration_from_legacy_metadata_dict(
     hnsw_config = populate_create_hnsw_defaults(hnsw_config)
 
     return CreateCollectionConfiguration(hnsw=hnsw_config)
-
-
-def load_create_collection_configuration_from_json_str(
-    json_str: str,
-) -> CreateCollectionConfiguration:
-    json_map = json.loads(json_str)
-    return load_create_collection_configuration_from_json(json_map)
 
 
 # TODO: make warnings prettier and add link to migration docs
@@ -342,14 +319,16 @@ def load_create_collection_configuration_from_json(
 
 def create_collection_configuration_to_json_str(
     config: CreateCollectionConfiguration,
+    metadata: Optional[CollectionMetadata] = None,
 ) -> str:
     """Convert a CreateCollection configuration to a JSON-serializable string"""
-    return json.dumps(create_collection_configuration_to_json(config))
+    return json.dumps(create_collection_configuration_to_json(config, metadata))
 
 
 # TODO: make warnings prettier and add link to migration docs
 def create_collection_configuration_to_json(
     config: CreateCollectionConfiguration,
+    metadata: Optional[CollectionMetadata] = None,
 ) -> Dict[str, Any]:
     """Convert a CreateCollection configuration to a JSON-serializable dict"""
     ef_config: Dict[str, Any] | None = None
@@ -383,6 +362,54 @@ def create_collection_configuration_to_json(
         if ef.is_legacy():
             ef_config = {"type": "legacy"}
         else:
+            # default space logic: if neither hnsw nor spann config is provided and metadata doesn't have space,
+            # then populate space from ef
+            # otherwise dont use default space from ef
+
+            # then validate the space afterwards based on the supported spaces of the embedding function,
+            # warn if space is not supported
+
+            if hnsw_config is None and spann_config is None:
+                if metadata is None or metadata.get("hnsw:space") is None:
+                    # this populates space from ef if not provided in either config
+                    hnsw_config = CreateHNSWConfiguration(space=ef.default_space())
+
+            # if hnsw config or spann config exists but space is not provided, populate it from ef
+            if hnsw_config is not None and hnsw_config.get("space") is None:
+                hnsw_config["space"] = ef.default_space()
+            if spann_config is not None and spann_config.get("space") is None:
+                spann_config["space"] = ef.default_space()
+
+            # Validate space compatibility with embedding function
+            if hnsw_config is not None:
+                if hnsw_config.get("space") not in ef.supported_spaces():
+                    warnings.warn(
+                        f"space {hnsw_config.get('space')} is not supported by {ef.name()}. Supported spaces: {ef.supported_spaces()}",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+            if spann_config is not None:
+                if spann_config.get("space") not in ef.supported_spaces():
+                    warnings.warn(
+                        f"space {spann_config.get('space')} is not supported by {ef.name()}. Supported spaces: {ef.supported_spaces()}",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+
+            # only validate space from metadata if config is not provided
+            if (
+                hnsw_config is None
+                and spann_config is None
+                and metadata is not None
+                and metadata.get("hnsw:space") is not None
+            ):
+                if metadata.get("hnsw:space") not in ef.supported_spaces():
+                    warnings.warn(
+                        f"space {metadata.get('hnsw:space')} is not supported by {ef.name()}. Supported spaces: {ef.supported_spaces()}",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+
             ef_config = {
                 "name": ef.name(),
                 "type": "known",

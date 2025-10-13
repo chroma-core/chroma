@@ -9,10 +9,10 @@ inputs:
     required: false
   dockerhub-username:
     description: "DockerHub username"
-    required: true
+    required: false
   dockerhub-password:
     description: "DockerHub password"
-    required: true
+    required: false
   setup-blacksmith:
     description: "Setup blacksmith"
     required: false
@@ -30,6 +30,7 @@ runs:
         password: ${{ inputs.ghcr-password }}
     - name: Login to DockerHub
       uses: docker/login-action@v2.1.0
+      if: ${{ inputs.dockerhub-username != '' }}
       with:
         username: ${{ inputs.dockerhub-username }}
         password: ${{ inputs.dockerhub-password }}

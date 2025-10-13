@@ -16,7 +16,7 @@ use setsum::Setsum;
 
 use crate::{
     Error, Fragment, FragmentSeqNo, Garbage, LogPosition, LogWriterOptions, ScrubError,
-    ScrubSuccess, SnapshotOptions, ThrottleOptions,
+    ScrubSuccess, SnapshotOptions, SnapshotPointerOrFragmentSeqNo, ThrottleOptions,
 };
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
@@ -363,12 +363,19 @@ impl Manifest {
         while snapshot_depth > 0 {
             let mut snapshots = vec![];
             let mut setsum = Setsum::default();
-            for snapshot in self.snapshots.iter().filter(|s| s.depth == snapshot_depth) {
-                if snapshots.len() < snapshot_options.snapshot_rollover_threshold {
-                    setsum += snapshot.setsum;
+            for snapshot in self.snapshots.iter().rev() {
+                if snapshot.depth < snapshot_depth {
+                    continue;
+                } else if snapshot.depth == snapshot_depth
+                    && snapshots.len() < snapshot_options.snapshot_rollover_threshold
+                {
                     snapshots.push(snapshot.clone());
+                    setsum += snapshot.setsum;
+                } else {
+                    break;
                 }
             }
+            snapshots.reverse();
             if snapshots.len() >= snapshot_options.snapshot_rollover_threshold {
                 if let Some(snap) = snapshots.iter().min_by_key(|s| s.start) {
                     if !self.snapshots.is_empty()
@@ -560,6 +567,27 @@ impl Manifest {
             .find(|f| f.limit.offset() >= position.offset())
     }
 
+    /// Round down to the nearest boundary so that the given log position will not bisect a
+    /// snapshot or fragment in the manifest.  If the given log position does not overlap any
+    /// snapshot or fragment, None will be returned.
+    pub fn round_to_boundary(&self, position: LogPosition) -> Option<LogPosition> {
+        for snapshot in self.snapshots.iter() {
+            if LogPosition::contains_offset(snapshot.start, snapshot.limit, position.offset) {
+                return Some(snapshot.start);
+            }
+        }
+        for fragment in self.fragments.iter() {
+            if LogPosition::contains_offset(fragment.start, fragment.limit, position.offset) {
+                return Some(fragment.start);
+            }
+        }
+        if position == self.next_write_timestamp() {
+            Some(position)
+        } else {
+            None
+        }
+    }
+
     /// Scrub the manifest without doing I/O.
     pub fn scrub(&self) -> Result<ScrubSuccess, Box<ScrubError>> {
         let mut calculated_setsum = Setsum::default();
@@ -576,9 +604,9 @@ impl Manifest {
             return Err(ScrubError::CorruptManifest{
                 manifest: format!("{:?}", self),
                 what: format!(
-                "expected manifest setsum does not match observed contents: expected:{} != observed:{}",
+                "expected manifest setsum does not match observed contents: expected:{} != observed:{}+{}",
                 self.setsum.hexdigest(),
-                calculated_setsum.hexdigest()
+                calculated_setsum.hexdigest(), self.collected.hexdigest(),
             )}.into());
         }
         for (lhs, rhs) in std::iter::zip(self.snapshots.iter(), self.snapshots.iter().skip(1)) {
@@ -612,6 +640,19 @@ impl Manifest {
                     what: format!(
                         "expected snapshots-fragments to be sequential within the manifest: gap {:?} -> {:?}",
                         snap.limit, frag.start,
+                    ),
+                }
+                .into());
+            }
+        }
+        if let Some(initial_offset) = self.initial_offset {
+            let oldest_timestamp = self.oldest_timestamp();
+            if initial_offset != oldest_timestamp {
+                return Err(ScrubError::CorruptManifest {
+                    manifest: format!("{:?}", self),
+                    what: format!(
+                        "expected initial offset to be equal to oldest timestamp when present: gap {:?} != {:?}",
+                        initial_offset, oldest_timestamp,
                     ),
                 }
                 .into());
@@ -680,6 +721,17 @@ impl Manifest {
             .await
             .map_err(Arc::new)?;
         Ok(())
+    }
+
+    /// Validate the e_tag against the manifest on object storage.
+    pub async fn head(
+        _: &ThrottleOptions,
+        storage: &Storage,
+        prefix: &str,
+        e_tag: &ETag,
+    ) -> Result<bool, Error> {
+        let path = manifest_path(prefix);
+        Ok(storage.confirm_same(&path, e_tag).await.map_err(Arc::new)?)
     }
 
     /// Load the latest manifest from object storage.
@@ -800,7 +852,22 @@ impl Manifest {
 
     /// Apply the destructive operation specified by the Garbage struct.
     #[allow(clippy::result_large_err)]
-    pub fn apply_garbage(&self, mut garbage: Garbage) -> Result<Option<Self>, Error> {
+    pub fn apply_garbage(&self, garbage: Garbage) -> Result<Option<Self>, Error> {
+        if garbage.is_empty() {
+            return Err(Error::GarbageCollectionPrecondition(
+                SnapshotPointerOrFragmentSeqNo::Stringy("cannot apply empty garbage".to_string()),
+            ));
+        }
+        if garbage.fragments_to_drop_limit <= self.initial_seq_no.unwrap_or(FragmentSeqNo::BEGIN)
+            && !garbage
+                .snapshots_to_drop
+                .iter()
+                .any(|snap| self.snapshots.contains(snap))
+            && garbage.snapshots_to_make.is_empty()
+        {
+            return Ok(None);
+        }
+        let mut setsum_to_discard = Setsum::default();
         if garbage.fragments_to_drop_start > garbage.fragments_to_drop_limit {
             return Err(Error::GarbageCollection(format!(
                 "Garbage has start > limit: {:?} > {:?}",
@@ -813,6 +880,9 @@ impl Manifest {
         let mut new = self.clone();
         for to_drop in garbage.snapshots_to_drop.iter() {
             if let Some(index) = new.snapshots.iter().position(|s| s == to_drop) {
+                if Some(to_drop) != garbage.snapshot_for_root.as_ref() {
+                    setsum_to_discard += to_drop.setsum;
+                }
                 new.snapshots.remove(index);
             }
         }
@@ -823,13 +893,25 @@ impl Manifest {
                 .iter()
                 .position(|f| f.seq_no == FragmentSeqNo(seq_no))
             {
+                setsum_to_discard += new.fragments[index].setsum;
                 new.fragments.remove(index);
             }
         }
-        if let Some(snap) = garbage.snapshot_for_root.take() {
-            if !new.snapshots.contains(&snap) {
-                new.snapshots.insert(0, snap);
+        let mut root_setsum = Setsum::default();
+        if let Some(snap) = garbage.snapshot_for_root.as_ref() {
+            if !new.snapshots.contains(snap) {
+                root_setsum = snap.setsum;
+                new.snapshots.insert(0, snap.clone());
             }
+        }
+        if setsum_to_discard - root_setsum != garbage.setsum_to_discard {
+            return Err(Error::GarbageCollectionPrecondition(
+                SnapshotPointerOrFragmentSeqNo::Stringy(format!(
+                    "Setsum mismatch: {} != {}",
+                    setsum_to_discard.hexdigest(),
+                    garbage.setsum_to_discard.hexdigest()
+                )),
+            ));
         }
         new.collected += garbage.setsum_to_discard;
         new.initial_offset = Some(garbage.first_to_keep);
@@ -852,6 +934,14 @@ impl Manifest {
         }
         Ok(Some(new))
     }
+}
+
+////////////////////////////////////////// ManifestAndETag /////////////////////////////////////////
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct ManifestAndETag {
+    pub manifest: Manifest,
+    pub e_tag: ETag,
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -1572,5 +1662,146 @@ mod tests {
 
         let result = manifest.apply_garbage(valid_garbage_less);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn apply_garbage_early_return_when_no_work_to_do() {
+        // Test the new early return condition: when fragments_to_drop_limit <= initial_seq_no
+        // and there are no snapshots to drop/make, return Ok(None)
+        let manifest = Manifest {
+            writer: "test_writer".to_string(),
+            setsum: Setsum::from_hexdigest(
+                "9eabcf03849e73854ebd6c80795d0fe4fbbbe4320151a011db9daf7419624dca",
+            )
+            .unwrap(),
+            collected: Setsum::from_hexdigest(
+                "8ab5679e202200027046c6b42d7ca4605004c8de3e3988ce3240212c9fa269cd",
+            )
+            .unwrap(),
+            acc_bytes: 6606733560,
+            snapshots: vec![],
+            fragments: vec![Fragment {
+                path: "log/Bucket=00000000002f2000/FragmentSeqNo=00000000002f2372.parquet"
+                    .to_string(),
+                seq_no: FragmentSeqNo(3089266),
+                start: LogPosition { offset: 5566918 },
+                limit: LogPosition { offset: 5566919 },
+                num_bytes: 2116,
+                setsum: Setsum::from_hexdigest(
+                    "0ff66765647c73839d76a6cb4ce16a8340b71c543c171843a95d8e48c1bee3fc",
+                )
+                .unwrap(),
+            }],
+            initial_offset: Some(LogPosition { offset: 5566918 }),
+            initial_seq_no: Some(FragmentSeqNo(3089266)),
+        };
+
+        // Case 1: fragments_to_drop_limit <= initial_seq_no, no snapshots to drop/make
+        let garbage = Garbage {
+            snapshots_to_drop: vec![],
+            snapshots_to_make: vec![],
+            snapshot_for_root: None,
+            fragments_to_drop_start: FragmentSeqNo(3089257),
+            fragments_to_drop_limit: FragmentSeqNo(3089266), // Equal to initial_seq_no
+            setsum_to_discard: Setsum::from_hexdigest(
+                "7287d2d717e35117811f1afb7c5e8dd6517417dcbc5ad195dabbafaca6df9ef3",
+            )
+            .unwrap(),
+            first_to_keep: LogPosition { offset: 5566918 },
+        };
+
+        let result = manifest.apply_garbage(garbage.clone());
+        assert!(result.is_ok());
+        assert!(
+            result.unwrap().is_none(),
+            "Expected None when no work to do"
+        );
+
+        // Case 2: fragments_to_drop_limit < initial_seq_no, no snapshots to drop/make
+        let garbage_below_initial = Garbage {
+            fragments_to_drop_limit: FragmentSeqNo(3089265), // Less than initial_seq_no
+            ..garbage.clone()
+        };
+
+        let result = manifest.apply_garbage(garbage_below_initial);
+        assert!(result.is_ok());
+        assert!(
+            result.unwrap().is_none(),
+            "Expected None when fragments_to_drop_limit < initial_seq_no"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_head_returns_true_for_matching_etag() {
+        use chroma_storage::s3::s3_client_for_test_with_new_bucket;
+
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let prefix = "test-head-matching";
+        let throttle_options = crate::ThrottleOptions::default();
+
+        let manifest = Manifest::new_empty("test-writer");
+
+        Manifest::initialize_from_manifest(
+            &crate::LogWriterOptions::default(),
+            &storage,
+            prefix,
+            manifest,
+        )
+        .await
+        .unwrap();
+
+        let (_loaded_manifest, etag) = Manifest::load(&throttle_options, &storage, prefix)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let result = Manifest::head(&throttle_options, &storage, prefix, &etag)
+            .await
+            .unwrap();
+        assert!(result, "head should return true for matching etag");
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_head_returns_false_for_non_matching_etag() {
+        use chroma_storage::s3::s3_client_for_test_with_new_bucket;
+
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let prefix = "test-head-non-matching";
+        let throttle_options = crate::ThrottleOptions::default();
+
+        let manifest = Manifest::new_empty("test-writer");
+
+        Manifest::initialize_from_manifest(
+            &crate::LogWriterOptions::default(),
+            &storage,
+            prefix,
+            manifest,
+        )
+        .await
+        .unwrap();
+
+        let fake_etag = chroma_storage::ETag("fake-etag-wont-match".to_string());
+
+        let result = Manifest::head(&throttle_options, &storage, prefix, &fake_etag)
+            .await
+            .unwrap();
+        assert!(!result, "head should return false for non-matching etag");
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_head_returns_error_for_nonexistent_manifest() {
+        use chroma_storage::s3::s3_client_for_test_with_new_bucket;
+
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let prefix = "test-head-nonexistent";
+        let throttle_options = crate::ThrottleOptions::default();
+
+        let fake_etag = chroma_storage::ETag("fake-etag".to_string());
+
+        let result = Manifest::head(&throttle_options, &storage, prefix, &fake_etag).await;
+        assert!(
+            result.is_err(),
+            "head should return error for nonexistent manifest"
+        );
     }
 }

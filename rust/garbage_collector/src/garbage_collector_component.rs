@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::operators::truncate_dirty_log::{
     TruncateDirtyLogError, TruncateDirtyLogOperator, TruncateDirtyLogOutput,
 };
@@ -12,20 +14,24 @@ use chroma_error::ChromaError;
 use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_storage::Storage;
-use chroma_sysdb::{CollectionToGcInfo, SysDb, SysDbConfig};
+use chroma_sysdb::{CollectionToGcInfo, GetCollectionsToGcError, SysDb, SysDbConfig};
 use chroma_system::{
     wrap, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, System,
     TaskResult,
 };
+use chroma_types::CollectionUuid;
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use opentelemetry::metrics::{Counter, Histogram};
+use opentelemetry::trace::TraceContextExt;
+use parking_lot::Mutex;
 use std::{
     fmt::{Debug, Formatter},
     time::{Duration, SystemTime},
 };
 use thiserror::Error;
-use tracing::{span, Instrument, Span};
+use tracing::{span, Instrument, Level, Span};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[allow(dead_code)]
 pub(crate) struct GarbageCollector {
@@ -42,6 +48,7 @@ pub(crate) struct GarbageCollector {
     job_duration_ms_metric: Histogram<u64>,
     total_files_deleted_metric: Counter<u64>,
     total_versions_deleted_metric: Counter<u64>,
+    manual_collections: Mutex<HashSet<CollectionUuid>>,
 }
 
 impl Debug for GarbageCollector {
@@ -99,6 +106,7 @@ impl GarbageCollector {
                 .u64_counter("garbage_collector.total_versions_deleted")
                 .with_description("Total number of versions deleted during garbage collection")
                 .build(),
+            manual_collections: Mutex::new(HashSet::default()),
         }
     }
 
@@ -110,12 +118,44 @@ impl GarbageCollector {
         self.system = Some(system);
     }
 
+    async fn garbage_collect_hard_delete_log(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Result<GarbageCollectorResponse, GarbageCollectCollectionError> {
+        let dispatcher = self
+            .dispatcher
+            .as_ref()
+            .ok_or(GarbageCollectCollectionError::Uninitialized)?;
+        let system = self
+            .system
+            .as_ref()
+            .ok_or(GarbageCollectCollectionError::Uninitialized)?;
+
+        let orchestrator =
+            crate::log_only_orchestrator::HardDeleteLogOnlyGarbageCollectorOrchestrator::new(
+                dispatcher.clone(),
+                self.storage.clone(),
+                self.logs.clone(),
+                collection_id,
+            );
+
+        let result = match orchestrator.run(system.clone()).await {
+            Ok(res) => res,
+            Err(e) => {
+                tracing::error!("Failed to run garbage collection orchestrator v2: {:?}", e);
+                return Err(GarbageCollectCollectionError::OrchestratorV2Error(e));
+            }
+        };
+        Ok(result)
+    }
+
     async fn garbage_collect_collection(
         &self,
         version_absolute_cutoff_time: DateTime<Utc>,
         collection_soft_delete_absolute_cutoff_time: DateTime<Utc>,
         collection: CollectionToGcInfo,
         cleanup_mode: CleanupMode,
+        enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
     ) -> Result<GarbageCollectorResponse, GarbageCollectCollectionError> {
         let dispatcher = self
             .dispatcher
@@ -149,6 +189,7 @@ impl GarbageCollector {
                     cleanup_mode,
                     self.config.min_versions_to_keep,
                     enable_log_gc,
+                    enable_dangerous_option_to_ignore_min_versions_for_wal3,
                 );
 
             let started_at = SystemTime::now();
@@ -303,6 +344,16 @@ impl GarbageCollector {
             })
             .collect()
     }
+
+    fn manual_garbage_collection_request(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), GarbageCollectCollectionError> {
+        tracing::event!(Level::INFO, name = "manual garbage collection", collection_id =? collection_id);
+        let mut manual_collections = self.manual_collections.lock();
+        manual_collections.insert(collection_id);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -311,6 +362,26 @@ impl Handler<Memberlist> for GarbageCollector {
 
     async fn handle(&mut self, message: Memberlist, _ctx: &ComponentContext<GarbageCollector>) {
         self.memberlist = message;
+    }
+}
+
+#[derive(Debug)]
+pub struct ManualGarbageCollectionRequest {
+    pub collection_id: CollectionUuid,
+}
+
+#[async_trait]
+impl Handler<ManualGarbageCollectionRequest> for GarbageCollector {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        req: ManualGarbageCollectionRequest,
+        _: &ComponentContext<GarbageCollector>,
+    ) {
+        if let Err(err) = self.manual_garbage_collection_request(req.collection_id) {
+            tracing::event!(Level::ERROR, name = "manual collection failed", error =? err);
+        }
     }
 }
 
@@ -361,14 +432,65 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             .sysdb_client
             .get_collections_to_gc(
                 Some(version_absolute_cutoff_time.into()),
-                Some(self.config.max_collections_to_gc.into()),
+                Some(
+                    self.config
+                        .max_collections_to_fetch
+                        .unwrap_or(self.config.max_collections_to_gc)
+                        .into(),
+                ),
                 message.tenant.clone(),
                 self.config.filter_min_versions_if_alive,
             )
             .await
             .expect("Failed to get collections to gc");
         tracing::info!("Got {} total collections", collections_to_gc.len());
-        let collections_to_gc = self.filter_collections(collections_to_gc);
+        let mut collections_to_gc = self.filter_collections(collections_to_gc);
+
+        // Append to collections_to_gc any manual collections iff they aren't already in there.
+        let mut manual = vec![];
+        {
+            let mut manual_collections = self.manual_collections.lock();
+            // NOTE(rescrv):  We do this dance so that we can remove the collection here so it
+            // isn't enqueued endlessly and so that it won't be thrown away immediately down below.
+            while collections_to_gc.len() + manual.len()
+                < self.config.max_collections_to_gc as usize
+            {
+                let popped = manual_collections.iter().next().cloned();
+                if let Some(c) = popped {
+                    manual.push(c);
+                    manual_collections.remove(&c);
+                } else {
+                    break;
+                }
+            }
+        }
+        let mut collections_to_hard_delete_log = vec![];
+        for collection_id in manual {
+            if collections_to_gc.iter().any(|c| c.id == collection_id) {
+                continue;
+            }
+            match self.sysdb_client.get_collection_to_gc(collection_id).await {
+                Ok(collection_info) => {
+                    tracing::event!(
+                        Level::INFO,
+                        name = "manually collecting",
+                        collection_id = collection_id.to_string()
+                    );
+                    collections_to_gc.push(collection_info);
+                }
+                Err(GetCollectionsToGcError::NoSuchCollection) => {
+                    collections_to_hard_delete_log.push(collection_id);
+                }
+                Err(err) => {
+                    tracing::event!(
+                        Level::ERROR,
+                        name = "cannot perform manual collection",
+                        collection_id = collection_id.to_string(),
+                        error = err.to_string(),
+                    );
+                }
+            }
+        }
 
         let mut num_skipped_jobs = 0;
         let collections_to_gc = collections_to_gc.into_iter().map(|collection| {
@@ -393,7 +515,9 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             }
 
             true
-        }).collect::<Vec<_>>();
+        })
+        .take(self.config.max_collections_to_gc as usize)
+        .collect::<Vec<_>>();
 
         tracing::info!(
             "Filtered to {} collections to garbage collect",
@@ -402,34 +526,67 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
 
         let mut sysdb = self.sysdb_client.clone();
 
-        let mut jobs_stream = futures::stream::iter(collections_to_gc)
-        .map(|(cleanup_mode, collection)| {
-            tracing::info!(
-                "Processing collection: {} (tenant: {}, version_file_path: {})",
-                collection.id,
-                collection.tenant,
-                collection.version_file_path
-            );
+        let jobs_iter1 = collections_to_gc.into_iter()
+            .map(|(cleanup_mode, collection)| {
+                tracing::info!(
+                    "Processing collection: {} (tenant: {}, version_file_path: {})",
+                    collection.id,
+                    collection.tenant,
+                    collection.version_file_path
+                );
 
-            let instrumented_span = span!(parent: None, tracing::Level::INFO, "Garbage collection job", collection_id = ?collection.id, tenant_id = %collection.tenant, cleanup_mode = ?cleanup_mode);
-            instrumented_span.follows_from(Span::current());
 
-            self.garbage_collect_collection(
-                version_absolute_cutoff_time,
-                collection_soft_delete_absolute_cutoff_time,
-                collection,
-                cleanup_mode,
-            )
-            .instrument(instrumented_span)
-        })
-        .buffer_unordered(100);
+                let instrumented_span = span!(parent: None, tracing::Level::INFO, "Garbage collection job", collection_id = ?collection.id, tenant_id = %collection.tenant, cleanup_mode = ?cleanup_mode);
+                Span::current().add_link(instrumented_span.context().span().span_context().clone());
+
+                Box::pin(self.garbage_collect_collection(
+                    version_absolute_cutoff_time,
+                    collection_soft_delete_absolute_cutoff_time,
+                    collection,
+                    cleanup_mode,
+                    self.config
+                        .enable_dangerous_option_to_ignore_min_versions_for_wal3,
+                )
+                .instrument(instrumented_span)) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<GarbageCollectorResponse, GarbageCollectCollectionError>> + Send + '_>>
+            });
+        let jobs_iter2 = collections_to_hard_delete_log.into_iter().map(|collection_id| {
+                tracing::event!(Level::INFO, "hard delete log-only");
+                let instrumented_span = span!(parent: None, tracing::Level::INFO, "Garbage collection job (hard delete log)", collection_id =? collection_id);
+                Span::current().add_link(instrumented_span.context().span().span_context().clone());
+                Box::pin(self.garbage_collect_hard_delete_log(collection_id).instrument(instrumented_span)) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<GarbageCollectorResponse, GarbageCollectCollectionError>> + Send + '_>>
+        });
+        let mut jobs_stream1 = futures::stream::iter(jobs_iter1).buffer_unordered(100);
+        let mut jobs_stream2 = futures::stream::iter(jobs_iter2).buffer_unordered(100);
 
         let mut num_completed_jobs = 0;
         let mut num_failed_jobs = 0;
-        while let Some(job_result) = jobs_stream.next().await {
+        while let Some(job_result) = jobs_stream1.next().await {
             match job_result {
                 Ok(result) => {
+                    {
+                        let mut manual_collections = self.manual_collections.lock();
+                        manual_collections.remove(&result.collection_id);
+                    }
                     tracing::info!("Garbage collection completed. Deleted {} files over {} versions for collection {}.", result.num_files_deleted, result.num_versions_deleted, result.collection_id);
+                    num_completed_jobs += 1;
+                }
+                Err(e) => {
+                    tracing::error!("Garbage collection failed: {:?}", e);
+                    num_failed_jobs += 1;
+                }
+            }
+        }
+        // NOTE(rescrv):  I'm not proud of this duplication, but I cannot coerce the
+        // futures::stream::iter above to take a chain of two different futures.  It just won't
+        // compile.
+        while let Some(job_result) = jobs_stream2.next().await {
+            match job_result {
+                Ok(result) => {
+                    {
+                        let mut manual_collections = self.manual_collections.lock();
+                        manual_collections.remove(&result.collection_id);
+                    }
+                    tracing::info!("Garbage collection hard delete completed. Deleted all log files collection {}.", result.collection_id);
                     num_completed_jobs += 1;
                 }
                 Err(e) => {
@@ -544,7 +701,7 @@ mod tests {
 
     use super::*;
     use crate::helper::ChromaGrpcClients;
-    use chroma_log::config::LogConfig;
+    use chroma_log::config::{GrpcLogConfig, LogConfig};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::s3_config_for_localhost_with_bucket_name;
     use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig};
@@ -565,6 +722,7 @@ mod tests {
             tracing::info!(
                 attempt,
                 max_attempts,
+                collection_id,
                 "Waiting for new version to be created..."
             );
 
@@ -725,6 +883,7 @@ mod tests {
             version_cutoff_time: Duration::from_secs(1),
             collection_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
+            max_collections_to_fetch: None,
             gc_interval_mins: 10,
             disallow_collections: HashSet::new(),
             min_versions_to_keep: 2,
@@ -746,10 +905,10 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
-            log: LogConfig::default(),
+            log: LogConfig::Grpc(GrpcLogConfig::default()),
             enable_log_gc_for_tenant: Vec::new(),
-            enable_log_gc_for_tenant_threshold: "tenant-ffffffff-ffff-ffff-ffff-ffffffffffff"
-                .to_string(),
+            enable_log_gc_for_tenant_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff".to_string(),
+            enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
         };
         let registry = Registry::new();
 
@@ -856,6 +1015,7 @@ mod tests {
             version_cutoff_time: Duration::from_secs(1),
             collection_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
+            max_collections_to_fetch: None,
             min_versions_to_keep: 2,
             filter_min_versions_if_alive: None,
             gc_interval_mins: 10,
@@ -879,7 +1039,8 @@ mod tests {
             jemalloc_pprof_server_port: None,
             enable_log_gc_for_tenant: Vec::new(),
             enable_log_gc_for_tenant_threshold: "tenant-threshold".to_string(),
-            log: LogConfig::default(),
+            log: LogConfig::Grpc(GrpcLogConfig::default()),
+            enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
         };
         let registry = Registry::new();
 
@@ -1080,9 +1241,8 @@ mod tests {
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
             enable_log_gc_for_tenant: Vec::new(),
-            enable_log_gc_for_tenant_threshold:
-                "tenant-delete-mode-ffffffff-ffff-ffff-ffff-ffffffffffff".to_string(),
-            log: LogConfig::default(),
+            enable_log_gc_for_tenant_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff".to_string(),
+            log: LogConfig::Grpc(GrpcLogConfig::default()),
             ..Default::default()
         };
         let registry = Registry::new();

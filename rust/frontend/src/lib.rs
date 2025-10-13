@@ -11,7 +11,6 @@ pub mod impls;
 pub mod quota;
 pub mod server;
 mod server_middleware;
-mod tower_tracing;
 mod traced_json;
 mod types;
 

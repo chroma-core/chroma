@@ -205,10 +205,8 @@ impl Orchestrator for ConstructVersionGraphOrchestrator {
         self.result_channel = Some(sender);
     }
 
-    fn take_result_channel(&mut self) -> Sender<Result<Self::Output, Self::Error>> {
-        self.result_channel
-            .take()
-            .expect("The result channel should be set before take")
+    fn take_result_channel(&mut self) -> Option<Sender<Result<Self::Output, Self::Error>>> {
+        self.result_channel.take()
     }
 }
 
@@ -252,15 +250,25 @@ impl ConstructVersionGraphOrchestrator {
                 let source_collection_id = dependency.source_collection_id;
                 let source_collection_version = dependency.source_collection_version;
 
-                let versions = versions_by_collection_id
+                let source_versions = versions_by_collection_id
                     .entry(source_collection_id)
                     .or_default();
 
-                if !versions
+                // Add source version if it does not exist
+                if !source_versions
                     .iter()
                     .any(|(v, _)| *v == source_collection_version)
                 {
-                    versions.push((source_collection_version, VersionStatus::Deleted));
+                    source_versions.push((source_collection_version, VersionStatus::Deleted));
+                }
+
+                // Add target version if it does not exist
+                let target_versions = versions_by_collection_id
+                    .entry(dependency.target_collection_id)
+                    .or_default();
+
+                if !target_versions.iter().any(|(v, _)| *v == 0) {
+                    target_versions.push((0, VersionStatus::Deleted));
                 }
             }
 
@@ -311,7 +319,7 @@ impl ConstructVersionGraphOrchestrator {
                     .node_indices()
                     .find(|n| {
                         let node = graph.node_weight(*n).expect("node index should exist");
-                        node.collection_id == dependency.target_collection_id
+                        node.collection_id == dependency.target_collection_id && node.version == 0
                     })
                     .ok_or_else(|| {
                         ConstructVersionGraphError::ExpectedNodeNotFound(
@@ -655,6 +663,7 @@ mod tests {
                     collection_id,
                     format!("test_collection_{}", collection_id),
                     vec![],
+                    None,
                     None,
                     None,
                     None,

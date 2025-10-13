@@ -60,7 +60,7 @@ impl Log {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
-                .read(tenant, collection_id, offset, batch_size, end_timestamp)
+                .read(collection_id, offset, batch_size, end_timestamp)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(log) => Ok(log
@@ -83,7 +83,7 @@ impl Log {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
-                .scout_logs(tenant, collection_id, starting_offset)
+                .scout_logs(collection_id, starting_offset)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(log) => log
@@ -106,7 +106,7 @@ impl Log {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
-                .push_logs(tenant, collection_id, records)
+                .push_logs(collection_id, records)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(_) => unimplemented!(),
@@ -123,7 +123,7 @@ impl Log {
         match self {
             Log::Sqlite(_) => Err(ForkCollectionError::Local),
             Log::Grpc(log) => log
-                .fork_logs(tenant, source_collection_id, target_collection_id)
+                .fork_logs(source_collection_id, target_collection_id)
                 .await
                 .map_err(|err| err.boxed().into()),
             Log::InMemory(_) => Err(ForkCollectionError::Local),
@@ -161,7 +161,7 @@ impl Log {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
-                .update_collection_log_offset(tenant, collection_id, new_offset)
+                .update_collection_log_offset(collection_id, new_offset)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(log) => {
@@ -169,6 +169,23 @@ impl Log {
                     .await;
                 Ok(())
             }
+        }
+    }
+
+    /// Only supported in distributed.
+    #[tracing::instrument(skip(self), err(Display))]
+    pub async fn update_collection_log_offset_on_every_node(
+        &mut self,
+        collection_id: CollectionUuid,
+        new_offset: i64,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(_) => Ok(()),
+            Log::Grpc(log) => log
+                .update_collection_log_offset_on_every_node(collection_id, new_offset)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::InMemory(_) => Ok(()),
         }
     }
 
@@ -226,13 +243,9 @@ impl Log {
         }
     }
 
-    pub async fn seal_log(
-        &mut self,
-        _: &str,
-        collection_id: CollectionUuid,
-    ) -> Result<(), GrpcSealLogError> {
+    pub async fn seal_log(&mut self, _: &str, _: CollectionUuid) -> Result<(), GrpcSealLogError> {
         match self {
-            Log::Grpc(log) => log.seal_log(collection_id).await,
+            Log::Grpc(_) => Err(GrpcSealLogError::NoMoreSeal),
             Log::Sqlite(_) => unimplemented!(),
             Log::InMemory(_) => unimplemented!(),
         }

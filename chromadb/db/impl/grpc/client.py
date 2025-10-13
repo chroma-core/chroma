@@ -6,7 +6,9 @@ from chromadb.api.collection_configuration import (
     create_collection_configuration_to_json_str,
     UpdateCollectionConfiguration,
     update_collection_configuration_to_json_str,
+    CollectionMetadata,
 )
+from chromadb.api.types import Schema
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
 from chromadb.db.system import SysDB
 from chromadb.errors import NotFoundError, UniqueConstraintError, InternalError
@@ -314,6 +316,7 @@ class GrpcSysDB(SysDB):
         self,
         id: UUID,
         name: str,
+        schema: Optional[Schema],
         configuration: CreateCollectionConfiguration,
         segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
@@ -327,7 +330,7 @@ class GrpcSysDB(SysDB):
                 id=id.hex,
                 name=name,
                 configuration_json_str=create_collection_configuration_to_json_str(
-                    configuration
+                    configuration, cast(CollectionMetadata, metadata)
                 ),
                 metadata=to_proto_update_metadata(metadata) if metadata else None,
                 dimension=dimension,

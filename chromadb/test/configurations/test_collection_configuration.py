@@ -1,6 +1,7 @@
 import pytest
 from typing import Dict, Any, cast, List
 import numpy as np
+import warnings
 from chromadb.api.types import (
     EmbeddingFunction,
     Embeddings,
@@ -20,21 +21,11 @@ from chromadb.api.collection_configuration import (
     overwrite_spann_configuration,
 )
 import json
-import os
 from chromadb.utils.embedding_functions import register_embedding_function
 from chromadb.test.conftest import ClientFactories
+from chromadb.test.conftest import is_spann_disabled_mode, skip_reason_spann_disabled
 from chromadb.types import Collection as CollectionModel
-
-
-# Check if we are running in a mode where SPANN is disabled
-# (Rust bindings test OR Rust single-node integration test)
-is_spann_disabled_mode = (
-    os.getenv("CHROMA_RUST_BINDINGS_TEST_ONLY") == "1"
-    or os.getenv("CHROMA_INTEGRATION_TEST_ONLY") == "1"
-)
-skip_reason_spann_disabled = (
-    "SPANN creation/modification disallowed in Rust bindings or integration test mode"
-)
+from typing import Optional, TypedDict
 
 
 class LegacyEmbeddingFunction(EmbeddingFunction[Embeddable]):
@@ -77,7 +68,7 @@ class CustomEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return CustomEmbeddingFunction(dim=config["dim"])
 
     def default_space(self) -> Space:
-        return "cosine"
+        return "l2"
 
 
 @register_embedding_function
@@ -277,6 +268,16 @@ def test_hnsw_configuration_updates(client: ClientAPI) -> None:
         if isinstance(hnsw_config, dict):
             assert hnsw_config.get("ef_search") == 20
             # assert hnsw_config.get("num_threads") == 2
+            assert hnsw_config.get("space") == "cosine"
+            assert hnsw_config.get("ef_construction") == 100
+            assert hnsw_config.get("max_neighbors") == 16
+
+    coll = client.get_collection(name="test_updates")
+    loaded_config = coll.configuration_json
+    if loaded_config and isinstance(loaded_config, dict):
+        hnsw_config = loaded_config.get("hnsw", {})
+        if isinstance(hnsw_config, dict):
+            assert hnsw_config.get("ef_search") == 20
             assert hnsw_config.get("space") == "cosine"
             assert hnsw_config.get("ef_construction") == 100
             assert hnsw_config.get("max_neighbors") == 16
@@ -712,6 +713,15 @@ def test_configuration_spann_updates(client: ClientAPI) -> None:
             # Original values should remain unchanged
             assert spann_config.get("space") == "cosine"
 
+    coll = client.get_collection("test_spann_updates")
+    loaded_config = coll.configuration_json
+    if loaded_config and isinstance(loaded_config, dict):
+        spann_config = loaded_config.get("spann", {})
+        if isinstance(spann_config, dict):
+            assert spann_config.get("ef_search") == 150
+            assert spann_config.get("search_nprobe") == 20
+            assert spann_config.get("space") == "cosine"
+
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
 def test_spann_update_from_json(client: ClientAPI) -> None:
@@ -743,6 +753,21 @@ def test_spann_update_from_json(client: ClientAPI) -> None:
     coll.modify(configuration=update_config)
 
     # Verify updates were applied
+    loaded_config = coll.configuration_json
+    if loaded_config and isinstance(loaded_config, dict):
+        spann_config = loaded_config.get("spann", {})
+        if isinstance(spann_config, dict):
+            # Updated values
+            assert spann_config.get("ef_search") == 200
+            assert spann_config.get("search_nprobe") == 15
+
+            # Unchanged values
+            assert spann_config.get("space") == "cosine"
+            assert spann_config.get("ef_construction") == 150
+            assert spann_config.get("max_neighbors") == 12
+            assert spann_config.get("write_nprobe") == 20
+
+    coll = client.get_collection("test_spann_json_update")
     loaded_config = coll.configuration_json
     if loaded_config and isinstance(loaded_config, dict):
         spann_config = loaded_config.get("spann", {})
@@ -894,6 +919,7 @@ def test_collection_load_with_invalid_configuration(client: ClientAPI) -> None:
         id=coll.id,
         name="test_invalid_config_collection",
         configuration_json=invalid_config_json,
+        serialized_schema=None,
         metadata=None,
         dimension=None,
         tenant=coll.tenant,
@@ -1015,6 +1041,7 @@ def test_invalid_configuration_operations_succeed_until_embed(
             id=coll.id,
             name=f"test_invalid_config_{i}",
             configuration_json=invalid_config,
+            serialized_schema=None,
             metadata=None,
             dimension=None,
             tenant=coll.tenant,
@@ -1266,3 +1293,451 @@ def test_get_or_create_after_create_with_ef(client: ClientAPI) -> None:
             name="test_get_or_create_after_create_with_ef",
             embedding_function=CustomEmbeddingFunction2(dim=3),
         )
+
+
+@register_embedding_function
+class DefaultSpaceCustomEmbeddingFunction(EmbeddingFunction[Embeddable]):
+    def __init__(self, model_name: str, dim: int = 3):
+        self._dim = dim
+        self._model_name = model_name
+
+    def __call__(self, input: Embeddable) -> Embeddings:
+        return cast(Embeddings, np.array([[1.0] * self._dim], dtype=np.float32))
+
+    @staticmethod
+    def name() -> str:
+        return "default_space_custom_ef"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {"model_name": self._model_name, "dim": self._dim}
+
+    @staticmethod
+    def build_from_config(
+        config: Dict[str, Any]
+    ) -> "DefaultSpaceCustomEmbeddingFunction":
+        return DefaultSpaceCustomEmbeddingFunction(
+            model_name=config["model_name"], dim=config["dim"]
+        )
+
+    def default_space(self) -> Space:
+        if self._model_name == "i_want_cosine":
+            return "cosine"
+        elif self._model_name == "i_want_l2":
+            return "l2"
+        elif self._model_name == "i_want_ip":
+            return "ip"
+        else:
+            return "cosine"
+
+    def supported_spaces(self) -> List[Space]:
+        if self._model_name == "i_want_cosine":
+            return ["cosine"]
+        elif self._model_name == "i_want_l2":
+            return ["l2"]
+        elif self._model_name == "i_want_ip":
+            return ["ip"]
+        elif self._model_name == "i_want_anything":
+            return ["cosine", "l2", "ip"]
+        else:
+            return ["cosine", "l2", "ip"]
+
+
+def test_default_space_custom_embedding_function_no_config(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(
+        name="test_default_space_custom_embedding_function",
+        embedding_function=DefaultSpaceCustomEmbeddingFunction(
+            model_name="i_want_cosine", dim=3
+        ),
+    )
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "default_space_custom_ef"
+    assert ef.get_config() == {"model_name": "i_want_cosine", "dim": 3}
+    assert ef.default_space() == "cosine"
+    assert ef.supported_spaces() == ["cosine"]
+
+    if is_spann_disabled_mode:
+        hnsw_config = coll.configuration.get("hnsw")
+        assert hnsw_config is not None
+        assert hnsw_config.get("space") == "cosine"
+    else:
+        spann_config = coll.configuration.get("spann")
+        assert spann_config is not None
+        assert spann_config.get("space") == "cosine"
+
+    coll = client.get_or_create_collection(
+        name="test_default_space_custom_embedding_function_l2",
+        embedding_function=DefaultSpaceCustomEmbeddingFunction(
+            model_name="i_want_l2", dim=3
+        ),
+    )
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "default_space_custom_ef"
+    assert ef.get_config() == {"model_name": "i_want_l2", "dim": 3}
+    assert ef.default_space() == "l2"
+    assert ef.supported_spaces() == ["l2"]
+
+    if is_spann_disabled_mode:
+        hnsw_config = coll.configuration.get("hnsw")
+        assert hnsw_config is not None
+        assert hnsw_config.get("space") == "l2"
+    else:
+        spann_config = coll.configuration.get("spann")
+        assert spann_config is not None
+        assert spann_config.get("space") == "l2"
+
+    coll = client.get_or_create_collection(
+        name="test_default_space_custom_embedding_function_ip",
+        embedding_function=DefaultSpaceCustomEmbeddingFunction(
+            model_name="i_want_ip", dim=3
+        ),
+    )
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "default_space_custom_ef"
+    assert ef.get_config() == {"model_name": "i_want_ip", "dim": 3}
+    assert ef.default_space() == "ip"
+    assert ef.supported_spaces() == ["ip"]
+
+    if is_spann_disabled_mode:
+        hnsw_config = coll.configuration.get("hnsw")
+        assert hnsw_config is not None
+        assert hnsw_config.get("space") == "ip"
+    else:
+        spann_config = coll.configuration.get("spann")
+        assert spann_config is not None
+        assert spann_config.get("space") == "ip"
+
+    coll = client.get_or_create_collection(
+        name="test_default_space_custom_embedding_function_anything",
+        embedding_function=DefaultSpaceCustomEmbeddingFunction(
+            model_name="i_want_anything", dim=3
+        ),
+    )
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "default_space_custom_ef"
+    assert ef.get_config() == {"model_name": "i_want_anything", "dim": 3}
+    assert ef.default_space() == "cosine"
+    assert ef.supported_spaces() == ["cosine", "l2", "ip"]
+
+    if is_spann_disabled_mode:
+        hnsw_config = coll.configuration.get("hnsw")
+        assert hnsw_config is not None
+        assert hnsw_config.get("space") == "cosine"
+    else:
+        spann_config = coll.configuration.get("spann")
+        assert spann_config is not None
+        assert spann_config.get("space") == "cosine"
+
+
+def test_default_space_custom_embedding_function_with_valid_config(
+    client: ClientAPI,
+) -> None:
+    client.reset()
+    if is_spann_disabled_mode:
+        coll = client.create_collection(
+            name="test_default_space_custom_embedding_function_with_valid_config",
+            embedding_function=DefaultSpaceCustomEmbeddingFunction(
+                model_name="i_want_anything", dim=3
+            ),
+            configuration={"hnsw": {"space": "l2"}},
+        )
+    else:
+        coll = client.create_collection(
+            name="test_default_space_custom_embedding_function_with_valid_config",
+            embedding_function=DefaultSpaceCustomEmbeddingFunction(
+                model_name="i_want_anything", dim=3
+            ),
+            configuration={"spann": {"space": "l2"}},
+        )
+
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "default_space_custom_ef"
+    assert ef.get_config() == {"model_name": "i_want_anything", "dim": 3}
+    assert ef.default_space() == "cosine"
+    assert ef.supported_spaces() == ["cosine", "l2", "ip"]
+
+    if is_spann_disabled_mode:
+        hnsw_config = coll.configuration.get("hnsw")
+        assert hnsw_config is not None
+        assert hnsw_config.get("space") == "l2"
+    else:
+        spann_config = coll.configuration.get("spann")
+        assert spann_config is not None
+        assert spann_config.get("space") == "l2"
+
+
+def test_default_space_custom_embedding_function_with_invalid_config(
+    client: ClientAPI,
+) -> None:
+    client.reset()
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+
+        if is_spann_disabled_mode:
+            coll = client.get_or_create_collection(
+                name="test_default_space_custom_embedding_function_with_invalid_config",
+                embedding_function=DefaultSpaceCustomEmbeddingFunction(
+                    model_name="i_want_cosine", dim=3
+                ),
+                configuration={"hnsw": {"space": "l2"}},
+            )
+        else:
+            coll = client.get_or_create_collection(
+                name="test_default_space_custom_embedding_function_with_invalid_config",
+                embedding_function=DefaultSpaceCustomEmbeddingFunction(
+                    model_name="i_want_cosine", dim=3
+                ),
+                configuration={"spann": {"space": "l2"}},
+            )
+
+        assert len(w) > 0
+        warning_messages = [str(warning.message) for warning in w]
+        assert any(
+            "space l2 is not supported" in msg.lower() for msg in warning_messages
+        )
+
+        assert coll is not None
+        ef = coll.configuration.get("embedding_function")
+        assert ef is not None
+        assert ef.name() == "default_space_custom_ef"
+
+        if is_spann_disabled_mode:
+            hnsw_config = coll.configuration.get("hnsw")
+            assert hnsw_config is not None
+            assert hnsw_config.get("space") == "l2"
+        else:
+            spann_config = coll.configuration.get("spann")
+            assert spann_config is not None
+            assert spann_config.get("space") == "l2"
+
+
+def test_default_space_custom_embedding_function_with_metadata(
+    client: ClientAPI,
+) -> None:
+    client.reset()
+    coll = client.create_collection(
+        name="test_default_space_custom_embedding_function_with_metadata",
+        embedding_function=DefaultSpaceCustomEmbeddingFunction(
+            model_name="i_want_anything", dim=3
+        ),
+        metadata={"hnsw:space": "ip"},
+    )
+
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "default_space_custom_ef"
+    assert ef.get_config() == {"model_name": "i_want_anything", "dim": 3}
+    assert ef.default_space() == "cosine"
+    assert ef.supported_spaces() == ["cosine", "l2", "ip"]
+
+    if is_spann_disabled_mode:
+        hnsw_config = coll.configuration.get("hnsw")
+        assert hnsw_config is not None
+        assert hnsw_config.get("space") == "ip"
+    else:
+        spann_config = coll.configuration.get("spann")
+        assert spann_config is not None
+        assert spann_config.get("space") == "ip"
+
+
+def test_default_space_custom_embedding_function_with_invalid_metadata(
+    client: ClientAPI,
+) -> None:
+    client.reset()
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+
+        coll = client.create_collection(
+            name="test_default_space_custom_embedding_function_with_invalid_metadata",
+            embedding_function=DefaultSpaceCustomEmbeddingFunction(
+                model_name="i_want_cosine", dim=3
+            ),
+            metadata={"hnsw:space": "l2"},
+        )
+
+        assert len(w) > 0
+        warning_messages = [str(warning.message) for warning in w]
+        assert any(
+            "space l2 is not supported" in msg.lower() for msg in warning_messages
+        )
+
+        assert coll is not None
+        ef = coll.configuration.get("embedding_function")
+        assert ef is not None
+        assert ef.name() == "default_space_custom_ef"
+        assert ef.get_config() == {"model_name": "i_want_cosine", "dim": 3}
+        assert ef.default_space() == "cosine"
+        assert ef.supported_spaces() == ["cosine"]
+
+        if is_spann_disabled_mode:
+            hnsw_config = coll.configuration.get("hnsw")
+            assert hnsw_config is not None
+            assert hnsw_config.get("space") == "l2"
+        else:
+            spann_config = coll.configuration.get("spann")
+            assert spann_config is not None
+            assert spann_config.get("space") == "l2"
+
+
+def test_default_space_custom_embedding_function_with_metadata_and_config(
+    client: ClientAPI,
+) -> None:
+    client.reset()
+    coll = client.create_collection(
+        name="test_default_space_custom_embedding_function_with_metadata_and_config",
+        configuration={"hnsw": {"space": "ip"}},
+        embedding_function=DefaultSpaceCustomEmbeddingFunction(
+            model_name="i_want_anything", dim=3
+        ),
+        metadata={"hnsw:space": "l2"},
+    )
+
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "default_space_custom_ef"
+    assert ef.get_config() == {"model_name": "i_want_anything", "dim": 3}
+    assert ef.default_space() == "cosine"
+    assert ef.supported_spaces() == ["cosine", "l2", "ip"]
+
+    if is_spann_disabled_mode:
+        hnsw_config = coll.configuration.get("hnsw")
+        assert hnsw_config is not None
+        assert hnsw_config.get("space") == "ip"
+    else:
+        spann_config = coll.configuration.get("spann")
+        assert spann_config is not None
+        assert spann_config.get("space") == "ip"
+
+
+class CustomEmbeddingFunctionQueryConfig(TypedDict):
+    task: str
+
+
+@register_embedding_function
+class CustomEmbeddingFunctionWithQueryConfig(EmbeddingFunction[Embeddable]):
+    def __init__(
+        self,
+        task: str,
+        model_name: str,
+        dim: int = 3,
+        query_config: Optional[CustomEmbeddingFunctionQueryConfig] = None,
+    ):
+        self._dim = dim
+        self._model_name = model_name
+        self._task = task
+        self._query_config = query_config
+
+    def __call__(self, input: Embeddable) -> Embeddings:
+        return cast(Embeddings, np.array([[1.0] * self._dim], dtype=np.float32))
+
+    def embed_query(self, input: Embeddable) -> Embeddings:
+        if self._query_config is not None and self._query_config.get("task") == "query":
+            return cast(Embeddings, np.array([[2.0] * self._dim], dtype=np.float32))
+        else:
+            return self.__call__(input)
+
+    @staticmethod
+    def name() -> str:
+        return "custom_ef_with_query_config"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {
+            "model_name": self._model_name,
+            "dim": self._dim,
+            "task": self._task,
+            "query_config": self._query_config,
+        }
+
+    @staticmethod
+    def build_from_config(
+        config: Dict[str, Any]
+    ) -> "CustomEmbeddingFunctionWithQueryConfig":
+        model_name = config.get("model_name")
+        dim = config.get("dim")
+        task = config.get("task")
+        query_config = config.get("query_config")
+
+        if model_name is None or dim is None:
+            assert False, "This code should not be reached"
+
+        return CustomEmbeddingFunctionWithQueryConfig(
+            model_name=model_name, dim=dim, task=task, query_config=query_config  # type: ignore
+        )
+
+    def default_space(self) -> Space:
+        return "cosine"
+
+    def supported_spaces(self) -> List[Space]:
+        return ["cosine"]
+
+
+def test_custom_embedding_function_with_query_config(client: ClientAPI) -> None:
+    client.reset()
+    coll = client.create_collection(
+        name="test_custom_embedding_function_with_query_config",
+        embedding_function=CustomEmbeddingFunctionWithQueryConfig(
+            task="document",
+            model_name="i_want_anything",
+            dim=3,
+            query_config={"task": "query"},
+        ),
+    )
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef_with_query_config"
+    assert ef.get_config() == {
+        "model_name": "i_want_anything",
+        "dim": 3,
+        "task": "document",
+        "query_config": {"task": "query"},
+    }
+    assert ef.default_space() == "cosine"
+    assert ef.supported_spaces() == ["cosine"]
+    assert np.array_equal(
+        ef.embed_query(input="How many people in Berlin?"),
+        np.array([[2.0, 2.0, 2.0]], dtype=np.float32),
+    )
+
+
+def test_deserializing_custom_embedding_function_with_query_config_no_query_config(
+    client: ClientAPI,
+) -> None:
+    json_string = """
+    {
+        "embedding_function": {
+            "type": "known",
+            "name": "custom_ef_with_query_config",
+            "config": {"model_name": "i_want_anything", "dim": 3, "task": "document"}
+        }
+    }
+    """
+    config = load_collection_configuration_from_json(json.loads(json_string))
+    assert config is not None
+    assert config.get("embedding_function") is not None
+    ef = config.get("embedding_function")
+    assert ef is not None
+    assert ef.get_config() == {
+        "model_name": "i_want_anything",
+        "dim": 3,
+        "task": "document",
+        "query_config": None,
+    }
+    assert ef.default_space() == "cosine"
+    assert ef.supported_spaces() == ["cosine"]
+    assert np.array_equal(
+        ef.embed_query(input="How many people in Berlin?"),
+        np.array([[1.0, 1.0, 1.0]], dtype=np.float32),
+    )

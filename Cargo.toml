@@ -1,40 +1,10 @@
 [workspace]
 resolver = "2"
 
-members = [
-    "rust/benchmark",
-    "rust/blockstore",
-    "rust/cache",
-    "rust/chroma",
-    "rust/config",
-    "rust/distance",
-    "rust/error",
-    "rust/frontend",
-    "rust/garbage_collector",
-    "rust/index",
-    "rust/load",
-    "rust/log",
-    "rust/log-service",
-    "rust/memberlist",
-    "rust/metering-macros",
-    "rust/metering",
-    "rust/storage",
-    "rust/system",
-    "rust/sysdb",
-    "rust/types",
-    "rust/worker",
-    "rust/segment",
-    "rust/python_bindings",
-    "rust/mdac",
-    "rust/tracing",
-    "rust/sqlite",
-    "rust/cli",
-    "rust/wal3",
-    "rust/js_bindings",
-    "rust/jemalloc-pprof-server"
-]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/metering-macros", "rust/metering", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server", "rust/s3heap", "rust/s3heap-service"]
 
 [workspace.dependencies]
+anyhow = "1.0"
 arrow = "55.1"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["macros"] }
@@ -53,7 +23,7 @@ num_cpus = "1.16.0"
 once_cell = "1.21.3"
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 opentelemetry-otlp = { version = "0.27", features = ["http-proto"] }
-opentelemetry-http = { version = "0.27", features = ["reqwest"] }
+opentelemetry-http = { version = "0.27", features = ["reqwest-rustls"] }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 parking_lot = { version = "0.12.3", features = ["serde"] }
 parquet = { version = "55.1", features = ["async"] }
@@ -68,9 +38,10 @@ sea-query-binder = "0.7"
 serde = { version = "1.0.215", features = ["derive", "rc"] }
 serde_json = "1.0.133"
 setsum = "0.7"
+sprs = "0.11"
 tantivy = "0.22.0"
 thiserror = "1.0.69"
-tokio = { version = "1.41", features = ["fs", "macros", "rt-multi-thread", "time", "io-util"] }
+tokio = { version = "1.41", features = ["fs", "macros", "rt-multi-thread", "time", "io-util", "signal"] }
 tokio-util = "0.7.12"
 tonic = "0.12"
 tonic-health = "0.12.3"
@@ -82,7 +53,7 @@ tracing-opentelemetry = "0.28.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.11.0", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
 utoipa = { version = "5.0.0", features = ["macros", "axum_extras", "debug", "uuid"] }
-sqlx = { version = "0.8.3", features = ["runtime-tokio", "sqlite"] }
+sqlx = { version = "0.8.3", features = ["runtime-tokio", "sqlite", "postgres", "chrono"] }
 sha2 = "0.10.8"
 md5 = "0.7.0"
 pyo3 = { version = "0.24.1", features = ["abi3-py39"] }
@@ -92,7 +63,7 @@ bytemuck = "1.21.0"
 rayon = "1.10.0"
 validator = { version = "0.19", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
-hnswlib = { version = "0.8.1", git = "https://github.com/chroma-core/hnswlib.git" }
+hnswlib = { version = "0.8.1", git = "https://github.com/chroma-core/hnswlib.git", branch = "master" }
 reqwest = { version = "0.12.9", features = ["rustls-tls-native-roots", "http2"], default-features = false }
 random-port = "0.1.1"
 ndarray = { version = "0.16.1", features = ["approx"] }
@@ -123,6 +94,7 @@ chroma-sqlite = { path = "rust/sqlite" }
 chroma-cli = { path = "rust/cli" }
 chroma-jemalloc-pprof-server = { path = "rust/jemalloc-pprof-server" }
 mdac = { path = "rust/mdac" }
+s3heap = { path = "rust/s3heap" }
 wal3 = { path = "rust/wal3" }
 worker = { path = "rust/worker" }
 

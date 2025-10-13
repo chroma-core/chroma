@@ -35,12 +35,14 @@ from chromadb.api.types import (
     Embeddings,
     Metadatas,
     Documents,
+    Schema,
     URIs,
     Where,
     WhereDocument,
     Include,
     GetResult,
     QueryResult,
+    SearchResult,
     validate_metadata,
     validate_update_metadata,
     validate_where,
@@ -74,6 +76,7 @@ from functools import wraps
 import time
 import logging
 import re
+from chromadb.execution.expression.plan import Search
 
 T = TypeVar("T", bound=Callable[..., Any])
 
@@ -210,6 +213,7 @@ class SegmentAPI(ServerAPI):
     def create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
@@ -235,8 +239,9 @@ class SegmentAPI(ServerAPI):
             id=id,
             name=name,
             metadata=metadata,
+            serialized_schema=None,
             configuration_json=create_collection_configuration_to_json(
-                configuration or CreateCollectionConfiguration()
+                configuration or CreateCollectionConfiguration(), metadata
             ),
             tenant=tenant,
             database=database,
@@ -247,6 +252,7 @@ class SegmentAPI(ServerAPI):
         coll, created = self._sysdb.create_collection(
             id=model.id,
             name=model.name,
+            schema=schema,
             configuration=configuration or CreateCollectionConfiguration(),
             segments=[],  # Passing empty till backend changes are deployed.
             metadata=model.metadata,
@@ -285,6 +291,7 @@ class SegmentAPI(ServerAPI):
     def get_or_create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
@@ -292,6 +299,7 @@ class SegmentAPI(ServerAPI):
     ) -> CollectionModel:
         return self.create_collection(
             name=name,
+            schema=schema,
             metadata=metadata,
             configuration=configuration,
             get_or_create=True,
@@ -416,6 +424,16 @@ class SegmentAPI(ServerAPI):
         raise NotImplementedError(
             "Collection forking is not implemented for SegmentAPI"
         )
+
+    @override
+    def _search(
+        self,
+        collection_id: UUID,
+        searches: List[Search],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> SearchResult:
+        raise NotImplementedError("Search is not implemented for SegmentAPI")
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override

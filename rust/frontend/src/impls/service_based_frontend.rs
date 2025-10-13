@@ -1,3 +1,4 @@
+use super::utils::to_records;
 use crate::{
     config::FrontendConfig, executor::Executor, types::errors::ValidationError,
     CollectionsWithSegmentsProvider,
@@ -7,9 +8,10 @@ use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
 use chroma_metering::{
-    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable, FinishRequest,
-    FtsQueryLength, LatestCollectionLogicalSizeBytes, LogSizeBytes, MetadataPredicateCount,
-    MeterEvent, PulledLogSizeBytes, QueryEmbeddingCount, ReturnBytes, WriteAction,
+    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
+    ExternalCollectionReadContext, FinishRequest, FtsQueryLength, LatestCollectionLogicalSizeBytes,
+    LogSizeBytes, MetadataPredicateCount, MeterEvent, MeteredFutureExt, PulledLogSizeBytes,
+    QueryEmbeddingCount, ReturnBytes, WriteAction,
 };
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
@@ -17,7 +19,7 @@ use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
-    plan::{Count, Get, Knn},
+    plan::{Count, Get, Knn, Search},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
     Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
     CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError,
@@ -26,29 +28,26 @@ use chroma_types::{
     DeleteCollectionError, DeleteCollectionRecordsError, DeleteCollectionRecordsRequest,
     DeleteCollectionRecordsResponse, DeleteCollectionRequest, DeleteDatabaseError,
     DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError, ForkCollectionRequest,
-    ForkCollectionResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    ForkCollectionResponse, GetCollectionByCrnError, GetCollectionByCrnRequest,
+    GetCollectionByCrnResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
     GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
     GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
-    HeartbeatError, HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest,
+    HeartbeatError, HeartbeatResponse, Include, InternalSchema, KnnIndex, ListCollectionsRequest,
     ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
     Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
-    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpsertCollectionRecordsError,
+    SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
+    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
+    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
     UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
     Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::{collections::HashSet, time::Duration};
-use std::{
-    sync::atomic::{AtomicUsize, Ordering},
-    time::Instant,
-};
-
-use super::utils::to_records;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
 struct Metrics {
@@ -60,6 +59,11 @@ struct Metrics {
     add_retries_counter: Counter<u64>,
     update_retries_counter: Counter<u64>,
     upsert_retries_counter: Counter<u64>,
+    search_retries_counter: Counter<u64>,
+    metering_fork_counter: Counter<u64>,
+    metering_read_counter: Counter<u64>,
+    metering_write_counter: Counter<u64>,
+    metering_external_read_counter: Counter<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -72,9 +76,8 @@ pub struct ServiceBasedFrontend {
     max_batch_size: u32,
     metrics: Arc<Metrics>,
     default_knn_index: KnnIndex,
+    enable_schema: bool,
     retries_builder: ExponentialBuilder,
-    tenants_to_migrate_immediately: HashSet<String>,
-    tenants_to_migrate_immediately_threshold: Option<String>,
 }
 
 impl ServiceBasedFrontend {
@@ -87,8 +90,7 @@ impl ServiceBasedFrontend {
         executor: Executor,
         max_batch_size: u32,
         default_knn_index: KnnIndex,
-        tenants_to_migrate_immediately: HashSet<String>,
-        tenants_to_migrate_immediately_threshold: Option<String>,
+        enable_schema: bool,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -99,6 +101,11 @@ impl ServiceBasedFrontend {
         let add_retries_counter = meter.u64_counter("add_retries").build();
         let update_retries_counter = meter.u64_counter("update_retries").build();
         let upsert_retries_counter = meter.u64_counter("upsert_retries").build();
+        let search_retries_counter = meter.u64_counter("search_retries").build();
+        let metering_fork_counter = meter.u64_counter("metering_events_sent.fork").with_description("The number of fork metering events sent by the frontend to the metering event receiver.").build();
+        let metering_read_counter = meter.u64_counter("metering_events_sent.read").with_description("The number of read metering events sent by the frontend to the metering event receiver.").build();
+        let metering_write_counter = meter.u64_counter("metering_events_sent.write").with_description("The number of write metering events sent by the frontend to the metering event receiver.").build();
+        let metering_external_read_counter = meter.u64_counter("metering_events_sent.external_read").with_description("The number of external read metering events sent by the frontend to the metering event receiver.").build();
         let metrics = Arc::new(Metrics {
             fork_retries_counter,
             delete_retries_counter,
@@ -108,6 +115,11 @@ impl ServiceBasedFrontend {
             add_retries_counter,
             update_retries_counter,
             upsert_retries_counter,
+            search_retries_counter,
+            metering_fork_counter,
+            metering_read_counter,
+            metering_write_counter,
+            metering_external_read_counter,
         });
         // factor: 2.0,
         // min_delay_ms: 100,
@@ -130,9 +142,8 @@ impl ServiceBasedFrontend {
             max_batch_size,
             metrics,
             default_knn_index,
+            enable_schema,
             retries_builder,
-            tenants_to_migrate_immediately,
-            tenants_to_migrate_immediately_threshold,
         }
     }
 
@@ -274,6 +285,19 @@ impl ServiceBasedFrontend {
         self.sysdb_client.get_tenant(name).await
     }
 
+    pub async fn update_tenant(
+        &mut self,
+        UpdateTenantRequest {
+            tenant_id,
+            resource_name,
+            ..
+        }: UpdateTenantRequest,
+    ) -> Result<UpdateTenantResponse, UpdateTenantError> {
+        self.sysdb_client
+            .update_tenant(tenant_id, resource_name)
+            .await
+    }
+
     pub async fn create_database(
         &mut self,
         CreateDatabaseRequest {
@@ -383,9 +407,38 @@ impl ServiceBasedFrontend {
             })
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        if self.enable_schema {
+            for collection in &mut collections {
+                let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+                    collection.schema.clone(),
+                    Some(collection.config.clone()),
+                )
+                .map_err(|reason| {
+                    GetCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
+                })?;
+                collection.schema = Some(reconciled_schema);
+            }
+        }
         collections
             .pop()
             .ok_or(GetCollectionError::NotFound(collection_name))
+    }
+
+    pub async fn get_collection_by_crn(
+        &mut self,
+        GetCollectionByCrnRequest { parsed_crn, .. }: GetCollectionByCrnRequest,
+    ) -> Result<GetCollectionByCrnResponse, GetCollectionByCrnError> {
+        let collection = self
+            .sysdb_client
+            .get_collection_by_crn(
+                parsed_crn.tenant_resource_name.clone(),
+                parsed_crn.database_name.clone(),
+                parsed_crn.collection_name.clone(),
+            )
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+        Ok(collection)
     }
 
     pub async fn create_collection(
@@ -395,7 +448,8 @@ impl ServiceBasedFrontend {
             database_name,
             name,
             metadata,
-            configuration,
+            mut configuration,
+            schema,
             get_or_create,
             ..
         }: CreateCollectionRequest,
@@ -440,9 +494,30 @@ impl ServiceBasedFrontend {
             }
         }
 
+        let reconciled_schema = if self.enable_schema {
+            // its safe to take here, bc we're moving all config info to schema
+            // when configuration is None, we then populate in sysdb with empty config {}
+            // this allows for easier migration paths in the future
+            let config_for_reconcile = configuration.take();
+            match InternalSchema::reconcile_schema_and_config(schema.clone(), config_for_reconcile)
+            {
+                Ok(schema) => Some(schema),
+                Err(e) => return Err(CreateCollectionError::InvalidSchema(e)),
+            }
+        } else {
+            None
+        };
+
         let segments = match self.executor {
             Executor::Distributed(_) => {
                 let mut vector_segment_type = SegmentType::HnswDistributed;
+                if self.enable_schema {
+                    if let Some(schema) = reconciled_schema.as_ref() {
+                        if schema.get_internal_spann_config().is_some() {
+                            vector_segment_type = SegmentType::Spann;
+                        }
+                    }
+                }
                 if let Some(config) = configuration.as_ref() {
                     if matches!(config.vector_index, VectorIndexConfiguration::Spann(_)) {
                         vector_segment_type = SegmentType::Spann;
@@ -498,7 +573,7 @@ impl ServiceBasedFrontend {
             }
         };
 
-        let collection = self
+        let mut collection = self
             .sysdb_client
             .create_collection(
                 tenant_id.clone(),
@@ -507,6 +582,7 @@ impl ServiceBasedFrontend {
                 name,
                 segments,
                 configuration,
+                reconciled_schema,
                 metadata,
                 None,
                 get_or_create,
@@ -517,20 +593,17 @@ impl ServiceBasedFrontend {
             .collections_with_segments_cache
             .remove(&collection_id)
             .await;
-        if self.tenant_is_on_new_log_by_default(&tenant_id) {
-            if let Err(err) = self.log_client.seal_log(&tenant_id, collection_id).await {
-                tracing::error!("could not seal collection right away: {err}");
-            }
+        // this is done in the case that get_or_create was a get, in which case we should reconcile the schema and config
+        // that was retrieved from sysdb, rather than the one that was passed in
+        if self.enable_schema {
+            let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+                collection.schema.clone(),
+                Some(collection.config.clone()),
+            )
+            .map_err(CreateCollectionError::InvalidSchema)?;
+            collection.schema = Some(reconciled_schema);
         }
         Ok(collection)
-    }
-
-    fn tenant_is_on_new_log_by_default(&self, tenant_id: &str) -> bool {
-        self.tenants_to_migrate_immediately.contains(tenant_id)
-            || self
-                .tenants_to_migrate_immediately_threshold
-                .as_ref()
-                .is_some_and(|threshold| tenant_id <= threshold.as_str())
     }
 
     pub async fn update_collection(
@@ -648,9 +721,12 @@ impl ServiceBasedFrontend {
         // TODO: Submit event after the response is sent
         match chroma_metering::close::<CollectionForkContext>() {
             Ok(collection_fork_context) => {
-                MeterEvent::CollectionFork(collection_fork_context)
+                if let Ok(()) = MeterEvent::CollectionFork(collection_fork_context)
                     .submit()
-                    .await;
+                    .await
+                {
+                    self.metrics.metering_fork_counter.add(1, &[]);
+                }
             }
             Err(e) => tracing::error!("Failed to submit metering event to receiver: {:?}", e),
         }
@@ -769,9 +845,12 @@ impl ServiceBasedFrontend {
             Ok(()) => {
                 match chroma_metering::close::<CollectionWriteContext>() {
                     Ok(collection_write_context) => {
-                        MeterEvent::CollectionWrite(collection_write_context)
+                        if let Ok(()) = MeterEvent::CollectionWrite(collection_write_context)
                             .submit()
-                            .await;
+                            .await
+                        {
+                            self.metrics.metering_write_counter.add(1, &[]);
+                        }
                     }
                     Err(e) => {
                         tracing::error!("Failed to submit metering event to receiver: {:?}", e)
@@ -854,9 +933,12 @@ impl ServiceBasedFrontend {
             Ok(()) => {
                 match chroma_metering::close::<CollectionWriteContext>() {
                     Ok(collection_write_context) => {
-                        MeterEvent::CollectionWrite(collection_write_context)
+                        if let Ok(()) = MeterEvent::CollectionWrite(collection_write_context)
                             .submit()
-                            .await;
+                            .await
+                        {
+                            self.metrics.metering_write_counter.add(1, &[]);
+                        }
                     }
                     Err(e) => {
                         tracing::error!("Failed to submit metering event to receiver: {:?}", e)
@@ -887,13 +969,16 @@ impl ServiceBasedFrontend {
             ..
         }: UpsertCollectionRecordsRequest,
     ) -> Result<UpsertCollectionRecordsResponse, UpsertCollectionRecordsError> {
-        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
-            Some(embedding.len())
-        })
+        self.validate_embedding(
+            collection_id,
+            Some(&embeddings),
+            true,
+            |embedding: &Vec<f32>| Some(embedding.len()),
+        )
         .await
         .map_err(|err| err.boxed())?;
 
-        let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
+        let embeddings = Some(embeddings.into_iter().map(Some).collect());
 
         let (records, log_size_bytes) = to_records(
             ids,
@@ -941,9 +1026,12 @@ impl ServiceBasedFrontend {
             Ok(()) => {
                 match chroma_metering::close::<CollectionWriteContext>() {
                     Ok(collection_write_context) => {
-                        MeterEvent::CollectionWrite(collection_write_context)
+                        if let Ok(()) = MeterEvent::CollectionWrite(collection_write_context)
                             .submit()
-                            .await;
+                            .await
+                        {
+                            self.metrics.metering_write_counter.add(1, &[]);
+                        }
                     }
                     Err(e) => {
                         tracing::error!("Failed to submit metering event to receiver: {:?}", e)
@@ -980,6 +1068,17 @@ impl ServiceBasedFrontend {
                 .get_collection_with_segments(collection_id)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            if self.enable_schema {
+                if let Some(ref schema) = collection_and_segments.collection.schema {
+                    schema
+                        .is_metadata_where_indexing_enabled(&where_clause)
+                        .map_err(|err| {
+                            DeleteCollectionRecordsError::Internal(
+                                Box::new(err) as Box<dyn ChromaError>
+                            )
+                        })?;
+                }
+            }
             let latest_collection_logical_size_bytes = collection_and_segments
                 .collection
                 .size_bytes_post_compaction;
@@ -999,8 +1098,8 @@ impl ServiceBasedFrontend {
                     },
                     filter,
                     limit: Limit {
-                        skip: 0,
-                        fetch: None,
+                        offset: 0,
+                        limit: None,
                     },
                     proj: Projection {
                         document: false,
@@ -1057,7 +1156,9 @@ impl ServiceBasedFrontend {
         };
 
         if let Some(event) = read_event {
-            event.submit().await;
+            if let Ok(()) = event.submit().await {
+                self.metrics.metering_read_counter.add(1, &[]);
+            }
         }
 
         let collection_write_context_container =
@@ -1067,37 +1168,49 @@ impl ServiceBasedFrontend {
                 collection_id.0.to_string(),
                 WriteAction::Delete,
             ));
+
+        // Closure for write context operations
+        (async {
+            if records.is_empty() {
+                tracing::debug!("Bailing because no records were found");
+                return Ok::<_, DeleteCollectionRecordsError>(DeleteCollectionRecordsResponse {});
+            }
+
+            let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
+
+            self.log_client
+                .push_logs(&tenant_id, collection_id, records)
+                .await
+                .map_err(|err| {
+                    if err.code() == ErrorCodes::Unavailable {
+                        DeleteCollectionRecordsError::Backoff
+                    } else {
+                        DeleteCollectionRecordsError::Internal(Box::new(err) as _)
+                    }
+                })?;
+
+            // Attach metadata to the write context
+            chroma_metering::with_current(|context| {
+                context.log_size_bytes(log_size_bytes);
+            });
+
+            Ok(DeleteCollectionRecordsResponse {})
+        })
+        .meter(collection_write_context_container.clone())
+        .await?;
+
+        // Need to re-enter the write context before attempting to close
         collection_write_context_container.enter();
-
-        if records.is_empty() {
-            tracing::debug!("Bailing because no records were found");
-            return Ok(DeleteCollectionRecordsResponse {});
-        }
-
-        let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
-
-        self.log_client
-            .push_logs(&tenant_id, collection_id, records)
-            .await
-            .map_err(|err| {
-                if err.code() == ErrorCodes::Unavailable {
-                    DeleteCollectionRecordsError::Backoff
-                } else {
-                    DeleteCollectionRecordsError::Internal(Box::new(err) as _)
-                }
-            })?;
-
-        // Attach metadata to the write context
-        chroma_metering::with_current(|context| {
-            context.log_size_bytes(log_size_bytes);
-        });
 
         // TODO: Submit event after the response is sent
         match chroma_metering::close::<CollectionWriteContext>() {
             Ok(collection_write_context) => {
-                MeterEvent::CollectionWrite(collection_write_context)
+                if let Ok(()) = MeterEvent::CollectionWrite(collection_write_context)
                     .submit()
-                    .await;
+                    .await
+                {
+                    self.metrics.metering_write_counter.add(1, &[]);
+                }
             }
             Err(e) => {
                 tracing::error!("Failed to submit metering event to receiver: {:?}", e)
@@ -1191,13 +1304,27 @@ impl ServiceBasedFrontend {
         // TODO: Submit event after the response is sent
         match chroma_metering::close::<CollectionReadContext>() {
             Ok(collection_read_context) => {
-                MeterEvent::CollectionRead(collection_read_context)
+                if let Ok(()) = MeterEvent::CollectionRead(collection_read_context)
                     .submit()
-                    .await;
+                    .await
+                {
+                    self.metrics.metering_read_counter.add(1, &[]);
+                }
             }
-            Err(e) => {
-                tracing::error!("Failed to submit metering event to receiver: {:?}", e)
-            }
+            Err(_) => match chroma_metering::close::<ExternalCollectionReadContext>() {
+                Ok(external_collection_read_context) => {
+                    if let Ok(()) =
+                        MeterEvent::ExternalCollectionRead(external_collection_read_context)
+                            .submit()
+                            .await
+                    {
+                        self.metrics.metering_external_read_counter.add(1, &[]);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                }
+            },
         }
 
         Ok(count_result.count)
@@ -1266,6 +1393,15 @@ impl ServiceBasedFrontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        if self.enable_schema {
+            if let Some(ref schema) = collection_and_segments.collection.schema {
+                if let Some(ref where_clause) = r#where {
+                    schema
+                        .is_metadata_where_indexing_enabled(where_clause)
+                        .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
+                }
+            }
+        }
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
@@ -1287,10 +1423,7 @@ impl ServiceBasedFrontend {
                     query_ids: ids,
                     where_clause: r#where,
                 },
-                limit: Limit {
-                    skip: offset,
-                    fetch: limit,
-                },
+                limit: Limit { offset, limit },
                 proj: Projection {
                     document: include.0.contains(&Include::Document),
                     embedding: include.0.contains(&Include::Embedding),
@@ -1316,13 +1449,27 @@ impl ServiceBasedFrontend {
         // TODO: Submit event after the response is sent
         match chroma_metering::close::<CollectionReadContext>() {
             Ok(collection_read_context) => {
-                MeterEvent::CollectionRead(collection_read_context)
+                if let Ok(()) = MeterEvent::CollectionRead(collection_read_context)
                     .submit()
-                    .await;
+                    .await
+                {
+                    self.metrics.metering_read_counter.add(1, &[]);
+                }
             }
-            Err(e) => {
-                tracing::error!("Failed to submit metering event to receiver: {:?}", e)
-            }
+            Err(_) => match chroma_metering::close::<ExternalCollectionReadContext>() {
+                Ok(external_collection_read_context) => {
+                    if let Ok(()) =
+                        MeterEvent::ExternalCollectionRead(external_collection_read_context)
+                            .submit()
+                            .await
+                    {
+                        self.metrics.metering_external_read_counter.add(1, &[]);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                }
+            },
         }
 
         Ok((get_result, include).into())
@@ -1391,6 +1538,15 @@ impl ServiceBasedFrontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        if self.enable_schema {
+            if let Some(ref schema) = collection_and_segments.collection.schema {
+                if let Some(ref where_clause) = r#where {
+                    schema
+                        .is_metadata_where_indexing_enabled(where_clause)
+                        .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
+                }
+            }
+        }
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
@@ -1445,13 +1601,27 @@ impl ServiceBasedFrontend {
         // TODO: Submit event after the response is sent
         match chroma_metering::close::<CollectionReadContext>() {
             Ok(collection_read_context) => {
-                MeterEvent::CollectionRead(collection_read_context)
+                if let Ok(()) = MeterEvent::CollectionRead(collection_read_context)
                     .submit()
-                    .await;
+                    .await
+                {
+                    self.metrics.metering_read_counter.add(1, &[]);
+                }
             }
-            Err(e) => {
-                tracing::error!("Failed to submit metering event to receiver: {:?}", e)
-            }
+            Err(_) => match chroma_metering::close::<ExternalCollectionReadContext>() {
+                Ok(external_collection_read_context) => {
+                    if let Ok(()) =
+                        MeterEvent::ExternalCollectionRead(external_collection_read_context)
+                            .submit()
+                            .await
+                    {
+                        self.metrics.metering_external_read_counter.add(1, &[]);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                }
+            },
         }
 
         Ok((query_result, include).into())
@@ -1476,7 +1646,7 @@ impl ServiceBasedFrontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.retryable_query(request_clone).await;
+                let res = Box::pin(self_clone.retryable_query(request_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -1492,7 +1662,169 @@ impl ServiceBasedFrontend {
                 }
             }
         };
-        let res = query_to_retry
+        let res = Box::pin(
+            query_to_retry
+                .retry(self.collections_with_segments_provider.get_retry_backoff())
+                // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+                .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+                .notify(|_, _| {
+                    let retried = retries.fetch_add(1, Ordering::Relaxed);
+                    if retried > 0 {
+                        tracing::info!(
+                            "Retrying query() request for collection {}",
+                            request.collection_id
+                        );
+                    }
+                }),
+        )
+        .await;
+        self.metrics
+            .query_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
+        res
+    }
+
+    pub async fn retryable_search(
+        &mut self,
+        request: SearchRequest,
+    ) -> Result<SearchResponse, QueryError> {
+        // TODO: The dispatch logic is mostly the same for count/get/query/search, we should consider unifying them
+        // Get collection and segments once for all queries
+        let collection_and_segments = self
+            .collections_with_segments_provider
+            .get_collection_with_segments(request.collection_id)
+            .await
+            .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
+        if self.enable_schema {
+            if let Some(ref schema) = collection_and_segments.collection.schema {
+                for payload in &request.searches {
+                    if let Some(ref where_clause) = payload.filter.where_clause {
+                        schema
+                            .is_metadata_where_indexing_enabled(where_clause)
+                            .map_err(|err| {
+                                QueryError::Other(Box::new(err) as Box<dyn ChromaError>)
+                            })?;
+                    }
+                    // for rank expressions, if knn has a key, check if the key is enabled
+                    if let Some(rank_expr) = &payload.rank.expr {
+                        let knn_queries = rank_expr.knn_queries();
+                        for knn_query in knn_queries {
+                            schema
+                                .is_knn_key_indexing_enabled(&knn_query.key, &knn_query.query)
+                                .map_err(|err| {
+                                    QueryError::Other(Box::new(err) as Box<dyn ChromaError>)
+                                })?;
+                        }
+                    }
+                }
+            }
+        }
+
+        let latest_collection_logical_size_bytes = collection_and_segments
+            .collection
+            .size_bytes_post_compaction;
+
+        // Aggregate metrics across all search payloads
+        let mut total_metadata_predicate_count = 0u64;
+        let mut total_fts_query_length = 0u64;
+        let mut total_search_embedding_count = 0u64;
+
+        for payload in &request.searches {
+            // Count metadata predicates and FTS query length from where clause
+            if let Some(ref where_clause) = payload.filter.where_clause {
+                total_metadata_predicate_count += where_clause.metadata_predicate_count();
+                total_fts_query_length += where_clause.fts_query_length();
+            }
+
+            // Count embeddings from the score expression
+            // Each rank in the score expression contains one embedding
+            total_search_embedding_count += payload.rank.knn_queries().len() as u64;
+        }
+
+        // Create a single Search plan with one scan and the payloads from the request
+        // Clone the searches to use them later for aggregating select keys
+        let searches_for_select = request.searches.clone();
+        let search_plan = Search {
+            scan: Scan {
+                collection_and_segments,
+            },
+            payloads: request.searches,
+        };
+
+        // Execute the single search plan using the executor
+        let result = self.executor.search(search_plan).await?;
+
+        // Calculate return bytes (approximate size of the response)
+        let return_bytes = result.size_bytes();
+
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.fts_query_length(total_fts_query_length);
+            context.metadata_predicate_count(total_metadata_predicate_count);
+            context.query_embedding_count(total_search_embedding_count);
+            context.pulled_log_size_bytes(result.pulled_log_bytes);
+            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+            context.return_bytes(return_bytes);
+            context.finish_request(Instant::now());
+        });
+
+        // TODO: Submit metering event after the response is sent
+        match chroma_metering::close::<CollectionReadContext>() {
+            Ok(collection_read_context) => {
+                if let Ok(()) = MeterEvent::CollectionRead(collection_read_context)
+                    .submit()
+                    .await
+                {
+                    self.metrics.metering_read_counter.add(1, &[]);
+                }
+            }
+            Err(_) => match chroma_metering::close::<ExternalCollectionReadContext>() {
+                Ok(external_collection_read_context) => {
+                    if let Ok(()) =
+                        MeterEvent::ExternalCollectionRead(external_collection_read_context)
+                            .submit()
+                            .await
+                    {
+                        self.metrics.metering_external_read_counter.add(1, &[]);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                }
+            },
+        }
+
+        Ok((result, searches_for_select).into())
+    }
+
+    pub async fn search(&mut self, request: SearchRequest) -> Result<SearchResponse, QueryError> {
+        // TODO: The retry logic is mostly the same for count/get/query/search, we should consider unifying them
+        let retries = Arc::new(AtomicUsize::new(0));
+        let search_to_retry = || {
+            let mut self_clone = self.clone();
+            let request_clone = request.clone();
+            let cache_clone = self
+                .collections_with_segments_provider
+                .collections_with_segments_cache
+                .clone();
+            async move {
+                let res = self_clone.retryable_search(request_clone).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => {
+                        if e.code() == ErrorCodes::NotFound {
+                            tracing::info!(
+                                "Invalidating cache for collection {}",
+                                request.collection_id
+                            );
+                            cache_clone.remove(&request.collection_id).await;
+                        }
+                        Err(e)
+                    }
+                }
+            }
+        };
+        let res = search_to_retry
             .retry(self.collections_with_segments_provider.get_retry_backoff())
             // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
             .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
@@ -1500,14 +1832,14 @@ impl ServiceBasedFrontend {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
                     tracing::info!(
-                        "Retrying query() request for collection {}",
+                        "Retrying search() request for collection {}",
                         request.collection_id
                     );
                 }
             })
             .await;
         self.metrics
-            .query_retries_counter
+            .search_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
         res
     }
@@ -1567,13 +1899,6 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
         let executor =
             Executor::try_from_config(&(config.executor.clone(), system.clone()), registry).await?;
 
-        let tenants_to_migrate_immediately = config
-            .tenants_to_migrate_immediately
-            .iter()
-            .cloned()
-            .collect::<HashSet<String>>();
-        let tenants_to_migrate_immediately_threshold =
-            config.tenants_to_migrate_immediately_threshold.clone();
         Ok(ServiceBasedFrontend::new(
             config.allow_reset,
             sysdb,
@@ -1582,8 +1907,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             executor,
             max_batch_size,
             config.default_knn_index,
-            tenants_to_migrate_immediately,
-            tenants_to_migrate_immediately_threshold,
+            config.enable_schema,
         ))
     }
 }
@@ -1595,10 +1919,7 @@ mod tests {
     use chroma_types::Collection;
     use uuid::Uuid;
 
-    use crate::{
-        executor::config::{DistributedExecutorConfig, ExecutorConfig},
-        server::CreateCollectionPayload,
-    };
+    use crate::server::CreateCollectionPayload;
 
     use super::*;
 
@@ -1618,6 +1939,7 @@ mod tests {
                     "default_tenant".to_string(),
                     "default_database".to_string(),
                     "test".to_string(),
+                    None,
                     None,
                     None,
                     false,
@@ -1643,42 +1965,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_migrate_immediately_criteria() {
-        let registry = Registry::new();
-        let system = System::new();
-        let config = FrontendConfig {
-            tenants_to_migrate_immediately: vec!["cccccccc-cccc-cccc-cccc-cccccccccccc".to_string()],
-            tenants_to_migrate_immediately_threshold: Some(
-                "66666666-6666-6666-6666-666666666666".to_string(),
-            ),
-            allow_reset: false,
-            sqlitedb: None,
-            segment_manager: None,
-            sysdb: Default::default(),
-            collections_with_segments_provider: Default::default(),
-            log: Default::default(),
-            executor: ExecutorConfig::Distributed(DistributedExecutorConfig {
-                connections_per_node: 128,
-                replication_factor: 2,
-                connect_timeout_ms: 1000,
-                request_timeout_ms: 1000,
-                retry: Default::default(),
-                assignment: Default::default(),
-                memberlist_provider: Default::default(),
-                max_query_service_response_size_bytes: 65536,
-            }),
-            default_knn_index: KnnIndex::Spann,
-        };
-        let frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
-            .await
-            .unwrap();
-        assert!(frontend.tenant_is_on_new_log_by_default("22222222-2222-2222-2222-222222222222"));
-        assert!(frontend.tenant_is_on_new_log_by_default("66666666-6666-6666-6666-666666666666"));
-        assert!(!frontend.tenant_is_on_new_log_by_default("77777777-7777-7777-7777-777777777777"));
-        assert!(frontend.tenant_is_on_new_log_by_default("cccccccc-cccc-cccc-cccc-cccccccccccc"));
-    }
-
-    #[tokio::test]
     async fn test_k8s_integration_default_distributed_segments() {
         // Creating a collection in distributed should result in three segments.
         // TODO: this should use our official Rust HTTP client, once we have one
@@ -1686,7 +1972,7 @@ mod tests {
         let create_response = client
             .post("http://localhost:8000/api/v2/tenants/default_tenant/databases/default_database/collections")
             .json(
-                &CreateCollectionPayload { name: Uuid::new_v4().to_string(), configuration: None, metadata: None, get_or_create: false },
+                &CreateCollectionPayload { name: Uuid::new_v4().to_string(), configuration: None, schema: None, metadata: None, get_or_create: false },
             )
             .send()
             .await
@@ -1723,5 +2009,87 @@ mod tests {
         assert!(segments
             .iter()
             .any(|s| s.r#type == SegmentType::BlockfileRecord && s.scope == SegmentScope::RECORD));
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_operator_constants() {
+        // Validate that hardcoded Rust operator constants match the live database.
+        // This prevents drift between constants and database migrations.
+        use chroma_types::{OPERATOR_RECORD_COUNTER_ID, OPERATOR_RECORD_COUNTER_NAME};
+        use std::collections::HashMap;
+
+        // Map of operator names to their expected UUID constants
+        // Add new operators here as they are added to rust/types/src/operators.rs
+        let expected_operators: HashMap<&str, uuid::Uuid> =
+            [(OPERATOR_RECORD_COUNTER_NAME, OPERATOR_RECORD_COUNTER_ID)]
+                .iter()
+                .cloned()
+                .collect();
+
+        // Connect to sysdb via gRPC
+        let registry = Registry::new();
+        let sysdb_config = chroma_sysdb::SysDbConfig::Grpc(GrpcSysDbConfig {
+            host: "localhost".to_string(),
+            port: 50051,
+            ..Default::default()
+        });
+        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+            .await
+            .unwrap();
+
+        // Get all operators from the database via gRPC
+        let operators = sysdb.get_all_operators().await.unwrap();
+
+        // Verify count matches expectations
+        assert_eq!(
+            operators.len(),
+            expected_operators.len(),
+            "Operator count mismatch. If you added a new operator to migrations, \
+             rebuild Rust (cargo build -p chroma-types) to auto-generate constants and update this test. \
+             Expected: {}, Actual: {}",
+            expected_operators.len(),
+            operators.len()
+        );
+
+        // Verify each operator constant matches the database
+        for (operator_name, expected_uuid) in &expected_operators {
+            let db_operator = operators
+                .iter()
+                .find(|(name, _)| name == operator_name)
+                .unwrap_or_else(|| panic!("Operator '{}' not found in database", operator_name));
+
+            assert_eq!(
+                *expected_uuid, db_operator.1,
+                "Operator '{}' UUID mismatch. Code: {}, DB: {}",
+                operator_name, expected_uuid, db_operator.1
+            );
+        }
+
+        println!(
+            "Verified {} operator(s) match database",
+            expected_operators.len()
+        );
+    }
+
+    #[test]
+    fn test_crn_parsing() {
+        use chroma_types::GetCollectionByCrnRequest;
+
+        let result = GetCollectionByCrnRequest::try_new("tenant1:db1:coll1".to_string());
+        assert!(result.is_ok());
+        let request = result.unwrap();
+        assert_eq!(request.parsed_crn.tenant_resource_name, "tenant1");
+        assert_eq!(request.parsed_crn.database_name, "db1");
+        assert_eq!(request.parsed_crn.collection_name, "coll1");
+
+        assert!(GetCollectionByCrnRequest::try_new("tenant1:coll1".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("tenant1".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("tenant1:db1:coll1:extra".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("tenant1:db1:".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("tenant1:db1:coll1:".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new(":db1:coll1".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new(":db1:coll1:".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new(":db1::".to_string()).is_err());
     }
 }

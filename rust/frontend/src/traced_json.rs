@@ -1,4 +1,4 @@
-use axum::body::Body;
+use axum::body::{Body, HttpBody};
 use axum::extract::{rejection::JsonRejection, FromRequest, Request};
 use axum::response::IntoResponse;
 use axum::{BoxError, RequestExt};
@@ -74,8 +74,12 @@ where
             }
         };
 
+        let buffered_req_len = buffered_req.body().size_hint().lower();
         match axum::Json::<T>::from_request(buffered_req, state)
-            .instrument(tracing::debug_span!("parsing_json"))
+            .instrument(tracing::debug_span!(
+                "parsing_json",
+                bytes =? buffered_req_len
+            ))
             .await
         {
             Ok(value) => Ok(Self(value.0)),
