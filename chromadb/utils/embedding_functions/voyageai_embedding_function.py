@@ -297,7 +297,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return "context" in self.model_name
 
     def _is_multimodal_model(self) -> bool:
-        """Check if the model is a contextualized embedding model."""
+        """Check if the model is a multimodal embedding model."""
         return "multimodal" in self.model_name
 
     @staticmethod
