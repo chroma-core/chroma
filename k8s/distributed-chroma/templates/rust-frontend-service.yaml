@@ -18,6 +18,12 @@ metadata:
   namespace: {{ .Values.namespace }}
 spec:
   replicas: {{ .Values.rustFrontendService.replicaCount }}
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: rust-frontend-service
@@ -27,12 +33,6 @@ spec:
         app: rust-frontend-service
     spec:
       serviceAccountName: rust-frontend-service-serviceaccount
-      minReadySeconds: 10
-      strategy:
-        type: RollingUpdate
-        rollingUpdate:
-          maxSurge: 1
-          maxUnavailable: 0
       containers:
         - name: rust-frontend-service
           {{ if .Values.rustFrontendService.command }}
