@@ -228,15 +228,15 @@ export class ChromaCloudQwenEmbeddingFunction implements EmbeddingFunction {
 	}
 
 	public validateConfigUpdate(newConfig: Record<string, any>): void {
-		if (this.getConfig().model !== newConfig.model) {
+		if ("model" in newConfig) {
 			throw new ChromaValueError("Model cannot be updated");
 		}
 
-		if (this.getConfig().task !== newConfig.task) {
+		if ("task" in newConfig) {
 			throw new ChromaValueError("Task cannot be updated");
 		}
 
-		if (this.getConfig().instructions !== newConfig.instructions) {
+		if ("instructions" in newConfig) {
 			throw new ChromaValueError("Instructions cannot be updated");
 		}
 	}
