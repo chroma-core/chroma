@@ -2956,7 +2956,7 @@ class TestRankFromDict:
         )
         assert rank.key == "sparse_embedding"
         assert rank.limit == 256
-        assert rank.return_rank == True
+        assert rank.return_rank
 
     def test_arithmetic_operators(self):
         """Test arithmetic operator conversions."""
