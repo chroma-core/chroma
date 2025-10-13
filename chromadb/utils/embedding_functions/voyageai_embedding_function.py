@@ -98,6 +98,10 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
         if not self.api_key:
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")
 
+        # Validate model_name
+        if not model_name or not model_name.strip():
+            raise ValueError("model_name cannot be None or empty")
+
         self.model_name = model_name
         self.input_type = input_type
         self.truncation = truncation
@@ -290,7 +294,10 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
             return self._PILImage.fromarray(image_array)
         else:
-            return None
+            raise ValueError(
+                f"Unsupported input type: {type(embeddable)}. "
+                "Expected Document (str) or Image (numpy array)"
+            )
 
     def _is_context_model(self) -> bool:
         """Check if the model is a contextualized embedding model."""
