@@ -285,13 +285,13 @@ Here's a practical example combining pagination with field selection:
 from chromadb import Search, K, Knn
 
 # Paginated search with field selection
-def search_with_pagination(collection, query_vector, page_size=20):
+def search_with_pagination(collection, query_text, page_size=20):
     current_page = 0
     
     while True:
         search = (Search()
             .where(K("status") == "published")
-            .rank(Knn(query=query_vector))
+            .rank(Knn(query=query_text))
             .limit(page_size, offset=current_page * page_size)
             .select(K.DOCUMENT, K.SCORE, "title", "author", "date")
         )
@@ -325,7 +325,7 @@ import * as readline from 'readline';
 // Paginated search with field selection
 async function searchWithPagination(
   collection: any, 
-  queryVector: number[], 
+  queryText: string, 
   pageSize = 20
 ) {
   let currentPage = 0;
@@ -337,7 +337,7 @@ async function searchWithPagination(
   while (true) {
     const search = new Search()
       .where(K("status").eq("published"))
-      .rank(Knn({ query: queryVector }))
+      .rank(Knn({ query: queryText }))
       .limit(pageSize, currentPage * pageSize)
       .select(K.DOCUMENT, K.SCORE, "title", "author", "date");
     

@@ -17,10 +17,10 @@ The Search API is currently available in Chroma Cloud (beta). This guide uses di
 
 | Legacy `query()` | Search API | Notes |
 |------------------|------------|-------|
-| `query_embeddings` | `rank={"$knn": {"query": ...}}` | Wrap in ranking expression |
-| `query_texts` | Not yet supported | Text queries coming with collection schema |
-| `query_images` | Not yet supported | Image queries coming with collection schema |
-| `query_uris` | Not yet supported | URI queries coming with collection schema |
+| `query_embeddings` | `rank={"$knn": {"query": ...}}` | Can use text or embeddings |
+| `query_texts` | `rank={"$knn": {"query": "text"}}` | Text queries now supported |
+| `query_images` | Not yet supported | Image queries coming in future release |
+| `query_uris` | Not yet supported | URI queries coming in future release |
 | `n_results` | `limit` | Direct mapping |
 | `ids` | `where={"#id": {"$in": [...]}}` | Filter by IDs |
 | `where` | `where` | Same syntax |
@@ -62,12 +62,12 @@ results = collection.query(
     n_results=10
 )
 
-# Search API
+# Search API - with text query
 from chromadb import Search
 
 results = collection.search(
     Search(
-        rank={"$knn": {"query": [0.1, 0.2, 0.3]}},
+        rank={"$knn": {"query": "machine learning"}},
         limit=10
     )
 )
@@ -81,12 +81,12 @@ const results = await collection.query({
   nResults: 10
 });
 
-// Search API
+// Search API - with text query
 import { Search } from 'chromadb';
 
 const results2 = await collection.search(
   new Search({
-    rank: { $knn: { query: [0.1, 0.2, 0.3] } },
+    rank: { $knn: { query: "machine learning" } },
     limit: 10
   })
 );
@@ -109,7 +109,7 @@ results = collection.query(
 # Search API
 results = collection.search(
     Search(
-        rank={"$knn": {"query": [0.1, 0.2, 0.3]}},
+        rank={"$knn": {"query": "quantum computing"}},
         where={"#document": {"$contains": "quantum"}},
         limit=5
     )
@@ -128,7 +128,7 @@ const results = await collection.query({
 // Search API
 const results2 = await collection.search(
   new Search({
-    rank: { $knn: { query: [0.1, 0.2, 0.3] } },
+    rank: { $knn: { query: "quantum computing" } },
     where: { "#document": { $contains: "quantum" } },
     limit: 5
   })
@@ -157,7 +157,7 @@ results = collection.search(
             {"category": "science"},
             {"#document": {"$contains": "quantum"}}
         ]},
-        rank={"$knn": {"query": [0.1, 0.2, 0.3]}},
+        rank={"$knn": {"query": "quantum physics"}},
         limit=10
     )
 )
@@ -182,7 +182,7 @@ const results2 = await collection.search(
         { "#document": { $contains: "quantum" } }
       ]
     },
-    rank: { $knn: { query: [0.1, 0.2, 0.3] } },
+    rank: { $knn: { query: "quantum physics" } },
     limit: 10
   })
 );
@@ -268,32 +268,30 @@ const results2 = await collection.search(
 
 ## Key Differences
 
-### Text Queries Not Yet Supported
+### Text Queries Now Supported
 
-The Search API currently requires embeddings. Text query support is coming when collection schema support is available.
+The Search API supports text queries directly - they are automatically converted to embeddings using the collection's configured embedding function.
 
 {% Tabs %}
 
 {% Tab label="python" %}
 ```python
-# Legacy - automatic embedding
+# Legacy API
 collection.query(query_texts=["search text"])
 
-# Search API - manual embedding (temporary)
-embedding = embedding_function(["search text"])[0]
-collection.search(Search(rank={"$knn": {"query": embedding}}))
+# Search API - direct text query
+collection.search(Search(rank={"$knn": {"query": "search text"}}))
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-// Legacy - automatic embedding
+// Legacy API
 await collection.query({ queryTexts: ["search text"] });
 
-// Search API - manual embedding (temporary)
-const embedding = await embeddingFunction.generate(["search text"])[0];
+// Search API - direct text query
 await collection.search(
-  new Search({ rank: { $knn: { query: embedding } } })
+  new Search({ rank: { $knn: { query: "search text" } } })
 );
 ```
 {% /Tab %}
@@ -325,9 +323,9 @@ results = collection.query(
 
 # Search API - different parameters per search
 searches = [
-    Search(rank={"$knn": {"query": emb1}}, limit=10, where={"category": "science"}),
-    Search(rank={"$knn": {"query": emb2}}, limit=5, where={"category": "tech"}),
-    Search(rank={"$knn": {"query": emb3}}, limit=20)  # No filter
+    Search(rank={"$knn": {"query": "machine learning"}}, limit=10, where={"category": "science"}),
+    Search(rank={"$knn": {"query": "neural networks"}}, limit=5, where={"category": "tech"}),
+    Search(rank={"$knn": {"query": "artificial intelligence"}}, limit=20)  # No filter
 ]
 results = collection.search(searches)
 ```
@@ -344,9 +342,9 @@ const results = await collection.query({
 
 // Search API - different parameters per search
 const searches = [
-  new Search({ rank: { $knn: { query: emb1 } }, limit: 10, where: { category: "science" } }),
-  new Search({ rank: { $knn: { query: emb2 } }, limit: 5, where: { category: "tech" } }),
-  new Search({ rank: { $knn: { query: emb3 } }, limit: 20 })  // No filter
+  new Search({ rank: { $knn: { query: "machine learning" } }, limit: 10, where: { category: "science" } }),
+  new Search({ rank: { $knn: { query: "neural networks" } }, limit: 5, where: { category: "tech" } }),
+  new Search({ rank: { $knn: { query: "artificial intelligence" } }, limit: 20 })  // No filter
 ];
 const results2 = await collection.search(searches);
 ```
@@ -359,7 +357,7 @@ const results2 = await collection.search(searches);
 - Start with simple queries before complex ones
 - Test both APIs in parallel during migration  
 - Use batch operations to reduce API calls
-- Keep embeddings ready until text queries are supported
+- Text queries are now supported - use them directly in the Search API
 
 ## Next Steps
 

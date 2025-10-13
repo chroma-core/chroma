@@ -93,7 +93,7 @@ from chromadb import Search, K, Knn
 # Basic method chaining
 search = (Search()
     .where(K("status") == "published")
-    .rank(Knn(query=[0.1, 0.2, 0.3]))
+    .rank(Knn(query="machine learning applications"))
     .limit(10)
     .select(K.DOCUMENT, K.SCORE))
 
@@ -105,7 +105,7 @@ search_v2 = base_search.limit(10) # Different instance
 # Progressive building
 search = Search()
 search = search.where(K("status") == "active")
-search = search.rank(Knn(query=embedding))
+search = search.rank(Knn(query="recent advances in quantum computing"))
 search = search.limit(20)
 search = search.select(K.DOCUMENT, K.METADATA)
 ```
@@ -118,7 +118,7 @@ import { Search, K, Knn } from 'chromadb';
 // Basic method chaining
 const search = new Search()
   .where(K("status").eq("published"))
-  .rank(Knn({ query: [0.1, 0.2, 0.3] }))
+  .rank(Knn({ query: "machine learning applications" }))
   .limit(10)
   .select(K.DOCUMENT, K.SCORE);
 
@@ -130,7 +130,7 @@ const searchV2 = baseSearch.limit(10); // Different instance
 // Progressive building
 let search2 = new Search();
 search2 = search2.where(K("status").eq("active"));
-search2 = search2.rank(Knn({ query: embedding }));
+search2 = search2.rank(Knn({ query: "recent advances in quantum computing" }));
 search2 = search2.limit(20);
 search2 = search2.select(K.DOCUMENT, K.METADATA);
 ```
@@ -157,7 +157,7 @@ from chromadb.execution.expression.operator import Limit, Select
 # With expression objects
 search = Search(
     where=K("status") == "active",
-    rank=Knn(query=[0.1, 0.2, 0.3]),
+    rank=Knn(query="latest research papers"),
     limit=Limit(limit=10, offset=0),
     select=Select(keys={K.DOCUMENT, K.SCORE})
 )
@@ -165,7 +165,7 @@ search = Search(
 # With dictionaries (MongoDB-style)
 search = Search(
     where={"status": "active"},
-    rank={"$knn": {"query": [0.1, 0.2, 0.3]}},
+    rank={"$knn": {"query": "latest research papers"}},
     limit={"limit": 10, "offset": 0},
     select={"keys": ["#document", "#score"]}
 )
@@ -173,7 +173,7 @@ search = Search(
 # Mixed types
 search = Search(
     where=K("category") == "science",           # Expression
-    rank={"$knn": {"query": embedding}},        # Dictionary
+    rank={"$knn": {"query": "quantum mechanics"}},  # Dictionary
     limit=10,                                   # Integer
     select=[K.DOCUMENT, K.SCORE, "author"]      # List
 )
@@ -185,7 +185,7 @@ search = Search()
 search = Search(where=K("status") == "published")
 
 # Just ranking
-search = Search(rank=Knn(query=embedding))
+search = Search(rank=Knn(query="artificial intelligence"))
 ```
 {% /Tab %}
 
@@ -196,7 +196,7 @@ import { Search, K, Knn, Limit, Select } from 'chromadb';
 // With expression objects
 const search1 = new Search({
   where: K("status").eq("active"),
-  rank: Knn({ query: [0.1, 0.2, 0.3] }),
+  rank: Knn({ query: "latest research papers" }),
   limit: new Limit({ limit: 10, offset: 0 }),
   select: new Select([K.DOCUMENT, K.SCORE])
 });
@@ -204,17 +204,17 @@ const search1 = new Search({
 // With dictionaries (MongoDB-style)
 const search2 = new Search({
   where: { status: "active" },
-  rank: { $knn: { query: [0.1, 0.2, 0.3] } },
+  rank: { $knn: { query: "latest research papers" } },
   limit: { limit: 10, offset: 0 },
   select: { keys: ["#document", "#score"] }
 });
 
 // Mixed types
 const search3 = new Search({
-  where: K("category").eq("science"),      // Expression
-  rank: { $knn: { query: embedding } },    // Dictionary
-  limit: 10,                               // Number
-  select: [K.DOCUMENT, K.SCORE, "author"]  // Array
+  where: K("category").eq("science"),          // Expression
+  rank: { $knn: { query: "quantum mechanics" } },  // Dictionary
+  limit: 10,                                   // Number
+  select: [K.DOCUMENT, K.SCORE, "author"]      // Array
 });
 
 // Minimal search (IDs only)
@@ -224,7 +224,7 @@ const search4 = new Search();
 const search5 = new Search({ where: K("status").eq("published") });
 
 // Just ranking
-const search6 = new Search({ rank: Knn({ query: embedding }) });
+const search6 = new Search({ rank: Knn({ query: "artificial intelligence" }) });
 ```
 {% /Tab %}
 
@@ -269,7 +269,7 @@ where_dict = {
 # Rank dictionary
 rank_dict = {
     "$knn": {
-        "query": [0.1, 0.2, 0.3],         # Query vector
+        "query": "machine learning research",  # Query text or embedding
         "key": "#embedding",              # Optional: field to search
         "limit": 128                      # Optional: max candidates
     }
@@ -346,7 +346,7 @@ whereDict = {
 // Rank dictionary
 const rankDict = {
   $knn: {
-    query: [0.1, 0.2, 0.3],         // Query vector
+    query: "machine learning research",  // Query text or embedding
     key: "#embedding",              // Optional: field to search
     limit: 128                      // Optional: max candidates
   }
@@ -445,7 +445,7 @@ const result2 = await collection.search(search2);
 {% /Tabs %}
 
 {% Note type="info" %}
-Empty searches are useful for retrieving all document IDs or when you only need to apply field selection.
+When no limit is specified, Chroma Cloud will apply a default limit based on your quota to prevent returning excessive results. For production use, it's recommended to always specify an explicit limit.
 {% /Note %}
 
 ## Common Initialization Patterns
@@ -458,51 +458,31 @@ Here are common patterns for building Search queries:
 ```python
 from chromadb import Search, K, Knn
 
-# Pattern 1: Filter-first approach (narrow down, then rank)
-def search_recent_science(query_vector):
+# Pattern 1: Baseline - no filter, no rank (natural storage order)
+def get_documents():
+    return Search().select(K.DOCUMENT, K.METADATA)
+
+# Pattern 2: Filter only - no ranking
+def filter_recent_science():
     return (Search()
         .where((K("category") == "science") & (K("year") >= 2023))
-        .rank(Knn(query=query_vector))
+        .limit(10)
+        .select(K.DOCUMENT, K.METADATA))
+
+# Pattern 3: Rank only - no filtering
+def search_similar(query):
+    return (Search()
+        .rank(Knn(query=query))
         .limit(10)
         .select(K.DOCUMENT, K.SCORE))
 
-# Pattern 2: Rank-first approach (score all, filter high-quality)
-def search_high_quality(query_vector, min_quality=0.8):
+# Pattern 4: Both filter and rank
+def search_recent_science(query):
     return (Search()
-        .rank(Knn(query=query_vector))
-        .where(K("quality_score") >= min_quality)
-        .limit(5)
-        .select_all())
-
-# Pattern 3: Conditional building
-def build_search(query_vector=None, category=None, limit=10):
-    search = Search()
-    
-    # Add filtering if category specified
-    if category:
-        search = search.where(K("category") == category)
-    
-    # Add ranking if query vector provided
-    if query_vector is not None:
-        search = search.rank(Knn(query=query_vector))
-        # TODO: When collection schema is ready:
-        # search = search.rank(Knn(query="text query"))
-    
-    # Always limit results
-    search = search.limit(limit)
-    
-    # Select common fields
-    search = search.select(K.DOCUMENT, K.METADATA)
-    
-    return search
-
-# Pattern 4: Base query with variations
-base_search = Search().where(K("status") == "published")
-
-# Create variations
-recent_search = base_search.where(K("year") == "2025").limit(20)
-popular_search = base_search.where(K("views") > 1000).limit(10)
-featured_search = base_search.where(K("featured") == True).limit(5)
+        .where((K("category") == "science") & (K("year") >= 2023))
+        .rank(Knn(query=query))
+        .limit(10)
+        .select(K.DOCUMENT, K.SCORE))
 ```
 {% /Tab %}
 
@@ -510,56 +490,35 @@ featured_search = base_search.where(K("featured") == True).limit(5)
 ```typescript
 import { Search, K, Knn } from 'chromadb';
 
-// Pattern 1: Filter-first approach (narrow down, then rank)
-function searchRecentScience(queryVector: number[]) {
+// Pattern 1: Baseline - no filter, no rank (natural storage order)
+function getDocuments() {
+  return new Search().select(K.DOCUMENT, K.METADATA);
+}
+
+// Pattern 2: Filter only - no ranking
+function filterRecentScience() {
   return new Search()
     .where(K("category").eq("science").and(K("year").gte(2023)))
-    .rank(Knn({ query: queryVector }))
+    .limit(10)
+    .select(K.DOCUMENT, K.METADATA);
+}
+
+// Pattern 3: Rank only - no filtering
+function searchSimilar(query: string) {
+  return new Search()
+    .rank(Knn({ query: query }))
     .limit(10)
     .select(K.DOCUMENT, K.SCORE);
 }
 
-// Pattern 2: Rank-first approach (score all, filter high-quality)
-function searchHighQuality(queryVector: number[], minQuality = 0.8) {
+// Pattern 4: Both filter and rank
+function searchRecentScience(query: string) {
   return new Search()
-    .rank(Knn({ query: queryVector }))
-    .where(K("quality_score").gte(minQuality))
-    .limit(5)
-    .selectAll();
+    .where(K("category").eq("science").and(K("year").gte(2023)))
+    .rank(Knn({ query: query }))
+    .limit(10)
+    .select(K.DOCUMENT, K.SCORE);
 }
-
-// Pattern 3: Conditional building
-function buildSearch(queryVector?: number[], category?: string, limit = 10) {
-  let search = new Search();
-  
-  // Add filtering if category specified
-  if (category) {
-    search = search.where(K("category").eq(category));
-  }
-  
-  // Add ranking if query vector provided
-  if (queryVector !== undefined) {
-    search = search.rank(Knn({ query: queryVector }));
-    // TODO: When collection schema is ready:
-    // search = search.rank(Knn({ query: "text query" }))
-  }
-  
-  // Always limit results
-  search = search.limit(limit);
-  
-  // Select common fields
-  search = search.select(K.DOCUMENT, K.METADATA);
-  
-  return search;
-}
-
-// Pattern 4: Base query with variations
-const baseSearch = new Search().where(K("status").eq("published"));
-
-// Create variations
-const recentSearch = baseSearch.where(K("year").eq("2025")).limit(20);
-const popularSearch = baseSearch.where(K("views").gt(1000)).limit(10);
-const featuredSearch = baseSearch.where(K("featured").eq(true)).limit(5);
 ```
 {% /Tab %}
 

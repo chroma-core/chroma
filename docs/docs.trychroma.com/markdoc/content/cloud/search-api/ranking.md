@@ -20,7 +20,7 @@ A ranking expression determines which documents are scored and how they're order
    - Documents must appear in at least one `Knn`'s top-k results to be considered
    - Documents must also appear in ALL `Knn` results where `default=None`
    - Documents missing from a `Knn` with a `default` value get that default score
-   - Each `Knn` considers its top `limit` candidates (default: 128)
+   - Each `Knn` considers its top `limit` candidates (default: 16)
    - Documents are sorted by score (ascending - lower scores first)
    - Final results based on `Search.limit()`
 
@@ -30,51 +30,51 @@ A ranking expression determines which documents are scored and how they're order
 
 {% Tab label="python" %}
 ```python
-# Example 1: Single Knn - scores top 128 documents
-rank = Knn(query=vector, limit=128)
-# Only the 128 nearest documents get scored
+# Example 1: Single Knn - scores top 16 documents
+rank = Knn(query="machine learning research")
+# Only the 16 nearest documents get scored (default limit)
 
 # Example 2: Multiple Knn with default=None
-rank = Knn(query=v1, limit=100) + Knn(query=v2, limit=100, key="sparse_embedding")
+rank = Knn(query="research papers", limit=100) + Knn(query="academic publications", limit=100, key="sparse_embedding")
 # Both Knn have default=None (the default)
 # Documents must appear in BOTH top-100 lists to be scored
 # Documents in only one list are excluded
 
 # Example 3: Mixed default values
-rank = Knn(query=v1, limit=100) * 0.5 + Knn(query=v2, limit=50, default=1000.0) * 0.5
-# v1 has default=None, v2 has default=1000.0
-# Documents in v1's top-100 but not in v2's top-50:
-#   - Get v1's distance * 0.5 + 1000.0 * 0.5 (v2's default)
-# Documents in v2's top-50 but not in v1's top-100:
+rank = Knn(query="AI research", limit=100) * 0.5 + Knn(query="scientific papers", limit=50, default=1000.0, key="sparse_embedding") * 0.5
+# First Knn has default=None, second has default=1000.0
+# Documents in first top-100 but not in second top-50:
+#   - Get first distance * 0.5 + 1000.0 * 0.5 (second's default)
+# Documents in second top-50 but not in first top-100:
 #   - Excluded (must appear in all Knn where default=None)
 # Documents in both lists:
-#   - Get v1's distance * 0.5 + v2's distance * 0.5
+#   - Get first distance * 0.5 + second distance * 0.5
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-// Example 1: Single Knn - scores top 128 documents
-const rank1 = Knn({ query: vector, limit: 128 });
-// Only the 128 nearest documents get scored
+// Example 1: Single Knn - scores top 16 documents
+const rank1 = Knn({ query: "machine learning research" });
+// Only the 16 nearest documents get scored (default limit)
 
-// Example 2: Multiple Knn with default=None
-const rank2 = Knn({ query: v1, limit: 100 })
-  .add(Knn({ query: v2, limit: 100, key: "sparse_embedding" }));
+// Example 2: Multiple Knn with default undefined
+const rank2 = Knn({ query: "research papers", limit: 100 })
+  .add(Knn({ query: "academic publications", limit: 100, key: "sparse_embedding" }));
 // Both Knn have default undefined (the default)
 // Documents must appear in BOTH top-100 lists to be scored
 // Documents in only one list are excluded
 
 // Example 3: Mixed default values
-const rank3 = Knn({ query: v1, limit: 100 }).multiply(0.5)
-  .add(Knn({ query: v2, limit: 50, default: 1000.0 }).multiply(0.5));
-// v1 has default undefined, v2 has default 1000.0
-// Documents in v1's top-100 but not in v2's top-50:
-//   - Get v1's distance * 0.5 + 1000.0 * 0.5 (v2's default)
-// Documents in v2's top-50 but not in v1's top-100:
+const rank3 = Knn({ query: "AI research", limit: 100 }).multiply(0.5)
+  .add(Knn({ query: "scientific papers", limit: 50, default: 1000.0, key: "sparse_embedding" }).multiply(0.5));
+// First Knn has default undefined, second has default 1000.0
+// Documents in first top-100 but not in second top-50:
+//   - Get first distance * 0.5 + 1000.0 * 0.5 (second's default)
+// Documents in second top-50 but not in first top-100:
 //   - Excluded (must appear in all Knn where default is undefined)
 // Documents in both lists:
-//   - Get v1's distance * 0.5 + v2's distance * 0.5
+//   - Get first distance * 0.5 + second distance * 0.5
 ```
 {% /Tab %}
 
@@ -94,22 +94,19 @@ The `Knn` class performs K-nearest neighbor search to find similar vectors. It's
 ```python
 from chromadb import Knn
 
-# Basic vector search on default embedding field
-Knn(query=[0.1, 0.2, 0.3])
-
-# TODO: When collection schema is supported, you'll be able to pass text directly:
-# Knn(query="What is machine learning?")
+# Basic search on default embedding field
+Knn(query="What is machine learning?")
 
 # Search with custom parameters
 Knn(
-    query=[0.1, 0.2, 0.3],
+    query="What is machine learning?",
     key="#embedding",      # Field to search (default: "#embedding")
-    limit=128,            # Max candidates to consider (default: 128)
+    limit=100,            # Max candidates to consider (default: 16)
     return_rank=False     # Return rank position vs distance (default: False)
 )
 
-# Search custom embedding field in metadata
-Knn(query=sparse_vector, key="sparse_embedding")
+# Search custom sparse embedding field in metadata
+Knn(query="machine learning", key="sparse_embedding")
 ```
 {% /Tab %}
 
@@ -117,22 +114,19 @@ Knn(query=sparse_vector, key="sparse_embedding")
 ```typescript
 import { Knn } from 'chromadb';
 
-// Basic vector search on default embedding field
-Knn({ query: [0.1, 0.2, 0.3] });
-
-// TODO: When collection schema is supported, you'll be able to pass text directly:
-// Knn({ query: "What is machine learning?" })
+// Basic search on default embedding field
+Knn({ query: "What is machine learning?" });
 
 // Search with custom parameters
 Knn({
-  query: [0.1, 0.2, 0.3],
+  query: "What is machine learning?",
   key: "#embedding",      // Field to search (default: "#embedding")
-  limit: 128,            // Max candidates to consider (default: 128)
+  limit: 100,            // Max candidates to consider (default: 16)
   returnRank: false      // Return rank position vs distance (default: false)
 });
 
-// Search custom embedding field in metadata
-Knn({ query: sparseVector, key: "sparse_embedding" });
+// Search custom sparse embedding field in metadata
+Knn({ query: "machine learning", key: "sparse_embedding" });
 ```
 {% /Tab %}
 
@@ -142,9 +136,9 @@ Knn({ query: sparseVector, key: "sparse_embedding" });
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `query` | List[float], SparseVector, or np.ndarray | Required | The query vector to search with |
+| `query` | str, List[float], SparseVector, or np.ndarray | Required | The query text or vector to search with |
 | `key` | str | `"#embedding"` | Field to search - `"#embedding"` for dense embeddings, or a metadata field name for sparse embeddings |
-| `limit` | int | `128` | Maximum number of candidates to consider |
+| `limit` | int | `16` | Maximum number of candidates to consider |
 | `default` | float or None | `None` | Score for documents not in KNN results |
 | `return_rank` | bool | `False` | If `True`, return rank position (0, 1, 2...) instead of distance |
 
@@ -152,7 +146,35 @@ Knn({ query: sparseVector, key: "sparse_embedding" });
 `"#embedding"` (or `K.EMBEDDING`) refers to the default embedding field where Chroma stores dense embeddings. Sparse embeddings must be stored in metadata under a consistent key.
 {% /Note %}
 
-## Query Vector Formats
+## Query Formats
+
+### Text Queries
+
+{% Tabs %}
+
+{% Tab label="python" %}
+```python
+# Text query (most common - auto-embedded using collection schema)
+Knn(query="machine learning applications")
+
+# Text is automatically converted to embeddings using the collection's
+# configured embedding function
+Knn(query="What are the latest advances in quantum computing?")
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+// Text query (most common - auto-embedded using collection schema)
+Knn({ query: "machine learning applications" });
+
+// Text is automatically converted to embeddings using the collection's
+// configured embedding function
+Knn({ query: "What are the latest advances in quantum computing?" });
+```
+{% /Tab %}
+
+{% /Tabs %}
 
 ### Dense Vectors
 
@@ -160,33 +182,24 @@ Knn({ query: sparseVector, key: "sparse_embedding" });
 
 {% Tab label="python" %}
 ```python
-# Python list (most common)
+# Python list
 Knn(query=[0.1, 0.2, 0.3, 0.4])
 
 # NumPy array
 import numpy as np
 embedding = np.array([0.1, 0.2, 0.3, 0.4])
 Knn(query=embedding)
-
-# Pre-normalized vectors (if your embeddings are already normalized)
-from chromadb.api.types import normalize_embeddings
-normalized = normalize_embeddings([[0.1, 0.2, 0.3, 0.4]])[0]
-Knn(query=normalized)
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-// Array (most common)
+// Array
 Knn({ query: [0.1, 0.2, 0.3, 0.4] });
 
 // Float32Array or other typed arrays
 const embedding = new Float32Array([0.1, 0.2, 0.3, 0.4]);
 Knn({ query: embedding });
-
-// Any iterable of numbers
-const embeddingIterable = [0.1, 0.2, 0.3, 0.4];
-Knn({ query: embeddingIterable });
 ```
 {% /Tab %}
 
@@ -234,58 +247,44 @@ Chroma currently supports:
 
 {% Tab label="python" %}
 ```python
-# Dense embeddings - use the default embedding field
-Knn(query=dense_vector)                    # Implicitly uses key="#embedding"
-Knn(query=dense_vector, key="#embedding")  # Explicit
-Knn(query=dense_vector, key=K.EMBEDDING)   # Using constant (same as "#embedding")
+# Text or dense embeddings - use the default embedding field
+Knn(query="machine learning")              # Implicitly uses key="#embedding"
+Knn(query="machine learning", key="#embedding")  # Explicit
+Knn(query="machine learning", key=K.EMBEDDING)   # Using constant (same as "#embedding")
 
 # Sparse embeddings - store in metadata under a consistent key
 # The sparse vector should be stored under the same metadata key across all documents
-sparse_vector = {
-    "indices": [1, 5, 10, 50],
-    "values": [0.5, 0.3, 0.8, 0.2]
-}
-Knn(query=sparse_vector, key="sparse_embedding")  # Search sparse embeddings in metadata
+Knn(query="machine learning", key="sparse_embedding")  # Search sparse embeddings in metadata
 
 # NOT SUPPORTED: Dense embeddings in metadata
-# Knn(query=dense_vector, key="some_metadata_field")  # ✗ Not supported
-
-# TODO: When collection schema is supported:
-# - You'll be able to store multiple dense embeddings
-# - You'll be able to declare metadata fields as embedding fields
-# - This will enable optimized indexing for additional embeddings
+# Knn(query=[0.1, 0.2], key="some_metadata_field")  # ✗ Not supported
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-// Dense embeddings - use the default embedding field
-Knn({ query: denseVector });                     // Implicitly uses key "#embedding"
-Knn({ query: denseVector, key: "#embedding" });  // Explicit
-Knn({ query: denseVector, key: K.EMBEDDING });   // Using constant (same as "#embedding")
+// Text or dense embeddings - use the default embedding field
+Knn({ query: "machine learning" });              // Implicitly uses key "#embedding"
+Knn({ query: "machine learning", key: "#embedding" });  // Explicit
+Knn({ query: "machine learning", key: K.EMBEDDING });   // Using constant (same as "#embedding")
 
 // Sparse embeddings - store in metadata under a consistent key
 // The sparse vector should be stored under the same metadata key across all documents
-const sparseVector = {
-  indices: [1, 5, 10, 50],
-  values: [0.5, 0.3, 0.8, 0.2]
-};
-Knn({ query: sparseVector, key: "sparse_embedding" });  // Search sparse embeddings in metadata
+Knn({ query: "machine learning", key: "sparse_embedding" });  // Search sparse embeddings in metadata
 
 // NOT SUPPORTED: Dense embeddings in metadata
-// Knn({ query: denseVector, key: "some_metadata_field" })  // ✗ Not supported
-
-// TODO: When collection schema is supported:
-// - You'll be able to store multiple dense embeddings
-// - You'll be able to declare metadata fields as embedding fields
-// - This will enable optimized indexing for additional embeddings
+// Knn({ query: [0.1, 0.2], key: "some_metadata_field" })  // ✗ Not supported
 ```
 {% /Tab %}
 
 {% /Tabs %}
 
 {% Note type="warning" %}
-Currently, dense embeddings can only be stored in the default embedding field (`#embedding`). Only sparse vector embeddings can be stored in metadata, and they must be stored consistently under the same key across all documents.
+Currently, dense embeddings can only be stored in the default embedding field (`#embedding`). Only sparse vector embeddings can be stored in metadata, and they must be stored consistently under the same key across all documents. Additionally, only one sparse vector index is allowed per collection in metadata.
+{% /Note %}
+
+{% Note type="info" %}
+Support for multiple dense embedding fields and multiple sparse vector indices is coming in a future release. This will allow you to store and query multiple embeddings per document, with optimized indexing for each field.
 {% /Note %}
 
 ## Arithmetic Operations
@@ -303,38 +302,40 @@ Combine ranking expressions using arithmetic operators. Operator precedence foll
 
 {% Tab label="python" %}
 ```python
-# Weighted combination of two embeddings
-text_score = Knn(query=text_vector)
-image_score = Knn(query=image_vector, key="image_embedding")
-combined = text_score * 0.7 + image_score * 0.3
+# Weighted combination of two searches
+text_score = Knn(query="machine learning research")
+sparse_q = {"indices": [1, 5, 10], "values": [0.5, 0.3, 0.8]}
+sparse_score = Knn(query=sparse_q, key="sparse_embedding")
+combined = text_score * 0.7 + sparse_score * 0.3
 
 # Scaling scores
-normalized = Knn(query=vector) / 100.0
+normalized = Knn(query="quantum computing") / 100.0
 
 # Adding baseline score
-with_baseline = Knn(query=vector) + 0.5
+with_baseline = Knn(query="artificial intelligence") + 0.5
 
 # Complex expressions (use parentheses for clarity)
-final_score = (Knn(query=v1) * 0.5 + Knn(query=v2) * 0.3) / 1.8
+final_score = (Knn(query="deep learning") * 0.5 + Knn(query="neural networks") * 0.3) / 1.8
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-// Weighted combination of two embeddings
-const textScore = Knn({ query: textVector });
-const imageScore = Knn({ query: imageVector, key: "image_embedding" });
-const combined = textScore.multiply(0.7).add(imageScore.multiply(0.3));
+// Weighted combination of two searches
+const textScore = Knn({ query: "machine learning research" });
+const sparseQ = { indices: [1, 5, 10], values: [0.5, 0.3, 0.8] };
+const sparseScore = Knn({ query: sparseQ, key: "sparse_embedding" });
+const combined = textScore.multiply(0.7).add(sparseScore.multiply(0.3));
 
 // Scaling scores
-const normalized = Knn({ query: vector }).divide(100.0);
+const normalized = Knn({ query: "quantum computing" }).divide(100.0);
 
 // Adding baseline score
-const withBaseline = Knn({ query: vector }).add(0.5);
+const withBaseline = Knn({ query: "artificial intelligence" }).add(0.5);
 
 // Complex expressions (use chaining for clarity)
-const finalScore = Knn({ query: v1 }).multiply(0.5)
-  .add(Knn({ query: v2 }).multiply(0.3))
+const finalScore = Knn({ query: "deep learning" }).multiply(0.5)
+  .add(Knn({ query: "neural networks" }).multiply(0.3))
   .divide(1.8);
 ```
 {% /Tab %}
@@ -359,42 +360,42 @@ Numbers in expressions are automatically converted to `Val` constants. For examp
 {% Tab label="python" %}
 ```python
 # Exponential - amplifies differences between scores
-score = Knn(query=vector).exp()
+score = Knn(query="machine learning").exp()
 
 # Logarithm - compresses score range
 # Add constant to avoid log(0)
-compressed = (Knn(query=vector) + 1).log()
+compressed = (Knn(query="deep learning") + 1).log()
 
 # Absolute value - useful for difference calculations
-diff = abs(Knn(query=v1) - Knn(query=v2))
+diff = abs(Knn(query="neural networks") - Knn(query="machine learning"))
 
 # Clamping scores to a range
-score = Knn(query=vector)
+score = Knn(query="artificial intelligence")
 clamped = score.min(0.0).max(1.0)  # Clamp to [0, 1]
 
 # Ensuring non-negative scores
-positive_only = Knn(query=vector).min(0.0)
+positive_only = Knn(query="quantum computing").min(0.0)
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
 // Exponential - amplifies differences between scores
-const score = Knn({ query: vector }).exp();
+const score = Knn({ query: "machine learning" }).exp();
 
 // Logarithm - compresses score range
 // Add constant to avoid log(0)
-const compressed = Knn({ query: vector }).add(1).log();
+const compressed = Knn({ query: "deep learning" }).add(1).log();
 
 // Absolute value - useful for difference calculations
-const diff = Knn({ query: v1 }).subtract(Knn({ query: v2 })).abs();
+const diff = Knn({ query: "neural networks" }).subtract(Knn({ query: "machine learning" })).abs();
 
 // Clamping scores to a range
-const score2 = Knn({ query: vector });
+const score2 = Knn({ query: "artificial intelligence" });
 const clamped = score2.min(0.0).max(1.0);  // Clamp to [0, 1]
 
 // Ensuring non-negative scores
-const positiveOnly = Knn({ query: vector }).min(0.0);
+const positiveOnly = Knn({ query: "quantum computing" }).min(0.0);
 ```
 {% /Tab %}
 
@@ -411,18 +412,18 @@ The `Val` class represents constant values in ranking expressions. Numbers are a
 from chromadb import Val
 
 # Automatic conversion (these are equivalent)
-score1 = Knn(query=vector) * 0.5
-score2 = Knn(query=vector) * Val(0.5)
+score1 = Knn(query="machine learning") * 0.5
+score2 = Knn(query="machine learning") * Val(0.5)
 
 # Explicit Val for named constants
 baseline = Val(0.1)
 boost_factor = Val(2.0)
-final_score = (Knn(query=vector) + baseline) * boost_factor
+final_score = (Knn(query="artificial intelligence") + baseline) * boost_factor
 
 # Using Val in complex expressions
 threshold = Val(0.8)
 penalty = Val(0.5)
-adjusted = Knn(query=vector).max(threshold) - penalty
+adjusted = Knn(query="deep learning").max(threshold) - penalty
 ```
 {% /Tab %}
 
@@ -431,18 +432,18 @@ adjusted = Knn(query=vector).max(threshold) - penalty
 import { Val, Knn } from 'chromadb';
 
 // Automatic conversion (these are equivalent)
-const score1 = Knn({ query: vector }).multiply(0.5);
-const score2 = Knn({ query: vector }).multiply(Val(0.5));
+const score1 = Knn({ query: "machine learning" }).multiply(0.5);
+const score2 = Knn({ query: "machine learning" }).multiply(Val(0.5));
 
 // Explicit Val for named constants
 const baseline = Val(0.1);
 const boostFactor = Val(2.0);
-const finalScore = Knn({ query: vector }).add(baseline).multiply(boostFactor);
+const finalScore = Knn({ query: "artificial intelligence" }).add(baseline).multiply(boostFactor);
 
 // Using Val in complex expressions
 const threshold = Val(0.8);
 const penalty = Val(0.5);
-const adjusted = Knn({ query: vector }).max(threshold).subtract(penalty);
+const adjusted = Knn({ query: "deep learning" }).max(threshold).subtract(penalty);
 ```
 {% /Tab %}
 
@@ -456,18 +457,18 @@ You can combine multiple Knn searches using arithmetic operations for custom sco
 
 {% Tab label="python" %}
 ```python
-# Linear combination - weighted average of different embeddings
-text_score = Knn(query=text_vector)
-title_score = Knn(query=title_vector, key="title_embedding")
-combined = text_score * 0.8 + title_score * 0.2
+# Linear combination - weighted average of different searches
+dense_score = Knn(query="machine learning applications")
+sparse_score = Knn(query="machine learning applications", key="sparse_embedding")
+combined = dense_score * 0.8 + sparse_score * 0.2
 
-# Multi-modal search - image and text
-image_score = Knn(query=image_vector, key="image_embedding")
-text_score = Knn(query=text_vector)
-multi_modal = image_score * 0.4 + text_score * 0.6
+# Multi-query search - combining different perspectives
+general_score = Knn(query="artificial intelligence overview")
+specific_score = Knn(query="neural network architectures")
+multi_query = general_score * 0.4 + specific_score * 0.6
 
-# Boosting with metadata
-base_score = Knn(query=vector)
+# Boosting with constant
+base_score = Knn(query="quantum computing")
 # Note: K("boost") would need to be part of select() to use in ranking
 final_score = base_score * (1 + Val(0.1))  # Fixed 10% boost
 ```
@@ -475,18 +476,18 @@ final_score = base_score * (1 + Val(0.1))  # Fixed 10% boost
 
 {% Tab label="typescript" %}
 ```typescript
-// Linear combination - weighted average of different embeddings
-const textScore = Knn({ query: textVector });
-const titleScore = Knn({ query: titleVector, key: "title_embedding" });
-const combined = textScore.multiply(0.8).add(titleScore.multiply(0.2));
+// Linear combination - weighted average of different searches
+const denseScore = Knn({ query: "machine learning applications" });
+const sparseScore = Knn({ query: "machine learning applications", key: "sparse_embedding" });
+const combined = denseScore.multiply(0.8).add(sparseScore.multiply(0.2));
 
-// Multi-modal search - image and text
-const imageScore = Knn({ query: imageVector, key: "image_embedding" });
-const textScore2 = Knn({ query: textVector });
-const multiModal = imageScore.multiply(0.4).add(textScore2.multiply(0.6));
+// Multi-query search - combining different perspectives
+const generalScore = Knn({ query: "artificial intelligence overview" });
+const specificScore = Knn({ query: "neural network architectures" });
+const multiQuery = generalScore.multiply(0.4).add(specificScore.multiply(0.6));
 
-// Boosting with metadata
-const baseScore = Knn({ query: vector });
+// Boosting with constant
+const baseScore = Knn({ query: "quantum computing" });
 // Note: K("boost") would need to be part of select() to use in ranking
 const finalScore = baseScore.multiply(Val(1).add(Val(0.1)));  // Fixed 10% boost
 ```
@@ -522,9 +523,9 @@ You can also construct ranking expressions using dictionary syntax. This is usef
 # Knn as dictionary
 rank_dict = {
     "$knn": {
-        "query": [0.1, 0.2, 0.3],
+        "query": "machine learning research",
         "key": "#embedding",  # Optional, defaults to "#embedding"
-        "limit": 128,         # Optional, defaults to 128
+        "limit": 100,         # Optional, defaults to 16
         "return_rank": False  # Optional, defaults to False
     }
 }
@@ -535,31 +536,31 @@ const_dict = {"$val": 0.5}
 # Arithmetic operations
 sum_dict = {
     "$sum": [
-        {"$knn": {"query": [0.1, 0.2, 0.3]}},
+        {"$knn": {"query": "deep learning"}},
         {"$val": 0.5}
     ]
-}  # Same as Knn(query=[0.1, 0.2, 0.3]) + 0.5
+}  # Same as Knn(query="deep learning") + 0.5
 
 mul_dict = {
     "$mul": [
-        {"$knn": {"query": [0.1, 0.2, 0.3]}},
+        {"$knn": {"query": "neural networks"}},
         {"$val": 0.8}
     ]
-}  # Same as Knn(query=[0.1, 0.2, 0.3]) * 0.8
+}  # Same as Knn(query="neural networks") * 0.8
 
 # Complex expression
 weighted_combo = {
     "$sum": [
         {"$mul": [
-            {"$knn": {"query": text_vector}},
+            {"$knn": {"query": "machine learning"}},
             {"$val": 0.7}
         ]},
         {"$mul": [
-            {"$knn": {"query": image_vector, "key": "image_embedding"}},
+            {"$knn": {"query": "machine learning", "key": "sparse_embedding"}},
             {"$val": 0.3}
         ]}
     ]
-}  # Same as Knn(query=text_vector) * 0.7 + Knn(query=image_vector, key="image_embedding") * 0.3
+}  # Same as Knn(query="machine learning") * 0.7 + Knn(query="machine learning", key="sparse_embedding") * 0.3
 
 # Use in Search
 search = Search(rank=rank_dict)
@@ -571,9 +572,9 @@ search = Search(rank=rank_dict)
 // Knn as dictionary
 const rankDict = {
   $knn: {
-    query: [0.1, 0.2, 0.3],
+    query: "machine learning research",
     key: "#embedding",  // Optional, defaults to "#embedding"
-    limit: 128,         // Optional, defaults to 128
+    limit: 100,         // Optional, defaults to 16
     return_rank: false  // Optional, defaults to false
   }
 };
@@ -584,35 +585,35 @@ const constDict = { $val: 0.5 };
 // Arithmetic operations
 const sumDict = {
   $sum: [
-    { $knn: { query: [0.1, 0.2, 0.3] } },
+    { $knn: { query: "deep learning" } },
     { $val: 0.5 }
   ]
-};  // Same as Knn({ query: [0.1, 0.2, 0.3] }).add(0.5)
+};  // Same as Knn({ query: "deep learning" }).add(0.5)
 
 const mulDict = {
   $mul: [
-    { $knn: { query: [0.1, 0.2, 0.3] } },
+    { $knn: { query: "neural networks" } },
     { $val: 0.8 }
   ]
-};  // Same as Knn({ query: [0.1, 0.2, 0.3] }).multiply(0.8)
+};  // Same as Knn({ query: "neural networks" }).multiply(0.8)
 
 // Complex expression
 const weightedCombo = {
   $sum: [
     {
       $mul: [
-        { $knn: { query: textVector } },
+        { $knn: { query: "machine learning" } },
         { $val: 0.7 }
       ]
     },
     {
       $mul: [
-        { $knn: { query: imageVector, key: "image_embedding" } },
+        { $knn: { query: "machine learning", key: "sparse_embedding" } },
         { $val: 0.3 }
       ]
     }
   ]
-};  // Same as Knn({ query: textVector }).multiply(0.7).add(Knn({ query: imageVector, key: "image_embedding" }).multiply(0.3))
+};  // Same as Knn({ query: "machine learning" }).multiply(0.7).add(Knn({ query: "machine learning", key: "sparse_embedding" }).multiply(0.3))
 
 // Use in Search
 const search = new Search({ rank: rankDict });
@@ -661,14 +662,14 @@ Documents must appear in at least one `Knn`'s results to be candidates, AND must
 {% Tab label="python" %}
 ```python
 # Problem: Restrictive filtering with default=None
-rank = Knn(query=v1, limit=100) * 0.7 + Knn(query=v2, limit=100) * 0.3
+rank = Knn(query="machine learning", limit=100) * 0.7 + Knn(query="deep learning", limit=100) * 0.3
 # Both have default=None
 # Only documents in BOTH top-100 lists get scored
 
 # Solution: Set default values for more inclusive results
 rank = (
-    Knn(query=v1, limit=100, default=10.0) * 0.7 + 
-    Knn(query=v2, limit=100, default=10.0) * 0.3
+    Knn(query="machine learning", limit=100, default=10.0) * 0.7 + 
+    Knn(query="deep learning", limit=100, default=10.0) * 0.3
 )
 # Now documents in either top-100 list can be scored
 # Documents get default score (10.0) for Knn where they don't appear
@@ -678,14 +679,14 @@ rank = (
 {% Tab label="typescript" %}
 ```typescript
 // Problem: Restrictive filtering with default undefined
-const rank1 = Knn({ query: v1, limit: 100 }).multiply(0.7)
-  .add(Knn({ query: v2, limit: 100 }).multiply(0.3));
+const rank1 = Knn({ query: "machine learning", limit: 100 }).multiply(0.7)
+  .add(Knn({ query: "deep learning", limit: 100 }).multiply(0.3));
 // Both have default undefined
 // Only documents in BOTH top-100 lists get scored
 
 // Solution: Set default values for more inclusive results
-const rank2 = Knn({ query: v1, limit: 100, default: 10.0 }).multiply(0.7)
-  .add(Knn({ query: v2, limit: 100, default: 10.0 }).multiply(0.3));
+const rank2 = Knn({ query: "machine learning", limit: 100, default: 10.0 }).multiply(0.7)
+  .add(Knn({ query: "deep learning", limit: 100, default: 10.0 }).multiply(0.3));
 // Now documents in either top-100 list can be scored
 // Documents get default score (10.0) for Knn where they don't appear
 ```
@@ -724,20 +725,20 @@ Set `return_rank=True` when using Knn with RRF to get rank positions (0, 1, 2...
 {% Tab label="python" %}
 ```python
 # For regular scoring - use distances
-Knn(query=vector)  # Returns: 0.23, 0.45, 0.67...
+Knn(query="machine learning")  # Returns: 0.23, 0.45, 0.67...
 
 # For RRF - use rank positions
-Knn(query=vector, return_rank=True)  # Returns: 0, 1, 2...
+Knn(query="machine learning", return_rank=True)  # Returns: 0, 1, 2...
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
 // For regular scoring - use distances
-Knn({ query: vector });  // Returns: 0.23, 0.45, 0.67...
+Knn({ query: "machine learning" });  // Returns: 0.23, 0.45, 0.67...
 
 // For RRF - use rank positions
-Knn({ query: vector, returnRank: true });  // Returns: 0, 1, 2...
+Knn({ query: "machine learning", returnRank: true });  // Returns: 0, 1, 2...
 ```
 {% /Tab %}
 
@@ -751,7 +752,7 @@ The `limit` parameter in Knn controls how many candidates are considered, not th
 {% Tab label="python" %}
 ```python
 # Knn.limit - candidates to consider for scoring
-rank = Knn(query=vector, limit=1000)  # Score top 1000 candidates
+rank = Knn(query="artificial intelligence", limit=1000)  # Score top 1000 candidates
 
 # Search.limit - results to return
 search = Search().rank(rank).limit(10)  # Return top 10 results
@@ -761,7 +762,7 @@ search = Search().rank(rank).limit(10)  # Return top 10 results
 {% Tab label="typescript" %}
 ```typescript
 // Knn.limit - candidates to consider for scoring
-const rank = Knn({ query: vector, limit: 1000 });  // Score top 1000 candidates
+const rank = Knn({ query: "artificial intelligence", limit: 1000 });  // Score top 1000 candidates
 
 // Search.limit - results to return
 const search = new Search().rank(rank).limit(10);  // Return top 10 results
@@ -787,10 +788,10 @@ search = (Search()
         (K("category").is_in(["tech", "science"]))
     )
     .rank(
-        # Combine two embeddings with weights
+        # Combine two queries with weights
         (
-            Knn(query=content_vector) * 0.7 +
-            Knn(query=title_vector, key="title_embedding") * 0.3
+            Knn(query="latest AI research developments") * 0.7 +
+            Knn(query="artificial intelligence breakthroughs") * 0.3
         ).exp()  # Amplify score differences
         .min(0.0)  # Ensure non-negative
     )
@@ -822,9 +823,9 @@ const search = new Search()
       .and(K("category").isIn(["tech", "science"]))
   )
   .rank(
-    // Combine two embeddings with weights
-    Knn({ query: contentVector }).multiply(0.7)
-      .add(Knn({ query: titleVector, key: "title_embedding" }).multiply(0.3))
+    // Combine two queries with weights
+    Knn({ query: "latest AI research developments" }).multiply(0.7)
+      .add(Knn({ query: "artificial intelligence breakthroughs" }).multiply(0.3))
       .exp()  // Amplify score differences
       .min(0.0)  // Ensure non-negative
   )

@@ -11,61 +11,7 @@ Learn how to combine multiple ranking strategies using Reciprocal Rank Fusion (R
 
 Reciprocal Rank Fusion combines multiple rankings by using rank positions rather than raw scores. This makes it effective for merging rankings with different score scales.
 
-{% Tabs %}
-
-{% Tab label="python" %}
-```python
-from chromadb import Rrf, Knn
-
-# Basic RRF - equal weights for both rankings
-rrf = Rrf([
-    Knn(query=dense_vector, return_rank=True),
-    Knn(query=sparse_vector, key="sparse_embedding", return_rank=True)
-])
-
-# Weighted RRF - adjust importance of each ranking
-rrf = Rrf(
-    ranks=[
-        Knn(query=dense_vector, return_rank=True),
-        Knn(query=sparse_vector, key="sparse_embedding", return_rank=True)
-    ],
-    weights=[2.0, 1.0],  # Dense embedding 2x more important
-    k=60                 # Smoothing parameter (default: 60)
-)
-```
-{% /Tab %}
-
-{% Tab label="typescript" %}
-```typescript
-import { Rrf, Knn } from 'chromadb';
-
-// Basic RRF - equal weights for both rankings
-const rrf1 = Rrf({
-  ranks: [
-    Knn({ query: denseVector, returnRank: true }),
-    Knn({ query: sparseVector, key: "sparse_embedding", returnRank: true })
-  ]
-});
-
-// Weighted RRF - adjust importance of each ranking
-const rrf2 = Rrf({
-  ranks: [
-    Knn({ query: denseVector, returnRank: true }),
-    Knn({ query: sparseVector, key: "sparse_embedding", returnRank: true })
-  ],
-  weights: [2.0, 1.0],  // Dense embedding 2x more important
-  k: 60                 // Smoothing parameter (default: 60)
-});
-```
-{% /Tab %}
-
-{% /Tabs %}
-
-{% Note type="warning" %}
-All ranking expressions in RRF must have `return_rank=True`. This ensures they return rank positions (0, 1, 2...) instead of distances.
-{% /Note %}
-
-## How RRF Works
+### RRF Formula
 
 RRF combines rankings using the formula:
 
@@ -132,12 +78,12 @@ The score is negative because Chroma uses ascending order (lower scores = better
 ```python
 # RRF - works well with different scales
 rrf = Rrf([
-    Knn(query=dense_vec, return_rank=True),      # Distance scale: 0.1-2.0
-    Knn(query=sparse_vec, key="sparse_embedding", return_rank=True)  # Different scale: 0-100
+    Knn(query="machine learning", return_rank=True),      # Dense embeddings
+    Knn(query="machine learning", key="sparse_embedding", return_rank=True)  # Sparse embeddings
 ])
 
 # Linear combination - better when scales are similar
-linear = Knn(query=dense_vec) * 0.7 + Knn(query=other_dense, key="other") * 0.3
+linear = Knn(query="machine learning") * 0.7 + Knn(query="deep learning") * 0.3
 ```
 {% /Tab %}
 
@@ -146,14 +92,14 @@ linear = Knn(query=dense_vec) * 0.7 + Knn(query=other_dense, key="other") * 0.3
 // RRF - works well with different scales
 const rrf = Rrf({
   ranks: [
-    Knn({ query: denseVec, returnRank: true }),      // Distance scale: 0.1-2.0
-    Knn({ query: sparseVec, key: "sparse_embedding", returnRank: true })  // Different scale: 0-100
+    Knn({ query: "machine learning", returnRank: true }),      // Dense embeddings
+    Knn({ query: "machine learning", key: "sparse_embedding", returnRank: true })  // Sparse embeddings
   ]
 });
 
 // Linear combination - better when scales are similar
-const linear = Knn({ query: denseVec }).multiply(0.7)
-  .add(Knn({ query: otherDense, key: "other" }).multiply(0.3));
+const linear = Knn({ query: "machine learning" }).multiply(0.7)
+  .add(Knn({ query: "deep learning" }).multiply(0.3));
 ```
 {% /Tab %}
 
@@ -169,14 +115,14 @@ RRF requires rank positions (0, 1, 2...) not distance scores. Always set `return
 ```python
 # ✓ CORRECT - returns rank positions
 rrf = Rrf([
-    Knn(query=v1, return_rank=True),  # Returns: 0, 1, 2, 3...
-    Knn(query=v2, key="sparse_embedding", return_rank=True)
+    Knn(query="artificial intelligence", return_rank=True),  # Returns: 0, 1, 2, 3...
+    Knn(query="artificial intelligence", key="sparse_embedding", return_rank=True)
 ])
 
 # ✗ INCORRECT - returns distances
 rrf = Rrf([
-    Knn(query=v1),  # Returns: 0.23, 0.45, 0.67... (distances)
-    Knn(query=v2, key="sparse_embedding")
+    Knn(query="artificial intelligence"),  # Returns: 0.23, 0.45, 0.67... (distances)
+    Knn(query="artificial intelligence", key="sparse_embedding")
 ])
 # This will produce incorrect results!
 ```
@@ -187,16 +133,16 @@ rrf = Rrf([
 // ✓ CORRECT - returns rank positions
 const rrf1 = Rrf({
   ranks: [
-    Knn({ query: v1, returnRank: true }),  // Returns: 0, 1, 2, 3...
-    Knn({ query: v2, key: "sparse_embedding", returnRank: true })
+    Knn({ query: "artificial intelligence", returnRank: true }),  // Returns: 0, 1, 2, 3...
+    Knn({ query: "artificial intelligence", key: "sparse_embedding", returnRank: true })
   ]
 });
 
 // ✗ INCORRECT - returns distances
 const rrf2 = Rrf({
   ranks: [
-    Knn({ query: v1 }),  // Returns: 0.23, 0.45, 0.67... (distances)
-    Knn({ query: v2, key: "sparse_embedding" })
+    Knn({ query: "artificial intelligence" }),  // Returns: 0.23, 0.45, 0.67... (distances)
+    Knn({ query: "artificial intelligence", key: "sparse_embedding" })
   ]
 });
 // This will produce incorrect results!
@@ -213,15 +159,15 @@ const rrf2 = Rrf({
 ```python
 # Equal weights (default) - each ranking equally important
 rrf = Rrf([
-    Knn(query=dense_vec, return_rank=True),
-    Knn(query=sparse_vec, key="sparse_embedding", return_rank=True)
+    Knn(query="neural networks", return_rank=True),
+    Knn(query="neural networks", key="sparse_embedding", return_rank=True)
 ])  # Implicit weights: [1.0, 1.0]
 
 # Custom weights - adjust relative importance
 rrf = Rrf(
     ranks=[
-        Knn(query=dense_vec, return_rank=True),
-        Knn(query=sparse_vec, key="sparse_embedding", return_rank=True)
+        Knn(query="neural networks", return_rank=True),
+        Knn(query="neural networks", key="sparse_embedding", return_rank=True)
     ],
     weights=[3.0, 1.0]  # Dense 3x more important than sparse
 )
@@ -229,8 +175,8 @@ rrf = Rrf(
 # Normalized weights - ensures weights sum to 1.0
 rrf = Rrf(
     ranks=[
-        Knn(query=dense_vec, return_rank=True),
-        Knn(query=sparse_vec, key="sparse_embedding", return_rank=True)
+        Knn(query="neural networks", return_rank=True),
+        Knn(query="neural networks", key="sparse_embedding", return_rank=True)
     ],
     weights=[75, 25],     # Will be normalized to [0.75, 0.25]
     normalize=True
@@ -243,16 +189,16 @@ rrf = Rrf(
 // Equal weights (default) - each ranking equally important
 const rrf1 = Rrf({
   ranks: [
-    Knn({ query: denseVec, returnRank: true }),
-    Knn({ query: sparseVec, key: "sparse_embedding", returnRank: true })
+    Knn({ query: "neural networks", returnRank: true }),
+    Knn({ query: "neural networks", key: "sparse_embedding", returnRank: true })
   ]
 });  // Implicit weights: [1.0, 1.0]
 
 // Custom weights - adjust relative importance
 const rrf2 = Rrf({
   ranks: [
-    Knn({ query: denseVec, returnRank: true }),
-    Knn({ query: sparseVec, key: "sparse_embedding", returnRank: true })
+    Knn({ query: "neural networks", returnRank: true }),
+    Knn({ query: "neural networks", key: "sparse_embedding", returnRank: true })
   ],
   weights: [3.0, 1.0]  // Dense 3x more important than sparse
 });
@@ -260,8 +206,8 @@ const rrf2 = Rrf({
 // Normalized weights - ensures weights sum to 1.0
 const rrf3 = Rrf({
   ranks: [
-    Knn({ query: denseVec, returnRank: true }),
-    Knn({ query: sparseVec, key: "sparse_embedding", returnRank: true })
+    Knn({ query: "neural networks", returnRank: true }),
+    Knn({ query: "neural networks", key: "sparse_embedding", returnRank: true })
   ],
   weights: [75, 25],     // Will be normalized to [0.75, 0.25]
   normalize: true
@@ -330,17 +276,17 @@ The most common RRF use case is combining dense semantic embeddings with sparse 
 ```python
 from chromadb import Search, K, Knn, Rrf
 
-# Dense semantic embeddings (e.g., from sentence-transformers)
+# Dense semantic embeddings
 dense_rank = Knn(
-    query=dense_vector,        # Your dense embedding
+    query="machine learning research",  # Text query for dense embeddings
     key="#embedding",          # Default embedding field
     return_rank=True,
     limit=200                  # Consider top 200 candidates
 )
 
-# Sparse keyword embeddings (e.g., BM25 or SPLADE)
+# Sparse keyword embeddings
 sparse_rank = Knn(
-    query=sparse_vector,       # {"indices": [...], "values": [...]}
+    query="machine learning research",  # Text query for sparse embeddings
     key="sparse_embedding",    # Metadata field for sparse vectors
     return_rank=True,
     limit=200
@@ -369,17 +315,17 @@ results = collection.search(search)
 ```typescript
 import { Search, K, Knn, Rrf } from 'chromadb';
 
-// Dense semantic embeddings (e.g., from sentence-transformers)
+// Dense semantic embeddings
 const denseRank = Knn({
-  query: denseVector,        // Your dense embedding
+  query: "machine learning research",  // Text query for dense embeddings
   key: "#embedding",         // Default embedding field
   returnRank: true,
   limit: 200                 // Consider top 200 candidates
 });
 
-// Sparse keyword embeddings (e.g., BM25 or SPLADE)
+// Sparse keyword embeddings
 const sparseRank = Knn({
-  query: sparseVector,       // {indices: [...], values: [...]}
+  query: "machine learning research",  // Text query for sparse embeddings
   key: "sparse_embedding",   // Metadata field for sparse vectors
   returnRank: true,
   limit: 200
@@ -407,28 +353,30 @@ const results = await collection.search(search);
 
 ## Edge Cases and Important Behavior
 
-### Empty Results from Component Rankings
-If a component Knn returns no results (e.g., due to filtering), RRF handles it gracefully - documents from other rankings are still scored.
+### Component Ranking Behavior
+Each Knn component in RRF operates on the documents that pass the filter. The number of results from each component is the minimum of its `limit` parameter and the number of filtered documents. RRF handles varying result counts gracefully - documents from any ranking are scored.
 
 {% Tabs %}
 
 {% Tab label="python" %}
 ```python
-# If sparse_rank returns no results, dense_rank results are still used
+# Each Knn operates on filtered documents
+# Results per Knn = min(limit, number of documents passing filter)
 rrf = Rrf([
-    Knn(query=dense_vec, return_rank=True, limit=100),
-    Knn(query=sparse_vec, key="sparse_embedding", return_rank=True, limit=100)
+    Knn(query="quantum computing", return_rank=True, limit=100),
+    Knn(query="quantum computing", key="sparse_embedding", return_rank=True, limit=100)
 ])
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-// If sparseRank returns no results, denseRank results are still used
+// Each Knn operates on filtered documents
+// Results per Knn = min(limit, number of documents passing filter)
 const rrf = Rrf({
   ranks: [
-    Knn({ query: denseVec, returnRank: true, limit: 100 }),
-    Knn({ query: sparseVec, key: "sparse_embedding", returnRank: true, limit: 100 })
+    Knn({ query: "quantum computing", returnRank: true, limit: 100 }),
+    Knn({ query: "quantum computing", key: "sparse_embedding", returnRank: true, limit: 100 })
   ]
 });
 ```
@@ -450,14 +398,14 @@ Documents must appear in at least one component ranking to be scored. To include
 ```python
 # Without default: only documents in BOTH rankings are scored
 rrf = Rrf([
-    Knn(query=dense_vec, return_rank=True, limit=100),
-    Knn(query=sparse_vec, key="sparse_embedding", return_rank=True, limit=100)
+    Knn(query="deep learning", return_rank=True, limit=100),
+    Knn(query="deep learning", key="sparse_embedding", return_rank=True, limit=100)
 ])
 
 # With default: documents in EITHER ranking can be scored
 rrf = Rrf([
-    Knn(query=dense_vec, return_rank=True, limit=100, default=1000),
-    Knn(query=sparse_vec, key="sparse_embedding", return_rank=True, limit=100, default=1000)
+    Knn(query="deep learning", return_rank=True, limit=100, default=1000),
+    Knn(query="deep learning", key="sparse_embedding", return_rank=True, limit=100, default=1000)
 ])
 # Documents missing from one ranking get default rank of 1000
 ```
@@ -468,16 +416,16 @@ rrf = Rrf([
 // Without default: only documents in BOTH rankings are scored
 const rrf1 = Rrf({
   ranks: [
-    Knn({ query: denseVec, returnRank: true, limit: 100 }),
-    Knn({ query: sparseVec, key: "sparse_embedding", returnRank: true, limit: 100 })
+    Knn({ query: "deep learning", returnRank: true, limit: 100 }),
+    Knn({ query: "deep learning", key: "sparse_embedding", returnRank: true, limit: 100 })
   ]
 });
 
 // With default: documents in EITHER ranking can be scored
 const rrf2 = Rrf({
   ranks: [
-    Knn({ query: denseVec, returnRank: true, limit: 100, default: 1000 }),
-    Knn({ query: sparseVec, key: "sparse_embedding", returnRank: true, limit: 100, default: 1000 })
+    Knn({ query: "deep learning", returnRank: true, limit: 100, default: 1000 }),
+    Knn({ query: "deep learning", key: "sparse_embedding", returnRank: true, limit: 100, default: 1000 })
   ]
 });
 // Documents missing from one ranking get default rank of 1000
@@ -538,18 +486,11 @@ Here's a practical example showing RRF with filtering and result processing:
 ```python
 from chromadb import Search, K, Knn, Rrf
 
-# Prepare your vectors
-dense_embedding = model.encode("machine learning applications")  # Your dense model
-sparse_embedding = {
-    "indices": [42, 128, 512, 1024],
-    "values": [0.8, 0.6, 0.4, 0.3]
-}  # Your sparse model output
-
-# Create RRF ranking
+# Create RRF ranking with text query
 hybrid_rank = Rrf(
     ranks=[
-        Knn(query=dense_embedding, return_rank=True, limit=300),
-        Knn(query=sparse_embedding, key="sparse_embedding", return_rank=True, limit=300)
+        Knn(query="machine learning applications", return_rank=True, limit=300),
+        Knn(query="machine learning applications", key="sparse_embedding", return_rank=True, limit=300)
     ],
     weights=[2.0, 1.0],  # Dense 2x more important
     k=60
@@ -593,18 +534,11 @@ Example output:
 ```typescript
 import { Search, K, Knn, Rrf } from 'chromadb';
 
-// Prepare your vectors
-const denseEmbedding = model.encode("machine learning applications");  // Your dense model
-const sparseEmbedding = {
-  indices: [42, 128, 512, 1024],
-  values: [0.8, 0.6, 0.4, 0.3]
-};  // Your sparse model output
-
-// Create RRF ranking
+// Create RRF ranking with text query
 const hybridRank = Rrf({
   ranks: [
-    Knn({ query: denseEmbedding, returnRank: true, limit: 300 }),
-    Knn({ query: sparseEmbedding, key: "sparse_embedding", returnRank: true, limit: 300 })
+    Knn({ query: "machine learning applications", returnRank: true, limit: 300 }),
+    Knn({ query: "machine learning applications", key: "sparse_embedding", returnRank: true, limit: 300 })
   ],
   weights: [2.0, 1.0],  // Dense 2x more important
   k: 60

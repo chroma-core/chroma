@@ -22,14 +22,14 @@ searches = [
     # Search 1: Recent articles
     (Search()
         .where((K("type") == "article") & (K("year") >= 2024))
-        .rank(Knn(query=query_vector_1))
+        .rank(Knn(query="machine learning applications"))
         .limit(5)
         .select(K.DOCUMENT, K.SCORE, "title")),
     
     # Search 2: Papers by specific authors
     (Search()
         .where(K("author").is_in(["Smith", "Jones"]))
-        .rank(Knn(query=query_vector_2))
+        .rank(Knn(query="neural network research"))
         .limit(10)
         .select(K.DOCUMENT, K.SCORE, "title", "author")),
     
@@ -42,11 +42,6 @@ searches = [
 
 # Execute all searches in one request
 results = collection.search(searches)
-
-# Access results by index
-first_search_ids = results.ids[0]     # IDs from Search 1
-second_search_ids = results.ids[1]    # IDs from Search 2
-third_search_ids = results.ids[2]     # IDs from Search 3
 ```
 {% /Tab %}
 
@@ -59,14 +54,14 @@ const searches = [
   // Search 1: Recent articles
   new Search()
     .where(K("type").eq("article").and(K("year").gte(2024)))
-    .rank(Knn({ query: queryVector1 }))
+    .rank(Knn({ query: "machine learning applications" }))
     .limit(5)
     .select(K.DOCUMENT, K.SCORE, "title"),
   
   // Search 2: Papers by specific authors
   new Search()
     .where(K("author").isIn(["Smith", "Jones"]))
-    .rank(Knn({ query: queryVector2 }))
+    .rank(Knn({ query: "neural network research" }))
     .limit(10)
     .select(K.DOCUMENT, K.SCORE, "title", "author"),
   
@@ -79,11 +74,6 @@ const searches = [
 
 // Execute all searches in one request
 const results = await collection.search(searches);
-
-// Access results by index
-const firstSearchIds = results.ids[0];     // IDs from Search 1
-const secondSearchIds = results.ids[1];    // IDs from Search 2
-const thirdSearchIds = results.ids[2];     // IDs from Search 3
 ```
 {% /Tab %}
 
@@ -99,16 +89,24 @@ const thirdSearchIds = results.ids[2];     // IDs from Search 3
 
 Results from batch operations maintain the same order as your searches. Each search's results are accessed by its index.
 
+### Result Structure
+
+Each field in the SearchResult maintains a list where each index corresponds to a search:
+
+- `results.ids[i]` - IDs from search at index i
+- `results.documents[i]` - Documents from search at index i (if selected)
+- `results.embeddings[i]` - Embeddings from search at index i (if selected)
+- `results.metadatas[i]` - Metadata from search at index i (if selected)
+- `results.scores[i]` - Scores from search at index i (if ranking was used)
+
 {% Tabs %}
 
 {% Tab label="python" %}
 ```python
-# Single search returns single result set
-result = collection.search(single_search)
-ids = result.ids[0]  # Single list of IDs
-
 # Batch search returns multiple result sets
 results = collection.search([search1, search2, search3])
+
+# Access results by index
 ids_1 = results.ids[0]    # IDs from search1
 ids_2 = results.ids[1]    # IDs from search2
 ids_3 = results.ids[2]    # IDs from search3
@@ -129,12 +127,10 @@ for search_index, rows in enumerate(all_rows):
 
 {% Tab label="typescript" %}
 ```typescript
-// Single search returns single result set
-const result = await collection.search(singleSearch);
-const ids = result.ids[0];  // Single list of IDs
-
 // Batch search returns multiple result sets
 const results = await collection.search([search1, search2, search3]);
+
+// Access results by index
 const ids1 = results.ids[0];    // IDs from search1
 const ids2 = results.ids[1];    // IDs from search2
 const ids3 = results.ids[2];    // IDs from search3
@@ -157,16 +153,6 @@ for (const [searchIndex, rows] of allRows.entries()) {
 
 {% /Tabs %}
 
-## Result Structure
-
-Each field in the SearchResult maintains a list where each index corresponds to a search:
-
-- `results.ids[i]` - IDs from search at index i
-- `results.documents[i]` - Documents from search at index i (if selected)
-- `results.embeddings[i]` - Embeddings from search at index i (if selected)
-- `results.metadatas[i]` - Metadata from search at index i (if selected)
-- `results.scores[i]` - Scores from search at index i (if ranking was used)
-
 
 
 ## Common Use Cases
@@ -178,8 +164,12 @@ Test multiple query variations to find the most relevant results.
 
 {% Tab label="python" %}
 ```python
-# Compare different query embeddings
-query_variations = [original_query, expanded_query, refined_query]
+# Compare different query variations
+query_variations = [
+    "machine learning",
+    "machine learning algorithms and applications", 
+    "modern machine learning techniques"
+]
 
 searches = [
     Search()
@@ -201,8 +191,12 @@ for i, query_name in enumerate(["Original", "Expanded", "Refined"]):
 
 {% Tab label="typescript" %}
 ```typescript
-// Compare different query embeddings
-const queryVariations = [originalQuery, expandedQuery, refinedQuery];
+// Compare different query variations
+const queryVariations = [
+  "machine learning",
+  "machine learning algorithms and applications",
+  "modern machine learning techniques"
+];
 
 const searches = queryVariations.map(q =>
   new Search()
@@ -236,21 +230,21 @@ Compare different ranking approaches on the same query.
 searches = [
     # Strategy A: Pure KNN
     Search()
-        .rank(Knn(query=query_vector))
+        .rank(Knn(query="artificial intelligence"))
         .limit(10)
         .select(K.SCORE, "title"),
     
     # Strategy B: Weighted KNN
     Search()
-        .rank(Knn(query=query_vector) * 0.8 + 0.2)
+        .rank(Knn(query="artificial intelligence") * 0.8 + 0.2)
         .limit(10)
         .select(K.SCORE, "title"),
     
     # Strategy C: Hybrid with RRF
     Search()
         .rank(Rrf([
-            Knn(query=query_vector, return_rank=True),
-            Knn(query=sparse_vector, key="sparse_embedding", return_rank=True)
+            Knn(query="artificial intelligence", return_rank=True),
+            Knn(query="artificial intelligence", key="sparse_embedding", return_rank=True)
         ]))
         .limit(10)
         .select(K.SCORE, "title")
@@ -266,13 +260,13 @@ results = collection.search(searches)
 const searches = [
   // Strategy A: Pure KNN
   new Search()
-    .rank(Knn({ query: queryVector }))
+    .rank(Knn({ query: "artificial intelligence" }))
     .limit(10)
     .select(K.SCORE, "title"),
   
   // Strategy B: Weighted KNN
   new Search()
-    .rank(Knn({ query: queryVector }).multiply(0.8).add(0.2))
+    .rank(Knn({ query: "artificial intelligence" }).multiply(0.8).add(0.2))
     .limit(10)
     .select(K.SCORE, "title"),
   
@@ -280,8 +274,8 @@ const searches = [
   new Search()
     .rank(Rrf({
       ranks: [
-        Knn({ query: queryVector, returnRank: true }),
-        Knn({ query: sparseVector, key: "sparse_embedding", returnRank: true })
+        Knn({ query: "artificial intelligence", returnRank: true }),
+        Knn({ query: "artificial intelligence", key: "sparse_embedding", returnRank: true })
       ]
     }))
     .limit(10)
@@ -307,7 +301,7 @@ categories = ["technology", "science", "business"]
 searches = [
     Search()
         .where(K("category") == category)
-        .rank(Knn(query=query_vector))
+        .rank(Knn(query="artificial intelligence"))
         .limit(5)
         .select("title", "category", K.SCORE)
     for category in categories
@@ -325,7 +319,7 @@ const categories = ["technology", "science", "business"];
 const searches = categories.map(category =>
   new Search()
     .where(K("category").eq(category))
-    .rank(Knn({ query: queryVector }))
+    .rank(Knn({ query: "artificial intelligence" }))
     .limit(5)
     .select("title", "category", K.SCORE)
 );
@@ -428,14 +422,14 @@ Here's a practical example using batch operations to find and compare relevant d
 ```python
 from chromadb import Search, K, Knn
 
-def compare_category_relevance(collection, query_vector, categories):
+def compare_category_relevance(collection, query_text, categories):
     """Find top results in each category for the same query"""
     
     # Build searches for each category
     searches = [
         Search()
             .where(K("category") == cat)
-            .rank(Knn(query=query_vector))
+            .rank(Knn(query=query_text))
             .limit(3)
             .select(K.DOCUMENT, K.SCORE, "title", "category")
         for cat in categories
@@ -465,9 +459,9 @@ def compare_category_relevance(collection, query_vector, categories):
 
 # Usage
 categories = ["technology", "science", "business", "health"]
-query_vector = embedding_model.encode("artificial intelligence applications")
+query_text = "artificial intelligence applications"
 
-compare_category_relevance(collection, query_vector, categories)
+compare_category_relevance(collection, query_text, categories)
 ```
 
 Example output:
@@ -493,7 +487,7 @@ import { Search, K, Knn } from 'chromadb';
 
 async function compareCategoryRelevance(
   collection: any,
-  queryVector: number[],
+  queryText: string,
   categories: string[]
 ) {
   // Find top results in each category for the same query
@@ -502,7 +496,7 @@ async function compareCategoryRelevance(
   const searches = categories.map(cat =>
     new Search()
       .where(K("category").eq(cat))
-      .rank(Knn({ query: queryVector }))
+      .rank(Knn({ query: queryText }))
       .limit(3)
       .select(K.DOCUMENT, K.SCORE, "title", "category")
   );
@@ -535,9 +529,9 @@ async function compareCategoryRelevance(
 
 // Usage
 const categories = ["technology", "science", "business", "health"];
-const queryVector = embeddingModel.encode("artificial intelligence applications");
+const queryText = "artificial intelligence applications";
 
-await compareCategoryRelevance(collection, queryVector, categories);
+await compareCategoryRelevance(collection, queryText, categories);
 ```
 
 Example output:

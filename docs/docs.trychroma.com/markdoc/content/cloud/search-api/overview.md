@@ -19,18 +19,21 @@ The Search API is currently in beta and available exclusively for Chroma Cloud u
 ```python
 from chromadb import Search, K, Knn
 
-# Simple vector search with metadata filtering
-query_embedding = [0.25, -0.15, 0.33, ...]  # Your query vector
-# TODO: When collection schema is ready, you'll be able to pass text directly:
-# .rank(Knn(query="What are the latest advances in quantum computing?"))
-
-result = collection.search(
+# Build the base search with filtering
+search = (
     Search()
     .where(K("category") == "science")
-    .rank(Knn(query=query_embedding))
     .limit(10)
     .select(K.DOCUMENT, K.SCORE)
 )
+
+# Option 1: Pass pre-computed embeddings directly
+query_embedding = [0.25, -0.15, 0.33, ...]
+result = collection.search(search.rank(Knn(query=query_embedding)))
+
+# Option 2: Pass text query (embedding created using collection's schema configuration)
+query_text = "What are the latest advances in quantum computing?"
+result = collection.search(search.rank(Knn(query=query_text)))
 ```
 {% /Tab %}
 
@@ -38,22 +41,27 @@ result = collection.search(
 ```typescript
 import { Search, K, Knn } from 'chromadb';
 
-// Simple vector search with metadata filtering
-const queryEmbedding = [0.25, -0.15, 0.33, ...];  // Your query vector
-// TODO: When collection schema is ready, you'll be able to pass text directly:
-// .rank(Knn({ query: "What are the latest advances in quantum computing?" }))
+// Build the base search with filtering
+const search = new Search()
+  .where(K("category").eq("science"))
+  .limit(10)
+  .select(K.DOCUMENT, K.SCORE);
 
-const result = await collection.search(
-  new Search()
-    .where(K("category").eq("science"))
-    .rank(Knn({ query: queryEmbedding }))
-    .limit(10)
-    .select(K.DOCUMENT, K.SCORE)
-);
+// Option 1: Pass pre-computed embeddings directly
+const queryEmbedding = [0.25, -0.15, 0.33, ...];
+const result = await collection.search(search.rank(Knn({ query: queryEmbedding })));
+
+// Option 2: Pass text query (embedding created using collection's schema configuration)
+const queryText = "What are the latest advances in quantum computing?";
+result = await collection.search(search.rank(Knn({ query: queryText })));
 ```
 {% /Tab %}
 
 {% /Tabs %}
+
+{% Note type="info" %}
+When passing text to `Knn()`, the embedding is automatically created using the collection's schema configuration. By default, `Knn` uses the `#embedding` key, which corresponds to the default vector index. You can specify a different key with the `key` parameter (e.g., `Knn(query=query_text, key="my_custom_embedding")`). If the specified key doesn't have an embedding configuration in the collection schema, an error will be thrown.
+{% /Note %}
 
 ## What is the Search API?
 
@@ -75,7 +83,7 @@ The Search API provides a powerful, unified interface for all search operations 
 | Custom ranking expressions | ❌ | ❌ | ✅ |
 | Batch operations | ⚠️ Embedding only | ❌ | ✅ |
 | Field selection | ⚠️ Coarse | ⚠️ Coarse | ✅ |
-| Pagination | ✅ | ✅ | ✅ |
+| Pagination | ❌ | ✅ | ✅ |
 | Type safety | ⚠️ Partial | ⚠️ Partial | ✅ |
 
 ## Availability
@@ -129,18 +137,21 @@ client = chromadb.CloudClient(
 )
 collection = client.get_collection("articles")
 
-# Search for science articles similar to a query
-query_embedding = [0.12, -0.34, 0.56, ...]  # Your embedding vector
-# TODO: When collection schema is ready, you'll be able to pass text directly:
-# .rank(Knn(query="recent quantum computing breakthroughs"))
-
-result = collection.search(
+# Build the base search query
+search = (
     Search()
     .where((K("category") == "science") & (K("year") >= 2020))
-    .rank(Knn(query=query_embedding))
     .limit(5)
     .select(K.DOCUMENT, K.SCORE, "title", "author")
 )
+
+# Option 1: Search with pre-computed embeddings
+query_embedding = [0.12, -0.34, 0.56, ...]
+result = collection.search(search.rank(Knn(query=query_embedding)))
+
+# Option 2: Search with text query (embedding created automatically)
+query_text = "recent quantum computing breakthroughs"
+result = collection.search(search.rank(Knn(query=query_text)))
 
 # Access results using the convenient rows() method
 # Note: Results are ordered by score (ascending - lower is better)
@@ -181,18 +192,19 @@ const client = new ChromaClient({
 });
 const collection = await client.getCollection({ name: "articles" });
 
-// Search for science articles similar to a query
-const queryEmbedding = [0.12, -0.34, 0.56, ...];  // Your embedding vector
-// TODO: When collection schema is ready, you'll be able to pass text directly:
-// .rank(Knn({ query: "recent quantum computing breakthroughs" }))
+// Build the base search query
+const search = new Search()
+  .where(K("category").eq("science").and(K("year").gte(2020)))
+  .limit(5)
+  .select(K.DOCUMENT, K.SCORE, "title", "author");
 
-const result = await collection.search(
-  new Search()
-    .where(K("category").eq("science").and(K("year").gte(2020)))
-    .rank(Knn({ query: queryEmbedding }))
-    .limit(5)
-    .select(K.DOCUMENT, K.SCORE, "title", "author")
-);
+// Option 1: Search with pre-computed embeddings
+const queryEmbedding = [0.12, -0.34, 0.56, ...];
+const result = await collection.search(search.rank(Knn({ query: queryEmbedding })));
+
+// Option 2: Search with text query (embedding created automatically)
+const queryText = "recent quantum computing breakthroughs";
+result = await collection.search(search.rank(Knn({ query: queryText })));
 
 // Access results using the convenient rows() method
 // Note: Results are ordered by score (ascending - lower is better)

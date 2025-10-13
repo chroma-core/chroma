@@ -256,11 +256,11 @@ You can also use dictionary syntax instead of K expressions. This is useful when
 {"category": {"$in": ["tech", "ai"]}}       # Same as K("category").is_in(["tech", "ai"])
 {"status": {"$nin": ["draft", "deleted"]}}  # Same as K("status").not_in(["draft", "deleted"])
 
-# String operators
+# String operators (currently K.DOCUMENT only)
 {"#document": {"$contains": "API"}}         # Same as K.DOCUMENT.contains("API")
-{"title": {"$not_contains": "draft"}}       # Same as K("title").not_contains("draft")
-{"email": {"$regex": ".*@example\\.com"}}   # Same as K("email").regex(".*@example\\.com")
-{"version": {"$not_regex": "^beta"}}        # Same as K("version").not_regex("^beta")
+# {"title": {"$not_contains": "draft"}}     # Not yet supported - metadata fields
+# {"email": {"$regex": ".*@example\\.com"}} # Not yet supported - metadata fields
+# {"version": {"$not_regex": "^beta"}}      # Not yet supported - metadata fields
 
 # Logical operators
 {"$and": [
@@ -307,11 +307,11 @@ You can also use dictionary syntax instead of K expressions. This is useful when
 { category: { $in: ["tech", "ai"] } }       // Same as K("category").isIn(["tech", "ai"])
 { status: { $nin: ["draft", "deleted"] } }  // Same as K("status").notIn(["draft", "deleted"])
 
-// String operators
+// String operators (currently K.DOCUMENT only)
 { "#document": { $contains: "API" } }       // Same as K.DOCUMENT.contains("API")
-{ title: { $not_contains: "draft" } }       // Same as K("title").notContains("draft")
-{ email: { $regex: ".*@example\\.com" } }   // Same as K("email").regex(".*@example\\.com")
-{ version: { $not_regex: "^beta" } }        // Same as K("version").notRegex("^beta")
+// { title: { $not_contains: "draft" } }    // Not yet supported - metadata fields
+// { email: { $regex: ".*@example\\.com" } } // Not yet supported - metadata fields
+// { version: { $not_regex: "^beta" } }     // Not yet supported - metadata fields
 
 // Logical operators
 {
@@ -548,7 +548,7 @@ String pattern matching currently only works on `K.DOCUMENT`. Support for metada
 {% /Note %}
 
 {% Note type="info" %}
-TODO: When collection schema is supported, users will be able to opt-in to enable additional indexes for string pattern matching on metadata fields.
+String pattern matching on metadata fields is not currently supported. Full support is coming in a future release, which will allow users to opt-in to additional indexes for string pattern matching on specific metadata fields.
 {% /Note %}
 
 ## Complete Example
@@ -579,7 +579,7 @@ search = (Search()
         ) &
         (K("year") >= 2023)
     )
-    .rank(Knn(query=embedding_vector))
+    .rank(Knn(query="latest AI research developments"))
     .limit(10)
     .select(K.DOCUMENT, "title", "author", "year")
 )
@@ -610,7 +610,7 @@ const search = new Search()
       )
       .and(K("year").gte(2023))
   )
-  .rank(Knn({ query: embeddingVector }))
+  .rank(Knn({ query: "latest AI research developments" }))
   .limit(10)
   .select(K.DOCUMENT, "title", "author", "year");
 
