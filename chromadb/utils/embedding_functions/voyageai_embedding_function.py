@@ -116,6 +116,10 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
         Returns:
             Embeddings for the documents or images.
         """
+        # Early return for empty input
+        if not input:
+            return []
+
         # Handle multimodal mixed inputs (images and text) separately - no batching
         if self._is_multimodal_model() and not all(isinstance(i, str) for i in input):
             embeddings = self._client.multimodal_embed(
@@ -149,9 +153,12 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
         current_batch: List[str] = []
         current_batch_tokens = 0
 
-        for text in texts:
-            # Count tokens for this text
-            n_tokens = len(self._client.tokenize([text], model=self.model_name)[0])
+        # Tokenize all texts in one API call
+        all_token_lists = self._client.tokenize(texts, model=self.model_name)
+        token_counts = [len(tokens) for tokens in all_token_lists]
+
+        for i, text in enumerate(texts):
+            n_tokens = token_counts[i]
 
             # Check if adding this text would exceed limits
             if current_batch and (
