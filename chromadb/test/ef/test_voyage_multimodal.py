@@ -150,7 +150,7 @@ def test_multimodal(
 def test_multimodal_update_with_image(
     multimodal_collection: chromadb.Collection,
 ) -> None:
-    # Updating an entry with an existing document should remove the documentß
+    # Updating an entry with an existing document should remove the documents
 
     document = random_document()
     image = random_image()
