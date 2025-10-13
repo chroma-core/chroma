@@ -8,7 +8,7 @@ name: Overview
 The Search API is a powerful, flexible interface for hybrid search operations in Chroma Cloud, combining vector similarity search with metadata filtering and custom ranking expressions.
 
 {% Note type="info" %}
-The Search API is currently in beta and available exclusively for Chroma Cloud users.
+The Search API is available exclusively for Chroma Cloud users.
 {% /Note %}
 
 ## Quick Start
@@ -88,7 +88,7 @@ The Search API provides a powerful, unified interface for all search operations 
 
 ## Availability
 
-The Search API is currently available in beta for Chroma Cloud. Support for local Chroma deployments will be available in a future release.
+The Search API is available for Chroma Cloud. Support for local Chroma deployments will be available in a future release.
 
 ## Required Setup
 
@@ -240,10 +240,10 @@ Document: The application of machine learning techniques to biological data has.
 
 The Search API provides the same performance as existing Chroma query endpoints, with the added benefit of more flexible query construction and batch operations that can reduce the number of round trips.
 
-## Beta Disclaimer
+## Feedback
 
 {% Note type="info" %}
-The Search API is in beta. Features and syntax may change. Please report issues or feedback through the [Chroma GitHub repository](https://github.com/chroma-core/chroma/issues).
+Please report issues or feedback through the [Chroma GitHub repository](https://github.com/chroma-core/chroma/issues).
 {% /Note %}
 
 ## What's Next?

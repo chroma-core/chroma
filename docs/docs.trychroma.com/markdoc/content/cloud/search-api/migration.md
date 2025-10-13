@@ -8,7 +8,7 @@ name: Migration Guide
 Migrate from the legacy `query()` and `get()` methods to the new Search API.
 
 {% Note type="info" %}
-The Search API is currently available in Chroma Cloud (beta). This guide uses dictionary syntax for minimal migration effort.
+The Search API is available in Chroma Cloud. This guide uses dictionary syntax for minimal migration effort.
 {% /Note %}
 
 ## Parameter Mapping
