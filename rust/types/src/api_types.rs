@@ -1017,6 +1017,8 @@ pub enum ForkCollectionError {
     NotFound(String),
     #[error("Failed to convert proto segment")]
     SegmentConversionError(#[from] SegmentConversionError),
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
 }
 
 impl ChromaError for ForkCollectionError {
@@ -1030,6 +1032,7 @@ impl ChromaError for ForkCollectionError {
             ForkCollectionError::Local => ErrorCodes::Unimplemented,
             ForkCollectionError::Internal(e) => e.code(),
             ForkCollectionError::SegmentConversionError(e) => e.code(),
+            ForkCollectionError::InvalidSchema(e) => e.code(),
         }
     }
 }

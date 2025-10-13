@@ -12,7 +12,8 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    operator::Filter, CollectionAndSegments, HnswParametersFromSegmentError, SegmentType,
+    operator::Filter, CollectionAndSegments, HnswParametersFromSegmentError, SchemaError,
+    SegmentType,
 };
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
@@ -73,8 +74,8 @@ pub enum KnnError {
     InvalidDistanceFunction,
     #[error("Operation aborted because resources exhausted")]
     Aborted,
-    #[error("Invalid schema")]
-    InvalidSchema,
+    #[error("Invalid schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
 }
 
 impl ChromaError for KnnError {
@@ -98,7 +99,7 @@ impl ChromaError for KnnError {
             KnnError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
             KnnError::Aborted => ErrorCodes::ResourceExhausted,
             KnnError::SpannSegmentReaderCreationError(e) => e.code(),
-            KnnError::InvalidSchema => ErrorCodes::InvalidArgument,
+            KnnError::InvalidSchema(e) => e.code(),
         }
     }
 }
@@ -413,7 +414,9 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                         .collection
                         .schema
                         .as_ref()
-                        .ok_or(KnnError::InvalidSchema)
+                        .ok_or(KnnError::InvalidSchema(SchemaError::InvalidSchema {
+                            reason: "Schema is None".to_string(),
+                        }))
                         .and_then(|s| {
                             s.get_internal_spann_config()
                                 .ok_or(KnnError::InvalidDistanceFunction)
