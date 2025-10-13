@@ -18,6 +18,7 @@ class MistralEmbeddingFunction(EmbeddingFunction[Documents]):
         Args:
             model (str): The name of the model to use for text embeddings.
             api_key_env_var (str): The environment variable name for the Mistral API key.
+            max_chunk_size (int): The maximal size of chunk to embed. Default to 50.
         """
         try:
             from mistralai import Mistral
