@@ -52,6 +52,7 @@ def test_get_builtins_holds() -> None:
         "HuggingFaceSparseEmbeddingFunction",
         "FastembedSparseEmbeddingFunction",
         "Bm25EmbeddingFunction",
+        "ChromaCloudQwenEmbeddingFunction",
     }
 
     assert expected_builtins == embedding_functions.get_builtins()
