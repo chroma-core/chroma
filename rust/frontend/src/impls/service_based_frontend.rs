@@ -693,7 +693,7 @@ impl ServiceBasedFrontend {
             .log_client
             .fork_logs(&tenant_id, source_collection_id, target_collection_id)
             .await?;
-        let collection_and_segments = self
+        let mut collection_and_segments = self
             .sysdb_client
             .fork_collection(
                 source_collection_id,
@@ -703,6 +703,14 @@ impl ServiceBasedFrontend {
                 target_collection_name,
             )
             .await?;
+        let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+            collection_and_segments.collection.schema.clone(),
+            Some(collection_and_segments.collection.config.clone()),
+        )
+        .map_err(|reason| {
+            ForkCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
+        })?;
+        collection_and_segments.collection.schema = Some(reconciled_schema);
         let collection = collection_and_segments.collection.clone();
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
