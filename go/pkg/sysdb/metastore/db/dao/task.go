@@ -88,7 +88,7 @@ func (s *taskDb) AdvanceTask(taskID uuid.UUID, taskRunNonce uuid.UUID) error {
 	result := s.db.Exec(`
 		UPDATE tasks
 		SET next_nonce = ?,
-			updated_at = max(updated_at + 1, max(?, last_run + 1))
+			updated_at = max(updated_at, max(TO_TIMESTAMP(?), last_run))
 		WHERE task_id = ?
 			AND next_nonce = ?
 			AND is_deleted = false
