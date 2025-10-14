@@ -156,7 +156,7 @@ impl Default for StorageMetrics {
 
 #[derive(Clone)]
 pub struct S3Storage {
-    pub(super) bucket: String,
+    pub(crate) bucket: String,
     pub(super) client: aws_sdk_s3::Client,
     pub(super) upload_part_size_bytes: usize,
     pub(super) download_part_size_bytes: usize,
