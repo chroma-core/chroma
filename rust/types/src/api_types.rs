@@ -11,7 +11,7 @@ use crate::plan::PlanToProtoError;
 use crate::plan::SearchPayload;
 use crate::validators::{
     validate_metadata_vec, validate_name, validate_non_empty_collection_update_metadata,
-    validate_optional_metadata, validate_update_metadata_vec,
+    validate_optional_metadata, validate_schema, validate_update_metadata_vec,
 };
 use crate::Collection;
 use crate::CollectionConfigurationToInternalConfigurationError;
@@ -668,6 +668,7 @@ pub struct CreateCollectionRequest {
     #[validate(custom(function = "validate_optional_metadata"))]
     pub metadata: Option<Metadata>,
     pub configuration: Option<InternalCollectionConfiguration>,
+    #[validate(custom(function = "validate_schema"))]
     pub schema: Option<InternalSchema>,
     pub get_or_create: bool,
 }
