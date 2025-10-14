@@ -288,13 +288,28 @@ impl S3Storage {
                             })
                         }
                         _ => {
-                            if inner.code() == Some("SlowDown") {
-                                Err(StorageError::Backoff)
-                            } else {
-                                tracing::error!("error: {}", inner.to_string());
-                                Err(StorageError::Generic {
-                                    source: Arc::new(inner),
-                                })
+                            match inner.code() {
+                                Some("SlowDown") => Err(StorageError::Backoff),
+                                Some("AccessDenied") => {
+                                    // Log all the details we need for debugging
+                                    tracing::error!(
+                                        bucket = %self.bucket,
+                                        key = %key,
+                                        error_code = "AccessDenied",
+                                        error_message = %inner,
+                                        "S3 access denied error"
+                                    );
+                                    Err(StorageError::PermissionDenied {
+                                        path: key.to_string(),
+                                        source: Arc::new(inner),
+                                    })
+                                }
+                                _ => {
+                                    tracing::error!("error: {}", inner.to_string());
+                                    Err(StorageError::Generic {
+                                        source: Arc::new(inner),
+                                    })
+                                }
                             }
                         }
                     }
