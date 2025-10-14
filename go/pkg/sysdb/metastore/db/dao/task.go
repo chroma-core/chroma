@@ -88,11 +88,13 @@ func (s *taskDb) AdvanceTask(taskID uuid.UUID, taskRunNonce uuid.UUID) error {
 	result := s.db.Exec(`
 		UPDATE tasks
 		SET next_nonce = ?,
-			updated_at = GREATEST(updated_at, GREATEST(TO_TIMESTAMP(?), last_run))
+			updated_at = GREATEST(updated_at, GREATEST(?, last_run)),
+			last_run = ?,
+			current_attempts = 0
 		WHERE task_id = ?
 			AND next_nonce = ?
 			AND is_deleted = false
-	`, nextNonce, now, taskID, taskRunNonce)
+	`, nextNonce, now, now, taskID, taskRunNonce)
 
 	if result.Error != nil {
 		log.Error("AdvanceTask failed", zap.Error(result.Error), zap.String("task_id", taskID.String()))
