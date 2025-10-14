@@ -96,15 +96,15 @@ impl HeapTender {
             if !triggerables.is_empty() {
                 self.writer.push(&triggerables).await?;
             }
-            if let Some(witness) = witness.as_ref() {
-                self.cursor
-                    .save(&HEAP_TENDER_CURSOR_NAME, &cursor, witness)
-                    .await?;
-            } else {
-                self.cursor
-                    .init(&HEAP_TENDER_CURSOR_NAME, cursor.clone())
-                    .await?;
-            }
+        }
+        if let Some(witness) = witness.as_ref() {
+            self.cursor
+                .save(&HEAP_TENDER_CURSOR_NAME, &cursor, witness)
+                .await?;
+        } else {
+            self.cursor
+                .init(&HEAP_TENDER_CURSOR_NAME, cursor.clone())
+                .await?;
         }
         Ok(())
     }

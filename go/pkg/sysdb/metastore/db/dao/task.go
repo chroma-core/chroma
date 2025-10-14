@@ -77,32 +77,30 @@ func (s *taskDb) GetByID(taskID uuid.UUID) (*dbmodel.Task, error) {
 	return &task, nil
 }
 
-func (s *taskDb) FinishTask(taskID uuid.UUID, taskRunNonce uuid.UUID) error {
+func (s *taskDb) AdvanceTask(taskID uuid.UUID, taskRunNonce uuid.UUID) error {
 	nextNonce, err := uuid.NewV7()
 	if err != nil {
-		log.Error("FinishTask: failed to generate next nonce", zap.Error(err))
+		log.Error("AdvanceTask: failed to generate next nonce", zap.Error(err))
 		return err
 	}
 
 	now := time.Now()
 	result := s.db.Exec(`
 		UPDATE tasks
-		SET last_run = ?,
-			next_nonce = ?,
-			current_attempts = 0,
-			updated_at = ?
+		SET next_nonce = ?,
+			updated_at = max(updated_at + 1, max(?, last_run + 1))
 		WHERE task_id = ?
 			AND next_nonce = ?
 			AND is_deleted = false
-	`, now, nextNonce, now, taskID, taskRunNonce)
+	`, nextNonce, now, taskID, taskRunNonce)
 
 	if result.Error != nil {
-		log.Error("FinishTask failed", zap.Error(result.Error), zap.String("task_id", taskID.String()))
+		log.Error("AdvanceTask failed", zap.Error(result.Error), zap.String("task_id", taskID.String()))
 		return result.Error
 	}
 
 	if result.RowsAffected == 0 {
-		log.Warn("FinishTask: no rows affected", zap.String("task_id", taskID.String()), zap.String("task_run_nonce", taskRunNonce.String()))
+		log.Warn("AdvanceTask: no rows affected", zap.String("task_id", taskID.String()), zap.String("task_run_nonce", taskRunNonce.String()))
 		return common.ErrTaskNotFound
 	}
 

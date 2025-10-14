@@ -26,7 +26,7 @@ async fn test_k8s_integration_08_concurrent_pushes() {
         scheduler.set_schedule(
             *item.scheduling.as_uuid(),
             Some(Schedule {
-                triggerable: item.clone(),
+                triggerable: item,
                 next_scheduled: bucket_time,
                 nonce: test_nonce(i),
             }),
@@ -91,7 +91,7 @@ async fn test_k8s_integration_08_concurrent_read_write() {
         .map(|i| {
             let item = create_test_triggerable(i, i);
             let schedule = Schedule {
-                triggerable: item.clone(),
+                triggerable: item,
                 next_scheduled: bucket_time,
                 nonce: test_nonce(i),
             };
@@ -128,7 +128,7 @@ async fn test_k8s_integration_08_concurrent_read_write() {
                     let idx = 100 + batch * 5 + i;
                     let item = create_test_triggerable(idx, idx);
                     let schedule = Schedule {
-                        triggerable: item.clone(),
+                        triggerable: item,
                         next_scheduled: bucket_time,
                         nonce: test_nonce(idx),
                     };
@@ -196,7 +196,7 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
             let item = create_test_triggerable(i, i);
             let nonce = test_nonce(i);
             let schedule = Schedule {
-                triggerable: item.clone(),
+                triggerable: item,
                 next_scheduled: bucket_time,
                 nonce,
             };
@@ -240,7 +240,7 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
             .map(|i| {
                 let item = create_test_triggerable(i, i);
                 let schedule = Schedule {
-                    triggerable: item.clone(),
+                    triggerable: item,
                     next_scheduled: bucket_time,
                     nonce: test_nonce(i),
                 };

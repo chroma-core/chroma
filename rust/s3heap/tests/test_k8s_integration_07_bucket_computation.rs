@@ -25,22 +25,22 @@ async fn test_k8s_integration_07_bucket_rounding() {
     let item4 = create_test_triggerable(4, 4);
 
     let schedule1 = Schedule {
-        triggerable: item1.clone(),
+        triggerable: item1,
         next_scheduled: base_time,
         nonce: test_nonce(1),
     };
     let schedule2 = Schedule {
-        triggerable: item2.clone(),
+        triggerable: item2,
         next_scheduled: base_time + Duration::seconds(15),
         nonce: test_nonce(2),
     };
     let schedule3 = Schedule {
-        triggerable: item3.clone(),
+        triggerable: item3,
         next_scheduled: base_time + Duration::seconds(30),
         nonce: test_nonce(3),
     };
     let schedule4 = Schedule {
-        triggerable: item4.clone(),
+        triggerable: item4,
         next_scheduled: base_time + Duration::seconds(59),
         nonce: test_nonce(4),
     };
@@ -88,12 +88,12 @@ async fn test_k8s_integration_07_bucket_boundaries() {
     let item2 = create_test_triggerable(2, 2);
 
     let schedule1 = Schedule {
-        triggerable: item1.clone(),
+        triggerable: item1,
         next_scheduled: minute1 + Duration::seconds(59),
         nonce: test_nonce(1),
     };
     let schedule2 = Schedule {
-        triggerable: item2.clone(),
+        triggerable: item2,
         next_scheduled: minute2,
         nonce: test_nonce(2),
     };
@@ -134,7 +134,7 @@ async fn test_k8s_integration_07_bucket_path_format() {
         .with_timezone(&Utc);
 
     let schedule = Schedule {
-        triggerable: item.clone(),
+        triggerable: item,
         next_scheduled: scheduled_time,
         nonce: test_nonce(1),
     };
@@ -180,7 +180,7 @@ async fn test_k8s_integration_07_multiple_buckets_ordering() {
             let item = create_test_triggerable(i as u32, i as u32);
             let time = base_time + Duration::minutes(i * 5);
             let schedule = Schedule {
-                triggerable: item.clone(),
+                triggerable: item,
                 next_scheduled: time,
                 nonce: test_nonce(i as u32),
             };

@@ -22,17 +22,17 @@ async fn test_k8s_integration_03_merge_same_bucket() {
     let now = Utc::now().duration_trunc(TimeDelta::minutes(1)).unwrap();
     let base_time = test_time_at_minute_offset(now, 5);
     let schedule1 = Schedule {
-        triggerable: item1.clone(),
+        triggerable: item1,
         next_scheduled: base_time,
         nonce: test_nonce(1),
     };
     let schedule2 = Schedule {
-        triggerable: item2.clone(),
+        triggerable: item2,
         next_scheduled: base_time + Duration::seconds(10),
         nonce: test_nonce(2),
     };
     let schedule3 = Schedule {
-        triggerable: item3.clone(),
+        triggerable: item3,
         next_scheduled: base_time + Duration::seconds(30),
         nonce: test_nonce(3),
     };
@@ -92,12 +92,12 @@ async fn test_k8s_integration_03_merge_multiple_pushes() {
     let push_time = test_time_at_minute_offset(now, 10);
 
     let schedule1 = Schedule {
-        triggerable: item1.clone(),
+        triggerable: item1,
         next_scheduled: push_time,
         nonce: test_nonce(1),
     };
     let schedule2 = Schedule {
-        triggerable: item2.clone(),
+        triggerable: item2,
         next_scheduled: push_time + Duration::seconds(5),
         nonce: test_nonce(2),
     };
@@ -114,12 +114,12 @@ async fn test_k8s_integration_03_merge_multiple_pushes() {
     let item4 = create_test_triggerable(4, 4);
 
     let schedule3 = Schedule {
-        triggerable: item3.clone(),
+        triggerable: item3,
         next_scheduled: push_time + Duration::seconds(20),
         nonce: test_nonce(3),
     };
     let schedule4 = Schedule {
-        triggerable: item4.clone(),
+        triggerable: item4,
         next_scheduled: push_time + Duration::seconds(40),
         nonce: test_nonce(4),
     };

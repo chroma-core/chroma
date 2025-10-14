@@ -40,12 +40,12 @@ async fn test_k8s_integration_06_concurrent_writes_with_retry() {
     let item2 = create_test_triggerable(2, 2);
 
     let schedule1 = Schedule {
-        triggerable: item1.clone(),
+        triggerable: item1,
         next_scheduled: time,
         nonce: test_nonce(1),
     };
     let schedule2 = Schedule {
-        triggerable: item2.clone(),
+        triggerable: item2,
         next_scheduled: time,
         nonce: test_nonce(2),
     };
@@ -73,7 +73,7 @@ async fn test_k8s_integration_06_prune_with_retry() {
         let nonce = test_nonce(1);
         let now = Utc::now();
         let schedule = Schedule {
-            triggerable: item.clone(),
+            triggerable: item,
             next_scheduled: test_time_at_minute_offset(now, 3),
             nonce,
         };

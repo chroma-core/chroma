@@ -380,14 +380,14 @@ func (suite *TaskDbTestSuite) TestTaskDb_GetByID_IgnoresDeleted() {
 	suite.db.Unscoped().Delete(&dbmodel.Task{}, "task_id = ?", task.ID)
 }
 
-func (suite *TaskDbTestSuite) TestTaskDb_FinishTask() {
+func (suite *TaskDbTestSuite) TestTaskDb_AdvanceTask() {
 	taskID := uuid.New()
 	operatorID := dbmodel.OperatorRecordCounter
 	originalNonce, _ := uuid.NewV7()
 
 	task := &dbmodel.Task{
 		ID:                   taskID,
-		Name:                 "test-done-task",
+		Name:                 "test-advance-task",
 		OperatorID:           operatorID,
 		InputCollectionID:    "input_col_id",
 		OutputCollectionName: "output_col_name",
@@ -402,7 +402,7 @@ func (suite *TaskDbTestSuite) TestTaskDb_FinishTask() {
 	err := suite.Db.Insert(task)
 	suite.Require().NoError(err)
 
-	err = suite.Db.FinishTask(taskID, originalNonce)
+	err = suite.Db.AdvanceTask(taskID, originalNonce)
 	suite.Require().NoError(err)
 
 	retrieved, err := suite.Db.GetByID(taskID)
@@ -415,7 +415,7 @@ func (suite *TaskDbTestSuite) TestTaskDb_FinishTask() {
 	suite.db.Unscoped().Delete(&dbmodel.Task{}, "task_id = ?", task.ID)
 }
 
-func (suite *TaskDbTestSuite) TestTaskDb_FinishTask_InvalidNonce() {
+func (suite *TaskDbTestSuite) TestTaskDb_AdvanceTask_InvalidNonce() {
 	taskID := uuid.New()
 	operatorID := dbmodel.OperatorRecordCounter
 	correctNonce, _ := uuid.NewV7()
@@ -423,7 +423,7 @@ func (suite *TaskDbTestSuite) TestTaskDb_FinishTask_InvalidNonce() {
 
 	task := &dbmodel.Task{
 		ID:                   taskID,
-		Name:                 "test-done-task-wrong-nonce",
+		Name:                 "test-advance-task-wrong-nonce",
 		OperatorID:           operatorID,
 		InputCollectionID:    "input_col_id",
 		OutputCollectionName: "output_col_name",
@@ -437,15 +437,15 @@ func (suite *TaskDbTestSuite) TestTaskDb_FinishTask_InvalidNonce() {
 	err := suite.Db.Insert(task)
 	suite.Require().NoError(err)
 
-	err = suite.Db.FinishTask(taskID, wrongNonce)
+	err = suite.Db.AdvanceTask(taskID, wrongNonce)
 	suite.Require().Error(err)
 	suite.Require().Equal(common.ErrTaskNotFound, err)
 
 	suite.db.Unscoped().Delete(&dbmodel.Task{}, "task_id = ?", task.ID)
 }
 
-func (suite *TaskDbTestSuite) TestTaskDb_FinishTask_NotFound() {
-	err := suite.Db.FinishTask(uuid.New(), uuid.Must(uuid.NewV7()))
+func (suite *TaskDbTestSuite) TestTaskDb_AdvanceTask_NotFound() {
+	err := suite.Db.AdvanceTask(uuid.New(), uuid.Must(uuid.NewV7()))
 	suite.Require().Error(err)
 	suite.Require().Equal(common.ErrTaskNotFound, err)
 }

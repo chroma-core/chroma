@@ -271,14 +271,16 @@ impl<'a> TestItemBuilder<'a> {
         let time = test_time_at_minute_offset(base, self.time_offset_minutes);
 
         let schedule = Schedule {
-            triggerable: item.clone(),
+            triggerable: item,
             next_scheduled: time,
             nonce,
         };
-        self.scheduler
-            .set_schedule(*item.scheduling.as_uuid(), Some(schedule.clone()));
+        self.scheduler.set_schedule(
+            *schedule.triggerable.scheduling.as_uuid(),
+            Some(schedule.clone()),
+        );
         if let Some(done) = self.is_done {
-            self.scheduler.set_done(&item, nonce, done);
+            self.scheduler.set_done(&schedule.triggerable, nonce, done);
         }
         schedule
     }

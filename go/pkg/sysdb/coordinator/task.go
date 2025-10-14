@@ -266,36 +266,36 @@ func (s *Coordinator) DeleteTask(ctx context.Context, req *coordinatorpb.DeleteT
 }
 
 // Mark a task run as complete and set the nonce for the next task run.
-func (s *Coordinator) FinishTask(ctx context.Context, req *coordinatorpb.FinishTaskRequest) (*coordinatorpb.FinishTaskResponse, error) {
+func (s *Coordinator) AdvanceTask(ctx context.Context, req *coordinatorpb.AdvanceTaskRequest) (*coordinatorpb.AdvanceTaskResponse, error) {
 	if req.TaskId == nil {
-		log.Error("FinishTask: task_id is required")
+		log.Error("AdvanceTask: task_id is required")
 		return nil, status.Errorf(codes.InvalidArgument, "task_id is required")
 	}
 
 	if req.TaskRunNonce == nil {
-		log.Error("FinishTask: task_run_nonce is required")
+		log.Error("AdvanceTask: task_run_nonce is required")
 		return nil, status.Errorf(codes.InvalidArgument, "task_run_nonce is required")
 	}
 
 	taskID, err := uuid.Parse(*req.TaskId)
 	if err != nil {
-		log.Error("FinishTask: invalid task_id", zap.Error(err))
+		log.Error("AdvanceTask: invalid task_id", zap.Error(err))
 		return nil, status.Errorf(codes.InvalidArgument, "invalid task_id: %v", err)
 	}
 
 	taskRunNonce, err := uuid.Parse(*req.TaskRunNonce)
 	if err != nil {
-		log.Error("FinishTask: invalid task_run_nonce", zap.Error(err))
+		log.Error("AdvanceTask: invalid task_run_nonce", zap.Error(err))
 		return nil, status.Errorf(codes.InvalidArgument, "invalid task_run_nonce: %v", err)
 	}
 
-	err = s.catalog.metaDomain.TaskDb(ctx).FinishTask(taskID, taskRunNonce)
+	err = s.catalog.metaDomain.TaskDb(ctx).AdvanceTask(taskID, taskRunNonce)
 	if err != nil {
-		log.Error("FinishTask failed", zap.Error(err), zap.String("task_id", taskID.String()))
+		log.Error("AdvanceTask failed", zap.Error(err), zap.String("task_id", taskID.String()))
 		return nil, err
 	}
 
-	return &coordinatorpb.FinishTaskResponse{}, nil
+	return &coordinatorpb.AdvanceTaskResponse{}, nil
 }
 
 // GetOperators retrieves all operators from the database
