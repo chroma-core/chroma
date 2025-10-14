@@ -11,7 +11,6 @@ from chromadb.api.types import (
     SparseVector,
     normalize_embeddings,
     validate_embeddings,
-    validate_sparse_vector,
 )
 from chromadb.types import (
     Collection,

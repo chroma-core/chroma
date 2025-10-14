@@ -1834,23 +1834,14 @@ def test_query_id_filtering_e2e(client):
 
 
 def test_validate_sparse_vector():
-    """Test the validate_sparse_vector function with various inputs."""
-    from chromadb.api.types import validate_sparse_vector
+    """Test SparseVector validation in __post_init__."""
     from chromadb.base_types import SparseVector
 
-    # Test 1: Valid sparse vector
-    valid_sparse = SparseVector(indices=[0, 2, 5], values=[0.1, 0.5, 0.9])
-    # Should not raise
-    validate_sparse_vector(valid_sparse)
+    # Test 1: Valid sparse vector - should not raise
+    SparseVector(indices=[0, 2, 5], values=[0.1, 0.5, 0.9])
 
-    # Test 2: Valid sparse vector with empty lists
-    valid_empty = SparseVector(indices=[], values=[])
-    # Should not raise
-    validate_sparse_vector(valid_empty)
-
-    # Test 3: Invalid - not a dataclass instance
-    with pytest.raises(ValueError, match="Expected SparseVector dataclass instance"):
-        validate_sparse_vector([1, 2, 3])
+    # Test 2: Valid sparse vector with empty lists - should not raise
+    SparseVector(indices=[], values=[])
 
     # Test 4: Invalid - indices not a list
     with pytest.raises(ValueError, match="Expected SparseVector indices to be a list"):
@@ -1883,16 +1874,13 @@ def test_validate_sparse_vector():
         SparseVector(indices=[0.0, 1.0, 2.0], values=[0.1, 0.2, 0.3])  # type: ignore
 
     # Test 11: Valid - integer values (not just floats)
-    valid_int_values = SparseVector(indices=[0, 1, 2], values=[1, 2, 3])
-    validate_sparse_vector(valid_int_values)
+    SparseVector(indices=[0, 1, 2], values=[1, 2, 3])
 
     # Test 12: Valid - mixed int and float values
-    valid_mixed = SparseVector(indices=[0, 1, 2], values=[1, 2.5, 3])
-    validate_sparse_vector(valid_mixed)
+    SparseVector(indices=[0, 1, 2], values=[1, 2.5, 3])
 
     # Test 13: Valid - large indices
-    valid_large = SparseVector(indices=[100, 1000, 10000], values=[0.1, 0.2, 0.3])
-    validate_sparse_vector(valid_large)
+    SparseVector(indices=[100, 1000, 10000], values=[0.1, 0.2, 0.3])
 
     # Test 14: Invalid - None as value
     with pytest.raises(ValueError, match="SparseVector values must be numbers"):
@@ -1903,12 +1891,10 @@ def test_validate_sparse_vector():
         SparseVector(indices=[0, None], values=[0.1, 0.2])  # type: ignore
 
     # Test 16: Valid - single element
-    valid_single = SparseVector(indices=[42], values=[3.14])
-    validate_sparse_vector(valid_single)
+    SparseVector(indices=[42], values=[3.14])
 
     # Test 17: Boolean values are actually valid (bool is subclass of int in Python)
-    valid_bool = SparseVector(indices=[0, 1], values=[True, False])  # True=1, False=0
-    validate_sparse_vector(valid_bool)
+    SparseVector(indices=[0, 1], values=[True, False])  # True=1, False=0
 
     # Test 18: Invalid - unsorted indices
     with pytest.raises(ValueError, match="indices must be sorted in strictly ascending order"):

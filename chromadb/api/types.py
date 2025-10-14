@@ -63,8 +63,6 @@ __all__ = [
     "SearchResult",
     "SearchResultRow",
     "SparseVector",
-    "is_valid_sparse_vector",
-    "validate_sparse_vector",
     # Index Configuration Types
     "FtsIndexConfig",
     "HnswIndexConfig",
@@ -924,27 +922,7 @@ def validate_ids(ids: IDs) -> IDs:
     return ids
 
 
-def is_valid_sparse_vector(value: Any) -> bool:
-    """Check if a value is a SparseVector dataclass instance."""
-    return isinstance(value, SparseVector)
 
-
-def validate_sparse_vector(value: Any) -> None:
-    """Validate that a value is a properly formed SparseVector.
-
-    Args:
-        value: The value to validate as a SparseVector
-
-    Raises:
-        ValueError: If the value is not a valid SparseVector
-
-    Note: Validation is performed in SparseVector.__post_init__,
-    so this function only needs to check the type.
-    """
-    if not isinstance(value, SparseVector):
-        raise ValueError(
-            f"Expected SparseVector dataclass instance, got {type(value).__name__}"
-        )
 
 
 def validate_metadata(metadata: Metadata) -> Metadata:
@@ -968,12 +946,9 @@ def validate_metadata(metadata: Metadata) -> Metadata:
             raise TypeError(
                 f"Expected metadata key to be a str, got {key} which is a {type(key).__name__}"
             )
-        # Check if value is a SparseVector
-        if is_valid_sparse_vector(value):
-            try:
-                validate_sparse_vector(value)
-            except ValueError as e:
-                raise ValueError(f"Invalid SparseVector for key '{key}': {e}")
+        # Check if value is a SparseVector (validation happens in __post_init__)
+        if isinstance(value, SparseVector):
+            pass  # Already validated in SparseVector.__post_init__
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
         elif not isinstance(value, bool) and not isinstance(
             value, (str, int, float, type(None))
@@ -997,12 +972,9 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
     for key, value in metadata.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
-        # Check if value is a SparseVector
-        if is_valid_sparse_vector(value):
-            try:
-                validate_sparse_vector(value)
-            except ValueError as e:
-                raise ValueError(f"Invalid SparseVector for key '{key}': {e}")
+        # Check if value is a SparseVector (validation happens in __post_init__)
+        if isinstance(value, SparseVector):
+            pass  # Already validated in SparseVector.__post_init__
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
         elif not isinstance(value, bool) and not isinstance(
             value, (str, int, float, type(None))
@@ -1282,7 +1254,10 @@ def validate_sparse_embeddings(embeddings: SparseEmbeddings) -> SparseEmbeddings
             f"Expected sparse embeddings to be a non-empty list, got {len(embeddings)} sparse embeddings"
         )
     for embedding in embeddings:
-        validate_sparse_vector(embedding)
+        if not isinstance(embedding, SparseVector):
+            raise ValueError(
+                f"Expected SparseVector dataclass instance, got {type(embedding).__name__}"
+            )
     return embeddings
 
 
