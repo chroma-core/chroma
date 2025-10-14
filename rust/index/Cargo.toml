@@ -39,15 +39,13 @@ itertools = { workspace = true }
 hnswlib = { workspace = true }
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 
-# Dependencies for examples
+[dev-dependencies]
 indicatif = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 sprs = { workspace = true }
 chroma-benchmark = { workspace = true }
 regex = { workspace = true }
-
-[dev-dependencies]
 rayon = { workspace = true }
 criterion = { workspace = true }
 proptest = { workspace = true }
