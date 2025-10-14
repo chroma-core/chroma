@@ -1977,11 +1977,13 @@ async fn collection_get(
         payload.offset.unwrap_or(0),
         payload.include,
     )?;
-    let res = server
-        .frontend
-        .get(request)
-        .meter(metering_context_container)
-        .await?;
+    let res = Box::pin(
+        server
+            .frontend
+            .get(request)
+            .meter(metering_context_container),
+    )
+    .await?;
     Ok(Json(res))
 }
 
