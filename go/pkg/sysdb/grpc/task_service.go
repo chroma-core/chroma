@@ -3,6 +3,8 @@ package grpc
 import (
 	"context"
 
+	"github.com/chroma-core/chroma/go/pkg/common"
+	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -14,6 +16,9 @@ func (s *Server) CreateTask(ctx context.Context, req *coordinatorpb.CreateTaskRe
 	res, err := s.coordinator.CreateTask(ctx, req)
 	if err != nil {
 		log.Error("CreateTask failed", zap.Error(err))
+		if err == common.ErrTaskAlreadyExists {
+			return nil, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
+		}
 		return nil, err
 	}
 
@@ -26,6 +31,9 @@ func (s *Server) GetTaskByName(ctx context.Context, req *coordinatorpb.GetTaskBy
 	res, err := s.coordinator.GetTaskByName(ctx, req)
 	if err != nil {
 		log.Error("GetTaskByName failed", zap.Error(err))
+		if err == common.ErrTaskNotFound {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
 		return nil, err
 	}
 

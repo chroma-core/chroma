@@ -21,26 +21,27 @@ use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn, Search},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
+    AddTaskError, Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
     CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError,
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantError, CreateTenantRequest, CreateTenantResponse,
-    DeleteCollectionError, DeleteCollectionRecordsError, DeleteCollectionRecordsRequest,
-    DeleteCollectionRecordsResponse, DeleteCollectionRequest, DeleteDatabaseError,
-    DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError, ForkCollectionRequest,
-    ForkCollectionResponse, GetCollectionByCrnError, GetCollectionByCrnRequest,
-    GetCollectionByCrnResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
-    GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
-    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
-    HeartbeatError, HeartbeatResponse, Include, InternalSchema, KnnIndex, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
-    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where,
+    CreateDatabaseResponse, CreateTaskRequest, CreateTaskResponse, CreateTenantError,
+    CreateTenantRequest, CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
+    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
+    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError,
+    ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
+    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
+    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
+    Include, InternalSchema, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
+    QueryError, QueryRequest, QueryResponse, RemoveTaskError, RemoveTaskRequest,
+    RemoveTaskResponse, ResetError, ResetResponse, SchemaError, SearchRequest, SearchResponse,
+    Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -78,6 +79,7 @@ pub struct ServiceBasedFrontend {
     default_knn_index: KnnIndex,
     enable_schema: bool,
     retries_builder: ExponentialBuilder,
+    min_records_for_task: u64,
 }
 
 impl ServiceBasedFrontend {
@@ -91,6 +93,7 @@ impl ServiceBasedFrontend {
         max_batch_size: u32,
         default_knn_index: KnnIndex,
         enable_schema: bool,
+        min_records_for_task: u64,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -144,6 +147,7 @@ impl ServiceBasedFrontend {
             default_knn_index,
             enable_schema,
             retries_builder,
+            min_records_for_task,
         }
     }
 
@@ -1852,6 +1856,101 @@ impl ServiceBasedFrontend {
         res
     }
 
+    pub async fn create_task(
+        &mut self,
+        tenant_name: String,
+        database_name: String,
+        collection_id: String,
+        CreateTaskRequest {
+            task_name,
+            operator_name,
+            output_collection_name,
+            params,
+            ..
+        }: CreateTaskRequest,
+    ) -> Result<CreateTaskResponse, AddTaskError> {
+        // TODO: Trigger initial task run via heaptender
+
+        // Parse collection_id from path parameter - client-side validation
+        let input_collection_id =
+            CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
+                AddTaskError::Internal(Box::new(chroma_error::TonicError(
+                    tonic::Status::invalid_argument(format!(
+                        "Client validation error: Invalid collection_id UUID format: {}",
+                        e
+                    )),
+                )))
+            })?);
+
+        let task_id = self
+            .sysdb_client
+            .create_task(
+                task_name.clone(),
+                operator_name,
+                input_collection_id,
+                output_collection_name.clone(),
+                params,
+                tenant_name,
+                database_name,
+                self.min_records_for_task,
+            )
+            .await
+            .map_err(|e| match e {
+                chroma_sysdb::CreateTaskError::AlreadyExists => {
+                    AddTaskError::AlreadyExists(task_name.clone())
+                }
+                chroma_sysdb::CreateTaskError::FailedToCreateTask(s) => {
+                    AddTaskError::Internal(Box::new(chroma_error::TonicError(s)))
+                }
+                chroma_sysdb::CreateTaskError::ServerReturnedInvalidData => AddTaskError::Internal(
+                    Box::new(chroma_sysdb::CreateTaskError::ServerReturnedInvalidData),
+                ),
+            })?;
+
+        Ok(CreateTaskResponse {
+            success: true,
+            task_id: task_id.to_string(),
+        })
+    }
+
+    pub async fn remove_task(
+        &mut self,
+        _tenant_id: String,
+        _database_name: String,
+        collection_id: String,
+        RemoveTaskRequest {
+            task_name,
+            delete_output,
+            ..
+        }: RemoveTaskRequest,
+    ) -> Result<RemoveTaskResponse, RemoveTaskError> {
+        // Parse collection_id from path parameter - client-side validation
+        let collection_uuid =
+            CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
+                RemoveTaskError::Internal(Box::new(chroma_error::TonicError(
+                    tonic::Status::invalid_argument(format!(
+                        "Client validation error: Invalid collection_id UUID format: {}",
+                        e
+                    )),
+                )))
+            })?);
+
+        // Delete task by name - the coordinator handles output collection deletion atomically
+        self.sysdb_client
+            .delete_task_by_name(collection_uuid, task_name.clone(), delete_output)
+            .await
+            .map_err(|e| match e {
+                chroma_sysdb::DeleteTaskError::NotFound => {
+                    RemoveTaskError::NotFound(task_name.clone())
+                }
+                chroma_sysdb::DeleteTaskError::FailedToDeleteTask(s) => {
+                    RemoveTaskError::Internal(Box::new(chroma_error::TonicError(s)))
+                }
+            })?;
+
+        Ok(RemoveTaskResponse { success: true })
+    }
+
     pub async fn healthcheck(&self) -> HealthCheckResponse {
         HealthCheckResponse {
             is_executor_ready: self.executor.is_ready().await,
@@ -1916,6 +2015,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             max_batch_size,
             config.default_knn_index,
             config.enable_schema,
+            config.min_records_for_task,
         ))
     }
 }
