@@ -311,6 +311,7 @@ impl InternalSchema {
                     config: SparseVectorIndexConfig {
                         embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
                         source_key: None,
+                        bm25: None,
                     },
                 }),
             }),
@@ -909,6 +910,7 @@ impl InternalSchema {
                 .clone()
                 .or(default.embedding_function.clone()),
             source_key: user.source_key.clone().or(default.source_key.clone()),
+            bm25: user.bm25.or(default.bm25),
         })
     }
 
@@ -1436,6 +1438,9 @@ pub struct SparseVectorIndexConfig {
     /// Key to source the sparse vector from
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
+    /// Whether this embedding is BM25
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bm25: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -1791,6 +1796,7 @@ mod tests {
                         config: SparseVectorIndexConfig {
                             embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
                             source_key: None,
+                            bm25: None,
                         },
                     }),
                 }),
@@ -2072,11 +2078,13 @@ mod tests {
         let default_config = SparseVectorIndexConfig {
             embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
             source_key: Some("default_sparse_key".to_string()),
+            bm25: None,
         };
 
         let user_config = SparseVectorIndexConfig {
             embedding_function: None,                        // Will use default
             source_key: Some("user_sparse_key".to_string()), // Override
+            bm25: None,
         };
 
         let result =
