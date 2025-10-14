@@ -21,6 +21,7 @@ lazy_static = { version = "1.4" }
 lexical-core = "1.0"
 num_cpus = "1.16.0"
 once_cell = "1.21.3"
+openssl = { version = "0.10", features = ["vendored"] }
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 opentelemetry-otlp = { version = "0.27", features = ["http-proto"] }
 opentelemetry-http = { version = "0.27", features = ["reqwest-rustls"] }
