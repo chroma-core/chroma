@@ -367,6 +367,11 @@ export type SpannIndexConfig = {
 
 /**
  * Represents a sparse vector using parallel arrays for indices and values.
+ *
+ * On deserialization: accepts both old format `{"indices": [...], "values": [...]}`
+ * and new format `{"#type": "sparse_vector", "indices": [...], "values": [...]}`.
+ *
+ * On serialization: always includes `#type` field with value `"sparse_vector"`.
  */
 export type SparseVector = {
     /**
