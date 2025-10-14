@@ -65,7 +65,7 @@ spec:
           configMap:
             name: rust-log-service-config
         {{ end }}
-        {{if .Values.rustLogService.configuration}}
+        {{if .Values.heapTenderService.configuration}}
         - name: heap-tender-service-config
           configMap:
             name: heap-tender-service-config
