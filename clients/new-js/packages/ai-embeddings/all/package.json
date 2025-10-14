@@ -48,7 +48,8 @@
     "@chroma-core/openai": "workspace:^",
     "@chroma-core/together-ai": "workspace:^",
     "@chroma-core/voyageai": "workspace:^",
-    "@chroma-core/chroma-cloud-qwen": "workspace:^"
+    "@chroma-core/chroma-cloud-qwen": "workspace:^",
+    "@chroma-core/chroma-cloud-splade": "workspace:^"
   },
   "engines": {
     "node": ">=20"
