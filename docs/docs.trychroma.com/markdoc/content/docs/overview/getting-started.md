@@ -101,6 +101,23 @@ bun add chromadb @chroma-core/default-embed
 
 {% /TabbedUseCaseCodeBlock %}
 
+We offer a number of first party embedding fuctions for use with the TypeScript package.
+
+| Provider                    | Embedding Function Package                    
+| ----------                  | ------------------------- 
+| All (installs all packages) | [@chroma-core/all](https://www.npmjs.com/package/@chroma-core/all)     
+| Cloudflare Workers AI       | [@chroma-core/cloudflare-worker-ai](https://www.npmjs.com/package/@chroma-core/cloudflare-worker-ai)     
+| Cohere                      | [@chroma-core/cohere](https://www.npmjs.com/package/@chroma-core/cohere) 
+| Google Gemini               | [@chroma-core/google-gemini](https://www.npmjs.com/package/@chroma-core/google-gemini)     
+| Hugging Face Server         | [@chroma-core/huggingface-server](https://www.npmjs.com/package/@chroma-core/huggingface-server)     
+| Jina                        | [@chroma-core/jina](https://www.npmjs.com/package/@chroma-core/jina)     
+| Mistral                     | [@chroma-core/mistral](https://www.npmjs.com/package/@chroma-core/mistral)     
+| Morph                       | [@chroma-core/morph](https://www.npmjs.com/package/@chroma-core/morph)     
+| Ollama                      | [@chroma-core/ollama](https://www.npmjs.com/package/@chroma-core/ollama)     
+| OpenAI                      | [@chroma-core/openai](https://www.npmjs.com/package/@chroma-core/huggingface-server)     
+| Together AI                 | [@chroma-core/together-ai](https://www.npmjs.com/package/@chroma-core/together-ai)     
+| Voyage AI                   | [@chroma-core/voyageai](https://www.npmjs.com/package/@chroma-core/voyageai)     
+
 {% /Tab %}
 
 {% /Tabs %}
