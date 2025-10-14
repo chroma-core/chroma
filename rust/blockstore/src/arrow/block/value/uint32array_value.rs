@@ -10,8 +10,8 @@ use crate::{
     BlockfileWriterMutationOrdering,
 };
 use arrow::{
-    array::{Array, Int32Array, ListArray, ListBuilder, UInt32Array, UInt32Builder},
-    datatypes::Field,
+    array::{Array, AsArray, Int32Array, ListArray, ListBuilder, UInt32Array, UInt32Builder},
+    datatypes::{Field, Int32Type, UInt32Type},
     util::bit_util,
 };
 use std::{mem::size_of, sync::Arc};
@@ -132,6 +132,29 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data [u32
                         "Expected UInt32Array or Int32Array (for legacy reasons) got neither"
                     ),
                 }
+            }
+        }
+    }
+
+    fn get_range(array: &'referred_data Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+        // Follows the fallback logic in Self::get(...)
+        let list_array = array.as_list::<i32>();
+        let offsets = list_array.offsets().slice(offset, length);
+        let offset_bounds = offsets.iter().zip(offsets.iter().skip(1));
+        match list_array.values().as_primitive_opt::<UInt32Type>() {
+            Some(u32_array) => offset_bounds
+                .map(|(&start, &end)| &u32_array.values()[start as usize..end as usize])
+                .collect(),
+            None => {
+                let i32_array = list_array.values().as_primitive::<Int32Type>();
+                offset_bounds
+                    .map(|(&start, &end)| {
+                        let slice = &i32_array.values()[start as usize..end as usize];
+                        unsafe {
+                            std::slice::from_raw_parts(slice.as_ptr() as *const u32, slice.len())
+                        }
+                    })
+                    .collect()
             }
         }
     }

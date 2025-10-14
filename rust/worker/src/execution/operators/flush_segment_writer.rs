@@ -78,14 +78,12 @@ impl Operator<FlushSegmentWriterInput, FlushSegmentWriterOutput> for FlushSegmen
         let name = segment_flusher.get_name();
         let id = segment_flusher.get_id();
 
-        let file_paths = segment_flusher
-            .flush()
-            .instrument(trace_span!(
-                "Flush segment",
-                otel.name = format!("Flush {:?}", name),
-                segment = name
-            ))
-            .await?;
+        let file_paths = Box::pin(segment_flusher.flush().instrument(trace_span!(
+            "Flush segment",
+            otel.name = format!("Flush {:?}", name),
+            segment = name
+        )))
+        .await?;
 
         Ok(FlushSegmentWriterOutput {
             flush_info: SegmentFlushInfo {

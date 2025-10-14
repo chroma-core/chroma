@@ -13,8 +13,8 @@ use chroma_storage::{
 };
 
 use crate::{
-    parse_fragment_path, Error, Fragment, LogPosition, LogReaderOptions, Manifest, ScrubError,
-    ScrubSuccess, Snapshot, SnapshotCache,
+    parse_fragment_path, Error, Fragment, LogPosition, LogReaderOptions, Manifest, ManifestAndETag,
+    ScrubError, ScrubSuccess, Snapshot, SnapshotCache,
 };
 
 fn ranges_overlap(lhs: (LogPosition, LogPosition), rhs: (LogPosition, LogPosition)) -> bool {
@@ -74,12 +74,32 @@ impl LogReader {
         self.cache = Some(cache);
     }
 
+    /// Verify that the reader would read the same manifest as the one provided in
+    /// manifest_and_etag, but do it in a way that doesn't load the whole manifest.
+    pub async fn verify(&self, manifest_and_etag: &ManifestAndETag) -> Result<bool, Error> {
+        Manifest::head(
+            &self.options.throttle,
+            &self.storage,
+            &self.prefix,
+            &manifest_and_etag.e_tag,
+        )
+        .await
+    }
+
     pub async fn manifest(&self) -> Result<Option<Manifest>, Error> {
         Ok(
             Manifest::load(&self.options.throttle, &self.storage, &self.prefix)
                 .await?
                 .map(|(m, _)| m),
         )
+    }
+
+    pub async fn manifest_and_e_tag(&self) -> Result<Option<ManifestAndETag>, Error> {
+        match Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await {
+            Ok(Some((manifest, e_tag))) => Ok(Some(ManifestAndETag { manifest, e_tag })),
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     pub async fn oldest_timestamp(&self) -> Result<LogPosition, Error> {
@@ -105,7 +125,6 @@ impl LogReader {
     ///    interval.
     /// 2. Up to, and including, the number of files to return.
     /// 3. Up to, and including, the total number of bytes to return.
-    #[tracing::instrument(skip(self))]
     pub async fn scan(&self, from: LogPosition, limits: Limits) -> Result<Vec<Fragment>, Error> {
         let Some((manifest, _)) =
             Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
@@ -258,7 +277,6 @@ impl LogReader {
         if let Some(max_files) = limits.max_files {
             if fragments.len() as u64 > max_files {
                 *short_read = true;
-                tracing::info!("truncating to {} files from {}", max_files, fragments.len());
                 fragments.truncate(max_files as usize);
             }
         }
@@ -268,10 +286,6 @@ impl LogReader {
             && fragments[fragments.len() - 1].start - from
                 > limits.max_records.unwrap_or(u64::MAX)
         {
-            tracing::info!(
-                "truncating to {} files because records restrictions",
-                fragments.len() - 1
-            );
             fragments.pop();
             *short_read = true;
         }
@@ -282,10 +296,6 @@ impl LogReader {
                 .fold(0, u64::saturating_add)
                 > limits.max_bytes.unwrap_or(u64::MAX)
         {
-            tracing::info!(
-                "truncating to {} files because bytes restrictions",
-                fragments.len() - 1
-            );
             fragments.pop();
             *short_read = true;
         }
@@ -331,9 +341,7 @@ impl LogReader {
             return Err(vec![Error::UninitializedLog]);
         };
         let manifest_scrub_success = manifest.scrub().map_err(|x| vec![x.into()])?;
-        let from = manifest
-            .initial_offset
-            .unwrap_or(LogPosition::from_offset(1));
+        let from = manifest.oldest_timestamp();
         let mut short_read = false;
         let fragments = self
             .scan_with_cache(manifest, from, limits, &mut short_read)
@@ -3448,6 +3456,141 @@ mod tests {
                 num_bytes: 78680,
                 setsum: Setsum::default(),
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_verify_returns_true_when_manifest_etag_matches() {
+        let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
+        let prefix = "test-prefix".to_string();
+        let options = LogReaderOptions::default();
+        let reader = LogReader::new(options, storage.clone(), prefix.clone());
+
+        let manifest = Manifest::new_empty("test-writer");
+        Manifest::initialize_from_manifest(
+            &crate::LogWriterOptions::default(),
+            &storage,
+            &prefix,
+            manifest.clone(),
+        )
+        .await
+        .unwrap();
+
+        let (loaded_manifest, etag) = Manifest::load(&reader.options.throttle, &storage, &prefix)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let manifest_and_etag = ManifestAndETag {
+            manifest: loaded_manifest,
+            e_tag: etag,
+        };
+
+        let result = reader.verify(&manifest_and_etag).await.unwrap();
+        assert!(result, "verify should return true for matching etag");
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_verify_returns_false_when_manifest_etag_does_not_match() {
+        let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
+        let prefix = "test-prefix".to_string();
+        let options = LogReaderOptions::default();
+        let reader = LogReader::new(options, storage.clone(), prefix.clone());
+
+        let manifest = Manifest::new_empty("test-writer");
+        Manifest::initialize_from_manifest(
+            &crate::LogWriterOptions::default(),
+            &storage,
+            &prefix,
+            manifest.clone(),
+        )
+        .await
+        .unwrap();
+
+        let fake_etag = chroma_storage::ETag("fake-etag-that-wont-match".to_string());
+        let manifest_and_etag = ManifestAndETag {
+            manifest,
+            e_tag: fake_etag,
+        };
+
+        let result = reader.verify(&manifest_and_etag).await.unwrap();
+        assert!(!result, "verify should return false for non-matching etag");
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_verify_handles_storage_errors_gracefully() {
+        use chroma_storage::local::LocalStorage;
+
+        let storage = Arc::new(chroma_storage::Storage::Local(LocalStorage::new(
+            "./test-local",
+        )));
+        let prefix = "test-prefix".to_string();
+        let options = LogReaderOptions::default();
+        let reader = LogReader::new(options, storage, prefix);
+
+        let manifest = Manifest::new_empty("test-writer");
+        let fake_etag = chroma_storage::ETag("fake-etag".to_string());
+        let manifest_and_etag = ManifestAndETag {
+            manifest,
+            e_tag: fake_etag,
+        };
+
+        let result = reader.verify(&manifest_and_etag).await;
+        match result {
+            Err(crate::Error::StorageError(storage_error)) => {
+                match storage_error.as_ref() {
+                    chroma_storage::StorageError::NotImplemented => {
+                        // This is expected for local storage
+                    }
+                    _ => panic!("Unexpected storage error: {:?}", storage_error),
+                }
+            }
+            _ => panic!("Expected storage error for local storage verify"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_manifest_and_e_tag_returns_both_manifest_and_etag() {
+        let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
+        let prefix = "test-prefix".to_string();
+        let options = LogReaderOptions::default();
+        let reader = LogReader::new(options, storage.clone(), prefix.clone());
+
+        let manifest = Manifest::new_empty("test-writer");
+        Manifest::initialize_from_manifest(
+            &crate::LogWriterOptions::default(),
+            &storage,
+            &prefix,
+            manifest.clone(),
+        )
+        .await
+        .unwrap();
+
+        let result = reader.manifest_and_e_tag().await.unwrap();
+        assert!(
+            result.is_some(),
+            "manifest_and_e_tag should return Some when manifest exists"
+        );
+
+        let manifest_and_etag = result.unwrap();
+        assert_eq!(manifest_and_etag.manifest.writer, "test-writer");
+        assert!(
+            !manifest_and_etag.e_tag.0.is_empty(),
+            "etag should not be empty"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_manifest_and_e_tag_returns_none_when_no_manifest() {
+        let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
+        let prefix = "nonexistent-prefix".to_string();
+        let options = LogReaderOptions::default();
+        let reader = LogReader::new(options, storage, prefix);
+
+        let result = reader.manifest_and_e_tag().await.unwrap();
+        assert!(
+            result.is_none(),
+            "manifest_and_e_tag should return None when no manifest exists"
         );
     }
 }

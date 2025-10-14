@@ -5,7 +5,7 @@ type GrpcConfig struct {
 	BindAddress string
 
 	MaxConcurrentStreams uint32
-	NumStreamWorkers uint32
+	NumStreamWorkers     uint32
 
 	// GRPC mTLS config
 	CertPath string

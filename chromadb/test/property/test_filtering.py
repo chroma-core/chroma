@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional, cast
 import uuid
 from hypothesis import example, given, settings, HealthCheck
 import pytest
+from typing import cast
 from chromadb.api import ClientAPI
 from chromadb.test.property import invariants
 from chromadb.api.types import (
@@ -19,9 +20,13 @@ from chromadb.api.types import (
 from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
+from chromadb.execution.expression.plan import Search
+from chromadb.execution.expression.operator import Knn, In, Key, Eq, And, Or, Contains, NotContains
 import logging
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 import numpy as np
+from chromadb.api.models.Collection import Collection
+from chromadb.execution.expression.operator import Where as WhereExpr
 
 
 def _filter_where_clause(clause: Where, metadata: Optional[Metadata]) -> bool:
@@ -147,6 +152,125 @@ def _filter_embedding_set(
     return list(ids)
 
 
+class LegacyWhereWrapper(WhereExpr):
+    """
+    Wraps old-style where/where_document dicts for testing.
+    Converts where_document to use #document field and combines with where using $and.
+    """
+    def __init__(self, where: Optional[Where] = None, where_document: Optional[WhereDocument] = None):
+        self.where = where
+        self.where_document = where_document
+    
+    def _convert_where_document(self, where_doc: WhereDocument) -> Dict[str, Any]:
+        """Convert where_document filters to use #document field."""
+        if not where_doc:
+            return {}
+        
+        # Handle logical operators recursively
+        if "$and" in where_doc:
+            and_clauses = where_doc["$and"]
+            if isinstance(and_clauses, list):
+                return {"$and": [self._convert_where_document(clause) for clause in and_clauses]}
+        elif "$or" in where_doc:
+            or_clauses = where_doc["$or"]
+            if isinstance(or_clauses, list):
+                return {"$or": [self._convert_where_document(clause) for clause in or_clauses]}
+        
+        # Handle document operators - convert to #document field
+        if "$contains" in where_doc:
+            return {"#document": {"$contains": where_doc["$contains"]}}
+        elif "$not_contains" in where_doc:
+            return {"#document": {"$not_contains": where_doc["$not_contains"]}}
+        
+        if "$regex" in where_doc:
+            return {"#document": {"$regex": where_doc["$regex"]}}
+        elif "$not_regex" in where_doc:
+            return {"#document": {"$not_regex": where_doc["$not_regex"]}}
+        
+        # Cast to dict for return
+        return cast(Dict[str, Any], where_doc)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        # Combine where and where_document into a single where clause
+        combined_where = None
+        
+        # Build list of conditions to AND together
+        conditions = []
+        
+        if self.where:
+            conditions.append(self.where)
+            
+        if self.where_document:
+            # Convert where_document to use #document field
+            converted_doc_filter = self._convert_where_document(self.where_document)
+            if converted_doc_filter:
+                conditions.append(converted_doc_filter)
+        
+        # Combine conditions with $and if needed
+        if len(conditions) == 1:
+            combined_where = conditions[0]
+        elif len(conditions) > 1:
+            combined_where = {"$and": conditions}
+        
+        # Return the combined where clause directly
+        if combined_where:
+            return combined_where
+        return {}
+
+
+def _search_with_filter(
+    collection: Collection,
+    filter: strategies.Filter,
+    query_embedding: Optional[Embedding] = None,
+    n_results: int = 10
+) -> List[str]:
+    """Use the search API to retrieve results with filters - test helper function."""
+    # Build Search object
+    search = Search()
+    
+    # Add KNN if embedding provided
+    if query_embedding is not None:
+        search = search.rank(Knn(query=query_embedding))  # type: ignore[arg-type]
+    
+    # Add filters using the LegacyWhereWrapper
+    if filter.get("where") or filter.get("where_document") or filter.get("ids"):
+        # Convert ids to list if it's a string
+        ids_val = filter.get("ids")
+        if isinstance(ids_val, str):
+            ids_val = [ids_val]
+        
+        # Build the where clause
+        where_expr = None
+        
+        # Add legacy where/where_document if present
+        if filter.get("where") or filter.get("where_document"):
+            wrapper = LegacyWhereWrapper(
+                where=filter.get("where"),
+                where_document=filter.get("where_document"),
+            )
+            if wrapper.to_dict():  # Only use if it has content
+                where_expr = wrapper
+        
+        # Add ID filter if present
+        if ids_val:
+            id_expr = Key.ID.is_in(ids_val)
+            if where_expr:
+                where_expr = where_expr & id_expr  # type: ignore[assignment]
+            else:
+                where_expr = id_expr
+        
+        # Apply the where clause if we have one
+        if where_expr:
+            search = search.where(where_expr)
+        
+    # Set limit and select only IDs
+    search = search.limit(n_results).select("id")
+    
+    # Execute search and return IDs
+    result = collection.search(search)
+    return result["ids"][0] if result["ids"] else []
+
+
 collection_st = st.shared(
     strategies.collections(add_filterable_data=True, with_hnsw_params=True),
     key="coll",
@@ -200,6 +324,55 @@ def test_filterable_metadata_get(
 
     for filter in filters:
         result_ids = coll.get(**filter)["ids"]
+        expected_ids = _filter_embedding_set(record_set, filter)
+        assert sorted(result_ids) == sorted(expected_ids)
+
+
+@pytest.mark.skipif(
+    NOT_CLUSTER_ONLY,
+    reason="Search API only available in distributed mode"
+)
+@settings(
+    deadline=90000,
+    suppress_health_check=[
+        HealthCheck.function_scoped_fixture,
+        HealthCheck.large_base_example,
+        HealthCheck.filter_too_much,
+    ],
+)  # type: ignore
+@given(
+    collection=collection_st,
+    record_set=recordset_st,
+    filters=st.lists(strategies.filters(collection_st, recordset_st), min_size=1),
+    should_compact=st.booleans(),
+)
+def test_filterable_metadata_search(
+    caplog,
+    client: ClientAPI,
+    collection: strategies.Collection,
+    record_set,
+    filters,
+    should_compact: bool,
+) -> None:
+    """Test metadata filtering using search API endpoint."""
+    caplog.set_level(logging.ERROR)
+    
+    reset(client)
+    coll = client.create_collection(
+        name=collection.name,
+        metadata=collection.metadata,  # type: ignore
+        embedding_function=collection.embedding_function,
+    )
+    
+    initial_version = coll.get_model()["version"]
+    coll.add(**record_set)
+    
+    if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
+        wait_for_version_increase(client, collection.name, initial_version)  # type: ignore
+    
+    for filter in filters:
+        # Use search API instead of get
+        result_ids = _search_with_filter(coll, filter, n_results=1000)
         expected_ids = _filter_embedding_set(record_set, filter)
         assert sorted(result_ids) == sorted(expected_ids)
 
@@ -371,6 +544,84 @@ def test_filterable_metadata_query(
                 where_document=filter["where_document"],
             )["ids"][0]
         )
+        expected_ids = set(
+            _filter_embedding_set(
+                cast(strategies.RecordSet, normalized_record_set), filter
+            )
+        )
+        assert len(result_ids.intersection(expected_ids)) == len(result_ids)
+
+
+@pytest.mark.skipif(
+    NOT_CLUSTER_ONLY,
+    reason="Search API only available in distributed mode"
+)
+@settings(
+    deadline=90000,
+    suppress_health_check=[
+        HealthCheck.function_scoped_fixture,
+        HealthCheck.large_base_example,
+        HealthCheck.filter_too_much,
+    ],
+)
+@given(
+    collection=collection_st,
+    record_set=recordset_st,
+    filters=st.lists(
+        strategies.filters(collection_st, recordset_st, include_all_ids=True),
+        min_size=1,
+    ),
+    should_compact=st.booleans(),
+    data=st.data(),
+)
+def test_filterable_metadata_query_via_search(
+    caplog: pytest.LogCaptureFixture,
+    client: ClientAPI,
+    collection: strategies.Collection,
+    record_set: strategies.RecordSet,
+    filters: List[strategies.Filter],
+    should_compact: bool,
+    data: st.DataObject,
+) -> None:
+    """Test query-like filtering using search API endpoint."""
+    caplog.set_level(logging.ERROR)
+    
+    reset(client)
+    coll = client.create_collection(
+        name=collection.name,
+        metadata=collection.metadata,  # type: ignore
+        embedding_function=collection.embedding_function,
+    )
+    
+    initial_version = coll.get_model()["version"]
+    normalized_record_set = invariants.wrap_all(record_set)
+    coll.add(**record_set)  # type: ignore[arg-type]
+    
+    if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
+        wait_for_version_increase(client, collection.name, initial_version)  # type: ignore
+    
+    total_count = len(normalized_record_set["ids"])
+    
+    # Pick a random query embedding
+    query_index = data.draw(st.integers(min_value=0, max_value=total_count - 1))
+    if collection.has_embeddings:
+        assert normalized_record_set["embeddings"] is not None
+        random_query = normalized_record_set["embeddings"][query_index]
+    else:
+        assert isinstance(normalized_record_set["documents"], list)
+        assert collection.embedding_function is not None
+        random_query = collection.embedding_function(
+            [normalized_record_set["documents"][query_index]]
+        )[0]
+    
+    for filter in filters:
+        # Use search API with query embedding
+        result_ids = set(_search_with_filter(
+            coll, 
+            filter, 
+            query_embedding=random_query,
+            n_results=total_count
+        ))
         expected_ids = set(
             _filter_embedding_set(
                 cast(strategies.RecordSet, normalized_record_set), filter

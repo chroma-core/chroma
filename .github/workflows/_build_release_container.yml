@@ -54,10 +54,10 @@ jobs:
         platform: [amd64, arm64]
         include:
           - platform: amd64
-            runner: blacksmith-16vcpu-ubuntu-2204
+            runner: blacksmith-16vcpu-ubuntu-2404
             docker_platform: linux/amd64
           - platform: arm64
-            runner: blacksmith-16vcpu-ubuntu-2204-arm
+            runner: blacksmith-16vcpu-ubuntu-2404-arm
             docker_platform: linux/arm64
     steps:
       - name: Checkout
@@ -97,7 +97,7 @@ jobs:
           set -euo pipefail
 
           # Pre-pull base images to speed up the build
-          docker pull --platform ${{ matrix.docker_platform }} rust:1.81.0
+          docker pull --platform ${{ matrix.docker_platform }} rust:1.85.0
           docker pull --platform ${{ matrix.docker_platform }} debian:stable-slim
 
       - name: Build and push image
@@ -119,7 +119,7 @@ jobs:
 
   merge:
     name: Merge platform manifests
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: ${{ inputs.push == true }}
     needs:
       - build

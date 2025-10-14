@@ -1,8 +1,8 @@
 from typing import Dict, Any, Type, Set
 from chromadb.api.types import (
     EmbeddingFunction,
-    Embeddings,
-    Documents,
+    DefaultEmbeddingFunction,
+    SparseEmbeddingFunction,
 )
 
 # Import all embedding functions
@@ -32,6 +32,7 @@ from chromadb.utils.embedding_functions.instructor_embedding_function import (
 )
 from chromadb.utils.embedding_functions.jina_embedding_function import (
     JinaEmbeddingFunction,
+    JinaQueryConfig,
 )
 from chromadb.utils.embedding_functions.voyageai_embedding_function import (
     VoyageAIEmbeddingFunction,
@@ -66,12 +67,22 @@ from chromadb.utils.embedding_functions.mistral_embedding_function import (
 )
 from chromadb.utils.embedding_functions.runpod_embedding_function import (
     RunPodEmbeddingFunction,
+from chromadb.utils.embedding_functions.morph_embedding_function import (
+    MorphEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.huggingface_sparse_embedding_function import (
+    HuggingFaceSparseEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.fastembed_sparse_embedding_function import (
+    FastembedSparseEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.bm25_embedding_function import (
+    Bm25EmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.chroma_cloud_qwen_embedding_function import (
+    ChromaCloudQwenEmbeddingFunction,
 )
 
-try:
-    from chromadb.is_thin_client import is_thin_client
-except ImportError:
-    is_thin_client = False
 
 # Get all the class names for backward compatibility
 _all_classes: Set[str] = {
@@ -87,6 +98,7 @@ _all_classes: Set[str] = {
     "InstructorEmbeddingFunction",
     "JinaEmbeddingFunction",
     "MistralEmbeddingFunction",
+    "MorphEmbeddingFunction",
     "VoyageAIEmbeddingFunction",
     "ONNXMiniLM_L6_V2",
     "OpenCLIPEmbeddingFunction",
@@ -99,40 +111,15 @@ _all_classes: Set[str] = {
     "TogetherAIEmbeddingFunction",
     "RunPodEmbeddingFunction",
     "DefaultEmbeddingFunction",
+    "HuggingFaceSparseEmbeddingFunction",
+    "FastembedSparseEmbeddingFunction",
+    "Bm25EmbeddingFunction",
+    "ChromaCloudQwenEmbeddingFunction",
 }
 
 
 def get_builtins() -> Set[str]:
     return _all_classes
-
-
-class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
-    def __init__(self) -> None:
-        if is_thin_client:
-            return
-
-    def __call__(self, input: Documents) -> Embeddings:
-        # Delegate to ONNXMiniLM_L6_V2
-        return ONNXMiniLM_L6_V2()(input)
-
-    @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "DefaultEmbeddingFunction":
-        DefaultEmbeddingFunction.validate_config(config)
-        return DefaultEmbeddingFunction()
-
-    @staticmethod
-    def name() -> str:
-        return "default"
-
-    def get_config(self) -> Dict[str, Any]:
-        return {}
-
-    def max_tokens(self) -> int:
-        return 256
-
-    @staticmethod
-    def validate_config(config: Dict[str, Any]) -> None:
-        return
 
 
 # Dictionary of supported embedding functions
@@ -149,6 +136,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "instructor": InstructorEmbeddingFunction,
     "jina": JinaEmbeddingFunction,
     "mistral": MistralEmbeddingFunction,
+    "morph": MorphEmbeddingFunction,
     "voyageai": VoyageAIEmbeddingFunction,
     "onnx_mini_lm_l6_v2": ONNXMiniLM_L6_V2,
     "open_clip": OpenCLIPEmbeddingFunction,
@@ -161,6 +149,13 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "cloudflare_workers_ai": CloudflareWorkersAIEmbeddingFunction,
     "together_ai": TogetherAIEmbeddingFunction,
     "runpod": RunPodEmbeddingFunction,
+    "chroma-cloud-qwen": ChromaCloudQwenEmbeddingFunction,
+}
+
+sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {
+    "huggingface_sparse": HuggingFaceSparseEmbeddingFunction,
+    "fastembed_sparse": FastembedSparseEmbeddingFunction,
+    "bm25": Bm25EmbeddingFunction,
 }
 
 
@@ -237,7 +232,9 @@ __all__ = [
     "OllamaEmbeddingFunction",
     "InstructorEmbeddingFunction",
     "JinaEmbeddingFunction",
+    "JinaQueryConfig",
     "MistralEmbeddingFunction",
+    "MorphEmbeddingFunction",
     "VoyageAIEmbeddingFunction",
     "ONNXMiniLM_L6_V2",
     "OpenCLIPEmbeddingFunction",
@@ -247,6 +244,10 @@ __all__ = [
     "ChromaLangchainEmbeddingFunction",
     "TogetherAIEmbeddingFunction",
     "RunPodEmbeddingFunction",
+    "HuggingFaceSparseEmbeddingFunction",
+    "FastembedSparseEmbeddingFunction",
+    "Bm25EmbeddingFunction",
+    "ChromaCloudQwenEmbeddingFunction",
     "register_embedding_function",
     "config_to_embedding_function",
     "known_embedding_functions",

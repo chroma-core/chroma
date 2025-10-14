@@ -129,6 +129,9 @@ pub trait ChromaError: Error + Send {
     {
         Box::new(self)
     }
+    fn should_trace_error(&self) -> bool {
+        true
+    }
 }
 
 impl Error for Box<dyn ChromaError> {}
@@ -136,5 +139,11 @@ impl Error for Box<dyn ChromaError> {}
 impl ChromaError for Box<dyn ChromaError> {
     fn code(&self) -> ErrorCodes {
         self.as_ref().code()
+    }
+}
+
+impl ChromaError for std::io::Error {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Unknown
     }
 }

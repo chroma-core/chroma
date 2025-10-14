@@ -12,9 +12,9 @@ use chroma_types::{
     CreateTenantError, CreateTenantResponse, Database, DatabaseUuid, DeleteCollectionError,
     DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionWithSegmentsError,
     GetCollectionsError, GetDatabaseError, GetSegmentsError, GetTenantError, GetTenantResponse,
-    InternalCollectionConfiguration, ListDatabasesError, Metadata, MetadataValue, ResetError,
-    ResetResponse, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionConfiguration,
-    UpdateCollectionError,
+    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, ListDatabasesError,
+    Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope, SegmentType,
+    SegmentUuid, UpdateCollectionError, UpdateTenantError, UpdateTenantResponse,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -226,7 +226,18 @@ impl SqliteSysDb {
                 sqlx::Error::RowNotFound => GetTenantError::NotFound(name.to_string()),
                 _ => GetTenantError::Internal(e.into()),
             })
-            .map(|row| GetTenantResponse { name: row.get(0) })
+            .map(|row| GetTenantResponse {
+                name: row.get(0),
+                resource_name: None,
+            })
+    }
+
+    pub(crate) async fn update_tenant(
+        &self,
+        _tenant_id: String,
+        _resource_name: String,
+    ) -> Result<UpdateTenantResponse, UpdateTenantError> {
+        Ok(UpdateTenantResponse {})
     }
 
     ////////////////////////// Collection Methods ////////////////////////
@@ -336,6 +347,7 @@ impl SqliteSysDb {
             database,
             config: configuration,
             metadata,
+            schema: None,
             dimension,
             log_position: 0,
             total_records_post_compaction: 0,
@@ -356,7 +368,7 @@ impl SqliteSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        configuration: Option<UpdateCollectionConfiguration>,
+        configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         let mut tx = self
             .db
@@ -733,6 +745,7 @@ impl SqliteSysDb {
                 Some(Ok(Collection {
                     collection_id,
                     config: configuration,
+                    schema: None,
                     metadata,
                     total_records_post_compaction: 0,
                     version: 0,
@@ -1048,8 +1061,9 @@ mod tests {
     use super::*;
     use chroma_sqlite::db::test_utils::get_new_sqlite_db;
     use chroma_types::{
-        SegmentScope, SegmentType, SegmentUuid, UpdateHnswConfiguration, UpdateMetadata,
-        UpdateMetadataValue, VectorIndexConfiguration,
+        InternalUpdateCollectionConfiguration, SegmentScope, SegmentType, SegmentUuid,
+        UpdateHnswConfiguration, UpdateMetadata, UpdateMetadataValue,
+        UpdateVectorIndexConfiguration, VectorIndexConfiguration,
     };
 
     #[tokio::test]
@@ -1175,6 +1189,31 @@ mod tests {
         // Get tenant
         let tenant = sysdb.get_tenant("new_tenant").await.unwrap();
         assert_eq!(tenant.name, "new_tenant");
+    }
+
+    #[tokio::test]
+    async fn test_update_tenant() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+
+        // Create tenant
+        sysdb.create_tenant("new_tenant".to_string()).await.unwrap();
+
+        // Get tenant
+        let tenant = sysdb.get_tenant("new_tenant").await.unwrap();
+        assert_eq!(tenant.name, "new_tenant");
+        assert_eq!(tenant.resource_name, None);
+
+        // Update tenant
+        sysdb
+            .update_tenant("new_tenant".to_string(), "new_resource_name".to_string())
+            .await
+            .unwrap();
+
+        // Get tenant
+        let tenant = sysdb.get_tenant("new_tenant").await.unwrap();
+        assert_eq!(tenant.name, "new_tenant");
+        assert_eq!(tenant.resource_name, None);
     }
 
     #[tokio::test]
@@ -1354,13 +1393,14 @@ mod tests {
                 Some("new_name".to_string()),
                 Some(CollectionMetadataUpdate::UpdateMetadata(metadata)),
                 Some(1024),
-                Some(UpdateCollectionConfiguration {
-                    hnsw: Some(UpdateHnswConfiguration {
-                        ef_search: Some(20),
-                        num_threads: Some(4),
-                        ..Default::default()
-                    }),
-                    spann: None,
+                Some(InternalUpdateCollectionConfiguration {
+                    vector_index: Some(UpdateVectorIndexConfiguration::Hnsw(Some(
+                        UpdateHnswConfiguration {
+                            ef_search: Some(10),
+                            num_threads: Some(2),
+                            ..Default::default()
+                        },
+                    ))),
                     embedding_function: None,
                 }),
             )
@@ -1387,7 +1427,7 @@ mod tests {
         // Access HNSW configuration through pattern matching
         match &collection.config.vector_index {
             VectorIndexConfiguration::Hnsw(hnsw) => {
-                assert_eq!(hnsw.ef_search, 20);
+                assert_eq!(hnsw.ef_search, 10);
             }
             _ => panic!("Expected HNSW configuration"),
         }

@@ -2,7 +2,7 @@ import asyncio
 from uuid import UUID
 import urllib.parse
 import orjson
-from typing import Any, Optional, cast, Tuple, Sequence, Dict
+from typing import Any, Optional, cast, Tuple, Sequence, Dict, List
 import logging
 import httpx
 from overrides import override
@@ -25,25 +25,30 @@ from chromadb.telemetry.opentelemetry import (
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.utils.async_to_sync import async_to_sync
 from chromadb.types import Database, Tenant, Collection as CollectionModel
-from chromadb.api.types import optional_embeddings_to_base64_strings
+from chromadb.execution.expression.plan import Search
 
 from chromadb.api.types import (
     Documents,
     Embeddings,
-    PyEmbeddings,
     IDs,
     Include,
+    Schema,
     Metadatas,
     URIs,
     Where,
     WhereDocument,
     GetResult,
     QueryResult,
+    SearchResult,
     CollectionMetadata,
+    optional_embeddings_to_base64_strings,
     validate_batch,
     convert_np_embeddings_to_list,
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
+)
+
+from chromadb.api.types import (
     IncludeMetadataDocumentsEmbeddings,
 )
 
@@ -123,7 +128,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 + " (https://github.com/chroma-core/chroma)"
             )
 
-            limits = httpx.Limits(max_keepalive_connections=self.keepalive_secs)
+            limits = httpx.Limits(keepalive_expiry=self.keepalive_secs)
             self._clients[loop_hash] = httpx.AsyncClient(
                 timeout=None,
                 headers=headers,
@@ -140,7 +145,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         # remove it from kwargs, and add it to the content parameter
         # This is because httpx uses a slower json serializer
         if "json" in kwargs:
-            data = orjson.dumps(kwargs.pop("json"))
+            data = orjson.dumps(kwargs.pop("json"), option=orjson.OPT_SERIALIZE_NUMPY)
             kwargs["content"] = data
 
         # Unlike requests, httpx does not automatically escape the path
@@ -289,6 +294,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
@@ -297,10 +303,11 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> CollectionModel:
         """Creates a collection"""
         config_json = (
-            create_collection_configuration_to_json(configuration)
+            create_collection_configuration_to_json(configuration, metadata)
             if configuration
             else None
         )
+        serialized_schema = schema.serialize_to_json() if schema else None
         resp_json = await self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections",
@@ -308,6 +315,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 "name": name,
                 "metadata": metadata,
                 "configuration": config_json,
+                "schema": serialized_schema,
                 "get_or_create": get_or_create,
             },
         )
@@ -339,6 +347,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def get_or_create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
@@ -346,6 +355,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> CollectionModel:
         return await self.create_collection(
             name=name,
+            schema=schema,
             configuration=configuration,
             metadata=metadata,
             get_or_create=True,
@@ -394,6 +404,27 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         )
         model = CollectionModel.from_json(resp_json)
         return model
+
+    @trace_method("AsyncFastAPI._search", OpenTelemetryGranularity.OPERATION)
+    @override
+    async def _search(
+        self,
+        collection_id: UUID,
+        searches: List[Search],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> SearchResult:
+        """Performs hybrid search on a collection"""
+        # Convert Search objects to dictionaries
+        payload = {"searches": [s.to_dict() for s in searches]}
+
+        resp_json = await self._make_request(
+            "post",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
+            json=payload,
+        )
+
+        return SearchResult(resp_json)
 
     @trace_method("AsyncFastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -506,7 +537,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self,
         batch: Tuple[
             IDs,
-            Optional[PyEmbeddings],
+            Optional[Embeddings],
             Optional[Metadatas],
             Optional[Documents],
             Optional[URIs],
@@ -548,7 +579,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> bool:
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings),
+            embeddings,
             metadatas,
             documents,
             uris,
@@ -575,9 +606,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> bool:
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings)
-            if embeddings is not None
-            else None,
+            embeddings if embeddings is not None else None,
             metadatas,
             documents,
             uris,
@@ -606,7 +635,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> bool:
         batch = (
             ids,
-            convert_np_embeddings_to_list(embeddings),
+            embeddings,
             metadatas,
             documents,
             uris,

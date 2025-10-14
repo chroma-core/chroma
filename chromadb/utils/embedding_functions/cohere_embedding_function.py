@@ -131,18 +131,10 @@ class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return "cosine"
 
     def supported_spaces(self) -> List[Space]:
-        if self.model_name == "embed-english-v3.0":
-            return ["cosine", "l2", "ip"]
-        elif self.model_name == "embed-english-light-v3.0":
-            return ["cosine", "ip", "l2"]
-        elif self.model_name == "embed-english-v2.0":
+        if self.model_name == "embed-english-v2.0":
             return ["cosine"]
         elif self.model_name == "embed-english-light-v2.0":
             return ["cosine"]
-        elif self.model_name == "embed-multilingual-v3.0":
-            return ["cosine", "l2", "ip"]
-        elif self.model_name == "embed-multilingual-light-v3.0":
-            return ["cosine", "l2", "ip"]
         elif self.model_name == "embed-multilingual-v2.0":
             return ["ip"]
         else:

@@ -1,5 +1,6 @@
 ---
-title: Collection
+id: collection-python
+name: Collection (Python)
 ---
 
 # Python Collection
@@ -38,11 +39,9 @@ Add embeddings to the data store.
 - `metadatas` - The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
 - `documents` - The documents to associate with the embeddings. Optional.
 
-
 **Returns**:
 
-  None
-
+None
 
 **Raises**:
 
@@ -74,7 +73,6 @@ all embeddings up to limit starting at offset.
 - `where_document` - A WhereDocument type dict used to filter by the documents. E.g. `{"$contains" : "hello"}`. Optional.
 - `include` - A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`. Ids are always included. Defaults to `["metadatas", "documents"]`. Optional.
 
-
 **Returns**:
 
 - `GetResult` - A GetResult object containing the results.
@@ -91,7 +89,6 @@ Get the first few results in the database up to limit
 
 - `limit` - The number of results to return.
 
-
 **Returns**:
 
 - `GetResult` - A GetResult object containing the results.
@@ -102,6 +99,7 @@ Get the first few results in the database up to limit
 def query(
         query_embeddings: Optional[OneOrMany[Embedding]] = None,
         query_texts: Optional[OneOrMany[Document]] = None,
+        ids: Optional[OneOrMany[ID]] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -115,16 +113,15 @@ Get the n_results nearest neighbor embeddings for provided query_embeddings or q
 
 - `query_embeddings` - The embeddings to get the closest neighbors of. Optional.
 - `query_texts` - The document texts to get the closest neighbors of. Optional.
+- `ids` - The list of ids to limit search space to. Optional.
 - `n_results` - The number of neighbors to return for each query_embedding or query_texts. Optional.
 - `where` - A Where type dict used to filter results by. E.g. `{$and: [{"color" : "red"}, {"price": 4.20}]}`. Optional.
 - `where_document` - A WhereDocument type dict used to filter by the documents. E.g. `{"$contains" : "hello"}`. Optional.
 - `include` - A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`, `"distances"`. Ids are always included. Defaults to `["metadatas", "documents", "distances"]`. Optional.
 
-
 **Returns**:
 
 - `QueryResult` - A QueryResult object containing the results.
-
 
 **Raises**:
 
@@ -145,10 +142,9 @@ Modify the collection name or metadata
 - `name` - The updated name for the collection. Optional.
 - `metadata` - The updated metadata for the collection. Optional.
 
-
 **Returns**:
 
-  None
+None
 
 ## update
 
@@ -168,10 +164,9 @@ Update the embeddings, metadatas or documents for provided ids.
 - `metadatas` - The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
 - `documents` - The documents to associate with the embeddings. Optional.
 
-
 **Returns**:
 
-  None
+None
 
 ## upsert
 
@@ -191,10 +186,9 @@ Update the embeddings, metadatas or documents for provided ids, or create them i
 - `metadatas` - The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
 - `documents` - The documents to associate with the embeddings. Optional.
 
-
 **Returns**:
 
-  None
+None
 
 ## delete
 
@@ -209,10 +203,9 @@ Delete the embeddings based on ids and/or a where filter
 **Arguments**:
 
 - `ids` - The ids of the embeddings to delete
-- `where` - A Where type dict used to filter the delection by. E.g. `{$and: [{"color" : "red"}, {"price": 4.20}]}`. Optional.
+- `where` - A Where type dict used to filter the deletion by. E.g. `{$and: [{"color" : "red"}, {"price": 4.20}]}`. Optional.
 - `where_document` - A WhereDocument type dict used to filter the deletion by the document content. E.g. `{"$contains" : "hello"}`. Optional.
-
 
 **Returns**:
 
-  None
+None

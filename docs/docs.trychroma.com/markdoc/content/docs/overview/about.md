@@ -1,3 +1,8 @@
+---
+id: about
+name: About
+---
+
 # About
 
 {% Banner type="tip" title="We are hiring" %}
@@ -31,7 +36,6 @@ It is important that our values around this are very clear!
 What code will be open source? As a general rule, any feature which an individual developer would find useful will be 100% open source forever. This approach, popularized by Gitlab, is called [buyer-based open source](https://about.gitlab.com/company/stewardship/). We believe that this is essential to accomplishing our mission.
 
 Currently we don’t have any specific plans to monetize Chroma, we are working on a hosted service that will be launched as a free technical preview to make it easier for developers to get going. We are 100% focused on building valuable open source software with the community and for the community.
-
 
 ## Our investors
 

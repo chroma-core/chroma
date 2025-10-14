@@ -116,7 +116,7 @@ impl CursorStore {
         }
     }
 
-    pub async fn load<'a>(&self, name: &CursorName<'a>) -> Result<Option<Witness>, Error> {
+    pub async fn load(&self, name: &CursorName<'_>) -> Result<Option<Witness>, Error> {
         // SAFETY(rescrv):  Semaphore poisoning.
         let _permit = self.semaphore.acquire().await.unwrap();
         let path = format!("{}/{}", self.prefix, name.path());
@@ -144,15 +144,15 @@ impl CursorStore {
         Ok(Some(Witness { e_tag, cursor }))
     }
 
-    pub async fn init<'a>(&self, name: &CursorName<'a>, cursor: Cursor) -> Result<Witness, Error> {
+    pub async fn init(&self, name: &CursorName<'_>, cursor: Cursor) -> Result<Witness, Error> {
         // Semaphore taken by put.
         let options = PutOptions::if_not_exists(StorageRequestPriority::P0);
         self.put(name, cursor, options).await
     }
 
-    pub async fn save<'a>(
+    pub async fn save(
         &self,
-        name: &CursorName<'a>,
+        name: &CursorName<'_>,
         cursor: &Cursor,
         witness: &Witness,
     ) -> Result<Witness, Error> {
@@ -161,9 +161,9 @@ impl CursorStore {
         self.put(name, cursor.clone(), options).await
     }
 
-    async fn put<'a>(
+    async fn put(
         &self,
-        name: &CursorName<'a>,
+        name: &CursorName<'_>,
         mut cursor: Cursor,
         options: PutOptions,
     ) -> Result<Witness, Error> {

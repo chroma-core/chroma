@@ -134,6 +134,7 @@ func TestConvertCollectionToModel(t *testing.T) {
 	collectionID := types.MustParse("d9a75e2e-2929-45c4-af06-75b15630edd0")
 	collectionName := "collection_name"
 	colllectionConfigurationJsonStr := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
+	collectionSchemaStr := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
 	collectionDimension := int32(3)
 	collectionTotalRecordsPostCompaction := uint64(100)
 	collectionSizeBytesPostCompaction := uint64(500000)
@@ -144,6 +145,7 @@ func TestConvertCollectionToModel(t *testing.T) {
 			ID:                         collectionID.String(),
 			Name:                       &collectionName,
 			ConfigurationJsonStr:       &colllectionConfigurationJsonStr,
+			SchemaStr:                  &collectionSchemaStr,
 			Dimension:                  &collectionDimension,
 			TotalRecordsPostCompaction: collectionTotalRecordsPostCompaction,
 			SizeBytesPostCompaction:    collectionSizeBytesPostCompaction,
@@ -158,6 +160,7 @@ func TestConvertCollectionToModel(t *testing.T) {
 	assert.Equal(t, collectionID, modelCollections[0].ID)
 	assert.Equal(t, collectionName, modelCollections[0].Name)
 	assert.Equal(t, colllectionConfigurationJsonStr, modelCollections[0].ConfigurationJsonStr)
+	assert.Equal(t, &collectionSchemaStr, modelCollections[0].SchemaStr)
 	assert.Equal(t, collectionDimension, *modelCollections[0].Dimension)
 	assert.Equal(t, collectionTotalRecordsPostCompaction, modelCollections[0].TotalRecordsPostCompaction)
 	assert.Equal(t, collectionSizeBytesPostCompaction, modelCollections[0].SizeBytesPostCompaction)

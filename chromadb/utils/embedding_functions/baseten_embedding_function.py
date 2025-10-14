@@ -2,7 +2,8 @@ import os
 from chromadb.utils.embedding_functions.openai_embedding_function import (
     OpenAIEmbeddingFunction,
 )
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from chromadb.api.types import Space
 import warnings
 
 
@@ -53,6 +54,12 @@ class BasetenEmbeddingFunction(OpenAIEmbeddingFunction):
     @staticmethod
     def name() -> str:
         return "baseten"
+
+    def default_space(self) -> Space:
+        return "cosine"
+
+    def supported_spaces(self) -> List[Space]:
+        return ["cosine", "l2", "ip"]
 
     def get_config(self) -> Dict[str, Any]:
         return {"api_base": self.api_base, "api_key_env_var": self.api_key_env_var}

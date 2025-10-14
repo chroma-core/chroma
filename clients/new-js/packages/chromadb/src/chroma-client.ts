@@ -265,11 +265,12 @@ export class ChromaClient {
     name: string;
     configuration?: CreateCollectionConfiguration;
     metadata?: CollectionMetadata;
-    embeddingFunction?: EmbeddingFunction;
+    embeddingFunction?: EmbeddingFunction | null;
   }): Promise<Collection> {
     const collectionConfig = await processCreateCollectionConfig({
       configuration,
       embeddingFunction,
+      metadata,
     });
 
     const { data } = await Api.createCollection({
@@ -328,9 +329,9 @@ export class ChromaClient {
       embeddingFunction: embeddingFunction
         ? embeddingFunction
         : await getEmbeddingFunction(
-            data.name,
-            data.configuration_json.embedding_function ?? undefined,
-          ),
+          data.name,
+          data.configuration_json.embedding_function ?? undefined,
+        ),
       id: data.id,
     });
   }
@@ -382,11 +383,12 @@ export class ChromaClient {
     name: string;
     configuration?: CreateCollectionConfiguration;
     metadata?: CollectionMetadata;
-    embeddingFunction?: EmbeddingFunction;
+    embeddingFunction?: EmbeddingFunction | null;
   }): Promise<Collection> {
     const collectionConfig = await processCreateCollectionConfig({
       configuration,
       embeddingFunction,
+      metadata,
     });
 
     const { data } = await Api.createCollection({

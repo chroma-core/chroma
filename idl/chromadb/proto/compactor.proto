@@ -22,7 +22,16 @@ message RebuildResponse {
   // Empty
 }
 
+message ListDeadJobsRequest {
+  // Empty
+}
+
+message ListDeadJobsResponse {
+  CollectionIds ids = 1;
+}
+
 service Compactor {
   rpc Compact(CompactRequest) returns (CompactResponse) {}
   rpc Rebuild(RebuildRequest) returns (RebuildResponse) {}
+  rpc ListDeadJobs(ListDeadJobsRequest) returns (ListDeadJobsResponse) {}
 }

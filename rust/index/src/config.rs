@@ -15,6 +15,10 @@ pub struct HnswProviderConfig {
     // inspired by the birthday paradox.
     #[serde(default = "HnswProviderConfig::default_permitted_parallelism")]
     pub permitted_parallelism: u32,
+    // Control whether HNSW indices are loaded from memory
+    // instead of disk. Defaults to false.
+    #[serde(default = "HnswProviderConfig::default_use_direct_hnsw")]
+    pub use_direct_hnsw: bool,
 }
 
 impl HnswProviderConfig {
@@ -25,17 +29,34 @@ impl HnswProviderConfig {
     const fn default_permitted_parallelism() -> u32 {
         180
     }
+
+    const fn default_use_direct_hnsw() -> bool {
+        false
+    }
 }
 
-fn default_garbage_collection() -> PlGarbageCollectionConfig {
+fn default_pl_garbage_collection() -> PlGarbageCollectionConfig {
     PlGarbageCollectionConfig {
         enabled: false,
         policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig::default()),
     }
 }
 
+fn default_hnsw_garbage_collection() -> HnswGarbageCollectionConfig {
+    HnswGarbageCollectionConfig {
+        enabled: false,
+        policy: HnswGarbageCollectionPolicyConfig::DeletePercentage(
+            DeletePercentageThresholdPolicyConfig::default(),
+        ),
+    }
+}
+
 fn default_pl_block_size() -> usize {
     5 * 1024 * 1024
+}
+
+fn default_adaptive_search_nprobe() -> bool {
+    true
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
@@ -54,9 +75,12 @@ impl Default for PlGarbageCollectionPolicyConfig {
 pub struct SpannProviderConfig {
     #[serde(default = "default_pl_block_size")]
     pub pl_block_size: usize,
-    #[serde(default = "default_garbage_collection")]
+    #[serde(default = "default_pl_garbage_collection")]
     pub pl_garbage_collection: PlGarbageCollectionConfig,
+    #[serde(default = "default_hnsw_garbage_collection")]
     pub hnsw_garbage_collection: HnswGarbageCollectionConfig,
+    #[serde(default = "default_adaptive_search_nprobe")]
+    pub adaptive_search_nprobe: bool,
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
@@ -79,6 +103,12 @@ impl Default for RandomSamplePolicyConfig {
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct DeletePercentageThresholdPolicyConfig {
     pub threshold: f32,
+}
+
+impl Default for DeletePercentageThresholdPolicyConfig {
+    fn default() -> Self {
+        DeletePercentageThresholdPolicyConfig { threshold: 0.1 }
+    }
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]

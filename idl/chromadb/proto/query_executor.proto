@@ -25,8 +25,8 @@ message KNNOperator {
 }
 
 message LimitOperator {
-    uint32 skip = 1;
-    optional uint32 fetch = 2;
+    uint32 offset = 1;
+    optional uint32 limit = 2;
 }
 
 message ProjectionOperator {
@@ -89,9 +89,88 @@ message KNNBatchResult {
     uint64 pulled_log_bytes = 2;
 }
 
+message QueryVector {
+    oneof vector {
+        Vector dense = 1;
+        SparseVector sparse = 2;
+    }
+}
+
+// RankExpr represents a ranking expression
+message RankExpr {
+    message Knn {
+        QueryVector query = 1;
+        string key = 2;
+        uint32 limit = 3;
+        optional float default = 4;
+        bool return_rank = 5;
+    }
+    
+    message RankPair {
+        RankExpr left = 1;
+        RankExpr right = 2;
+    }
+
+    message RankList {
+        repeated RankExpr exprs = 1;
+    }
+
+    oneof rank {
+        RankExpr absolute = 1;
+        RankPair division = 2;
+        RankExpr exponentiation = 3;
+        Knn knn = 4;
+        RankExpr logarithm = 5;
+        RankList maximum = 6;
+        RankList minimum = 7;
+        RankList multiplication = 8;
+        RankPair subtraction = 9;
+        RankList summation = 10;
+        float value = 11;
+    }
+}
+
+message RankOperator {
+    optional RankExpr expr = 1;
+}
+
+message SelectOperator {
+    repeated string keys = 1;
+}
+
+message SearchPayload {
+    FilterOperator filter = 1;
+    RankOperator rank = 2;
+    LimitOperator limit = 3;
+    SelectOperator select = 4;
+}
+
+message SearchPlan {
+    ScanOperator scan = 1;
+    repeated SearchPayload payloads = 2;
+}
+
+message SearchRecord {
+    string id = 1;
+    optional string document = 2;
+    optional Vector embedding = 3;
+    optional UpdateMetadata metadata = 4;
+    optional float score = 5;
+}
+
+message SearchPayloadResult {
+    repeated SearchRecord records = 1;
+}
+
+message SearchResult {
+    repeated SearchPayloadResult results = 1;
+    uint64 pulled_log_bytes = 2;
+}
+
 service QueryExecutor {
     rpc Count(CountPlan) returns (CountResult) {}
     rpc Get(GetPlan) returns (GetResult) {}
     rpc KNN(KNNPlan) returns (KNNBatchResult) {}
+    rpc Search(SearchPlan) returns (SearchResult) {}
 }
 

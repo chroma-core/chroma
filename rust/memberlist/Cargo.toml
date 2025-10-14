@@ -22,5 +22,5 @@ tower = { workspace = true }
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
 chroma-system = { workspace = true }
-chroma-tracing = { workspace = true }
+chroma-tracing = { workspace = true, features=["grpc"] }
 chroma-types = { workspace = true }

@@ -32,6 +32,8 @@ use guacamole::{Guacamole, Zipf};
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use opentelemetry::{Key, KeyValue, Value};
+use tokio::signal::unix::signal;
+use tokio::signal::unix::SignalKind;
 use tokio::sync::Mutex as TokioMutex;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
@@ -414,7 +416,7 @@ pub enum WhereMixin {
     /// each of integer, float, and string.  The integer fields are named i1, i2, and i3.  The
     /// float fields are named f1, f2, and f3.  The string fields are named s1, s2, and s3.
     ///
-    /// This mixin selects one of these 6 numeric fields at random and picks a metadata range query
+    /// This mixin selects one of these 6 numeric metadata keys at random and picks a metadata range query
     /// to perform on it that will return data according to the mixin.
     #[serde(rename = "tiny-stories")]
     TinyStories(TinyStoriesMixin),
@@ -1739,7 +1741,20 @@ pub async fn entrypoint() {
         .await
         .unwrap();
     let runner = tokio::task::spawn(async move { load.run().await });
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            match signal(SignalKind::terminate()) {
+                Ok(mut sigterm) => {
+                    sigterm.recv().await;
+                    tracing::info!("Received SIGTERM, shutting down service");
+                }
+                Err(err) => {
+                    tracing::error!("Failed to create SIGTERM handler: {err}")
+                }
+            }
+        })
+        .await
+        .unwrap();
     runner.abort();
 }
 

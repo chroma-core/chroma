@@ -1,8 +1,10 @@
 use async_trait::async_trait;
+use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_system::ComponentHandle;
 use chroma_types::chroma_proto::{
     compactor_server::{Compactor, CompactorServer},
-    CompactRequest, CompactResponse, RebuildRequest, RebuildResponse,
+    CollectionIds, CompactRequest, CompactResponse, ListDeadJobsRequest, ListDeadJobsResponse,
+    RebuildRequest, RebuildResponse,
 };
 use tokio::{
     signal::unix::{signal, SignalKind},
@@ -11,13 +13,14 @@ use tokio::{
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::trace_span;
 
-use crate::compactor::{OneOffCompactMessage, RegisterOnReadySignal};
+use crate::compactor::{ListDeadJobsMessage, OneOffCompactMessage, RegisterOnReadySignal};
 
 use super::{CompactionManager, RebuildMessage};
 
 pub struct CompactionServer {
     pub manager: ComponentHandle<CompactionManager>,
     pub port: u16,
+    pub jemalloc_pprof_server_port: Option<u16>,
 }
 
 impl CompactionServer {
@@ -42,9 +45,19 @@ impl CompactionServer {
             .send(RegisterOnReadySignal { on_ready_tx }, None)
             .await?;
 
+        // Start pprof server
+        let mut pprof_shutdown_tx = None;
+        if let Some(port) = self.jemalloc_pprof_server_port {
+            tracing::info!("Starting jemalloc pprof server on port {}", port);
+            let shutdown_channel = tokio::sync::oneshot::channel();
+            pprof_shutdown_tx = Some(shutdown_channel.0);
+            spawn_pprof_server(port, shutdown_channel.1).await;
+        }
+
         let server = Server::builder()
             .add_service(health_service)
             .add_service(CompactorServer::new(self));
+
         server
             .serve_with_shutdown(addr, async {
                 match signal(SignalKind::terminate()) {
@@ -58,6 +71,12 @@ impl CompactionServer {
                 }
             })
             .await?;
+
+        // Shutdown pprof server after server is finished shutting down
+        if let Some(shutdown_tx) = pprof_shutdown_tx {
+            let _ = shutdown_tx.send(());
+        }
+
         Ok(())
     }
 }
@@ -97,5 +116,28 @@ impl Compactor for CompactionServer {
             .map_err(|e| Status::internal(e.to_string()))?;
 
         Ok(Response::new(RebuildResponse {}))
+    }
+
+    async fn list_dead_jobs(
+        &self,
+        _request: Request<ListDeadJobsRequest>,
+    ) -> Result<Response<ListDeadJobsResponse>, Status> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+        self.manager
+            .receiver()
+            .send(ListDeadJobsMessage { response_tx }, None)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let dead_jobs = response_rx
+            .await
+            .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?;
+
+        Ok(Response::new(ListDeadJobsResponse {
+            ids: Some(CollectionIds {
+                ids: dead_jobs.iter().map(ToString::to_string).collect(),
+            }),
+        }))
     }
 }

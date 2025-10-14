@@ -4,7 +4,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_system::Operator;
 use chroma_types::{
-    operator::{KnnProjection, KnnProjectionOutput, KnnProjectionRecord, RecordDistance},
+    operator::{KnnProjection, KnnProjectionOutput, KnnProjectionRecord, RecordMeasure},
     Segment,
 };
 use thiserror::Error;
@@ -37,7 +37,7 @@ pub struct KnnProjectionInput {
     pub logs: FetchLogOutput,
     pub blockfile_provider: BlockfileProvider,
     pub record_segment: Segment,
-    pub record_distances: Vec<RecordDistance>,
+    pub record_distances: Vec<RecordMeasure>,
 }
 
 #[derive(Error, Debug)]
@@ -62,8 +62,6 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjection {
         &self,
         input: &KnnProjectionInput,
     ) -> Result<KnnProjectionOutput, KnnProjectionError> {
-        tracing::debug!("[{}]: {:?}", self.get_name(), input);
-
         let projection_input = ProjectionInput {
             logs: input.logs.clone(),
             blockfile_provider: input.blockfile_provider.clone(),
@@ -85,7 +83,7 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjection {
                 .map(
                     |(
                         record,
-                        RecordDistance {
+                        RecordMeasure {
                             offset_id: _,
                             measure,
                         },
@@ -104,7 +102,7 @@ mod tests {
     use chroma_log::test::{int_as_id, upsert_generator, LoadFromGenerator, LogGenerator};
     use chroma_segment::test::TestDistributedSegment;
     use chroma_system::Operator;
-    use chroma_types::operator::{KnnProjection, Projection, RecordDistance};
+    use chroma_types::operator::{KnnProjection, Projection, RecordMeasure};
 
     use super::KnnProjectionInput;
 
@@ -116,9 +114,9 @@ mod tests {
     /// - Log: Upsert [81..=120]
     /// - Compacted: Upsert [1..=100]
     async fn setup_knn_projection_input(
-        record_distances: Vec<RecordDistance>,
+        record_distances: Vec<RecordMeasure>,
     ) -> (TestDistributedSegment, KnnProjectionInput) {
-        let mut test_segment = TestDistributedSegment::default();
+        let mut test_segment = TestDistributedSegment::new().await;
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;
@@ -140,7 +138,7 @@ mod tests {
         let (_test_segment, knn_projection_input) = setup_knn_projection_input(
             (71..=90)
                 .rev()
-                .map(|offset_id| RecordDistance {
+                .map(|offset_id| RecordMeasure {
                     offset_id,
                     measure: -(offset_id as f32),
                 })
@@ -181,7 +179,7 @@ mod tests {
         let (_test_segment, knn_projection_input) = setup_knn_projection_input(
             (71..=90)
                 .rev()
-                .map(|offset_id| RecordDistance {
+                .map(|offset_id| RecordMeasure {
                     offset_id,
                     measure: -(offset_id as f32),
                 })

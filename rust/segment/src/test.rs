@@ -5,10 +5,13 @@ use super::{
     distributed_hnsw::DistributedHNSWSegmentWriter, types::materialize_logs,
 };
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
+use chroma_config::registry::Registry;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::ChromaError;
 use chroma_index::{
-    hnsw_provider::HnswIndexProvider, spann::types::SpannMetrics, test_hnsw_index_provider,
+    hnsw_provider::HnswIndexProvider,
+    spann::types::{GarbageCollectionContext, SpannMetrics},
+    test_hnsw_index_provider,
 };
 use chroma_types::{
     operator::{
@@ -44,11 +47,14 @@ pub struct TestDistributedSegment {
 }
 
 impl TestDistributedSegment {
-    pub fn new_with_dimension(dimension: usize) -> Self {
+    pub async fn new_with_dimension(dimension: usize) -> Self {
         let collection = Collection::test_collection(dimension as i32);
         let collection_uuid = collection.collection_id;
         let (blockfile_dir, blockfile_provider) = test_arrow_blockfile_provider(2 << 22);
         let (hnsw_dir, hnsw_provider) = test_hnsw_index_provider();
+        let garbage_collection_context = GarbageCollectionContext::new(Registry::new())
+            .await
+            .expect("Expected to construct gc context for spann");
 
         Self {
             temp_dirs: vec![blockfile_dir, hnsw_dir],
@@ -57,9 +63,10 @@ impl TestDistributedSegment {
             spann_provider: SpannProvider {
                 hnsw_provider,
                 blockfile_provider,
-                garbage_collection_context: None,
+                garbage_collection_context,
                 metrics: SpannMetrics::default(),
-                pl_block_size: Some(5 * 1024 * 1024),
+                pl_block_size: 5 * 1024 * 1024,
+                adaptive_search_nprobe: true,
             },
             collection,
             metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
@@ -84,20 +91,21 @@ impl TestDistributedSegment {
         .await
         .expect("Should be able to initialize metadata writer.");
         metadata_writer
-            .apply_materialized_log_chunk(&None, &materialized_logs)
+            .apply_materialized_log_chunk(&None, &materialized_logs, None)
             .await
             .expect("Should be able to apply materialized logs.");
         metadata_writer
             .finish()
             .await
             .expect("Should be able to write to blockfile.");
-        self.metadata_segment.file_path = metadata_writer
-            .commit()
-            .await
-            .expect("Should be able to commit metadata.")
-            .flush()
-            .await
-            .expect("Should be able to flush metadata.");
+        self.metadata_segment.file_path = Box::pin(
+            Box::pin(metadata_writer.commit())
+                .await
+                .expect("Should be able to commit metadata.")
+                .flush(),
+        )
+        .await
+        .expect("Should be able to flush metadata.");
 
         let record_writer = RecordSegmentWriter::from_segment(
             &self.collection.tenant,
@@ -112,13 +120,14 @@ impl TestDistributedSegment {
             .await
             .expect("Should be able to apply materialized log.");
 
-        self.record_segment.file_path = record_writer
-            .commit()
-            .await
-            .expect("Should be able to commit record.")
-            .flush()
-            .await
-            .expect("Should be able to flush record.");
+        self.record_segment.file_path = Box::pin(
+            Box::pin(record_writer.commit())
+                .await
+                .expect("Should be able to commit record.")
+                .flush(),
+        )
+        .await
+        .expect("Should be able to flush record.");
 
         let vector_writer = DistributedHNSWSegmentWriter::from_segment(
             &self.collection,
@@ -157,9 +166,9 @@ impl From<&TestDistributedSegment> for CollectionAndSegments {
     }
 }
 
-impl Default for TestDistributedSegment {
-    fn default() -> Self {
-        Self::new_with_dimension(128)
+impl TestDistributedSegment {
+    pub async fn new() -> Self {
+        Self::new_with_dimension(128).await
     }
 }
 
@@ -328,12 +337,12 @@ impl TestReferenceSegment {
                 plan.filter
                     .query_ids
                     .as_ref()
-                    .map_or(true, |ids| ids.contains(k))
+                    .is_none_or(|ids| ids.contains(k))
                     && plan
                         .filter
                         .where_clause
                         .as_ref()
-                        .map_or(true, |w| w.eval(rec))
+                        .is_none_or(|w| w.eval(rec))
             })
             .map(|(_, v)| v.clone())
             .collect::<Vec<_>>();
@@ -345,8 +354,8 @@ impl TestReferenceSegment {
             result: ProjectionOutput {
                 records: records
                     .into_iter()
-                    .skip(plan.limit.skip as usize)
-                    .take(plan.limit.fetch.unwrap_or(u32::MAX) as usize)
+                    .skip(plan.limit.offset as usize)
+                    .take(plan.limit.limit.unwrap_or(u32::MAX) as usize)
                     .map(|(_, mut rec)| {
                         let Projection {
                             document,
@@ -386,12 +395,12 @@ impl TestReferenceSegment {
                 plan.filter
                     .query_ids
                     .as_ref()
-                    .map_or(true, |ids| ids.contains(k))
+                    .is_none_or(|ids| ids.contains(k))
                     && plan
                         .filter
                         .where_clause
                         .as_ref()
-                        .map_or(true, |w| w.eval(rec))
+                        .is_none_or(|w| w.eval(rec))
             })
             .map(|(_, v)| v.clone())
             .collect::<Vec<_>>();

@@ -5,7 +5,12 @@ use std::path::Path;
 use thiserror::Error;
 use tracing::instrument;
 
-pub const DEFAULT_MAX_ELEMENTS: usize = 10000;
+// Setting it to a small value to prevent
+// bloating of the index which directly impacts query latency by increasing
+// the amount of bytes that need to be fetched from s3. The trade off is that
+// there will be more data movement/allocations during compaction which is
+// acceptable since compaction is a background operation.
+pub const DEFAULT_MAX_ELEMENTS: usize = 100;
 
 // TODO: Make this config:
 // - Watchable - for dynamic updates
@@ -238,6 +243,36 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
             id,
             distance_function: index_config.distance_function.clone(),
         })
+    }
+
+    #[instrument(skip(hnsw_data))]
+    fn load_from_hnsw_data(
+        hnsw_data: &hnswlib::HnswData,
+        index_config: &IndexConfig,
+        ef_search: usize,
+        id: IndexUuid,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let index = hnswlib::HnswIndex::load_from_hnsw_data(
+            hnswlib::HnswIndexMemoryLoadConfig {
+                distance_function: map_distance_function(index_config.distance_function.clone()),
+                dimensionality: index_config.dimensionality,
+                ef_search,
+            },
+            hnsw_data,
+        )
+        .map_err(|e| WrappedHnswInitError::Other(e).boxed())?;
+
+        Ok(HnswIndex {
+            index,
+            id,
+            distance_function: index_config.distance_function.clone(),
+        })
+    }
+
+    fn serialize_to_hnsw_data(&self) -> Result<hnswlib::HnswData, WrappedHnswError> {
+        self.index
+            .serialize_index_to_hnsw_data()
+            .map_err(WrappedHnswError)
     }
 }
 

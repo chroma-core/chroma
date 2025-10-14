@@ -1,3 +1,8 @@
+---
+id: integrations
+name: Integrations
+---
+
 # Integrations
 
 ### Embedding Integrations
@@ -25,6 +30,8 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Together AI](./embedding-models/together-ai.md)                        | ✓      | ✓          |
 | [Mistral](./embedding-models/mistral.md)                                | ✓      | -          |
 | [RunPod](./embedding-models/runpod.md)                                  | ✓      | ✓          |
+| [Mistral](./embedding-models/mistral.md)                                | ✓      | ✓          |
+| [Morph](./embedding-models/morph.md)                                    | ✓      | ✓          |
 
 ---
 
@@ -37,14 +44,16 @@ We welcome pull requests to add new Integrations to the community.
 {% special_table %}
 {% /special_table %}
 
-|                                         | Python | JS           |
-| --------------------------------------- | ------ | ------------ |
-| [DeepEval](./frameworks/deepeval)       | ✓      | -            |
-| [Langchain](./frameworks/langchain)     | ✓      | ✓            |
-| [LlamaIndex](./frameworks/llamaindex)   | ✓      | ✓            |
-| [Braintrust](./frameworks/braintrust)   | ✓      | ✓            |
-| [OpenLLMetry](./frameworks/openllmetry) | ✓      | Coming Soon! |
-| [Streamlit](./frameworks/streamlit)     | ✓      | -            |
-| [Haystack](./frameworks/haystack)       | ✓      | -            |
-| [OpenLIT](./frameworks/openlit)         | ✓      | Coming Soon! |
-| [Anthropic MCP](./frameworks/anthropic-mcp) | ✓ | Coming Soon! |
+|                                             | Python | JS           |
+| ------------------------------------------- | ------ | ------------ |
+| [DeepEval](./frameworks/deepeval)           | ✓      | -            |
+| [Langchain](./frameworks/langchain)         | ✓      | ✓            |
+| [LlamaIndex](./frameworks/llamaindex)       | ✓      | ✓            |
+| [Braintrust](./frameworks/braintrust)       | ✓      | ✓            |
+| [OpenLLMetry](./frameworks/openllmetry)     | ✓      | Coming Soon! |
+| [Streamlit](./frameworks/streamlit)         | ✓      | -            |
+| [Haystack](./frameworks/haystack)           | ✓      | -            |
+| [OpenLIT](./frameworks/openlit)             | ✓      | Coming Soon! |
+| [Anthropic MCP](./frameworks/anthropic-mcp) | ✓      | Coming Soon! |
+| [VoltAgent](./frameworks/voltagent)         | -      | ✓            |
+| [Mem0](./frameworks/mem0)                   | ✓      | -            |

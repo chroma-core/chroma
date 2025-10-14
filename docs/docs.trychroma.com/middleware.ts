@@ -74,6 +74,7 @@ const legacyPathsMapping: Record<string, string> = {
   "/production/cloud-providers/gcp": "/guides/deploy/gcp",
   "/production/administration/performance": "/guides/deploy/performance",
   "/production/administration/observability": "/guides/deploy/observability",
+  "/cloud/collection-forking": "/cloud/features/collection-forking",
 };
 
 export const middleware = (request: NextRequest) => {

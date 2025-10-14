@@ -124,7 +124,8 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
             CleanupMode::Delete | CleanupMode::DeleteV2 => {
                 // Hard delete - remove the file
                 if !all_files.is_empty() {
-                    for chunk in all_files.chunks(100) {
+                    // The S3 DeleteObjects API allows up to 1000 objects per request
+                    for chunk in all_files.chunks(1000) {
                         let result = self.storage.delete_many(chunk).await?;
                         if !result.errors.is_empty() {
                             // Log the errors but don't fail the operation

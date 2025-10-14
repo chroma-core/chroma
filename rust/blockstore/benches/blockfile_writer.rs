@@ -1,5 +1,6 @@
 use chroma_blockstore::{
     arrow::{
+        config::BlockManagerConfig,
         provider::ArrowBlockfileProvider,
         types::{ArrowWriteableKey, ArrowWriteableValue},
     },
@@ -240,8 +241,13 @@ pub fn benchmark(c: &mut Criterion) {
     let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
     let block_cache = Box::new(UnboundedCacheConfig {}.build()) as _;
     let sparse_index_cache = Box::new(UnboundedCacheConfig {}.build()) as _;
-    let arrow_blockfile_provider =
-        ArrowBlockfileProvider::new(storage.clone(), BLOCK_SIZE, block_cache, sparse_index_cache);
+    let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+        storage.clone(),
+        BLOCK_SIZE,
+        block_cache,
+        sparse_index_cache,
+        BlockManagerConfig::default_num_concurrent_block_flushes(),
+    );
 
     // todo: sizes should be configurable
     bench_writer_for_generator_and_size::<TrigramFrequencyGenerator>(

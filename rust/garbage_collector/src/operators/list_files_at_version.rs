@@ -3,6 +3,7 @@ use chroma_blockstore::{
     arrow::provider::{BlockManager, RootManagerError},
     RootManager,
 };
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{
     hnsw_provider::{HnswIndexProvider, FILES},
     IndexUuid,
@@ -58,6 +59,22 @@ pub enum ListFilesAtVersionError {
     FetchBlockIdsError(#[from] RootManagerError),
     #[error("Version file missing collection ID")]
     VersionFileMissingCollectionId,
+}
+
+impl ChromaError for ListFilesAtVersionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ListFilesAtVersionError::VersionHistoryMissing => ErrorCodes::NotFound,
+            ListFilesAtVersionError::VersionNotFound(_) => ErrorCodes::NotFound,
+            ListFilesAtVersionError::InvalidUuid(_) => ErrorCodes::InvalidArgument,
+            ListFilesAtVersionError::FetchBlockIdsError(e) => e.code(),
+            ListFilesAtVersionError::VersionFileMissingCollectionId => ErrorCodes::InvalidArgument,
+        }
+    }
+
+    fn should_trace_error(&self) -> bool {
+        self.code() != ErrorCodes::NotFound
+    }
 }
 
 #[derive(Clone, Debug)]

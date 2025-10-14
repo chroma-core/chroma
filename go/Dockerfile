@@ -44,11 +44,6 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-FROM runner AS logservice
-COPY --from=builder /build-dir/go/bin/logservice .
-ENV PATH=$PATH:./
-CMD ["./logservice"]
-
 FROM runner AS sysdb
 COPY --from=builder /build-dir/go/bin/coordinator .
 ENV PATH=$PATH:./

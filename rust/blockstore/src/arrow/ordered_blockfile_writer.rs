@@ -369,6 +369,7 @@ mod tests {
     use crate::arrow::block::delta::types::Delta;
     use crate::arrow::block::delta::OrderedBlockDelta;
     use crate::arrow::block::Block;
+    use crate::arrow::config::BlockManagerConfig;
     use crate::arrow::ordered_blockfile_writer::{ArrowOrderedBlockfileWriter, Inner};
     use crate::arrow::provider::{BlockManager, BlockfileReaderOptions, RootManager};
     use crate::arrow::root::{RootWriter, Version};
@@ -395,6 +396,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -442,6 +444,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
 
@@ -516,6 +519,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -563,6 +567,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -694,6 +699,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
 
@@ -742,6 +748,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -827,6 +834,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -926,7 +934,12 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let root_manager = RootManager::new(storage.clone(), root_cache);
-        let block_manager = BlockManager::new(storage.clone(), 8 * 1024 * 1024, block_cache);
+        let block_manager = BlockManager::new(
+            storage.clone(),
+            8 * 1024 * 1024,
+            block_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
 
         // Manually create a v1 blockfile with no counts
         let initial_block = block_manager.create::<&str, String, OrderedBlockDelta>();
@@ -990,8 +1003,12 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let root_manager = RootManager::new(storage.clone(), root_cache);
-        let block_manager =
-            BlockManager::new(storage.clone(), TEST_MAX_BLOCK_SIZE_BYTES, block_cache);
+        let block_manager = BlockManager::new(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
 
         // This test is rather fragile, but it is the best way to test the migration
         // without a lot of logic duplication. We will create a v1 blockfile with
@@ -1059,6 +1076,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
 
         let read_options = BlockfileReaderOptions::new(first_write_id, prefix_path.to_string());

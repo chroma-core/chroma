@@ -67,6 +67,7 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 			Id:                   req.Id,
 			Name:                 req.Name,
 			ConfigurationJsonStr: req.ConfigurationJsonStr,
+			SchemaStr:            req.SchemaStr,
 			Dimension:            req.Dimension,
 			Metadata:             req.Metadata,
 			Tenant:               req.Tenant,
@@ -107,6 +108,7 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 			Id:                   req.Id,
 			Name:                 req.Name,
 			ConfigurationJsonStr: req.ConfigurationJsonStr,
+			SchemaStr:            req.SchemaStr,
 			Dimension:            req.Dimension,
 			Metadata:             req.Metadata,
 			Tenant:               req.Tenant,
@@ -550,6 +552,7 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		FlushSegmentCompactions:    segmentCompactionInfo,
 		TotalRecordsPostCompaction: req.TotalRecordsPostCompaction,
 		SizeBytesPostCompaction:    req.SizeBytesPostCompaction,
+		SchemaStr:                  req.SchemaStr,
 	}
 	flushCollectionInfo, err := s.coordinator.FlushCollectionCompaction(ctx, FlushCollectionCompaction)
 	if err != nil {

@@ -292,6 +292,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
             id=id,
             name=request.name,
             configuration_json=configuration_json,
+            serialized_schema=None,
             metadata=from_proto_metadata(request.metadata),
             dimension=request.dimension,
             database=database,

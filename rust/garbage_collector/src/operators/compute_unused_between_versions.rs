@@ -331,7 +331,10 @@ impl Operator<ComputeUnusedBetweenVersionsInput, ComputeUnusedBetweenVersionsOut
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, BlockfileWriterOptions};
+    use chroma_blockstore::{
+        arrow::{config::BlockManagerConfig, provider::ArrowBlockfileProvider},
+        BlockfileWriterOptions,
+    };
     use chroma_cache::UnboundedCacheConfig;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_sysdb::{SysDb, TestSysDb};
@@ -345,6 +348,7 @@ mod tests {
             1024 * 1024,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let prefix_path = String::from("");
 

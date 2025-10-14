@@ -61,7 +61,12 @@ export const chromaFetch: typeof fetch = async (input, init) => {
       throw new ChromaUniqueError("The resource already exists");
     case 422:
       const body = await response.json();
-      if (body && body?.message.startsWith("Quota exceeded")) {
+      if (
+        body &&
+        body.message &&
+        (body.message.startsWith("Quota exceeded") ||
+          body.message.startsWith("Billing limit exceeded"))
+      ) {
         throw new ChromaQuotaExceededError(body?.message);
       }
       break;

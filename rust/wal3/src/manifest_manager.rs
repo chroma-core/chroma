@@ -4,21 +4,13 @@ use std::time::Instant;
 use chroma_storage::{ETag, Storage};
 
 use crate::gc::Garbage;
-use crate::manifest::{Manifest, Snapshot};
+use crate::manifest::{Manifest, ManifestAndETag, Snapshot};
 use crate::reader::read_fragment;
 use crate::writer::MarkDirty;
 use crate::{
     unprefixed_fragment_path, Error, Fragment, FragmentSeqNo, GarbageCollectionOptions,
-    LogPosition, SnapshotCache, SnapshotOptions, ThrottleOptions,
+    LogPosition, SnapshotCache, SnapshotOptions, SnapshotPointerOrFragmentSeqNo, ThrottleOptions,
 };
-
-////////////////////////////////////////// ManifestAndETag /////////////////////////////////////////
-
-#[derive(Debug)]
-struct ManifestAndETag {
-    manifest: Manifest,
-    e_tag: ETag,
-}
 
 ////////////////////////////////////////////// Staging /////////////////////////////////////////////
 
@@ -37,9 +29,12 @@ struct Staging {
     next_seq_no_to_apply: FragmentSeqNo,
     /// A prefix of the log to be garbage collected.  This is added to the manager from somewhere
     /// else and the manager will apply the garbage to the next manifest that gets written.
-    garbage: Option<Garbage>,
+    garbage: Option<(Garbage, tokio::sync::oneshot::Sender<Option<Error>>)>,
     /// The instant at which the last batch was generated.
     last_batch: Instant,
+    /// True iff the manifest manager is closing, so we want to prevent late-arriving threads from
+    /// being stuck waiting on a notify.
+    tearing_down: bool,
 }
 
 impl Staging {
@@ -89,14 +84,22 @@ impl Staging {
             return self.pull_gc_work_only();
         }
         self.last_batch = Instant::now();
-        let garbage = self.garbage.take();
-        let snapshot = if let Some(garbage) = garbage.as_ref() {
-            match new_manifest.apply_garbage(garbage.clone()) {
-                Ok(Some(manifest)) => new_manifest = manifest,
+        let snapshot = if let Some((garbage, notifier)) = self.garbage.take() {
+            match new_manifest.apply_garbage(garbage) {
+                Ok(Some(manifest)) => {
+                    notifiers.push(notifier);
+                    new_manifest = manifest
+                }
                 Ok(None) => {
                     tracing::error!("given empty garbage that did not apply");
+                    let _ = notifier.send(Some(Error::GarbageCollectionPrecondition(
+                        SnapshotPointerOrFragmentSeqNo::Stringy(
+                            "given empty garbage that did not apply".to_string(),
+                        ),
+                    )));
                 }
                 Err(err) => {
+                    notifiers.push(notifier);
                     tracing::error!("could not apply garabage: {err:?}");
                     for notifier in notifiers {
                         let _ = notifier.send(Some(err.clone()));
@@ -144,18 +147,38 @@ impl Staging {
         Option<Snapshot>,
         Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
     )> {
-        if let Some(garbage) = self.garbage.take() {
-            let new_manifest = self.stable.manifest.apply_garbage(garbage).ok()??;
+        if let Some((garbage, notifier)) = self.garbage.take() {
+            let new_manifest = match self.stable.manifest.apply_garbage(garbage) {
+                Ok(Some(manifest)) => manifest,
+                Ok(None) => {
+                    tracing::error!("given empty garbage that did not apply");
+                    let _ = notifier.send(None);
+                    return None;
+                }
+                Err(err) => {
+                    tracing::error!("could not apply garabage: {err:?}");
+                    let _ = notifier.send(Some(err));
+                    return None;
+                }
+            };
             Some((
                 self.stable.manifest.clone(),
                 self.stable.e_tag.clone(),
                 new_manifest,
                 self.next_seq_no_to_apply,
                 None,
-                vec![],
+                vec![notifier],
             ))
         } else {
             None
+        }
+    }
+}
+
+impl Drop for Staging {
+    fn drop(&mut self) {
+        for (_, notify) in std::mem::take(&mut self.fragments).into_iter() {
+            let _ = notify.send(Some(Error::LogContentionDurable));
         }
     }
 }
@@ -175,7 +198,9 @@ pub struct ManifestManager {
     /// The unique ID of the process doing the writing.
     writer: String,
     /// Staging area for manifests to be written.
-    staging: Arc<Mutex<Staging>>,
+    staging: Mutex<Staging>,
+    /// Only one thread doing work at a time.
+    do_work_mutex: tokio::sync::Mutex<()>,
 }
 
 impl ManifestManager {
@@ -196,7 +221,7 @@ impl ManifestManager {
         };
         let next_seq_no_to_apply = next_seq_no_to_assign;
         let stable = ManifestAndETag { manifest, e_tag };
-        let staging = Arc::new(Mutex::new(Staging {
+        let staging = Mutex::new(Staging {
             stable,
             fragments: vec![],
             next_log_position,
@@ -204,7 +229,9 @@ impl ManifestManager {
             next_seq_no_to_apply,
             garbage: None,
             last_batch: Instant::now(),
-        }));
+            tearing_down: false,
+        });
+        let do_work_mutex = tokio::sync::Mutex::new(());
         Ok(Self {
             throttle,
             snapshot,
@@ -212,21 +239,32 @@ impl ManifestManager {
             prefix,
             writer,
             staging,
+            do_work_mutex,
         })
     }
 
     /// Signal log contention to anyone writing on the manifest.
     pub fn shutdown(&self) {
-        let mut staging = self.staging.lock().unwrap();
-        for (_, tx) in std::mem::take(&mut staging.fragments) {
+        let (fragments, garbage) = {
+            let mut staging = self.staging.lock().unwrap();
+            staging.tearing_down = true;
+            (
+                std::mem::take(&mut staging.fragments),
+                std::mem::take(&mut staging.garbage),
+            )
+        };
+        for (_, tx) in fragments {
+            let _ = tx.send(Some(Error::LogContentionDurable));
+        }
+        if let Some((_, tx)) = garbage {
             let _ = tx.send(Some(Error::LogContentionDurable));
         }
     }
 
     /// Return the latest stable manifest
-    pub fn latest(&self) -> Manifest {
+    pub fn latest(&self) -> ManifestAndETag {
         let staging = self.staging.lock().unwrap();
-        staging.stable.manifest.clone()
+        staging.stable.clone()
     }
 
     /// Recover from a fault in writing.  It is possible that fragments have been written that are
@@ -299,7 +337,11 @@ impl ManifestManager {
     fn push_work(&self, fragment: Fragment, tx: tokio::sync::oneshot::Sender<Option<Error>>) {
         // SAFETY(rescrv):  Mutex poisoning.
         let mut staging = self.staging.lock().unwrap();
-        staging.fragments.push((fragment, tx));
+        if staging.tearing_down {
+            let _ = tx.send(Some(Error::LogContentionDurable));
+        } else {
+            staging.fragments.push((fragment, tx));
+        }
     }
 
     /// Given a fragment, add it to the manifest, batch its application and wait for it to apply.
@@ -307,7 +349,7 @@ impl ManifestManager {
     pub async fn publish_fragment(&self, fragment: Fragment) -> Result<(), Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.push_work(fragment, tx);
-        self.do_work().await?;
+        self.do_work().await;
         match rx.await {
             Ok(None) => Ok(()),
             Ok(Some(err)) => Err(err),
@@ -315,9 +357,18 @@ impl ManifestManager {
         }
     }
 
+    pub fn garbage_applies_cleanly(&self, garbage: &Garbage) -> bool {
+        let latest = {
+            let staging = self.staging.lock().unwrap();
+            staging.stable.manifest.clone()
+        };
+        matches!(latest.apply_garbage(garbage.clone()), Ok(Some(_)))
+    }
+
     // Given garbage that has already been written to S3, apply the garbage collection to this
     // manifest.
     pub async fn apply_garbage(&self, garbage: Garbage) -> Result<(), Error> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
         // SAFETY(rescrv):  Mutex poisoning.
         {
             let mut staging = self.staging.lock().unwrap();
@@ -326,26 +377,28 @@ impl ManifestManager {
                     "tried collecting garbage twice".to_string(),
                 ));
             }
-            staging.garbage = Some(garbage);
+            staging.garbage = Some((garbage, tx));
         }
-        loop {
-            {
-                let staging = self.staging.lock().unwrap();
-                if staging.garbage.is_none() {
-                    break;
-                }
+        self.do_work().await;
+        match rx.await {
+            Ok(None) => Ok(()),
+            Ok(Some(err)) => {
+                tracing::error!("Unable to apply garbage: {err}");
+                Err(err)
             }
-            match self.do_work().await {
-                Ok(_) => {}
-                Err(err) => {
-                    return Err(err);
-                }
-            };
+            Err(err) => {
+                tracing::error!(
+                    "Unable to receive message for garbage application completion: {err}"
+                );
+                Err(Error::GarbageCollection(format!(
+                    "Unable to receive message for garbage application completion: {err}"
+                )))
+            }
         }
-        Ok(())
     }
 
-    async fn do_work(&self) -> Result<(), Error> {
+    async fn do_work(&self) {
+        let _guard = self.do_work_mutex.lock().await;
         let mut iters = 0;
         for i in 0..u64::MAX {
             iters = i + 1;
@@ -364,9 +417,15 @@ impl ManifestManager {
             )) = work
             {
                 if let Some(snapshot) = snapshot {
-                    snapshot
+                    if let Err(err) = snapshot
                         .install(&self.throttle, &self.storage, &self.prefix)
-                        .await?;
+                        .await
+                    {
+                        for notifier in notifiers.into_iter() {
+                            let _ = notifier.send(Some(err.clone()));
+                        }
+                        continue;
+                    }
                 }
                 match old_manifest
                     .install(
@@ -380,12 +439,14 @@ impl ManifestManager {
                 {
                     Ok(e_tag) => {
                         // SAFETY(rescrv):  Mutex poisoning.
-                        let mut staging = self.staging.lock().unwrap();
-                        staging.next_seq_no_to_apply = next_seq_no_to_apply;
-                        staging.stable = ManifestAndETag {
-                            manifest: new_manifest,
-                            e_tag,
-                        };
+                        {
+                            let mut staging = self.staging.lock().unwrap();
+                            staging.next_seq_no_to_apply = next_seq_no_to_apply;
+                            staging.stable = ManifestAndETag {
+                                manifest: new_manifest,
+                                e_tag,
+                            };
+                        }
                         for notifier in notifiers.into_iter() {
                             let _ = notifier.send(None);
                         }
@@ -403,7 +464,6 @@ impl ManifestManager {
         if iters > 3 {
             tracing::event!(tracing::Level::INFO, name = "do work iterated", iters =? iters);
         }
-        Ok(())
     }
 
     pub async fn compute_garbage(
@@ -426,6 +486,27 @@ impl ManifestManager {
             first_to_keep,
         )
         .await
+    }
+
+    pub fn count_waiters(&self) -> usize {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let staging = self.staging.lock().unwrap();
+        staging.fragments.len()
+    }
+
+    pub fn debug_dump(&self) -> String {
+        let mut output = "[manifest manager]\n".to_string();
+        let staging = self.staging.lock().unwrap();
+        output += &format!("next_log_position: {:?}\n", staging.next_log_position);
+        output += &format!(
+            "next_seq_no_to_assign: {:?}\n",
+            staging.next_seq_no_to_assign
+        );
+        output += &format!("next_seq_no_to_apply: {:?}\n", staging.next_seq_no_to_apply);
+        output += &format!("last_batch: {:?}\n", staging.last_batch);
+        output += &format!("tearing_down: {:?}\n", staging.tearing_down);
+        output += &format!("fragments: {}\n", staging.fragments.len());
+        output
     }
 }
 

@@ -12,7 +12,7 @@
       <img src="https://img.shields.io/discord/1073293645303795742?cacheSeconds=3600" alt="Discord">
   </a> |
   <a href="https://github.com/chroma-core/chroma/blob/master/LICENSE" target="_blank">
-      <img src="https://img.shields.io/static/v1?label=license&message=Apache 2.0&color=white" alt="License">
+      <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License">
   </a> |
   <a href="https://docs.trychroma.com/" target="_blank">
       Docs
@@ -22,14 +22,21 @@
   </a>
 </p>
 
-
 ```bash
 pip install chromadb # python client
 # for javascript, npm install chromadb!
 # for client-server mode, chroma run --path /chroma_db_path
 ```
 
-The core API is only 4 functions (run our [💡 Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing) or [Replit template](https://replit.com/@chroma/Chroma-Pluggable-knowledge-for-AI?v=1)):
+## Chroma Cloud
+
+Our hosted service, Chroma Cloud, powers serverless vector and full-text search. It's extremely fast, cost-effective, scalable and painless. Create a DB and try it out in under 30 seconds with $5 of free credits.
+
+[Get started with Chroma Cloud](https://trychroma.com/signup)
+
+## API
+
+The core API is only 4 functions (run our [💡 Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing)):
 
 ```python
 import chromadb
@@ -55,11 +62,13 @@ results = collection.query(
 )
 ```
 
+Learn about all features on our [Docs](https://docs.trychroma.com)
+
 ## Features
 - __Simple__: Fully-typed, fully-tested, fully-documented == happiness
 - __Integrations__: [`🦜️🔗 LangChain`](https://blog.langchain.dev/langchain-chroma/) (python and js), [`🦙 LlamaIndex`](https://twitter.com/atroyn/status/1628557389762007040) and more soon
 - __Dev, Test, Prod__: the same API that runs in your python notebook, scales to your cluster
-- __Feature-rich__: Queries, filtering, density estimation and more
+- __Feature-rich__: Queries, filtering, regex and more
 - __Free & Open Source__: Apache 2.0 Licensed
 
 ## Use case: ChatGPT for ______
@@ -67,7 +76,7 @@ results = collection.query(
 For example, the `"Chat your data"` use case:
 1. Add documents to your database. You can pass in your own embeddings, embedding function, or let Chroma embed them for you.
 2. Query relevant documents with natural language.
-3. Compose documents into the context window of an LLM like `GPT3` for additional summarization or analysis.
+3. Compose documents into the context window of an LLM like `GPT4` for additional summarization or analysis.
 
 ## Embeddings?
 

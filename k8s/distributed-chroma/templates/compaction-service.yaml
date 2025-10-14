@@ -46,6 +46,8 @@ spec:
           image: "{{ .Values.compactionService.image.repository }}:{{ .Values.compactionService.image.tag }}"
           imagePullPolicy: IfNotPresent
           readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 30 # 30 seconds to allow for initial startup
             grpc:
               port: 50051
           volumeMounts:
@@ -59,6 +61,9 @@ spec:
             {{ end }}
           ports:
             - containerPort: 50051
+            - containerPort: 6060
+              protocol: TCP
+              name: pprof
           env:
             {{if .Values.compactionService.configuration}}
             - name: CONFIG_PATH
@@ -68,6 +73,10 @@ spec:
             - name: {{ .name }}
               # TODO properly use flow control here to check which type of value we need.
 {{ .value | nindent 14 }}
+            {{ end }}
+            {{ if .Values.compactionService.jemallocConfig }}
+            - name: _RJEM_MALLOC_CONF
+              value: {{ .Values.compactionService.jemallocConfig }}
             {{ end }}
             - name: CHROMA_COMPACTION_SERVICE__MY_MEMBER_ID
               valueFrom:

@@ -6,6 +6,7 @@ use chroma_log::config::LogConfig;
 use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sqlite::config::SqliteDBConfig;
 use chroma_sysdb::SysDbConfig;
+use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use chroma_types::{default_default_knn_index, KnnIndex};
 use figment::providers::{Env, Format, Yaml};
 use mdac::CircuitBreakerConfig;
@@ -68,6 +69,8 @@ pub struct FrontendConfig {
     pub tenants_to_migrate_immediately: Vec<String>,
     #[serde(default = "Default::default")]
     pub tenants_to_migrate_immediately_threshold: Option<String>,
+    #[serde(default = "default_enable_schema")]
+    pub enable_schema: bool,
 }
 
 impl FrontendConfig {
@@ -86,6 +89,7 @@ impl FrontendConfig {
             default_knn_index: default_default_knn_index(),
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
+            enable_schema: default_enable_schema(),
         }
     }
 }
@@ -94,11 +98,20 @@ fn default_otel_service_name() -> String {
     "chromadb".to_string()
 }
 
+fn default_otel_filters() -> Vec<OtelFilter> {
+    vec![OtelFilter {
+        crate_name: "chroma_frontend".to_string(),
+        filter_level: OtelFilterLevel::Trace,
+    }]
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct OpenTelemetryConfig {
     pub endpoint: String,
     #[serde(default = "default_otel_service_name")]
     pub service_name: String,
+    #[serde(default = "default_otel_filters")]
+    pub filters: Vec<OtelFilter>,
 }
 
 fn default_persist_path() -> String {
@@ -122,6 +135,10 @@ fn default_max_payload_size_bytes() -> usize {
 }
 
 fn default_enable_span_indexing() -> bool {
+    false
+}
+
+fn default_enable_schema() -> bool {
     false
 }
 
@@ -238,6 +255,7 @@ mod tests {
             CacheConfig::Nop => {}
             _ => {}
         }
+        assert!(config.frontend.enable_schema);
     }
 
     #[test]

@@ -29,12 +29,13 @@ from chromadb.api.types import (
     Loadable,
     Metadatas,
     QueryResult,
+    Schema,
     URIs,
+    DefaultEmbeddingFunction,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.errors import ChromaError
 from chromadb.types import Database, Tenant, Where, WhereDocument
-import chromadb.utils.embedding_functions as ef
 
 
 class AsyncClient(SharedSystemClient, AsyncClientAPI):
@@ -176,11 +177,12 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> AsyncCollection:
@@ -200,6 +202,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
 
         model = await self._server.create_collection(
             name=name,
+            schema=schema,
             configuration=configuration,
             metadata=metadata,
             tenant=self.tenant,
@@ -219,7 +222,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         name: str,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
         model = await self._server.get_collection(
@@ -244,11 +247,12 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def get_or_create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
         if configuration is None:
@@ -264,6 +268,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             configuration["embedding_function"] = embedding_function
         model = await self._server.get_or_create_collection(
             name=name,
+            schema=schema,
             configuration=configuration,
             metadata=metadata,
             tenant=self.tenant,

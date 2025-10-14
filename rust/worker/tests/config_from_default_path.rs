@@ -1,3 +1,4 @@
+use chroma_blockstore::config::BlockfileProviderConfig;
 use chroma_index::config::{HnswGarbageCollectionPolicyConfig, PlGarbageCollectionPolicyConfig};
 use figment::Jail;
 use serial_test::serial;
@@ -16,6 +17,7 @@ fn test_config_from_default_path() {
                 otel_endpoint: "http://jaeger:4317"
                 my_member_id: "query-service-0"
                 my_port: 50051
+                jemalloc_pprof_server_port: 6060
                 assignment_policy:
                     rendezvous_hashing:
                         hasher: Murmur3
@@ -62,6 +64,7 @@ fn test_config_from_default_path() {
                             block_cache_config:
                                 memory:
                                     capacity: 1000
+                            num_concurrent_block_flushes: 100
                         sparse_index_manager_config:
                             sparse_index_cache_config:
                                 memory:
@@ -78,6 +81,7 @@ fn test_config_from_default_path() {
                 otel_endpoint: "http://jaeger:4317"
                 my_member_id: "compaction-service-0"
                 my_port: 50051
+                jemalloc_pprof_server_port: 6060
                 assignment_policy:
                     rendezvous_hashing:
                         hasher: Murmur3
@@ -131,6 +135,7 @@ fn test_config_from_default_path() {
                             block_cache_config:
                                 memory:
                                     capacity: 1000
+                            num_concurrent_block_flushes: 100
                         sparse_index_manager_config:
                             sparse_index_cache_config:
                                 memory:
@@ -155,12 +160,16 @@ fn test_config_from_default_path() {
         let config = RootConfig::load();
         assert_eq!(config.query_service.my_member_id, "query-service-0");
         assert_eq!(config.query_service.my_port, 50051);
-
+        assert_eq!(config.query_service.jemalloc_pprof_server_port, Some(6060));
         assert_eq!(
             config.compaction_service.my_member_id,
             "compaction-service-0"
         );
         assert_eq!(config.compaction_service.my_port, 50051);
+        assert_eq!(
+            config.compaction_service.jemalloc_pprof_server_port,
+            Some(6060)
+        );
         assert_eq!(
             config
                 .compaction_service
@@ -177,6 +186,17 @@ fn test_config_from_default_path() {
             Uuid::parse_str(&config.compaction_service.compactor.disabled_collections[1]).unwrap(),
             Uuid::parse_str("496db4aa-fbe1-498a-b60b-81ec0fe59792").unwrap()
         );
+        match config.compaction_service.blockfile_provider {
+            BlockfileProviderConfig::Arrow(arrow_config) => {
+                assert_eq!(
+                    arrow_config
+                        .block_manager_config
+                        .num_concurrent_block_flushes,
+                    100
+                );
+            }
+            _ => panic!("Expected Arrow blockfile provider config"),
+        }
         assert!(
             config
                 .compaction_service

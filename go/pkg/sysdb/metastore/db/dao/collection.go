@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	"github.com/pingcap/log"
 )
@@ -30,7 +31,7 @@ func (s *collectionDb) DeleteAll() error {
 func (s *collectionDb) GetCollectionWithoutMetadata(collectionID *string, databaseName *string, softDeletedFlag *bool) (*dbmodel.Collection, error) {
 	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
-		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, collections.tenant, collections.version, collections.version_file_name, NULLIF(collections.root_collection_id, '') AS root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name").
+		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, collections.tenant, collections.version, collections.version_file_name, collections.log_position, NULLIF(collections.root_collection_id, '') AS root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Where("collections.id = ?", collectionID)
 
@@ -148,6 +149,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 		CollectionId               string     `gorm:"column:collection_id"`
 		CollectionName             *string    `gorm:"column:collection_name"`
 		ConfigurationJsonStr       *string    `gorm:"column:configuration_json_str"`
+		SchemaStr                  *string    `gorm:"column:schema_str"`
 		Dimension                  *int32     `gorm:"column:dimension"`
 		DatabaseID                 string     `gorm:"column:database_id"`
 		CollectionTs               *int64     `gorm:"column:collection_ts"`
@@ -176,15 +178,53 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 		MetadataUpdatedAt *time.Time `gorm:"column:metadata_updated_at"`
 	}
 
-	query := s.db.Table("collections").
-		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as db_tenant_id, collections.tenant as tenant").
-		Joins("INNER JOIN databases ON collections.database_id = databases.id").
-		Order("collections.created_at ASC")
+	isQueryOptimized := dbcore.IsOptimizedCollectionQueriesEnabled() && databaseName != "" && tenantID != ""
 
-	if databaseName != "" {
+	query := s.db.Table("collections")
+	collection_targets := "collections.id as collection_id, " +
+		"collections.name as collection_name, " +
+		"collections.configuration_json_str, " +
+		"collections.schema_str, " +
+		"collections.dimension, " +
+		"collections.database_id AS database_id, " +
+		"collections.ts as collection_ts, " +
+		"collections.is_deleted, " +
+		"collections.created_at as collection_created_at, " +
+		"collections.updated_at as collection_updated_at, " +
+		"collections.log_position, " +
+		"collections.version, " +
+		"collections.version_file_name, " +
+		"collections.root_collection_id, " +
+		"NULLIF(collections.lineage_file_name, '') AS lineage_file_name, " +
+		"collections.total_records_post_compaction, " +
+		"collections.size_bytes_post_compaction, " +
+		"collections.last_compaction_time_secs, "
+	db_targets := "databases.name as database_name, databases.tenant_id as db_tenant_id, "
+	collection_tenant := "collections.tenant as tenant"
+
+	if isQueryOptimized {
+		db_id_query := s.db.Model(&dbmodel.Database{}).
+			Select("id").
+			Where("tenant_id = ?", tenantID).
+			Where("name = ?", databaseName).
+			Limit(1)
+
+		// We rewrite the query to get the one database_id with what is hopefully an initplan
+		// that first gets the database_id and then uses it to do an ordered scan over
+		// the matching collections.
+		query = query.Select(collection_targets+"? as database_name, ? as db_tenant_id, "+collection_tenant, databaseName, tenantID).
+			Where("collections.database_id = (?)", db_id_query)
+	} else {
+		query = query.Select(collection_targets + db_targets + collection_tenant).
+			Joins("INNER JOIN databases ON collections.database_id = databases.id")
+	}
+
+	query = query.Order("collections.created_at ASC")
+
+	if databaseName != "" && !isQueryOptimized {
 		query = query.Where("databases.name = ?", databaseName)
 	}
-	if tenantID != "" {
+	if tenantID != "" && !isQueryOptimized {
 		query = query.Where("databases.tenant_id = ?", tenantID)
 	}
 	if ids != nil {
@@ -202,10 +242,10 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 	}
 	if offset != nil {
 		query = query.Offset(int(*offset))
-
 	}
+
 	var results []Result
-	err = s.db.Table("(?) as ci", query).
+	query = s.db.Table("(?) as ci", query).
 		Select(`
             ci.*,
             cm.key,
@@ -217,8 +257,27 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
             cm.created_at as metadata_created_at,
             cm.updated_at as metadata_updated_at
         `).
-		Joins("LEFT JOIN collection_metadata cm ON cm.collection_id = ci.collection_id").
-		Scan(&results).Error
+		Joins("LEFT JOIN collection_metadata cm ON cm.collection_id = ci.collection_id")
+
+	if isQueryOptimized {
+		// Setting random_page_cost to 1.1 because that's usually the recommended value
+		// for SSD based databases. This encourages index usage. The default used
+		// to be 4.0 which was more for HDD based databases where random seeking
+		// was way more expensive than sequential access.
+		var dummy []Result
+		stmt := query.Session(&gorm.Session{DryRun: true}).Find(&dummy).Statement
+		sqlString := stmt.SQL.String()
+
+		// Use a transaction to execute both commands in a single round trip
+		err = s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec("SET LOCAL random_page_cost = 1.1").Error; err != nil {
+				return err
+			}
+			return tx.Raw(sqlString, stmt.Vars...).Scan(&results).Error
+		})
+	} else {
+		err = query.Scan(&results).Error
+	}
 
 	if err != nil {
 		return nil, err
@@ -234,6 +293,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 				ID:                         r.CollectionId,
 				Name:                       r.CollectionName,
 				ConfigurationJsonStr:       r.ConfigurationJsonStr,
+				SchemaStr:                  r.SchemaStr,
 				Dimension:                  r.Dimension,
 				DatabaseID:                 r.DatabaseID,
 				IsDeleted:                  r.IsDeleted,
@@ -428,6 +488,9 @@ func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]inter
 	if in.Name != nil {
 		ret["name"] = *in.Name
 	}
+	if in.ConfigurationJsonStr != nil {
+		ret["configuration_json_str"] = *in.ConfigurationJsonStr
+	}
 	if in.Dimension != nil {
 		ret["dimension"] = *in.Dimension
 	}
@@ -471,32 +534,39 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	sizeBytesPostCompaction uint64,
 	lastCompactionTimeSecs uint64,
 	numVersions uint64,
+	schemaStr *string,
 ) (int64, error) {
 	// TODO(rohitcp): Investigate if we need to hold the lock using "UPDATE"
 	// strength, or if we can use "SELECT FOR UPDATE" or some other less
 	// expensive locking mechanism. Taking the lock as a caution for now.
+	updates := map[string]interface{}{
+		"log_position":                  logPosition,
+		"version":                       newCollectionVersion,
+		"version_file_name":             newVersionFileName,
+		"total_records_post_compaction": totalRecordsPostCompaction,
+		"size_bytes_post_compaction":    sizeBytesPostCompaction,
+		"last_compaction_time_secs":     lastCompactionTimeSecs,
+		"num_versions":                  numVersions,
+	}
+
+	if schemaStr != nil {
+		updates["schema_str"] = schemaStr
+	}
+
 	result := s.db.Model(&dbmodel.Collection{}).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("id = ? AND version = ? AND (version_file_name IS NULL OR version_file_name = ?)",
 			collectionID,
 			currentCollectionVersion,
 			currentVersionFileName).
-		Updates(map[string]interface{}{
-			"log_position":                  logPosition,
-			"version":                       newCollectionVersion,
-			"version_file_name":             newVersionFileName,
-			"total_records_post_compaction": totalRecordsPostCompaction,
-			"size_bytes_post_compaction":    sizeBytesPostCompaction,
-			"last_compaction_time_secs":     lastCompactionTimeSecs,
-			"num_versions":                  numVersions,
-		})
+		Updates(updates)
 	if result.Error != nil {
 		return 0, result.Error
 	}
 	return result.RowsAffected, nil
 }
 
-func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, tenant string) (int32, error) {
+func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, tenant string, schemaStr *string) (int32, error) {
 	log.Info("update log position, version, and total records post compaction", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion), zap.Uint64("totalRecords", totalRecordsPostCompaction))
 	var collection dbmodel.Collection
 	// We use select for update to ensure no lost update happens even for isolation level read committed or below
@@ -517,7 +587,12 @@ func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collec
 	}
 
 	version := currentCollectionVersion + 1
-	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction, "last_compaction_time_secs": lastCompactionTimeSecs, "tenant": tenant}).Error
+	// only writing if schemaStr is not nil to avoid overwriting the schemaStr
+	if schemaStr != nil {
+		err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction, "last_compaction_time_secs": lastCompactionTimeSecs, "tenant": tenant, "schema_str": schemaStr}).Error
+	} else {
+		err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction, "last_compaction_time_secs": lastCompactionTimeSecs, "tenant": tenant}).Error
+	}
 	if err != nil {
 		return 0, err
 	}

@@ -1,6 +1,6 @@
 use chroma_types::{
-    operator::{CountResult, GetResult, KnnBatchResult},
-    plan::{Count, Get, Knn},
+    operator::{CountResult, GetResult, KnnBatchResult, SearchResult},
+    plan::{Count, Get, Knn, Search},
     ExecutorError, SegmentType,
 };
 use distributed::DistributedExecutor;
@@ -36,6 +36,12 @@ impl Executor {
         match self {
             Executor::Distributed(distributed_executor) => distributed_executor.knn(plan).await,
             Executor::Local(local_executor) => local_executor.knn(plan).await,
+        }
+    }
+    pub async fn search(&mut self, plan: Search) -> Result<SearchResult, ExecutorError> {
+        match self {
+            Executor::Distributed(distributed_executor) => distributed_executor.search(plan).await,
+            Executor::Local(local_executor) => local_executor.search(plan).await,
         }
     }
     pub async fn is_ready(&self) -> bool {

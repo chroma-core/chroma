@@ -1,3 +1,8 @@
+---
+id: pricing
+name: Pricing
+---
+
 # Pricing
 
 Chroma Cloud uses a simple, transparent, usage-based pricing model. You pay for what you use across **writes**, **reads**, and **storage**—with no hidden fees or tiered feature gating.
@@ -8,8 +13,14 @@ Need an estimate? Try our [pricing calculator](https://trychroma.com/pricing).
 
 Chroma Cloud charges **$2.50 per logical GiB** written via an add, update, or upsert.
 
-- A *logical GiB* is the raw, uncompressed size of the data you send to Chroma—regardless of how it's stored or indexed internally.
+- A _logical GiB_ is the raw, uncompressed size of the data you send to Chroma—regardless of how it's stored or indexed internally.
 - You are only billed once per write, not for background compactions or reindexing.
+
+## Forking
+
+- Forking a collection costs **$0.03 per fork request**.
+- Forks are copy-on-write. You only pay for incremental storage written after the fork; unchanged data remains shared.
+- Forking is available on Chroma Cloud. Learn more on the [Collection Forking](./collection-forking) page.
 
 ## Reads
 
@@ -22,28 +33,32 @@ Read costs are based on both the amount of data scanned and the volume of data r
 
 - A single vector similarity query counts as one query.
 - Each metadata or full-text predicate in a query counts as an additional query.
-- Full-text and regex filters are billed as *(N – 2)* queries, where *N* is the number of characters in the search string.
+- Full-text and regex filters are billed as _(N – 2)_ queries, where _N_ is the number of characters in the search string.
 
 **Example:**
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.query(
    query_embeddings=[[1.0, 2.3, 1.1, ...]],
    where_document={"$contains": "hello world"}
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.query(
-   queryEmbeddings=[[1.0, 2.3, 1.1, ...]], 
+   queryEmbeddings=[[1.0, 2.3, 1.1, ...]],
    whereDocument={"$contains": "hello world"}
 )
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}

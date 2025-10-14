@@ -109,6 +109,7 @@ impl ChromaGrpcClients {
             database: database_name.to_string(),
             dimension: Some(3),
             configuration_json_str: config_str,
+            schema_str: None,
             get_or_create: Some(true),
             metadata: None,
             segments,
@@ -201,8 +202,8 @@ impl ChromaGrpcClients {
                 where_document: None,
             }),
             limit: Some(LimitOperator {
-                skip: 0,
-                fetch: None,
+                offset: 0,
+                limit: None,
             }),
             projection: Some(ProjectionOperator {
                 document: false, // include_documents,
@@ -263,6 +264,7 @@ impl ChromaGrpcClients {
                             Some(chroma_types::chroma_proto::update_metadata_value::Value::IntValue(i)) => i.to_string(),
                             Some(chroma_types::chroma_proto::update_metadata_value::Value::FloatValue(f)) => f.to_string(),
                             Some(chroma_types::chroma_proto::update_metadata_value::Value::BoolValue(b)) => b.to_string(),
+                            Some(chroma_types::chroma_proto::update_metadata_value::Value::SparseVectorValue(_)) => unimplemented!("Sparse vector is not supported"),
                             None => String::new(),
                         };
                         metadata_map.insert(key.clone(), string_value);

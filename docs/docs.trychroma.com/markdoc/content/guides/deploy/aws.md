@@ -1,10 +1,15 @@
+---
+id: aws
+name: AWS
+---
+
 # AWS Deployment
 
 {% Banner type="tip" %}
 
 **Chroma Cloud**
 
-Chroma Cloud, our fully managed hosted service is here. [Sign up for free](https://trychroma.com/signup).
+Chroma Cloud, our fully managed hosted service is here. [Sign up for free](https://trychroma.com/signup?utm_source=docs-aws).
 
 {% /Banner %}
 
@@ -128,6 +133,7 @@ chroma_client = chromadb.HttpClient(
 )
 chroma_client.heartbeat()
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
@@ -139,11 +145,12 @@ you need to do is configure your `ChromaClient` to use the server's IP address a
 import { ChromaClient } from "chromadb";
 
 const chromaClient = new ChromaClient({
-    host: "<Your Chroma instance IP>",
-    port: 8000
-})
-chromaClient.heartbeat()
+  host: "<Your Chroma instance IP>",
+  port: 8000,
+});
+chromaClient.heartbeat();
 ```
+
 {% /Tab %}
 
 {% /Tabs %}

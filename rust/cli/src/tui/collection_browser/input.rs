@@ -79,7 +79,7 @@ impl<'a, T: ToString> ToggleButton<'a, T> {
     }
 }
 
-impl<'a, T: ToString> StatefulWidget for ToggleButton<'a, T> {
+impl<T: ToString> StatefulWidget for ToggleButton<'_, T> {
     type State = ToggleState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {

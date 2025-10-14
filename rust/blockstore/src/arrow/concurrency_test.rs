@@ -2,7 +2,7 @@
 mod tests {
     use crate::{
         arrow::{
-            config::TEST_MAX_BLOCK_SIZE_BYTES,
+            config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES},
             provider::{ArrowBlockfileProvider, BlockfileReaderOptions},
         },
         BlockfileWriterOptions,
@@ -33,6 +33,7 @@ mod tests {
                 max_block_size_bytes,
                 block_cache,
                 sparse_index_cache,
+                BlockManagerConfig::default_num_concurrent_block_flushes(),
             );
             let prefix_path = String::from("");
             let writer = future::block_on(
@@ -114,6 +115,7 @@ mod tests {
                 TEST_MAX_BLOCK_SIZE_BYTES,
                 block_cache,
                 sparse_index_cache,
+                BlockManagerConfig::default_num_concurrent_block_flushes(),
             );
             let prefix_path = String::from("");
             let reader = future::block_on(async {

@@ -34,7 +34,6 @@ async fn writer_thread(
         loop {
             match writer.append(message.clone()).await {
                 Ok(position) => {
-                    let position = position + 1u64;
                     println!("writer succeeds in iteration {i}");
                     successful_writes += 1;
                     witness = cursors
@@ -80,6 +79,8 @@ async fn garbage_collector_thread(
     iterations: usize,
 ) -> (usize, usize) {
     println!("gc {:?}", &*writer as *const LogWriter);
+    let mut successes = 0;
+    let mut contentions = 0;
     for i in 0..iterations {
         wait.notified().await;
         // Using tokio::sync::Mutex which is safe to use with .await
@@ -91,19 +92,29 @@ async fn garbage_collector_thread(
                 .await
             {
                 Ok(()) => break,
+                Err(Error::CorruptGarbage(m))
+                    if m.starts_with("First to keep does not overlap manifest") =>
+                {
+                    println!("gc sees cursor ahead of manifest; only a problem if looping");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    contentions += 1;
+                    continue;
+                }
                 Err(Error::LogContentionDurable)
                 | Err(Error::LogContentionRetry)
                 | Err(Error::LogContentionFailure) => {
                     println!("gc sees contention preventing {i}");
                     tokio::time::sleep(Duration::from_millis(100)).await;
+                    contentions += 1;
                     continue;
                 }
                 Err(e) => panic!("unexpected error: {:?}", e),
             }
         }
+        successes += 1;
         notify.notify_one();
     }
-    (0, 0)
+    (successes, contentions)
 }
 
 #[tokio::test]
@@ -199,6 +210,10 @@ async fn test_k8s_integration_98_garbage_alternate() {
     // Assert some things about the test
     assert!(
         writer1_successes > 0,
+        "Writer 1 should have some successful writes"
+    );
+    assert!(
+        writer2_successes > 0,
         "Writer 1 should have some successful writes"
     );
 }

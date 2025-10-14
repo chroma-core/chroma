@@ -1140,6 +1140,52 @@ export const ApiApiFetchParamCreator = function (
       };
     },
     /**
+     * @summary Retrieves a collection by Chroma Resource Name.
+     * @param {string} crn <p>Chroma Resource Name</p>
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    getCollectionByCrn(crn: string, options: RequestInit = {}): FetchArgs {
+      // verify required parameter 'crn' is not null or undefined
+      if (crn === null || crn === undefined) {
+        throw new RequiredError(
+          "crn",
+          "Required parameter crn was null or undefined when calling getCollectionByCrn.",
+        );
+      }
+      let localVarPath = `/api/v2/collections/{crn}`.replace(
+        "{crn}",
+        encodeURIComponent(String(crn)),
+      );
+      const localVarPathQueryStart = localVarPath.indexOf("?");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "GET" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
+      if (localVarPathQueryStart !== -1) {
+        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+      }
+
+      localVarRequestOptions.headers = localVarHeaderParameter;
+
+      const localVarQueryParameterString = localVarQueryParameter.toString();
+      if (localVarQueryParameterString) {
+        localVarPath += "?" + localVarQueryParameterString;
+      }
+      return {
+        url: localVarPath,
+        options: localVarRequestOptions,
+      };
+    },
+    /**
      * @summary Retrieves a specific database by name.
      * @param {string} tenant <p>Tenant ID</p>
      * @param {string} database <p>Name of the database to retrieve</p>
@@ -1198,7 +1244,7 @@ export const ApiApiFetchParamCreator = function (
     },
     /**
      * @summary Returns an existing tenant by name.
-     * @param {string} tenantName <p>Tenant name or ID to retrieve</p>
+     * @param {string} tenantName <p>Tenant to retrieve</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
@@ -1600,6 +1646,70 @@ export const ApiApiFetchParamCreator = function (
       const localVarPathQueryStart = localVarPath.indexOf("?");
       const localVarRequestOptions: RequestInit = Object.assign(
         { method: "PUT" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
+      if (localVarPathQueryStart !== -1) {
+        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+      }
+
+      localVarHeaderParameter.set("Content-Type", "application/json");
+
+      localVarRequestOptions.headers = localVarHeaderParameter;
+
+      if (request !== undefined) {
+        localVarRequestOptions.body = JSON.stringify(request || {});
+      }
+
+      const localVarQueryParameterString = localVarQueryParameter.toString();
+      if (localVarQueryParameterString) {
+        localVarPath += "?" + localVarQueryParameterString;
+      }
+      return {
+        url: localVarPath,
+        options: localVarRequestOptions,
+      };
+    },
+    /**
+     * @summary Updates an existing tenant by name.
+     * @param {string} tenantName <p>Tenant to update</p>
+     * @param {Api.UpdateTenantPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    updateTenant(
+      tenantName: string,
+      request: Api.UpdateTenantPayload,
+      options: RequestInit = {},
+    ): FetchArgs {
+      // verify required parameter 'tenantName' is not null or undefined
+      if (tenantName === null || tenantName === undefined) {
+        throw new RequiredError(
+          "tenantName",
+          "Required parameter tenantName was null or undefined when calling updateTenant.",
+        );
+      }
+      // verify required parameter 'request' is not null or undefined
+      if (request === null || request === undefined) {
+        throw new RequiredError(
+          "request",
+          "Required parameter request was null or undefined when calling updateTenant.",
+        );
+      }
+      let localVarPath = `/api/v2/tenants/{tenant_name}`.replace(
+        "{tenant_name}",
+        encodeURIComponent(String(tenantName)),
+      );
+      const localVarPathQueryStart = localVarPath.indexOf("?");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "PATCH" },
         options,
       );
       const localVarHeaderParameter: Headers = options.headers
@@ -2487,6 +2597,57 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
+     * @summary Retrieves a collection by Chroma Resource Name.
+     * @param {string} crn <p>Chroma Resource Name</p>
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    getCollectionByCrn(
+      crn: string,
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Collection> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).getCollectionByCrn(crn, options);
+      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
+
+          if (response.status === 200) {
+            if (mimeType === "application/json") {
+              return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          throw response;
+        });
+      };
+    },
+    /**
      * @summary Retrieves a specific database by name.
      * @param {string} tenant <p>Tenant ID</p>
      * @param {string} database <p>Name of the database to retrieve</p>
@@ -2541,7 +2702,7 @@ export const ApiApiFp = function (configuration?: Configuration) {
     },
     /**
      * @summary Returns an existing tenant by name.
-     * @param {string} tenantName <p>Tenant name or ID to retrieve</p>
+     * @param {string} tenantName <p>Tenant to retrieve</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
@@ -2924,6 +3085,68 @@ export const ApiApiFp = function (configuration?: Configuration) {
             throw response;
           }
           if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          throw response;
+        });
+      };
+    },
+    /**
+     * @summary Updates an existing tenant by name.
+     * @param {string} tenantName <p>Tenant to update</p>
+     * @param {Api.UpdateTenantPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    updateTenant(
+      tenantName: string,
+      request: Api.UpdateTenantPayload,
+      options?: RequestInit,
+    ): (
+      fetch?: FetchAPI,
+      basePath?: string,
+    ) => Promise<Api.UpdateTenantResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).updateTenant(tenantName, request, options);
+      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
+
+          if (response.status === 200) {
+            if (mimeType === "application/json") {
+              return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 409) {
             if (mimeType === "application/json") {
               throw response;
             }
@@ -3331,6 +3554,19 @@ export class ApiApi extends BaseAPI {
   }
 
   /**
+   * @summary Retrieves a collection by Chroma Resource Name.
+   * @param {string} crn <p>Chroma Resource Name</p>
+   * @param {RequestInit} [options] Override http request option.
+   * @throws {RequiredError}
+   */
+  public getCollectionByCrn(crn: string, options?: RequestInit) {
+    return ApiApiFp(this.configuration).getCollectionByCrn(crn, options)(
+      this.fetch,
+      this.basePath,
+    );
+  }
+
+  /**
    * @summary Retrieves a specific database by name.
    * @param {string} tenant <p>Tenant ID</p>
    * @param {string} database <p>Name of the database to retrieve</p>
@@ -3347,7 +3583,7 @@ export class ApiApi extends BaseAPI {
 
   /**
    * @summary Returns an existing tenant by name.
-   * @param {string} tenantName <p>Tenant name or ID to retrieve</p>
+   * @param {string} tenantName <p>Tenant to retrieve</p>
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
@@ -3485,6 +3721,25 @@ export class ApiApi extends BaseAPI {
       tenant,
       database,
       collectionId,
+      request,
+      options,
+    )(this.fetch, this.basePath);
+  }
+
+  /**
+   * @summary Updates an existing tenant by name.
+   * @param {string} tenantName <p>Tenant to update</p>
+   * @param {Api.UpdateTenantPayload} request
+   * @param {RequestInit} [options] Override http request option.
+   * @throws {RequiredError}
+   */
+  public updateTenant(
+    tenantName: string,
+    request: Api.UpdateTenantPayload,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).updateTenant(
+      tenantName,
       request,
       options,
     )(this.fetch, this.basePath);

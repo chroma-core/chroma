@@ -521,10 +521,12 @@ impl ChromaError for RngQueryError {
 }
 
 // Assumes that query is already normalized.
+#[allow(clippy::too_many_arguments)]
 pub async fn rng_query(
     normalized_query: &[f32],
     hnsw_index: HnswIndexRef,
     k: usize,
+    replica_count: Option<usize>,
     rng_epsilon: f32,
     rng_factor: f32,
     distance_function: DistanceFunction,
@@ -542,7 +544,15 @@ pub async fn rng_query(
             .query(normalized_query, k, &allowed_ids, &disallowed_ids)
             .map_err(|_| RngQueryError::HnswSearchError)?;
         for (id, distance) in ids.iter().zip(distances.iter()) {
-            if !apply_rng_rule || *distance <= (1_f32 + rng_epsilon) * distances[0] {
+            let within_epsilon = if distances[0] < 0.0 && *distance < 0.0 {
+                // Both negative: reverse the comparison
+                *distance >= (1_f32 + rng_epsilon) * distances[0]
+            } else {
+                // At least one is non-negative: use normal comparison
+                *distance <= (1_f32 + rng_epsilon) * distances[0]
+            };
+
+            if !apply_rng_rule || within_epsilon {
                 nearby_ids.push(*id);
                 nearby_distances.push(*distance);
             }
@@ -569,10 +579,24 @@ pub async fn rng_query(
         .iter()
         .zip(nearby_distances.iter().zip(embeddings))
     {
+        if let Some(replica_count) = replica_count {
+            if res_ids.len() >= replica_count {
+                break;
+            }
+        }
         let mut rng_accepted = true;
         for nbr_embedding in res_embeddings.iter() {
             let dist = distance_function.distance(&embedding[..], &nbr_embedding[..]);
-            if rng_factor * dist <= *distance {
+
+            let fails_check = if dist < 0.0 && *distance < 0.0 {
+                // Both negative: reverse the comparison
+                rng_factor * dist >= *distance
+            } else {
+                // At least one is non-negative: use normal comparison
+                rng_factor * dist <= *distance
+            };
+
+            if fails_check {
                 rng_accepted = false;
                 break;
             }

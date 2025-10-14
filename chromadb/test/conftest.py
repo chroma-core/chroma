@@ -82,6 +82,17 @@ hypothesis.settings.register_profile(
 
 hypothesis.settings.load_profile(CURRENT_PRESET)
 
+# Check if we are running in a mode where SPANN is disabled
+# (Rust bindings test OR Rust single-node integration test)
+is_spann_disabled_mode = (
+    os.getenv("CHROMA_RUST_BINDINGS_TEST_ONLY") == "1"
+    or os.getenv("CHROMA_INTEGRATION_TEST_ONLY") == "1"
+)
+skip_reason_spann_disabled = (
+    "SPANN creation/modification disallowed in Rust bindings or integration test mode"
+)
+
+
 
 def reset(api: BaseAPI) -> None:
     api.reset()

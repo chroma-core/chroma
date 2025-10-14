@@ -51,8 +51,8 @@ where
 // Errors
 #[derive(Error, Debug)]
 pub enum ChannelError {
-    #[error("Failed to send message")]
-    SendError,
+    #[error("Failed to send message: {0}")]
+    SendError(String),
 }
 
 impl ChromaError for ChannelError {

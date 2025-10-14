@@ -1,10 +1,31 @@
+---
+id: getting-started
+name: Getting Started
+---
+
 # Getting Started
 
 Chroma is an AI-native open-source vector database. It comes with everything you need to get started built-in, and runs on your machine.
 
-For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
+{% Tabs %}
 
+{% Tab label="python" %}
 {% Video link="https://www.youtube.com/embed/yvsmkx-Jaj0" title="Getting Started Video" / %}
+{% /Tab %}
+
+{% Tab label="typescript" %}
+{% Video link="https://www.youtube.com/embed/I1Xr1okBREc" title="Getting Started Video" / %}
+{% /Tab %}
+
+{% /Tabs %}
+
+{% Banner type="tip" %}
+
+For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup?utm_source=docs-getting-started) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
+
+{% /Banner %}
+
+
 
 ### 1. Install
 
@@ -15,21 +36,27 @@ For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup) - a f
 {% TabbedUseCaseCodeBlock language="Terminal" %}
 
 {% Tab label="pip" %}
+
 ```terminal
 pip install chromadb
 ```
+
 {% /Tab %}
 
 {% Tab label="poetry" %}
+
 ```terminal
 poetry add chromadb
 ```
+
 {% /Tab %}
 
 {% Tab label="uv" %}
+
 ```terminal
 uv pip install chromadb
 ```
+
 {% /Tab %}
 
 {% /TabbedUseCaseCodeBlock %}
@@ -41,27 +68,35 @@ uv pip install chromadb
 {% TabbedUseCaseCodeBlock language="Terminal" %}
 
 {% Tab label="npm" %}
+
 ```terminal
 npm install chromadb @chroma-core/default-embed
 ```
+
 {% /Tab %}
 
 {% Tab label="pnpm" %}
+
 ```terminal
 pnpm add chromadb @chroma-core/default-embed
 ```
+
 {% /Tab %}
 
 {% Tab label="yarn" %}
+
 ```terminal
 yarn add chromadb @chroma-core/default-embed
 ```
+
 {% /Tab %}
 
 {% Tab label="bun" %}
+
 ```terminal
 bun add chromadb @chroma-core/default-embed
 ```
+
 {% /Tab %}
 
 {% /TabbedUseCaseCodeBlock %}
@@ -75,10 +110,12 @@ bun add chromadb @chroma-core/default-embed
 {% Tabs %}
 
 {% Tab label="python" %}
+
 ```python
 import chromadb
 chroma_client = chromadb.Client()
 ```
+
 {% /Tab %}
 {% Tab label="typescript" %}
 
@@ -87,16 +124,20 @@ Run the Chroma backend:
 {% TabbedUseCaseCodeBlock language="Terminal" %}
 
 {% Tab label="CLI" %}
+
 ```terminal
 chroma run --path ./getting-started
 ```
+
 {% /Tab %}
 
 {% Tab label="Docker" %}
+
 ```terminal
 docker pull chromadb/chroma
 docker run -p 8000:8000 chromadb/chroma
 ```
+
 {% /Tab %}
 
 {% /TabbedUseCaseCodeBlock %}
@@ -106,17 +147,21 @@ Then create a client which connects to it:
 {% TabbedUseCaseCodeBlock language="typescript" %}
 
 {% Tab label="ESM" %}
+
 ```typescript
 import { ChromaClient } from "chromadb";
 const client = new ChromaClient();
 ```
+
 {% /Tab %}
 
 {% Tab label="CJS" %}
+
 ```typescript
 const { ChromaClient } = require("chromadb");
 const client = new ChromaClient();
 ```
+
 {% /Tab %}
 
 {% /TabbedUseCaseCodeBlock %}
@@ -132,17 +177,21 @@ Collections are where you'll store your embeddings, documents, and any additiona
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection = chroma_client.create_collection(name="my_collection")
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 const collection = await client.createCollection({
   name: "my_collection",
 });
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -154,6 +203,7 @@ Chroma will store your text and handle embedding and indexing automatically. You
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.add(
     ids=["id1", "id2"],
@@ -163,18 +213,21 @@ collection.add(
     ]
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.add({
-    ids: ["id1", "id2"],
-    documents: [
-        "This is a document about pineapple",
-        "This is a document about oranges",
-    ]
+  ids: ["id1", "id2"],
+  documents: [
+    "This is a document about pineapple",
+    "This is a document about oranges",
+  ],
 });
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -186,6 +239,7 @@ You can query the collection with a list of query texts, and Chroma will return 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 results = collection.query(
     query_texts=["This is a query document about hawaii"], # Chroma will embed this for you
@@ -197,14 +251,16 @@ print(results)
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 const results = await collection.query({
-    queryTexts: "This is a query document about hawaii", // Chroma will embed this for you
-    nResults: 2, // how many results to return
+  queryTexts: "This is a query document about hawaii", // Chroma will embed this for you
+  nResults: 2, // how many results to return
 });
 
 console.log(results);
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -218,6 +274,7 @@ From the above - you can see that our query about `hawaii` is semantically most 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 {
   'documents': [[
@@ -232,9 +289,11 @@ From the above - you can see that our query about `hawaii` is semantically most 
   'embeddings': None,
 }
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 {
     documents: [
@@ -253,6 +312,7 @@ From the above - you can see that our query about `hawaii` is semantically most 
     embeddings: null
 }
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -264,6 +324,7 @@ What if we tried querying with `"This is a document about florida"`? Here is a f
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 import chromadb
 chroma_client = chromadb.Client()
@@ -287,34 +348,37 @@ results = collection.query(
 
 print(results)
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 import { ChromaClient } from "chromadb";
 const client = new ChromaClient();
 
 // switch `createCollection` to `getOrCreateCollection` to avoid creating a new collection every time
 const collection = await client.getOrCreateCollection({
-    name: "my_collection",
+  name: "my_collection",
 });
 
 // switch `addRecords` to `upsertRecords` to avoid adding the same documents every time
 await collection.upsert({
-    documents: [
-        "This is a document about pineapple",
-        "This is a document about oranges",
-    ],
-    ids: ["id1", "id2"],
+  documents: [
+    "This is a document about pineapple",
+    "This is a document about oranges",
+  ],
+  ids: ["id1", "id2"],
 });
 
 const results = await collection.query({
-    queryTexts: "This is a query document about florida", // Chroma will embed this for you
-    nResults: 2, // how many results to return
+  queryTexts: ["This is a query document about florida"], // Chroma will embed this for you
+  nResults: 2, // how many results to return
 });
 
 console.log(results);
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}

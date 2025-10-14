@@ -2,14 +2,14 @@
 
 This project uses the testing, build and release standards specified
 by the PyPA organization and documented at
-https://packaging.python.org.
+<https://packaging.python.org>.
 
 ## Setup
 
 Set up a virtual environment and install the project's requirements
 and dev requirements:
 
-```
+```bash
 python3 -m venv venv      # Only need to do this once
 source venv/bin/activate  # Do this each time you use a new shell for the project
 pip install -r requirements.txt
@@ -22,45 +22,21 @@ for MacOS `brew install protobuf`
 
 You can also install `chromadb` the `pypi` package locally and in editable mode with `pip install -e .`.
 
-## Running Chroma
-
-Chroma can be run via 3 modes:
-1. Standalone and in-memory:
-```python
-import chromadb
-api = chromadb.Client()
-print(api.heartbeat())
-```
-
-2. Standalone and in-memory with persistence:
-
-This by default saves your db and your indexes to a `.chroma` directory and can also load from them.
-```python
-import chromadb
-api = chromadb.PersistentClient(path="/path/to/persist/directory")
-print(api.heartbeat())
-```
-
-
-3. With a persistent backend and a small frontend client
-
-Run `chroma run --path /chroma_db_path`
-```python
-import chromadb
-api = chromadb.HttpClient(host="localhost", port=8000)
-
-print(api.heartbeat())
-```
 ## Local dev setup for distributed chroma
+
 We use tilt for providing local dev setup. Tilt is an open source project
-##### Requirement
+
+### Requirement
+
 - Docker
 - Local Kubernetes cluster (Recommended: [OrbStack](https://orbstack.dev/) for mac, [Kind](https://kind.sigs.k8s.io/) for linux)
 - [Tilt](https://docs.tilt.dev/)
 - [Helm](https://helm.sh)
 
-For starting the distributed Chroma in the workspace, use `tilt up`. It will create all the required resources and build the necessary Docker image in the current kubectl context. NOTE: make sure to have Orbstack installed and running with Kubernetes enabled before running `tilt up`.
-Once done, it will expose Chroma on port 8000. You can also visit the Tilt dashboard UI at http://localhost:10350/. To clean and remove all the resources created by Tilt, use `tilt down`.
+1. Start Kubernetes. If you're using OrbStack, navigate to `Kubernetes - Pods`, and select `Turn On`
+2. Start a distributed Chroma cluster by running `tilt up` from the root of the repository.
+3. Once done, it will expose Chroma on port 8000. You can also visit the Tilt dashboard UI at `http://localhost:10350/`.
+4. To clean and remove all the resources created by Tilt, use `tilt down`.
 
 ## Testing
 
@@ -71,7 +47,8 @@ To run unit tests using your current environment, run `pytest`.
 Make sure to have `tilt up` running for these tests otherwise some distributed Chroma tests will fail.
 
 ## Manual Build
-Make sure the following is only done in the virtual environment created in the [Setup]([url](https://github.com/chroma-core/chroma/edit/main/DEVELOP.md#setup)) section above.
+
+Make sure the following is only done in the virtual environment created in the [Setup](#setup) section above.
 
 To manually build the rust codebase and bindings for type safety, run `maturin dev`.
 
@@ -82,18 +59,20 @@ The project's source and wheel distributions will be placed in the `dist` direct
 If you have `tilt up` running, saving changes to your files will automatically rebuild new binaries with your changes and deploy to the local cluster `tilt` has running.
 
 ## IDE Recommendations
-If you are developing with VSCode or its derivatives (Windsurf/Cursor etc), make sure to install the rust-analyzer extension. It helps with auto-formatting, Intellisense and code navigation.
+
+If you are developing with VSCode or its derivatives (Windsurf/Cursor etc), make sure to install the `rust-analyzer` extension. It helps with auto-formatting, Intellisense and code navigation.
 
 For debugging it is recommended to install the `CodeLLDB` extension.
 
 You should be able to run and debug the rust tests by clicking on the 'Run Test' or 'Debug' button found above the test method definitions.
 
-<img width="262" alt="image" src="https://github.com/user-attachments/assets/a7779e4d-9d64-4511-9271-b790bed7b68b" />
+![rust-analyzer extension](https://github.com/user-attachments/assets/a7779e4d-9d64-4511-9271-b790bed7b68b)
 
 ## Setting breakpoints in Distributed Chroma
+
 Debugging binaries in the Kubernetes pods that `tilt up` spins up is a bit more involved. Right now the only reliable way to set a breakpoint in this scenario is to log in to the pod, install lldb/gdb and set a breakpoint that way. For example after running `tilt up` you can set a breakpoint in the query-service-0 pod as follows:
 
-```
+```bash
 kubectl exec -it query-service-0 -n chroma -- /bin/sh
 apt-get update && apt-get install gdb
 gdb

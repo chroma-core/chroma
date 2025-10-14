@@ -15,7 +15,7 @@ jobs:
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_embeddings.py"]
-    runs-on: "blacksmith-8vcpu-ubuntu-2204"
+    runs-on: "blacksmith-8vcpu-ubuntu-2404"
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/python
@@ -48,7 +48,7 @@ jobs:
           pagerduty-dedup-key: distributed-test-failed-${{ matrix.test-globs}}
 
   merge-cluster-logs:
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: test-cluster
     steps:
       - name: Merge

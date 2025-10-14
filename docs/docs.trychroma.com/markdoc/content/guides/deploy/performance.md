@@ -1,11 +1,15 @@
-# Single-Node Chroma: Performance and Limitations
+---
+id: performance
+name: Performance
+---
 
+# Single-Node Chroma: Performance and Limitations
 
 The single-node version of Chroma is designed to be easy to deploy and maintain, while still providing robust performance that satisfies a broad range of production applications.
 
 To help you understand when single-node Chroma is a good fit for your use case, we have performed a series of stress tests and performance experiments to probe the system’s capabilities and discover its limitations and edge cases. We analyzed these boundaries across a range of hardware configurations, to determine what sort of deployment is appropriate for different workloads.
 
-This document describes these findings, as well as some general principles for getting the most  out of your Chroma deployment.
+This document describes these findings, as well as some general principles for getting the most out of your Chroma deployment.
 
 ## Results Summary
 
@@ -16,13 +20,13 @@ Roughly speaking, here is the sort of performance you can expect from Chroma on 
 - Three metadata fields per record.
 
 | Instance Type   | System RAM | Approx. Max Collection Size | Mean Latency (query) | 99.9% Latency (query) | Mean Latency (insert, batch size=32) | 99.9% Latency (insert, batch size=32) | Monthly Cost |
-|-----------------|------------|-----------------------------|-----------------------|------------------------|----------------------|-----------------------|--------------|
-| **r7i.2xlarge** | 64         | 15,000,000                  | 5ms                  | 7ms                   | 112ms                  | 405ms                  | $386.944     |
-| **t3.2xlarge**  | 32         | 7,500,000                   | 5ms                  | 33ms                  | 149ms                 | 520ms                  | $242.976     |
-| **t3.xlarge**   | 16         | 3,600,000                   | 4ms                  | 7ms                  | 159ms                 | 530ms                  | $121.888     |
-| **t3.large**    | 8          | 1,700,000                   | 4ms                  | 10ms                  | 199ms                 | 633ms                  | $61.344      |
-| **t3.medium**   | 4          | 700,000                     | 5ms                  | 18ms                  | 191ms                 | 722ms                  | $31.072      |
-| **t3.small**    | 2          | 250,000                     | 8ms                  | 29ms                  | 231ms                 | 1280ms                  | $15.936      |
+| --------------- | ---------- | --------------------------- | -------------------- | --------------------- | ------------------------------------ | ------------------------------------- | ------------ |
+| **r7i.2xlarge** | 64         | 15,000,000                  | 5ms                  | 7ms                   | 112ms                                | 405ms                                 | $386.944     |
+| **t3.2xlarge**  | 32         | 7,500,000                   | 5ms                  | 33ms                  | 149ms                                | 520ms                                 | $242.976     |
+| **t3.xlarge**   | 16         | 3,600,000                   | 4ms                  | 7ms                   | 159ms                                | 530ms                                 | $121.888     |
+| **t3.large**    | 8          | 1,700,000                   | 4ms                  | 10ms                  | 199ms                                | 633ms                                 | $61.344      |
+| **t3.medium**   | 4          | 700,000                     | 5ms                  | 18ms                  | 191ms                                | 722ms                                 | $31.072      |
+| **t3.small**    | 2          | 250,000                     | 8ms                  | 29ms                  | 231ms                                | 1280ms                                | $15.936      |
 
 {% br %}{% /br %}
 
@@ -77,7 +81,6 @@ If you’re using multiple collections, performance looks quite similar, based o
 ## Concurrency
 
 The system can handle concurrent operations in parallel. For inserts, since writes are written to a log and flushed every N operations, the mean latency does not fluctuate as the number of writers increases, but does increase as batch size increases since larger batches are more likely to hit the flush threshold. The queries parallelize up to the number of vCPUs available in the instance, after which it begins queueing, thus causing a linear increase in latency.
-
 
 {% MarkdocImage lightSrc="/concurrent_writes_1_0_10_light.png" darkSrc="/concurrent_writes_1_0_10.png" alt="Concurrent writes" %}
 {% /MarkdocImage %}

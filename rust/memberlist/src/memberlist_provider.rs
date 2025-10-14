@@ -35,7 +35,7 @@ pub trait MemberlistProvider: Component + Configurable<MemberlistProviderConfig>
     namespaced
 )]
 pub(crate) struct MemberListCrd {
-    pub(crate) members: Vec<Member>,
+    pub(crate) members: Option<Vec<Member>>,
 }
 
 /// A member in a memberlist represents a kubernetes pod
@@ -212,7 +212,16 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
                 if name != &self.memberlist_name {
                     return;
                 }
-                let memberlist = memberlist.spec.members;
+
+                let memberlist = match memberlist.spec.members {
+                    Some(members) => members,
+                    None => {
+                        // We could change `members` in `MemberListCrd` to `Vec<Member>` instead of `Option<Vec<Member>>`. However, then the deserialization fails until the SysDb populates the memberlist for the first time because Kubernetes initially creates the CRD with no members. If the deserialization fails, the watcher stream backs off and retries--which is not what we want as it causes increased startup latency (10-20s) when running the system locally.
+                        tracing::warn!("Memberlist has not yet been populated");
+                        return;
+                    }
+                };
+
                 {
                     let mut curr_memberlist_handle = self.current_memberlist.write();
                     *curr_memberlist_handle = memberlist.clone();

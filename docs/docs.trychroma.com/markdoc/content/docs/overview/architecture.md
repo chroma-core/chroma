@@ -1,3 +1,8 @@
+---
+id: architecture
+name: Architecture
+---
+
 # Architecture
 
 Chroma is designed with a modular architecture that prioritizes performance and ease of use. It scales seamlessly from local development to large-scale production, while exposing a consistent API across all deployment modes.
@@ -12,7 +17,7 @@ Chroma runs wherever you need it to, supporting you in everything from local exp
 - **Single Node**: as a single-node server - great for small to medium scale workloads of < 10M records in a handful of collections.
 - **Distributed**: as a scalable distributed system - great for large scale production workloads, supporting millions of collections.
 
-You can use [Chroma Cloud](https://www.trychroma.com/signup), which is a managed offering of distributed Chroma.
+You can use [Chroma Cloud](https://www.trychroma.com/signup?utm_source=docs-architecture), which is a managed offering of distributed Chroma.
 
 ## Core Components
 
@@ -35,7 +40,6 @@ Chroma’s write-ahead log.
 - All writes are recorded here before acknowledgment to clients.
 - Ensures atomicity across multi-record writes.
 - Provides durability and replay in distributed deployments.
-
 
 ### The Query Executor
 
@@ -66,9 +70,9 @@ These components operate differently depending on the deployment mode, particula
 
 - In Local and Single Node mode, all components share a process and use the local filesystem for durability.
 - In **Distributed** mode, components are deployed as independent services.
-    - The log and built indexes are stored in cloud object storage.
-    - The system catalog is backed by a SQL database.
-    - All services use local SSDs as caches to reduce object storage latency and cost.
+  - The log and built indexes are stored in cloud object storage.
+  - The system catalog is backed by a SQL database.
+  - All services use local SSDs as caches to reduce object storage latency and cost.
 
 ## Request Sequences
 

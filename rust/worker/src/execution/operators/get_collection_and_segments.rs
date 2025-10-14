@@ -38,6 +38,11 @@ impl ChromaError for GetCollectionAndSegmentsError {
             GetCollectionAndSegmentsError::SysDB(chroma_error) => chroma_error.code(),
         }
     }
+
+    fn should_trace_error(&self) -> bool {
+        let Self::SysDB(gcwse) = self;
+        gcwse.should_trace_error()
+    }
 }
 
 #[async_trait]

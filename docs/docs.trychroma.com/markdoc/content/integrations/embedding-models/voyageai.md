@@ -1,6 +1,6 @@
 ---
-id: 'voyageai'
-name: 'VoyageAI'
+id: voyageai
+name: VoyageAI
 ---
 
 # VoyageAI
@@ -25,19 +25,25 @@ voyageai_ef(input=["document1","document2"])
 ```typescript
 // npm install @chroma-core/voyageai
 
-import { VoyageAIEmbeddingFunction } from '@chroma-core/voyageai';
+import { VoyageAIEmbeddingFunction } from "@chroma-core/voyageai";
 
 const embedder = new VoyageAIEmbeddingFunction({
-    apiKey: "apiKey", 
-    modelName: "model_name"
-})
+  apiKey: "apiKey",
+  modelName: "model_name",
+});
 
 // use directly
-const embeddings = embedder.generate(["document1","document2"])
+const embeddings = embedder.generate(["document1", "document2"]);
 
 // pass documents to query for .add and .query
-const collection = await client.createCollection({name: "name", embeddingFunction: embedder})
-const collectionGet = await client.getCollection({name: "name", embeddingFunction: embedder})
+const collection = await client.createCollection({
+  name: "name",
+  embeddingFunction: embedder,
+});
+const collectionGet = await client.getCollection({
+  name: "name",
+  embeddingFunction: embedder,
+});
 ```
 
 {% /Tab %}
@@ -70,18 +76,23 @@ voyageai_ef(input=multilingual_texts)
 {% Tab label="typescript" %}
 
 ```typescript
-import { VoyageAIEmbeddingFunction } from 'chromadb';
+import { VoyageAIEmbeddingFunction } from "chromadb";
 
-const embedder = new VoyageAIEmbeddingFunction("apiKey", "voyage-3-large")
+const embedder = new VoyageAIEmbeddingFunction("apiKey", "voyage-3-large");
 
-multilingual_texts  = [ 'Hello from VoyageAI!', 'مرحباً من VoyageAI!!',
-        'Hallo von VoyageAI!', 'Bonjour de VoyageAI!',
-        '¡Hola desde VoyageAI!', 'Olá do VoyageAI!',
-        'Ciao da VoyageAI!', '您好，来自 VoyageAI！',
-        'कोहिअर से VoyageAI!'  ]
+multilingual_texts = [
+  "Hello from VoyageAI!",
+  "مرحباً من VoyageAI!!",
+  "Hallo von VoyageAI!",
+  "Bonjour de VoyageAI!",
+  "¡Hola desde VoyageAI!",
+  "Olá do VoyageAI!",
+  "Ciao da VoyageAI!",
+  "您好，来自 VoyageAI！",
+  "कोहिअर से VoyageAI!",
+];
 
-const embeddings = embedder.generate(multilingual_texts)
-
+const embeddings = embedder.generate(multilingual_texts);
 ```
 
 {% /Tab %}

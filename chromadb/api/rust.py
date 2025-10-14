@@ -34,14 +34,17 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
     IncludeMetadataDocumentsEmbeddings,
+    Schema,
+    SearchResult,
 )
 
 # TODO(hammadb): Unify imports across types vs root __init__.py
 from chromadb.types import Database, Tenant, Collection as CollectionModel
+from chromadb.execution.expression.plan import Search
 import chromadb_rust_bindings
 
 
-from typing import Optional, Sequence
+from typing import Optional, Sequence, List
 from overrides import override
 from uuid import UUID
 import json
@@ -190,6 +193,7 @@ class RustBindingsAPI(ServerAPI):
             CollectionModel(
                 id=collection.id,
                 name=collection.name,
+                serialized_schema=None,
                 configuration_json=collection.configuration,
                 metadata=collection.metadata,
                 dimension=collection.dimension,
@@ -203,6 +207,7 @@ class RustBindingsAPI(ServerAPI):
     def create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
@@ -219,7 +224,7 @@ class RustBindingsAPI(ServerAPI):
         )
         if configuration:
             configuration_json_str = create_collection_configuration_to_json_str(
-                configuration
+                configuration, metadata
             )
         else:
             configuration_json_str = None
@@ -231,6 +236,7 @@ class RustBindingsAPI(ServerAPI):
             id=collection.id,
             name=collection.name,
             configuration_json=collection.configuration,
+            serialized_schema=None,
             metadata=collection.metadata,
             dimension=collection.dimension,
             tenant=collection.tenant,
@@ -250,6 +256,7 @@ class RustBindingsAPI(ServerAPI):
             id=collection.id,
             name=collection.name,
             configuration_json=collection.configuration,
+            serialized_schema=None,
             metadata=collection.metadata,
             dimension=collection.dimension,
             tenant=collection.tenant,
@@ -260,13 +267,14 @@ class RustBindingsAPI(ServerAPI):
     def get_or_create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         return self.create_collection(
-            name, configuration, metadata, True, tenant, database
+            name, schema, configuration, metadata, True, tenant, database
         )
 
     @override
@@ -309,6 +317,16 @@ class RustBindingsAPI(ServerAPI):
         raise NotImplementedError(
             "Collection forking is not implemented for Local Chroma"
         )
+
+    @override
+    def _search(
+        self,
+        collection_id: UUID,
+        searches: List[Search],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> SearchResult:
+        raise NotImplementedError("Search is not implemented for Local Chroma")
 
     @override
     def _count(

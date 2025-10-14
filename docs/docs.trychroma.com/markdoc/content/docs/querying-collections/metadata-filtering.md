@@ -1,3 +1,8 @@
+---
+id: metadata-filtering
+name: Metadata Filtering
+---
+
 # Metadata Filtering
 
 The `where` argument in `get` and `query` is used to filter records by their metadata. For example, in this `query` operation, Chroma will only query records that have the `page` metadata field with the value `10`:
@@ -5,21 +10,25 @@ The `where` argument in `get` and `query` is used to filter records by their met
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.query(
     query_texts=["first query", "second query"],
     where={"page": 10}
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.query({
-    queryTexts: ["first query", "second query"],
-    where: { page: 10 }
-})
+  queryTexts: ["first query", "second query"],
+  where: { page: 10 },
+});
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -29,6 +38,7 @@ In order to filter on metadata, you must supply a `where` filter dictionary to t
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 {
     "metadata_field": {
@@ -36,9 +46,11 @@ In order to filter on metadata, you must supply a `where` filter dictionary to t
     }
 }
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 {
     metadata_field: {
@@ -46,6 +58,7 @@ In order to filter on metadata, you must supply a `where` filter dictionary to t
     }
 }
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -55,6 +68,7 @@ Using the `$eq` operator is equivalent to using the metadata field directly in y
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 {
     "metadata_field": "search_string"
@@ -68,9 +82,11 @@ Using the `$eq` operator is equivalent to using the metadata field directly in y
     }
 }
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 {
     metadata_field: "search_string"
@@ -84,6 +100,7 @@ Using the `$eq` operator is equivalent to using the metadata field directly in y
     }
 }
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -93,21 +110,25 @@ For example, here we query all records whose `page` metadata field is greater th
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.query(
     query_texts=["first query", "second query"],
     where={"page": { "$gt": 10 }}
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.query({
-    queryTexts: ["first query", "second query"],
-    where: { page: { "$gt": 10 } }
-})
+  queryTexts: ["first query", "second query"],
+  where: { page: { $gt: 10 } },
+});
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -121,6 +142,7 @@ An `$and` operator will return results that match all the filters in the list.
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 {
     "$and": [
@@ -137,9 +159,11 @@ An `$and` operator will return results that match all the filters in the list.
     ]
 }
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 {
     "$and": [
@@ -152,6 +176,7 @@ An `$and` operator will return results that match all the filters in the list.
     ]
 }
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -161,6 +186,7 @@ For example, here we query all records whose `page` metadata field is between 5 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.query(
     query_texts=["first query", "second query"],
@@ -172,20 +198,20 @@ collection.query(
     }
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.query({
-    queryTexts: ["first query", "second query"],
-    where: {
-        "$and": [
-            { page: {"$gte": 5 } },
-            { page: {"$lte": 10 } },
-        ]
-    }
-})
+  queryTexts: ["first query", "second query"],
+  where: {
+    $and: [{ page: { $gte: 5 } }, { page: { $lte: 10 } }],
+  },
+});
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -195,6 +221,7 @@ An `$or` operator will return results that match any of the filters in the list.
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 {
     "or": [
@@ -211,9 +238,11 @@ An `$or` operator will return results that match any of the filters in the list.
     ]
 }
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 {
     "or": [
@@ -226,6 +255,7 @@ An `$or` operator will return results that match any of the filters in the list.
     ]
 }
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -235,6 +265,7 @@ For example, here we get all records whose `color` metadata field is `red` or `b
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.get(
     where={
@@ -245,19 +276,19 @@ collection.get(
     }
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.get({
-    where: {
-        "or": [
-            { color: "red" },
-            { color: "blue" },
-        ]
-    }
-})
+  where: {
+    or: [{ color: "red" }, { color: "blue" }],
+  },
+});
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -274,6 +305,7 @@ An `$in` operator will return results where the metadata attribute is part of a 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 {
   "metadata_field": {
@@ -281,9 +313,11 @@ An `$in` operator will return results where the metadata attribute is part of a 
   }
 }
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 {
     metadata_field: {
@@ -291,6 +325,7 @@ An `$in` operator will return results where the metadata attribute is part of a 
     }
 }
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -300,6 +335,7 @@ An `$nin` operator will return results where the metadata attribute is not part 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 {
   "metadata_field": {
@@ -307,9 +343,11 @@ An `$nin` operator will return results where the metadata attribute is not part 
   }
 }
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 {
     metadata_field: {
@@ -317,6 +355,7 @@ An `$nin` operator will return results where the metadata attribute is not part 
     }
 }
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -326,6 +365,7 @@ For example, here we get all records whose `author` metadata field is in a list 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.get(
     where={
@@ -333,16 +373,19 @@ collection.get(
     }
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.get({
-    where: {
-        author: {"$in": ["Rowling", "Fitzgerald", "Herbert"]}
-    }
-})
+  where: {
+    author: { $in: ["Rowling", "Fitzgerald", "Herbert"] },
+  },
+});
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -354,6 +397,7 @@ await collection.get({
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.query(
     query_texts=["doc10", "thus spake zarathustra", ...],
@@ -362,9 +406,11 @@ collection.query(
     where_document={"$contains":"search_string"}
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.query({
     queryTexts: ["doc10", "thus spake zarathustra", ...],
@@ -373,6 +419,7 @@ await collection.query({
     whereDocument: { "$contains": "search_string" }
 })
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}

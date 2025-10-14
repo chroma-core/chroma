@@ -17,6 +17,9 @@ TEMP_DIR=$(mktemp -d)
 mkdir "$TEMP_DIR/logs"
 mkdir "$TEMP_DIR/traces"
 
+# Create a description of the k8s cluster
+kubectl describe -A all > "${TEMP_DIR}/logs/describe-all.txt" || true
+
 # Get the list of all pods in the namespace
 PODS=$(kubectl get pods -n $NAMESPACE -o jsonpath='{.items[*].metadata.name}')
 echo "Got all the pods: $PODS"

@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 use guacamole::combinators::*;
 use guacamole::Guacamole;
 
-use chroma_config::{registry::Registry, Configurable};
-use chroma_storage::config::{S3CredentialsConfig, S3StorageConfig, StorageConfig};
+use chroma_storage::s3::s3_client_for_test_with_bucket_name;
+use chroma_storage::Storage;
 
 use wal3::{Error, LogWriter, LogWriterOptions};
 
@@ -36,43 +36,54 @@ impl Default for Options {
 async fn append_once(mut guac: Guacamole, log: Arc<LogWriter>) {
     let mut record = vec![0; 1 << 13];
     guac.generate(&mut record);
-    log.append(record).await.unwrap();
+    match log.append(record).await {
+        Ok(_)
+        | Err(Error::LogContentionDurable)
+        | Err(Error::LogContentionFailure)
+        | Err(Error::LogContentionRetry) => {}
+        Err(_err) => {
+            //println!("err {}:{}: {err:?}", file!(), line!());
+        }
+    }
 }
 
-#[tokio::main(flavor = "multi_thread")]
+async fn garbage_collect_in_a_loop(options: LogWriterOptions, storage: Arc<Storage>, prefix: &str) {
+    loop {
+        let log = match LogWriter::open(
+            options.clone(),
+            Arc::clone(&storage),
+            prefix,
+            "benchmark gc'er",
+            (),
+        )
+        .await
+        {
+            Ok(log) => log,
+            Err(_) => {
+                // squash this error for better log debuggability
+                continue;
+            }
+        };
+        if let Err(_err) = garbage_collect_once(&log).await {
+            //println!("err {}:{}: {err:?}", file!(), line!());
+        }
+    }
+}
+
+async fn garbage_collect_once(_log: &LogWriter) -> Result<(), Error> {
+    Ok(())
+}
+
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let options = Options::default();
 
-    // Setup the storage.
-    let storage_config = StorageConfig::S3(S3StorageConfig {
-        bucket: "chroma-storage".to_string(),
-        credentials: S3CredentialsConfig::Minio,
-        ..Default::default()
-    });
+    let storage = Arc::new(s3_client_for_test_with_bucket_name("wal3-testing").await);
 
-    let registry = Registry::default();
-    let storage = Arc::new(
-        Configurable::try_from_config(&storage_config, &registry)
-            .await
-            .unwrap(),
-    );
-
-    // NOTE(rescrv):  Outside benchmarking we don't want to initialize except when we create a new
-    // log.  A durability event that loses the manifest will cause the log to become truncated.
-    // Recovery is necessary, not just creating the manifest.
-    match LogWriter::initialize(&options.log, &storage, "wal3bench", "benchmark initializer").await
-    {
-        Ok(_) => {}
-        Err(Error::AlreadyInitialized) => {}
-        Err(e) => {
-            eprintln!("error initializing log: {e:?}");
-            std::process::exit(1);
-        }
-    };
     let log = Arc::new(
-        LogWriter::open(
+        LogWriter::open_or_initialize(
             options.log.clone(),
-            storage,
+            Arc::clone(&storage),
             "wal3bench",
             "benchmark writer",
             (),
@@ -88,6 +99,11 @@ async fn main() {
             handle.await.unwrap();
         }
     });
+    let gcer = tokio::task::spawn(garbage_collect_in_a_loop(
+        options.log.clone(),
+        Arc::clone(&storage),
+        "wal3bench",
+    ));
     let mut guac = Guacamole::new(0);
     let start = Instant::now();
     let mut next = Duration::ZERO;
@@ -114,14 +130,24 @@ async fn main() {
             .metrics()
             .num_alive_tasks();
         if tasks_alive > options.max_tokio_tasks {
-            eprintln!("max tokio tasks exceeded: {tasks_alive}");
+            println!("max tokio tasks exceeded: {tasks_alive}");
             break;
         }
     }
     println!("done offering load");
+    println!("{:?}", log.count_waiters());
+    let drained = Instant::now();
     drop(tx);
+    println!("{}", log.debug_dump());
     reaper.await.unwrap();
     println!("done with benchmark");
+    gcer.abort();
+    let closed = Instant::now();
+    println!("closing");
     Arc::into_inner(log).unwrap().close().await.unwrap();
-    println!("log closed");
+    println!(
+        "log drained in {:?} closed in {:?}",
+        drained.elapsed(),
+        closed.elapsed()
+    );
 }

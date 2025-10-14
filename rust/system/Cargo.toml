@@ -21,3 +21,4 @@ tempfile = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-config = { workspace = true }
+opentelemetry = { workspace = true }

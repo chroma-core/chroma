@@ -1,3 +1,8 @@
+---
+id: cli-vacuum
+name: Vacuum
+---
+
 # Vacuuming
 
 Vacuuming shrinks and optimizes your database.

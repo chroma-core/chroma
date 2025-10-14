@@ -36,8 +36,8 @@ const main = async () => {
 
     // Fix the HashMap type to include null and remove duplicate number
     typesContent = typesContent.replace(
-      /export type HashMap = \{\s*\[key: string\]: boolean \| number \| number \| string;\s*\};/,
-      "export type HashMap = {\n  [key: string]: boolean | number | string | null;\n};",
+      /export type HashMap = \{\s*\[key: string\]: boolean \| number \| number \| string \| SparseVector;\s*};/,
+      "export type HashMap = {\n  [key: string]: boolean | number | string | SparseVector | null;\n};",
     );
 
     await writeFile(typesPath, typesContent);

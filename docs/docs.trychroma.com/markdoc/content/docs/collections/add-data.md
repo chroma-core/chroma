@@ -1,10 +1,16 @@
+---
+id: collections-add
+name: Add Data
+---
+
 # Adding Data to Chroma Collections
 
-Add data to a Chroma collection with the `.add` method. It takes a list of unique string `ids`, and a list of `documents`. Chroma will embed these documents for you using the collection's [embedding function](../embeddings/embedding-functions). It will also store the documents themselves. You can optionally provide a metadata dictionary for each document you add. 
+Add data to a Chroma collection with the `.add` method. It takes a list of unique string `ids`, and a list of `documents`. Chroma will embed these documents for you using the collection's [embedding function](../embeddings/embedding-functions). It will also store the documents themselves. You can optionally provide a metadata dictionary for each document you add.
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.add(
     ids=["id1", "id2", "id3", ...],
@@ -12,9 +18,11 @@ collection.add(
     metadatas=[{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...],
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.add({
     ids: ["id1", "id2", "id3", ...],
@@ -22,6 +30,7 @@ await collection.add({
     metadatas: [{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...],
 });
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -33,18 +42,21 @@ Alternatively, you can supply a list of document-associated `embeddings` directl
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.add(
     ids=["id1", "id2", "id3", ...],
     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
     documents=["doc1", "doc2", "doc3", ...],
     metadatas=[{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...],
-    
+
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.add({
     ids: ["id1", "id2", "id3", ...],
@@ -53,6 +65,7 @@ await collection.add({
     metadatas: [{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...],
 })
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -64,6 +77,7 @@ You can also store documents elsewhere, and just supply a list of `embeddings` a
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.add(
     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
@@ -71,9 +85,11 @@ collection.add(
     ids=["id1", "id2", "id3", ...]
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.add({
     ids: ["id1", "id2", "id3", ...],
@@ -81,6 +97,7 @@ await collection.add({
     metadatas: [{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...],
 })
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}

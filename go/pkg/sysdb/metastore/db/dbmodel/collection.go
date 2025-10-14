@@ -10,6 +10,7 @@ type Collection struct {
 	ID                         string          `gorm:"id;primaryKey"`
 	Name                       *string         `gorm:"name;not null;index:idx_name,unique;"`
 	ConfigurationJsonStr       *string         `gorm:"configuration_json_str"`
+	SchemaStr                  *string         `gorm:"schema_str"`
 	Dimension                  *int32          `gorm:"dimension"`
 	DatabaseID                 string          `gorm:"database_id;not null;index:idx_name,unique;"`
 	Ts                         types.Timestamp `gorm:"ts;type:bigint;default:0"`
@@ -61,9 +62,9 @@ type ICollectionDb interface {
 	InsertOnConflictDoNothing(in *Collection) (didInsert bool, err error)
 	Update(in *Collection) error
 	DeleteAll() error
-	UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, tenant string) (int32, error)
+	UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, tenant string, schemaStr *string) (int32, error)
 	UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFilePath string, newCollectionVersion int32, newVersionFilePath string, totalRecordsPostCompaction uint64,
-		sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, numVersions uint64) (int64, error)
+		sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, numVersions uint64, schemaStr *string) (int64, error)
 	GetCollectionWithoutMetadata(collectionID *string, databaseName *string, softDeletedFlag *bool) (*Collection, error)
 	GetCollectionSize(collectionID string) (uint64, error)
 	ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64) ([]*CollectionToGc, error)

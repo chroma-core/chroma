@@ -9,6 +9,7 @@ proto_python:
 	    ./chromadb/proto/chroma.proto \
 	    ./chromadb/proto/coordinator.proto \
 	    ./chromadb/proto/logservice.proto \
+	    ./chromadb/proto/heapservice.proto \
 	    ./chromadb/proto/query_executor.proto
 	@mv chromadb/proto/*.py ../chromadb/proto/
 	@mv chromadb/proto/*.pyi ../chromadb/proto/

@@ -18,6 +18,12 @@ metadata:
   namespace: {{ .Values.namespace }}
 spec:
   replicas: {{ .Values.rustFrontendService.replicaCount }}
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: rust-frontend-service
@@ -35,6 +41,8 @@ spec:
           image: "{{ .Values.rustFrontendService.image.repository }}:{{ .Values.rustFrontendService.image.tag }}"
           imagePullPolicy: IfNotPresent
           readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 30 # 30 seconds to allow for initial startup
             httpGet:
               port: 8000
               path: /api/v2/healthcheck

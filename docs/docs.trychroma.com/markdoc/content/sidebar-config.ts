@@ -77,10 +77,10 @@ const sidebarConfig: AppSection[] = [
         name: "Collections",
         pages: [
           { id: "manage-collections", name: "Manage Collections" },
-          { id: "configure", name: "Configure" },
           { id: "add-data", name: "Add Data" },
           { id: "update-data", name: "Update Data" },
           { id: "delete-data", name: "Delete Data" },
+          { id: "configure", name: "Configure" },
         ],
       },
       {
@@ -127,6 +127,21 @@ const sidebarConfig: AppSection[] = [
       { id: "getting-started", name: "Getting Started" },
       { id: "pricing", name: "Pricing" },
       { id: "quotas-limits", name: "Quotas & Limits" },
+    ],
+    subsections: [
+      {
+        id: "features",
+        name: "Features",
+        pages: [{ id: "collection-forking", name: "Collection Forking" }],
+      },
+      {
+        id: "package-search",
+        name: "Package Search",
+        pages: [
+          { id: "mcp", name: "MCP" },
+          { id: "registry", name: "Registry" },
+        ],
+      },
     ],
   },
   {

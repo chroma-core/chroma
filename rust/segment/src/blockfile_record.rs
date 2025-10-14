@@ -3,6 +3,8 @@ use crate::types::ChromaSegmentFlusher;
 use super::distributed_spann::SpannSegmentWriterError;
 use super::types::{HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult};
 use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
+use chroma_blockstore::provider::ReadKey;
+use chroma_blockstore::provider::ReadValue;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{
     BlockfileFlusher, BlockfileReader, BlockfileWriter, BlockfileWriterOptions,
@@ -10,8 +12,8 @@ use chroma_blockstore::{
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::types::FullTextIndexError;
 use chroma_types::{
-    DataRecord, DatabaseUuid, MaterializedLogOperation, Segment, SegmentType, SegmentUuid,
-    MAX_OFFSET_ID, OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_TO_OFFSET_ID,
+    DataRecord, DatabaseUuid, MaterializedLogOperation, SchemaError, Segment, SegmentType,
+    SegmentUuid, MAX_OFFSET_ID, OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_TO_OFFSET_ID,
 };
 use futures::{Stream, StreamExt, TryStreamExt};
 use std::collections::HashMap;
@@ -20,6 +22,7 @@ use std::ops::RangeBounds;
 use std::sync::atomic::{self, AtomicU32};
 use std::sync::Arc;
 use thiserror::Error;
+use tracing::{Instrument, Span};
 
 #[derive(Clone)]
 pub struct RecordSegmentWriter {
@@ -58,6 +61,18 @@ pub enum RecordSegmentWriterCreationError {
     BlockfileOpenError(#[from] Box<OpenError>),
     #[error("S3 prefix path wrong in file paths")]
     InvalidPrefixPath,
+}
+
+impl chroma_error::ChromaError for RecordSegmentWriterCreationError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        use chroma_error::ErrorCodes;
+        match self {
+            Self::InvalidSegmentType | Self::IncorrectNumberOfFiles => ErrorCodes::InvalidArgument,
+            Self::BlockfileCreateError(e) => e.code(),
+            Self::BlockfileOpenError(e) => e.code(),
+            _ => ErrorCodes::Internal,
+        }
+    }
 }
 
 impl RecordSegmentWriter {
@@ -543,6 +558,8 @@ pub enum ApplyMaterializedLogError {
     BlockfileUpdate,
     #[error("Allocation error")]
     Allocation,
+    #[error("Schema error: {0}")]
+    Schema(#[from] SchemaError),
     #[error("Error writing to the full text index: {0}")]
     FullTextIndex(#[from] FullTextIndexError),
     #[error("Error writing to hnsw index")]
@@ -560,6 +577,7 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::BlockfileDelete => ErrorCodes::Internal,
             ApplyMaterializedLogError::BlockfileUpdate => ErrorCodes::Internal,
             ApplyMaterializedLogError::Allocation => ErrorCodes::Internal,
+            ApplyMaterializedLogError::Schema(e) => e.code(),
             ApplyMaterializedLogError::FullTextIndex(e) => e.code(),
             ApplyMaterializedLogError::HnswIndex(_) => ErrorCodes::Internal,
             ApplyMaterializedLogError::Materialization(e) => e.code(),
@@ -716,194 +734,95 @@ impl ChromaError for RecordSegmentReaderCreationError {
 }
 
 impl RecordSegmentReader<'_> {
+    async fn load_index_reader<'new, K: ReadKey<'new>, V: ReadValue<'new>>(
+        segment: &Segment,
+        file_path_string: &str,
+        blockfile_provider: &BlockfileProvider,
+    ) -> Result<BlockfileReader<'new, K, V>, RecordSegmentReaderCreationError> {
+        match segment.file_path.get(file_path_string) {
+            Some(file_paths) => match file_paths.first() {
+                Some(file_path) => {
+                    let (prefix_path, index_uuid) = Segment::extract_prefix_and_id(file_path)
+                        .map_err(|_| {
+                            RecordSegmentReaderCreationError::InvalidUuid(file_path.to_string())
+                        })?;
+                    let reader_options =
+                        BlockfileReaderOptions::new(index_uuid, prefix_path.to_string());
+                    match blockfile_provider.read::<K, V>(reader_options).await {
+                        Ok(reader) => Ok(reader),
+                        Err(e) => Err(RecordSegmentReaderCreationError::BlockfileOpenError(e)),
+                    }
+                }
+                None => Err(RecordSegmentReaderCreationError::FilePathNotFound),
+            },
+            None => Err(RecordSegmentReaderCreationError::FilePathNotFound),
+        }
+    }
+
     pub async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<Self, Box<RecordSegmentReaderCreationError>> {
-        let (user_id_to_id, id_to_user_id, id_to_data, existing_max_offset_id) = match segment
-            .file_path
-            .len()
-        {
-            4 => {
-                let user_id_to_id_bf_path = match &segment.file_path.get(USER_ID_TO_OFFSET_ID) {
-                    Some(user_id_to_id_bf_paths) => {
-                        if user_id_to_id_bf_paths.is_empty() {
-                            return Err(Box::new(
-                                RecordSegmentReaderCreationError::FilePathNotFound,
-                            ));
-                        }
-                        &user_id_to_id_bf_paths[0]
-                    }
-                    None => {
-                        return Err(Box::new(RecordSegmentReaderCreationError::FilePathNotFound));
-                    }
-                };
-                let id_to_user_id_bf_path = match &segment.file_path.get(OFFSET_ID_TO_USER_ID) {
-                    Some(id_to_user_id_bf_paths) => {
-                        if id_to_user_id_bf_paths.is_empty() {
-                            return Err(Box::new(
-                                RecordSegmentReaderCreationError::FilePathNotFound,
-                            ));
-                        }
-                        &id_to_user_id_bf_paths[0]
-                    }
-                    None => {
-                        return Err(Box::new(RecordSegmentReaderCreationError::FilePathNotFound));
-                    }
-                };
+        let (user_id_to_id, id_to_user_id, id_to_data, existing_max_offset_id) =
+            match segment.file_path.len() {
+                4 => {
+                    let user_id_to_id_future =
+                        Self::load_index_reader(segment, USER_ID_TO_OFFSET_ID, blockfile_provider)
+                            .instrument(Span::current());
 
-                let id_to_data_bf_path = match &segment.file_path.get(OFFSET_ID_TO_DATA) {
-                    Some(id_to_data_bf_paths) => {
-                        if id_to_data_bf_paths.is_empty() {
-                            return Err(Box::new(
-                                RecordSegmentReaderCreationError::FilePathNotFound,
-                            ));
-                        }
-                        &id_to_data_bf_paths[0]
-                    }
-                    None => {
-                        return Err(Box::new(RecordSegmentReaderCreationError::FilePathNotFound));
-                    }
-                };
+                    let id_to_user_id_future =
+                        Self::load_index_reader(segment, OFFSET_ID_TO_USER_ID, blockfile_provider)
+                            .instrument(Span::current());
 
-                let max_offset_id_bf_path = match &segment.file_path.get(MAX_OFFSET_ID) {
-                    Some(max_offset_id_bf_paths) => {
-                        if max_offset_id_bf_paths.is_empty() {
-                            return Err(Box::new(
-                                RecordSegmentReaderCreationError::FilePathNotFound,
-                            ));
-                        }
-                        &max_offset_id_bf_paths[0]
-                    }
-                    None => {
-                        return Err(Box::new(RecordSegmentReaderCreationError::FilePathNotFound));
-                    }
-                };
+                    let id_to_data_future =
+                        Self::load_index_reader(segment, OFFSET_ID_TO_DATA, blockfile_provider)
+                            .instrument(Span::current());
 
-                let (max_offset_segment_path, max_offset_id_bf_uuid) =
-                    Segment::extract_prefix_and_id(max_offset_id_bf_path).map_err(|_| {
-                        RecordSegmentReaderCreationError::InvalidUuid(
-                            max_offset_id_bf_path.to_string(),
-                        )
-                    })?;
+                    let max_offset_id_future =
+                        Self::load_index_reader(segment, MAX_OFFSET_ID, blockfile_provider)
+                            .instrument(Span::current());
 
-                let read_options = BlockfileReaderOptions::new(
-                    max_offset_id_bf_uuid,
-                    max_offset_segment_path.to_string(),
-                );
-                let max_offset_id_bf_reader =
-                    match blockfile_provider.read::<&str, u32>(read_options).await {
-                        Ok(max_offset_id_bf_reader) => Some(max_offset_id_bf_reader),
-                        Err(_) => None,
-                    };
+                    let (
+                        max_offset_id_result,
+                        user_id_to_id_result,
+                        id_to_user_id_result,
+                        id_to_data_result,
+                    ) = tokio::join!(
+                        max_offset_id_future,
+                        user_id_to_id_future,
+                        id_to_user_id_future,
+                        id_to_data_future
+                    );
 
-                let exising_max_offset_id = match max_offset_id_bf_reader {
-                    Some(reader) => match reader.get("", MAX_OFFSET_ID).await {
-                        Ok(Some(max_offset_id)) => max_offset_id,
-                        Ok(None) | Err(_) => 0,
-                    },
-                    None => 0,
-                };
+                    let max_offset_id_bf_reader = max_offset_id_result?;
+                    let user_id_to_id = user_id_to_id_result?;
+                    let id_to_user_id = id_to_user_id_result?;
+                    let id_to_data = id_to_data_result?;
 
-                let (user_id_to_id_segment_path, user_id_to_id_bf_uuid) =
-                    Segment::extract_prefix_and_id(user_id_to_id_bf_path).map_err(|_| {
-                        RecordSegmentReaderCreationError::InvalidUuid(
-                            user_id_to_id_bf_path.to_string(),
-                        )
-                    })?;
+                    let exising_max_offset_id =
+                        match max_offset_id_bf_reader.get("", MAX_OFFSET_ID).await {
+                            Ok(Some(max_offset_id)) => max_offset_id,
+                            Ok(None) | Err(_) => 0,
+                        };
 
-                if user_id_to_id_segment_path != max_offset_segment_path {
+                    (
+                        user_id_to_id,
+                        id_to_user_id,
+                        id_to_data,
+                        exising_max_offset_id,
+                    )
+                }
+                0 => {
                     return Err(Box::new(
-                        RecordSegmentReaderCreationError::PrefixPathsMismatch,
+                        RecordSegmentReaderCreationError::UninitializedSegment,
                     ));
                 }
-
-                let read_options = BlockfileReaderOptions::new(
-                    user_id_to_id_bf_uuid,
-                    user_id_to_id_segment_path.to_string(),
-                );
-                let user_id_to_id = match blockfile_provider.read::<&str, u32>(read_options).await {
-                    Ok(user_id_to_id) => user_id_to_id,
-                    Err(e) => {
-                        return Err(Box::new(
-                            RecordSegmentReaderCreationError::BlockfileOpenError(e),
-                        ))
-                    }
-                };
-
-                let (id_to_user_id_segment_path, id_to_user_id_bf_uuid) =
-                    Segment::extract_prefix_and_id(id_to_user_id_bf_path).map_err(|_| {
-                        RecordSegmentReaderCreationError::InvalidUuid(
-                            id_to_user_id_bf_path.to_string(),
-                        )
-                    })?;
-
-                if id_to_user_id_segment_path != max_offset_segment_path {
+                _ => {
                     return Err(Box::new(
-                        RecordSegmentReaderCreationError::PrefixPathsMismatch,
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles,
                     ));
                 }
-
-                let read_options = BlockfileReaderOptions::new(
-                    id_to_user_id_bf_uuid,
-                    id_to_user_id_segment_path.to_string(),
-                );
-                let id_to_user_id = match blockfile_provider.read::<u32, &str>(read_options).await {
-                    Ok(id_to_user_id) => id_to_user_id,
-                    Err(e) => {
-                        return Err(Box::new(
-                            RecordSegmentReaderCreationError::BlockfileOpenError(e),
-                        ))
-                    }
-                };
-
-                let (id_to_data_segment_path, id_to_data_bf_uuid) =
-                    Segment::extract_prefix_and_id(id_to_data_bf_path).map_err(|_| {
-                        RecordSegmentReaderCreationError::InvalidUuid(
-                            id_to_data_bf_path.to_string(),
-                        )
-                    })?;
-
-                if id_to_data_segment_path != max_offset_segment_path {
-                    return Err(Box::new(
-                        RecordSegmentReaderCreationError::PrefixPathsMismatch,
-                    ));
-                }
-
-                let read_options = BlockfileReaderOptions::new(
-                    id_to_data_bf_uuid,
-                    id_to_data_segment_path.to_string(),
-                );
-                let id_to_data = match blockfile_provider
-                    .read::<u32, DataRecord>(read_options)
-                    .await
-                {
-                    Ok(id_to_data) => id_to_data,
-                    Err(e) => {
-                        return Err(Box::new(
-                            RecordSegmentReaderCreationError::BlockfileOpenError(e),
-                        ))
-                    }
-                };
-
-                (
-                    user_id_to_id,
-                    id_to_user_id,
-                    id_to_data,
-                    exising_max_offset_id,
-                )
-            }
-            0 => {
-                return Err(Box::new(
-                    RecordSegmentReaderCreationError::UninitializedSegment,
-                ));
-            }
-            _ => {
-                return Err(Box::new(
-                    RecordSegmentReaderCreationError::InvalidNumberOfFiles,
-                ));
-            }
-        };
+            };
 
         Ok(RecordSegmentReader {
             user_id_to_id,
@@ -951,12 +870,13 @@ impl RecordSegmentReader<'_> {
     }
 
     /// Returns all data in the record segment, sorted by their offset ids
-    pub async fn get_all_data(&self) -> Result<Vec<(u32, DataRecord)>, Box<dyn ChromaError>> {
-        self.id_to_data.get_range(""..="", ..).await.map(|vec| {
-            vec.into_iter()
-                .map(|(_, offset, data)| (offset, data))
-                .collect()
-        })
+    pub async fn get_all_data(
+        &self,
+    ) -> Result<impl Iterator<Item = (u32, DataRecord)> + '_, Box<dyn ChromaError>> {
+        self.id_to_data
+            .get_range(""..="", ..)
+            .await
+            .map(|iter| iter.map(|(_, offset, data)| (offset, data)))
     }
 
     pub async fn get_data_stream<'me>(
@@ -1038,7 +958,7 @@ mod tests {
             .enable_all()
             .build()
             .expect("Runtime creation should not fail");
-        let test_segment = runtime.block_on(async { TestDistributedSegment::default() });
+        let test_segment = runtime.block_on(async { TestDistributedSegment::new().await });
         let record_segment_writer = runtime
             .block_on(RecordSegmentWriter::from_segment(
                 &test_segment.collection.tenant,

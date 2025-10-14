@@ -343,3 +343,49 @@ async fn test_nested_mutation_then_close_multi_thread() {
     let expected_error = metering::close::<metering::TestContextA>();
     assert!(expected_error.is_err());
 }
+
+#[tokio::test]
+async fn test_nested_function_creates_new_context() {
+    let parent_context_container =
+        metering::create::<metering::TestContextA>(metering::TestContextA::default());
+    child().meter(parent_context_container).await;
+
+    async fn child() {
+        // Mutate the parent context
+        metering::with_current(|metering_context| metering_context.test_capability(1));
+
+        // Close the parent context
+        let parent_context = metering::close::<metering::TestContextA>().unwrap();
+        assert_eq!(
+            parent_context.test_annotated_field.load(Ordering::Relaxed),
+            1
+        );
+
+        // Create a new context in the child function
+        let child_context_container =
+            metering::create::<metering::TestContextB>(metering::TestContextB::default());
+
+        // Call another async function to which we want to supply the child context. This has to be done in a closure
+        // because the parent's future only knows about the parent's context
+        (async {
+            helper().await;
+        })
+        .meter(child_context_container.clone())
+        .await;
+
+        // Need to re-enter the child context before attempting to close
+        child_context_container.enter();
+
+        // Close the child
+        let child_context = metering::close::<metering::TestContextB>().unwrap();
+        assert_eq!(
+            child_context.test_annotated_field.load(Ordering::Relaxed),
+            2
+        );
+    }
+
+    async fn helper() {
+        // Mutate the child context
+        metering::with_current(|metering_context| metering_context.test_capability(2));
+    }
+}

@@ -128,7 +128,7 @@ jobs:
 
   build-linux:
     name: Build Linux bindings
-    runs-on: blacksmith-16vcpu-ubuntu-2204
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     defaults:
       run:
         working-directory: rust/js_bindings

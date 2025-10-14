@@ -11,6 +11,7 @@ pub enum ReadAction {
     Get,
     GetForDelete,
     Query,
+    Search,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Hash, Serialize)]
@@ -356,6 +357,159 @@ initialize_metering! {
             }
         }
     }
+
+    ////////////////////////////////// external_collection_read //////////////////////////////////
+    #[context(
+        capabilities = [
+            FtsQueryLength,
+            MetadataPredicateCount,
+            QueryEmbeddingCount,
+            PulledLogSizeBytes,
+            LatestCollectionLogicalSizeBytes,
+            ReturnBytes,
+            StartRequest,
+            FinishRequest,
+        ],
+        handlers = [
+            __handler_external_collection_read_fts_query_length,
+            __handler_external_collection_read_metadata_predicate_count,
+            __handler_external_collection_read_query_embedding_count,
+            __handler_external_collection_read_pulled_log_size_bytes,
+            __handler_external_collection_read_latest_collection_logical_size_bytes,
+            __handler_external_collection_read_return_bytes,
+            __handler_external_collection_read_start_request,
+            __handler_external_collection_read_finish_request,
+        ]
+    )]
+    #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub struct ExternalCollectionReadContext {
+        pub tenant: String,
+        pub database: String,
+        pub collection_id: String,
+        #[serde(flatten)]
+        pub action: ReadAction,
+        #[serde(skip, default = "MeteringInstant::now")]
+        pub request_received_at: MeteringInstant,
+        pub fts_query_length: MeteringAtomicU64,
+        pub metadata_predicate_count: MeteringAtomicU64,
+        pub query_embedding_count: MeteringAtomicU64,
+        pub pulled_log_size_bytes: MeteringAtomicU64,
+        pub latest_collection_logical_size_bytes: MeteringAtomicU64,
+        pub return_bytes: MeteringAtomicU64,
+        pub request_execution_time_ms: MeteringAtomicU64,
+    }
+
+    impl ExternalCollectionReadContext {
+        pub fn new(
+            tenant: String,
+            database: String,
+            collection_id: String,
+            action: ReadAction,
+        ) -> Self {
+            ExternalCollectionReadContext {
+                tenant,
+                database,
+                collection_id,
+                action,
+                request_received_at: MeteringInstant::now(),
+                fts_query_length: MeteringAtomicU64::new(0),
+                metadata_predicate_count: MeteringAtomicU64::new(0),
+                query_embedding_count: MeteringAtomicU64::new(0),
+                pulled_log_size_bytes: MeteringAtomicU64::new(0),
+                latest_collection_logical_size_bytes: MeteringAtomicU64::new(0),
+                return_bytes: MeteringAtomicU64::new(0),
+                request_execution_time_ms: MeteringAtomicU64::new(0)
+            }
+        }
+    }
+
+    /// Handler for [`crate::core::FtsQueryLength`] capability for collection read contexts
+    fn __handler_external_collection_read_fts_query_length(
+        context: &ExternalCollectionReadContext,
+        fts_query_length: u64,
+    ) {
+        context
+            .fts_query_length
+            .store(fts_query_length, Ordering::SeqCst);
+    }
+
+    /// Handler for [`crate::core::MetadataPredicateCount`] capability for collection read contexts
+    fn __handler_external_collection_read_metadata_predicate_count(
+        context: &ExternalCollectionReadContext,
+        metadata_predicate_count: u64,
+    ) {
+        context
+            .metadata_predicate_count
+            .store(metadata_predicate_count, Ordering::SeqCst);
+    }
+
+    /// Handler for [`crate::core::QueryEmbeddingCount`] capability for collection read contexts
+    fn __handler_external_collection_read_query_embedding_count(
+        context: &ExternalCollectionReadContext,
+        query_embedding_count: u64,
+    ) {
+        context
+            .query_embedding_count
+            .store(query_embedding_count, Ordering::SeqCst);
+    }
+
+    /// Handler for [`crate::core::PulledLogSizeBytes`] capability for collection read contexts
+    fn __handler_external_collection_read_pulled_log_size_bytes(
+        context: &ExternalCollectionReadContext,
+        pulled_log_size_bytes: u64,
+    ) {
+        context
+            .pulled_log_size_bytes
+            .store(pulled_log_size_bytes, Ordering::SeqCst);
+    }
+
+    /// Handler for [`crate::core::LatestCollectionLogicalSizeBytes`] capability for collection read contexts
+    fn __handler_external_collection_read_latest_collection_logical_size_bytes(
+        context: &ExternalCollectionReadContext,
+        latest_collection_logical_size_bytes: u64,
+    ) {
+        context
+            .latest_collection_logical_size_bytes
+            .store(latest_collection_logical_size_bytes, Ordering::SeqCst);
+    }
+
+    /// Handler for [`crate::core::ReturnBytes`] capability for collection read contexts
+    fn __handler_external_collection_read_return_bytes(
+        context: &ExternalCollectionReadContext,
+        return_bytes: u64,
+    ) {
+        context
+            .return_bytes
+            .store(return_bytes, Ordering::SeqCst);
+    }
+
+    /// Handler for [`crate::core::StartRequest`] capability for collection read contexts
+    fn __handler_external_collection_read_start_request(
+        context: &ExternalCollectionReadContext,
+        started_at: Instant,
+    ) {
+        match context.request_received_at.store(started_at) {
+            Ok(()) => {}
+            Err(error) => tracing::error!("Failed to exercise `StartRequest` capability on `ExternalCollectionReadContext`: {:?}", error),
+        }
+    }
+
+    /// Handler for [`crate::core::FinishRequest`] capability for collection read contexts
+    fn __handler_external_collection_read_finish_request(
+        context: &ExternalCollectionReadContext,
+        finished_at: Instant,
+    ) {
+        match context.request_received_at.load() {
+            Ok(started_at) => {
+                let duration_ms = finished_at.duration_since(started_at).as_millis() as u64;
+                context.request_execution_time_ms.store(duration_ms, Ordering::SeqCst);
+            }
+            Err(error) => {
+                tracing::error!("Failed to exercise `FinishRequest` capability on `CollectionReadContext`: {:?}", error);
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -364,6 +518,7 @@ pub enum MeterEvent {
     CollectionFork(CollectionForkContext),
     CollectionRead(CollectionReadContext),
     CollectionWrite(CollectionWriteContext),
+    ExternalCollectionRead(ExternalCollectionReadContext),
 }
 
 #[cfg(test)]
@@ -398,6 +553,9 @@ mod tests {
                 write_context.request_received_at = request_received_at
             }
             MeterEvent::CollectionFork(_) => {}
+            MeterEvent::ExternalCollectionRead(external_collection_read_context) => {
+                external_collection_read_context.request_received_at = request_received_at
+            }
         }
         assert_eq!(json_event, event);
     }

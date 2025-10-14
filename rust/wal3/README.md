@@ -6,10 +6,14 @@ built entirely on top of object storage.  It relies upon the atomicity of object
 the If-Match header.  This allows us to create a log entirely on top of object storage without any
 other sources of locking or coordination.
 
+This log is designed to provide high throughput with a single writer and multiple readers, but it will remain correct and available even if multiple writers are present. Mostly this is intended to recover from a crashed or underperforming writer without risking the correctness of the log. 
+
 # Design
 
 wal3 is designed to work on object storage.  It is intended to to be lightweight, to allow a single
 machine to multiplex many logs simultaneously over a variety of paths.
+
+At a high level wal3's logged records are in a large number of immutable files on object storage ("fragments"), and wal3 maintains multiple files that track which files compose the log and in which order. Those files are organized in a tree for performance. The root is the "manifest" (mutable) and the interior nodes are the "snapshots" (immutable).
 
 ## Interface
 
@@ -64,8 +68,7 @@ wal3 is built around the following data structures:
 
 - A log is the unit of data isolation in wal3 and the unit of API instantiation.
 - A `Fragment` is a single, immutable file that contains a subsequence of data for a log.
-- A `Manifest` is a file that contains the metadata for the log.  It contains the list of fragments
-  that comprise the current state of the log.
+- A `Manifest` is a file that contains the metadata for the log.  The current state of the log is the list of fragments.
 - A `Cursor` holds a position in the log, pinning that position and all subsequent positions from
   being garbage collected.
 

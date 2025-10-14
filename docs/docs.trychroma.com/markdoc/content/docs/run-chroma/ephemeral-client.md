@@ -1,3 +1,8 @@
+---
+id: ephemeral-client
+name: Ephemeral Client
+---
+
 # Ephemeral Client
 
 In Python, you can run a Chroma server in-memory and connect to it with the ephemeral client:

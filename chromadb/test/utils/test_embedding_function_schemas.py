@@ -46,6 +46,20 @@ class TestEmbeddingFunctionSchemas:
         mock_call = MagicMock(return_value=mock_embeddings(["test"]))
         mock_ef.__call__ = mock_call
 
+        # For chroma-cloud-qwen, mock get_config to return valid data
+        if ef_name == "chroma-cloud-qwen":
+            from chromadb.utils.embedding_functions.chroma_cloud_qwen_embedding_function import (
+                ChromaCloudQwenEmbeddingModel,
+                ChromaCloudQwenEmbeddingTask,
+                CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
+            )
+            mock_ef.get_config.return_value = {
+                "api_key_env_var": "CHROMA_API_KEY",
+                "model": ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B.value,
+                "task": ChromaCloudQwenEmbeddingTask.NL_TO_CODE.value,
+                "instructions": CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
+            }
+
         # Mock the class constructor to return our mock instance
         mock_common_deps.setattr(
             ef_class, "__new__", lambda cls, *args, **kwargs: mock_ef

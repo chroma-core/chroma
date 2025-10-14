@@ -15,7 +15,7 @@ fn bench_limit(criterion: &mut Criterion) {
 
     for record_count in [1000, 10000, 100000] {
         let test_segment = runtime.block_on(async {
-            let mut segment = TestDistributedSegment::default();
+            let mut segment = TestDistributedSegment::new().await;
             segment
                 .populate_with_generator(record_count, upsert_generator)
                 .await;
@@ -32,8 +32,8 @@ fn bench_limit(criterion: &mut Criterion) {
 
         for offset in [0, record_count / 2, record_count - FETCH] {
             let limit_operator = Limit {
-                skip: offset as u32,
-                fetch: Some(FETCH as u32),
+                offset: offset as u32,
+                limit: Some(FETCH as u32),
             };
 
             let routine = |(op, input): (Limit, LimitInput)| async move {

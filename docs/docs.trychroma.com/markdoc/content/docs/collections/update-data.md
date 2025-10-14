@@ -1,3 +1,8 @@
+---
+id: collections-update
+name: Update Data
+---
+
 # Updating Data in Chroma Collections
 
 Any property of records in a collection can be updated with `.update`:
@@ -5,6 +10,7 @@ Any property of records in a collection can be updated with `.update`:
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.update(
     ids=["id1", "id2", "id3", ...],
@@ -13,17 +19,20 @@ collection.update(
     documents=["doc1", "doc2", "doc3", ...],
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.update({
-    ids: ["id1", "id2", "id3", ...], 
-    embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...], 
-    metadatas: [{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...], 
+    ids: ["id1", "id2", "id3", ...],
+    embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
+    metadatas: [{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...],
     documents: ["doc1", "doc2", "doc3", ...]
 })
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
@@ -37,6 +46,7 @@ Chroma also supports an `upsert` operation, which updates existing items, or add
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
+
 ```python
 collection.upsert(
     ids=["id1", "id2", "id3", ...],
@@ -45,25 +55,28 @@ collection.upsert(
     documents=["doc1", "doc2", "doc3", ...],
 )
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
+
 ```typescript
 await collection.upsert({
-    ids: ["id1", "id2", "id3"],
-    embeddings: [
-        [1.1, 2.3, 3.2],
-        [4.5, 6.9, 4.4],
-        [1.1, 2.3, 3.2],
-    ],
-    metadatas: [
-        { chapter: "3", verse: "16" },
-        { chapter: "3", verse: "5" },
-        { chapter: "29", verse: "11" },
-    ],
-    documents: ["doc1", "doc2", "doc3"],
+  ids: ["id1", "id2", "id3"],
+  embeddings: [
+    [1.1, 2.3, 3.2],
+    [4.5, 6.9, 4.4],
+    [1.1, 2.3, 3.2],
+  ],
+  metadatas: [
+    { chapter: "3", verse: "16" },
+    { chapter: "3", verse: "5" },
+    { chapter: "29", verse: "11" },
+  ],
+  documents: ["doc1", "doc2", "doc3"],
 });
 ```
+
 {% /Tab %}
 
 {% /TabbedCodeBlock %}

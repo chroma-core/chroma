@@ -48,6 +48,14 @@ var (
 	// Segment metadata errors
 	ErrUnknownSegmentMetadataType = errors.New("segment metadata value type not supported")
 
+	// Task errors
+	ErrTaskAlreadyExists = errors.New("the task that was being created already exists for this collection")
+	ErrTaskNotFound      = errors.New("the requested task was not found")
+	ErrInvalidTaskName   = errors.New("task name cannot start with reserved prefix '_deleted_'")
+
+	// Operator errors
+	ErrOperatorNotFound = errors.New("operator not found")
+
 	// Others
 	ErrCompactionOffsetSomehowAhead = errors.New("system invariant was violated. Compaction offset in sysdb should always be behind or equal to offset in log")
 )

@@ -3,6 +3,7 @@ use chroma_benchmark::datasets::types::Record;
 use chroma_benchmark::datasets::{
     ms_marco_queries::MicrosoftMarcoQueriesDataset, scidocs::SciDocsDataset, types::RecordDataset,
 };
+use chroma_blockstore::arrow::config::BlockManagerConfig;
 use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::BlockfileWriterOptions;
 use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
@@ -86,8 +87,13 @@ fn create_blockfile_provider(storage_dir: &str) -> BlockfileProvider {
     let storage = Storage::Local(LocalStorage::new(storage_dir));
     let block_cache = Box::new(UnboundedCacheConfig {}.build()) as _;
     let sparse_index_cache = Box::new(UnboundedCacheConfig {}.build()) as _;
-    let arrow_blockfile_provider =
-        ArrowBlockfileProvider::new(storage.clone(), BLOCK_SIZE, block_cache, sparse_index_cache);
+    let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+        storage.clone(),
+        BLOCK_SIZE,
+        block_cache,
+        sparse_index_cache,
+        BlockManagerConfig::default_num_concurrent_block_flushes(),
+    );
     BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider)
 }
 

@@ -18,11 +18,11 @@ use chroma_cache::{CacheError, PersistentCache};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage,
+    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage, StorageError,
 };
-use chroma_tracing::util::{get_current_trace_id, Stopwatch};
+use chroma_tracing::util::{LogSlowOperation, Stopwatch};
 use futures::{stream::FuturesUnordered, StreamExt};
-use opentelemetry::{global, KeyValue};
+use opentelemetry::global;
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -80,9 +80,15 @@ impl ArrowBlockfileProvider {
         max_block_size_bytes: usize,
         block_cache: Box<dyn PersistentCache<Uuid, Block>>,
         root_cache: Box<dyn PersistentCache<Uuid, RootReader>>,
+        num_concurrent_block_flushes: usize,
     ) -> Self {
         Self {
-            block_manager: BlockManager::new(storage.clone(), max_block_size_bytes, block_cache),
+            block_manager: BlockManager::new(
+                storage.clone(),
+                max_block_size_bytes,
+                block_cache,
+                num_concurrent_block_flushes,
+            ),
             root_manager: RootManager::new(storage, root_cache),
         }
     }
@@ -236,6 +242,20 @@ impl ArrowBlockfileProvider {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum ArrowBlockfileProviderError {
+    #[error("Invalid config")]
+    ConfigValidationError,
+}
+
+impl ChromaError for ArrowBlockfileProviderError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ArrowBlockfileProviderError::ConfigValidationError => ErrorCodes::Internal,
+        }
+    }
+}
+
 #[async_trait]
 impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfileProvider {
     async fn try_from_config(
@@ -243,6 +263,12 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (blockfile_config, storage) = config;
+        blockfile_config
+            .block_manager_config
+            .validate()
+            .then_some(())
+            .ok_or(ArrowBlockfileProviderError::ConfigValidationError)
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
         let block_cache = match chroma_cache::from_config_persistent(
             &blockfile_config.block_manager_config.block_cache_config,
         )
@@ -269,6 +295,9 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
             blockfile_config.block_manager_config.max_block_size_bytes,
             block_cache,
             sparse_index_cache,
+            blockfile_config
+                .block_manager_config
+                .num_concurrent_block_flushes,
         ))
     }
 }
@@ -352,9 +381,10 @@ impl Default for BlockMetrics {
 #[derive(Clone)]
 pub struct BlockManager {
     block_cache: Arc<dyn PersistentCache<Uuid, Block>>,
-    storage: Storage,
+    storage: Arc<Storage>,
     default_max_block_size_bytes: usize,
     block_metrics: BlockMetrics,
+    num_concurrent_block_flushes: usize,
 }
 
 impl BlockManager {
@@ -362,13 +392,16 @@ impl BlockManager {
         storage: Storage,
         default_max_block_size_bytes: usize,
         block_cache: Box<dyn PersistentCache<Uuid, Block>>,
+        num_concurrent_block_flushes: usize,
     ) -> Self {
         let block_cache: Arc<dyn PersistentCache<Uuid, Block>> = block_cache.into();
+        let storage = Arc::new(storage);
         Self {
             block_cache,
             storage,
             default_max_block_size_bytes,
             block_metrics: BlockMetrics::default(),
+            num_concurrent_block_flushes,
         }
     }
 
@@ -402,9 +435,11 @@ impl BlockManager {
         &self,
         delta: impl Delta,
     ) -> Block {
-        let trace_id = get_current_trace_id().to_string();
-        let attribute = [KeyValue::new("trace_id", trace_id)];
-        let _stopwatch = Stopwatch::new(&self.block_metrics.commit_latency, &attribute);
+        let _stopwatch = Stopwatch::new(
+            &self.block_metrics.commit_latency,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Micros,
+        );
         let delta_id = delta.id();
         let record_batch = delta.finish::<K, V>(None);
         let block = Block::from_record_batch(delta_id, record_batch);
@@ -435,46 +470,67 @@ impl BlockManager {
         priority: StorageRequestPriority,
     ) -> Result<Option<Block>, GetError> {
         let block = self.block_cache.obtain(*id).await.ok().flatten();
-        match block {
-            Some(block) => Ok(Some(block)),
-            None => async {
-                let key = Self::format_key(prefix_path, id);
-                let bytes_res = self
-                    .storage
-                    .get(&key, GetOptions::new(priority))
-                    .instrument(
-                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get", id = id.to_string()),
-                    )
-                    .await;
-                match bytes_res {
-                    Ok(bytes) => {
-                        let trace_id = get_current_trace_id().to_string();
-                        let attribute = [KeyValue::new("trace_id", trace_id)];
-                        self.block_metrics.num_get_requests.record(1, &attribute);
-                        let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
-                        let block =
-                            deserialization_span.in_scope(|| Block::from_bytes(&bytes, *id));
-                        match block {
-                            Ok(block) => {
-                                self.block_cache.insert(*id, block.clone()).await;
-                                Ok(Some(block))
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "Error converting bytes to Block {:?}/{:?}",
-                                    key,
-                                    e
-                                );
-                                Err(GetError::BlockLoadError(e))
-                            }
+        if let Some(block) = block {
+            return Ok(Some(block));
+        }
+
+        // Closure cloning
+        let key = Self::format_key(prefix_path, id);
+        let id_clone = *id;
+        let block_cache_clone = self.block_cache.clone();
+        let key_clone = key.clone();
+        let num_get_requests_metric_clone = self.block_metrics.num_get_requests.clone();
+
+        let res = {
+            let _slow_operation_log = LogSlowOperation::new(
+                format!(
+                    "Cold block fetch from storage and deserialize: {}",
+                    key_clone
+                ),
+                Duration::from_millis(100),
+            );
+            self.storage
+                .fetch(&key, GetOptions::new(priority), move |bytes| async move {
+                    let bytes = match bytes {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            tracing::error!("Error loading block from storage: {:?}", e);
+                            return Err(StorageError::Message {
+                                message: "Error loading block".to_string(),
+                            });
+                        }
+                    };
+                    num_get_requests_metric_clone.record(1, &[]);
+                    let block = Block::from_bytes(&bytes, id_clone);
+                    match block {
+                        Ok(block) => {
+                            block_cache_clone.insert(id_clone, block.clone()).await;
+                            Ok(block)
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "Error converting bytes to Block {:?}/{:?}",
+                                key_clone,
+                                e
+                            );
+                            // TODO(hammadb): We should ideally use BlockLoadError here since that is what this level of the code expects,
+                            // however that type is not trivially Clone. Since for all practical purposes this error results in the same upstream handling
+                            // and observability properties we use a generic StorageError here.
+                            Err(StorageError::Message {
+                                message: "Error converting bytes to Block".to_string(),
+                            })
                         }
                     }
-                    Err(e) => {
-                        tracing::error!("Error converting bytes to Block {:?}", e);
-                        Err(GetError::StorageGetError(e))
-                    }
-                }
-            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold", block_id = id.to_string())).await
+                })
+                .instrument(Span::current())
+                .await
+        };
+        match res {
+            Ok(block) => Ok(Some(block.0)),
+            Err(e) => {
+                tracing::error!("Error fetching block from storage: {:?}", e);
+                Err(GetError::StorageGetError(e))
+            }
         }
     }
 
@@ -491,9 +547,11 @@ impl BlockManager {
             }
         };
         let key = Self::format_key(prefix_path, &block.id);
-        let trace_id = get_current_trace_id().to_string();
-        let attribute = [KeyValue::new("trace_id", trace_id)];
-        let _stopwatch = Stopwatch::new(&self.block_metrics.flush_latency, &attribute);
+        let _stopwatch = Stopwatch::new(
+            &self.block_metrics.flush_latency,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
         let block_bytes_len = bytes.len();
         let res = self
             .storage
@@ -510,7 +568,7 @@ impl BlockManager {
                     block.id,
                     block_bytes_len
                 );
-                self.block_metrics.num_blocks_flushed.record(1, &attribute);
+                self.block_metrics.num_blocks_flushed.record(1, &[]);
             }
             Err(e) => {
                 tracing::info!("Error writing block to storage {}", e);
@@ -522,6 +580,10 @@ impl BlockManager {
 
     pub(super) fn default_max_block_size_bytes(&self) -> usize {
         self.default_max_block_size_bytes
+    }
+
+    pub(super) fn num_concurrent_block_flushes(&self) -> usize {
+        self.num_concurrent_block_flushes
     }
 }
 
@@ -606,9 +668,14 @@ impl RootManager {
         match index {
             Some(index) => Ok(Some(index)),
             None => {
-                tracing::info!("Cache miss - fetching root from storage");
                 let key = Self::get_storage_key(prefix_path, id);
-                tracing::debug!("Reading root from storage with key: {}", key);
+                let _slow_operation_log = LogSlowOperation::new(
+                    format!(
+                        "Cold root fetch from storage and deserialize for key: {}",
+                        key
+                    ),
+                    Duration::from_millis(50),
+                );
                 match self
                     .storage
                     .get(&key, GetOptions::new(StorageRequestPriority::P0))
@@ -758,14 +825,19 @@ impl RootManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arrow::block::delta::UnorderedBlockDelta;
+    use crate::arrow::{block::delta::UnorderedBlockDelta, config::BlockManagerConfig};
     use chroma_cache::new_cache_for_test;
     use chroma_storage::test_storage;
 
     #[tokio::test]
     async fn test_cached() {
         let (_temp_dir, storage) = test_storage();
-        let manager = BlockManager::new(storage, 100, new_cache_for_test());
+        let manager = BlockManager::new(
+            storage,
+            100,
+            new_cache_for_test(),
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         assert!(!manager.cached(&Uuid::new_v4()).await);
 
         let delta = manager.create::<&str, String, UnorderedBlockDelta>();

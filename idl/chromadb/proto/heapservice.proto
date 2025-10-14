@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package chroma;
+
+import "chromadb/proto/chroma.proto";
+
+message HeapSummaryRequest {}
+message HeapSummaryResponse {}
+
+service HeapTenderService {
+    rpc Summary(HeapSummaryRequest) returns (HeapSummaryResponse) {}
+}

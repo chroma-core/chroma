@@ -1,3 +1,8 @@
+---
+id: cli-db
+name: DB Management
+---
+
 # DB Management on Chroma Cloud
 
 The Chroma CLI lets you interact with your Chroma Cloud databases for your active [profile](./profile).

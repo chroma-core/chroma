@@ -1,5 +1,9 @@
-# Chroma's Thin-Client
+---
+id: thin-client
+name: Thin Client
+---
 
+# Chroma's Thin-Client
 
 If you are running Chroma in client-server mode in a Python application, you may not need the full Chroma library. Instead, you can use the lightweight client-only library.
 
@@ -10,21 +14,27 @@ The `chromadb-client` package is a lightweight HTTP client for the server with a
 {% TabbedUseCaseCodeBlock language="Terminal" %}
 
 {% Tab label="pip" %}
+
 ```terminal
 pip install chromadb-client
 ```
+
 {% /Tab %}
 
 {% Tab label="poetry" %}
+
 ```terminal
 poetry add chromadb-client
 ```
+
 {% /Tab %}
 
 {% Tab label="uv" %}
+
 ```terminal
 uv pip install chromadb-client
 ```
+
 {% /Tab %}
 
 {% /TabbedUseCaseCodeBlock %}

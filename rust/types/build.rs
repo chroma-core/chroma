@@ -4,6 +4,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "idl/chromadb/proto/chroma.proto",
         "idl/chromadb/proto/compactor.proto",
         "idl/chromadb/proto/coordinator.proto",
+        "idl/chromadb/proto/heapservice.proto",
         "idl/chromadb/proto/logservice.proto",
         "idl/chromadb/proto/query_executor.proto",
         "idl/chromadb/proto/garbage_collector.proto",
@@ -23,6 +24,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .emit_rerun_if_changed(true)
         .compile(&proto_paths, &["idl/"])?;
+
+    // Note: Operator constants are now generated via bin/generate_operator_constants.sh
+    // and committed to git as rust/types/src/operators_generated.rs.
+    // This avoids needing Go source files in Docker builds.
 
     Ok(())
 }

@@ -72,7 +72,7 @@ impl<'a> Operator<CommitSegmentWriterInput<'a>, CommitSegmentWriterOutput>
             .await
             .map_err(CommitSegmentWriterOperatorError::FinishSegmentWriterFailed)?;
 
-        let flusher = segment_writer.commit().await?;
+        let flusher = Box::pin(segment_writer.commit()).await?;
 
         Ok(CommitSegmentWriterOutput { flusher })
     }

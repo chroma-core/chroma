@@ -1,0 +1,52 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Chroma Cloud Qwen Embedding Function Schema",
+    "description": "Schema for the Chroma Cloud Qwen embedding function configuration",
+    "version": "1.0.0",
+    "type": "object",
+    "properties": {
+        "model": {
+            "type": "string",
+            "enum": ["Qwen/Qwen3-Embedding-0.6B"],
+            "description": "The specific Qwen model to use for embeddings"
+        },
+        "task": {
+            "type": "string",
+            "enum": ["nl_to_code"],
+            "description": "The task for which embeddings are being generated"
+        },
+        "instructions": {
+            "type": "object",
+            "description": "A mapping of tasks to instructions for targets (documents/queries)",
+            "properties": {
+                "nl_to_code": {
+                    "type": "object",
+                    "properties": {
+                        "documents": {
+                            "type": "string",
+                            "description": "Instructions for embedding documents"
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Instructions for embedding queries"
+                        }
+                    },
+                    "required": ["documents", "query"],
+                    "additionalProperties": false
+                }
+            },
+            "required": ["nl_to_code"],
+            "additionalProperties": false
+        },
+        "api_key_env_var": {
+            "type": "string",
+            "description": "Environment variable name that contains your API key for the Chroma Embedding API",
+            "default": "CHROMA_API_KEY"
+        }
+    },
+    "required": [
+        "model",
+        "task"
+    ],
+    "additionalProperties": false
+}

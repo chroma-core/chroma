@@ -1,3 +1,8 @@
+---
+id: cli-install
+name: Installing the CLI
+---
+
 # Installing the Chroma CLI
 
 The Chroma CLI lets you run a Chroma server locally on your machine, install sample apps, browse your collections, interact with your Chroma Cloud DBs, and much more!
@@ -22,18 +27,15 @@ pipx install chromadb
 
 ## JavaScript
 
-
 {% TabbedUseCaseCodeBlock language="Terminal" %}
-
 
 {% Tab label="yarn" %}
 
 ```terminal
-yarn global add chromadb 
+yarn global add chromadb
 ```
 
 {% /Tab %}
-
 
 {% Tab label="npm" %}
 
@@ -43,24 +45,21 @@ npm install -g chromadb
 
 {% /Tab %}
 
-
 {% Tab label="pnpm" %}
 
 ```terminal
-pnpm add -g chromadb 
+pnpm add -g chromadb
 ```
 
 {% /Tab %}
-
 
 {% Tab label="bun" %}
 
 ```terminal
-bun add -g chromadb 
+bun add -g chromadb
 ```
 
 {% /Tab %}
-
 
 {% /TabbedUseCaseCodeBlock %}
 
@@ -69,15 +68,19 @@ bun add -g chromadb
 {% TabbedUseCaseCodeBlock language="Terminal" %}
 
 {% Tab label="cURL" %}
+
 ```terminal
-curl -sSL https://raw.githubusercontent.com/chroma-core/chroma/main/rust/cli/install/install.sh | bash 
+curl -sSL https://raw.githubusercontent.com/chroma-core/chroma/main/rust/cli/install/install.sh | bash
 ```
+
 {% /Tab %}
 
 {% Tab label="Windows" %}
+
 ```terminal
 iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/chroma-core/chroma/main/rust/cli/install/install.ps1'))
 ```
+
 {% /Tab %}
 
 {% /TabbedUseCaseCodeBlock %}

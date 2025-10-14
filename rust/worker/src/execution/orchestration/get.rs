@@ -3,21 +3,22 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    PanicError, TaskError, TaskMessage, TaskResult,
+    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
     operator::{Filter, GetResult, Limit, Projection, ProjectionOutput},
     CollectionAndSegments,
 };
+use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
     filter::{FilterError, FilterInput, FilterOutput},
     limit::{LimitError, LimitInput, LimitOutput},
-    prefetch_record::{PrefetchRecordError, PrefetchRecordOperator, PrefetchRecordOutput},
     prefetch_segment::{
         PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
     },
@@ -121,9 +122,9 @@ where
 #[derive(Debug)]
 pub struct GetOrchestrator {
     // Orchestrator parameters
-    blockfile_provider: BlockfileProvider,
-    dispatcher: ComponentHandle<Dispatcher>,
+    context: OrchestratorContext,
     queue: usize,
+    blockfile_provider: BlockfileProvider,
 
     // Collection segments
     collection_and_segments: CollectionAndSegments,
@@ -155,10 +156,11 @@ impl GetOrchestrator {
         limit: Limit,
         projection: Projection,
     ) -> Self {
+        let context = OrchestratorContext::new(dispatcher);
         Self {
-            blockfile_provider,
-            dispatcher,
+            context,
             queue,
+            blockfile_provider,
             collection_and_segments,
             fetch_log,
             fetched_logs: None,
@@ -176,7 +178,11 @@ impl Orchestrator for GetOrchestrator {
     type Error = GetError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn initial_tasks(
@@ -192,9 +198,11 @@ impl Orchestrator for GetOrchestrator {
                 self.blockfile_provider.clone(),
             ),
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         // Prefetch task is detached from the orchestrator
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.collection_and_segments.record_segment.id);
+        Span::current().add_link(prefetch_span.context().span().span_context().clone());
         tasks.push((prefetch_record_segment_task, Some(prefetch_span)));
 
         // Prefetch metadata segment.
@@ -205,12 +213,19 @@ impl Orchestrator for GetOrchestrator {
                 self.blockfile_provider.clone(),
             ),
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch metadata segment", segment_id = %self.collection_and_segments.metadata_segment.id);
-        tasks.push((prefetch_metadata_task, Some(prefetch_span)));
+        Span::current().add_link(prefetch_span.context().span().span_context().clone());
+        tasks.push((prefetch_metadata_task, Some(prefetch_span.clone())));
 
         // Fetch log task.
-        let fetch_log_task = wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver());
+        let fetch_log_task = wrap(
+            Box::new(self.fetch_log.clone()),
+            (),
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
         tasks.push((fetch_log_task, Some(Span::current())));
 
         tasks
@@ -224,10 +239,8 @@ impl Orchestrator for GetOrchestrator {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Sender<Result<GetResult, GetError>> {
-        self.result_channel
-            .take()
-            .expect("The result channel should be set before take")
+    fn take_result_channel(&mut self) -> Option<Sender<Result<GetResult, GetError>>> {
+        self.result_channel.take()
     }
 }
 
@@ -269,6 +282,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
                 record_segment: self.collection_and_segments.record_segment.clone(),
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         self.send(task, ctx, Some(Span::current())).await;
     }
@@ -301,6 +315,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
                 compact_offset_ids: output.compact_offset_ids,
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         self.send(task, ctx, Some(Span::current())).await;
     }
@@ -331,32 +346,13 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
             offset_ids: output.offset_ids.iter().collect(),
         };
 
-        // Prefetch records before projection
-        let prefetch_task = wrap(
-            Box::new(PrefetchRecordOperator {}),
-            input.clone(),
+        let task = wrap(
+            Box::new(self.projection.clone()),
+            input,
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
-
-        if !self.send(prefetch_task, ctx, Some(Span::current())).await {
-            return;
-        }
-
-        let task = wrap(Box::new(self.projection.clone()), input, ctx.receiver());
         self.send(task, ctx, Some(Span::current())).await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<PrefetchRecordOutput, PrefetchRecordError>> for GetOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        _message: TaskResult<PrefetchRecordOutput, PrefetchRecordError>,
-        _ctx: &ComponentContext<Self>,
-    ) {
-        // The output and error from `PrefetchRecordOperator` are ignored
     }
 }
 

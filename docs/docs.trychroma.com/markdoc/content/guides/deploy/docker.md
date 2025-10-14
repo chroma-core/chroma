@@ -1,10 +1,15 @@
+---
+id: docker
+name: Docker
+---
+
 # Docker
 
 {% Banner type="tip" %}
 
 **Chroma Cloud**
 
-Chroma Cloud, our fully managed hosted service is here. [Sign up for free](https://trychroma.com/signup).
+Chroma Cloud, our fully managed hosted service is here. [Sign up for free](https://trychroma.com/signup?utm_source=docs-docker).
 
 {% /Banner %}
 
@@ -57,11 +62,12 @@ The Chroma client can then be configured to connect to the server running in the
 import { ChromaClient } from "chromadb";
 
 const chromaClient = new ChromaClient({
-    host: "localhost",
-    port: 8000
+  host: "localhost",
+  port: 8000,
 });
-chromaClient.heartbeat()
+chromaClient.heartbeat();
 ```
+
 {% /Tab %}
 
 {% /Tabs %}
@@ -111,9 +117,10 @@ service:
 ```
 
 This is the configuration file for the OpenTelemetry Collector:
-* The `receivers` section specifies that the OpenTelemetry protocol (OTLP) will be used to receive data over GRPC and HTTP.
-* `exporters` defines that telemetry data is logged to the console (`debug`), and sent to a `zipkin` server (defined below in `docker-compose.yml`).
-* The `service` section ties everything together, defining a `traces` pipeline receiving data through our `otlp` receiver and exporting data to `zipkin` and via logging.
+
+- The `receivers` section specifies that the OpenTelemetry protocol (OTLP) will be used to receive data over GRPC and HTTP.
+- `exporters` defines that telemetry data is logged to the console (`debug`), and sent to a `zipkin` server (defined below in `docker-compose.yml`).
+- The `service` section ties everything together, defining a `traces` pipeline receiving data through our `otlp` receiver and exporting data to `zipkin` and via logging.
 
 Next, paste the following into a new file called `docker-compose.yml`:
 

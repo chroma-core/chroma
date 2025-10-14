@@ -12,7 +12,7 @@ use worker::execution::operators::fetch_log::FetchLogOperator;
 const DATA_CHUNK_SIZE: usize = 10000;
 
 pub async fn sift1m_segments() -> TestDistributedSegment {
-    let mut segments = TestDistributedSegment::default();
+    let mut segments = TestDistributedSegment::new().await;
     let mut sift1m = Sift1MData::init()
         .await
         .expect("Should be able to download Sift1M data");
@@ -42,9 +42,7 @@ pub async fn sift1m_segments() -> TestDistributedSegment {
                 },
             })
             .collect::<Vec<_>>();
-        segments
-            .compact_log(Chunk::new(log_records.into()), chunk_start)
-            .await;
+        Box::pin(segments.compact_log(Chunk::new(log_records.into()), chunk_start)).await;
     }
     segments
 }
@@ -113,15 +111,15 @@ pub fn always_true_filter_for_modulo_metadata() -> Filter {
 
 pub fn trivial_limit() -> Limit {
     Limit {
-        skip: 0,
-        fetch: Some(100),
+        offset: 0,
+        limit: Some(100),
     }
 }
 
 pub fn offset_limit() -> Limit {
     Limit {
-        skip: 100,
-        fetch: Some(100),
+        offset: 100,
+        limit: Some(100),
     }
 }
 

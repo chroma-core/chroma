@@ -149,7 +149,7 @@ impl<'a> AppTable<'a> {
     }
 }
 
-impl<'a> StatefulWidget for AppTable<'a> {
+impl StatefulWidget for AppTable<'_> {
     type State = TableState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from chromadb.api.configuration import (
     ConfigurationInternal,
 )
+from chromadb.api.types import Schema
 from chromadb.serde import BaseModelJSONSerializable
 from chromadb.api.collection_configuration import (
     CollectionConfiguration,
@@ -75,6 +76,7 @@ class Collection(
     id: UUID
     name: str
     configuration_json: Dict[str, Any]
+    serialized_schema: Optional[Dict[str, Any]]
     metadata: Optional[
         Dict[str, Any]
     ]  # Dict[str, Any] needed by pydantic 1.x as it doesn't work well Union types and converts all types to str
@@ -91,6 +93,7 @@ class Collection(
         id: UUID,
         name: str,
         configuration_json: Dict[str, Any],
+        serialized_schema: Optional[Dict[str, Any]],
         metadata: Optional[Metadata],
         dimension: Optional[int],
         tenant: str,
@@ -101,6 +104,7 @@ class Collection(
         super().__init__(
             id=id,
             name=name,
+            serialized_schema=serialized_schema,
             metadata=metadata,
             configuration_json=configuration_json,
             dimension=dimension,
@@ -151,9 +155,17 @@ class Collection(
                 f"Could not deserialize configuration_json: {e}",
             )
 
+    def get_serialized_schema(self) -> Optional[Dict[str, Any]]:
+        """Returns the serialized_schema of the collection"""
+        return self.serialized_schema
+
     def set_configuration(self, configuration: CollectionConfiguration) -> None:
         """Sets the configuration of the collection"""
         self.configuration_json = collection_configuration_to_json(configuration)
+
+    def set_serialized_schema(self, serialized_schema: Dict[str, Any]) -> None:
+        """Sets the serialized_schema of the collection"""
+        self.serialized_schema = serialized_schema
 
     def get_model_fields(self) -> Dict[Any, Any]:
         """Used for backward compatibility with Pydantic 1.x"""
@@ -170,6 +182,7 @@ class Collection(
             id=json_map["id"],
             name=json_map["name"],
             configuration_json=json_map.get("configuration_json", None),
+            serialized_schema=json_map.get("schema", None),
             metadata=json_map.get("metadata", None),
             dimension=json_map.get("dimension", None),
             tenant=json_map["tenant"],
@@ -304,6 +317,7 @@ class CloudClientArg:
     name: str
     env_var: str
     value: Optional[str] = None
+
 
 __all__ = [
     "Metadata",

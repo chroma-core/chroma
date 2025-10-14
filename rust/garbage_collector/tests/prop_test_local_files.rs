@@ -683,6 +683,7 @@ impl GcTest {
                 ]),
                 0, // total_records_post_compaction
                 0, // size_bytes_post_compaction
+                None,
             )
             .await
         {
@@ -715,6 +716,7 @@ impl GcTest {
                 collection_id,
                 "collection".to_string(),
                 segments,
+                None,
                 None,
                 None,
                 None,

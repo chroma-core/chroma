@@ -256,6 +256,13 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for DataRecord<'referred
         }
     }
 
+    fn get_range(array: &'referred_data Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+        // TODO: Optiomize range get
+        (offset..offset + length)
+            .map(|i| Self::get(array, i))
+            .collect()
+    }
+
     fn add_to_delta<K: ArrowWriteableKey>(
         prefix: &str,
         key: K,

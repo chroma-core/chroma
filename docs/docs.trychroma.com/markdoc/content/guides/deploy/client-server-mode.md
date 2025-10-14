@@ -1,3 +1,8 @@
+---
+id: deploy-client-server-mode
+name: Client-Server Mode
+---
+
 # Running Chroma in Client-Server Mode
 
 {% Tabs %}
@@ -59,6 +64,7 @@ import { ChromaClient } from "chromadb";
 
 const client = new ChromaClient();
 ```
+
 {% /Tab %}
 
 {% /Tabs %}

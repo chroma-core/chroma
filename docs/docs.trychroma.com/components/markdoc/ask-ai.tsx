@@ -14,15 +14,18 @@ import ClaudeLogo from "../../public/claude-logo.svg";
 import { ChevronDown, Clipboard } from "lucide-react";
 import UIButton from "@/components/ui/ui-button";
 
-const prompt = (page: string) => {
-  const path = `https://docs.trychroma.com/llms${page.replaceAll("/", "-")}.txt`;
+const prompt = (page: string, content?: string) => {
+  const pagePath = page.replaceAll("/", "-");
+  const path = content
+    ? `https://docs.trychroma.com/llms${pagePath}.txt`
+    : `https://docs.trychroma.com/${pagePath}`;
   return `Read this webpage ${path}, so I can ask questions about it.`;
 };
 
-const AskAI: React.FC<{ content: string }> = ({ content }) => {
+const AskAI: React.FC<{ content?: string }> = ({ content }) => {
   const pathname = usePathname();
 
-  const copyToClipboard = () => {
+  const copyToClipboard = (content: string) => {
     navigator.clipboard.writeText(content).finally();
   };
 
@@ -54,7 +57,7 @@ const AskAI: React.FC<{ content: string }> = ({ content }) => {
         </DropdownMenuItem>
         <DropdownMenuItem className="flex w-full">
           <Link
-            href={`https://claude.ai/new/?q=${encodeURIComponent(prompt(pathname))}`}
+            href={`https://claude.ai/new/?q=${encodeURIComponent(prompt(pathname, content))}`}
             target="_blank"
             rel="noopener noreferrer"
           >
@@ -68,13 +71,15 @@ const AskAI: React.FC<{ content: string }> = ({ content }) => {
             </div>
           </Link>
         </DropdownMenuItem>
-        <DropdownMenuItem
-          className="flex items-center gap-1.5 cursor-pointer"
-          onClick={copyToClipboard}
-        >
-          <Clipboard className="w-4 h-4 ml-[2px]" />
-          <p>Copy this page</p>
-        </DropdownMenuItem>
+        {content && (
+          <DropdownMenuItem
+            className="flex items-center gap-1.5 cursor-pointer"
+            onClick={() => copyToClipboard(content)}
+          >
+            <Clipboard className="w-4 h-4 ml-[2px]" />
+            <p>Copy this page</p>
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

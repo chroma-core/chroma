@@ -1,7 +1,12 @@
+---
+id: embedding-multimodal
+name: Multimodal Embedding
+---
+
 # Multimodal
 
 {% Banner type="note" %}
-Multimodal support is currently available only in Python. Javascript/Typescript support coming soon! 
+Multimodal support is currently available only in Python. Javascript/Typescript support coming soon!
 {% /Banner %}
 
 You can create multimodal Chroma collections; these are collections which can store, and can be queried by, multiple modalities of data.
@@ -118,4 +123,3 @@ collection.update(
 ```
 
 Note that a given entry with a specific ID can only have one associated modality at a time. Updates will over-write the existing modality, so for example, an entry which originally has corresponding text and updated with an image, will no longer have that text after an update with images.
-

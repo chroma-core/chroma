@@ -1,3 +1,8 @@
+---
+id: troubleshooting
+name: Troubleshooting
+---
+
 # Troubleshooting
 
 This page is a list of common gotchas or issues and how to fix them.
@@ -43,7 +48,6 @@ results = collection.query(
 We may change `None` to something else to more clearly communicate why they were not returned.
 {% /note %}
 
-
 ## Build error when running `pip install chromadb`
 
 If you encounter an error like this during setup
@@ -71,7 +75,7 @@ Chroma requires SQLite > 3.35, if you encounter issues with having too low of a 
    replace the DLL in your python installation's DLLs folder with the latest version. You can find your python installation path by running `os.path.dirname(sys.executable)` in python.
 4. If you are using a Debian based Docker container, older Debian versions do not have an up to date SQLite, please use `bookworm` or higher.
 
-##  Illegal instruction (core dumped)
+## Illegal instruction (core dumped)
 
 If you encounter an error like this during setup and are using Docker - you may have built the library on a machine with a different CPU architecture than the one you are running it on. Try rebuilding the Docker image on the machine you are running it on.
 

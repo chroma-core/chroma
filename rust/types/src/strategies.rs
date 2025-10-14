@@ -1,11 +1,20 @@
 use crate::{
     regex::hir::ChromaHir, Collection, CollectionAndSegments, CollectionUuid, DocumentExpression,
     DocumentOperator, IncludeList, LogRecord, Metadata, MetadataComparison, MetadataExpression,
-    MetadataValue, Operation, OperationRecord, PrimitiveOperator, ScalarEncoding, Segment,
-    SegmentType, SegmentUuid, SetOperator, UpdateMetadata, UpdateMetadataValue, Where,
+    MetadataSetValue, MetadataValue, Operation, OperationRecord, PrimitiveOperator, ScalarEncoding,
+    Segment, SegmentType, SegmentUuid, SetOperator, UpdateMetadata, UpdateMetadataValue, Where,
 };
 use proptest::{collection, prelude::*, sample::SizeRange, string::string_regex};
 use regex_syntax::hir::{ClassUnicode, ClassUnicodeRange};
+
+/**
+ * Strategy for valid metadata keys.
+ * Keys cannot be empty and cannot start with '#' or '$'.
+ */
+fn valid_metadata_key() -> impl Strategy<Value = String> {
+    // Regex: at least one character, first character cannot be # or $
+    string_regex("[^#$].{0,99}").unwrap()
+}
 
 /**
  * Strategy for metadata.
@@ -14,7 +23,7 @@ pub fn arbitrary_update_metadata(
     num_pairs: impl Into<SizeRange>,
 ) -> impl Strategy<Value = UpdateMetadata> {
     proptest::collection::hash_map(
-        proptest::arbitrary::any::<String>(),
+        valid_metadata_key(),
         proptest::arbitrary::any::<UpdateMetadataValue>(),
         num_pairs,
     )
@@ -22,7 +31,7 @@ pub fn arbitrary_update_metadata(
 
 pub fn arbitrary_metadata(num_pairs: impl Into<SizeRange>) -> impl Strategy<Value = Metadata> {
     proptest::collection::hash_map(
-        proptest::arbitrary::any::<String>(),
+        valid_metadata_key(),
         proptest::arbitrary::any::<MetadataValue>(),
         num_pairs,
     )
@@ -355,7 +364,18 @@ impl Arbitrary for TestWhereFilter {
                 any::<SetOperator>().prop_map(move |op| {
                     Where::Metadata(MetadataExpression {
                         key: key.to_string(),
-                        comparison: MetadataComparison::Set(op, value.clone().into()),
+                        comparison: MetadataComparison::Set(
+                            op,
+                            match value.clone() {
+                                MetadataValue::Bool(v) => MetadataSetValue::Bool(vec![v]),
+                                MetadataValue::Int(v) => MetadataSetValue::Int(vec![v]),
+                                MetadataValue::Float(v) => MetadataSetValue::Float(vec![v]),
+                                MetadataValue::Str(v) => MetadataSetValue::Str(vec![v]),
+                                MetadataValue::SparseVector(_) => {
+                                    unreachable!("Metadata expression should not use sparse vector")
+                                }
+                            },
+                        ),
                     })
                 }),
             ]

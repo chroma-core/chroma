@@ -570,6 +570,9 @@ impl IntoSqliteExpr for MetadataExpression {
                     MetadataValue::Int(i) => (EmbeddingMetadata::IntValue, Expr::val(*i)),
                     MetadataValue::Float(f) => (EmbeddingMetadata::FloatValue, Expr::val(*f)),
                     MetadataValue::Str(s) => (EmbeddingMetadata::StringValue, Expr::val(s)),
+                    MetadataValue::SparseVector(_) => {
+                        unimplemented!("Comparision with sparse vector is not allowed")
+                    }
                 };
                 let scol = Expr::col((EmbeddingMetadata::Table, col));
                 let mut subq = Query::select()
@@ -759,7 +762,7 @@ impl SqliteMetadataReader {
                 query_ids,
                 where_clause,
             },
-            limit: Limit { skip, fetch },
+            limit: Limit { offset, limit },
             proj: Projection {
                 document, metadata, ..
             },
@@ -786,8 +789,8 @@ impl SqliteMetadataReader {
 
         filter_limit_query
             .order_by((Embeddings::Table, Embeddings::Id), sea_query::Order::Asc)
-            .offset(skip as u64)
-            .limit(fetch.unwrap_or(u32::MAX) as u64);
+            .offset(offset as u64)
+            .limit(limit.unwrap_or(u32::MAX) as u64);
 
         let alias = Alias::new(SUBQ_ALIAS);
         let mut projection_query = Query::select();
@@ -951,8 +954,8 @@ mod tests {
                     where_clause: Some(where_clause.clause),
                 },
                 limit: Limit {
-                    skip: 3,
-                    fetch: Some(6),
+                    offset: 3,
+                    limit: Some(6),
                 },
                 proj: Projection {
                     document: true,
@@ -1043,8 +1046,8 @@ mod tests {
                 where_clause: Some(where_clause),
             },
             limit: Limit {
-                skip: 0,
-                fetch: None,
+                offset: 0,
+                limit: None,
             },
             proj: Projection {
                 document: false,
@@ -1080,8 +1083,8 @@ mod tests {
                 where_clause: Some(where_clause2),
             },
             limit: Limit {
-                skip: 0,
-                fetch: None,
+                offset: 0,
+                limit: None,
             },
             proj: Projection {
                 document: false,
@@ -1185,8 +1188,8 @@ mod tests {
                 where_clause: Some(fts_where_clause),
             },
             limit: Limit {
-                skip: 0,
-                fetch: None,
+                offset: 0,
+                limit: None,
             },
             proj: Projection {
                 document: true,
@@ -1214,8 +1217,8 @@ mod tests {
                 where_clause: Some(metadata_where_clause),
             },
             limit: Limit {
-                skip: 0,
-                fetch: None,
+                offset: 0,
+                limit: None,
             },
             proj: Projection {
                 document: false,
@@ -1243,8 +1246,8 @@ mod tests {
                 where_clause: Some(hybrid_where_clause),
             },
             limit: Limit {
-                skip: 0,
-                fetch: None,
+                offset: 0,
+                limit: None,
             },
             proj: Projection {
                 document: true,

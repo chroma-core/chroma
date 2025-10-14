@@ -137,7 +137,7 @@ impl UnorderedBlockDelta {
 mod test {
     use crate::arrow::{
         block::{delta::UnorderedBlockDelta, Block},
-        config::TEST_MAX_BLOCK_SIZE_BYTES,
+        config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES},
         provider::BlockManager,
     };
     #[cfg(test)]
@@ -171,7 +171,12 @@ mod test {
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = new_cache_for_test();
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let block_manager = BlockManager::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let delta = block_manager.create::<&str, Vec<u32>, UnorderedBlockDelta>();
 
         let n = 2000;
@@ -218,7 +223,12 @@ mod test {
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let cache = new_cache_for_test();
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let block_manager = BlockManager::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let delta = block_manager.create::<&str, String, UnorderedBlockDelta>();
         let delta_id = delta.id;
 
@@ -291,7 +301,12 @@ mod test {
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = new_cache_for_test();
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let block_manager = BlockManager::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let delta = block_manager.create::<f32, String, UnorderedBlockDelta>();
 
         let n = 2000;
@@ -335,7 +350,12 @@ mod test {
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = new_cache_for_test();
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let block_manager = BlockManager::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let delta = block_manager.create::<&str, RoaringBitmap, UnorderedBlockDelta>();
 
         let n = 2000;
@@ -376,7 +396,12 @@ mod test {
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = new_cache_for_test();
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let block_manager = BlockManager::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let ids = ["embedding_id_2", "embedding_id_0", "embedding_id_1"];
         let embeddings = [
             vec![1.0, 2.0, 3.0],
@@ -445,7 +470,12 @@ mod test {
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = new_cache_for_test();
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let block_manager = BlockManager::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let delta = block_manager.create::<u32, String, UnorderedBlockDelta>();
 
         let n = 2000;
@@ -478,7 +508,12 @@ mod test {
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let cache = new_cache_for_test();
-        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let block_manager = BlockManager::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let delta = block_manager.create::<u32, u32, UnorderedBlockDelta>();
         let delta_id = delta.id;
 

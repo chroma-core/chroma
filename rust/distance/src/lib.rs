@@ -1,7 +1,18 @@
+pub mod distance;
 pub mod distance_avx;
+pub mod distance_avx512;
 pub mod distance_neon;
 pub mod distance_sse;
 pub mod types;
+
+#[cfg(all(
+    target_feature = "avx512f",
+    target_feature = "avx512dq",
+    target_feature = "avx512bw",
+    target_feature = "avx512vl",
+    target_feature = "fma"
+))]
+pub use distance_avx512::*;
 
 #[cfg(all(target_feature = "avx", target_feature = "fma"))]
 pub use distance_avx::*;

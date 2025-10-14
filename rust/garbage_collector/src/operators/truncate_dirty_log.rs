@@ -7,7 +7,7 @@ use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
 use futures::future::try_join_all;
 use thiserror::Error;
-use wal3::{GarbageCollectionOptions, LogWriter, LogWriterOptions};
+use wal3::{GarbageCollectionOptions, GarbageCollector, LogWriterOptions};
 
 #[derive(Clone, Debug)]
 pub struct TruncateDirtyLogOperator {
@@ -56,12 +56,11 @@ impl Operator<TruncateDirtyLogInput, TruncateDirtyLogOutput> for TruncateDirtyLo
         let mut replica_id = 0u64;
         loop {
             let dirty_log_prefix = format!("dirty-rust-log-service-{replica_id}");
-            match LogWriter::open(
+            match GarbageCollector::open(
                 LogWriterOptions::default(),
                 storage_arc.clone(),
                 &dirty_log_prefix,
                 "garbage collection service",
-                (),
             )
             .await
             {

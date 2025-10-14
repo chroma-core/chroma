@@ -22,10 +22,10 @@ import (
 
 // Path to Version Files in S3.
 // Example:
-// s3://<bucket-name>/<sysdbPathPrefix>/<tenant_id>/databases/<database_id>/collections/<collection_id>/versionfiles/file_name
+// s3://<bucket-name>/tenant/<tenant_id>/databases/<database_id>/collections/<collection_id>/versionfiles/file_name
 const (
-	lineageFilesPathFormat = "%s/databases/%s/collections/%s/lineagefiles/%s"
-	versionFilesPathFormat = "%s/databases/%s/collections/%s/versionfiles/%s"
+	lineageFilesPathFormat = "tenant/%s/database/%s/collection/%s/lineagefiles/%s"
+	versionFilesPathFormat = "tenant/%s/database/%s/collection/%s/versionfiles/%s"
 )
 
 type S3MetaStoreConfig struct {

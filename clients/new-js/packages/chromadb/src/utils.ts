@@ -227,6 +227,19 @@ export const validateIDs = (ids: string[]) => {
   }
 };
 
+export const validateSparseVector = (v: any) => {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    "indices" in v &&
+    "values" in v &&
+    Array.isArray(v.indices) &&
+    v.indices.every((e: any) => typeof e === "number") &&
+    Array.isArray(v.values) &&
+    v.values.every((e: any) => typeof e === "number")
+  );
+};
+
 /**
  * Validates metadata object for correct types and non-emptiness.
  * @param metadata - Metadata object to validate
@@ -248,11 +261,12 @@ export const validateMetadata = (metadata?: Metadata) => {
         v === undefined ||
         typeof v === "string" ||
         typeof v === "number" ||
-        typeof v === "boolean",
+        typeof v === "boolean" ||
+        validateSparseVector(v),
     )
   ) {
     throw new ChromaValueError(
-      "Expected metadata to be a string, number, boolean, or nullable",
+      "Expected metadata to be a string, number, boolean, SparseVector, or nullable",
     );
   }
 };
@@ -567,13 +581,7 @@ const packEmbedding = (embedding: number[]): ArrayBuffer => {
   return buffer;
 };
 
-export const optionalEmbeddingsToBase64Bytes = (
-  embeddings: number[][] | undefined,
-) => {
-  if (!embeddings) {
-    return undefined;
-  }
-
+export const embeddingsToBase64Bytes = (embeddings: number[][]) => {
   return embeddings.map((embedding) => {
     const buffer = packEmbedding(embedding);
 

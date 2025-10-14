@@ -16,7 +16,7 @@ chroma copy --from-local collections [collection names]
 * `to-cloud` - Sets the copy target to a DB on Chroma Cloud.
 * `db` - The name of the Chroma Cloud DB with the collections you want to copy. If not provided, the CLI will prompt you to select a DB from those available on your active [profile](./profile).
 * `host` - The host of your local Chroma server. This argument conflicts with `path`.
-* `path` - The path of your local Chroma data. If provided, the CLI will use the data path to start a local Chroma server at an available port for browsing. This argument conflicts wth `host`.
+* `path` - The path of your local Chroma data. If provided, the CLI will use the data path to start a local Chroma server at an available port for browsing. This argument conflicts with `host`.
 
 ### Copy from Local to Chroma Cloud
 

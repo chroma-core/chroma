@@ -62,6 +62,7 @@ impl StateMachineTest for FrontendUnderTest {
                                 "test".to_string(),
                                 None,
                                 None,
+                                None,
                                 false,
                             )
                             .unwrap(),

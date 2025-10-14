@@ -132,6 +132,7 @@ impl ReferenceStateMachine for FrontendReferenceStateMachine {
                         "test".to_string(),
                         None,
                         None,
+                        None,
                         false,
                     )
                     .unwrap(),

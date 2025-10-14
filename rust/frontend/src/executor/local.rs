@@ -12,10 +12,10 @@ use chroma_system::ComponentHandle;
 use chroma_types::{
     operator::{
         CountResult, Filter, GetResult, KnnBatchResult, KnnProjectionOutput, KnnProjectionRecord,
-        Projection, ProjectionRecord, RecordDistance,
+        Limit, Projection, ProjectionRecord, RecordMeasure, SearchResult,
     },
-    plan::{Count, Get, Knn},
-    CollectionAndSegments, CollectionUuid, ExecutorError, HnswSpace, SegmentType,
+    plan::{Count, Get, Knn, Search},
+    CollectionAndSegments, CollectionUuid, ExecutorError, SegmentType, Space,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -161,7 +161,10 @@ impl LocalExecutor {
                 let filter_plan = Get {
                     scan: plan.scan.clone(),
                     filter: filter.clone(),
-                    limit: Default::default(),
+                    limit: Limit {
+                        offset: 0,
+                        limit: None,
+                    },
                     proj: Default::default(),
                 };
 
@@ -216,7 +219,7 @@ impl LocalExecutor {
         let mut results = Vec::new();
         let mut returned_user_ids = Vec::new();
         for embedding in plan.knn.embeddings {
-            let query_embedding = if let HnswSpace::Cosine = distance_function {
+            let query_embedding = if let Space::Cosine = distance_function {
                 normalize(&embedding)
             } else {
                 embedding
@@ -231,7 +234,7 @@ impl LocalExecutor {
                 .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
 
             let mut records = Vec::new();
-            for RecordDistance { offset_id, measure } in distances {
+            for RecordMeasure { offset_id, measure } in distances {
                 let user_id = hnsw_reader
                     .get_user_id_by_offset_id(offset_id)
                     .await
@@ -264,7 +267,10 @@ impl LocalExecutor {
                     query_ids: Some(returned_user_ids),
                     where_clause: None,
                 },
-                limit: Default::default(),
+                limit: Limit {
+                    offset: 0,
+                    limit: None,
+                },
                 proj: Projection {
                     document: plan.proj.projection.document,
                     embedding: false,
@@ -304,6 +310,12 @@ impl LocalExecutor {
             pulled_log_bytes: 0,
             results,
         })
+    }
+
+    pub async fn search(&mut self, _plan: Search) -> Result<SearchResult, ExecutorError> {
+        Err(ExecutorError::NotImplemented(
+            "Search operation is not implemented for local executor".to_string(),
+        ))
     }
 
     pub async fn reset(&mut self) -> Result<(), Box<dyn ChromaError>> {
@@ -359,6 +371,7 @@ mod tests {
                     "test".to_string(),
                     None,
                     None,
+                    None,
                     false,
                 )
                 .unwrap(),
@@ -384,8 +397,8 @@ mod tests {
             .unwrap();
 
         // Knn should work
-        let result = frontend
-            .query(
+        let result = Box::pin(
+            frontend.query(
                 QueryRequest::try_new(
                     "default_tenant".to_string(),
                     "default_database".to_string(),
@@ -397,14 +410,15 @@ mod tests {
                     IncludeList::default_query(),
                 )
                 .unwrap(),
-            )
-            .await
-            .unwrap();
+            ),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.ids[0], vec!["id2".to_string(), "id1".to_string()]);
 
         // An empty list of IDs should return no results
-        let result = frontend
-            .query(
+        let result = Box::pin(
+            frontend.query(
                 QueryRequest::try_new(
                     "default_tenant".to_string(),
                     "default_database".to_string(),
@@ -416,9 +430,10 @@ mod tests {
                     IncludeList::default_query(),
                 )
                 .unwrap(),
-            )
-            .await
-            .unwrap();
+            ),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.ids[0].len(), 0);
     }
 }

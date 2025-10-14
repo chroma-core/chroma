@@ -107,6 +107,9 @@ export const startChromaServer = async (buildContextDir: string) => {
     process.exit(1);
   }
 
+  // jest throws an error if we use console.* after the test complete, so we use this flag to forward logs directly to stdout/stderr during shutdown
+  let is_exiting = false;
+
   console.log(chalk.blue("🚀 Starting Rust Chroma server..."));
   serverProcess = spawn(
     "cargo",
@@ -126,11 +129,21 @@ export const startChromaServer = async (buildContextDir: string) => {
   );
 
   serverProcess.stdout?.on("data", (data) => {
-    console.log(chalk.magenta(`🔧 rust-server: ${data.toString().trim()}`));
+    const message = chalk.magenta(`🔧 rust-server: ${data.toString().trim()}`);
+    if (is_exiting) {
+      process.stdout.write(message + "\n");
+    } else {
+      console.log(message);
+    }
   });
 
   serverProcess.stderr?.on("data", (data) => {
-    console.error(chalk.red(`🔧 rust-server-error: ${data.toString().trim()}`));
+    const message = chalk.red(`🔧 rust-server-error: ${data.toString().trim()}`)
+    if (is_exiting) {
+      process.stderr.write(message + "\n");
+    } else {
+      console.error(message);
+    }
   });
 
   console.log(chalk.yellow("⏳ Waiting for Chroma server heartbeat..."));
@@ -146,5 +159,25 @@ export const startChromaServer = async (buildContextDir: string) => {
     process.exit(1);
   }
 
-  return { url, host, port, stop: () => serverProcess.kill() };
+  return {
+    url,
+    host,
+    port,
+    stop: () => {
+      return new Promise<void>((resolve) => {
+        if (!serverProcess) {
+          resolve();
+          return;
+        }
+
+        is_exiting = true;
+
+        serverProcess.on('exit', () => {
+          resolve();
+        });
+
+        serverProcess.kill();
+      });
+    }
+  };
 };

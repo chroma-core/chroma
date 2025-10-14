@@ -2,7 +2,3 @@ FROM arigaio/atlas:latest AS sysdb-migration
 
 COPY ./go/pkg/sysdb/metastore/db/migrations migrations
 COPY ./go/pkg/sysdb/metastore/db/atlas.hcl atlas.hcl
-
-FROM arigaio/atlas:latest AS logservice-migration
-COPY ./go/pkg/log/store/migrations migrations
-COPY ./go/pkg/log/store/atlas.hcl atlas.hcl

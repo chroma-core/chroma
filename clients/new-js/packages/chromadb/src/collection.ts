@@ -5,6 +5,8 @@ import {
   CollectionMetadata,
   GetResult,
   Metadata,
+  PreparedRecordSet,
+  PreparedInsertRecordSet,
   QueryRecordSet,
   QueryResult,
   RecordSet,
@@ -22,8 +24,8 @@ import {
   validateWhereDocument,
   validateNResults,
   validateMetadata,
-  optionalEmbeddingsToBase64Bytes,
   validateMaxBatchSize,
+  embeddingsToBase64Bytes,
 } from "./utils";
 import { createClient } from "@hey-api/client-fetch";
 import { ChromaValueError } from "./errors";
@@ -32,6 +34,7 @@ import {
   processUpdateCollectionConfig,
   UpdateCollectionConfiguration,
 } from "./collection-configuration";
+import { SearchLike, SearchResult, toSearch } from "./execution/expression";
 
 /**
  * Interface for collection operations using collection ID.
@@ -178,6 +181,12 @@ export interface Collection {
     /** Document content-based filtering for deletion */
     whereDocument?: WhereDocument;
   }): Promise<void>;
+  /**
+   * Performs hybrid search on the collection using expression builders.
+   * @param searches - Single search payload or array of payloads
+   * @returns Promise resolving to column-major search results
+   */
+  search(searches: SearchLike | SearchLike[]): Promise<SearchResult>;
 }
 
 /**
@@ -281,33 +290,48 @@ export class CollectionImpl implements Collection {
     };
   }
 
-  private async embed(documents: string[]): Promise<number[][]> {
+  private async embed(inputs: string[], isQuery: boolean): Promise<number[][]> {
     if (!this._embeddingFunction) {
       throw new ChromaValueError(
         "Embedding function must be defined for operations requiring embeddings.",
       );
     }
 
-    return await this._embeddingFunction.generate(documents);
+	if (this._embeddingFunction.generateForQueries && isQuery) {
+		return await this._embeddingFunction.generateForQueries(inputs);
+	} else {
+    	return await this._embeddingFunction.generate(inputs);
+	}
   }
 
-  private async prepareRecords({
+  private async prepareRecords<T extends boolean = false>({
     recordSet,
-    maxBatchSize,
-    update = false,
+    update = false as T,
   }: {
     recordSet: RecordSet;
-    maxBatchSize: number;
-    update?: boolean;
-  }) {
+    update?: T;
+  }): Promise<T extends true ? PreparedRecordSet : PreparedInsertRecordSet> {
+    const maxBatchSize = await this.chromaClient.getMaxBatchSize();
+
     validateRecordSetLengthConsistency(recordSet);
     validateIDs(recordSet.ids);
     validateBaseRecordSet({ recordSet, update });
     validateMaxBatchSize(recordSet.ids.length, maxBatchSize);
 
     if (!recordSet.embeddings && recordSet.documents) {
-      recordSet.embeddings = await this.embed(recordSet.documents);
+      recordSet.embeddings = await this.embed(recordSet.documents, false);
     }
+
+    const preparedRecordSet: PreparedRecordSet = { ...recordSet };
+
+    const base64Supported = await this.chromaClient.supportsBase64Encoding();
+    if (base64Supported && recordSet.embeddings) {
+      preparedRecordSet.embeddings = embeddingsToBase64Bytes(
+        recordSet.embeddings,
+      );
+    }
+
+    return preparedRecordSet as T extends true ? PreparedRecordSet : PreparedInsertRecordSet;
   }
 
   private validateGet(
@@ -344,7 +368,7 @@ export class CollectionImpl implements Collection {
 
     let embeddings: number[][];
     if (!recordSet.embeddings) {
-      embeddings = await this.embed(recordSet.documents!);
+      embeddings = await this.embed(recordSet.documents!, true);
     } else {
       embeddings = recordSet.embeddings;
     }
@@ -396,25 +420,17 @@ export class CollectionImpl implements Collection {
       uris,
     };
 
-    const maxBatchSize = await this.chromaClient.getMaxBatchSize();
-
-    await this.prepareRecords({ recordSet, maxBatchSize });
-
-    const supportsBase64Encoding =
-      await this.chromaClient.supportsBase64Encoding();
-    const embeddingsBase64 = supportsBase64Encoding
-      ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings)
-      : recordSet.embeddings;
+    const preparedRecordSet = await this.prepareRecords({ recordSet });
 
     await Api.collectionAdd({
       client: this.apiClient,
       path: await this.path(),
       body: {
-        ids: recordSet.ids,
-        embeddings: embeddingsBase64,
-        documents: recordSet.documents,
-        metadatas: recordSet.metadatas,
-        uris: recordSet.uris,
+        ids: preparedRecordSet.ids,
+        embeddings: preparedRecordSet.embeddings,
+        documents: preparedRecordSet.documents,
+        metadatas: preparedRecordSet.metadatas,
+        uris: preparedRecordSet.uris,
       },
     });
   }
@@ -525,6 +541,24 @@ export class CollectionImpl implements Collection {
     });
   }
 
+  public async search(searches: SearchLike | SearchLike[]): Promise<SearchResult> {
+    const items = Array.isArray(searches) ? searches : [searches];
+
+    if (items.length === 0) {
+      throw new ChromaValueError("At least one search payload must be provided.");
+    }
+
+    const payloads = items.map((search) => toSearch(search).toPayload());
+
+    const { data } = await Api.collectionSearch({
+      client: this.apiClient,
+      path: await this.path(),
+      body: { searches: payloads },
+    });
+
+    return new SearchResult(data);
+  }
+
   public async modify({
     name,
     metadata,
@@ -612,25 +646,20 @@ export class CollectionImpl implements Collection {
       uris,
     };
 
-    const maxBatchSize = await this.chromaClient.getMaxBatchSize();
-
-    await this.prepareRecords({ recordSet, maxBatchSize, update: true });
-
-    const supportsBase64Encoding =
-      await this.chromaClient.supportsBase64Encoding();
-    const embeddingsBase64 = supportsBase64Encoding
-      ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings)
-      : recordSet.embeddings;
+    const preparedRecordSet = await this.prepareRecords({
+      recordSet,
+      update: true,
+    });
 
     await Api.collectionUpdate({
       client: this.apiClient,
       path: await this.path(),
       body: {
-        ids: recordSet.ids,
-        embeddings: embeddingsBase64,
-        metadatas: recordSet.metadatas,
-        uris: recordSet.uris,
-        documents: recordSet.documents,
+        ids: preparedRecordSet.ids,
+        embeddings: preparedRecordSet.embeddings,
+        metadatas: preparedRecordSet.metadatas,
+        uris: preparedRecordSet.uris,
+        documents: preparedRecordSet.documents,
       },
     });
   }
@@ -656,24 +685,19 @@ export class CollectionImpl implements Collection {
       uris,
     };
 
-    const maxBatchSize = await this.chromaClient.getMaxBatchSize();
-    await this.prepareRecords({ recordSet, maxBatchSize, update: true });
-
-    const supportsBase64Encoding =
-      await this.chromaClient.supportsBase64Encoding();
-    const embeddingsBase64 = supportsBase64Encoding
-      ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings)
-      : recordSet.embeddings;
+    const preparedRecordSet = await this.prepareRecords({
+      recordSet,
+    });
 
     await Api.collectionUpsert({
       client: this.apiClient,
       path: await this.path(),
       body: {
-        ids: recordSet.ids,
-        embeddings: embeddingsBase64,
-        metadatas: recordSet.metadatas,
-        uris: recordSet.uris,
-        documents: recordSet.documents,
+        ids: preparedRecordSet.ids,
+        embeddings: preparedRecordSet.embeddings,
+        metadatas: preparedRecordSet.metadatas,
+        uris: preparedRecordSet.uris,
+        documents: preparedRecordSet.documents,
       },
     });
   }

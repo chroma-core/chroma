@@ -201,7 +201,7 @@ copyright Qdrant, licensed under the Apache 2.0 license.
 */
 
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::HnswSpace;
+use chroma_types::Space;
 use thiserror::Error;
 
 /// The distance function enum.
@@ -220,12 +220,12 @@ pub enum DistanceFunction {
     InnerProduct,
 }
 
-impl From<HnswSpace> for DistanceFunction {
-    fn from(space: HnswSpace) -> Self {
+impl From<Space> for DistanceFunction {
+    fn from(space: Space) -> Self {
         match space {
-            HnswSpace::L2 => DistanceFunction::Euclidean,
-            HnswSpace::Cosine => DistanceFunction::Cosine,
-            HnswSpace::Ip => DistanceFunction::InnerProduct,
+            Space::L2 => DistanceFunction::Euclidean,
+            Space::Cosine => DistanceFunction::Cosine,
+            Space::Ip => DistanceFunction::InnerProduct,
         }
     }
 }
@@ -244,12 +244,23 @@ impl DistanceFunction {
                     }
                 }
                 #[cfg(all(
-                    any(target_arch = "x86_64", target_arch = "x86"),
-                    target_feature = "sse"
+                    target_arch = "x86_64",
+                    all(
+                        target_feature = "avx512f",
+                        target_feature = "avx512dq",
+                        target_feature = "avx512bw",
+                        target_feature = "avx512vl",
+                        target_feature = "fma"
+                    )
                 ))]
                 {
-                    if std::arch::is_x86_feature_detected!("sse") {
-                        return unsafe { crate::distance_sse::euclidean_distance(a, b) };
+                    if std::arch::is_x86_feature_detected!("avx512f")
+                        && std::arch::is_x86_feature_detected!("avx512dq")
+                        && std::arch::is_x86_feature_detected!("avx512bw")
+                        && std::arch::is_x86_feature_detected!("avx512vl")
+                        && std::arch::is_x86_feature_detected!("fma")
+                    {
+                        return unsafe { crate::distance_avx512::euclidean_distance(a, b) };
                     }
                 }
                 #[cfg(all(
@@ -261,6 +272,15 @@ impl DistanceFunction {
                         && std::arch::is_x86_feature_detected!("fma")
                     {
                         return unsafe { crate::distance_avx::euclidean_distance(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    any(target_arch = "x86_64", target_arch = "x86"),
+                    target_feature = "sse"
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("sse") {
+                        return unsafe { crate::distance_sse::euclidean_distance(a, b) };
                     }
                 }
                 let mut sum = 0.0;
@@ -277,12 +297,23 @@ impl DistanceFunction {
                     }
                 }
                 #[cfg(all(
-                    any(target_arch = "x86_64", target_arch = "x86"),
-                    target_feature = "sse"
+                    target_arch = "x86_64",
+                    all(
+                        target_feature = "avx512f",
+                        target_feature = "avx512dq",
+                        target_feature = "avx512bw",
+                        target_feature = "avx512vl",
+                        target_feature = "fma"
+                    )
                 ))]
                 {
-                    if std::arch::is_x86_feature_detected!("sse") {
-                        return unsafe { crate::distance_sse::cosine_distance(a, b) };
+                    if std::arch::is_x86_feature_detected!("avx512f")
+                        && std::arch::is_x86_feature_detected!("avx512dq")
+                        && std::arch::is_x86_feature_detected!("avx512bw")
+                        && std::arch::is_x86_feature_detected!("avx512vl")
+                        && std::arch::is_x86_feature_detected!("fma")
+                    {
+                        return unsafe { crate::distance_avx512::cosine_distance(a, b) };
                     }
                 }
                 #[cfg(all(
@@ -294,6 +325,15 @@ impl DistanceFunction {
                         && std::arch::is_x86_feature_detected!("fma")
                     {
                         return unsafe { crate::distance_avx::cosine_distance(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    any(target_arch = "x86_64", target_arch = "x86"),
+                    target_feature = "sse"
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("sse") {
+                        return unsafe { crate::distance_sse::cosine_distance(a, b) };
                     }
                 }
                 // For cosine we just assume the vectors have been normalized, since that
@@ -312,12 +352,23 @@ impl DistanceFunction {
                     }
                 }
                 #[cfg(all(
-                    any(target_arch = "x86_64", target_arch = "x86"),
-                    target_feature = "sse"
+                    target_arch = "x86_64",
+                    all(
+                        target_feature = "avx512f",
+                        target_feature = "avx512dq",
+                        target_feature = "avx512bw",
+                        target_feature = "avx512vl",
+                        target_feature = "fma"
+                    )
                 ))]
                 {
-                    if std::arch::is_x86_feature_detected!("sse") {
-                        return unsafe { crate::distance_sse::inner_product(a, b) };
+                    if std::arch::is_x86_feature_detected!("avx512f")
+                        && std::arch::is_x86_feature_detected!("avx512dq")
+                        && std::arch::is_x86_feature_detected!("avx512bw")
+                        && std::arch::is_x86_feature_detected!("avx512vl")
+                        && std::arch::is_x86_feature_detected!("fma")
+                    {
+                        return unsafe { crate::distance_avx512::inner_product(a, b) };
                     }
                 }
                 #[cfg(all(
@@ -329,6 +380,15 @@ impl DistanceFunction {
                         && std::arch::is_x86_feature_detected!("fma")
                     {
                         return unsafe { crate::distance_avx::inner_product(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    any(target_arch = "x86_64", target_arch = "x86"),
+                    target_feature = "sse"
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("sse") {
+                        return unsafe { crate::distance_sse::inner_product(a, b) };
                     }
                 }
                 let mut sum = 0.0;

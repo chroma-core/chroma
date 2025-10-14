@@ -1,7 +1,9 @@
 use chroma_cache::CacheConfig;
+use chroma_config::helpers::deserialize_duration_from_seconds;
 use chroma_log::config::LogConfig;
 use chroma_storage::config::StorageConfig;
 use chroma_system::DispatcherConfig;
+use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use chroma_types::CollectionUuid;
 use figment::providers::{Env, Format, Yaml};
 use std::{
@@ -13,18 +15,12 @@ use crate::types::CleanupMode;
 
 const DEFAULT_CONFIG_PATH: &str = "./garbage_collector_config.yaml";
 
-fn deserialize_duration_from_seconds<'de, D>(d: D) -> Result<Duration, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let secs: u64 = serde::Deserialize::deserialize(d)?;
-    Ok(Duration::from_secs(secs))
-}
-
-#[derive(Debug, serde::Deserialize, Clone)]
-pub(super) struct GarbageCollectorConfig {
+#[derive(Debug, serde::Deserialize, Clone, Default)]
+pub struct GarbageCollectorConfig {
     pub(super) service_name: String,
     pub(super) otel_endpoint: String,
+    #[serde(default = "GarbageCollectorConfig::default_otel_filters")]
+    pub(super) otel_filters: Vec<OtelFilter>,
     #[serde(
         rename = "collection_soft_delete_grace_period_seconds",
         deserialize_with = "deserialize_duration_from_seconds",
@@ -38,15 +34,16 @@ pub(super) struct GarbageCollectorConfig {
     )]
     pub(super) version_cutoff_time: Duration,
     pub(super) max_collections_to_gc: u32,
+    pub(super) max_collections_to_fetch: Option<u32>,
     pub(super) gc_interval_mins: u32,
     #[serde(default = "GarbageCollectorConfig::default_min_versions_to_keep")]
-    pub(super) min_versions_to_keep: u32,
+    pub min_versions_to_keep: u32,
     #[serde(default = "GarbageCollectorConfig::default_filter_min_versions_if_alive")]
     pub(super) filter_min_versions_if_alive: Option<u64>,
     pub(super) disallow_collections: HashSet<CollectionUuid>,
-    pub(super) sysdb_config: chroma_sysdb::GrpcSysDbConfig,
-    pub(super) dispatcher_config: DispatcherConfig,
-    pub(super) storage_config: StorageConfig,
+    pub sysdb_config: chroma_sysdb::GrpcSysDbConfig,
+    pub dispatcher_config: DispatcherConfig,
+    pub storage_config: StorageConfig,
     #[serde(default)]
     pub(super) default_mode: CleanupMode,
     #[serde(default)]
@@ -60,8 +57,12 @@ pub(super) struct GarbageCollectorConfig {
     pub root_cache_config: CacheConfig,
     pub jemalloc_pprof_server_port: Option<u16>,
     #[serde(default)]
-    pub disable_log_gc: bool,
+    pub enable_log_gc_for_tenant: Vec<String>,
+    #[serde(default = "GarbageCollectorConfig::enable_log_gc_for_tenant_threshold")]
+    pub enable_log_gc_for_tenant_threshold: String,
     pub log: LogConfig,
+    #[serde(default)]
+    pub enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
 }
 
 impl GarbageCollectorConfig {
@@ -77,7 +78,7 @@ impl GarbageCollectorConfig {
         Self::load_from_path(DEFAULT_CONFIG_PATH)
     }
 
-    pub(super) fn load_from_path(path: &str) -> Self {
+    pub fn load_from_path(path: &str) -> Self {
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
         let mut f = figment::Figment::from(Env::prefixed("CHROMA_GC_").map(|k| match k {
@@ -85,7 +86,8 @@ impl GarbageCollectorConfig {
             k => k.as_str().replace("__", ".").into(),
         }));
         if std::path::Path::new(path).exists() {
-            f = figment::Figment::from(Yaml::file(path)).merge(f);
+            let yaml = figment::Figment::from(Yaml::file(path));
+            f = yaml.clone().merge(yaml.focus("garbage_collector")).merge(f);
         }
         let res = f.extract();
         match res {
@@ -98,8 +100,19 @@ impl GarbageCollectorConfig {
         50055
     }
 
+    fn default_otel_filters() -> Vec<OtelFilter> {
+        vec![OtelFilter {
+            crate_name: "garbage_collector".to_string(),
+            filter_level: OtelFilterLevel::Debug,
+        }]
+    }
+
     fn default_collection_soft_delete_grace_period() -> Duration {
         Duration::from_secs(60 * 60 * 24) // 1 day
+    }
+
+    fn enable_log_gc_for_tenant_threshold() -> String {
+        "00000000-0000-0000-0000-000000000000".to_string()
     }
 }
 

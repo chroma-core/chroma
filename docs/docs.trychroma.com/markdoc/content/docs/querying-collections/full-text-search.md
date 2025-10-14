@@ -1,3 +1,8 @@
+---
+id: fts-regex
+name: FTS and Regex
+---
+
 # Full Text Search and Regex
 
 {% Tabs %}
@@ -16,7 +21,7 @@ collection.get(
 )
 ```
 
-*Note*: Full-text search is case-sensitive.
+_Note_: Full-text search is case-sensitive.
 
 Here we get all records whose documents matches the regex pattern for an email address:
 
@@ -85,18 +90,18 @@ For example, here we get all records whose document contains a search string:
 
 ```typescript
 await collection.get({
-    whereDocument: { "$contains": "search string" }
-})
+  whereDocument: { $contains: "search string" },
+});
 ```
 
 Here we get all records whose documents matches the regex pattern for an email address:
 
 ```typescript
 await collection.get({
-    whereDocument: {
-        "$regex": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-    }
-})
+  whereDocument: {
+    $regex: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
+  },
+});
 ```
 
 ## Using Logical Operators
@@ -107,28 +112,25 @@ An `$and` operator will return results that match all the filters in the list:
 
 ```typescript
 await collection.query({
-    queryTexts: ["query1", "query2"],
-    whereDocument: {
-        "$and": [
-            { "$contains": "search_string_1" },
-            { "$regex": "[a-z]+" },
-        ]
-    }
-})
+  queryTexts: ["query1", "query2"],
+  whereDocument: {
+    $and: [{ $contains: "search_string_1" }, { $regex: "[a-z]+" }],
+  },
+});
 ```
 
 An `$or` operator will return results that match any of the filters in the list:
 
 ```typescript
 await collection.query({
-    queryTexts: ["query1", "query2"],
-    whereDocument: {
-        "$or": [
-            { "$contains": "search_string_1" },
-            { "$not_contains": "search_string_2" },
-        ]
-    }
-})
+  queryTexts: ["query1", "query2"],
+  whereDocument: {
+    $or: [
+      { $contains: "search_string_1" },
+      { $not_contains: "search_string_2" },
+    ],
+  },
+});
 ```
 
 ## Combining with Metadata Filtering

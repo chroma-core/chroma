@@ -2,12 +2,16 @@ use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
 use super::OneOffCompactMessage;
 use super::RebuildMessage;
-use crate::compactor::types::ScheduledCompactMessage;
+use crate::compactor::types::{ListDeadJobsMessage, ScheduledCompactMessage};
 use crate::config::CompactionServiceConfig;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLog;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLogError;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLogInput;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLogOutput;
+use crate::execution::operators::repair_log_offsets::RepairLogOffsets;
+use crate::execution::operators::repair_log_offsets::RepairLogOffsetsError;
+use crate::execution::operators::repair_log_offsets::RepairLogOffsetsInput;
+use crate::execution::operators::repair_log_offsets::RepairLogOffsetsOutput;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use async_trait::async_trait;
@@ -31,6 +35,7 @@ use chroma_types::CollectionUuid;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::StreamExt;
+use opentelemetry::trace::TraceContextExt;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
@@ -45,16 +50,22 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tracing::instrument;
 use tracing::span;
-use tracing::Instrument;
 use tracing::Span;
+use tracing::{Instrument, Level};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
-type BoxedFuture =
-    Pin<Box<dyn Future<Output = Result<CompactionResponse, Box<dyn ChromaError>>> + Send>>;
+type CompactionOutput = Result<CompactionResponse, Box<dyn ChromaError>>;
+type BoxedFuture = Pin<Box<dyn Future<Output = CompactionOutput> + Send>>;
 
 struct CompactionTask {
     collection_id: CollectionUuid,
     future: BoxedFuture,
+}
+
+struct CompactionTaskCompletion {
+    collection_id: CollectionUuid,
+    result: CompactionOutput,
 }
 
 #[derive(Clone)]
@@ -79,13 +90,14 @@ pub(crate) struct CompactionManagerContext {
     max_partition_size: usize,
     fetch_log_batch_size: u32,
     purge_dirty_log_timeout_seconds: u64,
+    repair_log_offsets_timeout_seconds: u64,
 }
 
 pub(crate) struct CompactionManager {
     scheduler: Scheduler,
     context: CompactionManagerContext,
     compact_awaiter_channel: mpsc::Sender<CompactionTask>,
-    compact_awaiter_completion_channel: mpsc::UnboundedReceiver<CompactionResponse>,
+    compact_awaiter_completion_channel: mpsc::UnboundedReceiver<CompactionTaskCompletion>,
     compact_awaiter: tokio::task::JoinHandle<()>,
     on_next_memberlist_signal: Option<oneshot::Sender<()>>,
 }
@@ -122,6 +134,7 @@ impl CompactionManager {
         max_partition_size: usize,
         fetch_log_batch_size: u32,
         purge_dirty_log_timeout_seconds: u64,
+        repair_log_offsets_timeout_seconds: u64,
     ) -> Self {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
@@ -129,7 +142,7 @@ impl CompactionManager {
         // Using unbounded channel for the completion channel as its size
         // is bounded by max_concurrent_jobs. It's far more important for the
         // completion channel to not block or drop messages.
-        let (completion_tx, completion_rx) = mpsc::unbounded_channel::<CompactionResponse>();
+        let (completion_tx, completion_rx) = mpsc::unbounded_channel::<CompactionTaskCompletion>();
         let compact_awaiter = tokio::spawn(async {
             compact_awaiter_loop(compact_awaiter_rx, completion_tx).await;
         });
@@ -151,6 +164,7 @@ impl CompactionManager {
                 max_partition_size,
                 fetch_log_batch_size,
                 purge_dirty_log_timeout_seconds,
+                repair_log_offsets_timeout_seconds,
             },
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
@@ -172,7 +186,8 @@ impl CompactionManager {
                 "Compacting job",
                 collection_id = ?job.collection_id
             );
-            instrumented_span.follows_from(Span::current());
+            Span::current().add_link(instrumented_span.context().span().span_context().clone());
+
             let future = self
                 .context
                 .clone()
@@ -216,6 +231,7 @@ impl CompactionManager {
             Box::new(purge_dirty_log),
             purge_dirty_log_input,
             ctx.receiver(),
+            ctx.cancellation_token.clone(),
         );
         let Some(mut dispatcher) = self.context.dispatcher.clone() else {
             tracing::error!("Unable to create background task to purge dirty log: Dispatcher is not set for compaction manager");
@@ -233,15 +249,73 @@ impl CompactionManager {
         );
     }
 
+    #[instrument(name = "CompactionManager::repair_log_offsets", skip(ctx))]
+    pub(crate) async fn repair_log_offsets(&mut self, ctx: &ComponentContext<Self>) {
+        let log_offsets_to_repair = self.scheduler.drain_collections_requiring_repair();
+        if log_offsets_to_repair.is_empty() {
+            tracing::info!("No offsets to repair");
+            return;
+        }
+        let repair_log_offsets = RepairLogOffsets {
+            log_client: self.context.log.clone(),
+            timeout: Duration::from_secs(self.context.repair_log_offsets_timeout_seconds),
+        };
+        let repair_log_offsets_input = RepairLogOffsetsInput {
+            log_offsets_to_repair,
+        };
+        let repair_log_offsets_task = wrap(
+            Box::new(repair_log_offsets),
+            repair_log_offsets_input,
+            ctx.receiver(),
+            ctx.cancellation_token.clone(),
+        );
+        let Some(mut dispatcher) = self.context.dispatcher.clone() else {
+            tracing::error!("Unable to create background task to repair log offsets: Dispatcher is not set for compaction manager");
+            return;
+        };
+        if let Err(err) = dispatcher
+            .send(repair_log_offsets_task, Some(Span::current()))
+            .await
+        {
+            tracing::error!("Unable to create background task to repair log offsets: {err}");
+            return;
+        };
+    }
+
     pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
         self.context.dispatcher = Some(dispatcher);
     }
 
-    fn process_completions(&mut self) -> Vec<CompactionResponse> {
+    fn process_completions(&mut self) -> Vec<CompactionTaskCompletion> {
         let compact_awaiter_completion_channel = &mut self.compact_awaiter_completion_channel;
         let mut completed_collections = Vec::new();
         while let Ok(resp) = compact_awaiter_completion_channel.try_recv() {
-            self.scheduler.complete_collection(resp.collection_id);
+            match resp.result {
+                Ok(ref compaction_response) => match compaction_response {
+                    CompactionResponse::Success { collection_id } => {
+                        if *collection_id != resp.collection_id {
+                            tracing::event!(Level::ERROR, name = "mismatched collection ids in result", lhs =? *collection_id, rhs =? resp.collection_id);
+                        }
+                        self.scheduler.succeed_collection(resp.collection_id);
+                    }
+                    CompactionResponse::RequireCompactionOffsetRepair {
+                        collection_id,
+                        witnessed_offset_in_sysdb,
+                    } => {
+                        if *collection_id != resp.collection_id {
+                            tracing::event!(Level::ERROR, name = "mismatched collection ids in result", lhs =? *collection_id, rhs =? resp.collection_id);
+                            self.scheduler.succeed_collection(resp.collection_id);
+                        } else {
+                            self.scheduler
+                                .require_repair(resp.collection_id, *witnessed_offset_in_sysdb);
+                            self.scheduler.succeed_collection(resp.collection_id);
+                        }
+                    }
+                },
+                Err(_) => {
+                    self.scheduler.fail_collection(resp.collection_id);
+                }
+            }
             completed_collections.push(resp);
         }
         completed_collections
@@ -291,7 +365,9 @@ impl CompactionManagerContext {
                 return Ok(result);
             }
             Err(e) => {
-                tracing::error!("Compaction Job failed: {:?}", e);
+                if e.should_trace_error() {
+                    tracing::error!("Compaction Job failed: {:?}", e);
+                }
                 return Err(Box::new(e));
             }
         }
@@ -338,6 +414,8 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let max_partition_size = config.compactor.max_partition_size;
         let fetch_log_batch_size = config.compactor.fetch_log_batch_size;
         let purge_dirty_log_timeout_seconds = config.compactor.purge_dirty_log_timeout_seconds;
+        let repair_log_offsets_timeout_seconds =
+            config.compactor.repair_log_offsets_timeout_seconds;
         let mut disabled_collections =
             HashSet::with_capacity(config.compactor.disabled_collections.len());
         for collection_id_str in &config.compactor.disabled_collections {
@@ -349,6 +427,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             Box::<dyn AssignmentPolicy>::try_from_config(assignment_policy_config, registry)
                 .await?;
         let job_expiry_seconds = config.compactor.job_expiry_seconds;
+        let max_failure_count = config.compactor.max_failure_count;
         let scheduler = Scheduler::new(
             my_ip,
             log.clone(),
@@ -359,6 +438,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             assignment_policy,
             disabled_collections,
             job_expiry_seconds,
+            max_failure_count,
         );
 
         let blockfile_provider = BlockfileProvider::try_from_config(
@@ -399,31 +479,38 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             max_partition_size,
             fetch_log_batch_size,
             purge_dirty_log_timeout_seconds,
+            repair_log_offsets_timeout_seconds,
         ))
     }
 }
 
 async fn compact_awaiter_loop(
     mut job_rx: mpsc::Receiver<CompactionTask>,
-    completion_tx: mpsc::UnboundedSender<CompactionResponse>,
+    completion_tx: mpsc::UnboundedSender<CompactionTaskCompletion>,
 ) {
     let mut futures = FuturesUnordered::new();
     loop {
         select! {
             Some(job) = job_rx.recv() => {
                 futures.push(async move {
-                    let _ = AssertUnwindSafe(job.future).catch_unwind().await;
-                    CompactionResponse {
-                        collection_id: job.collection_id,
+                    let result = AssertUnwindSafe(job.future).catch_unwind().await;
+                    match result {
+                        Ok(response) => CompactionTaskCompletion {
+                            collection_id: job.collection_id,
+                            result: response,
+                        },
+                        Err(_) => CompactionTaskCompletion {
+                            collection_id: job.collection_id,
+                            result: Err(Box::new(CompactionError::FailedToCompact)),
+                        },
                     }
                 });
             }
-            Some(compaction_response) = futures.next() => {
-                match completion_tx.send(compaction_response) {
+            Some(completed_job) = futures.next() => {
+                let collection_id = completed_job.collection_id;
+                match completion_tx.send(completed_job) {
                     Ok(_) => {},
-                    Err(_) => {
-                        tracing::error!("Failed to send compaction response");
-                    }
+                    Err(_) => tracing::error!("Failed to record compaction result for collection {}", collection_id),
                 }
             }
             else => {
@@ -474,6 +561,7 @@ impl Handler<ScheduledCompactMessage> for CompactionManager {
         tracing::info!("CompactionManager: Performing scheduled compaction");
         let _ = self.start_compaction_batch().await;
         self.purge_dirty_log(ctx).await;
+        self.repair_log_offsets(ctx).await;
 
         // Compactions are kicked off, schedule the next compaction
         ctx.scheduler.schedule(
@@ -551,6 +639,21 @@ impl Handler<TaskResult<PurgeDirtyLogOutput, PurgeDirtyLogError>> for Compaction
     }
 }
 
+#[async_trait]
+impl Handler<TaskResult<RepairLogOffsetsOutput, RepairLogOffsetsError>> for CompactionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<RepairLogOffsetsOutput, RepairLogOffsetsError>,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        if let Err(err) = message.into_inner() {
+            tracing::error!("Error when repairing log offsets: {err}");
+        }
+    }
+}
+
 pub struct RegisterOnReadySignal {
     pub on_ready_tx: oneshot::Sender<()>,
 }
@@ -582,10 +685,26 @@ impl Handler<RegisterOnReadySignal> for CompactionManager {
     }
 }
 
+#[async_trait]
+impl Handler<ListDeadJobsMessage> for CompactionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: ListDeadJobsMessage,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        let dead_jobs = self.scheduler.get_dead_jobs();
+        if let Err(e) = message.response_tx.send(dead_jobs) {
+            tracing::error!("Failed to send dead jobs response: {:?}", e);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
+    use chroma_blockstore::arrow::config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES};
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use chroma_index::config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig};
@@ -770,7 +889,9 @@ mod tests {
         let max_partition_size = 1000;
         let fetch_log_batch_size = 100;
         let purge_dirty_log_timeout_seconds = 60;
+        let repair_log_offsets_timeout_seconds = 60;
         let job_expiry_seconds = 3600;
+        let max_failure_count = 3;
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
@@ -786,6 +907,7 @@ mod tests {
             assignment_policy,
             HashSet::new(),
             job_expiry_seconds,
+            max_failure_count,
         );
         // Set memberlist
         scheduler.set_memberlist(vec![my_member.clone()]);
@@ -807,19 +929,22 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmpdir.path().to_str().unwrap()),
             hnsw_cache,
             16,
+            false,
         );
         let spann_provider = SpannProvider {
             hnsw_provider: hnsw_provider.clone(),
             blockfile_provider: blockfile_provider.clone(),
-            garbage_collection_context: Some(gc_context),
+            garbage_collection_context: gc_context,
             metrics: SpannMetrics::default(),
-            pl_block_size: Some(5 * 1024 * 1024),
+            pl_block_size: 5 * 1024 * 1024,
+            adaptive_search_nprobe: true,
         };
         let system = System::new();
         let mut manager = CompactionManager::new(
@@ -838,6 +963,7 @@ mod tests {
             max_partition_size,
             fetch_log_batch_size,
             purge_dirty_log_timeout_seconds,
+            repair_log_offsets_timeout_seconds,
         );
 
         let dispatcher = Dispatcher::new(DispatcherConfig {
@@ -863,6 +989,7 @@ mod tests {
             completed_compactions.extend(
                 completed
                     .iter()
+                    .filter(|c| c.result.is_ok())
                     .map(|c| c.collection_id)
                     .collect::<Vec<CollectionUuid>>(),
             );
@@ -886,5 +1013,39 @@ mod tests {
                 panic!("Expected hnsw purge to be successful")
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_list_dead_jobs() {
+        // Create a simple system for testing
+        let system = System::new();
+        let dispatcher = Dispatcher::new(DispatcherConfig::default());
+        let _dispatcher_handle = system.start_component(dispatcher);
+
+        // Create test scheduler with dead jobs
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
+        assignment_policy.set_members(vec!["test-member".to_string()]);
+
+        let mut scheduler = Scheduler::new(
+            "test-member".to_string(),
+            Log::InMemory(InMemoryLog::new()),
+            SysDb::Test(TestSysDb::new()),
+            Box::new(LasCompactionTimeSchedulerPolicy {}),
+            10,
+            100,
+            assignment_policy,
+            HashSet::new(),
+            60,
+            3,
+        );
+
+        // Simulate a dead job by marking a collection as killed (moved to dead_jobs)
+        let test_collection_id = CollectionUuid::new();
+        scheduler.kill_collection(test_collection_id);
+
+        // Verify it's in dead jobs
+        let dead_jobs = scheduler.get_dead_jobs();
+        assert_eq!(dead_jobs.len(), 1);
+        assert!(dead_jobs.contains(&test_collection_id));
     }
 }

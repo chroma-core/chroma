@@ -8,7 +8,6 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use roaring::RoaringBitmap;
 use std::collections::HashSet;
-use std::ops::RangeBounds;
 use std::sync::Arc;
 use tantivy::tokenizer::NgramTokenizer;
 use tantivy::tokenizer::TokenStream;
@@ -327,7 +326,8 @@ impl<'me> FullTextIndexReader<'me> {
                 let positional_posting_list = self
                     .posting_lists_blockfile_reader
                     .get_range(token.text.as_str()..=token.text.as_str(), ..)
-                    .await?;
+                    .await?
+                    .collect::<Vec<_>>();
                 Ok::<_, FullTextIndexError>(positional_posting_list)
             })
             .collect::<Vec<_>>()
@@ -427,15 +427,15 @@ impl<'me> FullTextIndexReader<'me> {
             .get_range(token..=token, ..)
             .await?;
         let mut results = vec![];
-        for (_, doc_id, positions) in positional_posting_list.iter() {
-            results.push((*doc_id, positions.to_vec()));
+        for (_, doc_id, positions) in positional_posting_list {
+            results.push((doc_id, positions.to_vec()));
         }
         Ok(results)
     }
 }
 
 #[async_trait::async_trait]
-impl<'reader> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'reader> {
+impl NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'_> {
     fn maximum_branching_factor(&self) -> usize {
         6
     }
@@ -449,16 +449,14 @@ impl<'reader> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'
             .await
     }
 
-    async fn lookup_ngram_range<'me, NgramRange>(
+    async fn lookup_ngram<'me>(
         &'me self,
-        ngram_range: NgramRange,
-    ) -> Result<Vec<(&'me str, u32, &'me [u32])>, FullTextIndexError>
-    where
-        NgramRange: Clone + RangeBounds<&'me str> + Send + Sync,
+        ngram: &'me str,
+    ) -> Result<Box<dyn Iterator<Item = (u32, &'me [u32])> + Send + Sync + 'me>, FullTextIndexError>
     {
         Ok(self
             .posting_lists_blockfile_reader
-            .get_range(ngram_range, ..)
+            .get_prefix(ngram)
             .await?)
     }
 }
@@ -467,7 +465,8 @@ impl<'reader> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'
 mod tests {
     use super::*;
     use chroma_blockstore::{
-        arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider,
+        arrow::{config::BlockManagerConfig, provider::BlockfileReaderOptions},
+        provider::BlockfileProvider,
         BlockfileWriterOptions,
     };
     use chroma_cache::new_cache_for_test;
@@ -967,7 +966,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
-        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let provider = BlockfileProvider::new_arrow(
+            storage,
+            1024 * 1024,
+            block_cache,
+            root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
@@ -1006,7 +1011,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
-        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let provider = BlockfileProvider::new_arrow(
+            storage,
+            1024 * 1024,
+            block_cache,
+            root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
@@ -1048,7 +1059,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
-        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let provider = BlockfileProvider::new_arrow(
+            storage,
+            1024 * 1024,
+            block_cache,
+            root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
@@ -1133,7 +1150,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
-        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let provider = BlockfileProvider::new_arrow(
+            storage,
+            1024 * 1024,
+            block_cache,
+            root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
@@ -1214,7 +1237,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
-        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let provider = BlockfileProvider::new_arrow(
+            storage,
+            1024 * 1024,
+            block_cache,
+            root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))

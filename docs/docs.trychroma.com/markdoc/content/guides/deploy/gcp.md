@@ -1,10 +1,15 @@
+---
+id: gcp
+name: GCP
+---
+
 # GCP Deployment
 
 {% Banner type="tip" %}
 
 **Chroma Cloud**
 
-Chroma Cloud, our fully managed hosted service is here. [Sign up here](https://trychroma.com/signup) for free.
+Chroma Cloud, our fully managed hosted service is here. [Sign up here](https://trychroma.com/signup?utm_source=docs-gcp) for free.
 
 {% /Banner %}
 
@@ -51,10 +56,11 @@ for what you need, or reach out to the Chroma team for assistance.
 ### Step 1: Set up your GCP credentials
 
 In your GCP project, create a service account for deploying Chroma. It will need the following roles:
-* Service Account User
-* Compute Admin
-* Compute Network Admin
-* Storage Admin
+
+- Service Account User
+- Compute Admin
+- Compute Network Admin
+- Storage Admin
 
 Create a JSON key file for this service account, and download it. Set the `GOOGLE_APPLICATION_CREDENTIALS` environment variable to the path of your JSON key file:
 
@@ -81,35 +87,41 @@ zone="<your zone>"
 Download our [GCP Terraform configuration](https://github.com/chroma-core/chroma/blob/main/deployments/gcp/main.tf) to the same directory as your `chroma.tfvars` file. Then run the following commands to deploy your Chroma stack.
 
 Initialize Terraform:
+
 ```terminal
 terraform init
 ```
 
 Plan the deployment, and review it to ensure it matches your expectations:
+
 ```terminal
 terraform plan -var-file chroma.tfvars
 ```
+
 If you did not customize our configuration, you should be deploying an `e2-small` instance.
 
 Finally, apply the deployment:
+
 ```terminal
 terraform apply -var-file chroma.tfvars
 ```
 
 #### Customize the Stack (optional)
 
-If  you want to use a machine type different from the default `e2-small`, in your `chroma.tfvars` add the `machine_type` variable and set it to your desired machine:
+If you want to use a machine type different from the default `e2-small`, in your `chroma.tfvars` add the `machine_type` variable and set it to your desired machine:
 
 ```text
 machine_type = "e2-medium"
 ```
 
 After a few minutes, you can get the IP address of your instance with
+
 ```terminal
 terraform output -raw chroma_instance_ip
 ```
 
 ### Step 5: Chroma Client Set-Up
+
 {% Tabs %}
 
 {% Tab label="python" %}
@@ -126,6 +138,7 @@ chroma_client = chromadb.HttpClient(
 )
 chroma_client.heartbeat()
 ```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
@@ -137,11 +150,12 @@ you need to do is configure your `ChromaClient` to use the server's IP address a
 import { ChromaClient } from "chromadb";
 
 const chromaClient = new ChromaClient({
-    host: "<Your Chroma instance IP>",
-    port: 8000
-})
-chromaClient.heartbeat()
+  host: "<Your Chroma instance IP>",
+  port: 8000,
+});
+chromaClient.heartbeat();
 ```
+
 {% /Tab %}
 
 {% /Tabs %}
