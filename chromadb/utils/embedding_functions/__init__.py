@@ -65,6 +65,8 @@ from chromadb.utils.embedding_functions.together_ai_embedding_function import (
 from chromadb.utils.embedding_functions.mistral_embedding_function import (
     MistralEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.runpod_embedding_function import (
+    RunPodEmbeddingFunction,
 from chromadb.utils.embedding_functions.morph_embedding_function import (
     MorphEmbeddingFunction,
 )
@@ -107,6 +109,7 @@ _all_classes: Set[str] = {
     "BasetenEmbeddingFunction",
     "CloudflareWorkersAIEmbeddingFunction",
     "TogetherAIEmbeddingFunction",
+    "RunPodEmbeddingFunction",
     "DefaultEmbeddingFunction",
     "HuggingFaceSparseEmbeddingFunction",
     "FastembedSparseEmbeddingFunction",
@@ -145,6 +148,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "default": DefaultEmbeddingFunction,
     "cloudflare_workers_ai": CloudflareWorkersAIEmbeddingFunction,
     "together_ai": TogetherAIEmbeddingFunction,
+    "runpod": RunPodEmbeddingFunction,
     "chroma-cloud-qwen": ChromaCloudQwenEmbeddingFunction,
 }
 
@@ -239,6 +243,7 @@ __all__ = [
     "AmazonBedrockEmbeddingFunction",
     "ChromaLangchainEmbeddingFunction",
     "TogetherAIEmbeddingFunction",
+    "RunPodEmbeddingFunction",
     "HuggingFaceSparseEmbeddingFunction",
     "FastembedSparseEmbeddingFunction",
     "Bm25EmbeddingFunction",

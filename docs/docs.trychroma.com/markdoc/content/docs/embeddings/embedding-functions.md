@@ -18,6 +18,10 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Instructor](../../integrations/embedding-models/instructor)                             | ✓      | -          |
 | [Hugging Face Embedding Server](../../integrations/embedding-models/hugging-face-server) | ✓      | ✓          |
 | [Jina AI](../../integrations/embedding-models/jina-ai)                                   | ✓      | ✓          |
+| [Cloudflare Workers AI](../../integrations/embedding-models/cloudflare-workers-ai)    | ✓      | ✓          |
+| [Together AI](../../integrations/embedding-models/together-ai)                        | ✓      | ✓          |
+| [Mistral](../../integrations/embedding-models/mistral)                                | ✓      | ✓          |
+| [RunPod](../../integrations/embedding-models/runpod)                                | ✓      | ✓          |
 | [Cloudflare Workers AI](../../integrations/embedding-models/cloudflare-workers-ai)       | ✓      | ✓          |
 | [Together AI](../../integrations/embedding-models/together-ai)                           | ✓      | ✓          |
 | [Mistral](../../integrations/embedding-models/mistral)                                   | ✓      | ✓          |
