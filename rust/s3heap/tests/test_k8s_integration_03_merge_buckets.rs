@@ -70,7 +70,7 @@ async fn test_k8s_integration_03_merge_same_bucket() {
     )
     .await
     .unwrap();
-    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
+    let items = reader.peek(|_, _| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 3, "Should read all 3 items from single bucket");
 }
 
@@ -151,13 +151,13 @@ async fn test_k8s_integration_03_merge_multiple_pushes() {
     )
     .await
     .unwrap();
-    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
+    let items = reader.peek(|_, _| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 4, "Should have all 4 items after merging");
 
     // Verify all items are present
     let uuids: Vec<_> = items
         .iter()
-        .map(|i| *i.trigger.scheduling.as_uuid())
+        .map(|(_bucket, item)| *item.trigger.scheduling.as_uuid())
         .collect();
     assert!(uuids.contains(item1.scheduling.as_uuid()));
     assert!(uuids.contains(item2.scheduling.as_uuid()));

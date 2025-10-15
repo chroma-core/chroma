@@ -9980,6 +9980,7 @@ dependencies = [
  "chroma-system",
  "chroma-tracing",
  "chroma-types",
+ "chrono",
  "clap",
  "criterion",
  "fastrace",

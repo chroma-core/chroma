@@ -28,7 +28,7 @@ async fn test_k8s_integration_01_empty_heap() {
     .unwrap();
 
     // Peek should return empty results
-    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
+    let items = reader.peek(|_, _| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 0, "Empty heap should return no items");
 
     // Verify no buckets exist

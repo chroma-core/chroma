@@ -372,7 +372,7 @@ async fn reader_peek_empty_heap() {
         .await
         .unwrap();
 
-    let items = reader.peek(|_| true, Limits::default()).await;
+    let items = reader.peek(|_, _| true, Limits::default()).await;
     assert!(items.is_ok());
     assert_eq!(items.unwrap().len(), 0);
 }
@@ -394,7 +394,7 @@ async fn reader_peek_with_filter() {
         .unwrap();
 
     // Filter that rejects everything
-    let items = reader.peek(|_| false, Limits::default()).await;
+    let items = reader.peek(|_, _| false, Limits::default()).await;
     assert!(items.is_ok());
     assert_eq!(items.unwrap().len(), 0);
 }
@@ -421,7 +421,7 @@ async fn reader_respects_limits() {
     };
 
     // Should respect the bucket limit
-    let items = reader.peek(|_| true, limits).await;
+    let items = reader.peek(|_, _| true, limits).await;
     assert!(items.is_ok());
 }
 

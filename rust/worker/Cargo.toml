@@ -28,6 +28,7 @@ arrow = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 async-trait = { workspace = true }
+chrono = { workspace = true }
 roaring = { workspace = true }
 figment = { workspace = true }
 futures = { workspace = true }

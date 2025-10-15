@@ -713,6 +713,7 @@ mod tests {
     use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
+    use chroma_storage::s3_client_for_test_with_new_bucket;
     use chroma_sysdb::TestSysDb;
     use chroma_system::{Dispatcher, DispatcherConfig};
     use chroma_types::SegmentUuid;
@@ -1024,6 +1025,8 @@ mod tests {
         let dispatcher = Dispatcher::new(DispatcherConfig::default());
         let _dispatcher_handle = system.start_component(dispatcher);
 
+        let storage = s3_client_for_test_with_new_bucket().await;
+
         // Create test scheduler with dead jobs
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec!["test-member".to_string()]);
@@ -1032,6 +1035,7 @@ mod tests {
             "test-member".to_string(),
             Log::InMemory(InMemoryLog::new()),
             SysDb::Test(TestSysDb::new()),
+            storage,
             Box::new(LasCompactionTimeSchedulerPolicy {}),
             10,
             100,

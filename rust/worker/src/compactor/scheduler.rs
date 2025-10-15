@@ -493,7 +493,15 @@ impl Scheduler {
                 s3heap::Limits::default().with_items(self.max_concurrent_jobs),
             )
             .await;
-        tracing::info!("SCHEDULING TASKS FOR {tasks:?}");
+        for task in tasks {
+            tracing::info!(
+                "SCHEDULING TASKS FOR {:?} {:?} {:?} {:?}",
+                task.bucket,
+                task.collection_id,
+                task.task_id,
+                task.nonce,
+            );
+        }
         if collections.is_empty() {
             return;
         }

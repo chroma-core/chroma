@@ -52,13 +52,13 @@ async fn test_k8s_integration_02_basic_push() {
     )
     .await
     .unwrap();
-    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
+    let items = reader.peek(|_, _| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 2, "Should read 2 items back");
 
     // Verify items have correct data
     let partitioning_uuids: Vec<Uuid> = items
         .iter()
-        .map(|i| *i.trigger.partitioning.as_uuid())
+        .map(|(_bucket, item)| *item.trigger.partitioning.as_uuid())
         .collect();
     assert!(
         partitioning_uuids.contains(schedule1.triggerable.partitioning.as_uuid()),
@@ -109,10 +109,10 @@ async fn test_k8s_integration_02_push_with_no_schedule() {
     )
     .await
     .unwrap();
-    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
+    let items = reader.peek(|_, _| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 1, "Should have only 1 scheduled item");
     assert_eq!(
-        items[0].trigger.partitioning.as_uuid(),
+        items[0].1.trigger.partitioning.as_uuid(),
         schedule2.triggerable.partitioning.as_uuid(),
         "Should be the scheduled item"
     );

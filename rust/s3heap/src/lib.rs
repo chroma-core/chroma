@@ -1176,9 +1176,9 @@ impl HeapReader {
     /// ```
     pub async fn peek(
         &self,
-        should_return: impl for<'a> Fn(&'a Triggerable) -> bool + Send + Sync,
+        should_return: impl for<'a> Fn(&'a Triggerable, DateTime<Utc>) -> bool + Send + Sync,
         limits: Limits,
-    ) -> Result<Vec<HeapItem>, Error> {
+    ) -> Result<Vec<(DateTime<Utc>, HeapItem)>, Error> {
         let heap_scheduler = self.internal.heap_scheduler();
         let buckets = self.internal.list_approx_first_1k_buckets().await?;
         let mut returns = vec![];
@@ -1188,7 +1188,7 @@ impl HeapReader {
             let (entries, _) = self.internal.load_bucket_or_empty(bucket).await?;
             let triggerable_and_nonce = entries
                 .iter()
-                .filter(|hi| should_return(&hi.trigger))
+                .filter(|hi| should_return(&hi.trigger, bucket))
                 .map(|hi| (hi.trigger, hi.nonce))
                 .collect::<Vec<_>>();
             let are_done = heap_scheduler.are_done(&triggerable_and_nonce).await?;
@@ -1201,10 +1201,13 @@ impl HeapReader {
             }
             for ((triggerable, uuid), is_done) in triggerable_and_nonce.iter().zip(are_done) {
                 if !is_done {
-                    returns.push(HeapItem {
-                        trigger: *triggerable,
-                        nonce: *uuid,
-                    });
+                    returns.push((
+                        bucket,
+                        HeapItem {
+                            trigger: *triggerable,
+                            nonce: *uuid,
+                        },
+                    ));
                     if returns.len() >= max_items {
                         break 'outer;
                     }
