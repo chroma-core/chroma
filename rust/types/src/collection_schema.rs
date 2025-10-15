@@ -311,7 +311,7 @@ impl InternalSchema {
                     config: SparseVectorIndexConfig {
                         embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
                         source_key: None,
-                        bm25: None,
+                        bm25: Some(false),
                     },
                 }),
             }),
