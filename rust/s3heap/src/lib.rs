@@ -142,6 +142,9 @@ pub enum Error {
     /// Date rounding error
     #[error("could not round date: {0}")]
     RoundError(#[from] chrono::RoundingError),
+    /// SysDb error
+    #[error("sysdb error: {0}")]
+    SysDb(#[from] chroma_sysdb::PeekScheduleError),
 }
 
 impl chroma_error::ChromaError for Error {
@@ -162,6 +165,7 @@ impl chroma_error::ChromaError for Error {
             Error::Arrow(_) => ErrorCodes::Internal,
             Error::ParseDate(_) => ErrorCodes::InvalidArgument,
             Error::RoundError(_) => ErrorCodes::Internal,
+            Error::SysDb(e) => e.code(),
         }
     }
 }
@@ -362,7 +366,7 @@ impl Limits {
 
 /// The UnitOfPartitioning is e.g. a Chroma collection or some other unit of work that is a
 /// functional dependency of the key used for partitioning.  Always a UUID.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct UnitOfPartitioningUuid(Uuid);
 
 impl UnitOfPartitioningUuid {
@@ -391,7 +395,7 @@ impl fmt::Display for UnitOfPartitioningUuid {
 
 /// The UnitOfScheduling is the identifier for the individual thing to push and pop off the heap.  A
 /// given UnitOfPartitioning may have many UnitOfScheduling UUIDs assigned to it.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct UnitOfSchedulingUuid(Uuid);
 
 impl UnitOfSchedulingUuid {
@@ -440,7 +444,7 @@ impl fmt::Display for UnitOfSchedulingUuid {
 ///     scheduling: UnitOfSchedulingUuid::new(Uuid::new_v4()),
 /// };
 /// ```
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct Triggerable {
     /// The UUID identifying the partitioning unit
     pub partitioning: UnitOfPartitioningUuid,
@@ -493,7 +497,6 @@ pub struct Schedule {
 /// #[async_trait::async_trait]
 /// impl HeapScheduler for MyScheduler {
 ///     async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error> {
-///         // Check if tasks are complete in your system
 ///         let completed = self.completed_tasks.lock();
 ///         Ok(items.iter()
 ///             .map(|(item, nonce)| completed.get(&(*item.partitioning.as_uuid(), *item.scheduling.as_uuid(), *nonce)).copied().unwrap_or(false))
@@ -525,7 +528,7 @@ pub trait HeapScheduler: Send + Sync {
     /// * `Ok(false)` if the task is still pending or running
     /// * `Err` if there was an error checking the status
     async fn is_done(&self, item: &Triggerable, nonce: Uuid) -> Result<bool, Error> {
-        let results = self.are_done(&[(item.clone(), nonce)]).await?;
+        let results = self.are_done(&[(*item, nonce)]).await?;
         if results.len() != 1 {
             return Err(Error::Internal(format!(
                 "are_done returned {} results for 1 item",
@@ -733,7 +736,7 @@ impl HeapWriter {
 
         for schedule in schedules {
             let heap_item = HeapItem {
-                trigger: schedule.triggerable.clone(),
+                trigger: schedule.triggerable,
                 nonce: schedule.nonce,
             };
             let bucket = self.internal.compute_bucket(schedule.next_scheduled)?;
@@ -950,7 +953,7 @@ impl HeapPruner {
         let original_count = entries.len();
         let triggers = entries
             .iter()
-            .map(|e| (e.trigger.clone(), e.nonce))
+            .map(|e| (e.trigger, e.nonce))
             .collect::<Vec<_>>();
         let are_done = heap_scheduler.are_done(&triggers).await?;
 
@@ -1146,7 +1149,7 @@ impl HeapReader {
             let triggerable_and_nonce = entries
                 .iter()
                 .filter(|hi| should_return(&hi.trigger))
-                .map(|hi| (hi.trigger.clone(), hi.nonce))
+                .map(|hi| (hi.trigger, hi.nonce))
                 .collect::<Vec<_>>();
             let are_done = heap_scheduler.are_done(&triggerable_and_nonce).await?;
             if triggerable_and_nonce.len() != are_done.len() {
@@ -1159,7 +1162,7 @@ impl HeapReader {
             for ((triggerable, uuid), is_done) in triggerable_and_nonce.iter().zip(are_done) {
                 if !is_done {
                     returns.push(HeapItem {
-                        trigger: triggerable.clone(),
+                        trigger: *triggerable,
                         nonce: *uuid,
                     });
                     if returns.len() >= max_items {

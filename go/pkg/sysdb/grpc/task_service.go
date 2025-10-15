@@ -52,12 +52,36 @@ func (s *Server) DeleteTask(ctx context.Context, req *coordinatorpb.DeleteTaskRe
 	return res, nil
 }
 
+func (s *Server) AdvanceTask(ctx context.Context, req *coordinatorpb.AdvanceTaskRequest) (*coordinatorpb.AdvanceTaskResponse, error) {
+	log.Info("AdvanceTask", zap.String("collection_id", req.GetCollectionId()), zap.String("task_id", req.GetTaskId()))
+
+	res, err := s.coordinator.AdvanceTask(ctx, req)
+	if err != nil {
+		log.Error("AdvanceTask failed", zap.Error(err))
+		return nil, err
+	}
+
+	return res, nil
+}
+
 func (s *Server) GetOperators(ctx context.Context, req *coordinatorpb.GetOperatorsRequest) (*coordinatorpb.GetOperatorsResponse, error) {
 	log.Info("GetOperators")
 
 	res, err := s.coordinator.GetOperators(ctx, req)
 	if err != nil {
 		log.Error("GetOperators failed", zap.Error(err))
+		return nil, err
+	}
+
+	return res, nil
+}
+
+func (s *Server) PeekScheduleByCollectionId(ctx context.Context, req *coordinatorpb.PeekScheduleByCollectionIdRequest) (*coordinatorpb.PeekScheduleByCollectionIdResponse, error) {
+	log.Info("PeekScheduleByCollectionId", zap.Int64("num_collections", int64(len(req.CollectionId))))
+
+	res, err := s.coordinator.PeekScheduleByCollectionId(ctx, req)
+	if err != nil {
+		log.Error("PeekScheduleByCollectionId failed", zap.Error(err))
 		return nil, err
 	}
 

@@ -16,8 +16,9 @@ use chroma_types::{
     GetDatabaseResponse, GetSegmentsError, GetTenantError, GetTenantResponse,
     InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
     ListCollectionVersionsError, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
-    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
-    UpdateCollectionError, UpdateTenantError, UpdateTenantResponse, VectorIndexConfiguration,
+    ResetResponse, ScheduleEntry, ScheduleEntryConversionError, SegmentFlushInfo,
+    SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError, UpdateTenantError,
+    UpdateTenantResponse, VectorIndexConfiguration,
 };
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
@@ -681,6 +682,17 @@ impl SysDb {
             SysDb::Grpc(grpc) => grpc.reset().await,
             SysDb::Sqlite(sqlite) => sqlite.reset().await,
             SysDb::Test(_) => todo!(),
+        }
+    }
+
+    pub async fn peek_schedule_by_collection_id(
+        &mut self,
+        collection_ids: &[CollectionUuid],
+    ) -> Result<Vec<ScheduleEntry>, PeekScheduleError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.peek_schedule_by_collection_id(collection_ids).await,
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(test) => test.peek_schedule_by_collection_id(collection_ids).await,
         }
     }
 }
@@ -1813,6 +1825,43 @@ impl GrpcSysDb {
                     Err(DeleteTaskError::FailedToDeleteTask(status))
                 }
             }
+        }
+    }
+
+    async fn peek_schedule_by_collection_id(
+        &mut self,
+        collection_ids: &[CollectionUuid],
+    ) -> Result<Vec<ScheduleEntry>, PeekScheduleError> {
+        let req = chroma_proto::PeekScheduleByCollectionIdRequest {
+            collection_id: collection_ids.iter().map(|id| id.0.to_string()).collect(),
+        };
+        let res = self
+            .client
+            .peek_schedule_by_collection_id(req)
+            .await
+            .map_err(|e| TonicError(e).boxed())?;
+        res.into_inner()
+            .schedule
+            .into_iter()
+            .map(|entry| entry.try_into())
+            .collect::<Result<Vec<ScheduleEntry>, ScheduleEntryConversionError>>()
+            .map_err(PeekScheduleError::Conversion)
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum PeekScheduleError {
+    #[error("Failed to peek schedule")]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Failed to convert schedule entry")]
+    Conversion(#[from] ScheduleEntryConversionError),
+}
+
+impl ChromaError for PeekScheduleError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            PeekScheduleError::Internal(e) => e.code(),
+            PeekScheduleError::Conversion(_) => ErrorCodes::Internal,
         }
     }
 }

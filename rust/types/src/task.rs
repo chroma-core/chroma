@@ -1,4 +1,6 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use std::time::SystemTime;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -84,4 +86,70 @@ pub struct Task {
     pub created_at: SystemTime,
     /// Timestamp when the task was last updated
     pub updated_at: SystemTime,
+}
+
+/// ScheduleEntry represents a scheduled task run for a collection.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ScheduleEntry {
+    pub collection_id: CollectionUuid,
+    pub task_id: Uuid,
+    pub task_run_nonce: Uuid,
+    pub when_to_run: Option<DateTime<Utc>>,
+}
+
+impl TryFrom<crate::chroma_proto::ScheduleEntry> for ScheduleEntry {
+    type Error = ScheduleEntryConversionError;
+
+    fn try_from(proto: crate::chroma_proto::ScheduleEntry) -> Result<Self, Self::Error> {
+        let collection_id = proto
+            .collection_id
+            .ok_or(ScheduleEntryConversionError::MissingField(
+                "collection_id".to_string(),
+            ))
+            .and_then(|id| {
+                CollectionUuid::from_str(&id).map_err(|_| {
+                    ScheduleEntryConversionError::InvalidUuid("collection_id".to_string())
+                })
+            })?;
+
+        let task_id = proto
+            .task_id
+            .ok_or(ScheduleEntryConversionError::MissingField(
+                "task_id".to_string(),
+            ))
+            .and_then(|id| {
+                Uuid::parse_str(&id)
+                    .map_err(|_| ScheduleEntryConversionError::InvalidUuid("task_id".to_string()))
+            })?;
+
+        let task_run_nonce = proto
+            .task_run_nonce
+            .ok_or(ScheduleEntryConversionError::MissingField(
+                "task_run_nonce".to_string(),
+            ))
+            .and_then(|nonce| {
+                Uuid::parse_str(&nonce).map_err(|_| {
+                    ScheduleEntryConversionError::InvalidUuid("task_run_nonce".to_string())
+                })
+            })?;
+
+        let when_to_run = proto
+            .when_to_run
+            .and_then(|ms| DateTime::from_timestamp_millis(ms as i64));
+
+        Ok(ScheduleEntry {
+            collection_id,
+            task_id,
+            task_run_nonce,
+            when_to_run,
+        })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ScheduleEntryConversionError {
+    #[error("Missing required field: {0}")]
+    MissingField(String),
+    #[error("Invalid UUID for field: {0}")]
+    InvalidUuid(String),
 }

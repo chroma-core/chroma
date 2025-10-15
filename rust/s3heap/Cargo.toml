@@ -18,6 +18,7 @@ uuid = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-storage = { workspace = true }
+chroma-sysdb = { workspace = true }
 wal3 = { workspace = true }
 
 [dev-dependencies]

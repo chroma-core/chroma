@@ -228,7 +228,7 @@ fn triggerable_clone() {
         partitioning: Uuid::new_v4().into(),
         scheduling: Uuid::new_v4().into(),
     };
-    let cloned = original.clone();
+    let cloned = original;
     assert_eq!(original, cloned);
     assert_eq!(original.partitioning, cloned.partitioning);
     assert_eq!(original.scheduling, cloned.scheduling);

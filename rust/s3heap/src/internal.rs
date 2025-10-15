@@ -67,7 +67,7 @@ fn get_string_column<'a>(
 ///     nonce: Uuid::new_v4(),
 /// };
 /// ```
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd)]
 pub struct HeapItem {
     /// The triggerable task to be executed
     pub trigger: Triggerable,
@@ -154,9 +154,24 @@ impl Internal {
 
         let entries = entries.to_vec();
         (|| async {
-            let (mut on_s3, e_tag) = self.load_bucket_or_empty(bucket).await?;
-            on_s3.extend(entries.iter().cloned());
-            self.store_bucket(bucket, &on_s3, e_tag).await
+            let (on_s3, e_tag) = self.load_bucket_or_empty(bucket).await?;
+            let triggerables = on_s3
+                .iter()
+                .map(|x| (x.trigger, x.nonce))
+                .collect::<Vec<_>>();
+            let schedules = self.heap_scheduler.are_done(&triggerables).await?;
+            let mut results = Vec::with_capacity(on_s3.len().saturating_add(entries.len()));
+            for (item, is_done) in on_s3.into_iter().zip(schedules) {
+                if !is_done {
+                    results.push(item)
+                }
+            }
+            results.extend(entries.clone());
+            results.sort();
+            results.reverse();
+            results.dedup_by_key(|x| x.trigger);
+            results.reverse();
+            self.store_bucket(bucket, &results, e_tag).await
         })
         .retry(backoff)
         .await
@@ -562,15 +577,9 @@ mod tests {
         };
         let nonce = Uuid::new_v4();
 
-        let item1 = HeapItem {
-            trigger: trigger.clone(),
-            nonce,
-        };
+        let item1 = HeapItem { trigger, nonce };
 
-        let item2 = HeapItem {
-            trigger: trigger.clone(),
-            nonce,
-        };
+        let item2 = HeapItem { trigger, nonce };
 
         assert_eq!(item1, item2);
         assert_eq!(item1.trigger, trigger);

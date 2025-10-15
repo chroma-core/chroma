@@ -25,27 +25,27 @@ async fn test_k8s_integration_05_peek_all_items() {
     let now = Utc::now();
     let time = test_time_at_minute_offset(now, 5);
     let schedule1 = Schedule {
-        triggerable: item1.clone(),
+        triggerable: item1,
         next_scheduled: time,
         nonce: test_nonce(1),
     };
     let schedule2 = Schedule {
-        triggerable: item2.clone(),
+        triggerable: item2,
         next_scheduled: time,
         nonce: test_nonce(2),
     };
     let schedule3 = Schedule {
-        triggerable: item3.clone(),
+        triggerable: item3,
         next_scheduled: time,
         nonce: test_nonce(3),
     };
     let schedule4 = Schedule {
-        triggerable: item4.clone(),
+        triggerable: item4,
         next_scheduled: time,
         nonce: test_nonce(4),
     };
     let schedule5 = Schedule {
-        triggerable: item5.clone(),
+        triggerable: item5,
         next_scheduled: time,
         nonce: test_nonce(5),
     };
@@ -102,27 +102,27 @@ async fn test_k8s_integration_05_peek_with_filter() {
     let now = Utc::now();
     let time = test_time_at_minute_offset(now, 5);
     let schedule1 = Schedule {
-        triggerable: item1.clone(),
+        triggerable: item1,
         next_scheduled: time,
         nonce: test_nonce(1),
     };
     let schedule2 = Schedule {
-        triggerable: item2.clone(),
+        triggerable: item2,
         next_scheduled: time,
         nonce: test_nonce(2),
     };
     let schedule3 = Schedule {
-        triggerable: item3.clone(),
+        triggerable: item3,
         next_scheduled: time,
         nonce: test_nonce(3),
     };
     let schedule4 = Schedule {
-        triggerable: item4.clone(),
+        triggerable: item4,
         next_scheduled: time,
         nonce: test_nonce(4),
     };
     let schedule5 = Schedule {
-        triggerable: item5.clone(),
+        triggerable: item5,
         next_scheduled: time,
         nonce: test_nonce(5),
     };
@@ -209,17 +209,17 @@ async fn test_k8s_integration_05_peek_filters_completed() {
     let nonce3 = test_nonce(3);
 
     let schedule1 = Schedule {
-        triggerable: item1.clone(),
+        triggerable: item1,
         next_scheduled: time,
         nonce: nonce1,
     };
     let schedule2 = Schedule {
-        triggerable: item2.clone(),
+        triggerable: item2,
         next_scheduled: time,
         nonce: nonce2,
     };
     let schedule3 = Schedule {
-        triggerable: item3.clone(),
+        triggerable: item3,
         next_scheduled: time,
         nonce: nonce3,
     };
@@ -278,22 +278,22 @@ async fn test_k8s_integration_05_peek_across_buckets() {
     let time2 = test_time_at_minute_offset(now, 10);
 
     let schedule1 = Schedule {
-        triggerable: item1.clone(),
+        triggerable: item1,
         next_scheduled: time1,
         nonce: test_nonce(1),
     };
     let schedule2 = Schedule {
-        triggerable: item2.clone(),
+        triggerable: item2,
         next_scheduled: time1,
         nonce: test_nonce(2),
     };
     let schedule3 = Schedule {
-        triggerable: item3.clone(),
+        triggerable: item3,
         next_scheduled: time2,
         nonce: test_nonce(3),
     };
     let schedule4 = Schedule {
-        triggerable: item4.clone(),
+        triggerable: item4,
         next_scheduled: time2,
         nonce: test_nonce(4),
     };

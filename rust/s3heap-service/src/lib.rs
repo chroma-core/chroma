@@ -12,20 +12,19 @@ use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
+use chroma_sysdb::{SysDb, SysDbConfig};
 use chroma_tracing::OtelFilter;
 use chroma_tracing::OtelFilterLevel;
 use chroma_types::chroma_proto::heap_tender_service_server::{
     HeapTenderService, HeapTenderServiceServer,
 };
 use chroma_types::chroma_proto::{HeapSummaryRequest, HeapSummaryResponse};
-use chroma_types::{dirty_log_path_from_hostname, CollectionUuid, DirtyMarker};
+use chroma_types::{dirty_log_path_from_hostname, CollectionUuid, DirtyMarker, ScheduleEntry};
+use s3heap::{Configuration, DummyScheduler, Error, HeapWriter, Schedule, Triggerable};
 use wal3::{
     Cursor, CursorName, CursorStore, CursorStoreOptions, LogPosition, LogReader, LogReaderOptions,
     Witness,
 };
-
-use s3heap::DummyScheduler;
-use s3heap::{Configuration, Error, HeapWriter};
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
 
@@ -46,26 +45,58 @@ pub static HEAP_TENDER_CURSOR_NAME: CursorName =
 
 /// Manages heap compaction by reading dirty logs and coordinating with HeapWriter.
 pub struct HeapTender {
+    #[allow(dead_code)]
+    sysdb: SysDb,
     reader: LogReader,
     cursor: CursorStore,
-    _writer: HeapWriter,
+    writer: HeapWriter,
 }
 
 impl HeapTender {
     /// Creates a new HeapTender.
-    pub fn new(reader: LogReader, cursor: CursorStore, writer: HeapWriter) -> Self {
+    pub fn new(sysdb: SysDb, reader: LogReader, cursor: CursorStore, writer: HeapWriter) -> Self {
         Self {
+            sysdb,
             reader,
             cursor,
-            _writer: writer,
+            writer,
         }
     }
 
     /// Tends to the heap by reading and coalescing the dirty log, then updating the cursor.
     pub async fn tend_to_heap(&self) -> Result<(), Error> {
         let (witness, cursor, tended) = self.read_and_coalesce_dirty_log().await?;
-        // TODO(rescrv):  Do something with tended and update the cursor iff tended is false.
-        _ = tended;
+        if !tended.is_empty() {
+            let collection_ids = tended.iter().map(|t| t.0).collect::<Vec<_>>();
+            let scheduled = self
+                .sysdb
+                .clone()
+                .peek_schedule_by_collection_id(&collection_ids)
+                .await?;
+            let triggerables: Vec<Option<Schedule>> = scheduled
+                .into_iter()
+                .map(|s: ScheduleEntry| -> Result<_, Error> {
+                    let triggerable = Triggerable {
+                        partitioning: s3heap::UnitOfPartitioningUuid::new(s.collection_id.0),
+                        scheduling: s3heap::UnitOfSchedulingUuid::new(s.task_id),
+                    };
+                    if let Some(next_scheduled) = s.when_to_run {
+                        let schedule = Schedule {
+                            triggerable,
+                            next_scheduled,
+                            nonce: s.task_run_nonce,
+                        };
+                        Ok(Some(schedule))
+                    } else {
+                        Ok(None)
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let triggerables: Vec<Schedule> = triggerables.into_iter().flatten().collect();
+            if !triggerables.is_empty() {
+                self.writer.push(&triggerables).await?;
+            }
+        }
         if let Some(witness) = witness.as_ref() {
             self.cursor
                 .save(&HEAP_TENDER_CURSOR_NAME, &cursor, witness)
@@ -243,6 +274,13 @@ impl Configurable<HeapTenderServerConfig> for HeapTenderServer {
         config: &HeapTenderServerConfig,
         registry: &chroma_config::registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        match &config.sysdb {
+            chroma_sysdb::SysDbConfig::Grpc(_) => {}
+            chroma_sysdb::SysDbConfig::Sqlite(_) => {
+                panic!("Expected grpc sysdb config, got sqlite sysdb config")
+            }
+        };
+        let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
         let storage = Storage::try_from_config(&config.storage, registry).await?;
         let dirty_log_prefix = dirty_log_path_from_hostname(&config.my_member_id);
         let reader = LogReader::new(
@@ -258,12 +296,13 @@ impl Configurable<HeapTenderServerConfig> for HeapTenderServer {
         );
         let heap_prefix = heap_path_from_hostname(&config.my_member_id);
         let scheduler = Arc::new(DummyScheduler) as _;
-        let writer = HeapWriter::new(storage, heap_prefix, scheduler)
+        let writer = HeapWriter::new(storage, heap_prefix, Arc::clone(&scheduler))
             .map_err(|e| -> Box<dyn chroma_error::ChromaError> { Box::new(e) })?;
         let tender = Arc::new(HeapTender {
+            sysdb,
             reader,
             cursor,
-            _writer: writer,
+            writer,
         });
         Ok(Self {
             config: config.clone(),
@@ -413,6 +452,9 @@ pub struct HeapTenderServerConfig {
     /// Optional OpenTelemetry configuration for tracing.
     #[serde(default)]
     pub opentelemetry: Option<OpenTelemetryConfig>,
+    /// Configuration for the sysdb backend.
+    #[serde(default = "HeapTenderServerConfig::default_sysdb_config")]
+    pub sysdb: SysDbConfig,
     /// Configuration for the S3 storage backend.
     #[serde(default)]
     pub storage: StorageConfig,
@@ -465,6 +507,10 @@ impl HeapTenderServerConfig {
         Duration::from_secs(10)
     }
 
+    fn default_sysdb_config() -> SysDbConfig {
+        SysDbConfig::Grpc(Default::default())
+    }
+
     fn default_grpc_shutdown_grace_period() -> Duration {
         Duration::from_secs(1)
     }
@@ -476,6 +522,7 @@ impl Default for HeapTenderServerConfig {
             port: HeapTenderServerConfig::default_port(),
             my_member_id: HeapTenderServerConfig::default_my_member_id(),
             opentelemetry: None,
+            sysdb: HeapTenderServerConfig::default_sysdb_config(),
             storage: StorageConfig::default(),
             reader: LogReaderOptions::default(),
             cursor: CursorStoreOptions::default(),

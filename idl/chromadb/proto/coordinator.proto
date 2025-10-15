@@ -570,6 +570,14 @@ message DeleteTaskResponse {
   bool success = 1;
 }
 
+message AdvanceTaskRequest {
+  optional string collection_id = 1;
+  optional string task_id = 2;
+  optional string task_run_nonce = 3;
+}
+
+message AdvanceTaskResponse {}
+
 message Operator {
   string id = 1;
   string name = 2;
@@ -581,6 +589,21 @@ message GetOperatorsRequest {
 
 message GetOperatorsResponse {
   repeated Operator operators = 1;
+}
+
+message PeekScheduleByCollectionIdRequest {
+  repeated string collection_id = 1;
+}
+
+message ScheduleEntry {
+  optional string collection_id = 1;
+  optional string task_id = 2;
+  optional string task_run_nonce = 3;
+  optional uint64 when_to_run = 4;
+}
+
+message PeekScheduleByCollectionIdResponse {
+  repeated ScheduleEntry schedule = 1;
 }
 
 service SysDB {
@@ -623,5 +646,7 @@ service SysDB {
   rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse) {}
   rpc GetTaskByName(GetTaskByNameRequest) returns (GetTaskByNameResponse) {}
   rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse) {}
+  rpc AdvanceTask(AdvanceTaskRequest) returns (AdvanceTaskResponse) {}
   rpc GetOperators(GetOperatorsRequest) returns (GetOperatorsResponse) {}
+  rpc PeekScheduleByCollectionId(PeekScheduleByCollectionIdRequest) returns (PeekScheduleByCollectionIdResponse) {}
 }
