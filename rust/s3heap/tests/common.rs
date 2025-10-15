@@ -90,9 +90,12 @@ impl HeapScheduler for MockHeapScheduler {
             .collect())
     }
 
-    async fn get_schedules(&self, ids: &[Uuid]) -> Result<Vec<Option<Schedule>>, Error> {
+    async fn get_schedules(&self, ids: &[Uuid]) -> Result<Vec<Schedule>, Error> {
         let schedules = self.schedules.lock();
-        Ok(ids.iter().map(|id| schedules.get(id).cloned()).collect())
+        Ok(ids
+            .iter()
+            .filter_map(|id| schedules.get(id).cloned())
+            .collect())
     }
 }
 
@@ -201,7 +204,10 @@ pub async fn verify_bucket_count(
     let buckets = storage
         .list_prefix(prefix, GetOptions::default())
         .await
-        .unwrap();
+        .unwrap()
+        .into_iter()
+        .filter(|x| !x.ends_with("/INIT"))
+        .collect::<Vec<_>>();
     assert_eq!(buckets.len(), expected_count, "{}", message);
     buckets
 }

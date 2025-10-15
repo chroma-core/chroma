@@ -22,6 +22,7 @@ chroma-sysdb = { workspace = true }
 chroma-tracing = { workspace = true, features = ["grpc"] }
 chroma-types = { workspace = true }
 s3heap = { workspace = true }
+uuid = { workspace = true }
 wal3 = { workspace = true }
 
 [dev-dependencies]

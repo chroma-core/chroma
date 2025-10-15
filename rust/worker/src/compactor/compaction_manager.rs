@@ -432,6 +432,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             my_ip,
             log.clone(),
             sysdb.clone(),
+            storage.clone(),
             policy,
             max_concurrent_jobs,
             min_compaction_size,
@@ -712,6 +713,7 @@ mod tests {
     use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
+    use chroma_storage::s3_client_for_test_with_new_bucket;
     use chroma_sysdb::TestSysDb;
     use chroma_system::{Dispatcher, DispatcherConfig};
     use chroma_types::SegmentUuid;
@@ -901,6 +903,7 @@ mod tests {
             my_member.member_id.clone(),
             log.clone(),
             sysdb.clone(),
+            storage.clone(),
             Box::new(LasCompactionTimeSchedulerPolicy {}),
             max_concurrent_jobs,
             min_compaction_size,
@@ -1016,11 +1019,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_list_dead_jobs() {
+    async fn test_k8s_integration_list_dead_jobs() {
         // Create a simple system for testing
         let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig::default());
         let _dispatcher_handle = system.start_component(dispatcher);
+
+        let storage = s3_client_for_test_with_new_bucket().await;
 
         // Create test scheduler with dead jobs
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
@@ -1030,6 +1035,7 @@ mod tests {
             "test-member".to_string(),
             Log::InMemory(InMemoryLog::new()),
             SysDb::Test(TestSysDb::new()),
+            storage,
             Box::new(LasCompactionTimeSchedulerPolicy {}),
             10,
             100,

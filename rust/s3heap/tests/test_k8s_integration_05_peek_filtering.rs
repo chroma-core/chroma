@@ -61,6 +61,7 @@ async fn test_k8s_integration_05_peek_all_items() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer
         .push(&[
@@ -78,10 +79,11 @@ async fn test_k8s_integration_05_peek_all_items() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
 
     // Verify all items are present
-    let all_items = reader.peek(|_| true, Limits::default()).await.unwrap();
+    let all_items = reader.peek(|_, _| true, Limits::default()).await.unwrap();
     assert_eq!(all_items.len(), 5, "Should have all 5 items");
 }
 
@@ -138,6 +140,7 @@ async fn test_k8s_integration_05_peek_with_filter() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer
         .push(&[
@@ -155,6 +158,7 @@ async fn test_k8s_integration_05_peek_with_filter() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
 
     // Filter to only get items 2 and 4 by their scheduling UUIDs
@@ -162,7 +166,7 @@ async fn test_k8s_integration_05_peek_with_filter() {
     let target_uuid4 = *item4.scheduling.as_uuid();
     let filtered_items = reader
         .peek(
-            |triggerable| {
+            |triggerable, _| {
                 let uuid = *triggerable.scheduling.as_uuid();
                 uuid == target_uuid2 || uuid == target_uuid4
             },
@@ -178,7 +182,7 @@ async fn test_k8s_integration_05_peek_with_filter() {
     );
     let returned_uuids: Vec<_> = filtered_items
         .iter()
-        .map(|item| *item.trigger.scheduling.as_uuid())
+        .map(|(_bucket, item)| *item.trigger.scheduling.as_uuid())
         .collect();
     assert!(
         returned_uuids.contains(&target_uuid2),
@@ -238,6 +242,7 @@ async fn test_k8s_integration_05_peek_filters_completed() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer
         .push(&[schedule1.clone(), schedule2.clone(), schedule3.clone()])
@@ -250,11 +255,12 @@ async fn test_k8s_integration_05_peek_filters_completed() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
-    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
+    let items = reader.peek(|_, _| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 1, "Should only return incomplete items");
     assert_eq!(
-        items[0].trigger.scheduling.as_uuid(),
+        items[0].1.trigger.scheduling.as_uuid(),
         item2.scheduling.as_uuid(),
         "Should be the pending task"
     );
@@ -308,6 +314,7 @@ async fn test_k8s_integration_05_peek_across_buckets() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer
         .push(&[
@@ -324,9 +331,10 @@ async fn test_k8s_integration_05_peek_across_buckets() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
 
     // Verify all items across buckets
-    let all_items = reader.peek(|_| true, Limits::default()).await.unwrap();
+    let all_items = reader.peek(|_, _| true, Limits::default()).await.unwrap();
     assert_eq!(all_items.len(), 4, "Should find all items across buckets");
 }

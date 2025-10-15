@@ -34,6 +34,7 @@ async fn test_k8s_integration_04_prune_completed_items() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer
         .push(&[schedule1.clone(), schedule2.clone(), schedule3.clone()])
@@ -55,15 +56,16 @@ async fn test_k8s_integration_04_prune_completed_items() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
-    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
+    let items = reader.peek(|_, _| true, Limits::default()).await.unwrap();
     assert_eq!(
         items.len(),
         1,
         "Only incomplete item should remain after pruning"
     );
     assert_eq!(
-        items[0].trigger.scheduling.as_uuid(),
+        items[0].1.trigger.scheduling.as_uuid(),
         schedule2.triggerable.scheduling.as_uuid(),
         "Should be the incomplete item"
     );
@@ -93,6 +95,7 @@ async fn test_k8s_integration_04_prune_empty_bucket() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer
         .push(&[schedule1.clone(), schedule2.clone()])
@@ -117,8 +120,9 @@ async fn test_k8s_integration_04_prune_empty_bucket() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
-    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
+    let items = reader.peek(|_, _| true, Limits::default()).await.unwrap();
     assert_eq!(
         items.len(),
         0,
@@ -160,6 +164,7 @@ async fn test_k8s_integration_04_prune_multiple_buckets() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer
         .push(&[
@@ -186,13 +191,14 @@ async fn test_k8s_integration_04_prune_multiple_buckets() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
-    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
+    let items = reader.peek(|_, _| true, Limits::default()).await.unwrap();
     assert_eq!(items.len(), 2, "Two incomplete items should remain");
 
     let uuids: Vec<_> = items
         .iter()
-        .map(|i| *i.trigger.scheduling.as_uuid())
+        .map(|(_bucket, item)| *item.trigger.scheduling.as_uuid())
         .collect();
     assert!(
         uuids.contains(schedule2.triggerable.scheduling.as_uuid()),

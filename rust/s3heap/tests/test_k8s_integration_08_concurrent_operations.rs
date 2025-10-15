@@ -41,6 +41,7 @@ async fn test_k8s_integration_08_concurrent_pushes() {
             prefix.to_string().clone(),
             scheduler.clone(),
         )
+        .await
         .unwrap();
         let schedules: Vec<_> = (0..items_per_writer)
             .map(|j| {
@@ -68,8 +69,9 @@ async fn test_k8s_integration_08_concurrent_pushes() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
-    let items = reader.peek(|_| true, Limits::default()).await.unwrap();
+    let items = reader.peek(|_, _| true, Limits::default()).await.unwrap();
     assert_eq!(
         items.len(),
         (num_writers * items_per_writer) as usize,
@@ -105,6 +107,7 @@ async fn test_k8s_integration_08_concurrent_read_write() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer.push(&initial_schedules).await.unwrap();
 
@@ -119,6 +122,7 @@ async fn test_k8s_integration_08_concurrent_read_write() {
             prefix.to_string().clone(),
             scheduler.clone(),
         )
+        .await
         .unwrap();
         let scheduler_clone = scheduler.clone();
 
@@ -148,10 +152,11 @@ async fn test_k8s_integration_08_concurrent_read_write() {
             prefix.to_string().clone(),
             scheduler.clone(),
         )
+        .await
         .unwrap();
 
         read_handles.push(tokio::spawn(async move {
-            let items = reader.peek(|_| true, Limits::default()).await?;
+            let items = reader.peek(|_, _| true, Limits::default()).await?;
             // Items count will vary as writes complete
             assert!(items.len() >= 5, "Should have at least initial items");
             Ok::<_, s3heap::Error>(items.len())
@@ -172,8 +177,9 @@ async fn test_k8s_integration_08_concurrent_read_write() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
-    let final_items = reader.peek(|_| true, Limits::default()).await.unwrap();
+    let final_items = reader.peek(|_, _| true, Limits::default()).await.unwrap();
     assert_eq!(
         final_items.len(),
         20,
@@ -214,6 +220,7 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer.push(&initial_schedules).await.unwrap();
 
@@ -233,6 +240,7 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     let scheduler_clone = scheduler.clone();
     let write_handle = tokio::spawn(async move {
@@ -261,8 +269,9 @@ async fn test_k8s_integration_08_concurrent_prune_push() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
-    let final_items = reader.peek(|_| true, Limits::default()).await.unwrap();
+    let final_items = reader.peek(|_, _| true, Limits::default()).await.unwrap();
 
     // Should have: 5 incomplete initial items (odds) + 5 new items
     assert!(

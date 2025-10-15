@@ -1,18 +1,22 @@
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_log::{CollectionInfo, CollectionRecord, Log};
 use chroma_memberlist::memberlist_provider::Memberlist;
+use chroma_storage::Storage;
 use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_types::CollectionUuid;
 use figment::providers::Env;
 use figment::Figment;
+use s3heap_service::SysDbScheduler;
 use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::compactor::scheduler_policy::SchedulerPolicy;
+use crate::compactor::tasks::TaskHeapReader;
 use crate::compactor::types::CompactionJob;
 
 #[derive(Debug, Clone)]
@@ -97,6 +101,7 @@ pub(crate) struct Scheduler {
     dead_jobs: HashSet<CollectionUuid>,
     max_failure_count: u8,
     metrics: SchedulerMetrics,
+    tasks: TaskHeapReader,
 }
 
 #[derive(Deserialize, Debug)]
@@ -110,6 +115,7 @@ impl Scheduler {
         my_ip: String,
         log: Log,
         sysdb: SysDb,
+        storage: Storage,
         policy: Box<dyn SchedulerPolicy>,
         max_concurrent_jobs: usize,
         min_compaction_size: usize,
@@ -118,6 +124,10 @@ impl Scheduler {
         job_expiry_seconds: u64,
         max_failure_count: u8,
     ) -> Scheduler {
+        let heap_scheduler =
+            Arc::new(SysDbScheduler::new(sysdb.clone())) as Arc<dyn s3heap::HeapScheduler>;
+        let tasks = TaskHeapReader::new(storage, heap_scheduler);
+
         Scheduler {
             my_member_id: my_ip,
             log,
@@ -138,6 +148,7 @@ impl Scheduler {
             max_failure_count,
             dead_jobs: HashSet::new(),
             metrics: SchedulerMetrics::default(),
+            tasks,
         }
     }
 
@@ -476,6 +487,21 @@ impl Scheduler {
         // Recompute disabled list.
         self.recompute_disabled_collections();
         let collections = self.get_collections_with_new_data().await;
+        let tasks = self
+            .tasks
+            .get_tasks_scheduled_for_execution(
+                s3heap::Limits::default().with_items(self.max_concurrent_jobs),
+            )
+            .await;
+        for task in tasks {
+            tracing::info!(
+                "SCHEDULING TASKS FOR {:?} {:?} {:?} {:?}",
+                task.bucket,
+                task.collection_id,
+                task.task_id,
+                task.nonce,
+            );
+        }
         if collections.is_empty() {
             return;
         }
@@ -505,11 +531,14 @@ mod tests {
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
+    use chroma_storage::s3_client_for_test_with_new_bucket;
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord};
 
     #[tokio::test]
-    async fn test_scheduler() {
+    async fn test_k8s_integration_scheduler() {
+        let storage = s3_client_for_test_with_new_bucket().await;
+
         let mut log = Log::InMemory(InMemoryLog::new());
         let in_memory_log = match log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
@@ -609,6 +638,7 @@ mod tests {
             my_member.member_id.clone(),
             log,
             sysdb.clone(),
+            storage,
             scheduler_policy,
             max_concurrent_jobs,
             1,
@@ -737,7 +767,9 @@ mod tests {
 
     #[tokio::test]
     #[should_panic(expected = "is less than offset")]
-    async fn test_scheduler_panic() {
+    async fn test_k8s_integration_scheduler_panic() {
+        let storage = s3_client_for_test_with_new_bucket().await;
+
         let mut log = Log::InMemory(InMemoryLog::new());
         let in_memory_log = match log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
@@ -862,6 +894,7 @@ mod tests {
             my_member.member_id.clone(),
             log,
             sysdb.clone(),
+            storage,
             scheduler_policy,
             max_concurrent_jobs,
             1,

@@ -5,16 +5,40 @@ use chroma_sysdb::{SysDb, TestSysDb};
 use chroma_types::{CollectionUuid, DirtyMarker};
 use wal3::{CursorStore, CursorStoreOptions, LogPosition, LogReader, LogReaderOptions};
 
-use s3heap::{DummyScheduler, Error, HeapWriter};
+use s3heap::HeapWriter;
 use s3heap_service::{HeapTender, HEAP_TENDER_CURSOR_NAME};
 
-fn test_heap_tender(storage: Storage, test_id: &str) -> HeapTender {
-    let dirty_log_prefix = format!("test-dirty-log-{}", test_id);
-    let heap_prefix = format!("test-heap-{}", test_id);
-    create_heap_tender(storage, &dirty_log_prefix, &heap_prefix)
+// Dummy scheduler for testing purposes
+struct DummyScheduler;
+
+#[async_trait::async_trait]
+impl s3heap::HeapScheduler for DummyScheduler {
+    async fn are_done(
+        &self,
+        items: &[(s3heap::Triggerable, uuid::Uuid)],
+    ) -> Result<Vec<bool>, s3heap::Error> {
+        Ok(vec![false; items.len()])
+    }
+
+    async fn get_schedules(
+        &self,
+        _ids: &[uuid::Uuid],
+    ) -> Result<Vec<s3heap::Schedule>, s3heap::Error> {
+        Ok(vec![])
+    }
 }
 
-fn create_heap_tender(storage: Storage, dirty_log_prefix: &str, heap_prefix: &str) -> HeapTender {
+async fn test_heap_tender(storage: Storage, test_id: &str) -> HeapTender {
+    let dirty_log_prefix = format!("test-dirty-log-{}", test_id);
+    let heap_prefix = format!("test-heap-{}", test_id);
+    create_heap_tender(storage, &dirty_log_prefix, &heap_prefix).await
+}
+
+async fn create_heap_tender(
+    storage: Storage,
+    dirty_log_prefix: &str,
+    heap_prefix: &str,
+) -> HeapTender {
     let sysdb = SysDb::Test(TestSysDb::new());
     let reader = LogReader::new(
         LogReaderOptions::default(),
@@ -28,14 +52,16 @@ fn create_heap_tender(storage: Storage, dirty_log_prefix: &str, heap_prefix: &st
         "test-tender".to_string(),
     );
     let scheduler = Arc::new(DummyScheduler) as _;
-    let writer = HeapWriter::new(storage, heap_prefix.to_string(), Arc::clone(&scheduler)).unwrap();
+    let writer = HeapWriter::new(storage, heap_prefix.to_string(), Arc::clone(&scheduler))
+        .await
+        .unwrap();
     HeapTender::new(sysdb, reader, cursor, writer)
 }
 
 #[tokio::test]
 async fn test_k8s_integration_empty_dirty_log_returns_empty_list() {
     let storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
-    let tender = test_heap_tender(storage, "empty");
+    let tender = test_heap_tender(storage, "empty").await;
 
     let result = tender.read_and_coalesce_dirty_log().await;
     if let Err(ref e) = result {
@@ -75,7 +101,7 @@ async fn test_k8s_integration_single_mark_dirty_returns_collection() {
     let marker_bytes = serde_json::to_vec(&marker).unwrap();
     log_writer.append(marker_bytes).await.unwrap();
 
-    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix);
+    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix).await;
 
     let result = tender.read_and_coalesce_dirty_log().await;
     assert!(result.is_ok());
@@ -131,7 +157,7 @@ async fn test_k8s_integration_multiple_markers_same_collection_keeps_max() {
         log_writer.append(marker_bytes).await.unwrap();
     }
 
-    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix);
+    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix).await;
 
     let result = tender.read_and_coalesce_dirty_log().await;
     assert!(result.is_ok());
@@ -181,7 +207,7 @@ async fn test_k8s_integration_reinsert_count_nonzero_filters_marker() {
         log_writer.append(marker_bytes).await.unwrap();
     }
 
-    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix);
+    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix).await;
 
     let result = tender.read_and_coalesce_dirty_log().await;
     assert!(result.is_ok());
@@ -235,7 +261,7 @@ async fn test_k8s_integration_purge_and_cleared_markers_ignored() {
         log_writer.append(marker_bytes).await.unwrap();
     }
 
-    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix);
+    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix).await;
 
     let result = tender.read_and_coalesce_dirty_log().await;
     assert!(result.is_ok());
@@ -280,7 +306,7 @@ async fn test_k8s_integration_multiple_collections_all_processed() {
         log_writer.append(marker_bytes).await.unwrap();
     }
 
-    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix);
+    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix).await;
 
     let result = tender.read_and_coalesce_dirty_log().await;
     assert!(result.is_ok());
@@ -320,7 +346,7 @@ async fn test_k8s_integration_cursor_initialized_on_first_run() {
     let marker_bytes = serde_json::to_vec(&marker).unwrap();
     log_writer.append(marker_bytes).await.unwrap();
 
-    let tender = create_heap_tender(storage.clone(), &dirty_log_prefix, &heap_prefix);
+    let tender = create_heap_tender(storage.clone(), &dirty_log_prefix, &heap_prefix).await;
 
     let result = tender.tend_to_heap().await;
     assert!(result.is_ok());
@@ -366,7 +392,7 @@ async fn test_k8s_integration_cursor_advances_on_subsequent_runs() {
         .await
         .unwrap();
 
-    let tender = create_heap_tender(storage.clone(), &dirty_log_prefix, &heap_prefix);
+    let tender = create_heap_tender(storage.clone(), &dirty_log_prefix, &heap_prefix).await;
 
     tender.tend_to_heap().await.unwrap();
 
@@ -430,7 +456,7 @@ async fn test_k8s_integration_cursor_not_updated_when_no_new_data() {
         .await
         .unwrap();
 
-    let tender = create_heap_tender(storage.clone(), &dirty_log_prefix, &heap_prefix);
+    let tender = create_heap_tender(storage.clone(), &dirty_log_prefix, &heap_prefix).await;
 
     tender.tend_to_heap().await.unwrap();
 
@@ -470,11 +496,14 @@ async fn test_k8s_integration_invalid_json_in_dirty_log_fails() {
     let invalid_json = b"not valid json at all".to_vec();
     log_writer.append(invalid_json).await.unwrap();
 
-    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix);
+    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix).await;
 
     let result = tender.read_and_coalesce_dirty_log().await;
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), Error::Json(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        s3heap_service::Error::Json(_)
+    ));
 }
 
 #[tokio::test]
@@ -514,7 +543,7 @@ async fn test_k8s_integration_handles_empty_markers_after_filtering() {
             .unwrap();
     }
 
-    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix);
+    let tender = create_heap_tender(storage, &dirty_log_prefix, &heap_prefix).await;
 
     let result = tender.read_and_coalesce_dirty_log().await;
     assert!(result.is_ok());

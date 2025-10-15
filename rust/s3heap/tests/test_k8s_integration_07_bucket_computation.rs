@@ -55,6 +55,7 @@ async fn test_k8s_integration_07_bucket_rounding() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer
         .push(&[schedule1, schedule2, schedule3, schedule4])
@@ -65,7 +66,10 @@ async fn test_k8s_integration_07_bucket_rounding() {
     let buckets = storage
         .list_prefix(prefix, GetOptions::default())
         .await
-        .unwrap();
+        .unwrap()
+        .into_iter()
+        .filter(|x| !x.ends_with("INIT"))
+        .collect::<Vec<_>>();
     assert_eq!(
         buckets.len(),
         1,
@@ -106,6 +110,7 @@ async fn test_k8s_integration_07_bucket_boundaries() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer.push(&[schedule1, schedule2]).await.unwrap();
 
@@ -113,7 +118,10 @@ async fn test_k8s_integration_07_bucket_boundaries() {
     let buckets = storage
         .list_prefix(prefix, GetOptions::default())
         .await
-        .unwrap();
+        .unwrap()
+        .into_iter()
+        .filter(|x| !x.ends_with("INIT"))
+        .collect::<Vec<_>>();
     assert_eq!(
         buckets.len(),
         2,
@@ -146,6 +154,7 @@ async fn test_k8s_integration_07_bucket_path_format() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer.push(&[schedule]).await.unwrap();
 
@@ -153,7 +162,10 @@ async fn test_k8s_integration_07_bucket_path_format() {
     let buckets = storage
         .list_prefix(prefix, GetOptions::default())
         .await
-        .unwrap();
+        .unwrap()
+        .into_iter()
+        .filter(|x| !x.ends_with("INIT"))
+        .collect::<Vec<_>>();
 
     assert_eq!(buckets.len(), 1);
     let bucket_path = &buckets[0];
@@ -195,6 +207,7 @@ async fn test_k8s_integration_07_multiple_buckets_ordering() {
         prefix.to_string().clone(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     writer.push(&schedules).await.unwrap();
 
@@ -202,7 +215,10 @@ async fn test_k8s_integration_07_multiple_buckets_ordering() {
     let buckets = storage
         .list_prefix(prefix, GetOptions::default())
         .await
-        .unwrap();
+        .unwrap()
+        .into_iter()
+        .filter(|x| !x.ends_with("INIT"))
+        .collect::<Vec<_>>();
     assert_eq!(
         buckets.len(),
         5,

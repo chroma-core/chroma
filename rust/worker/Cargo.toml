@@ -28,6 +28,7 @@ arrow = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 async-trait = { workspace = true }
+chrono = { workspace = true }
 roaring = { workspace = true }
 figment = { workspace = true }
 futures = { workspace = true }
@@ -61,6 +62,8 @@ chroma-system = { workspace = true }
 chroma-sysdb = { workspace = true }
 chroma-types = { workspace = true }
 chroma-jemalloc-pprof-server = { workspace = true }
+s3heap = { workspace = true }
+s3heap-service = { workspace = true }
 
 fastrace = "0.7"
 fastrace-opentelemetry = "0.8"
