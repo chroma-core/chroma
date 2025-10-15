@@ -579,15 +579,8 @@ pub trait HeapScheduler: Send + Sync {
     /// * `Ok(None)` if no schedules exist for the task
     /// * `Err` if there was an error retrieving the schedule or if multiple schedules exist
     async fn get_schedule(&self, id: Uuid) -> Result<Option<Schedule>, Error> {
-        let results = self.get_schedules(&[id]).await?;
-        match results.len() {
-            0 => Ok(None),
-            1 => Ok(Some(results.into_iter().next().unwrap())),
-            n => Err(Error::Internal(format!(
-                "get_schedules returned {} schedules for 1 id (expected 0 or 1)",
-                n
-            ))),
-        }
+        let mut results = self.get_schedules(&[id]).await?;
+        Ok(results.pop())
     }
 
     /// Get the schedules for multiple tasks by their IDs.
@@ -699,14 +692,17 @@ impl HeapWriter {
         validate_prefix(&prefix)?;
 
         let init_path = format!("{}/INIT", prefix);
+        let internal = Internal::new(
+            storage.clone(),
+            prefix,
+            heap_scheduler,
+            config.backoff.clone(),
+        );
         storage
             .put_bytes(&init_path, vec![], chroma_storage::PutOptions::default())
             .await?;
 
-        Ok(Self {
-            internal: Internal::new(storage, prefix, heap_scheduler, config.backoff.clone()),
-            config,
-        })
+        Ok(Self { config, internal })
     }
 
     /// Schedule a batch of tasks in the heap.

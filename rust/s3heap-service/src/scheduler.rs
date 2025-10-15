@@ -45,7 +45,7 @@ impl HeapScheduler for SysDbScheduler {
                 results.push(true);
                 continue;
             };
-            results.push(schedule.when_to_run.is_some() && schedule.task_run_nonce != *nonce);
+            results.push(schedule.task_run_nonce != *nonce);
         }
         Ok(results)
     }
