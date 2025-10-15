@@ -114,14 +114,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             min_records_for_task,
         } => {
             let params_json: serde_json::Value = serde_json::from_str(&params)?;
-            let params_struct = match params_json {
-                serde_json::Value::Object(map) => Some(prost_types::Struct {
-                    fields: map
-                        .into_iter()
-                        .map(|(k, v)| (k, json_to_prost_value(v)))
-                        .collect(),
-                }),
-                _ => None,
+            let params_value = json_to_prost_value(params_json);
+            let params_struct = match params_value.kind {
+                Some(Kind::StructValue(s)) => Some(s),
+                _ => {
+                    return Err("params must be a JSON object".into());
+                }
             };
 
             let request = chroma_proto::CreateTaskRequest {
