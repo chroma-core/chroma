@@ -75,6 +75,8 @@ async fn main() {
     let mut next = Duration::ZERO;
     loop {
         let gap = interarrival_duration(options.target_throughput as f64)(&mut guac);
+        // This is so that we'll put it approximately a minute in the future on average, but with
+        // an expontential long tail.
         let future = interarrival_duration(1.0 / 60.0)(&mut guac);
         next += gap;
         let elapsed = start.elapsed();
