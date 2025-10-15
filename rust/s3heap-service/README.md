@@ -3,8 +3,8 @@
 The s3heap-service integrates with the task manager to trigger tasks at no-faster than a particular
 cadence, with reasonable guarantees that writing data will cause a task to run.
 
-This document lays refines the design of the heap-tender and heap service until it can be
-implemented safely.
+This document refines the design of the heap-tender and heap service until it can be implemented
+safely.
 
 ## Abstract:  A heap and a sysdb.
 
