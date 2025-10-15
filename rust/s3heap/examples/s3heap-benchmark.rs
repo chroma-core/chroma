@@ -10,7 +10,25 @@ use guacamole::Guacamole;
 use chroma_storage::s3::s3_client_for_test_with_bucket_name;
 use uuid::Uuid;
 
-use s3heap::{HeapWriter, Schedule, Triggerable, UnitOfPartitioningUuid, UnitOfSchedulingUuid};
+use s3heap::{
+    Error, HeapScheduler, HeapWriter, Schedule, Triggerable, UnitOfPartitioningUuid,
+    UnitOfSchedulingUuid,
+};
+
+///////////////////////////////////////////// DummyScheduler ///////////////////////////////////////
+
+struct DummyScheduler;
+
+#[async_trait::async_trait]
+impl HeapScheduler for DummyScheduler {
+    async fn are_done(&self, items: &[(Triggerable, uuid::Uuid)]) -> Result<Vec<bool>, Error> {
+        Ok(vec![false; items.len()])
+    }
+
+    async fn get_schedules(&self, _ids: &[uuid::Uuid]) -> Result<Vec<Schedule>, Error> {
+        Ok(vec![])
+    }
+}
 
 ///////////////////////////////////////////// benchmark ////////////////////////////////////////////
 
@@ -36,12 +54,9 @@ async fn main() {
     let options = Options::default();
     let storage = s3_client_for_test_with_bucket_name("s3heap-testing").await;
     let heap = Arc::new(
-        HeapWriter::new(
-            storage,
-            "s3heapbench".to_string(),
-            Arc::new(s3heap::DummyScheduler),
-        )
-        .unwrap(),
+        HeapWriter::new(storage, "s3heapbench".to_string(), Arc::new(DummyScheduler))
+            .await
+            .unwrap(),
     );
     let (tx, mut rx) =
         tokio::sync::mpsc::channel::<Schedule>(options.target_throughput + options.max_tokio_tasks);
@@ -49,7 +64,7 @@ async fn main() {
     let sum = Arc::new(AtomicU64::new(0));
     let heap_count = Arc::clone(&count);
     let heap_sum = Arc::clone(&sum);
-    let heap_runner = Arc::clone(&heap);
+    let heap_runner: Arc<HeapWriter> = Arc::clone(&heap);
     let runner = tokio::task::spawn(async move {
         let mut buffer = vec![];
         loop {
