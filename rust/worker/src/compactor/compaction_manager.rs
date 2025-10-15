@@ -1019,7 +1019,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_list_dead_jobs() {
+    async fn test_k8s_integration_list_dead_jobs() {
         // Create a simple system for testing
         let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig::default());
