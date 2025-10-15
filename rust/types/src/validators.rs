@@ -207,15 +207,24 @@ pub fn validate_schema(schema: &InternalSchema) -> Result<(), ValidationError> {
         return Err(ValidationError::new("schema").with_message("Full text search / regular expression index cannot be enabled by default. It can only be enabled on #document field.".into()));
     }
     for (key, config) in &schema.key_overrides {
-        if config
+        if let Some(vit) = config
             .float_list
             .as_ref()
-            .is_some_and(|vt| vt.vector_index.as_ref().is_some_and(|it| it.enabled))
+            .and_then(|vt| vt.vector_index.as_ref())
         {
-            if key != "#embedding" {
+            if vit.enabled && key != "#embedding" {
                 return Err(ValidationError::new("schema").with_message(
                     format!("Vector index can only be enabled on #embedding field: {key}").into(),
                 ));
+            }
+            if vit
+                .config
+                .source_key
+                .as_ref()
+                .is_some_and(|key| key != "#document")
+            {
+                return Err(ValidationError::new("schema")
+                    .with_message("Vector index can only source from #document".into()));
             }
         }
         if config
@@ -235,10 +244,9 @@ pub fn validate_schema(schema: &InternalSchema) -> Result<(), ValidationError> {
             .string
             .as_ref()
             .is_some_and(|vt| vt.fts_index.as_ref().is_some_and(|it| it.enabled))
+            && key != "#document"
         {
-            if key != "#document" {
-                return Err(ValidationError::new("schema").with_message(format!("Full text search / regular expression index can only be enabled on #document field: {key}").into()));
-            }
+            return Err(ValidationError::new("schema").with_message(format!("Full text search / regular expression index can only be enabled on #document field: {key}").into()));
         }
     }
     Ok(())
