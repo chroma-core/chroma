@@ -59,8 +59,8 @@ enum Command {
         #[arg(long, help = "Whether to delete the output collection")]
         delete_output: bool,
     },
-    #[command(about = "Mark a task run as complete")]
-    DoneTask {
+    #[command(about = "Mark a task run as ready to advance")]
+    AdvanceTask {
         #[arg(long, help = "ID of the collection")]
         collection_id: String,
         #[arg(long, help = "ID of the task")]
@@ -184,7 +184,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let response = client.delete_task(request).await?;
             println!("Task deleted: {}", response.into_inner().success);
         }
-        Command::DoneTask {
+        Command::AdvanceTask {
             collection_id,
             task_id,
             task_run_nonce,
