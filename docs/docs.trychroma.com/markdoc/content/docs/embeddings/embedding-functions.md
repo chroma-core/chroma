@@ -24,7 +24,7 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Together AI](../../integrations/embedding-models/together-ai)                           | ✓      | ✓          |
 
 
-For TypeScript users, Chroma provides packages for a number of embedding model providers.
+For TypeScript users, Chroma provides packages for a number of embedding model providers. The Chromadb python package ships will all embedding functions included.
 
 | Provider                    | Embedding Function Package                    
 | ----------                  | ------------------------- 
@@ -37,7 +37,7 @@ For TypeScript users, Chroma provides packages for a number of embedding model p
 | Mistral                     | [@chroma-core/mistral](https://www.npmjs.com/package/@chroma-core/mistral)     
 | Morph                       | [@chroma-core/morph](https://www.npmjs.com/package/@chroma-core/morph)     
 | Ollama                      | [@chroma-core/ollama](https://www.npmjs.com/package/@chroma-core/ollama)     
-| OpenAI                      | [@chroma-core/openai](https://www.npmjs.com/package/@chroma-core/huggingface-server)     
+| OpenAI                      | [@chroma-core/openai](https://www.npmjs.com/package/@chroma-core/openai)     
 | Together AI                 | [@chroma-core/together-ai](https://www.npmjs.com/package/@chroma-core/together-ai)     
 | Voyage AI                   | [@chroma-core/voyageai](https://www.npmjs.com/package/@chroma-core/voyageai)     
 
