@@ -621,7 +621,7 @@ impl Bindings {
         let mut frontend_clone = self.frontend.clone();
         let result = py.allow_threads(move || {
             self.runtime
-                .block_on(async { frontend_clone.get(request).await })
+                .block_on(async { Box::pin(frontend_clone.get(request)).await })
         })?;
         Ok(result)
     }
