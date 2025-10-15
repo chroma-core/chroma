@@ -536,7 +536,7 @@ mod tests {
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord};
 
     #[tokio::test]
-    async fn test_scheduler() {
+    async fn test_k8s_integration_scheduler() {
         let storage = s3_client_for_test_with_new_bucket().await;
 
         let mut log = Log::InMemory(InMemoryLog::new());
@@ -767,7 +767,7 @@ mod tests {
 
     #[tokio::test]
     #[should_panic(expected = "is less than offset")]
-    async fn test_scheduler_panic() {
+    async fn test_k8s_integration_scheduler_panic() {
         let storage = s3_client_for_test_with_new_bucket().await;
 
         let mut log = Log::InMemory(InMemoryLog::new());
