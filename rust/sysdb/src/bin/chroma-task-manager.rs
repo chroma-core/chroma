@@ -7,7 +7,11 @@ use tonic::transport::Channel;
 #[command(name = "chroma-sysdb")]
 #[command(about = "CLI client for Chroma coordinator task management", long_about = None)]
 struct Cli {
-    #[arg(long, default_value = "http://localhost:50051")]
+    #[arg(
+        long,
+        default_value = "http://localhost:50051",
+        help = "Address of the Chroma coordinator service"
+    )]
     addr: String,
 
     #[command(subcommand)]
@@ -18,53 +22,61 @@ struct Cli {
 enum Command {
     #[command(about = "Create a new task")]
     CreateTask {
-        #[arg(long)]
+        #[arg(long, help = "Name of the task")]
         name: String,
-        #[arg(long)]
+        #[arg(long, help = "Name of the operator to apply")]
         operator_name: String,
-        #[arg(long)]
+        #[arg(long, help = "ID of the input collection")]
         input_collection_id: String,
-        #[arg(long)]
+        #[arg(long, help = "Name for the output collection")]
         output_collection_name: String,
-        #[arg(long)]
+        #[arg(long, help = "JSON object containing operator parameters")]
         params: String,
-        #[arg(long)]
+        #[arg(long, help = "Tenant ID")]
         tenant_id: String,
-        #[arg(long)]
+        #[arg(long, help = "Database name")]
         database: String,
-        #[arg(long, default_value = "100")]
+        #[arg(
+            long,
+            default_value = "100",
+            help = "Minimum number of records required before task execution"
+        )]
         min_records_for_task: u64,
     },
     #[command(about = "Get task by name")]
     GetTask {
-        #[arg(long)]
+        #[arg(long, help = "ID of the input collection")]
         input_collection_id: String,
-        #[arg(long)]
+        #[arg(long, help = "Name of the task to retrieve")]
         task_name: String,
     },
     #[command(about = "Delete a task")]
     DeleteTask {
-        #[arg(long)]
+        #[arg(long, help = "ID of the input collection")]
         input_collection_id: String,
-        #[arg(long)]
+        #[arg(long, help = "Name of the task to delete")]
         task_name: String,
-        #[arg(long)]
+        #[arg(long, help = "Whether to delete the output collection")]
         delete_output: bool,
     },
     #[command(about = "Mark a task run as complete")]
     DoneTask {
-        #[arg(long)]
+        #[arg(long, help = "ID of the collection")]
         collection_id: String,
-        #[arg(long)]
+        #[arg(long, help = "ID of the task")]
         task_id: String,
-        #[arg(long)]
+        #[arg(long, help = "Nonce identifying the specific task run")]
         task_run_nonce: String,
     },
     #[command(about = "Get all operators")]
     GetOperators,
     #[command(about = "Peek schedule by collection IDs")]
     PeekSchedule {
-        #[arg(long, value_delimiter = ',')]
+        #[arg(
+            long,
+            value_delimiter = ',',
+            help = "Comma-separated list of collection IDs"
+        )]
         collection_ids: Vec<String>,
     },
 }
