@@ -1,5 +1,6 @@
 use chroma_types::chroma_proto;
 use clap::{Parser, Subcommand};
+use prost_types::value::Kind;
 use tonic::transport::Channel;
 
 #[derive(Parser)]
@@ -68,6 +69,31 @@ enum Command {
     },
 }
 
+fn json_to_prost_value(json: serde_json::Value) -> prost_types::Value {
+    let kind = match json {
+        serde_json::Value::Null => Kind::NullValue(0),
+        serde_json::Value::Bool(b) => Kind::BoolValue(b),
+        serde_json::Value::Number(n) => {
+            if let Some(f) = n.as_f64() {
+                Kind::NumberValue(f)
+            } else {
+                Kind::NullValue(0)
+            }
+        }
+        serde_json::Value::String(s) => Kind::StringValue(s),
+        serde_json::Value::Array(arr) => Kind::ListValue(prost_types::ListValue {
+            values: arr.into_iter().map(json_to_prost_value).collect(),
+        }),
+        serde_json::Value::Object(map) => Kind::StructValue(prost_types::Struct {
+            fields: map
+                .into_iter()
+                .map(|(k, v)| (k, json_to_prost_value(v)))
+                .collect(),
+        }),
+    };
+    prost_types::Value { kind: Some(kind) }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -87,12 +113,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             database,
             min_records_for_task,
         } => {
+            let params_json: serde_json::Value = serde_json::from_str(&params)?;
+            let params_struct = match params_json {
+                serde_json::Value::Object(map) => Some(prost_types::Struct {
+                    fields: map
+                        .into_iter()
+                        .map(|(k, v)| (k, json_to_prost_value(v)))
+                        .collect(),
+                }),
+                _ => None,
+            };
+
             let request = chroma_proto::CreateTaskRequest {
                 name,
                 operator_name,
                 input_collection_id,
                 output_collection_name,
-                params,
+                params: params_struct,
                 tenant_id,
                 database,
                 min_records_for_task,
@@ -142,13 +179,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             task_id,
             task_run_nonce,
         } => {
-            let request = chroma_proto::DoneTaskRequest {
+            let request = chroma_proto::AdvanceTaskRequest {
                 collection_id: Some(collection_id),
                 task_id: Some(task_id),
                 task_run_nonce: Some(task_run_nonce),
             };
 
-            client.done_task(request).await?;
+            client.advance_task(request).await?;
             println!("Task marked as done");
         }
         Command::GetOperators => {
