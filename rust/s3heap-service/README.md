@@ -51,7 +51,7 @@ another column within the same row.
 - GC1:  Item gets a perpetual "is-done" from the sysdb and transitions to A_2.
 - GC2:  Garbage collection.
 - NEW1:  Create a new task in the sysdb.
-- NEW2:  Finish the new operation by primiing the task and putting it on the heap.
+- NEW2:  Finish the new operation by priming the task and putting it on the heap.
 - YES1:  Task gets deleted from sysdb.
 - YES2:  This implies that we move from scheduled to waiting while the task is on heap.  This happens when a job completes and reads all data from the log.
 - YES3:  There was a write, the heap needed to schedule, so it picked a time and updated sysdb.
