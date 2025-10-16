@@ -380,6 +380,10 @@ export type SparseVector = {
 };
 
 export type SparseVectorIndexConfig = {
+    /**
+     * Whether this embedding is BM25
+     */
+    bm25?: boolean | null;
     embedding_function?: null | EmbeddingFunctionConfiguration;
     /**
      * Key to source the sparse vector from
