@@ -677,7 +677,10 @@ impl HeapTenderService for HeapTenderServer {
         let items = self
             .tender
             .heap_reader
-            .peek(|_, _| true, s3heap::Limits::default())
+            .peek(
+                |_, _| true,
+                s3heap::Limits::default().with_time_cut_off(Utc::now()),
+            )
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
         let total_items = items.len() as u32;
