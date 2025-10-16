@@ -263,7 +263,10 @@ mod tests {
         let mut metadata = Metadata::new();
         metadata.insert("valid_key".to_string(), MetadataValue::Int(42));
         let sparse = SparseVector::new(vec![1, 2, 3], vec![0.1, 0.2, 0.3]);
-        metadata.insert("#embedding".to_string(), MetadataValue::SparseVector(sparse));
+        metadata.insert(
+            "#embedding".to_string(),
+            MetadataValue::SparseVector(sparse),
+        );
         assert!(validate_metadata(&metadata).is_ok());
 
         // Invalid key starting with #
