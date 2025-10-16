@@ -6,6 +6,11 @@ import { GetUserIdentityResponse, Include, SparseVector } from "./api";
 export type UserIdentity = GetUserIdentityResponse;
 
 /**
+ * Re-export SparseVector type for external use
+ */
+export type { SparseVector };
+
+/**
  * Metadata that can be associated with a collection.
  * Values must be boolean, number, or string types.
  */

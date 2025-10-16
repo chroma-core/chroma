@@ -24,6 +24,7 @@ import togetherAiSchema from "../../../../../../schemas/embedding_functions/toge
 import mistralSchema from "../../../../../../schemas/embedding_functions/mistral.json";
 import morphSchema from "../../../../../../schemas/embedding_functions/morph.json";
 import chromaCloudQwenSchema from "../../../../../../schemas/embedding_functions/chroma-cloud-qwen.json";
+import chromaCloudSpladeSchema from "../../../../../../schemas/embedding_functions/chroma-cloud-splade.json";
 import Ajv from "ajv";
 
 // Define a common interface for all schemas
@@ -72,6 +73,7 @@ const schemaMap = {
 	mistral: mistralSchema as Schema,
 	morph: morphSchema as Schema,
 	"chroma-cloud-qwen": chromaCloudQwenSchema as Schema,
+	"chroma-cloud-splade": chromaCloudSpladeSchema as Schema,
 };
 
 /**

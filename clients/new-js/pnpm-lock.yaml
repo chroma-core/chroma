@@ -38,6 +38,9 @@ importers:
       '@chroma-core/chroma-cloud-qwen':
         specifier: workspace:^
         version: link:../chroma-cloud-qwen
+      '@chroma-core/chroma-cloud-splade':
+        specifier: workspace:^
+        version: link:../chroma-cloud-splade
       '@chroma-core/cloudflare-worker-ai':
         specifier: workspace:^
         version: link:../cloudflare-worker-ai
@@ -83,6 +86,37 @@ importers:
         version: 8.4.0(jiti@2.4.2)(postcss@8.5.3)(tsx@4.19.4)(typescript@5.8.3)(yaml@2.7.1)
 
   packages/ai-embeddings/chroma-cloud-qwen:
+    dependencies:
+      '@chroma-core/ai-embeddings-common':
+        specifier: workspace:^
+        version: link:../common
+      chromadb:
+        specifier: workspace:^
+        version: link:../../chromadb
+    devDependencies:
+      '@jest/globals':
+        specifier: ^29.7.0
+        version: 29.7.0
+      dotenv:
+        specifier: ^16.3.1
+        version: 16.5.0
+      jest:
+        specifier: ^29.7.0
+        version: 29.7.0(@types/node@20.17.46)(ts-node@10.9.2(@types/node@20.17.46)(typescript@5.8.3))
+      rimraf:
+        specifier: ^5.0.0
+        version: 5.0.10
+      ts-jest:
+        specifier: ^29.1.2
+        version: 29.3.2(@babel/core@7.27.1)(@jest/transform@29.7.0)(@jest/types@29.6.3)(babel-jest@29.7.0(@babel/core@7.27.1))(jest@29.7.0(@types/node@20.17.46)(ts-node@10.9.2(@types/node@20.17.46)(typescript@5.8.3)))(typescript@5.8.3)
+      ts-node:
+        specifier: ^10.9.2
+        version: 10.9.2(@types/node@20.17.46)(typescript@5.8.3)
+      tsup:
+        specifier: ^8.3.5
+        version: 8.4.0(jiti@2.4.2)(postcss@8.5.3)(tsx@4.19.4)(typescript@5.8.3)(yaml@2.7.1)
+
+  packages/ai-embeddings/chroma-cloud-splade:
     dependencies:
       '@chroma-core/ai-embeddings-common':
         specifier: workspace:^
