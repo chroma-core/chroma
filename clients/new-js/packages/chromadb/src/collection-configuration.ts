@@ -164,10 +164,10 @@ export const processUpdateCollectionConfig = async ({
 
   const embeddingFunction =
     currentEmbeddingFunction ||
-    (await getEmbeddingFunction(
+    getEmbeddingFunction(
       collectionName,
       currentConfiguration.embeddingFunction ?? undefined,
-    ));
+    );
 
   const newEmbeddingFunction = newConfiguration.embeddingFunction;
 
