@@ -80,8 +80,8 @@ pub const FLOAT_INVERTED_INDEX_NAME: &str = "float_inverted_index";
 pub const BOOL_INVERTED_INDEX_NAME: &str = "bool_inverted_index";
 
 // Special metadata keys - must match Python constants in chromadb/api/types.py
-pub const DOCUMENT_KEY: &str = "document";
-pub const EMBEDDING_KEY: &str = "embedding";
+pub const DOCUMENT_KEY: &str = "#document";
+pub const EMBEDDING_KEY: &str = "#embedding";
 
 // ============================================================================
 // SCHEMA STRUCTURES
@@ -259,7 +259,7 @@ pub struct BoolInvertedIndexType {
 impl InternalSchema {
     /// Create a new InternalSchema with strongly-typed default configurations
     pub fn new_default(default_knn_index: KnnIndex) -> Self {
-        // Vector index disabled on all keys except $embedding.
+        // Vector index disabled on all keys except #embedding.
         let vector_config = VectorIndexType {
             enabled: false,
             config: VectorIndexConfig {
@@ -350,7 +350,7 @@ impl InternalSchema {
         // Set up key overrides
         let mut keys = HashMap::new();
 
-        // Enable vector index for $embedding.
+        // Enable vector index for #embedding.
         let embedding_defaults = ValueTypes {
             float_list: Some(FloatListValueType {
                 vector_index: Some(VectorIndexType {
@@ -1057,7 +1057,7 @@ impl InternalSchema {
             VectorIndexConfiguration::Hnsw(hnsw_config) => VectorIndexConfig {
                 space: Some(hnsw_config.space),
                 embedding_function: collection_config.embedding_function,
-                source_key: Some("document".to_string()), // Default source key
+                source_key: Some(DOCUMENT_KEY.to_string()), // Default source key
                 hnsw: Some(HnswIndexConfig {
                     ef_construction: Some(hnsw_config.ef_construction),
                     max_neighbors: Some(hnsw_config.max_neighbors),
@@ -1072,7 +1072,7 @@ impl InternalSchema {
             VectorIndexConfiguration::Spann(spann_config) => VectorIndexConfig {
                 space: Some(spann_config.space),
                 embedding_function: collection_config.embedding_function,
-                source_key: Some("document".to_string()), // Default source key
+                source_key: Some(DOCUMENT_KEY.to_string()), // Default source key
                 hnsw: None,
                 spann: Some(SpannIndexConfig {
                     search_nprobe: Some(spann_config.search_nprobe),
@@ -1103,7 +1103,7 @@ impl InternalSchema {
             }
         }
 
-        // Update the vector_index in the existing $embedding key override
+        // Update the vector_index in the existing #embedding key override
         // Keep enabled=true (already set by new_default) and update the config
         if let Some(embedding_types) = schema.keys.get_mut(EMBEDDING_KEY) {
             if let Some(float_list) = &mut embedding_types.float_list {
@@ -1694,13 +1694,13 @@ mod tests {
 
     #[test]
     fn test_reconcile_with_defaults_override_existing_key() {
-        // Test overriding an existing key override (like $embedding)
+        // Test overriding an existing key override (like #embedding)
         let mut user_schema = InternalSchema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
         };
 
-        // Override the $embedding key with custom settings
+        // Override the #embedding key with custom settings
         let embedding_override = ValueTypes {
             float_list: Some(FloatListValueType {
                 vector_index: Some(VectorIndexType {
@@ -2263,8 +2263,8 @@ mod tests {
         ); // Default preserved
 
         // Check key overrides
-        assert!(result.keys.contains_key("embedding")); // Default preserved
-        assert!(result.keys.contains_key("document")); // Default preserved
+        assert!(result.keys.contains_key(EMBEDDING_KEY)); // Default preserved
+        assert!(result.keys.contains_key(DOCUMENT_KEY)); // Default preserved
         assert!(result.keys.contains_key("custom_field")); // User added
 
         let custom_override = result.keys.get("custom_field").unwrap();
@@ -2347,7 +2347,7 @@ mod tests {
         let result =
             InternalSchema::reconcile_with_collection_config(schema, collection_config).unwrap();
 
-        // Check that $embedding key override was created with the collection config settings
+        // Check that #embedding key override was created with the collection config settings
         let embedding_override = result.keys.get(EMBEDDING_KEY).unwrap();
         let vector_index = embedding_override
             .float_list
@@ -2411,7 +2411,7 @@ mod tests {
         let result =
             InternalSchema::reconcile_with_collection_config(schema, collection_config).unwrap();
 
-        // Check that $embedding key override was created with the collection config settings
+        // Check that #embedding key override was created with the collection config settings
         let embedding_override = result.keys.get(EMBEDDING_KEY).unwrap();
         let vector_index = embedding_override
             .float_list
@@ -2493,13 +2493,13 @@ mod tests {
         );
         assert_eq!(
             defaults_vector_index.config.source_key,
-            Some("document".to_string())
+            Some(DOCUMENT_KEY.to_string())
         );
         let defaults_hnsw = defaults_vector_index.config.hnsw.as_ref().unwrap();
         assert_eq!(defaults_hnsw.ef_construction, Some(300));
         assert_eq!(defaults_hnsw.max_neighbors, Some(32));
 
-        // Check that $embedding key override was also updated
+        // Check that #embedding key override was also updated
         let embedding_override = result.keys.get(EMBEDDING_KEY).unwrap();
         let embedding_vector_index = embedding_override
             .float_list
@@ -2509,7 +2509,7 @@ mod tests {
             .as_ref()
             .unwrap();
 
-        // Should be enabled on $embedding
+        // Should be enabled on #embedding
         assert!(embedding_vector_index.enabled);
         // Config should match defaults
         assert_eq!(embedding_vector_index.config.space, Some(Space::L2));
@@ -2519,7 +2519,7 @@ mod tests {
         );
         assert_eq!(
             embedding_vector_index.config.source_key,
-            Some("document".to_string())
+            Some(DOCUMENT_KEY.to_string())
         );
         let embedding_hnsw = embedding_vector_index.config.hnsw.as_ref().unwrap();
         assert_eq!(embedding_hnsw.ef_construction, Some(300));

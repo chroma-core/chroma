@@ -1580,8 +1580,8 @@ HNSW_INDEX_NAME: Final[str] = "hnsw_index"
 SPANN_INDEX_NAME: Final[str] = "spann_index"
 
 # Special key constants
-DOCUMENT_KEY: Final[str] = "document"
-EMBEDDING_KEY: Final[str] = "embedding"
+DOCUMENT_KEY: Final[str] = "#document"
+EMBEDDING_KEY: Final[str] = "#embedding"
 
 
 # Index Type Classes
@@ -1697,7 +1697,7 @@ class Schema:
                 "Cannot enable all index types globally. Must specify either config or key."
             )
 
-        # Disallow using special internal keys ($embedding, $document)
+        # Disallow using special internal keys (#embedding, #document)
         if key is not None and key in (EMBEDDING_KEY, DOCUMENT_KEY):
             raise ValueError(
                 f"Cannot create index on special key '{key}'. These keys are managed automatically by the system."
@@ -1706,8 +1706,8 @@ class Schema:
         # Special handling for vector index
         if isinstance(config, VectorIndexConfig):
             if key is None:
-                # Allow setting vector config globally - it applies to defaults and $embedding
-                # but doesn't change enabled state (vector index is always enabled on $embedding)
+                # Allow setting vector config globally - it applies to defaults and #embedding
+                # but doesn't change enabled state (vector index is always enabled on #embedding)
                 self._set_vector_index_config(config)
                 return self
             else:
@@ -1719,8 +1719,8 @@ class Schema:
         # Special handling for FTS index
         if isinstance(config, FtsIndexConfig):
             if key is None:
-                # Allow setting FTS config globally - it applies to defaults and $document
-                # but doesn't change enabled state (FTS is always enabled on $document)
+                # Allow setting FTS config globally - it applies to defaults and #document
+                # but doesn't change enabled state (FTS is always enabled on #document)
                 self._set_fts_index_config(config)
                 return self
             else:
@@ -1767,7 +1767,7 @@ class Schema:
                 "Cannot disable all indexes. Must specify either config or key."
             )
 
-        # Disallow using special internal keys ($embedding, $document)
+        # Disallow using special internal keys (#embedding, #document)
         if key is not None and key in (EMBEDDING_KEY, DOCUMENT_KEY):
             raise ValueError(
                 f"Cannot delete index on special key '{key}'. These keys are managed automatically by the system."
@@ -1815,16 +1815,16 @@ class Schema:
 
     def _set_vector_index_config(self, config: VectorIndexConfig) -> None:
         """
-        Set vector index config globally and on $embedding key.
+        Set vector index config globally and on #embedding key.
         This updates the config but preserves the enabled state.
-        Vector index is always enabled on $embedding, disabled in defaults.
-        Note: source_key on $embedding is always preserved as "$document".
+        Vector index is always enabled on #embedding, disabled in defaults.
+        Note: source_key on #embedding is always preserved as "#document".
         """
         # Update the config in defaults (preserve enabled=False)
         current_enabled = self.defaults.float_list.vector_index.enabled  # type: ignore[union-attr]
         self.defaults.float_list.vector_index = VectorIndexType(enabled=current_enabled, config=config)  # type: ignore[union-attr]
 
-        # Update the config on $embedding key (preserve enabled=True and source_key="$document")
+        # Update the config on #embedding key (preserve enabled=True and source_key="#document")
         current_enabled = self.keys[EMBEDDING_KEY].float_list.vector_index.enabled  # type: ignore[union-attr]
         current_source_key = self.keys[EMBEDDING_KEY].float_list.vector_index.config.source_key  # type: ignore[union-attr]
 
@@ -1834,21 +1834,21 @@ class Schema:
             embedding_function=config.embedding_function,
             hnsw=config.hnsw,
             spann=config.spann,
-            source_key=current_source_key,  # Preserve original source_key (should be "$document")
+            source_key=current_source_key,  # Preserve original source_key (should be "#document")
         )
         self.keys[EMBEDDING_KEY].float_list.vector_index = VectorIndexType(enabled=current_enabled, config=embedding_config)  # type: ignore[union-attr]
 
     def _set_fts_index_config(self, config: FtsIndexConfig) -> None:
         """
-        Set FTS index config globally and on $document key.
+        Set FTS index config globally and on #document key.
         This updates the config but preserves the enabled state.
-        FTS index is always enabled on $document, disabled in defaults.
+        FTS index is always enabled on #document, disabled in defaults.
         """
         # Update the config in defaults (preserve enabled=False)
         current_enabled = self.defaults.string.fts_index.enabled  # type: ignore[union-attr]
         self.defaults.string.fts_index = FtsIndexType(enabled=current_enabled, config=config)  # type: ignore[union-attr]
 
-        # Update the config on $document key (preserve enabled=True)
+        # Update the config on #document key (preserve enabled=True)
         current_enabled = self.keys[DOCUMENT_KEY].string.fts_index.enabled  # type: ignore[union-attr]
         self.keys[DOCUMENT_KEY].string.fts_index = FtsIndexType(enabled=current_enabled, config=config)  # type: ignore[union-attr]
 
@@ -2310,31 +2310,31 @@ class Schema:
         result = ValueTypes()
 
         # Deserialize each value type if present
-        if "#string" in value_types_json:
+        if STRING_VALUE_NAME in value_types_json:
             result.string = cls._deserialize_string_value_type(
-                value_types_json["#string"]
+                value_types_json[STRING_VALUE_NAME]
             )
 
-        if "#float_list" in value_types_json:
+        if FLOAT_LIST_VALUE_NAME in value_types_json:
             result.float_list = cls._deserialize_float_list_value_type(
-                value_types_json["#float_list"]
+                value_types_json[FLOAT_LIST_VALUE_NAME]
             )
 
-        if "#sparse_vector" in value_types_json:
+        if SPARSE_VECTOR_VALUE_NAME in value_types_json:
             result.sparse_vector = cls._deserialize_sparse_vector_value_type(
-                value_types_json["#sparse_vector"]
+                value_types_json[SPARSE_VECTOR_VALUE_NAME]
             )
 
-        if "#int" in value_types_json:
-            result.int_value = cls._deserialize_int_value_type(value_types_json["#int"])
+        if INT_VALUE_NAME in value_types_json:
+            result.int_value = cls._deserialize_int_value_type(value_types_json[INT_VALUE_NAME])
 
-        if "#float" in value_types_json:
+        if FLOAT_VALUE_NAME in value_types_json:
             result.float_value = cls._deserialize_float_value_type(
-                value_types_json["#float"]
+                value_types_json[FLOAT_VALUE_NAME]
             )
 
-        if "#bool" in value_types_json:
-            result.boolean = cls._deserialize_bool_value_type(value_types_json["#bool"])
+        if BOOL_VALUE_NAME in value_types_json:
+            result.boolean = cls._deserialize_bool_value_type(value_types_json[BOOL_VALUE_NAME])
 
         return result
 
