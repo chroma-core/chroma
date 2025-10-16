@@ -131,6 +131,11 @@ export const knownSparseEmbeddingFunctions = new Map<
 >();
 
 /**
+ * Union type covering both dense and sparse embedding functions.
+ */
+export type AnyEmbeddingFunction = EmbeddingFunction | SparseEmbeddingFunction;
+
+/**
  * Registers an embedding function in the global registry.
  * @param name - Unique name for the embedding function
  * @param fn - Embedding function class to register
