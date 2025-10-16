@@ -212,19 +212,21 @@ pub fn validate_schema(schema: &InternalSchema) -> Result<(), ValidationError> {
             .as_ref()
             .and_then(|vt| vt.vector_index.as_ref())
         {
-            if vit.enabled && key != "#embedding" {
+            // TODO(Sicheng): Schema currently use `$embedding`. This should be updated once schema updates naming
+            if vit.enabled && key != "$embedding" {
                 return Err(ValidationError::new("schema").with_message(
-                    format!("Vector index can only be enabled on #embedding field: {key}").into(),
+                    format!("Vector index can only be enabled on $embedding field: {key}").into(),
                 ));
             }
+            // TODO(Sicheng): Schema currently use `$document`. This should be updated once schema updates naming
             if vit
                 .config
                 .source_key
                 .as_ref()
-                .is_some_and(|key| key != "#document")
+                .is_some_and(|key| key != "$document")
             {
                 return Err(ValidationError::new("schema")
-                    .with_message("Vector index can only source from #document".into()));
+                    .with_message("Vector index can only source from $document".into()));
             }
         }
         if config
@@ -240,13 +242,14 @@ pub fn validate_schema(schema: &InternalSchema) -> Result<(), ValidationError> {
                 ));
             }
         }
+        // TODO(Sicheng): Schema currently use `$document`. This should be updated once schema updates naming
         if config
             .string
             .as_ref()
             .is_some_and(|vt| vt.fts_index.as_ref().is_some_and(|it| it.enabled))
-            && key != "#document"
+            && key != "$document"
         {
-            return Err(ValidationError::new("schema").with_message(format!("Full text search / regular expression index can only be enabled on #document field: {key}").into()));
+            return Err(ValidationError::new("schema").with_message(format!("Full text search / regular expression index can only be enabled on $document field: {key}").into()));
         }
     }
     Ok(())
