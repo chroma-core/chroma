@@ -1561,27 +1561,27 @@ IndexConfig: TypeAlias = Union[
 
 
 # Value type constants
-STRING_VALUE_NAME: Final[str] = "#string"
-INT_VALUE_NAME: Final[str] = "#int"
-BOOL_VALUE_NAME: Final[str] = "#bool"
-FLOAT_VALUE_NAME: Final[str] = "#float"
-FLOAT_LIST_VALUE_NAME: Final[str] = "#float_list"
-SPARSE_VECTOR_VALUE_NAME: Final[str] = "#sparse_vector"
+STRING_VALUE_NAME: Final[str] = "string"
+INT_VALUE_NAME: Final[str] = "int"
+BOOL_VALUE_NAME: Final[str] = "bool"
+FLOAT_VALUE_NAME: Final[str] = "float"
+FLOAT_LIST_VALUE_NAME: Final[str] = "float_list"
+SPARSE_VECTOR_VALUE_NAME: Final[str] = "sparse_vector"
 
 # Index type name constants
-FTS_INDEX_NAME: Final[str] = "$fts_index"
-VECTOR_INDEX_NAME: Final[str] = "$vector_index"
-SPARSE_VECTOR_INDEX_NAME: Final[str] = "$sparse_vector_index"
-STRING_INVERTED_INDEX_NAME: Final[str] = "$string_inverted_index"
-INT_INVERTED_INDEX_NAME: Final[str] = "$int_inverted_index"
-FLOAT_INVERTED_INDEX_NAME: Final[str] = "$float_inverted_index"
-BOOL_INVERTED_INDEX_NAME: Final[str] = "$bool_inverted_index"
-HNSW_INDEX_NAME: Final[str] = "$hnsw_index"
-SPANN_INDEX_NAME: Final[str] = "$spann_index"
+FTS_INDEX_NAME: Final[str] = "fts_index"
+VECTOR_INDEX_NAME: Final[str] = "vector_index"
+SPARSE_VECTOR_INDEX_NAME: Final[str] = "sparse_vector_index"
+STRING_INVERTED_INDEX_NAME: Final[str] = "string_inverted_index"
+INT_INVERTED_INDEX_NAME: Final[str] = "int_inverted_index"
+FLOAT_INVERTED_INDEX_NAME: Final[str] = "float_inverted_index"
+BOOL_INVERTED_INDEX_NAME: Final[str] = "bool_inverted_index"
+HNSW_INDEX_NAME: Final[str] = "hnsw_index"
+SPANN_INDEX_NAME: Final[str] = "spann_index"
 
 # Special key constants
-DOCUMENT_KEY: Final[str] = "$document"
-EMBEDDING_KEY: Final[str] = "$embedding"
+DOCUMENT_KEY: Final[str] = "document"
+EMBEDDING_KEY: Final[str] = "embedding"
 
 
 # Index Type Classes
@@ -1676,16 +1676,16 @@ class ValueTypes:
 @dataclass
 class Schema:
     defaults: ValueTypes
-    key_overrides: Dict[str, ValueTypes]
+    keys: Dict[str, ValueTypes]
 
     def __init__(self) -> None:
         # Initialize the dataclass fields first
         self.defaults = ValueTypes()
-        self.key_overrides: Dict[str, ValueTypes] = {}
+        self.keys: Dict[str, ValueTypes] = {}
 
         # Populate with sensible defaults automatically
         self._initialize_defaults()
-        self._initialize_key_overrides()
+        self._initialize_keys()
 
     def create_index(
         self, config: Optional[IndexConfig] = None, key: Optional[str] = None
@@ -1825,8 +1825,8 @@ class Schema:
         self.defaults.float_list.vector_index = VectorIndexType(enabled=current_enabled, config=config)  # type: ignore[union-attr]
 
         # Update the config on $embedding key (preserve enabled=True and source_key="$document")
-        current_enabled = self.key_overrides[EMBEDDING_KEY].float_list.vector_index.enabled  # type: ignore[union-attr]
-        current_source_key = self.key_overrides[EMBEDDING_KEY].float_list.vector_index.config.source_key  # type: ignore[union-attr]
+        current_enabled = self.keys[EMBEDDING_KEY].float_list.vector_index.enabled  # type: ignore[union-attr]
+        current_source_key = self.keys[EMBEDDING_KEY].float_list.vector_index.config.source_key  # type: ignore[union-attr]
 
         # Create a new config with user settings but preserve the original source_key
         embedding_config = VectorIndexConfig(
@@ -1836,7 +1836,7 @@ class Schema:
             spann=config.spann,
             source_key=current_source_key,  # Preserve original source_key (should be "$document")
         )
-        self.key_overrides[EMBEDDING_KEY].float_list.vector_index = VectorIndexType(enabled=current_enabled, config=embedding_config)  # type: ignore[union-attr]
+        self.keys[EMBEDDING_KEY].float_list.vector_index = VectorIndexType(enabled=current_enabled, config=embedding_config)  # type: ignore[union-attr]
 
     def _set_fts_index_config(self, config: FtsIndexConfig) -> None:
         """
@@ -1849,8 +1849,8 @@ class Schema:
         self.defaults.string.fts_index = FtsIndexType(enabled=current_enabled, config=config)  # type: ignore[union-attr]
 
         # Update the config on $document key (preserve enabled=True)
-        current_enabled = self.key_overrides[DOCUMENT_KEY].string.fts_index.enabled  # type: ignore[union-attr]
-        self.key_overrides[DOCUMENT_KEY].string.fts_index = FtsIndexType(enabled=current_enabled, config=config)  # type: ignore[union-attr]
+        current_enabled = self.keys[DOCUMENT_KEY].string.fts_index.enabled  # type: ignore[union-attr]
+        self.keys[DOCUMENT_KEY].string.fts_index = FtsIndexType(enabled=current_enabled, config=config)  # type: ignore[union-attr]
 
     def _set_index_in_defaults(self, config: IndexConfig, enabled: bool) -> None:
         """Set an index configuration in the defaults."""
@@ -1911,7 +1911,7 @@ class Schema:
 
         Raises ValueError if another key already has a sparse vector index enabled.
         """
-        for existing_key, value_types in self.key_overrides.items():
+        for existing_key, value_types in self.keys.items():
             if existing_key == key:
                 continue  # Skip the current key being updated
             if value_types.sparse_vector is not None:
@@ -1932,75 +1932,75 @@ class Schema:
         if config_name == "SparseVectorIndexConfig" and enabled:
             self._validate_single_sparse_vector_index(key)
 
-        if key not in self.key_overrides:
-            self.key_overrides[key] = ValueTypes()
+        if key not in self.keys:
+            self.keys[key] = ValueTypes()
 
         if config_name == "FtsIndexConfig":
-            if self.key_overrides[key].string is None:
-                self.key_overrides[key].string = StringValueType()
-            self.key_overrides[key].string.fts_index = FtsIndexType(enabled=enabled, config=cast(FtsIndexConfig, config))  # type: ignore[union-attr]
+            if self.keys[key].string is None:
+                self.keys[key].string = StringValueType()
+            self.keys[key].string.fts_index = FtsIndexType(enabled=enabled, config=cast(FtsIndexConfig, config))  # type: ignore[union-attr]
 
         elif config_name == "StringInvertedIndexConfig":
-            if self.key_overrides[key].string is None:
-                self.key_overrides[key].string = StringValueType()
-            self.key_overrides[key].string.string_inverted_index = StringInvertedIndexType(enabled=enabled, config=cast(StringInvertedIndexConfig, config))  # type: ignore[union-attr]
+            if self.keys[key].string is None:
+                self.keys[key].string = StringValueType()
+            self.keys[key].string.string_inverted_index = StringInvertedIndexType(enabled=enabled, config=cast(StringInvertedIndexConfig, config))  # type: ignore[union-attr]
 
         elif config_name == "VectorIndexConfig":
-            if self.key_overrides[key].float_list is None:
-                self.key_overrides[key].float_list = FloatListValueType()
-            self.key_overrides[key].float_list.vector_index = VectorIndexType(enabled=enabled, config=cast(VectorIndexConfig, config))  # type: ignore[union-attr]
+            if self.keys[key].float_list is None:
+                self.keys[key].float_list = FloatListValueType()
+            self.keys[key].float_list.vector_index = VectorIndexType(enabled=enabled, config=cast(VectorIndexConfig, config))  # type: ignore[union-attr]
 
         elif config_name == "SparseVectorIndexConfig":
-            if self.key_overrides[key].sparse_vector is None:
-                self.key_overrides[key].sparse_vector = SparseVectorValueType()
-            self.key_overrides[key].sparse_vector.sparse_vector_index = SparseVectorIndexType(enabled=enabled, config=cast(SparseVectorIndexConfig, config))  # type: ignore[union-attr]
+            if self.keys[key].sparse_vector is None:
+                self.keys[key].sparse_vector = SparseVectorValueType()
+            self.keys[key].sparse_vector.sparse_vector_index = SparseVectorIndexType(enabled=enabled, config=cast(SparseVectorIndexConfig, config))  # type: ignore[union-attr]
 
         elif config_name == "IntInvertedIndexConfig":
-            if self.key_overrides[key].int_value is None:
-                self.key_overrides[key].int_value = IntValueType()
-            self.key_overrides[key].int_value.int_inverted_index = IntInvertedIndexType(enabled=enabled, config=cast(IntInvertedIndexConfig, config))  # type: ignore[union-attr]
+            if self.keys[key].int_value is None:
+                self.keys[key].int_value = IntValueType()
+            self.keys[key].int_value.int_inverted_index = IntInvertedIndexType(enabled=enabled, config=cast(IntInvertedIndexConfig, config))  # type: ignore[union-attr]
 
         elif config_name == "FloatInvertedIndexConfig":
-            if self.key_overrides[key].float_value is None:
-                self.key_overrides[key].float_value = FloatValueType()
-            self.key_overrides[key].float_value.float_inverted_index = FloatInvertedIndexType(enabled=enabled, config=cast(FloatInvertedIndexConfig, config))  # type: ignore[union-attr]
+            if self.keys[key].float_value is None:
+                self.keys[key].float_value = FloatValueType()
+            self.keys[key].float_value.float_inverted_index = FloatInvertedIndexType(enabled=enabled, config=cast(FloatInvertedIndexConfig, config))  # type: ignore[union-attr]
 
         elif config_name == "BoolInvertedIndexConfig":
-            if self.key_overrides[key].boolean is None:
-                self.key_overrides[key].boolean = BoolValueType()
-            self.key_overrides[key].boolean.bool_inverted_index = BoolInvertedIndexType(enabled=enabled, config=cast(BoolInvertedIndexConfig, config))  # type: ignore[union-attr]
+            if self.keys[key].boolean is None:
+                self.keys[key].boolean = BoolValueType()
+            self.keys[key].boolean.bool_inverted_index = BoolInvertedIndexType(enabled=enabled, config=cast(BoolInvertedIndexConfig, config))  # type: ignore[union-attr]
 
     def _enable_all_indexes_for_key(self, key: str) -> None:
         """Enable all possible index types for a specific key."""
-        if key not in self.key_overrides:
-            self.key_overrides[key] = ValueTypes()
+        if key not in self.keys:
+            self.keys[key] = ValueTypes()
 
         # Enable all index types with default configs
-        self.key_overrides[key].string = StringValueType(
+        self.keys[key].string = StringValueType(
             fts_index=FtsIndexType(enabled=True, config=FtsIndexConfig()),
             string_inverted_index=StringInvertedIndexType(
                 enabled=True, config=StringInvertedIndexConfig()
             ),
         )
-        self.key_overrides[key].float_list = FloatListValueType(
+        self.keys[key].float_list = FloatListValueType(
             vector_index=VectorIndexType(enabled=True, config=VectorIndexConfig())
         )
-        self.key_overrides[key].sparse_vector = SparseVectorValueType(
+        self.keys[key].sparse_vector = SparseVectorValueType(
             sparse_vector_index=SparseVectorIndexType(
                 enabled=True, config=SparseVectorIndexConfig()
             )
         )
-        self.key_overrides[key].int_value = IntValueType(
+        self.keys[key].int_value = IntValueType(
             int_inverted_index=IntInvertedIndexType(
                 enabled=True, config=IntInvertedIndexConfig()
             )
         )
-        self.key_overrides[key].float_value = FloatValueType(
+        self.keys[key].float_value = FloatValueType(
             float_inverted_index=FloatInvertedIndexType(
                 enabled=True, config=FloatInvertedIndexConfig()
             )
         )
-        self.key_overrides[key].boolean = BoolValueType(
+        self.keys[key].boolean = BoolValueType(
             bool_inverted_index=BoolInvertedIndexType(
                 enabled=True, config=BoolInvertedIndexConfig()
             )
@@ -2008,35 +2008,35 @@ class Schema:
 
     def _disable_all_indexes_for_key(self, key: str) -> None:
         """Disable all possible index types for a specific key."""
-        if key not in self.key_overrides:
-            self.key_overrides[key] = ValueTypes()
+        if key not in self.keys:
+            self.keys[key] = ValueTypes()
 
         # Disable all index types with default configs
-        self.key_overrides[key].string = StringValueType(
+        self.keys[key].string = StringValueType(
             fts_index=FtsIndexType(enabled=False, config=FtsIndexConfig()),
             string_inverted_index=StringInvertedIndexType(
                 enabled=False, config=StringInvertedIndexConfig()
             ),
         )
-        self.key_overrides[key].float_list = FloatListValueType(
+        self.keys[key].float_list = FloatListValueType(
             vector_index=VectorIndexType(enabled=False, config=VectorIndexConfig())
         )
-        self.key_overrides[key].sparse_vector = SparseVectorValueType(
+        self.keys[key].sparse_vector = SparseVectorValueType(
             sparse_vector_index=SparseVectorIndexType(
                 enabled=False, config=SparseVectorIndexConfig()
             )
         )
-        self.key_overrides[key].int_value = IntValueType(
+        self.keys[key].int_value = IntValueType(
             int_inverted_index=IntInvertedIndexType(
                 enabled=False, config=IntInvertedIndexConfig()
             )
         )
-        self.key_overrides[key].float_value = FloatValueType(
+        self.keys[key].float_value = FloatValueType(
             float_inverted_index=FloatInvertedIndexType(
                 enabled=False, config=FloatInvertedIndexConfig()
             )
         )
-        self.key_overrides[key].boolean = BoolValueType(
+        self.keys[key].boolean = BoolValueType(
             bool_inverted_index=BoolInvertedIndexType(
                 enabled=False, config=BoolInvertedIndexConfig()
             )
@@ -2084,10 +2084,10 @@ class Schema:
             )
         )
 
-    def _initialize_key_overrides(self) -> None:
+    def _initialize_keys(self) -> None:
         """Initialize key-specific index overrides."""
         # Enable full-text search for document content
-        self.key_overrides[DOCUMENT_KEY] = ValueTypes(
+        self.keys[DOCUMENT_KEY] = ValueTypes(
             string=StringValueType(
                 fts_index=FtsIndexType(enabled=True, config=FtsIndexConfig()),
                 string_inverted_index=StringInvertedIndexType(
@@ -2098,7 +2098,7 @@ class Schema:
 
         # Enable vector index for embeddings with document source reference
         vector_config = VectorIndexConfig(source_key=DOCUMENT_KEY)
-        self.key_overrides[EMBEDDING_KEY] = ValueTypes(
+        self.keys[EMBEDDING_KEY] = ValueTypes(
             float_list=FloatListValueType(
                 vector_index=VectorIndexType(enabled=True, config=vector_config)
             )
@@ -2110,11 +2110,11 @@ class Schema:
         defaults_json = self._serialize_value_types(self.defaults)
 
         # Convert key overrides to JSON format
-        key_overrides_json: Dict[str, Dict[str, Any]] = {}
-        for key, value_types in self.key_overrides.items():
-            key_overrides_json[key] = self._serialize_value_types(value_types)
+        keys_json: Dict[str, Dict[str, Any]] = {}
+        for key, value_types in self.keys.items():
+            keys_json[key] = self._serialize_value_types(value_types)
 
-        return {"defaults": defaults_json, "key_overrides": key_overrides_json}
+        return {"defaults": defaults_json, "keys": keys_json}
 
     @classmethod
     def deserialize_from_json(cls, json_data: Dict[str, Any]) -> "Schema":
@@ -2124,9 +2124,9 @@ class Schema:
 
         # Deserialize and set the components
         instance.defaults = cls._deserialize_value_types(json_data.get("defaults", {}))
-        instance.key_overrides = {}
-        for key, value_types_json in json_data.get("key_overrides", {}).items():
-            instance.key_overrides[key] = cls._deserialize_value_types(value_types_json)
+        instance.keys = {}
+        for key, value_types_json in json_data.get("keys", {}).items():
+            instance.keys[key] = cls._deserialize_value_types(value_types_json)
 
         return instance
 

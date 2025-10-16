@@ -564,7 +564,7 @@ class CollectionCommon(Generic[ClientT]):
             return {}
 
         targets: Dict[str, "SparseVectorIndexConfig"] = {}
-        for key, value_types in schema.key_overrides.items():
+        for key, value_types in schema.keys.items():
             if value_types.sparse_vector is None:
                 continue
             sparse_index = value_types.sparse_vector.sparse_vector_index

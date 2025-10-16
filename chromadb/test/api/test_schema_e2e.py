@@ -88,7 +88,7 @@ def test_schema_spann_vector_config_persistence(
     persisted_schema = collection.schema
     assert persisted_schema is not None
 
-    vector_index = persisted_schema.key_overrides["$embedding"].float_list.vector_index
+    vector_index = persisted_schema.keys["embedding"].float_list.vector_index
     assert vector_index.enabled is True
     assert vector_index.config.spann is not None
     spann_config = vector_index.config.spann
@@ -103,7 +103,7 @@ def test_schema_spann_vector_config_persistence(
     assert ef.get_config() == {"dim": 6}
 
     persisted_json = persisted_schema.serialize_to_json()
-    spann_json = persisted_json["key_overrides"]["$embedding"]["#float_list"][
+    spann_json = persisted_json["keys"]["embedding"]["float_list"][
         "$vector_index"
     ]["config"]["spann"]
     assert spann_json["search_nprobe"] == 16
@@ -117,8 +117,8 @@ def test_schema_spann_vector_config_persistence(
 
     reloaded_schema = reloaded_collection.schema
     assert reloaded_schema is not None
-    reloaded_vector_index = reloaded_schema.key_overrides[
-        "$embedding"
+    reloaded_vector_index = reloaded_schema.keys[
+        "embedding"
     ].float_list.vector_index
     assert reloaded_vector_index.config.spann is not None
     assert reloaded_vector_index.config.spann.search_nprobe == 16
