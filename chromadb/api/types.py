@@ -2136,26 +2136,26 @@ class Schema:
 
         # Serialize each value type if it exists
         if value_types.string is not None:
-            result["#string"] = self._serialize_string_value_type(value_types.string)
+            result[STRING_VALUE_NAME] = self._serialize_string_value_type(value_types.string)
 
         if value_types.float_list is not None:
-            result["#float_list"] = self._serialize_float_list_value_type(
+            result[FLOAT_LIST_VALUE_NAME] = self._serialize_float_list_value_type(
                 value_types.float_list
             )
 
         if value_types.sparse_vector is not None:
-            result["#sparse_vector"] = self._serialize_sparse_vector_value_type(
+            result[SPARSE_VECTOR_VALUE_NAME] = self._serialize_sparse_vector_value_type(
                 value_types.sparse_vector
             )
 
         if value_types.int_value is not None:
-            result["#int"] = self._serialize_int_value_type(value_types.int_value)
+            result[INT_VALUE_NAME] = self._serialize_int_value_type(value_types.int_value)
 
         if value_types.float_value is not None:
-            result["#float"] = self._serialize_float_value_type(value_types.float_value)
+            result[FLOAT_VALUE_NAME] = self._serialize_float_value_type(value_types.float_value)
 
         if value_types.boolean is not None:
-            result["#bool"] = self._serialize_bool_value_type(value_types.boolean)
+            result[BOOL_VALUE_NAME] = self._serialize_bool_value_type(value_types.boolean)
 
         return result
 
@@ -2166,13 +2166,13 @@ class Schema:
         result: Dict[str, Any] = {}
 
         if string_type.fts_index is not None:
-            result["$fts_index"] = {
+            result[FTS_INDEX_NAME] = {
                 "enabled": string_type.fts_index.enabled,
                 "config": self._serialize_config(string_type.fts_index.config),
             }
 
         if string_type.string_inverted_index is not None:
-            result["$string_inverted_index"] = {
+            result[STRING_INVERTED_INDEX_NAME] = {
                 "enabled": string_type.string_inverted_index.enabled,
                 "config": self._serialize_config(
                     string_type.string_inverted_index.config
@@ -2188,7 +2188,7 @@ class Schema:
         result: Dict[str, Any] = {}
 
         if float_list_type.vector_index is not None:
-            result["$vector_index"] = {
+            result[VECTOR_INDEX_NAME] = {
                 "enabled": float_list_type.vector_index.enabled,
                 "config": self._serialize_config(float_list_type.vector_index.config),
             }
@@ -2202,7 +2202,7 @@ class Schema:
         result: Dict[str, Any] = {}
 
         if sparse_vector_type.sparse_vector_index is not None:
-            result["$sparse_vector_index"] = {
+            result[SPARSE_VECTOR_INDEX_NAME] = {
                 "enabled": sparse_vector_type.sparse_vector_index.enabled,
                 "config": self._serialize_config(
                     sparse_vector_type.sparse_vector_index.config
@@ -2216,7 +2216,7 @@ class Schema:
         result: Dict[str, Any] = {}
 
         if int_type.int_inverted_index is not None:
-            result["$int_inverted_index"] = {
+            result[INT_INVERTED_INDEX_NAME] = {
                 "enabled": int_type.int_inverted_index.enabled,
                 "config": self._serialize_config(int_type.int_inverted_index.config),
             }
@@ -2228,7 +2228,7 @@ class Schema:
         result: Dict[str, Any] = {}
 
         if float_type.float_inverted_index is not None:
-            result["$float_inverted_index"] = {
+            result[FLOAT_INVERTED_INDEX_NAME] = {
                 "enabled": float_type.float_inverted_index.enabled,
                 "config": self._serialize_config(
                     float_type.float_inverted_index.config
@@ -2242,7 +2242,7 @@ class Schema:
         result: Dict[str, Any] = {}
 
         if bool_type.bool_inverted_index is not None:
-            result["$bool_inverted_index"] = {
+            result[BOOL_INVERTED_INDEX_NAME] = {
                 "enabled": bool_type.bool_inverted_index.enabled,
                 "config": self._serialize_config(bool_type.bool_inverted_index.config),
             }
@@ -2346,15 +2346,15 @@ class Schema:
         fts_index = None
         string_inverted_index = None
 
-        if "$fts_index" in string_json:
-            fts_index_data = string_json["$fts_index"]
+        if FTS_INDEX_NAME in string_json:
+            fts_index_data = string_json[FTS_INDEX_NAME]
             fts_enabled = fts_index_data.get("enabled", True)
             fts_config_data = fts_index_data.get("config", {})
             fts_config = FtsIndexConfig(**fts_config_data)
             fts_index = FtsIndexType(enabled=fts_enabled, config=fts_config)
 
-        if "$string_inverted_index" in string_json:
-            string_index_data = string_json["$string_inverted_index"]
+        if STRING_INVERTED_INDEX_NAME in string_json:
+            string_index_data = string_json[STRING_INVERTED_INDEX_NAME]
             string_enabled = string_index_data.get("enabled", True)
             string_config_data = string_index_data.get("config", {})
             string_config = StringInvertedIndexConfig(**string_config_data)
@@ -2373,8 +2373,8 @@ class Schema:
         """Deserialize FloatListValueType from JSON format."""
         vector_index = None
 
-        if "$vector_index" in float_list_json:
-            index_data = float_list_json["$vector_index"]
+        if VECTOR_INDEX_NAME in float_list_json:
+            index_data = float_list_json[VECTOR_INDEX_NAME]
             enabled = index_data.get("enabled", True)
             config_data = deepcopy(index_data.get("config", {}))
 
@@ -2420,8 +2420,8 @@ class Schema:
         """Deserialize SparseVectorValueType from JSON format."""
         sparse_vector_index = None
 
-        if "$sparse_vector_index" in sparse_vector_json:
-            index_data = sparse_vector_json["$sparse_vector_index"]
+        if SPARSE_VECTOR_INDEX_NAME in sparse_vector_json:
+            index_data = sparse_vector_json[SPARSE_VECTOR_INDEX_NAME]
             enabled = index_data.get("enabled", True)
             config_data = deepcopy(index_data.get("config", {}))
 
@@ -2459,8 +2459,8 @@ class Schema:
         """Deserialize IntValueType from JSON format."""
         int_inverted_index = None
 
-        if "$int_inverted_index" in int_json:
-            index_data = int_json["$int_inverted_index"]
+        if INT_INVERTED_INDEX_NAME in int_json:
+            index_data = int_json[INT_INVERTED_INDEX_NAME]
             enabled = index_data.get("enabled", True)
             config_data = index_data.get("config", {})
             config = IntInvertedIndexConfig(**config_data)
@@ -2475,8 +2475,8 @@ class Schema:
         """Deserialize FloatValueType from JSON format."""
         float_inverted_index = None
 
-        if "$float_inverted_index" in float_json:
-            index_data = float_json["$float_inverted_index"]
+        if FLOAT_INVERTED_INDEX_NAME in float_json:
+            index_data = float_json[FLOAT_INVERTED_INDEX_NAME]
             enabled = index_data.get("enabled", True)
             config_data = index_data.get("config", {})
             config = FloatInvertedIndexConfig(**config_data)
@@ -2491,8 +2491,8 @@ class Schema:
         """Deserialize BoolValueType from JSON format."""
         bool_inverted_index = None
 
-        if "$bool_inverted_index" in bool_json:
-            index_data = bool_json["$bool_inverted_index"]
+        if BOOL_INVERTED_INDEX_NAME in bool_json:
+            index_data = bool_json[BOOL_INVERTED_INDEX_NAME]
             enabled = index_data.get("enabled", True)
             config_data = index_data.get("config", {})
             config = BoolInvertedIndexConfig(**config_data)
