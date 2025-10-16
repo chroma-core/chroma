@@ -148,7 +148,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "chroma-cloud-qwen": ChromaCloudQwenEmbeddingFunction,
 }
 
-sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {
+sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {  # type: ignore
     "huggingface_sparse": HuggingFaceSparseEmbeddingFunction,
     "fastembed_sparse": FastembedSparseEmbeddingFunction,
     "bm25": Bm25EmbeddingFunction,
@@ -184,6 +184,30 @@ def register_embedding_function(ef_class=None):  # type: ignore
         return _register(ef_class)  # type: ignore
 
     # If called without arguments, return a decorator
+    return _register
+
+
+def register_sparse_embedding_function(ef_class=None):  # type: ignore
+    """Register a custom sparse embedding function.
+
+    Can be used as a decorator:
+        @register_sparse_embedding_function
+        class MySparseEmbeddingFunction(SparseEmbeddingFunction):
+            @classmethod
+            def name(cls): return "my_sparse_embedding"
+    """
+
+    def _register(cls):  # type: ignore
+        try:
+            name = cls.name()
+            sparse_known_embedding_functions[name] = cls
+        except Exception as e:
+            raise ValueError(f"Failed to register sparse embedding function: {e}")
+        return cls  # Return the class unchanged
+
+    if ef_class is not None:
+        return _register(ef_class)  # type: ignore
+
     return _register
 
 
