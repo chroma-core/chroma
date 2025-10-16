@@ -61,6 +61,8 @@ pub enum SqlitePushLogsError {
     QueryError(#[from] WrappedSqlxError),
     #[error("Error getting max batch size: {0}")]
     GetMaxBatchSizeError(#[from] SqliteGetMaxBatchSizeError),
+    #[error("Unimplemented: {0}")]
+    Unimplemented(String),
 }
 
 impl ChromaError for SqlitePushLogsError {
@@ -74,6 +76,7 @@ impl ChromaError for SqlitePushLogsError {
             SqlitePushLogsError::QueryError(err) => err.code(),
             SqlitePushLogsError::PurgeLogSendingFailure(e) => e.code(),
             SqlitePushLogsError::GetMaxBatchSizeError(e) => e.code(),
+            SqlitePushLogsError::Unimplemented(_) => ErrorCodes::Unimplemented,
         }
     }
 }
@@ -336,6 +339,13 @@ impl SqliteLog {
                 let mut empty_metadata = UpdateMetadata::new();
 
                 let metadata = record.metadata.as_mut().unwrap_or(&mut empty_metadata);
+                for (key, value) in metadata.iter() {
+                    if matches!(value, UpdateMetadataValue::SparseVector(_)) {
+                        return Err(SqlitePushLogsError::Unimplemented(format!(
+                            "Sparse vector is not supported for local chroma: {key}"
+                        )));
+                    }
+                }
                 if let Some(ref document) = record.document {
                     metadata.insert(
                         "chroma:document".to_string(),
