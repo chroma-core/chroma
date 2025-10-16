@@ -20,7 +20,11 @@ use chroma_types::chroma_proto::heap_tender_service_server::{
 };
 use chroma_types::chroma_proto::{HeapSummaryRequest, HeapSummaryResponse};
 use chroma_types::{dirty_log_path_from_hostname, CollectionUuid, DirtyMarker, ScheduleEntry};
-use s3heap::{heap_path_from_hostname, Configuration, HeapWriter, Schedule, Triggerable};
+use chrono::{DateTime, Utc};
+use s3heap::{
+    heap_path_from_hostname, Configuration, HeapPruner, HeapReader, HeapWriter, Schedule,
+    Triggerable,
+};
 use wal3::{
     Cursor, CursorName, CursorStore, CursorStoreOptions, LogPosition, LogReader, LogReaderOptions,
     Witness,
@@ -29,6 +33,117 @@ use wal3::{
 mod scheduler;
 
 pub use scheduler::SysDbScheduler;
+
+//////////////////////////////////////////// conversions ///////////////////////////////////////////
+
+/// Error type for conversion failures.
+#[derive(Debug)]
+pub struct ConversionError(pub String);
+
+impl std::fmt::Display for ConversionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "conversion error: {}", self.0)
+    }
+}
+
+impl std::error::Error for ConversionError {}
+
+mod conversions {
+    use super::ConversionError;
+    use chroma_types::chroma_proto;
+    use chrono::{DateTime, Utc};
+    use prost_types::Timestamp;
+    use s3heap::{HeapItem, Limits, PruneStats, Schedule, Triggerable};
+    use uuid::Uuid;
+
+    /// Convert proto Triggerable to s3heap Triggerable.
+    pub fn triggerable_from_proto(
+        proto: chroma_proto::Triggerable,
+    ) -> Result<Triggerable, ConversionError> {
+        let partitioning_uuid = Uuid::parse_str(&proto.partitioning_uuid)
+            .map_err(|e| ConversionError(format!("invalid partitioning_uuid: {}", e)))?;
+        let scheduling_uuid = Uuid::parse_str(&proto.scheduling_uuid)
+            .map_err(|e| ConversionError(format!("invalid scheduling_uuid: {}", e)))?;
+        Ok(Triggerable {
+            partitioning: partitioning_uuid.into(),
+            scheduling: scheduling_uuid.into(),
+        })
+    }
+
+    /// Convert s3heap Triggerable to proto Triggerable.
+    pub fn triggerable_to_proto(triggerable: Triggerable) -> chroma_proto::Triggerable {
+        chroma_proto::Triggerable {
+            partitioning_uuid: triggerable.partitioning.to_string(),
+            scheduling_uuid: triggerable.scheduling.to_string(),
+        }
+    }
+
+    /// Convert proto Schedule to s3heap Schedule.
+    pub fn schedule_from_proto(proto: chroma_proto::Schedule) -> Result<Schedule, ConversionError> {
+        let triggerable = proto
+            .triggerable
+            .ok_or_else(|| ConversionError("missing triggerable".to_string()))
+            .and_then(triggerable_from_proto)?;
+        let next_scheduled = proto
+            .next_scheduled
+            .ok_or_else(|| ConversionError("missing next_scheduled".to_string()))?;
+        let next_scheduled = DateTime::from_timestamp(
+            next_scheduled.seconds,
+            next_scheduled.nanos.try_into().unwrap_or(0),
+        )
+        .ok_or_else(|| ConversionError("invalid next_scheduled timestamp".to_string()))?;
+        let nonce = Uuid::parse_str(&proto.nonce)
+            .map_err(|e| ConversionError(format!("invalid nonce: {}", e)))?;
+        Ok(Schedule {
+            triggerable,
+            next_scheduled,
+            nonce,
+        })
+    }
+
+    /// Convert s3heap HeapItem with bucket time to proto HeapItem.
+    pub fn heap_item_to_proto(
+        scheduled_time: DateTime<Utc>,
+        item: HeapItem,
+    ) -> chroma_proto::HeapItem {
+        chroma_proto::HeapItem {
+            triggerable: Some(triggerable_to_proto(item.trigger)),
+            nonce: item.nonce.to_string(),
+            scheduled_time: Some(Timestamp {
+                seconds: scheduled_time.timestamp(),
+                nanos: scheduled_time.timestamp_subsec_nanos() as i32,
+            }),
+        }
+    }
+
+    /// Convert proto Limits to s3heap Limits.
+    pub fn limits_from_proto(proto: chroma_proto::Limits) -> Result<Limits, ConversionError> {
+        let buckets_to_read = proto.buckets_to_read.map(|v| v as usize);
+        let max_items = proto.max_items.map(|v| v as usize);
+        let time_cut_off = proto
+            .time_cut_off
+            .map(|ts| {
+                DateTime::from_timestamp(ts.seconds, ts.nanos.try_into().unwrap_or(0))
+                    .ok_or_else(|| ConversionError("invalid time_cut_off timestamp".to_string()))
+            })
+            .transpose()?;
+        Ok(Limits {
+            buckets_to_read,
+            max_items,
+            time_cut_off,
+        })
+    }
+
+    /// Convert s3heap PruneStats to proto PruneStats.
+    pub fn prune_stats_to_proto(stats: PruneStats) -> chroma_proto::PruneStats {
+        chroma_proto::PruneStats {
+            items_pruned: stats.items_pruned as u32,
+            items_retained: stats.items_retained as u32,
+            buckets_deleted: stats.buckets_deleted as u32,
+            buckets_updated: stats.buckets_updated as u32,
+        }
+    }
+}
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -104,16 +219,27 @@ pub struct HeapTender {
     reader: LogReader,
     cursor: CursorStore,
     writer: HeapWriter,
+    heap_reader: HeapReader,
+    heap_pruner: HeapPruner,
 }
 
 impl HeapTender {
     /// Creates a new HeapTender.
-    pub fn new(sysdb: SysDb, reader: LogReader, cursor: CursorStore, writer: HeapWriter) -> Self {
+    pub fn new(
+        sysdb: SysDb,
+        reader: LogReader,
+        cursor: CursorStore,
+        writer: HeapWriter,
+        heap_reader: HeapReader,
+        heap_pruner: HeapPruner,
+    ) -> Self {
         Self {
             sysdb,
             reader,
             cursor,
             writer,
+            heap_reader,
+            heap_pruner,
         }
     }
 
@@ -350,14 +476,22 @@ impl Configurable<HeapTenderServerConfig> for HeapTenderServer {
         );
         let heap_prefix = heap_path_from_hostname(&config.my_member_id);
         let scheduler = Arc::new(SysDbScheduler::new(sysdb.clone())) as _;
-        let writer = HeapWriter::new(storage, heap_prefix, Arc::clone(&scheduler))
+        let writer = HeapWriter::new(storage.clone(), heap_prefix.clone(), Arc::clone(&scheduler))
             .await
+            .map_err(|e| -> Box<dyn chroma_error::ChromaError> { Box::new(e) })?;
+        let heap_reader =
+            HeapReader::new(storage.clone(), heap_prefix.clone(), Arc::clone(&scheduler))
+                .await
+                .map_err(|e| -> Box<dyn chroma_error::ChromaError> { Box::new(e) })?;
+        let heap_pruner = HeapPruner::new(storage, heap_prefix, Arc::clone(&scheduler))
             .map_err(|e| -> Box<dyn chroma_error::ChromaError> { Box::new(e) })?;
         let tender = Arc::new(HeapTender {
             sysdb,
             reader,
             cursor,
             writer,
+            heap_reader,
+            heap_pruner,
         });
         Ok(Self {
             config: config.clone(),
@@ -368,11 +502,192 @@ impl Configurable<HeapTenderServerConfig> for HeapTenderServer {
 
 #[async_trait::async_trait]
 impl HeapTenderService for HeapTenderServer {
+    async fn push(
+        &self,
+        request: Request<chroma_types::chroma_proto::PushRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::PushResponse>, Status> {
+        let schedules: Vec<Schedule> = request
+            .into_inner()
+            .schedules
+            .into_iter()
+            .map(conversions::schedule_from_proto)
+            .collect::<Result<Vec<_>, ConversionError>>()
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+
+        let count = schedules.len();
+        self.tender
+            .writer
+            .push(&schedules)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(chroma_types::chroma_proto::PushResponse {
+            schedules_added: count as u32,
+        }))
+    }
+
+    async fn peek(
+        &self,
+        request: Request<chroma_types::chroma_proto::PeekRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::PeekResponse>, Status> {
+        let req = request.into_inner();
+        let limits: s3heap::Limits = req
+            .limits
+            .ok_or_else(|| Status::invalid_argument("missing limits"))
+            .and_then(|l| {
+                conversions::limits_from_proto(l)
+                    .map_err(|e| Status::invalid_argument(e.to_string()))
+            })?;
+
+        let filter = req.filter;
+        let filter_fn = move |triggerable: &Triggerable, _: DateTime<Utc>| {
+            if let Some(ref f) = filter {
+                if let Some(ref partitioning_uuid) = f.partitioning_uuid {
+                    if triggerable.partitioning.to_string() != *partitioning_uuid {
+                        return false;
+                    }
+                }
+                if let Some(ref scheduling_uuid) = f.scheduling_uuid {
+                    if triggerable.scheduling.to_string() != *scheduling_uuid {
+                        return false;
+                    }
+                }
+            }
+            true
+        };
+
+        let items = self
+            .tender
+            .heap_reader
+            .peek(filter_fn, limits)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let proto_items: Vec<chroma_types::chroma_proto::HeapItem> = items
+            .into_iter()
+            .map(|(dt, item)| conversions::heap_item_to_proto(dt, item))
+            .collect();
+
+        Ok(Response::new(chroma_types::chroma_proto::PeekResponse {
+            items: proto_items,
+        }))
+    }
+
+    async fn prune(
+        &self,
+        request: Request<chroma_types::chroma_proto::PruneRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::PruneResponse>, Status> {
+        let limits: s3heap::Limits = request
+            .into_inner()
+            .limits
+            .ok_or_else(|| Status::invalid_argument("missing limits"))
+            .and_then(|l| {
+                conversions::limits_from_proto(l)
+                    .map_err(|e| Status::invalid_argument(e.to_string()))
+            })?;
+
+        let stats = self
+            .tender
+            .heap_pruner
+            .prune(limits)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(chroma_types::chroma_proto::PruneResponse {
+            stats: Some(conversions::prune_stats_to_proto(stats)),
+        }))
+    }
+
+    async fn prune_bucket(
+        &self,
+        request: Request<chroma_types::chroma_proto::PruneBucketRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::PruneBucketResponse>, Status> {
+        let timestamp = request
+            .into_inner()
+            .bucket
+            .ok_or_else(|| Status::invalid_argument("missing bucket timestamp"))?;
+
+        let bucket =
+            DateTime::from_timestamp(timestamp.seconds, timestamp.nanos.try_into().unwrap_or(0))
+                .ok_or_else(|| Status::invalid_argument("invalid bucket timestamp"))?;
+
+        let stats = self
+            .tender
+            .heap_pruner
+            .prune_bucket(bucket)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(
+            chroma_types::chroma_proto::PruneBucketResponse {
+                stats: Some(conversions::prune_stats_to_proto(stats)),
+            },
+        ))
+    }
+
+    async fn list_buckets(
+        &self,
+        request: Request<chroma_types::chroma_proto::ListBucketsRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::ListBucketsResponse>, Status> {
+        let max_buckets = request.into_inner().max_buckets.map(|v| v as usize);
+
+        let buckets = self
+            .tender
+            .heap_reader
+            .list_buckets(max_buckets)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let proto_buckets: Vec<prost_types::Timestamp> = buckets
+            .into_iter()
+            .map(|dt| prost_types::Timestamp {
+                seconds: dt.timestamp(),
+                nanos: dt.timestamp_subsec_nanos() as i32,
+            })
+            .collect();
+
+        Ok(Response::new(
+            chroma_types::chroma_proto::ListBucketsResponse {
+                buckets: proto_buckets,
+            },
+        ))
+    }
+
     async fn summary(
         &self,
         _request: Request<HeapSummaryRequest>,
     ) -> Result<Response<HeapSummaryResponse>, Status> {
-        todo!();
+        let buckets = self
+            .tender
+            .heap_reader
+            .list_buckets(None)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let bucket_count = buckets.len() as u32;
+        let oldest_bucket = buckets.first().map(|dt| prost_types::Timestamp {
+            seconds: dt.timestamp(),
+            nanos: dt.timestamp_subsec_nanos() as i32,
+        });
+        let newest_bucket = buckets.last().map(|dt| prost_types::Timestamp {
+            seconds: dt.timestamp(),
+            nanos: dt.timestamp_subsec_nanos() as i32,
+        });
+
+        let items = self
+            .tender
+            .heap_reader
+            .peek(|_, _| true, s3heap::Limits::default())
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let total_items = items.len() as u32;
+
+        Ok(Response::new(HeapSummaryResponse {
+            total_items,
+            oldest_bucket,
+            newest_bucket,
+            bucket_count,
+        }))
     }
 }
 
@@ -633,5 +948,158 @@ pub async fn entrypoint() {
         Err(e) => {
             tracing::error!("Error terminating server: {:?}", e);
         }
+    }
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_types::chroma_proto;
+    use chrono::TimeZone;
+    use s3heap::{HeapItem, Limits, PruneStats, Triggerable};
+    use uuid::Uuid;
+
+    #[test]
+    fn triggerable_round_trip() {
+        let partitioning_uuid = Uuid::new_v4();
+        let scheduling_uuid = Uuid::new_v4();
+
+        let original = Triggerable {
+            partitioning: partitioning_uuid.into(),
+            scheduling: scheduling_uuid.into(),
+        };
+
+        let proto = conversions::triggerable_to_proto(original);
+        let recovered = conversions::triggerable_from_proto(proto).unwrap();
+
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn schedule_round_trip() {
+        let partitioning_uuid = Uuid::new_v4();
+        let scheduling_uuid = Uuid::new_v4();
+        let nonce = Uuid::new_v4();
+        let next_scheduled = Utc.with_ymd_and_hms(2024, 3, 15, 14, 30, 0).unwrap();
+
+        let original = Schedule {
+            triggerable: Triggerable {
+                partitioning: partitioning_uuid.into(),
+                scheduling: scheduling_uuid.into(),
+            },
+            next_scheduled,
+            nonce,
+        };
+
+        let proto = chroma_proto::Schedule {
+            triggerable: Some(conversions::triggerable_to_proto(original.triggerable)),
+            next_scheduled: Some(prost_types::Timestamp {
+                seconds: next_scheduled.timestamp(),
+                nanos: next_scheduled.timestamp_subsec_nanos() as i32,
+            }),
+            nonce: nonce.to_string(),
+        };
+        let recovered = conversions::schedule_from_proto(proto).unwrap();
+
+        assert_eq!(original.triggerable, recovered.triggerable);
+        assert_eq!(original.nonce, recovered.nonce);
+        assert_eq!(original.next_scheduled, recovered.next_scheduled);
+    }
+
+    #[test]
+    fn heap_item_round_trip() {
+        let partitioning_uuid = Uuid::new_v4();
+        let scheduling_uuid = Uuid::new_v4();
+        let nonce = Uuid::new_v4();
+        let scheduled_time = Utc.with_ymd_and_hms(2024, 3, 15, 14, 30, 0).unwrap();
+
+        let original_item = HeapItem {
+            trigger: Triggerable {
+                partitioning: partitioning_uuid.into(),
+                scheduling: scheduling_uuid.into(),
+            },
+            nonce,
+        };
+
+        let proto = conversions::heap_item_to_proto(scheduled_time, original_item.clone());
+
+        assert_eq!(
+            proto.triggerable.as_ref().unwrap().partitioning_uuid,
+            partitioning_uuid.to_string()
+        );
+        assert_eq!(
+            proto.triggerable.as_ref().unwrap().scheduling_uuid,
+            scheduling_uuid.to_string()
+        );
+        assert_eq!(proto.nonce, nonce.to_string());
+        assert_eq!(
+            proto.scheduled_time.as_ref().unwrap().seconds,
+            scheduled_time.timestamp()
+        );
+        assert_eq!(
+            proto.scheduled_time.as_ref().unwrap().nanos,
+            scheduled_time.timestamp_subsec_nanos() as i32
+        );
+    }
+
+    #[test]
+    fn limits_round_trip() {
+        let original = Limits {
+            buckets_to_read: Some(100),
+            max_items: Some(50),
+            time_cut_off: Some(Utc.with_ymd_and_hms(2024, 3, 15, 14, 30, 0).unwrap()),
+        };
+
+        let proto = chroma_proto::Limits {
+            buckets_to_read: original.buckets_to_read.map(|v| v as u32),
+            max_items: original.max_items.map(|v| v as u32),
+            time_cut_off: original.time_cut_off.map(|dt| prost_types::Timestamp {
+                seconds: dt.timestamp(),
+                nanos: dt.timestamp_subsec_nanos() as i32,
+            }),
+        };
+        let recovered = conversions::limits_from_proto(proto).unwrap();
+
+        assert_eq!(original.buckets_to_read, recovered.buckets_to_read);
+        assert_eq!(original.max_items, recovered.max_items);
+        assert_eq!(original.time_cut_off, recovered.time_cut_off);
+    }
+
+    #[test]
+    fn limits_round_trip_with_none() {
+        let original = Limits {
+            buckets_to_read: None,
+            max_items: None,
+            time_cut_off: None,
+        };
+
+        let proto = chroma_proto::Limits {
+            buckets_to_read: None,
+            max_items: None,
+            time_cut_off: None,
+        };
+        let recovered = conversions::limits_from_proto(proto).unwrap();
+
+        assert_eq!(original.buckets_to_read, recovered.buckets_to_read);
+        assert_eq!(original.max_items, recovered.max_items);
+        assert_eq!(original.time_cut_off, recovered.time_cut_off);
+    }
+
+    #[test]
+    fn prune_stats_round_trip() {
+        let original = PruneStats {
+            items_pruned: 42,
+            items_retained: 100,
+            buckets_deleted: 5,
+            buckets_updated: 10,
+        };
+
+        let proto = conversions::prune_stats_to_proto(original.clone());
+        assert_eq!(proto.items_pruned, 42);
+        assert_eq!(proto.items_retained, 100);
+        assert_eq!(proto.buckets_deleted, 5);
+        assert_eq!(proto.buckets_updated, 10);
     }
 }
