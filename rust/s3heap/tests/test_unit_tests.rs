@@ -184,18 +184,22 @@ fn limits_equality() {
     let limits1 = Limits {
         buckets_to_read: Some(100),
         max_items: None,
+        time_cut_off: None,
     };
     let limits2 = Limits {
         buckets_to_read: Some(100),
         max_items: None,
+        time_cut_off: None,
     };
     let limits3 = Limits {
         buckets_to_read: Some(200),
         max_items: None,
+        time_cut_off: None,
     };
     let limits4 = Limits {
         buckets_to_read: None,
         max_items: None,
+        time_cut_off: None,
     };
 
     assert_eq!(limits1, limits2);
@@ -208,6 +212,7 @@ fn limits_copy() {
     let original = Limits {
         buckets_to_read: Some(500),
         max_items: None,
+        time_cut_off: None,
     };
     let copied = original;
     assert_eq!(original, copied);
@@ -348,6 +353,7 @@ async fn pruner_respects_limits() {
     let limits = Limits {
         buckets_to_read: Some(5),
         max_items: None,
+        time_cut_off: None,
     };
 
     // Should respect the limit even if more buckets exist
@@ -418,6 +424,7 @@ async fn reader_respects_limits() {
     let limits = Limits {
         buckets_to_read: Some(3),
         max_items: None,
+        time_cut_off: None,
     };
 
     // Should respect the bucket limit
@@ -455,6 +462,7 @@ fn limits_with_max_value() {
     let limits = Limits {
         buckets_to_read: Some(usize::MAX),
         max_items: None,
+        time_cut_off: None,
     };
     assert_eq!(limits.buckets_to_read, Some(usize::MAX));
 }

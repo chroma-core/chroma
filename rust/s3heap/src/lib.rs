@@ -318,6 +318,8 @@ pub struct Limits {
     /// Maximum number of items to return.
     /// If None, returns all items found within bucket limits.
     pub max_items: Option<usize>,
+    /// Cut-off time:  Do not read items after this cut-off.
+    pub time_cut_off: Option<DateTime<Utc>>,
 }
 
 impl Limits {
@@ -355,6 +357,26 @@ impl Limits {
     /// ```
     pub fn with_items(mut self, max_items: usize) -> Self {
         self.max_items = Some(max_items);
+        self
+    }
+
+    /// Set the time cut-off for reading items.
+    ///
+    /// Items scheduled after this time will not be returned.
+    ///
+    /// # Arguments
+    /// * `time_cut_off` - The cut-off time
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use s3heap::Limits;
+    /// use chrono::Utc;
+    ///
+    /// let limits = Limits::default().with_time_cut_off(Utc::now());
+    /// ```
+    pub fn with_time_cut_off(mut self, time_cut_off: DateTime<Utc>) -> Self {
+        self.time_cut_off = Some(time_cut_off);
         self
     }
 
@@ -904,6 +926,7 @@ impl HeapPruner {
     /// * `limits` - Controls pruning limits:
     ///   - `.with_buckets(n)` - Maximum number of buckets to scan (default: 1000)
     ///   - `.with_items(n)` - Maximum number of items to process (default: unlimited)
+    ///   - `.with_time_cut_off(t)` - Skip items scheduled after this time (default: no limit)
     ///
     /// # Errors
     ///
@@ -924,6 +947,11 @@ impl HeapPruner {
     ///
     /// // Stop after processing 1000 items total
     /// pruner.prune(Limits::default().with_items(1000)).await?;
+    ///
+    /// // Only prune tasks scheduled before a specific time
+    /// use chrono::{Utc, Duration};
+    /// let cutoff = Utc::now() - Duration::days(7);
+    /// pruner.prune(Limits::default().with_time_cut_off(cutoff)).await?;
     /// ```
     pub async fn prune(&self, limits: Limits) -> Result<PruneStats, Error> {
         let buckets = self.internal.list_approx_first_1k_buckets().await?;
@@ -931,6 +959,11 @@ impl HeapPruner {
         let max_items = limits.max_items.unwrap_or(usize::MAX);
 
         for bucket in buckets.into_iter().take(limits.max_buckets()) {
+            if let Some(time_cut_off) = limits.time_cut_off {
+                if bucket > time_cut_off {
+                    break;
+                }
+            }
             // Stop if we've processed enough items
             let items_processed = total_stats.items_pruned + total_stats.items_retained;
             if items_processed >= max_items {
@@ -1136,6 +1169,7 @@ impl HeapReader {
     /// * `limits` - Controls scanning limits:
     ///   - `.with_buckets(n)` - Maximum number of buckets to scan (default: 1000)
     ///   - `.with_items(n)` - Maximum number of items to return (default: unlimited)
+    ///   - `.with_time_cut_off(t)` - Skip items scheduled after this time (default: no limit)
     ///
     /// # Errors
     ///
@@ -1169,6 +1203,14 @@ impl HeapReader {
     ///     |_| true,
     ///     Limits::default().with_buckets(5).with_items(10),
     /// ).await?;
+    ///
+    /// // Get tasks scheduled before a specific time
+    /// use chrono::{Utc, Duration};
+    /// let one_hour_from_now = Utc::now() + Duration::hours(1);
+    /// let upcoming = reader.peek(
+    ///     |_| true,
+    ///     Limits::default().with_time_cut_off(one_hour_from_now),
+    /// ).await?;
     /// ```
     pub async fn peek(
         &self,
@@ -1181,6 +1223,11 @@ impl HeapReader {
         let max_items = limits.max_items.unwrap_or(usize::MAX);
 
         'outer: for bucket in buckets.into_iter().take(limits.max_buckets()) {
+            if let Some(time_cut_off) = limits.time_cut_off {
+                if bucket > time_cut_off {
+                    break;
+                }
+            }
             let (entries, _) = self.internal.load_bucket_or_empty(bucket).await?;
             let triggerable_and_nonce = entries
                 .iter()
