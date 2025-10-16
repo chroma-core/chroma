@@ -25,7 +25,7 @@ export type BoolInvertedIndexType = {
  * Boolean value type index configurations
  */
 export type BoolValueType = {
-    $bool_inverted_index?: null | BoolInvertedIndexType;
+    bool_inverted_index?: null | BoolInvertedIndexType;
 };
 
 export type ChecklistResponse = {
@@ -142,14 +142,14 @@ export type FloatInvertedIndexType = {
  * Float list value type index configurations (for vectors)
  */
 export type FloatListValueType = {
-    $vector_index?: null | VectorIndexType;
+    vector_index?: null | VectorIndexType;
 };
 
 /**
  * Float value type index configurations
  */
 export type FloatValueType = {
-    $float_inverted_index?: null | FloatInvertedIndexType;
+    float_inverted_index?: null | FloatInvertedIndexType;
 };
 
 export type ForkCollectionPayload = {
@@ -239,7 +239,7 @@ export type IntInvertedIndexType = {
  * Integer value type index configurations
  */
 export type IntValueType = {
-    $int_inverted_index?: null | IntInvertedIndexType;
+    int_inverted_index?: null | IntInvertedIndexType;
 };
 
 /**
@@ -254,7 +254,7 @@ export type InternalSchema = {
     /**
      * Key-specific index overrides
      */
-    key_overrides: {
+    keys: {
         [key: string]: ValueTypes;
     };
 };
@@ -400,7 +400,7 @@ export type SparseVectorIndexType = {
  * Sparse vector value type index configurations
  */
 export type SparseVectorValueType = {
-    $sparse_vector_index?: null | SparseVectorIndexType;
+    sparse_vector_index?: null | SparseVectorIndexType;
 };
 
 export type StringInvertedIndexConfig = {
@@ -416,8 +416,8 @@ export type StringInvertedIndexType = {
  * String value type index configurations
  */
 export type StringValueType = {
-    $fts_index?: null | FtsIndexType;
-    $string_inverted_index?: null | StringInvertedIndexType;
+    fts_index?: null | FtsIndexType;
+    string_inverted_index?: null | StringInvertedIndexType;
 };
 
 export type UpdateCollectionConfiguration = {
@@ -489,12 +489,12 @@ export type UpsertCollectionRecordsResponse = {
  * Contains optional configurations for each supported value type
  */
 export type ValueTypes = {
-    '#bool'?: null | BoolValueType;
-    '#float'?: null | FloatValueType;
-    '#float_list'?: null | FloatListValueType;
-    '#int'?: null | IntValueType;
-    '#sparse_vector'?: null | SparseVectorValueType;
-    '#string'?: null | StringValueType;
+    bool?: null | BoolValueType;
+    float?: null | FloatValueType;
+    float_list?: null | FloatListValueType;
+    int?: null | IntValueType;
+    sparse_vector?: null | SparseVectorValueType;
+    string?: null | StringValueType;
 };
 
 export type Vec = Array<{
