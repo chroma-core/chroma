@@ -116,7 +116,7 @@ pub struct CollectionsWithSegmentsProvider {
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum CollectionsWithSegmentsProviderError {
+pub enum CollectionsWithSegmentsProviderError {
     #[error(transparent)]
     Cache(#[from] CacheError),
     #[error(transparent)]
@@ -140,7 +140,7 @@ impl CollectionsWithSegmentsProvider {
         self.retry_backoff
     }
 
-    pub(crate) async fn get_collection_with_segments(
+    pub async fn get_collection_with_segments(
         &mut self,
         collection_id: CollectionUuid,
     ) -> Result<CollectionAndSegments, CollectionsWithSegmentsProviderError> {
