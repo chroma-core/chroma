@@ -425,16 +425,16 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             json=payload,
         )
 
-        metadatas_raw = resp_json.get("metadatas", None)
-        if metadatas_raw is not None:
+        metadata_batches = resp_json.get("metadatas", None)
+        if metadata_batches is not None:
             resp_json["metadatas"] = [
                 [
                     deserialize_metadata(metadata) if metadata is not None else None
-                    for metadata in result_metadatas
+                    for metadata in metadatas
                 ]
-                if result_metadatas is not None
+                if metadatas is not None
                 else None
-                for result_metadatas in metadatas_raw
+                for metadatas in metadata_batches
             ]
 
         return SearchResult(resp_json)
@@ -517,17 +517,17 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             },
         )
 
-        metadatas_raw = resp_json.get("metadatas", None)
-        if metadatas_raw is not None:
-            metadatas_raw = [
+        metadatas = resp_json.get("metadatas", None)
+        if metadatas is not None:
+            metadatas = [
                 deserialize_metadata(metadata) if metadata is not None else None
-                for metadata in metadatas_raw
+                for metadata in metadatas
             ]
 
         return GetResult(
             ids=resp_json["ids"],
             embeddings=resp_json.get("embeddings", None),
-            metadatas=metadatas_raw,  # type: ignore
+            metadatas=metadatas,  # type: ignore
             documents=resp_json.get("documents", None),
             data=None,
             uris=resp_json.get("uris", None),
@@ -707,23 +707,23 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             },
         )
 
-        metadatas_raw = resp_json.get("metadatas", None)
-        if metadatas_raw is not None:
-            metadatas_raw = [
+        metadata_batches = resp_json.get("metadatas", None)
+        if metadata_batches is not None:
+            metadata_batches = [
                 [
                     deserialize_metadata(metadata) if metadata is not None else None
-                    for metadata in result_metadatas
+                    for metadata in metadatas
                 ]
-                if result_metadatas is not None
+                if metadatas is not None
                 else None
-                for result_metadatas in metadatas_raw
+                for metadatas in metadata_batches
             ]
 
         return QueryResult(
             ids=resp_json["ids"],
             distances=resp_json.get("distances", None),
             embeddings=resp_json.get("embeddings", None),
-            metadatas=metadatas_raw,  # type: ignore
+            metadatas=metadata_batches,  # type: ignore
             documents=resp_json.get("documents", None),
             uris=resp_json.get("uris", None),
             data=None,

@@ -1,5 +1,5 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Number, Value};
 use sprs::CsVec;
 use std::{
@@ -17,6 +17,14 @@ use pyo3::types::PyAnyMethods;
 
 #[cfg(feature = "testing")]
 use proptest::prelude::*;
+
+#[derive(Serialize, Deserialize)]
+struct SparseVectorSerdeHelper {
+    #[serde(rename = "#type")]
+    type_tag: Option<String>,
+    indices: Vec<u32>,
+    values: Vec<f32>,
+}
 
 /// Represents a sparse vector using parallel arrays for indices and values.
 ///
@@ -36,17 +44,9 @@ pub struct SparseVector {
 impl<'de> Deserialize<'de> for SparseVector {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>,
+        D: Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        struct SparseVectorHelper {
-            #[serde(rename = "#type")]
-            type_tag: Option<String>,
-            indices: Vec<u32>,
-            values: Vec<f32>,
-        }
-
-        let helper = SparseVectorHelper::deserialize(deserializer)?;
+        let helper = SparseVectorSerdeHelper::deserialize(deserializer)?;
 
         // If #type is present, validate it
         if let Some(type_tag) = &helper.type_tag {
@@ -69,15 +69,14 @@ impl<'de> Deserialize<'de> for SparseVector {
 impl Serialize for SparseVector {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer,
+        S: Serializer,
     {
-        use serde::ser::SerializeStruct;
-
-        let mut state = serializer.serialize_struct("SparseVector", 3)?;
-        state.serialize_field("#type", "sparse_vector")?;
-        state.serialize_field("indices", &self.indices)?;
-        state.serialize_field("values", &self.values)?;
-        state.end()
+        let helper = SparseVectorSerdeHelper {
+            type_tag: Some("sparse_vector".to_string()),
+            indices: self.indices.clone(),
+            values: self.values.clone(),
+        };
+        helper.serialize(serializer)
     }
 }
 
@@ -827,7 +826,7 @@ pub enum Where {
 impl serde::Serialize for Where {
     fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer,
+        S: Serializer,
     {
         todo!()
     }
