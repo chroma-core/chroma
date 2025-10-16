@@ -60,17 +60,17 @@ prohibited by the invariant.
 |     | C_1  | INV1 | X    | DO1  | X    | -    | INV4 | X    | X    | X    | X    | T2   | X    |
 |     | C_2  | X    | INV3 | X    | DO2  | INV4 | -    | X    | X    | X    | X    | X    | T2   |
 |     |------|------|------|------|------|------|------|------|------|------|------|------|------|
-|     | D_1  | TT1  | X    | X    | X    | X    | X    | -    | INV2 | HOLE | X    | HOLE | X    |
-|     | D_2  | X    | TT1  | X    | X    | X    | X    | INV5 | -    | X    | HOLE | X    | HOLE |
-|     | E_1  | X    | X    | TT1  | X    | X    | X    | X    | X    | -    | R1   | HOLE | X    |
-|     | E_2  | X    | X    | X    | TT1  | X    | X    | X    | HOLE | INV4 | -    | X    | WT1  |
+|     | D_1  | TT1  | X    | X    | X    | X    | X    | -    | INV2 | INV6 | X    | INV6 | X    |
+|     | D_2  | X    | TT1  | X    | X    | X    | X    | INV5 | -    | X    | INV6 | X    | INV6 |
+|     | E_1  | X    | X    | TT1  | X    | X    | X    | X    | X    | -    | R1   | WT1  | X    |
+|     | E_2  | X    | X    | X    | TT1  | X    | X    | X    | TT3  | INV4 | -    | X    | WT1  |
 |     | F_1  | X    | X    | X    | X    | TT1  | X    | TT3  | X    | DO1  | X    | -    | X    |
-|     | F_2  | X    | X    | X    | X    | X    | TT1  | X    | HOLE | X    | DO2  | INV4 | -    |
+|     | F_2  | X    | X    | X    | X    | X    | TT1  | X    | HOLE2| X    | DO2  | INV4 | -    |
 
 - -:  Identity function.  Always permitted.
 - X:  The transition hops rows, columns, or column families in the 2x6 table.
 - STOP:  Transition to the quiescent state.
-- TT1:  Add task template.
+- TT1:  Add function template.
 - TT2:  Task template deleted.
 - TT3:  Task template instantiated.
 - ADD1:  Attach function.
@@ -79,10 +79,13 @@ prohibited by the invariant.
 - DO2:  Same as DO1, but technically not possible to happen.
 - WT1:  Write triggered-state change.
 - GC:  Garbage collection kicks in.
-- INV1:  Task UUIDs are not reused.  Therefore the task lifetime has the progression not used -> used -> never used again.
+- INV1:  Task UUIDs are not reused.  Therefore the function lifetime has the progression not used -> used -> never used again.
 - INV2:  A function will only be added to the heap after it has been witnessed to exist as a template or sysdb entry.  By INV1 if it is on heap and no longer witnessed it will never be used again.  Therefore it cannot resurrect to add to the heap.
-- INV3:  A task is always added in a non-waiting state.  This is necessary to guarantee that tasks don't get dropped.  It is either existing and on the heap or quiescent and waiting for additional writes.  The latter should never be the starting condition.
-- INV4:  A two-phase commit with the heap makes it possible to transition the schedule to keep the task scheduled, commit the heap change, and then commit the change to sysdb.  Therefore the signal will never leave the heap as long as the sysdb has a scheduled task.
-- INV5:  By INV2 the task template was witnessed in sysdb before the task was added to the heap.  By INV1, this means the task was deleted.  An impossibility arises.
-- R1:  Corollary to INV4:  On start, any outstanding 2PC is reconciled and converged to push the task to the heap.
-- HOLE:  There's a hole I don't know how to address.
+- INV3:  A function is always added in a non-waiting state.  This is necessary to guarantee that functions don't get dropped.  It is either existing and on the heap or quiescent and waiting for additional writes.  The latter should never be the starting condition.
+- INV4:  A two-phase commit with the heap makes it possible to transition the schedule to keep the function scheduled, commit the heap change, and then commit the change to sysdb.  Therefore the signal will never leave the heap as long as the sysdb has a scheduled function.
+- INV5:  By INV2 the function template was witnessed in sysdb before the function was added to the heap.  By INV1, this means the function was deleted.  An impossibility arises.
+- INV6:  A function cannot be deleted if it descends a template.
+- R1:  Corollary to INV4:  On start, any outstanding 2PC is reconciled and converged to push the function to the heap.
+
+Holes to overcomb/Unsurities:
+- HOLE2:  What would compel a process to instantiate a function template if not in heap?
