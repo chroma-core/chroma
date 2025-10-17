@@ -229,14 +229,25 @@ class RustBindingsAPI(ServerAPI):
         else:
             configuration_json_str = None
 
+        if schema:
+            schema_json_str = schema.serialize_to_json()
+        else:
+            schema_json_str = None
+
         collection = self.bindings.create_collection(
-            name, configuration_json_str, metadata, get_or_create, tenant, database
+            name,
+            configuration_json_str,
+            schema_json_str,
+            metadata,
+            get_or_create,
+            tenant,
+            database,
         )
         collection_model = CollectionModel(
             id=collection.id,
             name=collection.name,
             configuration_json=collection.configuration,
-            serialized_schema=None,
+            serialized_schema=collection.schema,
             metadata=collection.metadata,
             dimension=collection.dimension,
             tenant=collection.tenant,
@@ -256,7 +267,7 @@ class RustBindingsAPI(ServerAPI):
             id=collection.id,
             name=collection.name,
             configuration_json=collection.configuration,
-            serialized_schema=None,
+            serialized_schema=collection.schema,
             metadata=collection.metadata,
             dimension=collection.dimension,
             tenant=collection.tenant,
