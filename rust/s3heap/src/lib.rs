@@ -310,7 +310,7 @@ impl RetryConfig {
 /// // Create custom limits
 /// let custom_limits = Limits::default().with_buckets(100);
 /// ```
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Limits {
     /// Maximum number of buckets to read during a scan operation.
     /// If None, defaults to 1000 buckets.
@@ -318,7 +318,8 @@ pub struct Limits {
     /// Maximum number of items to return.
     /// If None, returns all items found within bucket limits.
     pub max_items: Option<usize>,
-    /// Cut-off time:  Do not read items after this cut-off.
+    /// Cut-off time for filtering items.
+    /// If Some, only items scheduled before this time will be processed.
     pub time_cut_off: Option<DateTime<Utc>>,
 }
 
@@ -1259,6 +1260,52 @@ impl HeapReader {
         }
 
         Ok(returns)
+    }
+
+    /// List time buckets in the heap.
+    ///
+    /// Returns up to max_buckets bucket timestamps in chronological order.
+    /// Each bucket corresponds to a one-minute window of scheduled tasks.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_buckets` - Maximum number of buckets to return (default: 1000, max: 1000)
+    ///
+    /// # Returns
+    ///
+    /// A vector of bucket timestamps in chronological order
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidArgument`] if max_buckets exceeds 1000
+    /// - [`Error::Storage`] if S3 operations fail
+    /// - [`Error::Internal`] if bucket paths have unexpected format
+    /// - [`Error::ParseDate`] if bucket timestamps cannot be parsed
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use s3heap::HeapReader;
+    ///
+    /// // Get the first 100 buckets
+    /// let buckets = reader.list_buckets(Some(100)).await?;
+    ///
+    /// // Get all buckets (up to 1000)
+    /// let all_buckets = reader.list_buckets(None).await?;
+    /// ```
+    pub async fn list_buckets(
+        &self,
+        max_buckets: Option<usize>,
+    ) -> Result<Vec<DateTime<Utc>>, Error> {
+        let limit = max_buckets.unwrap_or(1000);
+        if limit > 1000 {
+            return Err(Error::Internal(format!(
+                "max_buckets cannot exceed 1000, got {}",
+                limit
+            )));
+        }
+        let all = self.internal.list_approx_first_1k_buckets().await?;
+        Ok(all.into_iter().take(limit).collect())
     }
 }
 

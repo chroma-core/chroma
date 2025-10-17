@@ -5,7 +5,7 @@ use chroma_sysdb::{SysDb, TestSysDb};
 use chroma_types::{CollectionUuid, DirtyMarker};
 use wal3::{CursorStore, CursorStoreOptions, LogPosition, LogReader, LogReaderOptions};
 
-use s3heap::HeapWriter;
+use s3heap::{HeapPruner, HeapReader, HeapWriter};
 use s3heap_service::{HeapTender, HEAP_TENDER_CURSOR_NAME};
 
 // Dummy scheduler for testing purposes
@@ -52,10 +52,23 @@ async fn create_heap_tender(
         "test-tender".to_string(),
     );
     let scheduler = Arc::new(DummyScheduler) as _;
-    let writer = HeapWriter::new(storage, heap_prefix.to_string(), Arc::clone(&scheduler))
-        .await
-        .unwrap();
-    HeapTender::new(sysdb, reader, cursor, writer)
+    let writer = HeapWriter::new(
+        storage.clone(),
+        heap_prefix.to_string(),
+        Arc::clone(&scheduler),
+    )
+    .await
+    .unwrap();
+    let heap_reader = HeapReader::new(
+        storage.clone(),
+        heap_prefix.to_string(),
+        Arc::clone(&scheduler),
+    )
+    .await
+    .unwrap();
+    let heap_pruner =
+        HeapPruner::new(storage, heap_prefix.to_string(), Arc::clone(&scheduler)).unwrap();
+    HeapTender::new(sysdb, reader, cursor, writer, heap_reader, heap_pruner)
 }
 
 #[tokio::test]

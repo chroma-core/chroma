@@ -208,15 +208,15 @@ fn limits_equality() {
 }
 
 #[test]
-fn limits_copy() {
+fn limits_clone() {
     let original = Limits {
         buckets_to_read: Some(500),
         max_items: None,
         time_cut_off: None,
     };
-    let copied = original;
-    assert_eq!(original, copied);
-    assert_eq!(copied.buckets_to_read, Some(500));
+    let cloned = original.clone();
+    assert_eq!(original, cloned);
+    assert_eq!(cloned.buckets_to_read, Some(500));
 }
 
 // Tests for Triggerable

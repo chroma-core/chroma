@@ -66,7 +66,7 @@ impl TaskHeapReader {
                 }
             };
 
-            match reader.peek(|_, _| true, limits).await {
+            match reader.peek(|_, _| true, limits.clone()).await {
                 Ok(items) => {
                     tracing::trace!("Found {} tasks in {}", items.len(), heap_prefix);
                     for (bucket, item) in items {
