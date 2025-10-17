@@ -4,6 +4,7 @@ use crate::{
     CollectionsWithSegmentsProvider,
 };
 use backon::{ExponentialBuilder, Retryable};
+use chroma_api_types::HeartbeatResponse;
 use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
@@ -32,16 +33,16 @@ use chroma_types::{
     GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
     GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
     GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
-    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
-    Include, InternalSchema, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
-    QueryError, QueryRequest, QueryResponse, RemoveTaskError, RemoveTaskRequest,
-    RemoveTaskResponse, ResetError, ResetResponse, SchemaError, SearchRequest, SearchResponse,
-    Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
-    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
-    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
-    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include,
+    InternalSchema, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
+    ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError,
+    QueryRequest, QueryResponse, RemoveTaskError, RemoveTaskRequest, RemoveTaskResponse,
+    ResetError, ResetResponse, SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope,
+    SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
+    VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -1722,7 +1723,10 @@ impl ServiceBasedFrontend {
                         let knn_queries = rank_expr.knn_queries();
                         for knn_query in knn_queries {
                             schema
-                                .is_knn_key_indexing_enabled(&knn_query.key, &knn_query.query)
+                                .is_knn_key_indexing_enabled(
+                                    &knn_query.key.to_string(),
+                                    &knn_query.query,
+                                )
                                 .map_err(|err| {
                                     QueryError::Other(Box::new(err) as Box<dyn ChromaError>)
                                 })?;
@@ -2027,7 +2031,7 @@ mod tests {
     use chroma_types::Collection;
     use uuid::Uuid;
 
-    use crate::server::CreateCollectionPayload;
+    use chroma_types::CreateCollectionPayload;
 
     use super::*;
 

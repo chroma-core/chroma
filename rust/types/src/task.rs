@@ -2,26 +2,15 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::time::SystemTime;
-use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::CollectionUuid;
 
 /// TaskUuid is a wrapper around Uuid to provide a type for task identifiers.
 #[derive(
-    Copy,
-    Clone,
-    Debug,
-    Default,
-    Deserialize,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Hash,
-    Serialize,
-    ToSchema,
+    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
 )]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct TaskUuid(pub Uuid);
 
 impl TaskUuid {

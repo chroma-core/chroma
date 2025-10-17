@@ -5,27 +5,28 @@ use axum::{
     routing::{get, patch, post},
     Json, Router, ServiceExt,
 };
+use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse};
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
     ExternalCollectionReadContext, MeteredFutureExt, ReadAction, StartRequest, WriteAction,
 };
 use chroma_system::System;
 use chroma_tracing::add_tracing_middleware;
-use chroma_types::{plan::SearchPayload, InternalSchema};
+use chroma_types::plan::SearchPayload;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
     CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
-    CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTaskRequest, CreateTaskResponse, CreateTenantRequest,
-    CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, GetCollectionByCrnRequest, GetCollectionRequest, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
-    GetUserIdentityResponse, HeartbeatResponse, IncludeList, InternalCollectionConfiguration,
+    CountRequest, CountResponse, CreateCollectionPayload, CreateCollectionRequest,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTaskRequest, CreateTaskResponse,
+    CreateTenantRequest, CreateTenantResponse, DeleteCollectionRecordsResponse,
+    DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionByCrnRequest, GetCollectionRequest,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest,
+    GetTenantResponse, IncludeList, InternalCollectionConfiguration,
     InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    RemoveTaskRequest, RemoveTaskResponse, SearchRequest, SearchResponse,
-    UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
-    UpdateMetadata, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsResponse,
+    RemoveTaskRequest, RemoveTaskResponse, SearchRequest, SearchResponse, UpdateCollectionPayload,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
@@ -975,16 +976,6 @@ async fn count_collections(
     Ok(Json(server.frontend.count_collections(request).await?))
 }
 
-#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
-pub struct CreateCollectionPayload {
-    pub name: String,
-    pub schema: Option<InternalSchema>,
-    pub configuration: Option<CollectionConfiguration>,
-    pub metadata: Option<Metadata>,
-    #[serde(default)]
-    pub get_or_create: bool,
-}
-
 /// Creates a new collection under the specified database.
 #[utoipa::path(
     post,
@@ -1139,13 +1130,6 @@ async fn get_collection_by_crn(
     let request = GetCollectionByCrnRequest::try_new(crn)?;
     let collection = server.frontend.get_collection_by_crn(request).await?;
     Ok(Json(collection))
-}
-
-#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
-pub struct UpdateCollectionPayload {
-    pub new_name: Option<String>,
-    pub new_metadata: Option<UpdateMetadata>,
-    pub new_configuration: Option<UpdateCollectionConfiguration>,
 }
 
 /// Updates an existing collection's name or metadata.

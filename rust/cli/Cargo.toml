@@ -7,6 +7,8 @@ edition = "2021"
 axum = { workspace = true }
 arboard = "3.4.1"
 clap = { version = "4.5.28", features = ["derive"] }
+chroma = { workspace = true }
+chroma-api-types = { workspace = true }
 chroma-frontend = { workspace = true }
 chroma-config = { workspace = true }
 chroma-system = { workspace = true }
@@ -19,10 +21,10 @@ colored = "3.0.0"
 dialoguer = "0.11.0"
 dirs = "6.0.0"
 indicatif = { workspace = true }
-rand = {workspace = true}
+rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true}
+serde_json = { workspace = true }
 sqlx = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
@@ -34,11 +36,11 @@ semver = "1.0.26"
 regex = "1.11.1"
 futures-util = "0.3.31"
 zip-extract = "0.2.1"
-crossterm = {  version = "0.29.0", features = ["event-stream"] }
+crossterm = { version = "0.29.0", features = ["event-stream"] }
 ratatui = { version = "0.29.0", features = ["crossterm"] }
 tui-input = { version = "0.12.1", default-features = false, features = ["crossterm"] }
 textwrap = "0.16.2"
-futures = {workspace = true}
+futures = { workspace = true }
 supports-color = "3.0.2"
 
 

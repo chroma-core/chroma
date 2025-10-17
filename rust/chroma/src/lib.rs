@@ -1,7 +1,6 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test() {
-        println!("Hello, test!");
-    }
-}
+pub mod client;
+pub mod collection;
+pub mod embed;
+pub mod types;
+
+pub use client::ChromaClient;

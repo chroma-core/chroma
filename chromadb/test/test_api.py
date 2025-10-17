@@ -14,7 +14,13 @@ import pytest
 import chromadb
 import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
-from chromadb.api.types import Document, EmbeddingFunction, QueryResult
+from chromadb.api.types import (
+    Document,
+    EmbeddingFunction,
+    QueryResult,
+    TYPE_KEY,
+    SPARSE_VECTOR_TYPE_VALUE,
+)
 from chromadb.config import Settings
 from chromadb.errors import (
     ChromaError,
@@ -1897,15 +1903,21 @@ def test_validate_sparse_vector():
     SparseVector(indices=[0, 1], values=[True, False])  # True=1, False=0
 
     # Test 18: Invalid - unsorted indices
-    with pytest.raises(ValueError, match="indices must be sorted in strictly ascending order"):
+    with pytest.raises(
+        ValueError, match="indices must be sorted in strictly ascending order"
+    ):
         SparseVector(indices=[0, 2, 1], values=[0.1, 0.2, 0.3])
 
     # Test 19: Invalid - duplicate indices (not strictly ascending)
-    with pytest.raises(ValueError, match="indices must be sorted in strictly ascending order"):
+    with pytest.raises(
+        ValueError, match="indices must be sorted in strictly ascending order"
+    ):
         SparseVector(indices=[0, 1, 1, 2], values=[0.1, 0.2, 0.3, 0.4])
 
     # Test 20: Invalid - descending order
-    with pytest.raises(ValueError, match="indices must be sorted in strictly ascending order"):
+    with pytest.raises(
+        ValueError, match="indices must be sorted in strictly ascending order"
+    ):
         SparseVector(indices=[5, 3, 1], values=[0.5, 0.3, 0.1])
 
 
@@ -1962,7 +1974,9 @@ def test_sparse_vector_in_metadata_validation():
     with pytest.raises(ValueError, match="SparseVector indices must be non-negative"):
         invalid_metadata_3 = {
             "text": "negative index",
-            "sparse_embedding": SparseVector(indices=[0, -1, 2], values=[0.1, 0.2, 0.3]),
+            "sparse_embedding": SparseVector(
+                indices=[0, -1, 2], values=[0.1, 0.2, 0.3]
+            ),
         }
 
     # Test 6: Invalid sparse vector - non-numeric value (construction fails)
@@ -1999,6 +2013,178 @@ def test_sparse_vector_in_metadata_validation():
     )
     metadata_large = {"text": "large sparse", "large_sparse_vec": large_sparse}
     validate_metadata(metadata_large)
+
+
+def test_sparse_vector_dict_format_normalization():
+    """Test that dict-format sparse vectors are normalized to SparseVector instances."""
+    from chromadb.api.types import normalize_metadata, validate_metadata
+    from chromadb.base_types import SparseVector
+
+    # Test 1: Dict format with #type='sparse_vector' should be converted
+    metadata_dict_format = {
+        "text": "test document",
+        "sparse": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [0, 2, 5],
+            "values": [1.0, 2.0, 3.0],
+        },
+    }
+    normalized = normalize_metadata(metadata_dict_format)
+
+    assert isinstance(normalized["sparse"], SparseVector)
+    assert normalized["sparse"].indices == [0, 2, 5]
+    assert normalized["sparse"].values == [1.0, 2.0, 3.0]
+
+    # Should pass validation after normalization
+    validate_metadata(normalized)
+
+    # Test 2: SparseVector instance should pass through unchanged
+    sparse_instance = SparseVector(indices=[1, 3, 4], values=[0.5, 1.5, 2.5])
+    metadata_instance_format = {
+        "text": "test document",
+        "sparse": sparse_instance,
+    }
+    normalized2 = normalize_metadata(metadata_instance_format)
+
+    assert normalized2["sparse"] is sparse_instance  # Same object
+    validate_metadata(normalized2)
+
+    # Test 3: Dict format with unsorted indices should be rejected during normalization
+    metadata_unsorted = {
+        "text": "unsorted",
+        "sparse": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [5, 0, 2],
+            "values": [3.0, 1.0, 2.0],
+        },
+    }
+    with pytest.raises(
+        ValueError, match="indices must be sorted in strictly ascending order"
+    ):
+        normalize_metadata(metadata_unsorted)
+
+    # Test 4: Dict format with duplicate indices should be rejected
+    metadata_duplicates = {
+        "text": "duplicates",
+        "sparse": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [0, 2, 2],
+            "values": [1.0, 2.0, 3.0],
+        },
+    }
+    with pytest.raises(
+        ValueError, match="indices must be sorted in strictly ascending order"
+    ):
+        normalize_metadata(metadata_duplicates)
+
+    # Test 5: Dict format with negative indices should be rejected
+    metadata_negative = {
+        "text": "negative",
+        "sparse": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [-1, 0, 2],
+            "values": [1.0, 2.0, 3.0],
+        },
+    }
+    with pytest.raises(ValueError, match="indices must be non-negative"):
+        normalize_metadata(metadata_negative)
+
+    # Test 6: Dict format with length mismatch should be rejected
+    metadata_mismatch = {
+        "text": "mismatch",
+        "sparse": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [0, 2],
+            "values": [1.0, 2.0, 3.0],
+        },
+    }
+    with pytest.raises(
+        ValueError, match="indices and values must have the same length"
+    ):
+        normalize_metadata(metadata_mismatch)
+
+    # Test 7: Regular dict without #type should not be converted
+    metadata_regular_dict = {
+        "text": "regular",
+        "config": {"key": "value"},
+    }
+    normalized3 = normalize_metadata(metadata_regular_dict)
+    assert isinstance(normalized3["config"], dict)
+    assert normalized3["config"]["key"] == "value"
+
+    # Test 8: Empty sparse vector in dict format
+    metadata_empty = {
+        "text": "empty",
+        "sparse": {TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE, "indices": [], "values": []},
+    }
+    normalized4 = normalize_metadata(metadata_empty)
+    assert isinstance(normalized4["sparse"], SparseVector)
+    assert normalized4["sparse"].indices == []
+    assert normalized4["sparse"].values == []
+
+    # Test 9: Multiple sparse vectors in dict format
+    metadata_multiple = {
+        "sparse1": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [0, 1],
+            "values": [1.0, 2.0],
+        },
+        "sparse2": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [2, 3],
+            "values": [3.0, 4.0],
+        },
+        "regular": 42,
+    }
+    normalized5 = normalize_metadata(metadata_multiple)
+    assert isinstance(normalized5["sparse1"], SparseVector)
+    assert isinstance(normalized5["sparse2"], SparseVector)
+    assert normalized5["regular"] == 42
+
+
+def test_sparse_vector_dict_format_in_record_set():
+    """Test that dict-format sparse vectors work in normalize_insert_record_set."""
+    from chromadb.api.types import (
+        normalize_insert_record_set,
+        validate_insert_record_set,
+    )
+    from chromadb.base_types import SparseVector
+
+    # Test 1: Mix of dict format and SparseVector instances
+    record_set = normalize_insert_record_set(
+        ids=["doc1", "doc2", "doc3"],
+        embeddings=None,
+        metadatas=[
+            {
+                "text": "test1",
+                "sparse": {
+                    TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+                    "indices": [0, 2],
+                    "values": [1.0, 2.0],
+                },
+            },
+            {
+                "text": "test2",
+                "sparse": SparseVector(indices=[1, 3], values=[1.5, 2.5]),
+            },
+            {"text": "test3"},  # No sparse vector
+        ],
+        documents=["doc one", "doc two", "doc three"],
+    )
+
+    # Both should be converted to SparseVector instances
+    assert isinstance(record_set["metadatas"][0]["sparse"], SparseVector)
+    assert isinstance(record_set["metadatas"][1]["sparse"], SparseVector)
+    assert "sparse" not in record_set["metadatas"][2]
+
+    # Validation should pass
+    validate_insert_record_set(record_set)
+
+    # Test 2: Verify values are correct after normalization
+    assert record_set["metadatas"][0]["sparse"].indices == [0, 2]
+    assert record_set["metadatas"][0]["sparse"].values == [1.0, 2.0]
+    assert record_set["metadatas"][1]["sparse"].indices == [1, 3]
+    assert record_set["metadatas"][1]["sparse"].values == [1.5, 2.5]
 
 
 def test_search_result_rows() -> None:

@@ -2,7 +2,6 @@ use crate::hnsw_configuration::Space;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use utoipa::ToSchema;
 use validator::Validate;
 
 pub fn default_search_nprobe() -> u32 {
@@ -94,7 +93,8 @@ impl ChromaError for DistributedSpannParametersFromSegmentError {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct InternalSpannConfiguration {
     #[serde(default = "default_search_nprobe")]
     pub search_nprobe: u32,
@@ -103,7 +103,7 @@ pub struct InternalSpannConfiguration {
     #[serde(default = "default_search_rng_epsilon")]
     pub search_rng_epsilon: f32,
     #[serde(default = "default_write_nprobe")]
-    #[validate(range(max = 128))]
+    #[validate(range(max = 64))]
     pub write_nprobe: u32,
     #[serde(default = "default_nreplica_count")]
     #[validate(range(max = 8))]
@@ -113,7 +113,7 @@ pub struct InternalSpannConfiguration {
     #[serde(default = "default_write_rng_epsilon")]
     pub write_rng_epsilon: f32,
     #[serde(default = "default_split_threshold")]
-    #[validate(range(min = 25, max = 200))]
+    #[validate(range(min = 50, max = 200))]
     pub split_threshold: u32,
     #[serde(default = "default_num_samples_kmeans")]
     pub num_samples_kmeans: usize,
@@ -123,7 +123,7 @@ pub struct InternalSpannConfiguration {
     #[validate(range(max = 64))]
     pub reassign_neighbor_count: u32,
     #[serde(default = "default_merge_threshold")]
-    #[validate(range(min = 12, max = 100))]
+    #[validate(range(min = 25, max = 100))]
     pub merge_threshold: u32,
     #[serde(default = "default_num_centers_to_merge_to")]
     #[validate(range(max = 8))]
@@ -147,7 +147,8 @@ impl Default for InternalSpannConfiguration {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct SpannConfiguration {
     pub search_nprobe: Option<u32>,
@@ -204,7 +205,8 @@ impl Default for SpannConfiguration {
     }
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, Validate, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct UpdateSpannConfiguration {

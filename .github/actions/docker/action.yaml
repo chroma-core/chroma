@@ -36,6 +36,6 @@ runs:
         password: ${{ inputs.dockerhub-password }}
     - name: Set up Blacksmith builder
       if: ${{ inputs.setup-blacksmith == 'true' }}
-      uses: useblacksmith/build-push-action@v1.1
+      uses: useblacksmith/build-push-action@v2
       with:
         setup-only: true

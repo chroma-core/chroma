@@ -2,7 +2,36 @@
 name = "chroma"
 version = "0.1.0"
 edition = "2021"
-description = "Placeholder for trychroma.com"
+description = "Client for Chroma, the AI-native cloud database."
 license = "Apache-2.0"
 
 [dependencies]
+async-trait = { workspace = true }
+backon = "1.5"
+bon = "3.8.1"
+reqwest = { version = ">=0.12.0,<0.13.0", features = ["json", "charset", "system-proxy", "http2"], default-features = false }
+opentelemetry = { version = ">=0.27,<0.32", optional = true }
+serde.workspace = true
+serde_json.workspace = true
+tokio = { version = ">=1,<2", features = ["sync"] }
+thiserror.workspace = true
+tracing.workspace = true
+parking_lot.workspace = true
+
+chroma-api-types = { workspace = true }
+chroma-error = { workspace = true }
+chroma-types = { workspace = true }
+
+[features]
+default = ["rustls", "ollama"]
+native-tls = ["reqwest/default-tls", "reqwest/default"]
+rustls = ["reqwest/rustls-tls"]
+ollama = []
+
+[dev-dependencies]
+dotenvy = "0.15.7"
+futures-util = "0.3.31"
+test-log = { version = "0.2.18", features = ["trace"] }
+tokio.workspace = true
+uuid.workspace = true
+httpmock = "0.8.2"
