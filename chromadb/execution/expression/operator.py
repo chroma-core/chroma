@@ -11,7 +11,6 @@ from chromadb.api.types import (
     SparseVector,
     normalize_embeddings,
     validate_embeddings,
-    validate_sparse_vector,
 )
 from chromadb.types import (
     Collection,
@@ -672,8 +671,14 @@ class Rank:
             query = knn_data["query"]
 
             if isinstance(query, dict):
-                # SparseVector case
-                validate_sparse_vector(query)
+                # SparseVector case - deserialize from transport format
+                if query.get("#type") == "sparse_vector":
+                    query = SparseVector.from_dict(query)
+                else:
+                    # Old format or invalid - try to construct directly
+                    raise ValueError(
+                        f"Expected dict with #type='sparse_vector', got {query}"
+                    )
 
             elif isinstance(query, (list, tuple, np.ndarray)):
                 # Dense vector case - normalize then validate
@@ -1040,9 +1045,13 @@ class Knn(Rank):
     return_rank: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
-        # Convert numpy array to list if needed
+        # Convert to transport format
         query_value = self.query
-        if isinstance(query_value, np.ndarray):
+        if isinstance(query_value, SparseVector):
+            # Convert SparseVector dataclass to transport dict
+            query_value = query_value.to_dict()
+        elif isinstance(query_value, np.ndarray):
+            # Convert numpy array to list
             query_value = query_value.tolist()
 
         # Build result dict - only include non-default values to keep JSON clean

@@ -4,6 +4,8 @@ import {
   HttpMethod,
   normalizeMethod,
   parseConnectionPath,
+  deserializeMetadata,
+  serializeMetadata,
 } from "./utils";
 import { DefaultService as Api, ChecklistResponse } from "./api";
 import { CollectionMetadata, UserIdentity } from "./types";
@@ -227,7 +229,8 @@ export class ChromaClient {
               collection.configuration_json.embedding_function ?? undefined,
             ),
             configuration: collection.configuration_json,
-            metadata: collection.metadata ?? undefined,
+            metadata:
+              deserializeMetadata(collection.metadata ?? undefined) ?? undefined,
           }),
       ),
     );
@@ -279,7 +282,7 @@ export class ChromaClient {
       body: {
         name,
         configuration: collectionConfig,
-        metadata,
+        metadata: serializeMetadata(metadata),
         get_or_create: false,
       },
     });
@@ -289,7 +292,7 @@ export class ChromaClient {
       apiClient: this.apiClient,
       name,
       configuration: data.configuration_json,
-      metadata,
+      metadata: deserializeMetadata(data.metadata ?? undefined) ?? undefined,
       embeddingFunction:
         embeddingFunction ??
         (await getEmbeddingFunction(
@@ -325,7 +328,7 @@ export class ChromaClient {
       apiClient: this.apiClient,
       name,
       configuration: data.configuration_json,
-      metadata: data.metadata ?? undefined,
+      metadata: deserializeMetadata(data.metadata ?? undefined) ?? undefined,
       embeddingFunction: embeddingFunction
         ? embeddingFunction
         : await getEmbeddingFunction(
@@ -397,7 +400,7 @@ export class ChromaClient {
       body: {
         name,
         configuration: collectionConfig,
-        metadata,
+        metadata: serializeMetadata(metadata),
         get_or_create: true,
       },
     });
@@ -407,7 +410,7 @@ export class ChromaClient {
       apiClient: this.apiClient,
       name,
       configuration: data.configuration_json,
-      metadata: data.metadata ?? undefined,
+      metadata: deserializeMetadata(data.metadata ?? undefined) ?? undefined,
       embeddingFunction:
         embeddingFunction ??
         (await getEmbeddingFunction(

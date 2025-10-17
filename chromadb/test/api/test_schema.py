@@ -25,7 +25,7 @@ class MockSparseEmbeddingFunction(SparseEmbeddingFunction[List[str]]):
         self._name = name
 
     def __call__(self, input: List[str]) -> List[SparseVector]:
-        return [{"indices": [0, 1], "values": [1.0, 1.0]} for _ in input]
+        return [SparseVector(indices=[0, 1], values=[1.0, 1.0]) for _ in input]
 
     @staticmethod
     def name() -> str:

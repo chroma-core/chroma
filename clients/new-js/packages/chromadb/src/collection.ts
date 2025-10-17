@@ -26,6 +26,11 @@ import {
   validateMetadata,
   validateMaxBatchSize,
   embeddingsToBase64Bytes,
+  serializeMetadatas,
+  serializeMetadata,
+  deserializeMetadatas,
+  deserializeMetadataMatrix,
+  deserializeMetadata,
 } from "./utils";
 import { createClient } from "@hey-api/client-fetch";
 import { ChromaValueError } from "./errors";
@@ -429,7 +434,7 @@ export class CollectionImpl implements Collection {
         ids: preparedRecordSet.ids,
         embeddings: preparedRecordSet.embeddings,
         documents: preparedRecordSet.documents,
-        metadatas: preparedRecordSet.metadatas,
+        metadatas: serializeMetadatas(preparedRecordSet.metadatas),
         uris: preparedRecordSet.uris,
       },
     });
@@ -469,12 +474,14 @@ export class CollectionImpl implements Collection {
       },
     });
 
+    const deserializedMetadatas = deserializeMetadatas(data.metadatas) ?? [];
+
     return new GetResult<TMeta>({
       documents: data.documents ?? [],
       embeddings: data.embeddings ?? [],
       ids: data.ids,
       include: data.include,
-      metadatas: (data.metadatas ?? []) as (TMeta | null)[],
+      metadatas: deserializedMetadatas as (TMeta | null)[],
       uris: data.uris ?? [],
     });
   }
@@ -530,13 +537,16 @@ export class CollectionImpl implements Collection {
       },
     });
 
+    const deserializedMetadatas =
+      deserializeMetadataMatrix(data.metadatas) ?? [];
+
     return new QueryResult({
       distances: data.distances ?? [],
       documents: data.documents ?? [],
       embeddings: data.embeddings ?? [],
       ids: data.ids ?? [],
       include: data.include,
-      metadatas: (data.metadatas ?? []) as (TMeta | null)[][],
+      metadatas: deserializedMetadatas as (TMeta | null)[][],
       uris: data.uris ?? [],
     });
   }
@@ -601,7 +611,7 @@ export class CollectionImpl implements Collection {
       path: await this.path(),
       body: {
         new_name: name,
-        new_metadata: metadata,
+        new_metadata: serializeMetadata(metadata),
         new_configuration: updateConfiguration,
       },
     });
@@ -620,7 +630,7 @@ export class CollectionImpl implements Collection {
       name: data.name,
       id: data.id,
       embeddingFunction: this._embeddingFunction,
-      metadata: data.metadata ?? undefined,
+      metadata: deserializeMetadata(data.metadata ?? undefined) ?? undefined,
       configuration: data.configuration_json,
     });
   }
@@ -657,7 +667,7 @@ export class CollectionImpl implements Collection {
       body: {
         ids: preparedRecordSet.ids,
         embeddings: preparedRecordSet.embeddings,
-        metadatas: preparedRecordSet.metadatas,
+        metadatas: serializeMetadatas(preparedRecordSet.metadatas),
         uris: preparedRecordSet.uris,
         documents: preparedRecordSet.documents,
       },
@@ -695,7 +705,7 @@ export class CollectionImpl implements Collection {
       body: {
         ids: preparedRecordSet.ids,
         embeddings: preparedRecordSet.embeddings,
-        metadatas: preparedRecordSet.metadatas,
+        metadatas: serializeMetadatas(preparedRecordSet.metadatas),
         uris: preparedRecordSet.uris,
         documents: preparedRecordSet.documents,
       },

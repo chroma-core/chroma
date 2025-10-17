@@ -1,10 +1,12 @@
-import type { HashMap, SearchResponse } from "../../api";
+import type { SearchResponse } from "../../api";
+import type { Metadata } from "../../types";
+import { deserializeMetadatas } from "../../utils";
 
 export interface SearchResultRow {
   id: string;
   document?: string | null;
   embedding?: number[] | null;
-  metadata?: HashMap | null;
+  metadata?: Metadata | null;
   score?: number | null;
 }
 
@@ -29,7 +31,7 @@ export class SearchResult {
   public readonly ids: string[][];
   public readonly documents: Array<Array<string | null> | null>;
   public readonly embeddings: Array<Array<Array<number> | null> | null>;
-  public readonly metadatas: Array<Array<HashMap | null> | null>;
+  public readonly metadatas: Array<Array<Metadata | null> | null>;
   public readonly scores: Array<Array<number | null> | null>;
   public readonly select: SearchResponse["select"];
 
@@ -38,7 +40,13 @@ export class SearchResult {
     const payloadCount = this.ids.length;
     this.documents = normalizePayloadArray(response.documents, payloadCount);
     this.embeddings = normalizePayloadArray(response.embeddings, payloadCount);
-    this.metadatas = normalizePayloadArray(response.metadatas, payloadCount);
+    const rawMetadatas = normalizePayloadArray(response.metadatas, payloadCount);
+    this.metadatas = rawMetadatas.map((payload) => {
+      if (!payload) {
+        return null;
+      }
+      return deserializeMetadatas(payload) ?? [];
+    });
     this.scores = normalizePayloadArray(response.scores, payloadCount);
     this.select = response.select ?? [];
   }

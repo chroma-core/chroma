@@ -3,6 +3,7 @@ from chromadb.api.types import (
     SparseEmbeddings,
     Documents,
 )
+from chromadb.base_types import SparseVector
 from typing import Dict, Any, TypedDict, Optional
 from typing import cast, Literal
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
@@ -116,7 +117,7 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
 
         for vec in embeddings:
             sparse_embeddings.append(
-                {"indices": vec.indices.tolist(), "values": vec.values.tolist()}
+                SparseVector(indices=vec.indices.tolist(), values=vec.values.tolist())
             )
 
         _sort_sparse_vectors(sparse_embeddings)
@@ -147,7 +148,9 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
 
             for vec in embeddings:
                 sparse_embeddings.append(
-                    {"indices": vec.indices.tolist(), "values": vec.values.tolist()}
+                    SparseVector(
+                        indices=vec.indices.tolist(), values=vec.values.tolist()
+                    )
                 )
 
             _sort_sparse_vectors(sparse_embeddings)

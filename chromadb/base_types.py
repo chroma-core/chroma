@@ -1,18 +1,84 @@
-from typing import Dict, List, Mapping, Optional, Sequence, Union
-from typing_extensions import Literal, TypedDict
+from typing import Dict, List, Mapping, Optional, Sequence, Union, Any
+from typing_extensions import Literal
+from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
 
-class SparseVector(TypedDict):
+@dataclass
+class SparseVector:
     """Represents a sparse vector using parallel arrays for indices and values.
-    
+
     Attributes:
-        indices: List of dimension indices (must be non-negative integers)
-        values: List of values corresponding to each index
+        indices: List of dimension indices (must be non-negative integers, sorted in strictly ascending order)
+        values: List of values corresponding to each index (floats)
+    
+    Note:
+        - Indices must be sorted in strictly ascending order (no duplicates)
+        - Indices and values must have the same length
+        - All validations are performed in __post_init__
     """
+
     indices: List[int]
     values: List[float]
+
+    def __post_init__(self) -> None:
+        """Validate the sparse vector structure."""
+        if not isinstance(self.indices, list):
+            raise ValueError(
+                f"Expected SparseVector indices to be a list, got {type(self.indices).__name__}"
+            )
+
+        if not isinstance(self.values, list):
+            raise ValueError(
+                f"Expected SparseVector values to be a list, got {type(self.values).__name__}"
+            )
+
+        if len(self.indices) != len(self.values):
+            raise ValueError(
+                f"SparseVector indices and values must have the same length, "
+                f"got {len(self.indices)} indices and {len(self.values)} values"
+            )
+
+        for i, idx in enumerate(self.indices):
+            if not isinstance(idx, int):
+                raise ValueError(
+                    f"SparseVector indices must be integers, got {type(idx).__name__} at position {i}"
+                )
+            if idx < 0:
+                raise ValueError(
+                    f"SparseVector indices must be non-negative, got {idx} at position {i}"
+                )
+
+        for i, val in enumerate(self.values):
+            if not isinstance(val, (int, float)):
+                raise ValueError(
+                    f"SparseVector values must be numbers, got {type(val).__name__} at position {i}"
+                )
+        
+        # Validate indices are sorted in strictly ascending order
+        if len(self.indices) > 1:
+            for i in range(1, len(self.indices)):
+                if self.indices[i] <= self.indices[i - 1]:
+                    raise ValueError(
+                        f"SparseVector indices must be sorted in strictly ascending order, "
+                        f"found indices[{i}]={self.indices[i]} <= indices[{i-1}]={self.indices[i-1]}"
+                    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to transport format with type tag."""
+        return {
+            "#type": "sparse_vector",
+            "indices": self.indices,
+            "values": self.values,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "SparseVector":
+        """Deserialize from transport format (strict - requires #type field)."""
+        if d.get("#type") != "sparse_vector":
+            raise ValueError(f"Expected #type='sparse_vector', got {d.get('#type')}")
+        return cls(indices=d["indices"], values=d["values"])
 
 
 Metadata = Mapping[str, Optional[Union[str, int, float, bool, SparseVector]]]

@@ -63,8 +63,6 @@ __all__ = [
     "SearchResult",
     "SearchResultRow",
     "SparseVector",
-    "is_valid_sparse_vector",
-    "validate_sparse_vector",
     # Index Configuration Types
     "FtsIndexConfig",
     "HnswIndexConfig",
@@ -924,67 +922,7 @@ def validate_ids(ids: IDs) -> IDs:
     return ids
 
 
-def is_valid_sparse_vector(value: Any) -> bool:
-    """Check if a value looks like a SparseVector (has indices and values keys)."""
-    return isinstance(value, dict) and "indices" in value and "values" in value
 
-
-def validate_sparse_vector(value: Any) -> None:
-    """Validate that a value is a properly formed SparseVector.
-
-    Args:
-        value: The value to validate as a SparseVector
-
-    Raises:
-        ValueError: If the value is not a valid SparseVector
-    """
-    if not isinstance(value, dict):
-        raise ValueError(
-            f"Expected SparseVector to be a dict, got {type(value).__name__}"
-        )
-
-    if "indices" not in value or "values" not in value:
-        raise ValueError("SparseVector must have 'indices' and 'values' keys")
-
-    indices = value.get("indices")
-    values = value.get("values")
-
-    # Validate indices
-    if not isinstance(indices, list):
-        raise ValueError(
-            f"Expected SparseVector indices to be a list, got {type(indices).__name__}"
-        )
-
-    # Validate values
-    if not isinstance(values, list):
-        raise ValueError(
-            f"Expected SparseVector values to be a list, got {type(values).__name__}"
-        )
-
-    # Check lengths match
-    if len(indices) != len(values):
-        raise ValueError(
-            f"SparseVector indices and values must have the same length, "
-            f"got {len(indices)} indices and {len(values)} values"
-        )
-
-    # Validate each index
-    for i, idx in enumerate(indices):
-        if not isinstance(idx, int):
-            raise ValueError(
-                f"SparseVector indices must be integers, got {type(idx).__name__} at position {i}"
-            )
-        if idx < 0:
-            raise ValueError(
-                f"SparseVector indices must be non-negative, got {idx} at position {i}"
-            )
-
-    # Validate each value
-    for i, val in enumerate(values):
-        if not isinstance(val, (int, float)):
-            raise ValueError(
-                f"SparseVector values must be numbers, got {type(val).__name__} at position {i}"
-            )
 
 
 def validate_metadata(metadata: Metadata) -> Metadata:
@@ -1008,12 +946,9 @@ def validate_metadata(metadata: Metadata) -> Metadata:
             raise TypeError(
                 f"Expected metadata key to be a str, got {key} which is a {type(key).__name__}"
             )
-        # Check if value is a SparseVector
-        if is_valid_sparse_vector(value):
-            try:
-                validate_sparse_vector(value)
-            except ValueError as e:
-                raise ValueError(f"Invalid SparseVector for key '{key}': {e}")
+        # Check if value is a SparseVector (validation happens in __post_init__)
+        if isinstance(value, SparseVector):
+            pass  # Already validated in SparseVector.__post_init__
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
         elif not isinstance(value, bool) and not isinstance(
             value, (str, int, float, type(None))
@@ -1037,12 +972,9 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
     for key, value in metadata.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
-        # Check if value is a SparseVector
-        if is_valid_sparse_vector(value):
-            try:
-                validate_sparse_vector(value)
-            except ValueError as e:
-                raise ValueError(f"Invalid SparseVector for key '{key}': {e}")
+        # Check if value is a SparseVector (validation happens in __post_init__)
+        if isinstance(value, SparseVector):
+            pass  # Already validated in SparseVector.__post_init__
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
         elif not isinstance(value, bool) and not isinstance(
             value, (str, int, float, type(None))
@@ -1051,6 +983,50 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
                 f"Expected metadata value to be a str, int, float, bool, SparseVector, or None, got {value}"
             )
     return metadata
+
+
+def serialize_metadata(metadata: Optional[Metadata]) -> Optional[Dict[str, Any]]:
+    """Serialize metadata for transport, converting SparseVector dataclass instances to dicts.
+
+    Args:
+        metadata: Metadata dictionary that may contain SparseVector instances
+
+    Returns:
+        Metadata dictionary with SparseVector instances converted to transport format
+    """
+    if metadata is None:
+        return None
+
+    result: Dict[str, Any] = {}
+    for key, value in metadata.items():
+        if isinstance(value, SparseVector):
+            result[key] = value.to_dict()
+        else:
+            result[key] = value
+    return result
+
+
+def deserialize_metadata(
+    metadata: Optional[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """Deserialize metadata from transport, converting dicts with #type=sparse_vector to dataclass instances.
+
+    Args:
+        metadata: Metadata dictionary from transport that may contain serialized SparseVectors
+
+    Returns:
+        Metadata dictionary with serialized SparseVectors converted to dataclass instances
+    """
+    if metadata is None:
+        return None
+
+    result: Dict[str, Any] = {}
+    for key, value in metadata.items():
+        if isinstance(value, dict) and value.get("#type") == "sparse_vector":
+            result[key] = SparseVector.from_dict(value)
+        else:
+            result[key] = value
+    return result
 
 
 def validate_metadatas(metadatas: Metadatas) -> Metadatas:
@@ -1278,7 +1254,10 @@ def validate_sparse_embeddings(embeddings: SparseEmbeddings) -> SparseEmbeddings
             f"Expected sparse embeddings to be a non-empty list, got {len(embeddings)} sparse embeddings"
         )
     for embedding in embeddings:
-        validate_sparse_vector(embedding)
+        if not isinstance(embedding, SparseVector):
+            raise ValueError(
+                f"Expected SparseVector dataclass instance, got {type(embedding).__name__}"
+            )
     return embeddings
 
 
@@ -1784,9 +1763,7 @@ class Schema:
 
         # Temporarily disallow deleting sparse vector index (both globally and per-key)
         if isinstance(config, SparseVectorIndexConfig):
-            raise ValueError(
-                "Deleting sparse vector index is not currently supported."
-            )
+            raise ValueError("Deleting sparse vector index is not currently supported.")
 
         # TODO: Consider removing this check in the future to allow disabling all indexes for a key
         # Disallow disabling all index types for a key (config=None, key="some_key")
