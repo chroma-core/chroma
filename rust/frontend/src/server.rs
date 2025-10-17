@@ -5,6 +5,7 @@ use axum::{
     routing::{get, patch, post},
     Json, Router, ServiceExt,
 };
+use chroma::types::HeartbeatResponse;
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
     ExternalCollectionReadContext, MeteredFutureExt, ReadAction, StartRequest, WriteAction,
@@ -20,7 +21,7 @@ use chroma_types::{
     CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
     DeleteDatabaseResponse, GetCollectionByCrnRequest, GetCollectionRequest, GetDatabaseRequest,
     GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
-    GetUserIdentityResponse, HeartbeatResponse, IncludeList, InternalCollectionConfiguration,
+    GetUserIdentityResponse, IncludeList, InternalCollectionConfiguration,
     InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
     RemoveTaskRequest, RemoveTaskResponse, SearchRequest, SearchResponse,

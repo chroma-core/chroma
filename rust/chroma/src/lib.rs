@@ -1,7 +1,3 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test() {
-        println!("Hello, test!");
-    }
-}
+#[allow(dead_code)] // TODO: remove
+mod client;
+pub mod types;
