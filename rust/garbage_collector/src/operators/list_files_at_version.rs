@@ -1,8 +1,6 @@
+use crate::types::FilePathSet;
 use async_trait::async_trait;
-use chroma_blockstore::{
-    arrow::provider::{BlockManager, RootManagerError},
-    RootManager,
-};
+use chroma_blockstore::{arrow::provider::RootManagerError, RootManager};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{
     hnsw_provider::{HnswIndexProvider, FILES},
@@ -11,7 +9,8 @@ use chroma_index::{
 use chroma_storage::StorageError;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{chroma_proto::CollectionVersionFile, CollectionUuid, Segment, HNSW_PATH};
-use futures::stream::StreamExt;
+use futures::{stream::StreamExt, TryStreamExt};
+use itertools::Itertools;
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
@@ -44,7 +43,7 @@ impl ListFilesAtVersionInput {
 pub struct ListFilesAtVersionOutput {
     pub collection_id: CollectionUuid,
     pub version: i64,
-    pub file_paths: HashSet<String>,
+    pub file_paths: FilePathSet,
 }
 
 #[derive(Debug, Error)]
@@ -59,6 +58,8 @@ pub enum ListFilesAtVersionError {
     FetchBlockIdsError(#[from] RootManagerError),
     #[error("Version file missing collection ID")]
     VersionFileMissingCollectionId,
+    #[error("Error converting to FilePathSet: {0}")]
+    FilePathSetConversionError(#[from] fst::Error),
 }
 
 impl ChromaError for ListFilesAtVersionError {
@@ -69,6 +70,7 @@ impl ChromaError for ListFilesAtVersionError {
             ListFilesAtVersionError::InvalidUuid(_) => ErrorCodes::InvalidArgument,
             ListFilesAtVersionError::FetchBlockIdsError(e) => e.code(),
             ListFilesAtVersionError::VersionFileMissingCollectionId => ErrorCodes::InvalidArgument,
+            ListFilesAtVersionError::FilePathSetConversionError(_) => ErrorCodes::Internal,
         }
     }
 
@@ -108,7 +110,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
             .as_ref()
             .ok_or_else(|| ListFilesAtVersionError::VersionHistoryMissing)?;
 
-        let mut file_paths = HashSet::new();
+        let mut file_path_sets: Vec<FilePathSet> = vec![];
         let mut sparse_index_ids = HashMap::new();
 
         let version = version_history
@@ -128,6 +130,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
             collection_id
         );
 
+        let mut hnsw_and_sparse_file_paths = HashSet::new();
         if let Some(segment_info) = &version.segment_info {
             for segment in &segment_info.segment_compaction_info {
                 for (file_type, segment_paths) in &segment.file_paths {
@@ -141,7 +144,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                                     &IndexUuid(hnsw_index_uuid),
                                     hnsw_file,
                                 );
-                                file_paths.insert(s3_key);
+                                hnsw_and_sparse_file_paths.insert(s3_key);
                             }
                         }
                     } else {
@@ -152,13 +155,16 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                             let file_path =
                                 RootManager::get_storage_key(prefix, &sparse_index_uuid);
 
-                            file_paths.insert(file_path);
+                            hnsw_and_sparse_file_paths.insert(file_path);
                             sparse_index_ids.insert(sparse_index_uuid, prefix.to_string());
                         }
                     }
                 }
             }
         }
+
+        let mut file_path_sets: Vec<FilePathSet> =
+            vec![FilePathSet::try_from(hnsw_and_sparse_file_paths)?];
 
         if !sparse_index_ids.is_empty() {
             let mut get_block_ids_stream = futures::stream::iter(sparse_index_ids)
@@ -177,15 +183,16 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                         }
                 }).buffer_unordered(100);
 
-            while let Some(res) = get_block_ids_stream.next().await {
-                let block_ids = res.map_err(ListFilesAtVersionError::FetchBlockIdsError)?;
-
-                for block_id in block_ids.0 {
-                    let s3_key = BlockManager::format_key(&block_ids.1, &block_id);
-                    file_paths.insert(s3_key);
-                }
+            while let Some((mut block_ids, prefix)) = get_block_ids_stream
+                .try_next()
+                .await
+                .map_err(ListFilesAtVersionError::FetchBlockIdsError)?
+            {
+                file_path_sets.push(FilePathSet::from_block_ids(block_ids, prefix)?);
             }
         }
+
+        let file_paths = FilePathSet::concat(&file_path_sets)?;
 
         Ok(ListFilesAtVersionOutput {
             collection_id,
