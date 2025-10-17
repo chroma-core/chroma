@@ -1,6 +1,10 @@
+use chroma_blockstore::arrow::provider::BlockManager;
 use chroma_types::CollectionUuid;
 use chrono::DateTime;
+use fst::{IntoStreamer, Streamer};
 use petgraph::{graph::DiGraph, prelude::DiGraphMap};
+use std::collections::HashSet;
+use uuid::Uuid;
 
 // GC will use it to rename a S3 file to a new name.
 pub(crate) const RENAMED_FILE_PREFIX: &str = "gc/renamed/";
@@ -69,4 +73,163 @@ pub struct GarbageCollectorResponse {
     pub num_files_deleted: u32,
     #[deprecated = "only used by gc v1"]
     pub deletion_list: Vec<String>,
+}
+
+pub struct FilePathRefCountMap {
+    map: fst::Map<Vec<u8>>,
+}
+
+impl std::fmt::Debug for FilePathRefCountMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FilePathRefCountMap(len={})", self.map.len())
+    }
+}
+
+impl FilePathRefCountMap {
+    pub fn empty() -> Self {
+        let builder = fst::MapBuilder::memory();
+        let map = builder.into_map();
+        FilePathRefCountMap { map }
+    }
+
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    pub fn add_set(&mut self, other: FilePathSet, default_count: u64) -> Result<(), fst::Error> {
+        let combined_map = {
+            let mut new_map = fst::MapBuilder::memory();
+            let mut stream = other.paths.stream();
+            while let Some(path) = stream.next() {
+                new_map.insert(path, default_count)?;
+            }
+            let new_map = new_map.into_map();
+
+            let mut union = fst::map::OpBuilder::new();
+            union = union.add(&self.map);
+            union = union.add(&new_map);
+            let mut union = union.union();
+
+            let mut combined = fst::MapBuilder::memory();
+
+            while let Some((key, indices)) = union.next() {
+                let total_count = indices.iter().map(|idx| idx.value).sum();
+                combined.insert(key, total_count)?;
+            }
+
+            combined.into_map()
+        };
+
+        self.map = combined_map;
+        Ok(())
+    }
+
+    pub fn filter_by_count(&self, exact_count: u64) -> Result<FilePathSet, fst::Error> {
+        let mut builder = fst::SetBuilder::memory();
+        let mut stream = self.map.stream();
+        while let Some((path, count)) = stream.next() {
+            if count == exact_count {
+                builder.insert(path)?;
+            }
+        }
+
+        Ok(FilePathSet {
+            paths: builder.into_set(),
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct FilePathSet {
+    paths: fst::Set<Vec<u8>>,
+}
+
+impl std::fmt::Debug for FilePathSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FilePathSet(len={})", self.paths.len())
+    }
+}
+
+impl TryFrom<Vec<String>> for FilePathSet {
+    type Error = fst::Error;
+
+    fn try_from(mut paths: Vec<String>) -> Result<Self, Self::Error> {
+        // Must insert into the fst in sorted order
+        paths.sort_unstable();
+
+        let paths = fst::Set::from_iter(paths)?;
+        Ok(FilePathSet { paths })
+    }
+}
+
+impl TryFrom<HashSet<String>> for FilePathSet {
+    type Error = fst::Error;
+
+    fn try_from(mut paths: HashSet<String>) -> Result<Self, Self::Error> {
+        // Must insert into the fst in sorted order
+        let mut paths: Vec<String> = paths.drain().collect();
+        paths.sort_unstable();
+
+        let paths = fst::Set::from_iter(paths)?;
+        Ok(FilePathSet { paths })
+    }
+}
+
+impl FilePathSet {
+    pub fn empty() -> Self {
+        let builder = fst::SetBuilder::memory();
+        let paths = builder.into_set();
+        FilePathSet { paths }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.paths.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.paths.len()
+    }
+
+    pub fn from_block_ids(mut block_ids: Vec<Uuid>, prefix: String) -> Result<Self, fst::Error> {
+        // Must insert into the fst in sorted order
+        block_ids.sort_unstable();
+
+        let paths = fst::Set::from_iter(
+            block_ids
+                .into_iter()
+                .map(|id| BlockManager::format_key(&prefix, &id)),
+        )?;
+
+        Ok(FilePathSet { paths })
+    }
+
+    pub fn concat(sets: &[FilePathSet]) -> Result<Self, fst::Error> {
+        let mut union = fst::set::OpBuilder::new();
+        for set in sets {
+            union = union.add(&set.paths);
+        }
+        let union = union.union();
+        let mut builder = fst::SetBuilder::memory();
+        builder.extend_stream(union)?;
+        Ok(FilePathSet {
+            paths: builder.into_set(),
+        })
+    }
+
+    // todo: used?
+    pub fn into_refcount_map(self, initial_count: u64) -> Result<FilePathRefCountMap, fst::Error> {
+        let mut builder = fst::MapBuilder::memory();
+        let mut stream = self.paths.stream();
+        while let Some(path) = stream.next() {
+            builder.insert(path, initial_count)?;
+        }
+
+        Ok(FilePathRefCountMap {
+            map: builder.into_map(),
+        })
+    }
+
+    pub fn into_stream<'a>(&'a self) -> fst::set::Stream<'a> {
+        self.paths.into_stream()
+    }
 }
