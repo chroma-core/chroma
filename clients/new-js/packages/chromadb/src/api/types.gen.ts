@@ -115,7 +115,9 @@ export type EmbeddingFunctionConfiguration = {
     type: 'legacy';
 } | (EmbeddingFunctionNewConfiguration & {
     type: 'known';
-});
+}) | {
+    type: 'unknown';
+};
 
 export type EmbeddingFunctionNewConfiguration = {
     config: unknown;
