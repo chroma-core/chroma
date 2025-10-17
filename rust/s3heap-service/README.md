@@ -47,7 +47,7 @@ another column within the same row.
 Note that there are six base cases.  Reasoning through all 36 cases and getting them right will be
 difficult.  Instead, we aim to exploit symmetry:  If there is a function template and something is
 in sysdb, it is as if there is no function template.  As before, we can mark as trivially impossible
-anything that changes along two axis simultaneously.  Anything listed as INVX is invariant X and is
+anything that changes along two axes simultaneously.  Anything listed as INVX is invariant X and is
 prohibited by the invariant.
 
                      From
