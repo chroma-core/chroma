@@ -1487,6 +1487,7 @@ class SparseVectorIndexConfig(BaseModel):
     # TODO(Sanket): Change this to the appropriate sparse ef and use a default here.
     embedding_function: Optional[Any] = None
     source_key: Optional[str] = None  # key to source the sparse vector from
+    bm25: Optional[bool] = None
 
     @field_validator("embedding_function", mode="before")
     @classmethod
@@ -2270,7 +2271,7 @@ class Schema:
             if hasattr(config, "embedding_function"):
                 embedding_func = getattr(config, "embedding_function", None)
                 if embedding_func is None:
-                    config_dict["embedding_function"] = {"type": "legacy"}
+                    config_dict["embedding_function"] = {"type": "unknown"}
                 else:
                     embedding_func = cast(SparseEmbeddingFunction, embedding_func)  # type: ignore
                     config_dict["embedding_function"] = {
@@ -2405,7 +2406,7 @@ class Schema:
             # Handle embedding function deserialization
             if "embedding_function" in config_data:
                 ef_config = config_data["embedding_function"]
-                if ef_config.get("type") == "legacy":
+                if ef_config.get("type") == "unknown" or ef_config.get("type") == "legacy":
                     config_data["embedding_function"] = None
                 else:
                     try:

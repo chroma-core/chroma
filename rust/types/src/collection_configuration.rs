@@ -37,12 +37,15 @@ pub enum EmbeddingFunctionConfiguration {
     Legacy,
     #[serde(rename = "known")]
     Known(EmbeddingFunctionNewConfiguration),
+    #[serde(rename = "unknown")]
+    Unknown,
 }
 
 impl EmbeddingFunctionConfiguration {
     pub fn is_default(&self) -> bool {
         match self {
             EmbeddingFunctionConfiguration::Legacy => false,
+            EmbeddingFunctionConfiguration::Unknown => false,
             EmbeddingFunctionConfiguration::Known(config) => config.name == "default",
         }
     }
