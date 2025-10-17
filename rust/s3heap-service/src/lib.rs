@@ -89,7 +89,9 @@ mod conversions {
             .ok_or_else(|| ConversionError("missing next_scheduled".to_string()))?;
         let next_scheduled = DateTime::from_timestamp(
             next_scheduled.seconds,
-            next_scheduled.nanos.try_into().unwrap_or(0),
+            next_scheduled.nanos.try_into().map_err(|_| {
+                ConversionError("invalid nanos value in next_scheduled".to_string())
+            })?,
         )
         .ok_or_else(|| ConversionError("invalid next_scheduled timestamp".to_string()))?;
         let nonce = Uuid::parse_str(&proto.nonce)
@@ -123,7 +125,10 @@ mod conversions {
         let time_cut_off = proto
             .time_cut_off
             .map(|ts| {
-                DateTime::from_timestamp(ts.seconds, ts.nanos.try_into().unwrap_or(0))
+                let nanos = ts.nanos.try_into().map_err(|_| {
+                    ConversionError("invalid nanos value in time_cut_off".to_string())
+                })?;
+                DateTime::from_timestamp(ts.seconds, nanos)
                     .ok_or_else(|| ConversionError("invalid time_cut_off timestamp".to_string()))
             })
             .transpose()?;
@@ -515,6 +520,9 @@ impl HeapTenderService for HeapTenderServer {
             .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
         let count = schedules.len();
+        let count_u32 = count
+            .try_into()
+            .map_err(|_| Status::invalid_argument("too many schedules to push"))?;
         self.tender
             .writer
             .push(&schedules)
@@ -522,7 +530,7 @@ impl HeapTenderService for HeapTenderServer {
             .map_err(|e| Status::internal(e.to_string()))?;
 
         Ok(Response::new(chroma_types::chroma_proto::PushResponse {
-            schedules_added: count as u32,
+            schedules_added: count_u32,
         }))
     }
 
