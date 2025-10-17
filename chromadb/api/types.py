@@ -20,7 +20,7 @@ from numpy.typing import NDArray
 import numpy as np
 import warnings
 from typing_extensions import TypedDict, Protocol, runtime_checkable
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 import chromadb.errors as errors
 from chromadb.base_types import (
@@ -39,7 +39,9 @@ from chromadb.base_types import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
+        ONNXMiniLM_L6_V2,
+    )
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -1478,12 +1480,23 @@ class SpannIndexConfig(BaseModel):
     merge_threshold: Optional[int] = None
 
 
+def _default_vector_embedding_function() -> Any:
+    """Instantiate the default ONNX embedding function lazily to avoid circular imports."""
+    from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
+        ONNXMiniLM_L6_V2,
+    )
+
+    return ONNXMiniLM_L6_V2()
+
+
 class VectorIndexConfig(BaseModel):
     """Configuration for vector index with space, embedding function, and algorithm config."""
 
     model_config = {"arbitrary_types_allowed": True}
     space: Optional[Space] = None
-    embedding_function: Optional[Any] = DefaultEmbeddingFunction()
+    embedding_function: Optional[Any] = Field(
+        default_factory=_default_vector_embedding_function
+    )
     source_key: Optional[str] = None  # key to source the vector from
     hnsw: Optional[HnswIndexConfig] = None
     spann: Optional[SpannIndexConfig] = None
@@ -1784,9 +1797,7 @@ class Schema:
 
         # Temporarily disallow deleting sparse vector index (both globally and per-key)
         if isinstance(config, SparseVectorIndexConfig):
-            raise ValueError(
-                "Deleting sparse vector index is not currently supported."
-            )
+            raise ValueError("Deleting sparse vector index is not currently supported.")
 
         # TODO: Consider removing this check in the future to allow disabling all indexes for a key
         # Disallow disabling all index types for a key (config=None, key="some_key")
@@ -2136,7 +2147,9 @@ class Schema:
 
         # Serialize each value type if it exists
         if value_types.string is not None:
-            result[STRING_VALUE_NAME] = self._serialize_string_value_type(value_types.string)
+            result[STRING_VALUE_NAME] = self._serialize_string_value_type(
+                value_types.string
+            )
 
         if value_types.float_list is not None:
             result[FLOAT_LIST_VALUE_NAME] = self._serialize_float_list_value_type(
@@ -2149,13 +2162,19 @@ class Schema:
             )
 
         if value_types.int_value is not None:
-            result[INT_VALUE_NAME] = self._serialize_int_value_type(value_types.int_value)
+            result[INT_VALUE_NAME] = self._serialize_int_value_type(
+                value_types.int_value
+            )
 
         if value_types.float_value is not None:
-            result[FLOAT_VALUE_NAME] = self._serialize_float_value_type(value_types.float_value)
+            result[FLOAT_VALUE_NAME] = self._serialize_float_value_type(
+                value_types.float_value
+            )
 
         if value_types.boolean is not None:
-            result[BOOL_VALUE_NAME] = self._serialize_bool_value_type(value_types.boolean)
+            result[BOOL_VALUE_NAME] = self._serialize_bool_value_type(
+                value_types.boolean
+            )
 
         return result
 
@@ -2326,7 +2345,9 @@ class Schema:
             )
 
         if INT_VALUE_NAME in value_types_json:
-            result.int_value = cls._deserialize_int_value_type(value_types_json[INT_VALUE_NAME])
+            result.int_value = cls._deserialize_int_value_type(
+                value_types_json[INT_VALUE_NAME]
+            )
 
         if FLOAT_VALUE_NAME in value_types_json:
             result.float_value = cls._deserialize_float_value_type(
@@ -2334,7 +2355,9 @@ class Schema:
             )
 
         if BOOL_VALUE_NAME in value_types_json:
-            result.boolean = cls._deserialize_bool_value_type(value_types_json[BOOL_VALUE_NAME])
+            result.boolean = cls._deserialize_bool_value_type(
+                value_types_json[BOOL_VALUE_NAME]
+            )
 
         return result
 
