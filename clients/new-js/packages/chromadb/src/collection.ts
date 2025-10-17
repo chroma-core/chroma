@@ -35,6 +35,7 @@ import {
   UpdateCollectionConfiguration,
 } from "./collection-configuration";
 import { SearchLike, SearchResult, toSearch } from "./execution/expression";
+import { Schema, EMBEDDING_KEY } from "./schema";
 
 /**
  * Interface for collection operations using collection ID.
@@ -51,6 +52,8 @@ export interface Collection {
   configuration: CollectionConfiguration;
   /** Optional embedding function. Must match the one used to create the collection. */
   embeddingFunction?: EmbeddingFunction;
+  /** Collection schema describing index configuration */
+  schema?: Schema;
   /** Gets the total number of records in the collection */
   count(): Promise<number>;
   /**
@@ -207,6 +210,8 @@ export interface CollectionArgs {
   configuration: CollectionConfiguration;
   /** Optional collection metadata */
   metadata?: CollectionMetadata;
+  /** Optional schema returned by the server */
+  schema?: Schema;
 }
 
 /**
@@ -221,6 +226,7 @@ export class CollectionImpl implements Collection {
   private _metadata: CollectionMetadata | undefined;
   private _configuration: CollectionConfiguration;
   protected _embeddingFunction: EmbeddingFunction | undefined;
+  protected _schema: Schema | undefined;
 
   /**
    * Creates a new CollectionAPIImpl instance.
@@ -234,6 +240,7 @@ export class CollectionImpl implements Collection {
     metadata,
     configuration,
     embeddingFunction,
+    schema,
   }: CollectionArgs) {
     this.chromaClient = chromaClient;
     this.apiClient = apiClient;
@@ -242,6 +249,7 @@ export class CollectionImpl implements Collection {
     this._metadata = metadata;
     this._configuration = configuration;
     this._embeddingFunction = embeddingFunction;
+    this._schema = schema;
   }
 
   public get name(): string {
@@ -278,6 +286,14 @@ export class CollectionImpl implements Collection {
     this._embeddingFunction = embeddingFunction;
   }
 
+  public get schema(): Schema | undefined {
+    return this._schema;
+  }
+
+  protected set schema(schema: Schema | undefined) {
+    this._schema = schema;
+  }
+
   protected async path(): Promise<{
     tenant: string;
     database: string;
@@ -291,17 +307,36 @@ export class CollectionImpl implements Collection {
   }
 
   private async embed(inputs: string[], isQuery: boolean): Promise<number[][]> {
-    if (!this._embeddingFunction) {
+    const embeddingFunction =
+      this._embeddingFunction ?? this.getSchemaEmbeddingFunction();
+
+    if (!embeddingFunction) {
       throw new ChromaValueError(
         "Embedding function must be defined for operations requiring embeddings.",
       );
     }
 
-	if (this._embeddingFunction.generateForQueries && isQuery) {
-		return await this._embeddingFunction.generateForQueries(inputs);
-	} else {
-    	return await this._embeddingFunction.generate(inputs);
-	}
+    if (isQuery && embeddingFunction.generateForQueries) {
+      return await embeddingFunction.generateForQueries(inputs);
+    }
+
+    return await embeddingFunction.generate(inputs);
+  }
+
+  private getSchemaEmbeddingFunction(): EmbeddingFunction | undefined {
+    const schema = this._schema;
+    if (!schema) return undefined;
+
+    const schemaOverride = schema.keys[EMBEDDING_KEY];
+    const overrideFunction = schemaOverride?.floatList?.vectorIndex?.config
+      .embeddingFunction;
+    if (overrideFunction) {
+      return overrideFunction;
+    }
+
+    const defaultFunction = schema.defaults.floatList?.vectorIndex?.config
+      .embeddingFunction;
+    return defaultFunction ?? undefined;
   }
 
   private async prepareRecords<T extends boolean = false>({
