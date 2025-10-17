@@ -173,13 +173,6 @@ pub struct ChecklistResponse {
     pub supports_base64_encoding: bool,
 }
 
-#[derive(Serialize, ToSchema)]
-pub struct HeartbeatResponse {
-    #[serde(rename(serialize = "nanosecond heartbeat"))]
-    #[schema(rename = "nanosecond heartbeat")]
-    pub nanosecond_heartbeat: u128,
-}
-
 #[derive(Debug, Error, ToSchema)]
 pub enum HeartbeatError {
     #[error("system time error: {0}")]

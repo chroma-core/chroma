@@ -31,6 +31,7 @@ mdac = { workspace = true }
 opentelemetry.workspace = true
 validator = { workspace = true }
 rust-embed = { workspace = true }
+chroma = { workspace = true, features = ["utoipa"] }
 chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-distance = { workspace = true }
@@ -63,5 +64,5 @@ criterion = { workspace = true }
 
 
 [[bench]]
-name="base64"
+name = "base64"
 harness = false
