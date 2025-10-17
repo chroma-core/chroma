@@ -63,6 +63,8 @@ from chromadb.api.types import (
     validate_record_set_for_embedding,
     validate_filter_set,
     DefaultEmbeddingFunction,
+    EMBEDDING_KEY,
+    DOCUMENT_KEY,
 )
 from chromadb.api.collection_configuration import (
     UpdateCollectionConfiguration,
@@ -241,7 +243,7 @@ class CollectionCommon(Generic[ClientT]):
             add_embeddings = add_records["embeddings"]
 
         add_metadatas = self._apply_sparse_embeddings_to_metadatas(
-            add_records["metadatas"]
+            add_records["metadatas"], add_records["documents"]
         )
 
         return AddRequest(
@@ -399,7 +401,7 @@ class CollectionCommon(Generic[ClientT]):
             update_embeddings = update_records["embeddings"]
 
         update_metadatas = self._apply_sparse_embeddings_to_metadatas(
-            update_records["metadatas"]
+            update_records["metadatas"], update_records["documents"]
         )
 
         return UpdateRequest(
@@ -448,7 +450,7 @@ class CollectionCommon(Generic[ClientT]):
             upsert_embeddings = upsert_records["embeddings"]
 
         upsert_metadatas = self._apply_sparse_embeddings_to_metadatas(
-            upsert_records["metadatas"]
+            upsert_records["metadatas"], upsert_records["documents"]
         )
 
         return UpsertRequest(
@@ -578,7 +580,9 @@ class CollectionCommon(Generic[ClientT]):
         return targets
 
     def _apply_sparse_embeddings_to_metadatas(
-        self, metadatas: Optional[List[Metadata]]
+        self,
+        metadatas: Optional[List[Metadata]],
+        documents: Optional[List[Document]] = None,
     ) -> Optional[List[Metadata]]:
         if metadatas is None:
             return None
@@ -590,6 +594,8 @@ class CollectionCommon(Generic[ClientT]):
         updated_metadatas: List[Dict[str, Any]] = [
             dict(metadata) for metadata in metadatas
         ]
+
+        documents_list = list(documents) if documents is not None else None
 
         for target_key, config in sparse_targets.items():
             source_key = config.source_key
@@ -608,7 +614,12 @@ class CollectionCommon(Generic[ClientT]):
                 if target_key in metadata:
                     continue
 
-                source_value = metadata.get(source_key)
+                if source_key == DOCUMENT_KEY:
+                    source_value = None
+                    if documents_list is not None and idx < len(documents_list):
+                        source_value = documents_list[idx]
+                else:
+                    source_value = metadata.get(source_key)
                 if not isinstance(source_value, str):
                     continue
 
@@ -681,6 +692,36 @@ class CollectionCommon(Generic[ClientT]):
                 return config_ef.embed_query(input=input)
             else:
                 return config_ef(input=input)
+        schema = self.schema
+        schema_embedding_function: Optional[EmbeddingFunction[Embeddable]] = None
+        if schema is not None:
+            override = schema.keys.get(EMBEDDING_KEY)
+            if (
+                override is not None
+                and override.float_list is not None
+                and override.float_list.vector_index is not None
+                and override.float_list.vector_index.config.embedding_function
+                is not None
+            ):
+                schema_embedding_function = cast(
+                    EmbeddingFunction[Embeddable],
+                    override.float_list.vector_index.config.embedding_function,
+                )
+            elif (
+                schema.defaults.float_list is not None
+                and schema.defaults.float_list.vector_index is not None
+                and schema.defaults.float_list.vector_index.config.embedding_function
+                is not None
+            ):
+                schema_embedding_function = cast(
+                    EmbeddingFunction[Embeddable],
+                    schema.defaults.float_list.vector_index.config.embedding_function,
+                )
+
+        if schema_embedding_function is not None:
+            if is_query and hasattr(schema_embedding_function, "embed_query"):
+                return schema_embedding_function.embed_query(input=input)
+            return schema_embedding_function(input=input)
         if self._embedding_function is None:
             raise ValueError(
                 "You must provide an embedding function to compute embeddings."
