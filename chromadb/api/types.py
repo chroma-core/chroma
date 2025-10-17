@@ -20,7 +20,7 @@ from numpy.typing import NDArray
 import numpy as np
 import warnings
 from typing_extensions import TypedDict, Protocol, runtime_checkable
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 import chromadb.errors as errors
 from chromadb.base_types import (
@@ -39,7 +39,9 @@ from chromadb.base_types import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
+        ONNXMiniLM_L6_V2,
+    )
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -1524,12 +1526,23 @@ class SpannIndexConfig(BaseModel):
     merge_threshold: Optional[int] = None
 
 
+def _default_vector_embedding_function() -> Any:
+    """Instantiate the default ONNX embedding function lazily to avoid circular imports."""
+    from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
+        ONNXMiniLM_L6_V2,
+    )
+
+    return ONNXMiniLM_L6_V2()
+
+
 class VectorIndexConfig(BaseModel):
     """Configuration for vector index with space, embedding function, and algorithm config."""
 
     model_config = {"arbitrary_types_allowed": True}
     space: Optional[Space] = None
-    embedding_function: Optional[Any] = DefaultEmbeddingFunction()
+    embedding_function: Optional[Any] = Field(
+        default_factory=_default_vector_embedding_function
+    )
     source_key: Optional[str] = None  # key to source the vector from
     hnsw: Optional[HnswIndexConfig] = None
     spann: Optional[SpannIndexConfig] = None
