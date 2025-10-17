@@ -216,7 +216,7 @@ impl Orchestrator for SparseKnnOrchestrator {
                 .schema
                 .as_ref()
                 .is_some_and(|schema| {
-                    if let Some(flag) = schema.key_overrides.get(&self.key).and_then(|uvt| {
+                    if let Some(flag) = schema.keys.get(&self.key).and_then(|uvt| {
                         uvt.sparse_vector.as_ref().and_then(|vt| {
                             vt.sparse_vector_index
                                 .as_ref()
