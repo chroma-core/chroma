@@ -149,10 +149,7 @@ class DeterministicSparseEmbeddingFunction(SparseEmbeddingFunction[List[str]]):
         self._label = label
 
     def __call__(self, input: List[str]) -> List[SparseVector]:
-        return [
-            {"indices": [idx], "values": [float(len(text) + idx)]}
-            for idx, text in enumerate(input)
-        ]
+        return [SparseVector(indices=[idx], values=[float(len(text) + idx)]) for idx, text in enumerate(input)]
 
     @staticmethod
     def name() -> str:
