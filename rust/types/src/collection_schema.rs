@@ -95,6 +95,8 @@ pub struct InternalSchema {
     /// Default index configurations for each value type
     pub defaults: ValueTypes,
     /// Key-specific index overrides
+    /// TODO(Sanket): Needed for backwards compatibility. Should remove after deploy.
+    #[serde(rename = "keys", alias = "key_overrides")]
     pub keys: HashMap<String, ValueTypes>,
 }
 
@@ -134,35 +136,64 @@ pub fn is_hnsw_config_default(hnsw_config: &HnswIndexConfig) -> bool {
 /// Contains optional configurations for each supported value type
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ValueTypes {
-    #[serde(rename = "string", skip_serializing_if = "Option::is_none")] // STRING_VALUE_NAME
+    #[serde(
+        rename = "string",
+        alias = "#string",
+        skip_serializing_if = "Option::is_none"
+    )] // STRING_VALUE_NAME
     pub string: Option<StringValueType>,
 
-    #[serde(rename = "float_list", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "float_list",
+        alias = "#float_list",
+        skip_serializing_if = "Option::is_none"
+    )]
     // FLOAT_LIST_VALUE_NAME
     pub float_list: Option<FloatListValueType>,
 
-    #[serde(rename = "sparse_vector", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "sparse_vector",
+        alias = "#sparse_vector",
+        skip_serializing_if = "Option::is_none"
+    )]
     // SPARSE_VECTOR_VALUE_NAME
     pub sparse_vector: Option<SparseVectorValueType>,
 
-    #[serde(rename = "int", skip_serializing_if = "Option::is_none")] // INT_VALUE_NAME
+    #[serde(
+        rename = "int",
+        alias = "#int",
+        skip_serializing_if = "Option::is_none"
+    )] // INT_VALUE_NAME
     pub int: Option<IntValueType>,
 
-    #[serde(rename = "float", skip_serializing_if = "Option::is_none")] // FLOAT_VALUE_NAME
+    #[serde(
+        rename = "float",
+        alias = "#float",
+        skip_serializing_if = "Option::is_none"
+    )] // FLOAT_VALUE_NAME
     pub float: Option<FloatValueType>,
 
-    #[serde(rename = "bool", skip_serializing_if = "Option::is_none")] // BOOL_VALUE_NAME
+    #[serde(
+        rename = "bool",
+        alias = "#bool",
+        skip_serializing_if = "Option::is_none"
+    )] // BOOL_VALUE_NAME
     pub boolean: Option<BoolValueType>,
 }
 
 /// String value type index configurations
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct StringValueType {
-    #[serde(rename = "fts_index", skip_serializing_if = "Option::is_none")] // FTS_INDEX_NAME
+    #[serde(
+        rename = "fts_index",
+        alias = "$fts_index",
+        skip_serializing_if = "Option::is_none"
+    )] // FTS_INDEX_NAME
     pub fts_index: Option<FtsIndexType>,
 
     #[serde(
         rename = "string_inverted_index", // STRING_INVERTED_INDEX_NAME
+        alias = "$string_inverted_index",
         skip_serializing_if = "Option::is_none"
     )]
     pub string_inverted_index: Option<StringInvertedIndexType>,
@@ -171,7 +202,11 @@ pub struct StringValueType {
 /// Float list value type index configurations (for vectors)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct FloatListValueType {
-    #[serde(rename = "vector_index", skip_serializing_if = "Option::is_none")] // VECTOR_INDEX_NAME
+    #[serde(
+        rename = "vector_index",
+        alias = "$vector_index",
+        skip_serializing_if = "Option::is_none"
+    )] // VECTOR_INDEX_NAME
     pub vector_index: Option<VectorIndexType>,
 }
 
@@ -180,6 +215,7 @@ pub struct FloatListValueType {
 pub struct SparseVectorValueType {
     #[serde(
         rename = "sparse_vector_index", // SPARSE_VECTOR_INDEX_NAME
+        alias = "$sparse_vector_index",
         skip_serializing_if = "Option::is_none"
     )]
     pub sparse_vector_index: Option<SparseVectorIndexType>,
@@ -188,7 +224,11 @@ pub struct SparseVectorValueType {
 /// Integer value type index configurations
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct IntValueType {
-    #[serde(rename = "int_inverted_index", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "int_inverted_index",
+        alias = "$int_inverted_index",
+        skip_serializing_if = "Option::is_none"
+    )]
     // INT_INVERTED_INDEX_NAME
     pub int_inverted_index: Option<IntInvertedIndexType>,
 }
@@ -198,6 +238,7 @@ pub struct IntValueType {
 pub struct FloatValueType {
     #[serde(
         rename = "float_inverted_index", // FLOAT_INVERTED_INDEX_NAME
+        alias = "$float_inverted_index",
         skip_serializing_if = "Option::is_none"
     )]
     pub float_inverted_index: Option<FloatInvertedIndexType>,
@@ -208,6 +249,7 @@ pub struct FloatValueType {
 pub struct BoolValueType {
     #[serde(
         rename = "bool_inverted_index", // BOOL_INVERTED_INDEX_NAME
+        alias = "$bool_inverted_index",
         skip_serializing_if = "Option::is_none"
     )]
     pub bool_inverted_index: Option<BoolInvertedIndexType>,
@@ -2681,5 +2723,162 @@ mod tests {
             }
             _ => panic!("Expected InvalidSchema error"),
         }
+    }
+
+    // TODO(Sanket): Remove this test once deployed
+    #[test]
+    fn test_backward_compatibility_aliases() {
+        // Test that old format with # and $ prefixes and key_overrides can be deserialized
+        let old_format_json = r###"{
+            "defaults": {
+                "#string": {
+                    "$fts_index": {
+                        "enabled": true,
+                        "config": {}
+                    }
+                },
+                "#int": {
+                    "$int_inverted_index": {
+                        "enabled": true,
+                        "config": {}
+                    }
+                },
+                "#float_list": {
+                    "$vector_index": {
+                        "enabled": true,
+                        "config": {
+                            "spann": {
+                                "search_nprobe": 10
+                            }
+                        }
+                    }
+                }
+            },
+            "key_overrides": {
+                "#document": {
+                    "#string": {
+                        "$fts_index": {
+                            "enabled": false,
+                            "config": {}
+                        }
+                    }
+                }
+            }
+        }"###;
+
+        let schema_from_old: InternalSchema = serde_json::from_str(old_format_json).unwrap();
+
+        // Test that new format without prefixes and keys can be deserialized
+        let new_format_json = r###"{
+            "defaults": {
+                "string": {
+                    "fts_index": {
+                        "enabled": true,
+                        "config": {}
+                    }
+                },
+                "int": {
+                    "int_inverted_index": {
+                        "enabled": true,
+                        "config": {}
+                    }
+                },
+                "float_list": {
+                    "vector_index": {
+                        "enabled": true,
+                        "config": {
+                            "spann": {
+                                "search_nprobe": 10
+                            }
+                        }
+                    }
+                }
+            },
+            "keys": {
+                "#document": {
+                    "string": {
+                        "fts_index": {
+                            "enabled": false,
+                            "config": {}
+                        }
+                    }
+                }
+            }
+        }"###;
+
+        let schema_from_new: InternalSchema = serde_json::from_str(new_format_json).unwrap();
+
+        // Both should deserialize to the same structure
+        assert_eq!(schema_from_old, schema_from_new);
+
+        // Verify the deserialized content is correct
+        assert!(schema_from_old.defaults.string.is_some());
+        assert!(schema_from_old
+            .defaults
+            .string
+            .as_ref()
+            .unwrap()
+            .fts_index
+            .is_some());
+        assert!(
+            schema_from_old
+                .defaults
+                .string
+                .as_ref()
+                .unwrap()
+                .fts_index
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
+
+        assert!(schema_from_old.defaults.int.is_some());
+        assert!(schema_from_old
+            .defaults
+            .int
+            .as_ref()
+            .unwrap()
+            .int_inverted_index
+            .is_some());
+
+        assert!(schema_from_old.defaults.float_list.is_some());
+        assert!(schema_from_old
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .is_some());
+
+        assert!(schema_from_old.keys.contains_key(DOCUMENT_KEY));
+        let doc_override = schema_from_old.keys.get(DOCUMENT_KEY).unwrap();
+        assert!(doc_override.string.is_some());
+        assert!(
+            !doc_override
+                .string
+                .as_ref()
+                .unwrap()
+                .fts_index
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
+
+        // Test that serialization always outputs the new format (without prefixes)
+        let serialized = serde_json::to_string(&schema_from_old).unwrap();
+
+        // Should contain new format keys
+        assert!(serialized.contains(r#""keys":"#));
+        assert!(serialized.contains(r#""string":"#));
+        assert!(serialized.contains(r#""fts_index":"#));
+        assert!(serialized.contains(r#""int_inverted_index":"#));
+        assert!(serialized.contains(r#""vector_index":"#));
+
+        // Should NOT contain old format keys
+        assert!(!serialized.contains(r#""key_overrides":"#));
+        assert!(!serialized.contains(r###""#string":"###));
+        assert!(!serialized.contains(r###""$fts_index":"###));
+        assert!(!serialized.contains(r###""$int_inverted_index":"###));
+        assert!(!serialized.contains(r###""$vector_index":"###));
     }
 }

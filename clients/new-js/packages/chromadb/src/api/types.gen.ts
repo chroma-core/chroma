@@ -253,6 +253,7 @@ export type InternalSchema = {
     defaults: ValueTypes;
     /**
      * Key-specific index overrides
+     * TODO(Sanket): Needed for backwards compatibility. Should remove after deploy.
      */
     keys: {
         [key: string]: ValueTypes;
