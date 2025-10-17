@@ -190,6 +190,13 @@ export const getEmbeddingFunction = async (
     return undefined;
   }
 
+  if (efConfig.type === "unknown") {
+    console.warn(
+      `Unknown embedding function configuration for collection ${collectionName}. 'add' and 'query' will fail unless you provide them embeddings directly.`,
+    );
+    return undefined;
+  }
+
   const name = efConfig.name;
 
   const embeddingFunction = knownEmbeddingFunctions.get(name);
