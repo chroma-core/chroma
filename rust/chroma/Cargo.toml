@@ -13,6 +13,7 @@ serde.workspace = true
 serde_json.workspace = true
 utoipa = { version = "5.0.0", features = ["macros", "axum_extras", "debug", "uuid"], optional = true }
 thiserror.workspace = true
+tracing.workspace = true
 
 [features]
 default = ["native-tls"]
@@ -20,4 +21,6 @@ native-tls = ["reqwest/default-tls", "reqwest/default"]
 rustls = ["reqwest/rustls-tls"]
 
 [dev-dependencies]
+dotenvy = "0.15.7"
+test-log = { version = "0.2.18", features = ["trace"] }
 tokio.workspace = true

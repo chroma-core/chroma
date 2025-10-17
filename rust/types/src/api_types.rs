@@ -191,13 +191,6 @@ impl ChromaError for HeartbeatError {
     }
 }
 
-#[derive(Serialize, Deserialize, ToSchema, Default)]
-pub struct GetUserIdentityResponse {
-    pub user_id: String,
-    pub tenant: String,
-    pub databases: Vec<String>,
-}
-
 #[non_exhaustive]
 #[derive(Serialize, Validate, Deserialize, ToSchema)]
 pub struct CreateTenantRequest {

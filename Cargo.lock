@@ -1421,12 +1421,15 @@ name = "chroma"
 version = "0.1.0"
 dependencies = [
  "backon",
+ "dotenvy",
  "opentelemetry",
  "reqwest 0.12.24",
  "serde",
  "serde_json",
+ "test-log",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "utoipa",
 ]
 
@@ -1518,6 +1521,7 @@ version = "1.1.11"
 dependencies = [
  "arboard",
  "axum 0.8.1",
+ "chroma",
  "chroma-config",
  "chroma-frontend",
  "chroma-log",
@@ -2956,6 +2960,8 @@ version = "0.11.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3716d7a920fb4fac5d84e9d4bce8ceb321e9414b4409da61b07b75c1e3d0697"
 dependencies = [
+ "anstream",
+ "anstyle",
  "env_filter",
  "log",
 ]
@@ -8363,6 +8369,28 @@ dependencies = [
  "once_cell",
  "rustix 0.38.41",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "test-log"
+version = "0.2.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e33b98a582ea0be1168eba097538ee8dd4bbe0f2b01b22ac92ea30054e5be7b"
+dependencies = [
+ "env_logger",
+ "test-log-macros",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "test-log-macros"
+version = "0.2.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "451b374529930d7601b1eef8d32bc79ae870b6079b069401709c2a8bf9e75f36"
+dependencies = [
+ "proc-macro2 1.0.95",
+ "quote 1.0.40",
+ "syn 2.0.102",
 ]
 
 [[package]]
