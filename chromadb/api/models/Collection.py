@@ -22,7 +22,6 @@ from chromadb.api.types import (
 )
 from chromadb.api.collection_configuration import UpdateCollectionConfiguration
 from chromadb.execution.expression.plan import Search
-from typing import cast, List
 
 import logging
 
@@ -362,9 +361,14 @@ class Collection(CollectionCommon["ServerAPI"]):
         if searches_list is None:
             searches_list = []
 
+        # Embed any string queries in Knn objects
+        embedded_searches = [
+            self._embed_search_string_queries(search) for search in searches_list
+        ]
+
         return self._client._search(
             collection_id=self.id,
-            searches=cast(List[Search], searches_list),
+            searches=cast(List[Search], embedded_searches),
             tenant=self.tenant,
             database=self.database,
         )
