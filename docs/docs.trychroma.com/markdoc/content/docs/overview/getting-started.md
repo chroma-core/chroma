@@ -7,8 +7,6 @@ name: Getting Started
 
 Chroma is an AI-native open-source vector database. It comes with everything you need to get started built-in, and runs on your machine.
 
-For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
-
 {% Tabs %}
 
 {% Tab label="python" %}
@@ -21,6 +19,11 @@ For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup) - a f
 
 {% /Tabs %}
 
+{% Banner type="tip" %}
+
+For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup?utm_source=docs-getting-started) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
+
+{% /Banner %}
 
 ### 1. Install
 
@@ -378,6 +381,10 @@ console.log(results);
 
 {% /TabbedCodeBlock %}
 
+{% Tabs %}
+
+{% Tab label="python" %}
+
 ## Next steps
 
 In this guide we used Chroma's [ephemeral client](../run-chroma/ephemeral-client) for simplicity. It starts a Chroma server in-memory, so any data you ingest will be lost when your program terminates. You can use the [persistent client](../run-chroma/persistent-client) or run Chroma in [client-server mode](../run-chroma/client-server) if you need data persistence.
@@ -385,3 +392,17 @@ In this guide we used Chroma's [ephemeral client](../run-chroma/ephemeral-client
 - Learn how to [Deploy Chroma](../../guides/deploy/client-server-mode) to a server
 - Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
 - Follow Chroma on [X (@trychroma)](https://twitter.com/trychroma) for updates
+
+{% /Tab %}
+
+{% Tab label="typescript" %}
+## Next steps
+
+- We offer [first class support](/docs/embeddings/embedding-functions) for various embedding providers via our embedding function interface. Each embedding function ships in its own npm package.
+- Learn how to [Deploy Chroma](../../guides/deploy/client-server-mode) to a server
+- Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
+- Follow Chroma on [X (@trychroma)](https://twitter.com/trychroma) for updates
+
+{% /Tab %}
+
+{% /Tabs %}

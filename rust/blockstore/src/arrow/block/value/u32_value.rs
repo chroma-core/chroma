@@ -10,8 +10,8 @@ use crate::{
     BlockfileWriterMutationOrdering,
 };
 use arrow::{
-    array::{Array, UInt32Array, UInt32Builder},
-    datatypes::Field,
+    array::{Array, AsArray, UInt32Array, UInt32Builder},
+    datatypes::{Field, UInt32Type},
 };
 use std::sync::Arc;
 
@@ -86,6 +86,15 @@ impl ArrowReadableValue<'_> for u32 {
         let array = array.as_any().downcast_ref::<UInt32Array>().unwrap();
         array.value(index)
     }
+
+    fn get_range(array: &Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+        array
+            .as_primitive::<UInt32Type>()
+            .slice(offset, length)
+            .values()
+            .to_vec()
+    }
+
     fn add_to_delta<K: ArrowWriteableKey>(
         prefix: &str,
         key: K,

@@ -10,12 +10,17 @@ backon = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
-parking_lot = { workspace = true }
 parquet = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
-tracing = { workspace = true }
 uuid = { workspace = true }
 
+chroma-error = { workspace = true }
 chroma-storage = { workspace = true }
+wal3 = { workspace = true }
+
+[dev-dependencies]
+guacamole = { version = "0.11", default-features = false }
+parking_lot = { workspace = true }
+tokio = { workspace = true }

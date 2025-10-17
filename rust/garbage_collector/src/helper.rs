@@ -109,6 +109,7 @@ impl ChromaGrpcClients {
             database: database_name.to_string(),
             dimension: Some(3),
             configuration_json_str: config_str,
+            schema_str: None,
             get_or_create: Some(true),
             metadata: None,
             segments,

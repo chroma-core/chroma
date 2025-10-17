@@ -2,7 +2,7 @@ use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
 use super::OneOffCompactMessage;
 use super::RebuildMessage;
-use crate::compactor::types::ScheduledCompactMessage;
+use crate::compactor::types::{ListDeadJobsMessage, ScheduledCompactMessage};
 use crate::config::CompactionServiceConfig;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLog;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLogError;
@@ -432,6 +432,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             my_ip,
             log.clone(),
             sysdb.clone(),
+            storage.clone(),
             policy,
             max_concurrent_jobs,
             min_compaction_size,
@@ -685,6 +686,22 @@ impl Handler<RegisterOnReadySignal> for CompactionManager {
     }
 }
 
+#[async_trait]
+impl Handler<ListDeadJobsMessage> for CompactionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: ListDeadJobsMessage,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        let dead_jobs = self.scheduler.get_dead_jobs();
+        if let Err(e) = message.response_tx.send(dead_jobs) {
+            tracing::error!("Failed to send dead jobs response: {:?}", e);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -696,6 +713,7 @@ mod tests {
     use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
+    use chroma_storage::s3_client_for_test_with_new_bucket;
     use chroma_sysdb::TestSysDb;
     use chroma_system::{Dispatcher, DispatcherConfig};
     use chroma_types::SegmentUuid;
@@ -885,6 +903,7 @@ mod tests {
             my_member.member_id.clone(),
             log.clone(),
             sysdb.clone(),
+            storage.clone(),
             Box::new(LasCompactionTimeSchedulerPolicy {}),
             max_concurrent_jobs,
             min_compaction_size,
@@ -997,5 +1016,42 @@ mod tests {
                 panic!("Expected hnsw purge to be successful")
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_list_dead_jobs() {
+        // Create a simple system for testing
+        let system = System::new();
+        let dispatcher = Dispatcher::new(DispatcherConfig::default());
+        let _dispatcher_handle = system.start_component(dispatcher);
+
+        let storage = s3_client_for_test_with_new_bucket().await;
+
+        // Create test scheduler with dead jobs
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
+        assignment_policy.set_members(vec!["test-member".to_string()]);
+
+        let mut scheduler = Scheduler::new(
+            "test-member".to_string(),
+            Log::InMemory(InMemoryLog::new()),
+            SysDb::Test(TestSysDb::new()),
+            storage,
+            Box::new(LasCompactionTimeSchedulerPolicy {}),
+            10,
+            100,
+            assignment_policy,
+            HashSet::new(),
+            60,
+            3,
+        );
+
+        // Simulate a dead job by marking a collection as killed (moved to dead_jobs)
+        let test_collection_id = CollectionUuid::new();
+        scheduler.kill_collection(test_collection_id);
+
+        // Verify it's in dead jobs
+        let dead_jobs = scheduler.get_dead_jobs();
+        assert_eq!(dead_jobs.len(), 1);
+        assert!(dead_jobs.contains(&test_collection_id));
     }
 }

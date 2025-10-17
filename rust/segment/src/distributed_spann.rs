@@ -15,6 +15,8 @@ use chroma_index::spann::types::{
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
 use chroma_types::Collection;
+use chroma_types::InternalSchema;
+use chroma_types::SchemaError;
 use chroma_types::SegmentUuid;
 use chroma_types::HNSW_PATH;
 use chroma_types::MAX_HEAD_ID_BF_PATH;
@@ -68,6 +70,8 @@ pub enum SpannSegmentWriterError {
     GarbageCollectError(#[source] SpannIndexWriterError),
     #[error("Prefix paths do not match")]
     InvalidPrefixPath,
+    #[error("Invalid schema: {0}")]
+    InvalidSchema(#[source] SchemaError),
 }
 
 impl ChromaError for SpannSegmentWriterError {
@@ -86,6 +90,7 @@ impl ChromaError for SpannSegmentWriterError {
             Self::MissingSpannConfiguration => ErrorCodes::Internal,
             Self::GarbageCollectError(e) => e.code(),
             Self::InvalidPrefixPath => ErrorCodes::Internal,
+            Self::InvalidSchema(e) => e.code(),
         }
     }
 }
@@ -105,10 +110,18 @@ impl SpannSegmentWriter {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentWriterError::InvalidArgument);
         }
-        let params = collection
-            .config
-            .get_spann_config()
-            .ok_or_else(|| SpannSegmentWriterError::MissingSpannConfiguration)?;
+
+        let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+            collection.schema.clone(),
+            Some(collection.config.clone()),
+        )
+        .map_err(|e| {
+            SpannSegmentWriterError::InvalidSchema(SchemaError::InvalidSchema { reason: e })
+        })?;
+
+        let params = reconciled_schema
+            .get_internal_spann_config()
+            .ok_or(SpannSegmentWriterError::MissingSpannConfiguration)?;
 
         let (hnsw_id, segment_prefix_hnsw) = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
@@ -415,6 +428,8 @@ pub enum SpannSegmentReaderError {
     RngError(#[source] SpannIndexReaderError),
     #[error("Prefix paths do not match")]
     InvalidPrefixPath,
+    #[error("Invalid schema: {0}")]
+    InvalidSchema(#[source] SchemaError),
 }
 
 impl ChromaError for SpannSegmentReaderError {
@@ -431,6 +446,7 @@ impl ChromaError for SpannSegmentReaderError {
             Self::MissingSpannConfiguration => ErrorCodes::Internal,
             Self::RngError(e) => e.code(),
             Self::InvalidPrefixPath => ErrorCodes::Internal,
+            Self::InvalidSchema(e) => e.code(),
         }
     }
 }
@@ -454,10 +470,15 @@ impl<'me> SpannSegmentReader<'me> {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentReaderError::InvalidArgument);
         }
-        let params = collection
-            .config
-            .get_spann_config()
-            .ok_or(SpannSegmentReaderError::MissingSpannConfiguration)?;
+        let schema = collection.schema.as_ref().ok_or_else(|| {
+            SpannSegmentReaderError::InvalidSchema(SchemaError::InvalidSchema {
+                reason: "Schema is None".to_string(),
+            })
+        })?;
+
+        let params = schema
+            .get_internal_spann_config()
+            .ok_or_else(|| SpannSegmentReaderError::MissingSpannConfiguration)?;
 
         let (hnsw_id, segment_prefix_hnsw) = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
@@ -600,8 +621,8 @@ mod test {
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
         Chunk, Collection, CollectionUuid, DatabaseUuid, InternalCollectionConfiguration,
-        InternalSpannConfiguration, LogRecord, Operation, OperationRecord, SegmentUuid,
-        SpannPostingList,
+        InternalSchema, InternalSpannConfiguration, LogRecord, Operation, OperationRecord,
+        SegmentUuid, SpannPostingList,
     };
 
     use crate::{
@@ -654,7 +675,7 @@ mod test {
         .expect("Error converting config to gc context");
 
         let db_id = DatabaseUuid::new();
-        let collection = chroma_types::Collection {
+        let mut collection = chroma_types::Collection {
             collection_id,
             name: "test".to_string(),
             config: chroma_types::InternalCollectionConfiguration {
@@ -668,6 +689,10 @@ mod test {
             database_id: db_id,
             ..Default::default()
         };
+        collection.schema = Some(
+            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+                .expect("Error reconciling schema for test collection"),
+        );
 
         let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriter::from_segment(
@@ -893,7 +918,7 @@ mod test {
         .await
         .expect("Error converting config to gc context");
 
-        let collection = Collection {
+        let mut collection = Collection {
             collection_id,
             config: InternalCollectionConfiguration {
                 vector_index: chroma_types::VectorIndexConfiguration::Spann(params),
@@ -901,6 +926,10 @@ mod test {
             },
             ..Default::default()
         };
+        collection.schema = Some(
+            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+                .expect("Error reconciling schema for test collection"),
+        );
 
         let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriter::from_segment(
@@ -1054,11 +1083,15 @@ mod test {
         );
         let collection_id = CollectionUuid::new();
 
-        let collection = Collection {
+        let mut collection = Collection {
             collection_id,
             config: InternalCollectionConfiguration::default_spann(),
             ..Default::default()
         };
+        collection.schema = Some(
+            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+                .expect("Error reconciling schema for test collection"),
+        );
 
         let segment_id = SegmentUuid::new();
         let mut spann_segment = chroma_types::Segment {
@@ -1181,11 +1214,15 @@ mod test {
         .await
         .expect("Error converting config to gc context");
 
-        let collection = Collection {
+        let mut collection = Collection {
             collection_id,
             config: InternalCollectionConfiguration::default_spann(),
             ..Default::default()
         };
+        collection.schema = Some(
+            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+                .expect("Error reconciling schema for test collection"),
+        );
 
         let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriter::from_segment(

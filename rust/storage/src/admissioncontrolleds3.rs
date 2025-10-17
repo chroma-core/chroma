@@ -42,7 +42,7 @@ use tokio::{
 /// For writes, it will rate limit the number of concurrent requests.
 #[derive(Clone)]
 pub struct AdmissionControlledS3Storage {
-    storage: S3Storage,
+    pub(crate) storage: S3Storage,
     #[allow(clippy::type_complexity)]
     outstanding_read_requests: Arc<tokio::sync::Mutex<HashMap<String, InflightRequest>>>,
     rate_limiter: Arc<RateLimitPolicy>,
@@ -571,7 +571,7 @@ impl AdmissionControlledS3Storage {
         }
         let is_parallel = options.request_parallelism;
 
-        // Create a dedup key
+        // Create a dedup key.
         let composite_key = keys.join("|");
 
         let (any_res, _guard);

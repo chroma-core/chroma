@@ -24,6 +24,7 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 			ID:                         types.MustParse(collectionAndMetadata.Collection.ID),
 			Name:                       *collectionAndMetadata.Collection.Name,
 			ConfigurationJsonStr:       *collectionAndMetadata.Collection.ConfigurationJsonStr,
+			SchemaStr:                  collectionAndMetadata.Collection.SchemaStr,
 			Dimension:                  collectionAndMetadata.Collection.Dimension,
 			TenantID:                   collectionAndMetadata.TenantID,
 			DatabaseName:               collectionAndMetadata.DatabaseName,

@@ -22,7 +22,7 @@
 //! ## Data Model
 //!
 //! Each task in the heap is represented by a [`HeapItem`] containing:
-//! - A [`Triggerable`] with a UUID and name identifying the task
+//! - A [`Triggerable`] with partitioning and scheduling UUIDs
 //! - A nonce (UUID) uniquely identifying each invocation
 //!
 //! ## Usage Example
@@ -39,13 +39,20 @@
 //!
 //! // Create heap components
 //! let scheduler = Arc::new(MyScheduler);
-//! let writer = HeapWriter::new("my-heap".to_string(), storage, scheduler);
+//! let writer = HeapWriter::new(storage, "my-heap".to_string(), scheduler).await?;
 //!
 //! // Schedule tasks
-//! let tasks = vec![
-//!     Triggerable { uuid: task_id, name: "process_order".to_string() }
+//! let schedules = vec![
+//!     Schedule {
+//!         triggerable: Triggerable {
+//!             partitioning: UnitOfPartitioningUuid::new(collection_id),
+//!             scheduling: UnitOfSchedulingUuid::new(task_id),
+//!         },
+//!         next_scheduled: Utc::now(),
+//!         nonce: Uuid::new_v4(),
+//!     }
 //! ];
-//! writer.push(&tasks).await?;
+//! writer.push(&schedules).await?;
 //! ```
 //!
 //! # Concurrency and Safety
@@ -63,7 +70,6 @@
 
 #![deny(missing_docs)]
 #![warn(clippy::all)]
-#![deny(unsafe_code)]
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -77,9 +83,33 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 mod internal;
+use internal::Internal;
 
 pub use internal::HeapItem;
-use internal::Internal;
+
+////////////////////////////////////////////// heap_path ///////////////////////////////////////////
+
+/// Compute the heap path from a hostname.
+///
+/// This function generates the S3 prefix for a heap based on the hostname
+/// of the service instance managing it. The format is `heap/{hostname}`.
+///
+/// # Arguments
+/// * `hostname` - The hostname of the service instance
+///
+/// # Returns
+/// The S3 prefix path for the heap
+///
+/// # Examples
+/// ```
+/// use s3heap::heap_path_from_hostname;
+///
+/// let path = heap_path_from_hostname("rust-log-service-0");
+/// assert_eq!(path, "heap/rust-log-service-0");
+/// ```
+pub fn heap_path_from_hostname(hostname: &str) -> String {
+    format!("heap/{}", hostname)
+}
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -108,6 +138,9 @@ pub enum Error {
     /// Invalid prefix format
     #[error("invalid prefix: {0}")]
     InvalidPrefix(String),
+    /// Uninitialized heap
+    #[error("uninitialized heap: {0}")]
+    UninitializedHeap(String),
     /// Storage backend error
     #[error("storage error: {0}")]
     Storage(#[from] chroma_storage::StorageError),
@@ -120,12 +153,38 @@ pub enum Error {
     /// Arrow data processing error
     #[error("arrow error: {0}")]
     Arrow(String),
+    /// JSON data processing error
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+    /// Date parsing error
     /// Date parsing error
     #[error("invalid date: {0}")]
     ParseDate(#[from] chrono::ParseError),
     /// Date rounding error
     #[error("could not round date: {0}")]
     RoundError(#[from] chrono::RoundingError),
+}
+
+impl chroma_error::ChromaError for Error {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        use chroma_error::ErrorCodes;
+        match self {
+            Error::ETagConflict => ErrorCodes::FailedPrecondition,
+            Error::MissingETag(_) => ErrorCodes::FailedPrecondition,
+            Error::Internal(_) => ErrorCodes::Internal,
+            Error::InvalidBucket(_) => ErrorCodes::InvalidArgument,
+            Error::PartialLoadFailure(..) => ErrorCodes::Internal,
+            Error::InvalidPrefix(_) => ErrorCodes::InvalidArgument,
+            Error::UninitializedHeap(_) => ErrorCodes::FailedPrecondition,
+            Error::Storage(e) => e.code(),
+            Error::Uuid(_) => ErrorCodes::InvalidArgument,
+            Error::Parquet(_) => ErrorCodes::Internal,
+            Error::Json(_) => ErrorCodes::Internal,
+            Error::Arrow(_) => ErrorCodes::Internal,
+            Error::ParseDate(_) => ErrorCodes::InvalidArgument,
+            Error::RoundError(_) => ErrorCodes::Internal,
+        }
+    }
 }
 
 /////////////////////////////////////////// Configuration //////////////////////////////////////////
@@ -251,7 +310,7 @@ impl RetryConfig {
 /// // Create custom limits
 /// let custom_limits = Limits::default().with_buckets(100);
 /// ```
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Limits {
     /// Maximum number of buckets to read during a scan operation.
     /// If None, defaults to 1000 buckets.
@@ -320,34 +379,107 @@ impl Limits {
     }
 }
 
+//////////////////////////////////////////// Uuid types ////////////////////////////////////////////
+
+/// The UnitOfPartitioning is e.g. a Chroma collection or some other unit of work that is a
+/// functional dependency of the key used for partitioning.  Always a UUID.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct UnitOfPartitioningUuid(Uuid);
+
+impl UnitOfPartitioningUuid {
+    /// Create a new UnitOfPartitioningUuid from a Uuid.
+    pub fn new(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+
+    /// Get the inner Uuid.
+    pub fn as_uuid(&self) -> &Uuid {
+        &self.0
+    }
+}
+
+impl From<Uuid> for UnitOfPartitioningUuid {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl fmt::Display for UnitOfPartitioningUuid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// The UnitOfScheduling is the identifier for the individual thing to push and pop off the heap.  A
+/// given UnitOfPartitioning may have many UnitOfScheduling UUIDs assigned to it.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct UnitOfSchedulingUuid(Uuid);
+
+impl UnitOfSchedulingUuid {
+    /// Create a new UnitOfSchedulingUuid from a Uuid.
+    pub fn new(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+
+    /// Get the inner Uuid.
+    pub fn as_uuid(&self) -> &Uuid {
+        &self.0
+    }
+}
+
+impl From<Uuid> for UnitOfSchedulingUuid {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl fmt::Display for UnitOfSchedulingUuid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 //////////////////////////////////////////// Triggerable ///////////////////////////////////////////
 
 /// Represents a task that can be scheduled and triggered in the heap.
 ///
 /// A `Triggerable` consists of two parts:
-/// - A UUID identifying the schedulable unit (e.g., a document, job, or entity)
-/// - A name specifying which task to execute on that unit
+/// - A partitioning UUID identifying the unit for partitioning (e.g., a collection)
+/// - A scheduling UUID identifying the specific task to execute
 ///
-/// This allows multiple different tasks to be scheduled for the same entity,
-/// each identified by its name.
+/// This allows the heap to partition tasks by the partitioning unit while
+/// scheduling individual tasks within those partitions.
 ///
 /// # Examples
 ///
 /// ```
-/// use s3heap::Triggerable;
+/// use s3heap::{Triggerable, UnitOfPartitioningUuid, UnitOfSchedulingUuid};
 /// use uuid::Uuid;
 ///
 /// let task = Triggerable {
-///     uuid: Uuid::new_v4(),
-///     name: "index_document".to_string(),
+///     partitioning: UnitOfPartitioningUuid::new(Uuid::new_v4()),
+///     scheduling: UnitOfSchedulingUuid::new(Uuid::new_v4()),
 /// };
 /// ```
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct Triggerable {
-    /// The UUID identifying the schedulable unit
-    pub uuid: Uuid,
-    /// The name of the specific task to execute
-    pub name: String,
+    /// The UUID identifying the partitioning unit
+    pub partitioning: UnitOfPartitioningUuid,
+    /// The UUID identifying the specific schedulable task
+    pub scheduling: UnitOfSchedulingUuid,
+}
+
+///////////////////////////////////////////// Schedule /////////////////////////////////////////////
+
+/// A scheduled task with its next execution time and unique identifier.
+#[derive(Clone)]
+pub struct Schedule {
+    /// The task to be executed
+    pub triggerable: Triggerable,
+    /// The next scheduled execution time
+    pub next_scheduled: DateTime<Utc>,
+    /// The unique identifier for this task invocation
+    pub nonce: Uuid,
 }
 
 /////////////////////////////////////////// HeapScheduler //////////////////////////////////////////
@@ -368,33 +500,34 @@ pub struct Triggerable {
 /// # Examples
 ///
 /// ```
-/// use s3heap::{HeapScheduler, Triggerable, Error};
+/// use s3heap::{HeapScheduler, Triggerable, Schedule, Error};
 /// use chrono::{DateTime, Utc};
 /// use uuid::Uuid;
 /// use std::collections::HashMap;
 /// use parking_lot::Mutex;
 ///
 /// struct MyScheduler {
-///     completed_tasks: Mutex<HashMap<(Uuid, Uuid), bool>>,
+///     schedules: Mutex<HashMap<Uuid, Schedule>>,
+///     completed_tasks: Mutex<HashMap<(Uuid, Uuid, Uuid), bool>>,
 /// }
 ///
 /// #[async_trait::async_trait]
 /// impl HeapScheduler for MyScheduler {
 ///     async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error> {
-///         // Check if tasks are complete in your system
 ///         let completed = self.completed_tasks.lock();
 ///         Ok(items.iter()
-///             .map(|(item, nonce)| completed.get(&(item.uuid, *nonce)).copied().unwrap_or(false))
+///             .map(|(item, nonce)| completed.get(&(*item.partitioning.as_uuid(), *item.scheduling.as_uuid(), *nonce)).copied().unwrap_or(false))
 ///             .collect())
 ///     }
 ///
-///     async fn next_times_and_nonces(
+///     async fn get_schedules(
 ///         &self,
-///         items: &[Triggerable],
-///     ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, Error> {
-///         // Determine when to schedule these tasks
-///         Ok(items.iter()
-///             .map(|_| Some((Utc::now() + chrono::Duration::minutes(5), Uuid::new_v4())))
+///         ids: &[Uuid],
+///     ) -> Result<Vec<Schedule>, Error> {
+///         // Retrieve scheduled tasks from your system
+///         let schedules = self.schedules.lock();
+///         Ok(ids.iter()
+///             .filter_map(|id| schedules.get(id).cloned())
 ///             .collect())
 ///     }
 /// }
@@ -412,7 +545,7 @@ pub trait HeapScheduler: Send + Sync {
     /// * `Ok(false)` if the task is still pending or running
     /// * `Err` if there was an error checking the status
     async fn is_done(&self, item: &Triggerable, nonce: Uuid) -> Result<bool, Error> {
-        let results = self.are_done(&[(item.clone(), nonce)]).await?;
+        let results = self.are_done(&[(*item, nonce)]).await?;
         if results.len() != 1 {
             return Err(Error::Internal(format!(
                 "are_done returned {} results for 1 item",
@@ -436,44 +569,33 @@ pub trait HeapScheduler: Send + Sync {
     /// result[i] = is_done(&items[i])
     async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error>;
 
-    /// Get the next scheduled execution time and nonce for a task.
+    /// Get the schedule for a specific task by its ID.
     ///
     /// # Arguments
-    /// * `item` - The triggerable task to schedule
+    /// * `id` - The unique identifier of the scheduled task
     ///
     /// # Returns
-    /// * `Ok(Some((time, nonce)))` if the task should be scheduled
-    /// * `Ok(None)` if the task should not be scheduled
-    /// * `Err` if there was an error determining the schedule
-    async fn next_time_and_nonce(
-        &self,
-        item: &Triggerable,
-    ) -> Result<Option<(DateTime<Utc>, Uuid)>, Error> {
-        let results = self.next_times_and_nonces(&[item.clone()]).await?;
-        if results.len() != 1 {
-            return Err(Error::Internal(format!(
-                "next_times_and_nonces returned {} results for 1 item",
-                results.len()
-            )));
-        }
-        Ok(results[0])
+    /// * `Ok(Some(Schedule))` if exactly one schedule exists for the task
+    /// * `Ok(None)` if no schedules exist for the task
+    /// * `Err` if there was an error retrieving the schedule or if multiple schedules exist
+    async fn get_schedule(&self, id: Uuid) -> Result<Option<Schedule>, Error> {
+        let mut results = self.get_schedules(&[id]).await?;
+        Ok(results.pop())
     }
 
-    /// Get the next scheduled execution times and nonces for multiple tasks.
+    /// Get the schedules for multiple tasks by their IDs.
     ///
     /// # Arguments
-    /// * `items` - The triggerable tasks to schedule
+    /// * `ids` - The unique identifiers of the scheduled tasks
     ///
     /// # Returns
-    /// * `Ok(Vec<Option<(time, nonce)>>)` with one option per item
-    /// * `Err` if there was an error determining the schedules
+    /// * `Ok(Vec<Schedule>)` containing all schedules for the given IDs
+    /// * `Err` if there was an error retrieving the schedules
     ///
-    /// # Implementation Requirements
-    /// The returned vector must have exactly the same length as the input slice.
-    async fn next_times_and_nonces(
-        &self,
-        items: &[Triggerable],
-    ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, Error>;
+    /// # Implementation Notes
+    /// The returned vector may contain zero, one, or many schedules per ID.
+    /// The length of the returned vector is not required to match the input slice length.
+    async fn get_schedules(&self, ids: &[Uuid]) -> Result<Vec<Schedule>, Error>;
 }
 
 //////////////////////////////////////////// HeapWriter ////////////////////////////////////////////
@@ -503,24 +625,32 @@ pub trait HeapScheduler: Send + Sync {
 /// use uuid::Uuid;
 ///
 /// let writer = HeapWriter::new(
-///     "my-heap".to_string(),
 ///     storage,
+///     "my-heap".to_string(),
 ///     scheduler,
-/// );
+/// ).await?;
 ///
 /// // Schedule a batch of tasks
-/// let tasks = vec![
-///     Triggerable {
-///         uuid: Uuid::new_v4(),
-///         name: "process_payment".to_string(),
+/// let schedules = vec![
+///     Schedule {
+///         triggerable: Triggerable {
+///             uuid: Uuid::new_v4(),
+///             name: "process_payment".to_string(),
+///         },
+///         next_scheduled: Utc::now(),
+///         nonce: Uuid::new_v4(),
 ///     },
-///     Triggerable {
-///         uuid: Uuid::new_v4(),
-///         name: "send_notification".to_string(),
+///     Schedule {
+///         triggerable: Triggerable {
+///             uuid: Uuid::new_v4(),
+///             name: "send_notification".to_string(),
+///         },
+///         next_scheduled: Utc::now(),
+///         nonce: Uuid::new_v4(),
 ///     },
 /// ];
 ///
-/// writer.push(&tasks).await?;
+/// writer.push(&schedules).await?;
 /// ```
 pub struct HeapWriter {
     internal: Internal,
@@ -551,38 +681,44 @@ impl HeapWriter {
     ///     "production/task-queue".to_string(),
     ///     storage,
     ///     Arc::new(scheduler),
-    /// )?;
+    /// ).await?;
     /// ```
-    pub fn new(
-        prefix: String,
+    pub async fn new(
         storage: Storage,
+        prefix: String,
         heap_scheduler: Arc<dyn HeapScheduler>,
     ) -> Result<Self, Error> {
         let config = Configuration::default();
         validate_prefix(&prefix)?;
-        Ok(Self {
-            internal: Internal::new(prefix, storage, heap_scheduler, config.backoff.clone()),
-            config,
-        })
+
+        let init_path = format!("{}/INIT", prefix);
+        let internal = Internal::new(
+            storage.clone(),
+            prefix,
+            heap_scheduler,
+            config.backoff.clone(),
+        );
+        storage
+            .put_bytes(&init_path, vec![], chroma_storage::PutOptions::default())
+            .await?;
+
+        Ok(Self { config, internal })
     }
 
     /// Schedule a batch of tasks in the heap.
     ///
-    /// This method queries the [`HeapScheduler`] for each task to determine when it should
-    /// be executed. Tasks scheduled for the same minute are automatically batched together
-    /// into a single parquet file for efficient storage. Tasks with no scheduled time
-    /// (when the scheduler returns `None`) are silently skipped.
+    /// Tasks scheduled for the same minute are automatically batched together
+    /// into a single parquet file for efficient storage.
     ///
     /// For best performance, batch multiple tasks into a single call rather than
     /// calling this method repeatedly with individual tasks.
     ///
     /// # Arguments
     ///
-    /// * `items` - The tasks to schedule. Empty slices are allowed and will return immediately.
+    /// * `schedules` - The scheduled tasks to add to the heap. Empty slices are allowed and will return immediately.
     ///
     /// # Errors
     ///
-    /// - [`Error::Internal`] if the scheduler returns an error
     /// - [`Error::Storage`] if there's an S3 operation failure
     /// - [`Error::ETagConflict`] if concurrent modifications exhaust retries
     /// - [`Error::Parquet`] if parquet serialization fails
@@ -590,49 +726,39 @@ impl HeapWriter {
     /// # Examples
     ///
     /// ```ignore
-    /// use s3heap::Triggerable;
+    /// use s3heap::{Schedule, Triggerable};
     /// use uuid::Uuid;
+    /// use chrono::Utc;
     ///
-    /// let tasks = vec![
-    ///     Triggerable {
-    ///         uuid: Uuid::new_v4(),
-    ///         name: "daily_report".to_string(),
+    /// let schedules = vec![
+    ///     Schedule {
+    ///         triggerable: Triggerable {
+    ///             partitioning: Uuid::new_v4().into(),
+    ///             scheduling: Uuid::new_v4().into(),
+    ///         },
+    ///         next_scheduled: Utc::now(),
+    ///         nonce: Uuid::new_v4(),
     ///     },
     /// ];
     ///
-    /// // Schedule tasks - those without a next execution time are skipped
-    /// writer.push(&tasks).await?;
+    /// writer.push(&schedules).await?;
     ///
     /// // Empty push is safe and does nothing
     /// writer.push(&[]).await?;
     /// ```
-    pub async fn push(&self, items: &[Triggerable]) -> Result<(), Error> {
-        if items.is_empty() {
+    pub async fn push(&self, schedules: &[Schedule]) -> Result<(), Error> {
+        if schedules.is_empty() {
             return Ok(());
         }
 
-        let heap_scheduler = self.internal.heap_scheduler();
         let mut buckets: BTreeMap<DateTime<Utc>, Vec<HeapItem>> = BTreeMap::new();
-        let next_times_and_nonces = heap_scheduler.next_times_and_nonces(items).await?;
 
-        if items.len() != next_times_and_nonces.len() {
-            return Err(Error::Internal(format!(
-                "scheduler returned {} results for {} items",
-                next_times_and_nonces.len(),
-                items.len()
-            )));
-        }
-
-        for (item, next) in items.iter().zip(next_times_and_nonces) {
-            let Some((when, nonce)) = next else {
-                // Skip items that have no next scheduled time
-                continue;
-            };
+        for schedule in schedules {
             let heap_item = HeapItem {
-                trigger: item.clone(),
-                nonce,
+                trigger: schedule.triggerable,
+                nonce: schedule.nonce,
             };
-            let bucket = self.internal.compute_bucket(when)?;
+            let bucket = self.internal.compute_bucket(schedule.next_scheduled)?;
             buckets.entry(bucket).or_default().push(heap_item);
         }
 
@@ -752,14 +878,14 @@ impl HeapPruner {
     /// )?;
     /// ```
     pub fn new(
-        prefix: String,
         storage: Storage,
+        prefix: String,
         heap_scheduler: Arc<dyn HeapScheduler>,
     ) -> Result<Self, Error> {
         let config = Configuration::default();
         validate_prefix(&prefix)?;
         Ok(Self {
-            internal: Internal::new(prefix, storage, heap_scheduler, config.backoff.clone()),
+            internal: Internal::new(storage, prefix, heap_scheduler, config.backoff.clone()),
             config,
         })
     }
@@ -846,7 +972,7 @@ impl HeapPruner {
         let original_count = entries.len();
         let triggers = entries
             .iter()
-            .map(|e| (e.trigger.clone(), e.nonce))
+            .map(|e| (e.trigger, e.nonce))
             .collect::<Vec<_>>();
         let are_done = heap_scheduler.are_done(&triggers).await?;
 
@@ -950,6 +1076,7 @@ impl HeapReader {
     ///
     /// - Returns [`Error::InvalidPrefix`] if `prefix` is empty
     /// - Returns [`Error::InvalidPrefix`] if `prefix` contains "//" (double slashes)
+    /// - Returns [`Error::UninitializedHeap`] if the heap has not been initialized with a HeapWriter
     ///
     /// # Examples
     ///
@@ -961,17 +1088,33 @@ impl HeapReader {
     ///     "production/task-queue".to_string(),
     ///     storage,
     ///     Arc::new(scheduler),
-    /// )?;
+    /// ).await?;
     /// ```
-    pub fn new(
-        prefix: String,
+    pub async fn new(
         storage: Storage,
+        prefix: String,
         heap_scheduler: Arc<dyn HeapScheduler>,
     ) -> Result<Self, Error> {
         let config = Configuration::default();
         validate_prefix(&prefix)?;
+
+        let init_path = format!("{}/INIT", prefix);
+        match storage
+            .get(&init_path, chroma_storage::GetOptions::default())
+            .await
+        {
+            Ok(_) => {}
+            Err(chroma_storage::StorageError::NotFound { .. }) => {
+                return Err(Error::UninitializedHeap(format!(
+                    "heap at prefix '{}' has not been initialized",
+                    prefix
+                )));
+            }
+            Err(e) => return Err(Error::Storage(e)),
+        }
+
         Ok(Self {
-            internal: Internal::new(prefix, storage, heap_scheduler, config.backoff),
+            internal: Internal::new(storage, prefix, heap_scheduler, config.backoff),
         })
     }
 
@@ -1029,9 +1172,9 @@ impl HeapReader {
     /// ```
     pub async fn peek(
         &self,
-        should_return: impl for<'a> Fn(&'a Triggerable) -> bool + Send + Sync,
+        should_return: impl for<'a> Fn(&'a Triggerable, DateTime<Utc>) -> bool + Send + Sync,
         limits: Limits,
-    ) -> Result<Vec<HeapItem>, Error> {
+    ) -> Result<Vec<(DateTime<Utc>, HeapItem)>, Error> {
         let heap_scheduler = self.internal.heap_scheduler();
         let buckets = self.internal.list_approx_first_1k_buckets().await?;
         let mut returns = vec![];
@@ -1041,8 +1184,8 @@ impl HeapReader {
             let (entries, _) = self.internal.load_bucket_or_empty(bucket).await?;
             let triggerable_and_nonce = entries
                 .iter()
-                .filter(|hi| should_return(&hi.trigger))
-                .map(|hi| (hi.trigger.clone(), hi.nonce))
+                .filter(|hi| should_return(&hi.trigger, bucket))
+                .map(|hi| (hi.trigger, hi.nonce))
                 .collect::<Vec<_>>();
             let are_done = heap_scheduler.are_done(&triggerable_and_nonce).await?;
             if triggerable_and_nonce.len() != are_done.len() {
@@ -1054,10 +1197,13 @@ impl HeapReader {
             }
             for ((triggerable, uuid), is_done) in triggerable_and_nonce.iter().zip(are_done) {
                 if !is_done {
-                    returns.push(HeapItem {
-                        trigger: triggerable.clone(),
-                        nonce: *uuid,
-                    });
+                    returns.push((
+                        bucket,
+                        HeapItem {
+                            trigger: *triggerable,
+                            nonce: *uuid,
+                        },
+                    ));
                     if returns.len() >= max_items {
                         break 'outer;
                     }

@@ -17,9 +17,33 @@ use uuid::Uuid;
 use crate::{Error, HeapScheduler, RetryConfig, Triggerable};
 
 /// Column name constants for the parquet schema
-const COLUMN_UUIDS: &str = "uuids";
-const COLUMN_NAMES: &str = "names";
+const COLUMN_PARTITIONING_UUIDS: &str = "partitioning_uuids";
+const COLUMN_SCHEDULING_UUIDS: &str = "scheduling_uuids";
 const COLUMN_NONCES: &str = "nonces";
+
+/// Helper function to extract and validate a string column from a parquet record batch.
+fn get_string_column<'a>(
+    batch: &'a RecordBatch,
+    column_name: &str,
+    path: &str,
+) -> Result<&'a StringArray, Error> {
+    let column = batch.column_by_name(column_name).ok_or_else(|| {
+        Error::Arrow(format!(
+            "missing '{}' column in parquet file: {}",
+            column_name, path
+        ))
+    })?;
+
+    column
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .ok_or_else(|| {
+            Error::Arrow(format!(
+                "'{}' column is not a StringArray in {}",
+                column_name, path
+            ))
+        })
+}
 
 ///////////////////////////////////////////// HeapItem /////////////////////////////////////////////
 
@@ -32,18 +56,18 @@ const COLUMN_NONCES: &str = "nonces";
 /// # Examples
 ///
 /// ```
-/// use s3heap::{HeapItem, Triggerable};
+/// use s3heap::{HeapItem, Triggerable, UnitOfPartitioningUuid, UnitOfSchedulingUuid};
 /// use uuid::Uuid;
 ///
 /// let item = HeapItem {
 ///     trigger: Triggerable {
-///         uuid: Uuid::new_v4(),
-///         name: "send_email".to_string(),
+///         partitioning: UnitOfPartitioningUuid::new(Uuid::new_v4()),
+///         scheduling: UnitOfSchedulingUuid::new(Uuid::new_v4()),
 ///     },
 ///     nonce: Uuid::new_v4(),
 /// };
 /// ```
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Ord, PartialOrd)]
 pub struct HeapItem {
     /// The triggerable task to be executed
     pub trigger: Triggerable,
@@ -67,8 +91,8 @@ pub struct HeapItem {
 /// - **Parquet Format**: Provides efficient compression and columnar storage for UUID/string data
 /// - **ETag-based Concurrency**: Uses S3's conditional PUT/GET for optimistic concurrency control
 pub struct Internal {
-    prefix: String,
     storage: Storage,
+    prefix: String,
     heap_scheduler: Arc<dyn HeapScheduler>,
     retry_config: RetryConfig,
 }
@@ -83,8 +107,8 @@ impl Internal {
     /// * `heap_scheduler` - The scheduler implementation
     /// * `retry_config` - Configuration for retry behavior on conflicts
     pub fn new(
-        prefix: String,
         storage: Storage,
+        prefix: String,
         heap_scheduler: Arc<dyn HeapScheduler>,
         retry_config: RetryConfig,
     ) -> Self {
@@ -130,9 +154,24 @@ impl Internal {
 
         let entries = entries.to_vec();
         (|| async {
-            let (mut on_s3, e_tag) = self.load_bucket_or_empty(bucket).await?;
-            on_s3.extend(entries.iter().cloned());
-            self.store_bucket(bucket, &on_s3, e_tag).await
+            let (on_s3, e_tag) = self.load_bucket_or_empty(bucket).await?;
+            let triggerables = on_s3
+                .iter()
+                .map(|x| (x.trigger, x.nonce))
+                .collect::<Vec<_>>();
+            let schedules = self.heap_scheduler.are_done(&triggerables).await?;
+            let mut results = Vec::with_capacity(on_s3.len().saturating_add(entries.len()));
+            for (item, is_done) in on_s3.into_iter().zip(schedules) {
+                if !is_done {
+                    results.push(item)
+                }
+            }
+            results.extend(entries.clone());
+            results.sort();
+            results.reverse();
+            results.dedup_by_key(|x| x.trigger);
+            results.reverse();
+            self.store_bucket(bucket, &results, e_tag).await
         })
         .retry(backoff)
         .await
@@ -161,6 +200,7 @@ impl Internal {
             .await?;
         first_1k
             .into_iter()
+            .filter(|x| !x.ends_with("INIT"))
             .map(|p| -> Result<_, Error> {
                 let Some(dt) = p
                     .strip_prefix(&self.prefix)
@@ -227,73 +267,41 @@ impl Internal {
         let mut items = vec![];
         for batch in reader {
             let batch = batch.map_err(|err| Error::Arrow(err.to_string()))?;
-            let uuid = batch.column_by_name(COLUMN_UUIDS).ok_or_else(|| {
-                Error::Arrow(format!(
-                    "missing '{}' column in parquet file: {}",
-                    COLUMN_UUIDS, path
-                ))
-            })?;
-            let name = batch.column_by_name(COLUMN_NAMES).ok_or_else(|| {
-                Error::Arrow(format!(
-                    "missing '{}' column in parquet file: {}",
-                    COLUMN_NAMES, path
-                ))
-            })?;
-            let nonce = batch.column_by_name(COLUMN_NONCES).ok_or_else(|| {
-                Error::Arrow(format!(
-                    "missing '{}' column in parquet file: {}",
-                    COLUMN_NONCES, path
-                ))
-            })?;
-            let uuid = uuid
-                .as_any()
-                .downcast_ref::<arrow::array::StringArray>()
-                .ok_or_else(|| {
-                    Error::Arrow(format!(
-                        "'{}' column is not a StringArray in {}",
-                        COLUMN_UUIDS, path
-                    ))
-                })?;
-            let name = name
-                .as_any()
-                .downcast_ref::<arrow::array::StringArray>()
-                .ok_or_else(|| {
-                    Error::Arrow(format!(
-                        "'{}' column is not a StringArray in {}",
-                        COLUMN_NAMES, path
-                    ))
-                })?;
-            let nonce = nonce
-                .as_any()
-                .downcast_ref::<arrow::array::StringArray>()
-                .ok_or_else(|| {
-                    Error::Arrow(format!(
-                        "'{}' column is not a StringArray in {}",
-                        COLUMN_NONCES, path
-                    ))
-                })?;
+            let partitioning_uuids = get_string_column(&batch, COLUMN_PARTITIONING_UUIDS, &path)?;
+            let scheduling_uuids = get_string_column(&batch, COLUMN_SCHEDULING_UUIDS, &path)?;
+            let nonces = get_string_column(&batch, COLUMN_NONCES, &path)?;
             let mut errors = Vec::new();
             for i in 0..batch.num_rows() {
-                if uuid.is_null(i) || name.is_null(i) || nonce.is_null(i) {
+                if partitioning_uuids.is_null(i) || scheduling_uuids.is_null(i) || nonces.is_null(i)
+                {
                     errors.push(format!("null value at row {}", i));
                     continue;
                 }
-                let uuid_str = uuid.value(i);
-                let name_str = name.value(i);
-                let nonce_str = nonce.value(i);
+                let partitioning_uuid_str = partitioning_uuids.value(i);
+                let scheduling_uuid_str = scheduling_uuids.value(i);
+                let nonce_str = nonces.value(i);
 
-                match (Uuid::from_str(uuid_str), Uuid::from_str(nonce_str)) {
-                    (Ok(uuid), Ok(nonce)) => {
-                        let name = name_str.to_string();
+                match (
+                    Uuid::from_str(partitioning_uuid_str),
+                    Uuid::from_str(scheduling_uuid_str),
+                    Uuid::from_str(nonce_str),
+                ) {
+                    (Ok(partitioning_uuid), Ok(scheduling_uuid), Ok(nonce)) => {
                         items.push(HeapItem {
-                            trigger: Triggerable { uuid, name },
+                            trigger: Triggerable {
+                                partitioning: partitioning_uuid.into(),
+                                scheduling: scheduling_uuid.into(),
+                            },
                             nonce,
                         });
                     }
-                    (Err(e), _) => {
-                        errors.push(format!("invalid UUID at row {}: {}", i, e));
+                    (Err(e), _, _) => {
+                        errors.push(format!("invalid partitioning UUID at row {}: {}", i, e));
                     }
-                    (_, Err(e)) => {
+                    (_, Err(e), _) => {
+                        errors.push(format!("invalid scheduling UUID at row {}: {}", i, e));
+                    }
+                    (_, _, Err(e)) => {
                         errors.push(format!("invalid nonce at row {}: {}", i, e));
                     }
                 }
@@ -512,25 +520,31 @@ impl Internal {
 /// - All columns are non-nullable strings
 /// - Empty input produces a valid parquet file with no rows
 fn construct_parquet(items: &[HeapItem]) -> Result<Vec<u8>, Error> {
-    let uuids = items
+    let partitioning_uuids = items
         .iter()
-        .map(|x| x.trigger.uuid.to_string())
+        .map(|x| x.trigger.partitioning.to_string())
         .collect::<Vec<_>>();
-    let names = items
+    let scheduling_uuids = items
         .iter()
-        .map(|x| x.trigger.name.clone())
+        .map(|x| x.trigger.scheduling.to_string())
         .collect::<Vec<_>>();
     let nonces = items
         .iter()
         .map(|x| x.nonce.to_string())
         .collect::<Vec<_>>();
     // Create an Arrow record batch
-    let uuids = StringArray::from(uuids);
-    let names = StringArray::from(names);
+    let partitioning_uuids = StringArray::from(partitioning_uuids);
+    let scheduling_uuids = StringArray::from(scheduling_uuids);
     let nonces = StringArray::from(nonces);
     let batch = RecordBatch::try_from_iter(vec![
-        (COLUMN_UUIDS, Arc::new(uuids) as ArrayRef),
-        (COLUMN_NAMES, Arc::new(names) as ArrayRef),
+        (
+            COLUMN_PARTITIONING_UUIDS,
+            Arc::new(partitioning_uuids) as ArrayRef,
+        ),
+        (
+            COLUMN_SCHEDULING_UUIDS,
+            Arc::new(scheduling_uuids) as ArrayRef,
+        ),
         (COLUMN_NONCES, Arc::new(nonces) as ArrayRef),
     ])
     .map_err(|err| Error::Arrow(format!("Failed to create RecordBatch: {}", err)))?;
@@ -550,27 +564,38 @@ fn construct_parquet(items: &[HeapItem]) -> Result<Vec<u8>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Schedule;
     use chrono::TimeZone;
     use std::time::Duration;
+
+    /// A dummy scheduler implementation for testing purposes.
+    ///
+    /// This scheduler always reports that items are not done and have no scheduled times.
+    pub struct DummyScheduler;
+
+    #[async_trait::async_trait]
+    impl HeapScheduler for DummyScheduler {
+        async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error> {
+            Ok(vec![false; items.len()])
+        }
+
+        async fn get_schedules(&self, _ids: &[Uuid]) -> Result<Vec<Schedule>, Error> {
+            Ok(vec![])
+        }
+    }
 
     // HeapItem tests
     #[test]
     fn heap_item_creation_and_equality() {
         let trigger = crate::Triggerable {
-            uuid: Uuid::new_v4(),
-            name: "test-task".to_string(),
+            partitioning: Uuid::new_v4().into(),
+            scheduling: Uuid::new_v4().into(),
         };
         let nonce = Uuid::new_v4();
 
-        let item1 = HeapItem {
-            trigger: trigger.clone(),
-            nonce,
-        };
+        let item1 = HeapItem { trigger, nonce };
 
-        let item2 = HeapItem {
-            trigger: trigger.clone(),
-            nonce,
-        };
+        let item2 = HeapItem { trigger, nonce };
 
         assert_eq!(item1, item2);
         assert_eq!(item1.trigger, trigger);
@@ -581,8 +606,8 @@ mod tests {
     fn heap_item_clone() {
         let item = HeapItem {
             trigger: crate::Triggerable {
-                uuid: Uuid::new_v4(),
-                name: "clone-test".to_string(),
+                partitioning: Uuid::new_v4().into(),
+                scheduling: Uuid::new_v4().into(),
             },
             nonce: Uuid::new_v4(),
         };
@@ -596,8 +621,8 @@ mod tests {
     #[test]
     fn heap_item_default() {
         let item = HeapItem::default();
-        assert_eq!(item.trigger.uuid, Uuid::nil());
-        assert_eq!(item.trigger.name, "");
+        assert_eq!(item.trigger.partitioning.as_uuid(), &Uuid::nil());
+        assert_eq!(item.trigger.scheduling.as_uuid(), &Uuid::nil());
         assert_eq!(item.nonce, Uuid::nil());
     }
 
@@ -605,7 +630,7 @@ mod tests {
     #[test]
     fn internal_new() {
         let (_temp_dir, storage) = chroma_storage::test_storage();
-        let scheduler = Arc::new(DummyScheduler {});
+        let scheduler = Arc::new(DummyScheduler);
         let retry_config = RetryConfig {
             min_delay: Duration::from_millis(50),
             max_delay: Duration::from_secs(5),
@@ -614,8 +639,8 @@ mod tests {
         };
 
         let internal = Internal::new(
+            storage,
             "test-prefix".to_string(),
-            storage.clone(),
             scheduler.clone(),
             retry_config.clone(),
         );
@@ -633,7 +658,7 @@ mod tests {
         let internal = Internal {
             prefix: "test".to_string(),
             storage,
-            heap_scheduler: Arc::new(DummyScheduler {}),
+            heap_scheduler: Arc::new(DummyScheduler),
             retry_config: RetryConfig::default(),
         };
 
@@ -663,7 +688,7 @@ mod tests {
         let internal = Internal {
             prefix: "test".to_string(),
             storage,
-            heap_scheduler: Arc::new(DummyScheduler {}),
+            heap_scheduler: Arc::new(DummyScheduler),
             retry_config: RetryConfig::default(),
         };
 
@@ -695,7 +720,7 @@ mod tests {
         let internal = Internal {
             prefix: "test-prefix".to_string(),
             storage,
-            heap_scheduler: Arc::new(DummyScheduler {}),
+            heap_scheduler: Arc::new(DummyScheduler),
             retry_config: RetryConfig::default(),
         };
 
@@ -707,7 +732,7 @@ mod tests {
         let internal2 = Internal {
             prefix: "another/nested/prefix".to_string(),
             storage: chroma_storage::test_storage().1,
-            heap_scheduler: Arc::new(DummyScheduler {}),
+            heap_scheduler: Arc::new(DummyScheduler),
             retry_config: RetryConfig::default(),
         };
         let path2 = internal2.path_for_bucket(bucket);
@@ -720,7 +745,7 @@ mod tests {
         let internal = Internal {
             prefix: "edge".to_string(),
             storage,
-            heap_scheduler: Arc::new(DummyScheduler {}),
+            heap_scheduler: Arc::new(DummyScheduler),
             retry_config: RetryConfig::default(),
         };
 
@@ -743,7 +768,7 @@ mod tests {
     #[test]
     fn heap_scheduler_reference() {
         let (_temp_dir, storage) = chroma_storage::test_storage();
-        let scheduler = Arc::new(DummyScheduler {});
+        let scheduler = Arc::new(DummyScheduler);
         let internal = Internal {
             prefix: "test".to_string(),
             storage,
@@ -796,15 +821,15 @@ mod tests {
         let items = vec![
             HeapItem {
                 trigger: Triggerable {
-                    uuid: uuid1,
-                    name: "test-task-1".to_string(),
+                    partitioning: uuid1.into(),
+                    scheduling: uuid2.into(),
                 },
                 nonce: nonce1,
             },
             HeapItem {
                 trigger: Triggerable {
-                    uuid: uuid2,
-                    name: "test-task-2".to_string(),
+                    partitioning: uuid2.into(),
+                    scheduling: uuid1.into(),
                 },
                 nonce: nonce2,
             },
@@ -830,19 +855,25 @@ mod tests {
             total_rows += batch.num_rows();
 
             // Verify columns exist
-            let uuids = batch.column_by_name(COLUMN_UUIDS).unwrap();
-            let names = batch.column_by_name(COLUMN_NAMES).unwrap();
+            let partitioning_uuids = batch.column_by_name(COLUMN_PARTITIONING_UUIDS).unwrap();
+            let scheduling_uuids = batch.column_by_name(COLUMN_SCHEDULING_UUIDS).unwrap();
             let nonces = batch.column_by_name(COLUMN_NONCES).unwrap();
 
             // Extract and verify data
-            let uuids = uuids.as_any().downcast_ref::<StringArray>().unwrap();
-            let names = names.as_any().downcast_ref::<StringArray>().unwrap();
+            let partitioning_uuids = partitioning_uuids
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let scheduling_uuids = scheduling_uuids
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
             let nonces = nonces.as_any().downcast_ref::<StringArray>().unwrap();
 
             for i in 0..batch.num_rows() {
                 found_items.push((
-                    uuids.value(i).to_string(),
-                    names.value(i).to_string(),
+                    partitioning_uuids.value(i).to_string(),
+                    scheduling_uuids.value(i).to_string(),
                     nonces.value(i).to_string(),
                 ));
             }
@@ -853,10 +884,10 @@ mod tests {
 
         // Verify the data matches what we put in
         assert!(found_items.iter().any(|(u, n, nc)| u == &uuid1.to_string()
-            && n == "test-task-1"
+            && n == &uuid2.to_string()
             && nc == &nonce1.to_string()));
         assert!(found_items.iter().any(|(u, n, nc)| u == &uuid2.to_string()
-            && n == "test-task-2"
+            && n == &uuid1.to_string()
             && nc == &nonce2.to_string()));
     }
 
@@ -864,10 +895,11 @@ mod tests {
     fn construct_parquet_single_item() {
         use crate::Triggerable;
 
+        let scheduling_id = Uuid::new_v4();
         let item = HeapItem {
             trigger: Triggerable {
-                uuid: Uuid::new_v4(),
-                name: "single-task".to_string(),
+                partitioning: Uuid::new_v4().into(),
+                scheduling: scheduling_id.into(),
             },
             nonce: Uuid::new_v4(),
         };
@@ -888,75 +920,15 @@ mod tests {
             let batch = batch.unwrap();
             total_rows += batch.num_rows();
 
-            let names = batch
-                .column_by_name(COLUMN_NAMES)
+            let scheduling_uuids = batch
+                .column_by_name(COLUMN_SCHEDULING_UUIDS)
                 .unwrap()
                 .as_any()
                 .downcast_ref::<StringArray>()
                 .unwrap();
-            assert_eq!(names.value(0), "single-task");
+            assert_eq!(scheduling_uuids.value(0), scheduling_id.to_string());
         }
         assert_eq!(total_rows, 1);
-    }
-
-    #[test]
-    fn construct_parquet_with_special_characters() {
-        use crate::Triggerable;
-
-        let items = vec![
-            HeapItem {
-                trigger: Triggerable {
-                    uuid: Uuid::new_v4(),
-                    name: "task-with-😀-emoji".to_string(),
-                },
-                nonce: Uuid::new_v4(),
-            },
-            HeapItem {
-                trigger: Triggerable {
-                    uuid: Uuid::new_v4(),
-                    name: "task/with\\special|chars<>&\"'".to_string(),
-                },
-                nonce: Uuid::new_v4(),
-            },
-            HeapItem {
-                trigger: Triggerable {
-                    uuid: Uuid::new_v4(),
-                    name: "".to_string(), // empty name
-                },
-                nonce: Uuid::new_v4(),
-            },
-        ];
-
-        let result = construct_parquet(&items);
-        assert!(result.is_ok());
-        let buffer = result.unwrap();
-
-        // Read it back and verify special characters are preserved
-        let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
-            bytes::Bytes::from(buffer),
-        )
-        .unwrap();
-        let reader = builder.build().unwrap();
-
-        let mut found_names = vec![];
-        for batch in reader {
-            let batch = batch.unwrap();
-            let names = batch
-                .column_by_name(COLUMN_NAMES)
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-
-            for i in 0..batch.num_rows() {
-                found_names.push(names.value(i).to_string());
-            }
-        }
-
-        assert_eq!(found_names.len(), 3);
-        assert!(found_names.contains(&"task-with-😀-emoji".to_string()));
-        assert!(found_names.contains(&"task/with\\special|chars<>&\"'".to_string()));
-        assert!(found_names.contains(&"".to_string()));
     }
 
     #[test]
@@ -965,10 +937,10 @@ mod tests {
 
         // Create a large batch of items
         let items: Vec<HeapItem> = (0..1000)
-            .map(|i| HeapItem {
+            .map(|_| HeapItem {
                 trigger: Triggerable {
-                    uuid: Uuid::new_v4(),
-                    name: format!("task-{}", i),
+                    partitioning: Uuid::new_v4().into(),
+                    scheduling: Uuid::new_v4().into(),
                 },
                 nonce: Uuid::new_v4(),
             })
@@ -1000,7 +972,7 @@ mod tests {
         let internal = Internal {
             prefix: "empty-list".to_string(),
             storage,
-            heap_scheduler: Arc::new(DummyScheduler {}),
+            heap_scheduler: Arc::new(DummyScheduler),
             retry_config: RetryConfig::default(),
         };
 
@@ -1014,7 +986,7 @@ mod tests {
         let internal = Internal {
             prefix: "clear-test".to_string(),
             storage,
-            heap_scheduler: Arc::new(DummyScheduler {}),
+            heap_scheduler: Arc::new(DummyScheduler),
             retry_config: RetryConfig::default(),
         };
 
@@ -1022,25 +994,5 @@ mod tests {
         // Clearing a non-existent bucket might return an error depending on storage implementation
         // In production S3, it would succeed, but test storage might behave differently
         let _ = internal.clear_bucket(bucket).await;
-    }
-
-    // Test schedulers
-    struct DummyScheduler;
-
-    #[async_trait::async_trait]
-    impl crate::HeapScheduler for DummyScheduler {
-        async fn are_done(
-            &self,
-            items: &[(crate::Triggerable, Uuid)],
-        ) -> Result<Vec<bool>, crate::Error> {
-            Ok(vec![false; items.len()])
-        }
-
-        async fn next_times_and_nonces(
-            &self,
-            items: &[crate::Triggerable],
-        ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, crate::Error> {
-            Ok(vec![None; items.len()])
-        }
     }
 }

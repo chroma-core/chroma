@@ -8,7 +8,6 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use roaring::RoaringBitmap;
 use std::collections::HashSet;
-use std::ops::RangeBounds;
 use std::sync::Arc;
 use tantivy::tokenizer::NgramTokenizer;
 use tantivy::tokenizer::TokenStream;
@@ -326,7 +325,7 @@ impl<'me> FullTextIndexReader<'me> {
             .then(|token| async move {
                 let positional_posting_list = self
                     .posting_lists_blockfile_reader
-                    .get_range(token.text.as_str()..=token.text.as_str(), ..)
+                    .get_prefix(token.text.as_str())
                     .await?
                     .collect::<Vec<_>>();
                 Ok::<_, FullTextIndexError>(positional_posting_list)
@@ -347,7 +346,7 @@ impl<'me> FullTextIndexReader<'me> {
                 .enumerate()
                 .map(|(i, posting_list)| {
                     if pointers[i] < posting_list.len() {
-                        Some(posting_list[pointers[i]].1)
+                        Some(posting_list[pointers[i]].0)
                     } else {
                         None
                     }
@@ -373,7 +372,7 @@ impl<'me> FullTextIndexReader<'me> {
 
                 // Seed with the positions of the first token.
                 let mut adjusted = posting_lists[0][pointers[0]]
-                    .2
+                    .1
                     .iter()
                     .copied()
                     .collect::<HashSet<_>>();
@@ -381,7 +380,7 @@ impl<'me> FullTextIndexReader<'me> {
                 for i in 1..num_tokens {
                     let byte_delta_from_first_token =
                         tokens[i].offset_from as u32 - tokens[0].offset_from as u32;
-                    let positions = &posting_lists[i][pointers[i]].2;
+                    let positions = &posting_lists[i][pointers[i]].1;
 
                     let shifted = positions
                         .iter()
@@ -425,10 +424,10 @@ impl<'me> FullTextIndexReader<'me> {
     ) -> Result<Vec<(u32, Vec<u32>)>, FullTextIndexError> {
         let positional_posting_list = self
             .posting_lists_blockfile_reader
-            .get_range(token..=token, ..)
+            .get_prefix(token)
             .await?;
         let mut results = vec![];
-        for (_, doc_id, positions) in positional_posting_list {
+        for (doc_id, positions) in positional_posting_list {
             results.push((doc_id, positions.to_vec()));
         }
         Ok(results)
@@ -450,18 +449,15 @@ impl NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'_> {
             .await
     }
 
-    async fn lookup_ngram_range<'me, NgramRange>(
+    async fn lookup_ngram<'me>(
         &'me self,
-        ngram_range: NgramRange,
-    ) -> Result<Vec<(&'me str, u32, &'me [u32])>, FullTextIndexError>
-    where
-        NgramRange: Clone + RangeBounds<&'me str> + Send + Sync + 'me,
+        ngram: &'me str,
+    ) -> Result<Box<dyn Iterator<Item = (u32, &'me [u32])> + Send + Sync + 'me>, FullTextIndexError>
     {
         Ok(self
             .posting_lists_blockfile_reader
-            .get_range(ngram_range, ..)
-            .await?
-            .collect::<Vec<_>>())
+            .get_prefix(ngram)
+            .await?)
     }
 }
 

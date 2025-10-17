@@ -1,11 +1,15 @@
+use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::collection_configuration::{
     EmbeddingFunctionConfiguration, InternalCollectionConfiguration, VectorIndexConfiguration,
 };
 use crate::hnsw_configuration::Space;
+use crate::metadata::{MetadataComparison, MetadataValueType, Where};
+use crate::operator::QueryVector;
 use crate::{
     default_batch_size, default_construction_ef, default_construction_ef_spann,
     default_initial_lambda, default_m, default_m_spann, default_merge_threshold,
@@ -13,8 +17,75 @@ use crate::{
     default_num_threads, default_reassign_neighbor_count, default_resize_factor, default_search_ef,
     default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
     default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
-    default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor, KnnIndex,
+    default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor,
+    InternalSpannConfiguration, KnnIndex,
 };
+
+impl ChromaError for SchemaError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum SchemaError {
+    #[error("Schema is malformed: missing index configuration for metadata key '{key}' with type '{value_type}'")]
+    MissingIndexConfiguration { key: String, value_type: String },
+    #[error("Schema reconciliation failed: {reason}")]
+    InvalidSchema { reason: String },
+}
+
+#[derive(Debug, Error)]
+pub enum FilterValidationError {
+    #[error(
+        "Cannot filter using metadata key '{key}' with type '{value_type:?}' because indexing is disabled"
+    )]
+    IndexingDisabled {
+        key: String,
+        value_type: MetadataValueType,
+    },
+    #[error(transparent)]
+    Schema(#[from] SchemaError),
+}
+
+impl ChromaError for FilterValidationError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            FilterValidationError::IndexingDisabled { .. } => ErrorCodes::InvalidArgument,
+            FilterValidationError::Schema(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+// ============================================================================
+// SCHEMA CONSTANTS
+// ============================================================================
+// These constants must match the Python constants in chromadb/api/types.py
+
+// Value type name constants
+pub const STRING_VALUE_NAME: &str = "string";
+pub const INT_VALUE_NAME: &str = "int";
+pub const BOOL_VALUE_NAME: &str = "bool";
+pub const FLOAT_VALUE_NAME: &str = "float";
+pub const FLOAT_LIST_VALUE_NAME: &str = "float_list";
+pub const SPARSE_VECTOR_VALUE_NAME: &str = "sparse_vector";
+
+// Index type name constants
+pub const FTS_INDEX_NAME: &str = "fts_index";
+pub const VECTOR_INDEX_NAME: &str = "vector_index";
+pub const SPARSE_VECTOR_INDEX_NAME: &str = "sparse_vector_index";
+pub const STRING_INVERTED_INDEX_NAME: &str = "string_inverted_index";
+pub const INT_INVERTED_INDEX_NAME: &str = "int_inverted_index";
+pub const FLOAT_INVERTED_INDEX_NAME: &str = "float_inverted_index";
+pub const BOOL_INVERTED_INDEX_NAME: &str = "bool_inverted_index";
+
+// Special metadata keys - must match Python constants in chromadb/api/types.py
+pub const DOCUMENT_KEY: &str = "#document";
+pub const EMBEDDING_KEY: &str = "#embedding";
+
+// ============================================================================
+// SCHEMA STRUCTURES
+// ============================================================================
 
 /// Internal schema representation for collection index configurations
 /// This represents the server-side schema structure used for index management
@@ -24,7 +95,7 @@ pub struct InternalSchema {
     /// Default index configurations for each value type
     pub defaults: ValueTypes,
     /// Key-specific index overrides
-    pub key_overrides: HashMap<String, ValueTypes>,
+    pub keys: HashMap<String, ValueTypes>,
 }
 
 pub fn is_embedding_function_default(
@@ -63,33 +134,35 @@ pub fn is_hnsw_config_default(hnsw_config: &HnswIndexConfig) -> bool {
 /// Contains optional configurations for each supported value type
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ValueTypes {
-    #[serde(rename = "#string", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "string", skip_serializing_if = "Option::is_none")] // STRING_VALUE_NAME
     pub string: Option<StringValueType>,
 
-    #[serde(rename = "#float_list", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "float_list", skip_serializing_if = "Option::is_none")]
+    // FLOAT_LIST_VALUE_NAME
     pub float_list: Option<FloatListValueType>,
 
-    #[serde(rename = "#sparse_vector", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "sparse_vector", skip_serializing_if = "Option::is_none")]
+    // SPARSE_VECTOR_VALUE_NAME
     pub sparse_vector: Option<SparseVectorValueType>,
 
-    #[serde(rename = "#int", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "int", skip_serializing_if = "Option::is_none")] // INT_VALUE_NAME
     pub int: Option<IntValueType>,
 
-    #[serde(rename = "#float", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "float", skip_serializing_if = "Option::is_none")] // FLOAT_VALUE_NAME
     pub float: Option<FloatValueType>,
 
-    #[serde(rename = "#bool", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "bool", skip_serializing_if = "Option::is_none")] // BOOL_VALUE_NAME
     pub boolean: Option<BoolValueType>,
 }
 
 /// String value type index configurations
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct StringValueType {
-    #[serde(rename = "$fts_index", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "fts_index", skip_serializing_if = "Option::is_none")] // FTS_INDEX_NAME
     pub fts_index: Option<FtsIndexType>,
 
     #[serde(
-        rename = "$string_inverted_index",
+        rename = "string_inverted_index", // STRING_INVERTED_INDEX_NAME
         skip_serializing_if = "Option::is_none"
     )]
     pub string_inverted_index: Option<StringInvertedIndexType>,
@@ -98,7 +171,7 @@ pub struct StringValueType {
 /// Float list value type index configurations (for vectors)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct FloatListValueType {
-    #[serde(rename = "$vector_index", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "vector_index", skip_serializing_if = "Option::is_none")] // VECTOR_INDEX_NAME
     pub vector_index: Option<VectorIndexType>,
 }
 
@@ -106,7 +179,7 @@ pub struct FloatListValueType {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct SparseVectorValueType {
     #[serde(
-        rename = "$sparse_vector_index",
+        rename = "sparse_vector_index", // SPARSE_VECTOR_INDEX_NAME
         skip_serializing_if = "Option::is_none"
     )]
     pub sparse_vector_index: Option<SparseVectorIndexType>,
@@ -115,10 +188,8 @@ pub struct SparseVectorValueType {
 /// Integer value type index configurations
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct IntValueType {
-    #[serde(
-        rename = "$int_inverted_index",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "int_inverted_index", skip_serializing_if = "Option::is_none")]
+    // INT_INVERTED_INDEX_NAME
     pub int_inverted_index: Option<IntInvertedIndexType>,
 }
 
@@ -126,7 +197,7 @@ pub struct IntValueType {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct FloatValueType {
     #[serde(
-        rename = "$float_inverted_index",
+        rename = "float_inverted_index", // FLOAT_INVERTED_INDEX_NAME
         skip_serializing_if = "Option::is_none"
     )]
     pub float_inverted_index: Option<FloatInvertedIndexType>,
@@ -136,7 +207,7 @@ pub struct FloatValueType {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct BoolValueType {
     #[serde(
-        rename = "$bool_inverted_index",
+        rename = "bool_inverted_index", // BOOL_INVERTED_INDEX_NAME
         skip_serializing_if = "Option::is_none"
     )]
     pub bool_inverted_index: Option<BoolInvertedIndexType>,
@@ -188,7 +259,7 @@ pub struct BoolInvertedIndexType {
 impl InternalSchema {
     /// Create a new InternalSchema with strongly-typed default configurations
     pub fn new_default(default_knn_index: KnnIndex) -> Self {
-        // Vector index disabled on all keys except $embedding.
+        // Vector index disabled on all keys except #embedding.
         let vector_config = VectorIndexType {
             enabled: false,
             config: VectorIndexConfig {
@@ -267,19 +338,19 @@ impl InternalSchema {
             sparse_vector: Some(SparseVectorValueType {
                 sparse_vector_index: Some(SparseVectorIndexType {
                     enabled: false,
-                    // TODO(Sanket): Add a strong type here.
                     config: SparseVectorIndexConfig {
-                        embedding_function: Some(serde_json::json!({"type": "legacy"})),
+                        embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
                         source_key: None,
+                        bm25: Some(false),
                     },
                 }),
             }),
         };
 
         // Set up key overrides
-        let mut key_overrides = HashMap::new();
+        let mut keys = HashMap::new();
 
-        // Enable vector index for $embedding.
+        // Enable vector index for #embedding.
         let embedding_defaults = ValueTypes {
             float_list: Some(FloatListValueType {
                 vector_index: Some(VectorIndexType {
@@ -287,7 +358,7 @@ impl InternalSchema {
                     config: VectorIndexConfig {
                         space: Some(default_space()),
                         embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
-                        source_key: Some("$document".to_string()),
+                        source_key: Some(DOCUMENT_KEY.to_string()),
                         hnsw: match default_knn_index {
                             KnnIndex::Hnsw => Some(HnswIndexConfig {
                                 ef_construction: Some(default_construction_ef()),
@@ -326,7 +397,7 @@ impl InternalSchema {
             }),
             ..Default::default()
         };
-        key_overrides.insert("$embedding".to_string(), embedding_defaults);
+        keys.insert(EMBEDDING_KEY.to_string(), embedding_defaults);
 
         // Document defaults - initialize directly instead of Default::default() + field assignment
         let document_defaults = ValueTypes {
@@ -342,12 +413,33 @@ impl InternalSchema {
             }),
             ..Default::default()
         };
-        key_overrides.insert("$document".to_string(), document_defaults);
+        keys.insert(DOCUMENT_KEY.to_string(), document_defaults);
 
-        InternalSchema {
-            defaults,
-            key_overrides,
-        }
+        InternalSchema { defaults, keys }
+    }
+
+    pub fn get_internal_spann_config(&self) -> Option<InternalSpannConfiguration> {
+        let to_internal = |vector_index: &VectorIndexType| {
+            let space = vector_index.config.space.clone();
+            vector_index
+                .config
+                .spann
+                .clone()
+                .map(|config| config.into_internal_configuration(space))
+        };
+
+        self.keys
+            .get(EMBEDDING_KEY)
+            .and_then(|value_types| value_types.float_list.as_ref())
+            .and_then(|float_list| float_list.vector_index.as_ref())
+            .and_then(to_internal)
+            .or_else(|| {
+                self.defaults
+                    .float_list
+                    .as_ref()
+                    .and_then(|float_list| float_list.vector_index.as_ref())
+                    .and_then(to_internal)
+            })
     }
 
     /// Reconcile user-provided schema with system defaults
@@ -366,25 +458,213 @@ impl InternalSchema {
                     Self::merge_value_types(&default_schema.defaults, &user.defaults)?;
 
                 // Merge key overrides
-                let mut merged_key_overrides = default_schema.key_overrides.clone();
-                for (key, user_value_types) in user.key_overrides {
-                    if let Some(default_value_types) = merged_key_overrides.get(&key) {
+                let mut merged_keys = default_schema.keys.clone();
+                for (key, user_value_types) in user.keys {
+                    if let Some(default_value_types) = merged_keys.get(&key) {
                         // Merge with existing default key override
                         let merged_value_types =
                             Self::merge_value_types(default_value_types, &user_value_types)?;
-                        merged_key_overrides.insert(key, merged_value_types);
+                        merged_keys.insert(key, merged_value_types);
                     } else {
                         // New key override from user
-                        merged_key_overrides.insert(key, user_value_types);
+                        merged_keys.insert(key, user_value_types);
                     }
                 }
 
                 Ok(InternalSchema {
                     defaults: merged_defaults,
-                    key_overrides: merged_key_overrides,
+                    keys: merged_keys,
                 })
             }
             None => Ok(default_schema),
+        }
+    }
+
+    /// Merge two schemas together, combining key overrides when possible.
+    pub fn merge(&self, other: &InternalSchema) -> Result<InternalSchema, SchemaError> {
+        if self.defaults != other.defaults {
+            return Err(SchemaError::InvalidSchema {
+                reason: "Cannot merge schemas with differing defaults".to_string(),
+            });
+        }
+
+        let mut keys = self.keys.clone();
+
+        for (key, other_value_types) in &other.keys {
+            if let Some(existing) = keys.get(key).cloned() {
+                let merged = Self::merge_override_value_types(key, &existing, other_value_types)?;
+                keys.insert(key.clone(), merged);
+            } else {
+                keys.insert(key.clone(), other_value_types.clone());
+            }
+        }
+
+        Ok(InternalSchema {
+            defaults: self.defaults.clone(),
+            keys,
+        })
+    }
+
+    fn merge_override_value_types(
+        key: &str,
+        left: &ValueTypes,
+        right: &ValueTypes,
+    ) -> Result<ValueTypes, SchemaError> {
+        Ok(ValueTypes {
+            string: Self::merge_string_override(key, left.string.as_ref(), right.string.as_ref())?,
+            float: Self::merge_float_override(key, left.float.as_ref(), right.float.as_ref())?,
+            int: Self::merge_int_override(key, left.int.as_ref(), right.int.as_ref())?,
+            boolean: Self::merge_bool_override(key, left.boolean.as_ref(), right.boolean.as_ref())?,
+            float_list: Self::merge_float_list_override(
+                key,
+                left.float_list.as_ref(),
+                right.float_list.as_ref(),
+            )?,
+            sparse_vector: Self::merge_sparse_vector_override(
+                key,
+                left.sparse_vector.as_ref(),
+                right.sparse_vector.as_ref(),
+            )?,
+        })
+    }
+
+    fn merge_string_override(
+        key: &str,
+        left: Option<&StringValueType>,
+        right: Option<&StringValueType>,
+    ) -> Result<Option<StringValueType>, SchemaError> {
+        match (left, right) {
+            (Some(l), Some(r)) => Ok(Some(StringValueType {
+                string_inverted_index: Self::merge_index_or_error(
+                    l.string_inverted_index.as_ref(),
+                    r.string_inverted_index.as_ref(),
+                    &format!("key '{key}' string.string_inverted_index"),
+                )?,
+                fts_index: Self::merge_index_or_error(
+                    l.fts_index.as_ref(),
+                    r.fts_index.as_ref(),
+                    &format!("key '{key}' string.fts_index"),
+                )?,
+            })),
+            (Some(l), None) => Ok(Some(l.clone())),
+            (None, Some(r)) => Ok(Some(r.clone())),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn merge_float_override(
+        key: &str,
+        left: Option<&FloatValueType>,
+        right: Option<&FloatValueType>,
+    ) -> Result<Option<FloatValueType>, SchemaError> {
+        match (left, right) {
+            (Some(l), Some(r)) => Ok(Some(FloatValueType {
+                float_inverted_index: Self::merge_index_or_error(
+                    l.float_inverted_index.as_ref(),
+                    r.float_inverted_index.as_ref(),
+                    &format!("key '{key}' float.float_inverted_index"),
+                )?,
+            })),
+            (Some(l), None) => Ok(Some(l.clone())),
+            (None, Some(r)) => Ok(Some(r.clone())),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn merge_int_override(
+        key: &str,
+        left: Option<&IntValueType>,
+        right: Option<&IntValueType>,
+    ) -> Result<Option<IntValueType>, SchemaError> {
+        match (left, right) {
+            (Some(l), Some(r)) => Ok(Some(IntValueType {
+                int_inverted_index: Self::merge_index_or_error(
+                    l.int_inverted_index.as_ref(),
+                    r.int_inverted_index.as_ref(),
+                    &format!("key '{key}' int.int_inverted_index"),
+                )?,
+            })),
+            (Some(l), None) => Ok(Some(l.clone())),
+            (None, Some(r)) => Ok(Some(r.clone())),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn merge_bool_override(
+        key: &str,
+        left: Option<&BoolValueType>,
+        right: Option<&BoolValueType>,
+    ) -> Result<Option<BoolValueType>, SchemaError> {
+        match (left, right) {
+            (Some(l), Some(r)) => Ok(Some(BoolValueType {
+                bool_inverted_index: Self::merge_index_or_error(
+                    l.bool_inverted_index.as_ref(),
+                    r.bool_inverted_index.as_ref(),
+                    &format!("key '{key}' bool.bool_inverted_index"),
+                )?,
+            })),
+            (Some(l), None) => Ok(Some(l.clone())),
+            (None, Some(r)) => Ok(Some(r.clone())),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn merge_float_list_override(
+        key: &str,
+        left: Option<&FloatListValueType>,
+        right: Option<&FloatListValueType>,
+    ) -> Result<Option<FloatListValueType>, SchemaError> {
+        match (left, right) {
+            (Some(l), Some(r)) => Ok(Some(FloatListValueType {
+                vector_index: Self::merge_index_or_error(
+                    l.vector_index.as_ref(),
+                    r.vector_index.as_ref(),
+                    &format!("key '{key}' float_list.vector_index"),
+                )?,
+            })),
+            (Some(l), None) => Ok(Some(l.clone())),
+            (None, Some(r)) => Ok(Some(r.clone())),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn merge_sparse_vector_override(
+        key: &str,
+        left: Option<&SparseVectorValueType>,
+        right: Option<&SparseVectorValueType>,
+    ) -> Result<Option<SparseVectorValueType>, SchemaError> {
+        match (left, right) {
+            (Some(l), Some(r)) => Ok(Some(SparseVectorValueType {
+                sparse_vector_index: Self::merge_index_or_error(
+                    l.sparse_vector_index.as_ref(),
+                    r.sparse_vector_index.as_ref(),
+                    &format!("key '{key}' sparse_vector.sparse_vector_index"),
+                )?,
+            })),
+            (Some(l), None) => Ok(Some(l.clone())),
+            (None, Some(r)) => Ok(Some(r.clone())),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn merge_index_or_error<T: Clone + PartialEq>(
+        left: Option<&T>,
+        right: Option<&T>,
+        context: &str,
+    ) -> Result<Option<T>, SchemaError> {
+        match (left, right) {
+            (Some(l), Some(r)) => {
+                if l == r {
+                    Ok(Some(l.clone()))
+                } else {
+                    Err(SchemaError::InvalidSchema {
+                        reason: format!("Conflicting configuration for {context}"),
+                    })
+                }
+            }
+            (Some(l), None) => Ok(Some(l.clone())),
+            (None, Some(r)) => Ok(Some(r.clone())),
+            (None, None) => Ok(None),
         }
     }
 
@@ -657,6 +937,7 @@ impl InternalSchema {
                 .clone()
                 .or(default.embedding_function.clone()),
             source_key: user.source_key.clone().or(default.source_key.clone()),
+            bm25: user.bm25.or(default.bm25),
         })
     }
 
@@ -743,6 +1024,18 @@ impl InternalSchema {
         Self::convert_collection_config_to_schema(collection_config)
     }
 
+    pub fn reconcile_schema_and_config(
+        schema: Option<InternalSchema>,
+        configuration: Option<InternalCollectionConfiguration>,
+    ) -> Result<InternalSchema, String> {
+        let reconciled_schema = Self::reconcile_with_defaults(schema)?;
+        if let Some(config) = configuration {
+            Self::reconcile_with_collection_config(reconciled_schema, config)
+        } else {
+            Ok(reconciled_schema)
+        }
+    }
+
     /// Check if schema is default by comparing it word-by-word with new_default
     fn is_schema_default(schema: &InternalSchema) -> bool {
         // Compare with both possible default schemas (HNSW and SPANN)
@@ -764,7 +1057,7 @@ impl InternalSchema {
             VectorIndexConfiguration::Hnsw(hnsw_config) => VectorIndexConfig {
                 space: Some(hnsw_config.space),
                 embedding_function: collection_config.embedding_function,
-                source_key: Some("$document".to_string()), // Default source key
+                source_key: Some(DOCUMENT_KEY.to_string()), // Default source key
                 hnsw: Some(HnswIndexConfig {
                     ef_construction: Some(hnsw_config.ef_construction),
                     max_neighbors: Some(hnsw_config.max_neighbors),
@@ -779,7 +1072,7 @@ impl InternalSchema {
             VectorIndexConfiguration::Spann(spann_config) => VectorIndexConfig {
                 space: Some(spann_config.space),
                 embedding_function: collection_config.embedding_function,
-                source_key: Some("$document".to_string()), // Default source key
+                source_key: Some(DOCUMENT_KEY.to_string()), // Default source key
                 hnsw: None,
                 spann: Some(SpannIndexConfig {
                     search_nprobe: Some(spann_config.search_nprobe),
@@ -802,17 +1095,241 @@ impl InternalSchema {
             },
         };
 
-        // Just overwrite the vector_index in the existing $embedding key override
-        if let Some(embedding_types) = schema.key_overrides.get_mut("$embedding") {
+        // Update defaults (keep enabled=false, just update the config)
+        // This serves as the template for any new float_list fields
+        if let Some(float_list) = &mut schema.defaults.float_list {
+            if let Some(vector_index) = &mut float_list.vector_index {
+                vector_index.config = vector_config.clone();
+            }
+        }
+
+        // Update the vector_index in the existing #embedding key override
+        // Keep enabled=true (already set by new_default) and update the config
+        if let Some(embedding_types) = schema.keys.get_mut(EMBEDDING_KEY) {
             if let Some(float_list) = &mut embedding_types.float_list {
                 if let Some(vector_index) = &mut float_list.vector_index {
-                    // Keep enabled=true (already set by new_default) and just update the config
                     vector_index.config = vector_config;
                 }
             }
         }
 
         Ok(schema)
+    }
+
+    /// Check if a specific metadata key-value should be indexed based on schema configuration
+    pub fn is_metadata_type_index_enabled(
+        &self,
+        key: &str,
+        value_type: MetadataValueType,
+    ) -> Result<bool, SchemaError> {
+        let v_type = self.keys.get(key).unwrap_or(&self.defaults);
+
+        match value_type {
+            MetadataValueType::Bool => match &v_type.boolean {
+                Some(bool_type) => match &bool_type.bool_inverted_index {
+                    Some(bool_inverted_index) => Ok(bool_inverted_index.enabled),
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "bool".to_string(),
+                    }),
+                },
+                None => match &self.defaults.boolean {
+                    Some(bool_type) => match &bool_type.bool_inverted_index {
+                        Some(bool_inverted_index) => Ok(bool_inverted_index.enabled),
+                        None => Err(SchemaError::MissingIndexConfiguration {
+                            key: key.to_string(),
+                            value_type: "bool".to_string(),
+                        }),
+                    },
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "bool".to_string(),
+                    }),
+                },
+            },
+            MetadataValueType::Int => match &v_type.int {
+                Some(int_type) => match &int_type.int_inverted_index {
+                    Some(int_inverted_index) => Ok(int_inverted_index.enabled),
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "int".to_string(),
+                    }),
+                },
+                None => match &self.defaults.int {
+                    Some(int_type) => match &int_type.int_inverted_index {
+                        Some(int_inverted_index) => Ok(int_inverted_index.enabled),
+                        None => Err(SchemaError::MissingIndexConfiguration {
+                            key: key.to_string(),
+                            value_type: "int".to_string(),
+                        }),
+                    },
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "int".to_string(),
+                    }),
+                },
+            },
+            MetadataValueType::Float => match &v_type.float {
+                Some(float_type) => match &float_type.float_inverted_index {
+                    Some(float_inverted_index) => Ok(float_inverted_index.enabled),
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "float".to_string(),
+                    }),
+                },
+                None => match &self.defaults.float {
+                    Some(float_type) => match &float_type.float_inverted_index {
+                        Some(float_inverted_index) => Ok(float_inverted_index.enabled),
+                        None => Err(SchemaError::MissingIndexConfiguration {
+                            key: key.to_string(),
+                            value_type: "float".to_string(),
+                        }),
+                    },
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "float".to_string(),
+                    }),
+                },
+            },
+            MetadataValueType::Str => match &v_type.string {
+                Some(string_type) => match &string_type.string_inverted_index {
+                    Some(string_inverted_index) => Ok(string_inverted_index.enabled),
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "string".to_string(),
+                    }),
+                },
+                None => match &self.defaults.string {
+                    Some(string_type) => match &string_type.string_inverted_index {
+                        Some(string_inverted_index) => Ok(string_inverted_index.enabled),
+                        None => Err(SchemaError::MissingIndexConfiguration {
+                            key: key.to_string(),
+                            value_type: "string".to_string(),
+                        }),
+                    },
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "string".to_string(),
+                    }),
+                },
+            },
+            MetadataValueType::SparseVector => match &v_type.sparse_vector {
+                Some(sparse_vector_type) => match &sparse_vector_type.sparse_vector_index {
+                    Some(sparse_vector_index) => Ok(sparse_vector_index.enabled),
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "sparse_vector".to_string(),
+                    }),
+                },
+                None => match &self.defaults.sparse_vector {
+                    Some(sparse_vector_type) => match &sparse_vector_type.sparse_vector_index {
+                        Some(sparse_vector_index) => Ok(sparse_vector_index.enabled),
+                        None => Err(SchemaError::MissingIndexConfiguration {
+                            key: key.to_string(),
+                            value_type: "sparse_vector".to_string(),
+                        }),
+                    },
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "sparse_vector".to_string(),
+                    }),
+                },
+            },
+        }
+    }
+
+    pub fn is_metadata_where_indexing_enabled(
+        &self,
+        where_clause: &Where,
+    ) -> Result<(), FilterValidationError> {
+        match where_clause {
+            Where::Composite(composite) => {
+                for child in &composite.children {
+                    self.is_metadata_where_indexing_enabled(child)?;
+                }
+                Ok(())
+            }
+            Where::Document(_) => Ok(()),
+            Where::Metadata(expression) => {
+                let value_type = match &expression.comparison {
+                    MetadataComparison::Primitive(_, value) => value.value_type(),
+                    MetadataComparison::Set(_, set_value) => set_value.value_type(),
+                };
+                let is_enabled = self
+                    .is_metadata_type_index_enabled(expression.key.as_str(), value_type)
+                    .map_err(FilterValidationError::Schema)?;
+                if !is_enabled {
+                    return Err(FilterValidationError::IndexingDisabled {
+                        key: expression.key.clone(),
+                        value_type,
+                    });
+                }
+                Ok(())
+            }
+        }
+    }
+
+    pub fn is_knn_key_indexing_enabled(
+        &self,
+        key: &str,
+        query: &QueryVector,
+    ) -> Result<(), FilterValidationError> {
+        match query {
+            QueryVector::Sparse(_) => {
+                let is_enabled = self
+                    .is_metadata_type_index_enabled(key, MetadataValueType::SparseVector)
+                    .map_err(FilterValidationError::Schema)?;
+                if !is_enabled {
+                    return Err(FilterValidationError::IndexingDisabled {
+                        key: key.to_string(),
+                        value_type: MetadataValueType::SparseVector,
+                    });
+                }
+                Ok(())
+            }
+            QueryVector::Dense(_) => {
+                // TODO: once we allow turning off dense vector indexing, we need to check if the key is enabled
+                // Dense vectors are always indexed
+                Ok(())
+            }
+        }
+    }
+
+    pub fn ensure_key_from_metadata(&mut self, key: &str, value_type: MetadataValueType) -> bool {
+        let value_types = self.keys.entry(key.to_string()).or_default();
+        match value_type {
+            MetadataValueType::Bool => {
+                if value_types.boolean.is_none() {
+                    value_types.boolean = self.defaults.boolean.clone();
+                    return true;
+                }
+            }
+            MetadataValueType::Int => {
+                if value_types.int.is_none() {
+                    value_types.int = self.defaults.int.clone();
+                    return true;
+                }
+            }
+            MetadataValueType::Float => {
+                if value_types.float.is_none() {
+                    value_types.float = self.defaults.float.clone();
+                    return true;
+                }
+            }
+            MetadataValueType::Str => {
+                if value_types.string.is_none() {
+                    value_types.string = self.defaults.string.clone();
+                    return true;
+                }
+            }
+            MetadataValueType::SparseVector => {
+                if value_types.sparse_vector.is_none() {
+                    value_types.sparse_vector = self.defaults.sparse_vector.clone();
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
@@ -898,16 +1415,59 @@ pub struct SpannIndexConfig {
     pub max_neighbors: Option<usize>,
 }
 
+impl SpannIndexConfig {
+    pub fn into_internal_configuration(
+        self,
+        vector_space: Option<Space>,
+    ) -> InternalSpannConfiguration {
+        InternalSpannConfiguration {
+            search_nprobe: self.search_nprobe.unwrap_or(default_search_nprobe()),
+            search_rng_factor: self
+                .search_rng_factor
+                .unwrap_or(default_search_rng_factor()),
+            search_rng_epsilon: self
+                .search_rng_epsilon
+                .unwrap_or(default_search_rng_epsilon()),
+            nreplica_count: self.nreplica_count.unwrap_or(default_nreplica_count()),
+            write_rng_factor: self.write_rng_factor.unwrap_or(default_write_rng_factor()),
+            write_rng_epsilon: self
+                .write_rng_epsilon
+                .unwrap_or(default_write_rng_epsilon()),
+            split_threshold: self.split_threshold.unwrap_or(default_split_threshold()),
+            num_samples_kmeans: self
+                .num_samples_kmeans
+                .unwrap_or(default_num_samples_kmeans()),
+            initial_lambda: self.initial_lambda.unwrap_or(default_initial_lambda()),
+            reassign_neighbor_count: self
+                .reassign_neighbor_count
+                .unwrap_or(default_reassign_neighbor_count()),
+            merge_threshold: self.merge_threshold.unwrap_or(default_merge_threshold()),
+            num_centers_to_merge_to: self
+                .num_centers_to_merge_to
+                .unwrap_or(default_num_centers_to_merge_to()),
+            write_nprobe: self.write_nprobe.unwrap_or(default_write_nprobe()),
+            ef_construction: self
+                .ef_construction
+                .unwrap_or(default_construction_ef_spann()),
+            ef_search: self.ef_search.unwrap_or(default_search_ef_spann()),
+            max_neighbors: self.max_neighbors.unwrap_or(default_m_spann()),
+            space: vector_space.unwrap_or(default_space()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SparseVectorIndexConfig {
-    /// Embedding function configuration (flexible JSON for dynamic configurations)
-    /// TODO(Sanket): Strongly type ef.
+    /// Embedding function configuration
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub embedding_function: Option<serde_json::Value>,
+    pub embedding_function: Option<EmbeddingFunctionConfiguration>,
     /// Key to source the sparse vector from
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
+    /// Whether this embedding is BM25
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bm25: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -944,6 +1504,7 @@ pub struct BoolInvertedIndexConfig {
 mod tests {
     use super::*;
     use crate::hnsw_configuration::Space;
+    use crate::metadata::SparseVector;
     use crate::{InternalHnswConfiguration, InternalSpannConfiguration};
 
     #[test]
@@ -959,7 +1520,7 @@ mod tests {
         // Test merging with an empty user schema
         let user_schema = InternalSchema {
             defaults: ValueTypes::default(),
-            key_overrides: HashMap::new(),
+            keys: HashMap::new(),
         };
 
         let result = InternalSchema::reconcile_with_defaults(Some(user_schema)).unwrap();
@@ -972,7 +1533,7 @@ mod tests {
         // Test that user can override string inverted index enabled state
         let mut user_schema = InternalSchema {
             defaults: ValueTypes::default(),
-            key_overrides: HashMap::new(),
+            keys: HashMap::new(),
         };
 
         user_schema.defaults.string = Some(StringValueType {
@@ -1007,7 +1568,7 @@ mod tests {
         // Test field-level merging for vector configurations
         let mut user_schema = InternalSchema {
             defaults: ValueTypes::default(),
-            key_overrides: HashMap::new(),
+            keys: HashMap::new(),
         };
 
         user_schema.defaults.float_list = Some(FloatListValueType {
@@ -1037,20 +1598,20 @@ mod tests {
             let merged_defaults =
                 InternalSchema::merge_value_types(&default_schema.defaults, &user_schema.defaults)
                     .unwrap();
-            let mut merged_key_overrides = default_schema.key_overrides.clone();
-            for (key, user_value_types) in user_schema.key_overrides {
-                if let Some(default_value_types) = merged_key_overrides.get(&key) {
+            let mut merged_keys = default_schema.keys.clone();
+            for (key, user_value_types) in user_schema.keys {
+                if let Some(default_value_types) = merged_keys.get(&key) {
                     let merged_value_types =
                         InternalSchema::merge_value_types(default_value_types, &user_value_types)
                             .unwrap();
-                    merged_key_overrides.insert(key, merged_value_types);
+                    merged_keys.insert(key, merged_value_types);
                 } else {
-                    merged_key_overrides.insert(key, user_value_types);
+                    merged_keys.insert(key, user_value_types);
                 }
             }
             InternalSchema {
                 defaults: merged_defaults,
-                key_overrides: merged_key_overrides,
+                keys: merged_keys,
             }
         };
 
@@ -1085,11 +1646,11 @@ mod tests {
     }
 
     #[test]
-    fn test_reconcile_with_defaults_key_overrides() {
+    fn test_reconcile_with_defaults_keys() {
         // Test that key overrides are properly merged
         let mut user_schema = InternalSchema {
             defaults: ValueTypes::default(),
-            key_overrides: HashMap::new(),
+            keys: HashMap::new(),
         };
 
         // Add a custom key override
@@ -1107,18 +1668,18 @@ mod tests {
             ..Default::default()
         };
         user_schema
-            .key_overrides
+            .keys
             .insert("custom_key".to_string(), custom_key_types);
 
         let result = InternalSchema::reconcile_with_defaults(Some(user_schema)).unwrap();
 
         // Check that default key overrides are preserved
-        assert!(result.key_overrides.contains_key("$embedding"));
-        assert!(result.key_overrides.contains_key("$document"));
+        assert!(result.keys.contains_key(EMBEDDING_KEY));
+        assert!(result.keys.contains_key(DOCUMENT_KEY));
 
         // Check that user key override was added
-        assert!(result.key_overrides.contains_key("custom_key"));
-        let custom_override = result.key_overrides.get("custom_key").unwrap();
+        assert!(result.keys.contains_key("custom_key"));
+        let custom_override = result.keys.get("custom_key").unwrap();
         assert!(
             custom_override
                 .string
@@ -1133,13 +1694,13 @@ mod tests {
 
     #[test]
     fn test_reconcile_with_defaults_override_existing_key() {
-        // Test overriding an existing key override (like $embedding)
+        // Test overriding an existing key override (like #embedding)
         let mut user_schema = InternalSchema {
             defaults: ValueTypes::default(),
-            key_overrides: HashMap::new(),
+            keys: HashMap::new(),
         };
 
-        // Override the $embedding key with custom settings
+        // Override the #embedding key with custom settings
         let embedding_override = ValueTypes {
             float_list: Some(FloatListValueType {
                 vector_index: Some(VectorIndexType {
@@ -1156,12 +1717,12 @@ mod tests {
             ..Default::default()
         };
         user_schema
-            .key_overrides
-            .insert("$embedding".to_string(), embedding_override);
+            .keys
+            .insert(EMBEDDING_KEY.to_string(), embedding_override);
 
         let result = InternalSchema::reconcile_with_defaults(Some(user_schema)).unwrap();
 
-        let embedding_config = result.key_overrides.get("$embedding").unwrap();
+        let embedding_config = result.keys.get(EMBEDDING_KEY).unwrap();
         let vector_config = &embedding_config
             .float_list
             .as_ref()
@@ -1177,6 +1738,116 @@ mod tests {
             vector_config.config.source_key,
             Some("custom_embedding_key".to_string())
         );
+    }
+
+    #[test]
+    fn test_ensure_key_from_metadata_no_changes_for_existing_key() {
+        let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        let before = schema.clone();
+        let modified = schema.ensure_key_from_metadata(DOCUMENT_KEY, MetadataValueType::Str);
+        assert!(!modified);
+        assert_eq!(schema, before);
+    }
+
+    #[test]
+    fn test_ensure_key_from_metadata_populates_new_key_with_default_value_type() {
+        let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        assert!(!schema.keys.contains_key("custom_field"));
+
+        let modified = schema.ensure_key_from_metadata("custom_field", MetadataValueType::Bool);
+
+        assert!(modified);
+        let entry = schema
+            .keys
+            .get("custom_field")
+            .expect("expected new key override to be inserted");
+        assert_eq!(entry.boolean, schema.defaults.boolean);
+        assert!(entry.string.is_none());
+        assert!(entry.int.is_none());
+        assert!(entry.float.is_none());
+        assert!(entry.float_list.is_none());
+        assert!(entry.sparse_vector.is_none());
+    }
+
+    #[test]
+    fn test_ensure_key_from_metadata_adds_missing_value_type_to_existing_key() {
+        let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        let initial_len = schema.keys.len();
+        schema.keys.insert(
+            "custom_field".to_string(),
+            ValueTypes {
+                string: schema.defaults.string.clone(),
+                ..Default::default()
+            },
+        );
+
+        let modified = schema.ensure_key_from_metadata("custom_field", MetadataValueType::Bool);
+
+        assert!(modified);
+        assert_eq!(schema.keys.len(), initial_len + 1);
+        let entry = schema
+            .keys
+            .get("custom_field")
+            .expect("expected key override to exist after ensure call");
+        assert!(entry.string.is_some());
+        assert_eq!(entry.boolean, schema.defaults.boolean);
+    }
+
+    #[test]
+    fn test_is_knn_key_indexing_enabled_sparse_disabled_errors() {
+        let schema = InternalSchema::new_default(KnnIndex::Spann);
+        let result = schema.is_knn_key_indexing_enabled(
+            "custom_sparse",
+            &QueryVector::Sparse(SparseVector::new(vec![0_u32], vec![1.0_f32])),
+        );
+
+        let err = result.expect_err("expected indexing disabled error");
+        match err {
+            FilterValidationError::IndexingDisabled { key, value_type } => {
+                assert_eq!(key, "custom_sparse");
+                assert_eq!(value_type, crate::metadata::MetadataValueType::SparseVector);
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_is_knn_key_indexing_enabled_sparse_enabled_succeeds() {
+        let mut schema = InternalSchema::new_default(KnnIndex::Spann);
+        schema.keys.insert(
+            "sparse_enabled".to_string(),
+            ValueTypes {
+                sparse_vector: Some(SparseVectorValueType {
+                    sparse_vector_index: Some(SparseVectorIndexType {
+                        enabled: true,
+                        config: SparseVectorIndexConfig {
+                            embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+                            source_key: None,
+                            bm25: None,
+                        },
+                    }),
+                }),
+                ..Default::default()
+            },
+        );
+
+        let result = schema.is_knn_key_indexing_enabled(
+            "sparse_enabled",
+            &QueryVector::Sparse(SparseVector::new(vec![0_u32], vec![1.0_f32])),
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_is_knn_key_indexing_enabled_dense_succeeds() {
+        let schema = InternalSchema::new_default(KnnIndex::Spann);
+        let result = schema.is_knn_key_indexing_enabled(
+            EMBEDDING_KEY,
+            &QueryVector::Dense(vec![0.1_f32, 0.2_f32]),
+        );
+
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -1270,6 +1941,45 @@ mod tests {
         assert_eq!(result.search_rng_factor, Some(2.0));
         assert_eq!(result.nreplica_count, Some(3));
         assert_eq!(result.initial_lambda, Some(0.5));
+    }
+
+    #[test]
+    fn test_spann_index_config_into_internal_configuration() {
+        let config = SpannIndexConfig {
+            search_nprobe: Some(33),
+            search_rng_factor: Some(1.2),
+            search_rng_epsilon: None,
+            nreplica_count: None,
+            write_rng_factor: Some(1.5),
+            write_rng_epsilon: None,
+            split_threshold: Some(75),
+            num_samples_kmeans: None,
+            initial_lambda: Some(0.9),
+            reassign_neighbor_count: Some(40),
+            merge_threshold: None,
+            num_centers_to_merge_to: Some(4),
+            write_nprobe: Some(60),
+            ef_construction: Some(180),
+            ef_search: Some(170),
+            max_neighbors: Some(32),
+        };
+
+        let with_space = config
+            .clone()
+            .into_internal_configuration(Some(Space::Cosine));
+        assert_eq!(with_space.space, Space::Cosine);
+        assert_eq!(with_space.search_nprobe, 33);
+        assert_eq!(with_space.search_rng_factor, 1.2);
+        assert_eq!(with_space.search_rng_epsilon, default_search_rng_epsilon());
+        assert_eq!(with_space.write_rng_factor, 1.5);
+        assert_eq!(with_space.write_nprobe, 60);
+        assert_eq!(with_space.ef_construction, 180);
+        assert_eq!(with_space.ef_search, 170);
+        assert_eq!(with_space.max_neighbors, 32);
+        assert_eq!(with_space.merge_threshold, default_merge_threshold());
+
+        let default_space_config = config.into_internal_configuration(None);
+        assert_eq!(default_space_config.space, default_space());
     }
 
     #[test]
@@ -1395,13 +2105,15 @@ mod tests {
     fn test_merge_sparse_vector_index_config() {
         // Test sparse vector index config merging
         let default_config = SparseVectorIndexConfig {
-            embedding_function: Some(serde_json::json!({"type": "legacy"})),
+            embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
             source_key: Some("default_sparse_key".to_string()),
+            bm25: None,
         };
 
         let user_config = SparseVectorIndexConfig {
-            embedding_function: Some(serde_json::json!({"type": "custom", "model": "test"})), // Override
-            source_key: None, // Will use default
+            embedding_function: None,                        // Will use default
+            source_key: Some("user_sparse_key".to_string()), // Override
+            bm25: None,
         };
 
         let result =
@@ -1409,12 +2121,12 @@ mod tests {
                 .unwrap();
 
         // Check user override
+        assert_eq!(result.source_key, Some("user_sparse_key".to_string()));
+        // Check default preserved
         assert_eq!(
             result.embedding_function,
-            Some(serde_json::json!({"type": "custom", "model": "test"}))
+            Some(EmbeddingFunctionConfiguration::Legacy)
         );
-        // Check default preserved
-        assert_eq!(result.source_key, Some("default_sparse_key".to_string()));
     }
 
     #[test]
@@ -1422,7 +2134,7 @@ mod tests {
         // Test a complex scenario with multiple levels of merging
         let mut user_schema = InternalSchema {
             defaults: ValueTypes::default(),
-            key_overrides: HashMap::new(),
+            keys: HashMap::new(),
         };
 
         // Set up complex user defaults
@@ -1470,7 +2182,7 @@ mod tests {
             ..Default::default()
         };
         user_schema
-            .key_overrides
+            .keys
             .insert("custom_field".to_string(), custom_key_override);
 
         // Use HNSW defaults for this test so we have HNSW config to merge with
@@ -1479,20 +2191,20 @@ mod tests {
             let merged_defaults =
                 InternalSchema::merge_value_types(&default_schema.defaults, &user_schema.defaults)
                     .unwrap();
-            let mut merged_key_overrides = default_schema.key_overrides.clone();
-            for (key, user_value_types) in user_schema.key_overrides {
-                if let Some(default_value_types) = merged_key_overrides.get(&key) {
+            let mut merged_keys = default_schema.keys.clone();
+            for (key, user_value_types) in user_schema.keys {
+                if let Some(default_value_types) = merged_keys.get(&key) {
                     let merged_value_types =
                         InternalSchema::merge_value_types(default_value_types, &user_value_types)
                             .unwrap();
-                    merged_key_overrides.insert(key, merged_value_types);
+                    merged_keys.insert(key, merged_value_types);
                 } else {
-                    merged_key_overrides.insert(key, user_value_types);
+                    merged_keys.insert(key, user_value_types);
                 }
             }
             InternalSchema {
                 defaults: merged_defaults,
-                key_overrides: merged_key_overrides,
+                keys: merged_keys,
             }
         };
 
@@ -1551,11 +2263,11 @@ mod tests {
         ); // Default preserved
 
         // Check key overrides
-        assert!(result.key_overrides.contains_key("$embedding")); // Default preserved
-        assert!(result.key_overrides.contains_key("$document")); // Default preserved
-        assert!(result.key_overrides.contains_key("custom_field")); // User added
+        assert!(result.keys.contains_key(EMBEDDING_KEY)); // Default preserved
+        assert!(result.keys.contains_key(DOCUMENT_KEY)); // Default preserved
+        assert!(result.keys.contains_key("custom_field")); // User added
 
-        let custom_override = result.key_overrides.get("custom_field").unwrap();
+        let custom_override = result.keys.get("custom_field").unwrap();
         assert!(
             custom_override
                 .string
@@ -1635,8 +2347,8 @@ mod tests {
         let result =
             InternalSchema::reconcile_with_collection_config(schema, collection_config).unwrap();
 
-        // Check that $embedding key override was created with the collection config settings
-        let embedding_override = result.key_overrides.get("$embedding").unwrap();
+        // Check that #embedding key override was created with the collection config settings
+        let embedding_override = result.keys.get(EMBEDDING_KEY).unwrap();
         let vector_index = embedding_override
             .float_list
             .as_ref()
@@ -1653,7 +2365,7 @@ mod tests {
         );
         assert_eq!(
             vector_index.config.source_key,
-            Some("$document".to_string())
+            Some(DOCUMENT_KEY.to_string())
         );
 
         let hnsw_config = vector_index.config.hnsw.as_ref().unwrap();
@@ -1699,8 +2411,8 @@ mod tests {
         let result =
             InternalSchema::reconcile_with_collection_config(schema, collection_config).unwrap();
 
-        // Check that $embedding key override was created with the collection config settings
-        let embedding_override = result.key_overrides.get("$embedding").unwrap();
+        // Check that #embedding key override was created with the collection config settings
+        let embedding_override = result.keys.get(EMBEDDING_KEY).unwrap();
         let vector_index = embedding_override
             .float_list
             .as_ref()
@@ -1714,7 +2426,7 @@ mod tests {
         assert_eq!(vector_index.config.embedding_function, None);
         assert_eq!(
             vector_index.config.source_key,
-            Some("$document".to_string())
+            Some(DOCUMENT_KEY.to_string())
         );
 
         assert!(vector_index.config.hnsw.is_none());
@@ -1739,6 +2451,82 @@ mod tests {
     }
 
     #[test]
+    fn test_reconcile_with_collection_config_updates_both_defaults_and_embedding() {
+        // Test that collection config updates BOTH defaults.float_list.vector_index
+        // AND keys["embedding"].float_list.vector_index
+        let schema = InternalSchema::new_default(KnnIndex::Hnsw);
+
+        let collection_config = InternalCollectionConfiguration {
+            vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
+                ef_construction: 300,
+                max_neighbors: 32,
+                ef_search: 50,
+                num_threads: 8,
+                batch_size: 200,
+                sync_threshold: 2000,
+                resize_factor: 1.5,
+                space: Space::L2,
+            }),
+            embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+        };
+
+        let result =
+            InternalSchema::reconcile_with_collection_config(schema, collection_config).unwrap();
+
+        // Check that defaults.float_list.vector_index was updated
+        let defaults_vector_index = result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+
+        // Should be disabled in defaults (template for new keys)
+        assert!(!defaults_vector_index.enabled);
+        // But config should be updated
+        assert_eq!(defaults_vector_index.config.space, Some(Space::L2));
+        assert_eq!(
+            defaults_vector_index.config.embedding_function,
+            Some(EmbeddingFunctionConfiguration::Legacy)
+        );
+        assert_eq!(
+            defaults_vector_index.config.source_key,
+            Some(DOCUMENT_KEY.to_string())
+        );
+        let defaults_hnsw = defaults_vector_index.config.hnsw.as_ref().unwrap();
+        assert_eq!(defaults_hnsw.ef_construction, Some(300));
+        assert_eq!(defaults_hnsw.max_neighbors, Some(32));
+
+        // Check that #embedding key override was also updated
+        let embedding_override = result.keys.get(EMBEDDING_KEY).unwrap();
+        let embedding_vector_index = embedding_override
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+
+        // Should be enabled on #embedding
+        assert!(embedding_vector_index.enabled);
+        // Config should match defaults
+        assert_eq!(embedding_vector_index.config.space, Some(Space::L2));
+        assert_eq!(
+            embedding_vector_index.config.embedding_function,
+            Some(EmbeddingFunctionConfiguration::Legacy)
+        );
+        assert_eq!(
+            embedding_vector_index.config.source_key,
+            Some(DOCUMENT_KEY.to_string())
+        );
+        let embedding_hnsw = embedding_vector_index.config.hnsw.as_ref().unwrap();
+        assert_eq!(embedding_hnsw.ef_construction, Some(300));
+        assert_eq!(embedding_hnsw.max_neighbors, Some(32));
+    }
+
+    #[test]
     fn test_is_schema_default() {
         // Test that actual default schemas are correctly identified
         let default_hnsw_schema = InternalSchema::new_default(KnnIndex::Hnsw);
@@ -1750,7 +2538,7 @@ mod tests {
         // Test that an empty schema is NOT considered default (since it doesn't match new_default structure)
         let empty_schema = InternalSchema {
             defaults: ValueTypes::default(),
-            key_overrides: HashMap::new(),
+            keys: HashMap::new(),
         };
         assert!(!InternalSchema::is_schema_default(&empty_schema));
 
@@ -1767,10 +2555,131 @@ mod tests {
         // Test that schema with additional key overrides is not default
         let mut schema_with_extra_overrides = InternalSchema::new_default(KnnIndex::Hnsw);
         schema_with_extra_overrides
-            .key_overrides
+            .keys
             .insert("custom_key".to_string(), ValueTypes::default());
         assert!(!InternalSchema::is_schema_default(
             &schema_with_extra_overrides
         ));
+    }
+
+    #[test]
+    fn test_add_merges_keys_by_value_type() {
+        let mut schema_a = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut schema_b = InternalSchema::new_default(KnnIndex::Hnsw);
+
+        let string_override = ValueTypes {
+            string: Some(StringValueType {
+                string_inverted_index: Some(StringInvertedIndexType {
+                    enabled: true,
+                    config: StringInvertedIndexConfig {},
+                }),
+                fts_index: None,
+            }),
+            ..Default::default()
+        };
+        schema_a
+            .keys
+            .insert("custom_field".to_string(), string_override);
+
+        let float_override = ValueTypes {
+            float: Some(FloatValueType {
+                float_inverted_index: Some(FloatInvertedIndexType {
+                    enabled: true,
+                    config: FloatInvertedIndexConfig {},
+                }),
+            }),
+            ..Default::default()
+        };
+        schema_b
+            .keys
+            .insert("custom_field".to_string(), float_override);
+
+        let merged = schema_a.merge(&schema_b).unwrap();
+        let merged_override = merged.keys.get("custom_field").unwrap();
+
+        assert!(merged_override.string.is_some());
+        assert!(merged_override.float.is_some());
+        assert!(
+            merged_override
+                .string
+                .as_ref()
+                .unwrap()
+                .string_inverted_index
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
+        assert!(
+            merged_override
+                .float
+                .as_ref()
+                .unwrap()
+                .float_inverted_index
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
+    }
+
+    #[test]
+    fn test_add_rejects_different_defaults() {
+        let schema_a = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut schema_b = InternalSchema::new_default(KnnIndex::Hnsw);
+
+        if let Some(string_type) = schema_b.defaults.string.as_mut() {
+            if let Some(string_index) = string_type.string_inverted_index.as_mut() {
+                string_index.enabled = false;
+            }
+        }
+
+        let err = schema_a.merge(&schema_b).unwrap_err();
+        match err {
+            SchemaError::InvalidSchema { reason } => {
+                assert_eq!(reason, "Cannot merge schemas with differing defaults")
+            }
+            _ => panic!("Expected InvalidSchema error"),
+        }
+    }
+
+    #[test]
+    fn test_add_detects_conflicting_value_type_configuration() {
+        let mut schema_a = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut schema_b = InternalSchema::new_default(KnnIndex::Hnsw);
+
+        let string_override_enabled = ValueTypes {
+            string: Some(StringValueType {
+                string_inverted_index: Some(StringInvertedIndexType {
+                    enabled: true,
+                    config: StringInvertedIndexConfig {},
+                }),
+                fts_index: None,
+            }),
+            ..Default::default()
+        };
+        schema_a
+            .keys
+            .insert("custom_field".to_string(), string_override_enabled);
+
+        let string_override_disabled = ValueTypes {
+            string: Some(StringValueType {
+                string_inverted_index: Some(StringInvertedIndexType {
+                    enabled: false,
+                    config: StringInvertedIndexConfig {},
+                }),
+                fts_index: None,
+            }),
+            ..Default::default()
+        };
+        schema_b
+            .keys
+            .insert("custom_field".to_string(), string_override_disabled);
+
+        let err = schema_a.merge(&schema_b).unwrap_err();
+        match err {
+            SchemaError::InvalidSchema { reason } => {
+                assert!(reason.contains("Conflicting configuration"));
+            }
+            _ => panic!("Expected InvalidSchema error"),
+        }
     }
 }

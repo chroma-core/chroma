@@ -306,6 +306,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		ID:                         createCollection.ID.String(),
 		Name:                       &createCollection.Name,
 		ConfigurationJsonStr:       &createCollection.ConfigurationJsonStr,
+		SchemaStr:                  createCollection.SchemaStr,
 		Dimension:                  createCollection.Dimension,
 		DatabaseID:                 databases[0].ID,
 		VersionFileName:            versionFileName,
@@ -1087,6 +1088,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			ID:                         forkCollection.TargetCollectionID,
 			Name:                       forkCollection.TargetCollectionName,
 			ConfigurationJsonStr:       sourceCollection.ConfigurationJsonStr,
+			SchemaStr:                  sourceCollection.SchemaStr,
 			Dimension:                  sourceCollection.Dimension,
 			Metadata:                   sourceCollection.Metadata,
 			GetOrCreate:                false,
@@ -1661,6 +1663,7 @@ func (tc *Catalog) updateVersionFileInS3(ctx context.Context, versionFilePb *coo
 }
 
 func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
+	// This is the core path now, since version files are enabled
 	if tc.versionFileEnabled {
 		return tc.FlushCollectionCompactionForVersionedCollection(ctx, flushCollectionCompaction)
 	}
@@ -1691,7 +1694,7 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 
 		// update collection log position and version
 		lastCompactionTime := time.Now().Unix()
-		collectionVersion, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionVersionTotalRecordsAndLogicalSize(flushCollectionCompaction.ID.String(), flushCollectionCompaction.LogPosition, flushCollectionCompaction.CurrentCollectionVersion, flushCollectionCompaction.TotalRecordsPostCompaction, flushCollectionCompaction.SizeBytesPostCompaction, uint64(lastCompactionTime), flushCollectionCompaction.TenantID)
+		collectionVersion, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionVersionTotalRecordsAndLogicalSize(flushCollectionCompaction.ID.String(), flushCollectionCompaction.LogPosition, flushCollectionCompaction.CurrentCollectionVersion, flushCollectionCompaction.TotalRecordsPostCompaction, flushCollectionCompaction.SizeBytesPostCompaction, uint64(lastCompactionTime), flushCollectionCompaction.TenantID, flushCollectionCompaction.SchemaStr)
 		if err != nil {
 			return err
 		}
@@ -1923,6 +1926,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 				// and the value is always positive.
 				uint64(lastCompactionTime),
 				uint64(numActiveVersions),
+				flushCollectionCompaction.SchemaStr,
 			)
 			if err != nil {
 				return err

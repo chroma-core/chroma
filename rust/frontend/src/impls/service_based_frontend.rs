@@ -1,3 +1,4 @@
+use super::utils::to_records;
 use crate::{
     config::FrontendConfig, executor::Executor, types::errors::ValidationError,
     CollectionsWithSegmentsProvider,
@@ -20,26 +21,27 @@ use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn, Search},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
+    AddTaskError, Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
     CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError,
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantError, CreateTenantRequest, CreateTenantResponse,
-    DeleteCollectionError, DeleteCollectionRecordsError, DeleteCollectionRecordsRequest,
-    DeleteCollectionRecordsResponse, DeleteCollectionRequest, DeleteDatabaseError,
-    DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError, ForkCollectionRequest,
-    ForkCollectionResponse, GetCollectionByCrnError, GetCollectionByCrnRequest,
-    GetCollectionByCrnResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
-    GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
-    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
-    HeartbeatError, HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
-    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where,
+    CreateDatabaseResponse, CreateTaskRequest, CreateTaskResponse, CreateTenantError,
+    CreateTenantRequest, CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
+    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
+    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError,
+    ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
+    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
+    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
+    Include, InternalSchema, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
+    QueryError, QueryRequest, QueryResponse, RemoveTaskError, RemoveTaskRequest,
+    RemoveTaskResponse, ResetError, ResetResponse, SchemaError, SearchRequest, SearchResponse,
+    Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -47,8 +49,6 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-use super::utils::to_records;
 
 #[derive(Debug)]
 struct Metrics {
@@ -77,7 +77,9 @@ pub struct ServiceBasedFrontend {
     max_batch_size: u32,
     metrics: Arc<Metrics>,
     default_knn_index: KnnIndex,
+    enable_schema: bool,
     retries_builder: ExponentialBuilder,
+    min_records_for_task: u64,
 }
 
 impl ServiceBasedFrontend {
@@ -90,6 +92,8 @@ impl ServiceBasedFrontend {
         executor: Executor,
         max_batch_size: u32,
         default_knn_index: KnnIndex,
+        enable_schema: bool,
+        min_records_for_task: u64,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -141,7 +145,9 @@ impl ServiceBasedFrontend {
             max_batch_size,
             metrics,
             default_knn_index,
+            enable_schema,
             retries_builder,
+            min_records_for_task,
         }
     }
 
@@ -405,6 +411,18 @@ impl ServiceBasedFrontend {
             })
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        if self.enable_schema {
+            for collection in &mut collections {
+                let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+                    collection.schema.clone(),
+                    Some(collection.config.clone()),
+                )
+                .map_err(|reason| {
+                    GetCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
+                })?;
+                collection.schema = Some(reconciled_schema);
+            }
+        }
         collections
             .pop()
             .ok_or(GetCollectionError::NotFound(collection_name))
@@ -434,7 +452,8 @@ impl ServiceBasedFrontend {
             database_name,
             name,
             metadata,
-            configuration,
+            mut configuration,
+            schema,
             get_or_create,
             ..
         }: CreateCollectionRequest,
@@ -479,9 +498,30 @@ impl ServiceBasedFrontend {
             }
         }
 
+        let reconciled_schema = if self.enable_schema {
+            // its safe to take here, bc we're moving all config info to schema
+            // when configuration is None, we then populate in sysdb with empty config {}
+            // this allows for easier migration paths in the future
+            let config_for_reconcile = configuration.take();
+            match InternalSchema::reconcile_schema_and_config(schema.clone(), config_for_reconcile)
+            {
+                Ok(schema) => Some(schema),
+                Err(e) => return Err(CreateCollectionError::InvalidSchema(e)),
+            }
+        } else {
+            None
+        };
+
         let segments = match self.executor {
             Executor::Distributed(_) => {
                 let mut vector_segment_type = SegmentType::HnswDistributed;
+                if self.enable_schema {
+                    if let Some(schema) = reconciled_schema.as_ref() {
+                        if schema.get_internal_spann_config().is_some() {
+                            vector_segment_type = SegmentType::Spann;
+                        }
+                    }
+                }
                 if let Some(config) = configuration.as_ref() {
                     if matches!(config.vector_index, VectorIndexConfiguration::Spann(_)) {
                         vector_segment_type = SegmentType::Spann;
@@ -537,7 +577,7 @@ impl ServiceBasedFrontend {
             }
         };
 
-        let collection = self
+        let mut collection = self
             .sysdb_client
             .create_collection(
                 tenant_id.clone(),
@@ -546,6 +586,7 @@ impl ServiceBasedFrontend {
                 name,
                 segments,
                 configuration,
+                reconciled_schema,
                 metadata,
                 None,
                 get_or_create,
@@ -556,6 +597,16 @@ impl ServiceBasedFrontend {
             .collections_with_segments_cache
             .remove(&collection_id)
             .await;
+        // this is done in the case that get_or_create was a get, in which case we should reconcile the schema and config
+        // that was retrieved from sysdb, rather than the one that was passed in
+        if self.enable_schema {
+            let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+                collection.schema.clone(),
+                Some(collection.config.clone()),
+            )
+            .map_err(CreateCollectionError::InvalidSchema)?;
+            collection.schema = Some(reconciled_schema);
+        }
         Ok(collection)
     }
 
@@ -646,7 +697,7 @@ impl ServiceBasedFrontend {
             .log_client
             .fork_logs(&tenant_id, source_collection_id, target_collection_id)
             .await?;
-        let collection_and_segments = self
+        let mut collection_and_segments = self
             .sysdb_client
             .fork_collection(
                 source_collection_id,
@@ -656,6 +707,14 @@ impl ServiceBasedFrontend {
                 target_collection_name,
             )
             .await?;
+        let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+            collection_and_segments.collection.schema.clone(),
+            Some(collection_and_segments.collection.config.clone()),
+        )
+        .map_err(|reason| {
+            ForkCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
+        })?;
+        collection_and_segments.collection.schema = Some(reconciled_schema);
         let collection = collection_and_segments.collection.clone();
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
@@ -1021,6 +1080,17 @@ impl ServiceBasedFrontend {
                 .get_collection_with_segments(collection_id)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            if self.enable_schema {
+                if let Some(ref schema) = collection_and_segments.collection.schema {
+                    schema
+                        .is_metadata_where_indexing_enabled(&where_clause)
+                        .map_err(|err| {
+                            DeleteCollectionRecordsError::Internal(
+                                Box::new(err) as Box<dyn ChromaError>
+                            )
+                        })?;
+                }
+            }
             let latest_collection_logical_size_bytes = collection_and_segments
                 .collection
                 .size_bytes_post_compaction;
@@ -1335,6 +1405,15 @@ impl ServiceBasedFrontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        if self.enable_schema {
+            if let Some(ref schema) = collection_and_segments.collection.schema {
+                if let Some(ref where_clause) = r#where {
+                    schema
+                        .is_metadata_where_indexing_enabled(where_clause)
+                        .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
+                }
+            }
+        }
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
@@ -1471,6 +1550,15 @@ impl ServiceBasedFrontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        if self.enable_schema {
+            if let Some(ref schema) = collection_and_segments.collection.schema {
+                if let Some(ref where_clause) = r#where {
+                    schema
+                        .is_metadata_where_indexing_enabled(where_clause)
+                        .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
+                }
+            }
+        }
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
@@ -1570,7 +1658,7 @@ impl ServiceBasedFrontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.retryable_query(request_clone).await;
+                let res = Box::pin(self_clone.retryable_query(request_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -1586,20 +1674,22 @@ impl ServiceBasedFrontend {
                 }
             }
         };
-        let res = query_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying query() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .await;
+        let res = Box::pin(
+            query_to_retry
+                .retry(self.collections_with_segments_provider.get_retry_backoff())
+                // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+                .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+                .notify(|_, _| {
+                    let retried = retries.fetch_add(1, Ordering::Relaxed);
+                    if retried > 0 {
+                        tracing::info!(
+                            "Retrying query() request for collection {}",
+                            request.collection_id
+                        );
+                    }
+                }),
+        )
+        .await;
         self.metrics
             .query_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
@@ -1617,6 +1707,30 @@ impl ServiceBasedFrontend {
             .get_collection_with_segments(request.collection_id)
             .await
             .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
+        if self.enable_schema {
+            if let Some(ref schema) = collection_and_segments.collection.schema {
+                for payload in &request.searches {
+                    if let Some(ref where_clause) = payload.filter.where_clause {
+                        schema
+                            .is_metadata_where_indexing_enabled(where_clause)
+                            .map_err(|err| {
+                                QueryError::Other(Box::new(err) as Box<dyn ChromaError>)
+                            })?;
+                    }
+                    // for rank expressions, if knn has a key, check if the key is enabled
+                    if let Some(rank_expr) = &payload.rank.expr {
+                        let knn_queries = rank_expr.knn_queries();
+                        for knn_query in knn_queries {
+                            schema
+                                .is_knn_key_indexing_enabled(&knn_query.key, &knn_query.query)
+                                .map_err(|err| {
+                                    QueryError::Other(Box::new(err) as Box<dyn ChromaError>)
+                                })?;
+                        }
+                    }
+                }
+            }
+        }
 
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
@@ -1742,6 +1856,101 @@ impl ServiceBasedFrontend {
         res
     }
 
+    pub async fn create_task(
+        &mut self,
+        tenant_name: String,
+        database_name: String,
+        collection_id: String,
+        CreateTaskRequest {
+            task_name,
+            operator_name,
+            output_collection_name,
+            params,
+            ..
+        }: CreateTaskRequest,
+    ) -> Result<CreateTaskResponse, AddTaskError> {
+        // TODO: Trigger initial task run via heaptender
+
+        // Parse collection_id from path parameter - client-side validation
+        let input_collection_id =
+            CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
+                AddTaskError::Internal(Box::new(chroma_error::TonicError(
+                    tonic::Status::invalid_argument(format!(
+                        "Client validation error: Invalid collection_id UUID format: {}",
+                        e
+                    )),
+                )))
+            })?);
+
+        let task_id = self
+            .sysdb_client
+            .create_task(
+                task_name.clone(),
+                operator_name,
+                input_collection_id,
+                output_collection_name.clone(),
+                params,
+                tenant_name,
+                database_name,
+                self.min_records_for_task,
+            )
+            .await
+            .map_err(|e| match e {
+                chroma_sysdb::CreateTaskError::AlreadyExists => {
+                    AddTaskError::AlreadyExists(task_name.clone())
+                }
+                chroma_sysdb::CreateTaskError::FailedToCreateTask(s) => {
+                    AddTaskError::Internal(Box::new(chroma_error::TonicError(s)))
+                }
+                chroma_sysdb::CreateTaskError::ServerReturnedInvalidData => AddTaskError::Internal(
+                    Box::new(chroma_sysdb::CreateTaskError::ServerReturnedInvalidData),
+                ),
+            })?;
+
+        Ok(CreateTaskResponse {
+            success: true,
+            task_id: task_id.to_string(),
+        })
+    }
+
+    pub async fn remove_task(
+        &mut self,
+        _tenant_id: String,
+        _database_name: String,
+        collection_id: String,
+        RemoveTaskRequest {
+            task_name,
+            delete_output,
+            ..
+        }: RemoveTaskRequest,
+    ) -> Result<RemoveTaskResponse, RemoveTaskError> {
+        // Parse collection_id from path parameter - client-side validation
+        let collection_uuid =
+            CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
+                RemoveTaskError::Internal(Box::new(chroma_error::TonicError(
+                    tonic::Status::invalid_argument(format!(
+                        "Client validation error: Invalid collection_id UUID format: {}",
+                        e
+                    )),
+                )))
+            })?);
+
+        // Delete task by name - the coordinator handles output collection deletion atomically
+        self.sysdb_client
+            .delete_task_by_name(collection_uuid, task_name.clone(), delete_output)
+            .await
+            .map_err(|e| match e {
+                chroma_sysdb::DeleteTaskError::NotFound => {
+                    RemoveTaskError::NotFound(task_name.clone())
+                }
+                chroma_sysdb::DeleteTaskError::FailedToDeleteTask(s) => {
+                    RemoveTaskError::Internal(Box::new(chroma_error::TonicError(s)))
+                }
+            })?;
+
+        Ok(RemoveTaskResponse { success: true })
+    }
+
     pub async fn healthcheck(&self) -> HealthCheckResponse {
         HealthCheckResponse {
             is_executor_ready: self.executor.is_ready().await,
@@ -1805,6 +2014,8 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             executor,
             max_batch_size,
             config.default_knn_index,
+            config.enable_schema,
+            config.min_records_for_task,
         ))
     }
 }
@@ -1838,6 +2049,7 @@ mod tests {
                     "test".to_string(),
                     None,
                     None,
+                    None,
                     false,
                 )
                 .unwrap(),
@@ -1868,7 +2080,7 @@ mod tests {
         let create_response = client
             .post("http://localhost:8000/api/v2/tenants/default_tenant/databases/default_database/collections")
             .json(
-                &CreateCollectionPayload { name: Uuid::new_v4().to_string(), configuration: None, metadata: None, get_or_create: false },
+                &CreateCollectionPayload { name: Uuid::new_v4().to_string(), configuration: None, schema: None, metadata: None, get_or_create: false },
             )
             .send()
             .await
@@ -1905,6 +2117,66 @@ mod tests {
         assert!(segments
             .iter()
             .any(|s| s.r#type == SegmentType::BlockfileRecord && s.scope == SegmentScope::RECORD));
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_operator_constants() {
+        // Validate that hardcoded Rust operator constants match the live database.
+        // This prevents drift between constants and database migrations.
+        use chroma_types::{OPERATOR_RECORD_COUNTER_ID, OPERATOR_RECORD_COUNTER_NAME};
+        use std::collections::HashMap;
+
+        // Map of operator names to their expected UUID constants
+        // Add new operators here as they are added to rust/types/src/operators.rs
+        let expected_operators: HashMap<&str, uuid::Uuid> =
+            [(OPERATOR_RECORD_COUNTER_NAME, OPERATOR_RECORD_COUNTER_ID)]
+                .iter()
+                .cloned()
+                .collect();
+
+        // Connect to sysdb via gRPC
+        let registry = Registry::new();
+        let sysdb_config = chroma_sysdb::SysDbConfig::Grpc(GrpcSysDbConfig {
+            host: "localhost".to_string(),
+            port: 50051,
+            ..Default::default()
+        });
+        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+            .await
+            .unwrap();
+
+        // Get all operators from the database via gRPC
+        let operators = sysdb.get_all_operators().await.unwrap();
+
+        // Verify count matches expectations
+        assert_eq!(
+            operators.len(),
+            expected_operators.len(),
+            "Operator count mismatch. If you added a new operator to migrations, \
+             rebuild Rust (cargo build -p chroma-types) to auto-generate constants and update this test. \
+             Expected: {}, Actual: {}",
+            expected_operators.len(),
+            operators.len()
+        );
+
+        // Verify each operator constant matches the database
+        for (operator_name, expected_uuid) in &expected_operators {
+            let db_operator = operators
+                .iter()
+                .find(|(name, _)| name == operator_name)
+                .unwrap_or_else(|| panic!("Operator '{}' not found in database", operator_name));
+
+            assert_eq!(
+                *expected_uuid, db_operator.1,
+                "Operator '{}' UUID mismatch. Code: {}, DB: {}",
+                operator_name, expected_uuid, db_operator.1
+            );
+        }
+
+        println!(
+            "Verified {} operator(s) match database",
+            expected_operators.len()
+        );
     }
 
     #[test]

@@ -231,6 +231,15 @@ impl ChromaError for StorageConfigError {
 }
 
 impl Storage {
+    /// Get the bucket name for S3-based storage, or None for local storage
+    pub fn bucket_name(&self) -> Option<&str> {
+        match self {
+            Storage::S3(s3) => Some(&s3.bucket),
+            Storage::AdmissionControlledS3(ac_s3) => Some(&ac_s3.storage.bucket),
+            Storage::Local(_) => None,
+        }
+    }
+
     pub async fn get(&self, key: &str, options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
         match self {
             Storage::S3(s3) => s3.get(key, options).await,

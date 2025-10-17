@@ -149,6 +149,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 		CollectionId               string     `gorm:"column:collection_id"`
 		CollectionName             *string    `gorm:"column:collection_name"`
 		ConfigurationJsonStr       *string    `gorm:"column:configuration_json_str"`
+		SchemaStr                  *string    `gorm:"column:schema_str"`
 		Dimension                  *int32     `gorm:"column:dimension"`
 		DatabaseID                 string     `gorm:"column:database_id"`
 		CollectionTs               *int64     `gorm:"column:collection_ts"`
@@ -183,6 +184,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 	collection_targets := "collections.id as collection_id, " +
 		"collections.name as collection_name, " +
 		"collections.configuration_json_str, " +
+		"collections.schema_str, " +
 		"collections.dimension, " +
 		"collections.database_id AS database_id, " +
 		"collections.ts as collection_ts, " +
@@ -291,6 +293,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 				ID:                         r.CollectionId,
 				Name:                       r.CollectionName,
 				ConfigurationJsonStr:       r.ConfigurationJsonStr,
+				SchemaStr:                  r.SchemaStr,
 				Dimension:                  r.Dimension,
 				DatabaseID:                 r.DatabaseID,
 				IsDeleted:                  r.IsDeleted,
@@ -531,32 +534,39 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	sizeBytesPostCompaction uint64,
 	lastCompactionTimeSecs uint64,
 	numVersions uint64,
+	schemaStr *string,
 ) (int64, error) {
 	// TODO(rohitcp): Investigate if we need to hold the lock using "UPDATE"
 	// strength, or if we can use "SELECT FOR UPDATE" or some other less
 	// expensive locking mechanism. Taking the lock as a caution for now.
+	updates := map[string]interface{}{
+		"log_position":                  logPosition,
+		"version":                       newCollectionVersion,
+		"version_file_name":             newVersionFileName,
+		"total_records_post_compaction": totalRecordsPostCompaction,
+		"size_bytes_post_compaction":    sizeBytesPostCompaction,
+		"last_compaction_time_secs":     lastCompactionTimeSecs,
+		"num_versions":                  numVersions,
+	}
+
+	if schemaStr != nil {
+		updates["schema_str"] = schemaStr
+	}
+
 	result := s.db.Model(&dbmodel.Collection{}).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("id = ? AND version = ? AND (version_file_name IS NULL OR version_file_name = ?)",
 			collectionID,
 			currentCollectionVersion,
 			currentVersionFileName).
-		Updates(map[string]interface{}{
-			"log_position":                  logPosition,
-			"version":                       newCollectionVersion,
-			"version_file_name":             newVersionFileName,
-			"total_records_post_compaction": totalRecordsPostCompaction,
-			"size_bytes_post_compaction":    sizeBytesPostCompaction,
-			"last_compaction_time_secs":     lastCompactionTimeSecs,
-			"num_versions":                  numVersions,
-		})
+		Updates(updates)
 	if result.Error != nil {
 		return 0, result.Error
 	}
 	return result.RowsAffected, nil
 }
 
-func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, tenant string) (int32, error) {
+func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, tenant string, schemaStr *string) (int32, error) {
 	log.Info("update log position, version, and total records post compaction", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion), zap.Uint64("totalRecords", totalRecordsPostCompaction))
 	var collection dbmodel.Collection
 	// We use select for update to ensure no lost update happens even for isolation level read committed or below
@@ -577,7 +587,12 @@ func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collec
 	}
 
 	version := currentCollectionVersion + 1
-	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction, "last_compaction_time_secs": lastCompactionTimeSecs, "tenant": tenant}).Error
+	// only writing if schemaStr is not nil to avoid overwriting the schemaStr
+	if schemaStr != nil {
+		err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction, "last_compaction_time_secs": lastCompactionTimeSecs, "tenant": tenant, "schema_str": schemaStr}).Error
+	} else {
+		err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction, "last_compaction_time_secs": lastCompactionTimeSecs, "tenant": tenant}).Error
+	}
 	if err != nil {
 		return 0, err
 	}

@@ -307,6 +307,33 @@ pub enum MetadataValue {
 
 impl Eq for MetadataValue {}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MetadataValueType {
+    Bool,
+    Int,
+    Float,
+    Str,
+    SparseVector,
+}
+
+impl MetadataValue {
+    pub fn value_type(&self) -> MetadataValueType {
+        match self {
+            MetadataValue::Bool(_) => MetadataValueType::Bool,
+            MetadataValue::Int(_) => MetadataValueType::Int,
+            MetadataValue::Float(_) => MetadataValueType::Float,
+            MetadataValue::Str(_) => MetadataValueType::Str,
+            MetadataValue::SparseVector(_) => MetadataValueType::SparseVector,
+        }
+    }
+}
+
+impl From<&MetadataValue> for MetadataValueType {
+    fn from(value: &MetadataValue) -> Self {
+        value.value_type()
+    }
+}
+
 /// We need `Eq` and `Ord` since we want to use this as a key in `BTreeMap`
 ///
 /// For cross-type comparisons, we define a consistent ordering based on variant position:
@@ -1186,6 +1213,17 @@ pub enum MetadataSetValue {
     Int(Vec<i64>),
     Float(Vec<f64>),
     Str(Vec<String>),
+}
+
+impl MetadataSetValue {
+    pub fn value_type(&self) -> MetadataValueType {
+        match self {
+            MetadataSetValue::Bool(_) => MetadataValueType::Bool,
+            MetadataSetValue::Int(_) => MetadataValueType::Int,
+            MetadataSetValue::Float(_) => MetadataValueType::Float,
+            MetadataSetValue::Str(_) => MetadataValueType::Str,
+        }
+    }
 }
 
 // TODO: Deprecate where_document

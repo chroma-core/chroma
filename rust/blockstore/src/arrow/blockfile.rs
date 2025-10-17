@@ -574,6 +574,42 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
     }
 
+    /// Get all key-value pairs for a specific prefix
+    /// Optimized for retrieving all entries under a single prefix
+    pub(crate) async fn get_prefix(
+        &'me self,
+        prefix: &str,
+    ) -> Result<impl Iterator<Item = (K, V)>, Box<dyn ChromaError>> {
+        // Get all block IDs that might contain this prefix
+        let block_ids = self.root.sparse_index.get_block_ids_range(prefix..=prefix);
+
+        if block_ids.is_empty() {
+            return Ok(Vec::new().into_iter().flatten());
+        }
+
+        // Fetch blocks AND extract prefix data in parallel
+        let block_futures = block_ids.into_iter().map(|block_id| {
+            async move {
+                match self.get_block(block_id, StorageRequestPriority::P0).await {
+                    Ok(Some(block)) => {
+                        // Extract prefix data while we're in the async context
+                        let prefix_data = block.get_prefix::<K, V>(prefix);
+                        Ok(prefix_data)
+                    }
+                    Ok(None) => {
+                        Err(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)
+                    }
+                    Err(e) => Err(Box::new(e) as Box<dyn ChromaError>),
+                }
+            }
+            .instrument(Span::current())
+        });
+
+        let block_iters = try_join_all(block_futures).await?;
+
+        Ok(block_iters.into_iter().flatten())
+    }
+
     // Returns all Arrow records in the specified range.
     pub(crate) fn get_range_stream<'prefix, PrefixRange, KeyRange>(
         &'me self,

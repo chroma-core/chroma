@@ -35,6 +35,7 @@ from chromadb.api.types import (
     Embeddings,
     Metadatas,
     Documents,
+    Schema,
     URIs,
     Where,
     WhereDocument,
@@ -66,6 +67,7 @@ from typing import (
     Generator,
     List,
     Any,
+    Dict,
     Callable,
     TypeVar,
 )
@@ -212,6 +214,7 @@ class SegmentAPI(ServerAPI):
     def create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
@@ -237,6 +240,7 @@ class SegmentAPI(ServerAPI):
             id=id,
             name=name,
             metadata=metadata,
+            serialized_schema=None,
             configuration_json=create_collection_configuration_to_json(
                 configuration or CreateCollectionConfiguration(), metadata
             ),
@@ -249,6 +253,7 @@ class SegmentAPI(ServerAPI):
         coll, created = self._sysdb.create_collection(
             id=model.id,
             name=model.name,
+            schema=schema,
             configuration=configuration or CreateCollectionConfiguration(),
             segments=[],  # Passing empty till backend changes are deployed.
             metadata=model.metadata,
@@ -287,6 +292,7 @@ class SegmentAPI(ServerAPI):
     def get_or_create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
@@ -294,6 +300,7 @@ class SegmentAPI(ServerAPI):
     ) -> CollectionModel:
         return self.create_collection(
             name=name,
+            schema=schema,
             metadata=metadata,
             configuration=configuration,
             get_or_create=True,
@@ -427,9 +434,7 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> SearchResult:
-        raise NotImplementedError(
-            "Seach is not implemented for SegmentAPI"
-        )
+        raise NotImplementedError("Search is not implemented for SegmentAPI")
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -901,6 +906,38 @@ class SegmentAPI(ServerAPI):
     @override
     def get_max_batch_size(self) -> int:
         return self._producer.max_batch_size
+
+    @override
+    def create_task(
+        self,
+        task_name: str,
+        operator_name: str,
+        input_collection_id: UUID,
+        output_collection_name: str,
+        params: Optional[Dict[str, Any]] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> tuple[bool, str]:
+        """Tasks are not supported in the Segment API (local embedded mode)."""
+        raise NotImplementedError(
+            "Tasks are only supported when connecting to a Chroma server via HttpClient. "
+            "The Segment API (embedded mode) does not support task operations."
+        )
+
+    @override
+    def remove_task(
+        self,
+        task_name: str,
+        input_collection_id: UUID,
+        delete_output: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """Tasks are not supported in the Segment API (local embedded mode)."""
+        raise NotImplementedError(
+            "Tasks are only supported when connecting to a Chroma server via HttpClient. "
+            "The Segment API (embedded mode) does not support task operations."
+        )
 
     # TODO: This could potentially cause race conditions in a distributed version of the
     # system, since the cache is only local.

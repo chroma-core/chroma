@@ -662,4 +662,11 @@ impl TestSysDb {
         inner.tenant_resource_names.insert(tenant_id, resource_name);
         Ok(UpdateTenantResponse {})
     }
+
+    pub(crate) async fn peek_schedule_by_collection_id(
+        &mut self,
+        _collection_ids: &[CollectionUuid],
+    ) -> Result<Vec<chroma_types::ScheduleEntry>, crate::sysdb::PeekScheduleError> {
+        Ok(vec![])
+    }
 }

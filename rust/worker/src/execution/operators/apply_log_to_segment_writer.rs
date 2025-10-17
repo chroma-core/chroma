@@ -8,7 +8,7 @@ use chroma_segment::{
     types::{ChromaSegmentWriter, LogMaterializerError, MaterializeLogsResult},
 };
 use chroma_system::Operator;
-use chroma_types::SegmentUuid;
+use chroma_types::{InternalSchema, SegmentUuid};
 use thiserror::Error;
 use tracing::Instrument;
 
@@ -56,6 +56,7 @@ pub struct ApplyLogToSegmentWriterInput<'bf> {
     segment_writer: ChromaSegmentWriter<'bf>,
     materialized_logs: MaterializeLogsResult,
     record_segment_reader: Option<RecordSegmentReader<'bf>>,
+    schema: Option<InternalSchema>,
 }
 
 impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
@@ -63,11 +64,13 @@ impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
         segment_writer: ChromaSegmentWriter<'bf>,
         materialized_logs: MaterializeLogsResult,
         record_segment_reader: Option<RecordSegmentReader<'bf>>,
+        schema: Option<InternalSchema>,
     ) -> Self {
         ApplyLogToSegmentWriterInput {
             segment_writer,
             materialized_logs,
             record_segment_reader,
+            schema,
         }
     }
 }
@@ -75,6 +78,8 @@ impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
 #[derive(Debug)]
 pub struct ApplyLogToSegmentWriterOutput {
     pub segment_id: SegmentUuid,
+    pub segment_type: &'static str,
+    pub schema_update: Option<InternalSchema>,
 }
 
 #[async_trait]
@@ -96,9 +101,13 @@ impl Operator<ApplyLogToSegmentWriterInput<'_>, ApplyLogToSegmentWriterOutput>
         }
 
         // Apply materialized records.
-        match input
+        let schema_update = match input
             .segment_writer
-            .apply_materialized_log_chunk(&input.record_segment_reader, &input.materialized_logs)
+            .apply_materialized_log_chunk(
+                &input.record_segment_reader,
+                &input.materialized_logs,
+                input.schema.clone(),
+            )
             .instrument(tracing::trace_span!(
                 "Apply materialized logs",
                 otel.name = format!(
@@ -109,14 +118,16 @@ impl Operator<ApplyLogToSegmentWriterInput<'_>, ApplyLogToSegmentWriterOutput>
             ))
             .await
         {
-            Ok(()) => (),
+            Ok(schema_update) => schema_update,
             Err(e) => {
                 return Err(ApplyLogToSegmentWriterOperatorError::ApplyMaterializedLogsError(e));
             }
-        }
+        };
 
         Ok(ApplyLogToSegmentWriterOutput {
             segment_id: input.segment_writer.get_id(),
+            segment_type: input.segment_writer.get_name(),
+            schema_update,
         })
     }
 }

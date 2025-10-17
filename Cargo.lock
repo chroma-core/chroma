@@ -1440,6 +1440,7 @@ dependencies = [
  "reqwest 0.12.9",
  "serde",
  "serde_json",
+ "sprs",
  "tantivy",
  "tokio",
  "tokio-stream",
@@ -1662,6 +1663,7 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "rayon",
+ "regex",
  "roaring",
  "serde",
  "sprs",
@@ -1922,10 +1924,12 @@ dependencies = [
  "chroma-tracing",
  "chroma-types",
  "chrono",
+ "clap",
  "derivative",
  "futures",
  "parking_lot",
  "prost 0.13.5",
+ "prost-types 0.13.5",
  "sea-query",
  "sea-query-binder",
  "serde",
@@ -1989,6 +1993,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chroma-error",
+ "chrono",
  "proptest",
  "proptest-derive 0.5.1",
  "prost 0.13.5",
@@ -3807,7 +3812,7 @@ dependencies = [
 [[package]]
 name = "hnswlib"
 version = "0.8.1"
-source = "git+https://github.com/chroma-core/hnswlib.git?branch=master#7cb7befea40d8cf858580eb06f06cf76467755f9"
+source = "git+https://github.com/chroma-core/hnswlib.git?branch=master#9b60aa3598ed6077e2a337143a1a64fa7b91b0bf"
 dependencies = [
  "cc",
  "thiserror 1.0.69",
@@ -7135,16 +7140,44 @@ dependencies = [
  "async-trait",
  "backon",
  "bytes",
+ "chroma-error",
  "chroma-storage",
  "chrono",
  "futures",
+ "guacamole",
  "parking_lot",
  "parquet",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "uuid",
+ "wal3",
+]
+
+[[package]]
+name = "s3heap-service"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chroma-config",
+ "chroma-error",
+ "chroma-storage",
+ "chroma-sysdb",
+ "chroma-tracing",
+ "chroma-types",
+ "chrono",
+ "figment",
+ "futures",
+ "s3heap",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonic",
+ "tonic-health",
  "tracing",
  "uuid",
+ "wal3",
 ]
 
 [[package]]
@@ -9948,6 +9981,7 @@ dependencies = [
  "chroma-system",
  "chroma-tracing",
  "chroma-types",
+ "chrono",
  "clap",
  "criterion",
  "fastrace",
@@ -9968,6 +10002,8 @@ dependencies = [
  "random-port",
  "regex",
  "roaring",
+ "s3heap",
+ "s3heap-service",
  "serde",
  "serde_json",
  "serial_test",

@@ -62,6 +62,7 @@ impl StateMachineTest for FrontendUnderTest {
                                 "test".to_string(),
                                 None,
                                 None,
+                                None,
                                 false,
                             )
                             .unwrap(),
@@ -109,10 +110,8 @@ impl StateMachineTest for FrontendUnderTest {
                     // Update stats
                     {
                         if request.r#where.is_some() {
-                            let filtered_records = state
-                                .frontend
-                                .clone()
-                                .get(
+                            let filtered_records = Box::pin(
+                                state.frontend.clone().get(
                                     GetRequest::try_new(
                                         collection.tenant,
                                         collection.database,
@@ -124,9 +123,10 @@ impl StateMachineTest for FrontendUnderTest {
                                         IncludeList(vec![]),
                                     )
                                     .unwrap(),
-                                )
-                                .await
-                                .unwrap();
+                                ),
+                            )
+                            .await
+                            .unwrap();
 
                             STATS.with_borrow_mut(|stats| {
                                 stats.num_log_operations += filtered_records.ids.len()
@@ -198,7 +198,7 @@ impl StateMachineTest for FrontendUnderTest {
                         request.tenant_id = collection.tenant;
                         request.database_name = collection.database;
 
-                        state.frontend.get(request.clone()).await.unwrap()
+                        Box::pin(state.frontend.get(request.clone())).await.unwrap()
                     };
 
                     check_get_responses_are_close_to_equal(expected_result, received_result);
@@ -331,8 +331,8 @@ impl StateMachineTest for FrontendUnderTest {
                 )
                 .unwrap();
 
-            let received_results = frontend_under_test
-                .get(
+            let received_results = Box::pin(
+                frontend_under_test.get(
                     GetRequest::try_new(
                         collection_under_test.tenant,
                         collection_under_test.database,
@@ -344,9 +344,10 @@ impl StateMachineTest for FrontendUnderTest {
                         IncludeList::default_get(),
                     )
                     .unwrap(),
-                )
-                .await
-                .unwrap();
+                ),
+            )
+            .await
+            .unwrap();
 
             check_get_responses_are_close_to_equal(expected_results, received_results);
         });

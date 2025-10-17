@@ -5,6 +5,7 @@ option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
 
 import "chromadb/proto/chroma.proto";
 import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
 message CreateDatabaseRequest {
@@ -133,6 +134,7 @@ message CreateCollectionRequest {
   // When segments are set, then the collection and segments will be created as
   // a single atomic operation.
   repeated Segment segments = 9;  // Optional.
+  optional string schema_str = 10;
 }
 
 message CreateCollectionResponse {
@@ -310,6 +312,7 @@ message FlushCollectionCompactionRequest {
   repeated FlushSegmentCompactionInfo segment_compaction_info = 5;
   uint64 total_records_post_compaction = 6;
   uint64 size_bytes_post_compaction = 7;
+  optional string schema_str = 8;
 }
 
 message FlushCollectionCompactionResponse {
@@ -523,6 +526,86 @@ message BatchGetCollectionSoftDeleteStatusResponse {
   map<string, bool> collection_id_to_is_soft_deleted = 1;
 }
 
+message CreateTaskRequest {
+  string name = 1;
+  string operator_name = 2;
+  string input_collection_id = 3;
+  string output_collection_name = 4;
+  optional google.protobuf.Struct params = 5;
+  string tenant_id = 6;
+  string database = 7;
+  uint64 min_records_for_task = 8;
+}
+
+message CreateTaskResponse {
+  string task_id = 1;
+}
+
+message GetTaskByNameRequest {
+  string input_collection_id = 1;
+  string task_name = 2;
+}
+
+message GetTaskByNameResponse {
+  optional string task_id = 1;
+  optional string name = 2;
+  optional string operator_name = 3;
+  optional string input_collection_id = 4;
+  optional string output_collection_name = 5;
+  optional string output_collection_id = 6;
+  optional google.protobuf.Struct params = 7;
+  optional int64 completion_offset = 8;
+  optional uint64 min_records_for_task = 9;
+  optional string tenant_id = 10;
+  optional string database_id = 11;
+}
+
+message DeleteTaskRequest {
+  string input_collection_id = 1;
+  string task_name = 2;
+  bool delete_output = 3; // If true and output_collection_id is not null, atomically soft-delete the output collection
+}
+
+message DeleteTaskResponse {
+  bool success = 1;
+}
+
+message AdvanceTaskRequest {
+  optional string collection_id = 1;
+  optional string task_id = 2;
+  optional string task_run_nonce = 3;
+}
+
+message AdvanceTaskResponse {}
+
+message Operator {
+  string id = 1;
+  string name = 2;
+}
+
+message GetOperatorsRequest {
+  // Empty request - returns all operators
+}
+
+message GetOperatorsResponse {
+  repeated Operator operators = 1;
+}
+
+message PeekScheduleByCollectionIdRequest {
+  repeated string collection_id = 1;
+}
+
+message ScheduleEntry {
+  optional string collection_id = 1;
+  optional string task_id = 2;
+  optional string task_run_nonce = 3;
+  optional uint64 when_to_run = 4;
+}
+
+message PeekScheduleByCollectionIdResponse {
+  repeated ScheduleEntry schedule = 1;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -560,4 +643,10 @@ service SysDB {
   rpc DeleteCollectionVersion(DeleteCollectionVersionRequest) returns (DeleteCollectionVersionResponse) {}
   rpc BatchGetCollectionVersionFilePaths(BatchGetCollectionVersionFilePathsRequest) returns (BatchGetCollectionVersionFilePathsResponse) {}
   rpc BatchGetCollectionSoftDeleteStatus(BatchGetCollectionSoftDeleteStatusRequest) returns (BatchGetCollectionSoftDeleteStatusResponse) {}
+  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse) {}
+  rpc GetTaskByName(GetTaskByNameRequest) returns (GetTaskByNameResponse) {}
+  rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse) {}
+  rpc AdvanceTask(AdvanceTaskRequest) returns (AdvanceTaskResponse) {}
+  rpc GetOperators(GetOperatorsRequest) returns (GetOperatorsResponse) {}
+  rpc PeekScheduleByCollectionId(PeekScheduleByCollectionIdRequest) returns (PeekScheduleByCollectionIdResponse) {}
 }

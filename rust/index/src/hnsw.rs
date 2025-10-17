@@ -245,8 +245,9 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
         })
     }
 
+    #[instrument(skip(hnsw_data))]
     fn load_from_hnsw_data(
-        hnsw_data: hnswlib::HnswData,
+        hnsw_data: &hnswlib::HnswData,
         index_config: &IndexConfig,
         ef_search: usize,
         id: IndexUuid,

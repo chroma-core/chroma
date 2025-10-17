@@ -1,8 +1,7 @@
-use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use s3heap::{
     Error, HeapPruner, HeapReader, HeapScheduler, HeapWriter, Limits, PruneStats, RetryConfig,
-    Triggerable,
+    Schedule, Triggerable,
 };
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -10,30 +9,26 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
-struct TestScheduler;
+// Dummy scheduler for testing purposes
+struct DummyScheduler;
 
 #[async_trait::async_trait]
-impl HeapScheduler for TestScheduler {
+impl HeapScheduler for DummyScheduler {
     async fn are_done(&self, items: &[(Triggerable, Uuid)]) -> Result<Vec<bool>, Error> {
         Ok(vec![false; items.len()])
     }
 
-    async fn next_times_and_nonces(
-        &self,
-        items: &[Triggerable],
-    ) -> Result<Vec<Option<(DateTime<Utc>, Uuid)>>, Error> {
-        Ok(vec![None; items.len()])
+    async fn get_schedules(&self, _ids: &[Uuid]) -> Result<Vec<Schedule>, Error> {
+        Ok(vec![])
     }
 }
 
 // More sophisticated test scheduler for comprehensive testing
-type ScheduleInfo = Option<(DateTime<Utc>, Uuid)>;
-
 struct ConfigurableScheduler {
-    done_items: Arc<Mutex<HashMap<(Uuid, Uuid), bool>>>,
-    scheduled_items: Arc<Mutex<HashMap<Uuid, ScheduleInfo>>>,
+    #[allow(clippy::type_complexity)]
+    done_items: Arc<Mutex<HashMap<(Uuid, Uuid, Uuid), bool>>>,
+    scheduled_items: Arc<Mutex<HashMap<Uuid, Option<Schedule>>>>,
     error_on_done: Arc<Mutex<bool>>,
-    error_on_schedule: Arc<Mutex<bool>>,
 }
 
 impl ConfigurableScheduler {
@@ -42,12 +37,7 @@ impl ConfigurableScheduler {
             done_items: Arc::new(Mutex::new(HashMap::new())),
             scheduled_items: Arc::new(Mutex::new(HashMap::new())),
             error_on_done: Arc::new(Mutex::new(false)),
-            error_on_schedule: Arc::new(Mutex::new(false)),
         }
-    }
-
-    fn set_error_on_schedule(&self, should_error: bool) {
-        *self.error_on_schedule.lock() = should_error;
     }
 }
 
@@ -62,121 +52,112 @@ impl HeapScheduler for ConfigurableScheduler {
             .iter()
             .map(|(item, nonce)| {
                 done_items
-                    .get(&(item.uuid, *nonce))
+                    .get(&(
+                        *item.partitioning.as_uuid(),
+                        *item.scheduling.as_uuid(),
+                        *nonce,
+                    ))
                     .copied()
                     .unwrap_or(false)
             })
             .collect())
     }
 
-    async fn next_times_and_nonces(
-        &self,
-        items: &[Triggerable],
-    ) -> Result<Vec<ScheduleInfo>, Error> {
-        if *self.error_on_schedule.lock() {
-            return Err(Error::Internal(
-                "Simulated error in next_time_and_nonce".to_string(),
-            ));
-        }
+    async fn get_schedules(&self, ids: &[Uuid]) -> Result<Vec<Schedule>, Error> {
         let scheduled_items = self.scheduled_items.lock();
-        Ok(items
+        Ok(ids
             .iter()
-            .map(|item| scheduled_items.get(&item.uuid).cloned().flatten())
+            .filter_map(|id| scheduled_items.get(id).cloned().flatten())
             .collect())
     }
 }
 
 // Tests for prefix validation
-#[test]
-fn writer_errors_on_empty_prefix() {
+#[tokio::test]
+async fn heap_components_error_on_empty_prefix() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
-    let scheduler = Arc::new(TestScheduler);
-    let result = HeapWriter::new(String::new(), storage, scheduler);
-    assert!(result.is_err());
-    match result {
-        Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("empty")),
-        _ => panic!("Expected InvalidPrefix error"),
+    let scheduler = Arc::new(DummyScheduler);
+
+    let writer_result = HeapWriter::new(storage.clone(), String::new(), scheduler.clone()).await;
+    assert!(writer_result.is_err());
+    match writer_result {
+        Err(Error::InvalidPrefix(msg)) => assert!(msg.contains("empty")),
+        _ => panic!("Expected InvalidPrefix error for HeapWriter"),
+    }
+
+    let pruner_result = HeapPruner::new(storage.clone(), String::new(), scheduler.clone());
+    assert!(pruner_result.is_err());
+    match pruner_result {
+        Err(Error::InvalidPrefix(msg)) => assert!(msg.contains("empty")),
+        _ => panic!("Expected InvalidPrefix error for HeapPruner"),
+    }
+
+    let reader_result = HeapReader::new(storage, String::new(), scheduler).await;
+    assert!(reader_result.is_err());
+    match reader_result {
+        Err(Error::InvalidPrefix(msg)) => assert!(msg.contains("empty")),
+        _ => panic!("Expected InvalidPrefix error for HeapReader"),
     }
 }
 
-#[test]
-fn pruner_errors_on_empty_prefix() {
+#[tokio::test]
+async fn heap_components_accept_valid_prefix() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
-    let scheduler = Arc::new(TestScheduler);
-    let result = HeapPruner::new(String::new(), storage, scheduler);
-    assert!(result.is_err());
-    match result {
-        Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("empty")),
-        _ => panic!("Expected InvalidPrefix error"),
-    }
-}
-
-#[test]
-fn reader_errors_on_empty_prefix() {
-    let (_temp_dir, storage) = chroma_storage::test_storage();
-    let scheduler = Arc::new(TestScheduler);
-    let result = HeapReader::new(String::new(), storage, scheduler);
-    assert!(result.is_err());
-    match result {
-        Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("empty")),
-        _ => panic!("Expected InvalidPrefix error"),
-    }
-}
-
-#[test]
-fn heap_components_accept_valid_prefix() {
-    let (_temp_dir, storage) = chroma_storage::test_storage();
-    let scheduler = Arc::new(TestScheduler);
+    let scheduler = Arc::new(DummyScheduler);
 
     // These should not error
     let _writer = HeapWriter::new(
-        "valid-prefix".to_string(),
         storage.clone(),
+        "valid-prefix".to_string(),
         scheduler.clone(),
     )
+    .await
     .unwrap();
     let _pruner = HeapPruner::new(
-        "valid-prefix".to_string(),
         storage.clone(),
+        "valid-prefix".to_string(),
         scheduler.clone(),
     )
     .unwrap();
-    let _reader = HeapReader::new("valid-prefix".to_string(), storage, scheduler).unwrap();
+    let _reader = HeapReader::new(storage, "valid-prefix".to_string(), scheduler)
+        .await
+        .unwrap();
 }
 
-#[test]
-fn heap_writer_errors_on_double_slash() {
+#[tokio::test]
+async fn heap_components_error_on_double_slash() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
-    let scheduler = Arc::new(TestScheduler);
-    let result = HeapWriter::new("prefix//with//slashes".to_string(), storage, scheduler);
-    assert!(result.is_err());
-    match result {
-        Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("double slashes")),
-        _ => panic!("Expected InvalidPrefix error"),
+    let scheduler = Arc::new(DummyScheduler);
+
+    let writer_result = HeapWriter::new(
+        storage.clone(),
+        "prefix//with//slashes".to_string(),
+        scheduler.clone(),
+    )
+    .await;
+    assert!(writer_result.is_err());
+    match writer_result {
+        Err(Error::InvalidPrefix(msg)) => assert!(msg.contains("double slashes")),
+        _ => panic!("Expected InvalidPrefix error for HeapWriter"),
     }
-}
 
-#[test]
-fn heap_pruner_errors_on_double_slash() {
-    let (_temp_dir, storage) = chroma_storage::test_storage();
-    let scheduler = Arc::new(TestScheduler);
-    let result = HeapPruner::new("prefix//with//slashes".to_string(), storage, scheduler);
-    assert!(result.is_err());
-    match result {
-        Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("double slashes")),
-        _ => panic!("Expected InvalidPrefix error"),
+    let pruner_result = HeapPruner::new(
+        storage.clone(),
+        "prefix//with//slashes".to_string(),
+        scheduler.clone(),
+    );
+    assert!(pruner_result.is_err());
+    match pruner_result {
+        Err(Error::InvalidPrefix(msg)) => assert!(msg.contains("double slashes")),
+        _ => panic!("Expected InvalidPrefix error for HeapPruner"),
     }
-}
 
-#[test]
-fn heap_reader_errors_on_double_slash() {
-    let (_temp_dir, storage) = chroma_storage::test_storage();
-    let scheduler = Arc::new(TestScheduler);
-    let result = HeapReader::new("prefix//with//slashes".to_string(), storage, scheduler);
-    assert!(result.is_err());
-    match result {
-        Err(s3heap::Error::InvalidPrefix(msg)) => assert!(msg.contains("double slashes")),
-        _ => panic!("Expected InvalidPrefix error"),
+    let reader_result =
+        HeapReader::new(storage, "prefix//with//slashes".to_string(), scheduler).await;
+    assert!(reader_result.is_err());
+    match reader_result {
+        Err(Error::InvalidPrefix(msg)) => assert!(msg.contains("double slashes")),
+        _ => panic!("Expected InvalidPrefix error for HeapReader"),
     }
 }
 
@@ -223,35 +204,36 @@ fn limits_equality() {
 }
 
 #[test]
-fn limits_clone() {
+fn limits_copy() {
     let original = Limits {
         buckets_to_read: Some(500),
         max_items: None,
     };
-    let cloned = original.clone();
-    assert_eq!(original, cloned);
-    assert_eq!(cloned.buckets_to_read, Some(500));
+    let copied = original;
+    assert_eq!(original, copied);
+    assert_eq!(copied.buckets_to_read, Some(500));
 }
 
 // Tests for Triggerable
 #[test]
 fn triggerable_creation_and_equality() {
-    let uuid = Uuid::new_v4();
+    let uuid1 = Uuid::new_v4();
+    let uuid2 = Uuid::new_v4();
     let t1 = Triggerable {
-        uuid,
-        name: "test-task".to_string(),
+        partitioning: uuid1.into(),
+        scheduling: uuid2.into(),
     };
     let t2 = Triggerable {
-        uuid,
-        name: "test-task".to_string(),
+        partitioning: uuid1.into(),
+        scheduling: uuid2.into(),
     };
     let t3 = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: "test-task".to_string(),
+        partitioning: Uuid::new_v4().into(),
+        scheduling: uuid2.into(),
     };
     let t4 = Triggerable {
-        uuid,
-        name: "different-task".to_string(),
+        partitioning: uuid1.into(),
+        scheduling: Uuid::new_v4().into(),
     };
 
     assert_eq!(t1, t2);
@@ -262,20 +244,20 @@ fn triggerable_creation_and_equality() {
 #[test]
 fn triggerable_clone() {
     let original = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: "clone-test".to_string(),
+        partitioning: Uuid::new_v4().into(),
+        scheduling: Uuid::new_v4().into(),
     };
-    let cloned = original.clone();
+    let cloned = original;
     assert_eq!(original, cloned);
-    assert_eq!(original.uuid, cloned.uuid);
-    assert_eq!(original.name, cloned.name);
+    assert_eq!(original.partitioning, cloned.partitioning);
+    assert_eq!(original.scheduling, cloned.scheduling);
 }
 
 #[test]
 fn triggerable_default() {
     let t = Triggerable::default();
-    assert_eq!(t.uuid, Uuid::nil());
-    assert_eq!(t.name, "");
+    assert_eq!(t.partitioning.as_uuid(), &Uuid::nil());
+    assert_eq!(t.scheduling.as_uuid(), &Uuid::nil());
 }
 
 // Tests for Error enum
@@ -309,8 +291,10 @@ fn error_display() {
 #[tokio::test]
 async fn writer_push_empty_items() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
-    let scheduler = Arc::new(TestScheduler);
-    let writer = HeapWriter::new("test-prefix".to_string(), storage, scheduler).unwrap();
+    let scheduler = Arc::new(DummyScheduler);
+    let writer = HeapWriter::new(storage, "test-prefix".to_string(), scheduler)
+        .await
+        .unwrap();
 
     // Pushing empty items should succeed without doing anything
     let result = writer.push(&[]).await;
@@ -321,46 +305,34 @@ async fn writer_push_empty_items() {
 async fn writer_push_with_no_scheduled_items() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(ConfigurableScheduler::new());
-    let writer = HeapWriter::new("test-no-schedule".to_string(), storage, scheduler).unwrap();
+    let writer = HeapWriter::new(storage, "test-no-schedule".to_string(), scheduler)
+        .await
+        .unwrap();
 
-    let item = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: "unscheduled".to_string(),
-    };
-
-    // Item has no schedule, so push should succeed but not create any buckets
-    let result = writer.push(&[item]).await;
+    // Push empty schedules should succeed but not create any buckets
+    let result = writer.push(&[]).await;
     assert!(result.is_ok());
 }
 
 #[tokio::test]
-async fn writer_push_with_scheduler_error() {
+async fn writer_push_empty_schedules_succeeds() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
     let scheduler = Arc::new(ConfigurableScheduler::new());
-    scheduler.set_error_on_schedule(true);
 
-    let writer = HeapWriter::new("test-error".to_string(), storage, scheduler).unwrap();
+    let writer = HeapWriter::new(storage, "test-empty".to_string(), scheduler)
+        .await
+        .unwrap();
 
-    let item = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: "error-item".to_string(),
-    };
-
-    // Should propagate the scheduler error
-    let result = writer.push(&[item]).await;
-    assert!(result.is_err());
-    match result {
-        Err(Error::Internal(msg)) => assert!(msg.contains("Simulated error")),
-        _ => panic!("Expected Internal error"),
-    }
+    let result = writer.push(&[]).await;
+    assert!(result.is_ok());
 }
 
 // Async tests for HeapPruner
 #[tokio::test]
 async fn pruner_with_empty_heap() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
-    let scheduler = Arc::new(TestScheduler);
-    let pruner = HeapPruner::new("empty-heap".to_string(), storage, scheduler).unwrap();
+    let scheduler = Arc::new(DummyScheduler);
+    let pruner = HeapPruner::new(storage, "empty-heap".to_string(), scheduler).unwrap();
 
     // Pruning empty heap should succeed
     let result = pruner.prune(Limits::default()).await;
@@ -370,8 +342,8 @@ async fn pruner_with_empty_heap() {
 #[tokio::test]
 async fn pruner_respects_limits() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
-    let scheduler = Arc::new(TestScheduler);
-    let pruner = HeapPruner::new("limited-prune".to_string(), storage, scheduler).unwrap();
+    let scheduler = Arc::new(DummyScheduler);
+    let pruner = HeapPruner::new(storage, "limited-prune".to_string(), scheduler).unwrap();
 
     let limits = Limits {
         buckets_to_read: Some(5),
@@ -387,10 +359,20 @@ async fn pruner_respects_limits() {
 #[tokio::test]
 async fn reader_peek_empty_heap() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
-    let scheduler = Arc::new(TestScheduler);
-    let reader = HeapReader::new("empty-reader".to_string(), storage, scheduler).unwrap();
+    let scheduler = Arc::new(DummyScheduler);
+    // Initialize heap first
+    let _writer = HeapWriter::new(
+        storage.clone(),
+        "empty-reader".to_string(),
+        scheduler.clone(),
+    )
+    .await
+    .unwrap();
+    let reader = HeapReader::new(storage, "empty-reader".to_string(), scheduler)
+        .await
+        .unwrap();
 
-    let items = reader.peek(|_| true, Limits::default()).await;
+    let items = reader.peek(|_, _| true, Limits::default()).await;
     assert!(items.is_ok());
     assert_eq!(items.unwrap().len(), 0);
 }
@@ -398,11 +380,21 @@ async fn reader_peek_empty_heap() {
 #[tokio::test]
 async fn reader_peek_with_filter() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
-    let scheduler = Arc::new(TestScheduler);
-    let reader = HeapReader::new("filtered-reader".to_string(), storage, scheduler).unwrap();
+    let scheduler = Arc::new(DummyScheduler);
+    // Initialize heap first
+    let _writer = HeapWriter::new(
+        storage.clone(),
+        "filtered-reader".to_string(),
+        scheduler.clone(),
+    )
+    .await
+    .unwrap();
+    let reader = HeapReader::new(storage, "filtered-reader".to_string(), scheduler)
+        .await
+        .unwrap();
 
     // Filter that rejects everything
-    let items = reader.peek(|_| false, Limits::default()).await;
+    let items = reader.peek(|_, _| false, Limits::default()).await;
     assert!(items.is_ok());
     assert_eq!(items.unwrap().len(), 0);
 }
@@ -410,8 +402,18 @@ async fn reader_peek_with_filter() {
 #[tokio::test]
 async fn reader_respects_limits() {
     let (_temp_dir, storage) = chroma_storage::test_storage();
-    let scheduler = Arc::new(TestScheduler);
-    let reader = HeapReader::new("limited-reader".to_string(), storage, scheduler).unwrap();
+    let scheduler = Arc::new(DummyScheduler);
+    // Initialize heap first
+    let _writer = HeapWriter::new(
+        storage.clone(),
+        "limited-reader".to_string(),
+        scheduler.clone(),
+    )
+    .await
+    .unwrap();
+    let reader = HeapReader::new(storage, "limited-reader".to_string(), scheduler)
+        .await
+        .unwrap();
 
     let limits = Limits {
         buckets_to_read: Some(3),
@@ -419,32 +421,8 @@ async fn reader_respects_limits() {
     };
 
     // Should respect the bucket limit
-    let items = reader.peek(|_| true, limits).await;
+    let items = reader.peek(|_, _| true, limits).await;
     assert!(items.is_ok());
-}
-
-// Edge case tests
-#[test]
-fn triggerable_with_empty_name() {
-    let t = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: String::new(),
-    };
-    assert_eq!(t.name, "");
-
-    let t2 = t.clone();
-    assert_eq!(t, t2);
-}
-
-#[test]
-fn triggerable_with_very_long_name() {
-    let long_name = "a".repeat(10000);
-    let t = Triggerable {
-        uuid: Uuid::new_v4(),
-        name: long_name.clone(),
-    };
-    assert_eq!(t.name.len(), 10000);
-    assert_eq!(t.name, long_name);
 }
 
 #[test]

@@ -8,6 +8,7 @@ path = "src/lib.rs"
 
 [dependencies]
 async-trait = { workspace = true }
+chrono = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 roaring = { workspace = true }

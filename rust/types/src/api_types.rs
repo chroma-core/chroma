@@ -11,7 +11,7 @@ use crate::plan::PlanToProtoError;
 use crate::plan::SearchPayload;
 use crate::validators::{
     validate_metadata_vec, validate_name, validate_non_empty_collection_update_metadata,
-    validate_optional_metadata, validate_update_metadata_vec,
+    validate_optional_metadata, validate_schema, validate_update_metadata_vec,
 };
 use crate::Collection;
 use crate::CollectionConfigurationToInternalConfigurationError;
@@ -19,7 +19,9 @@ use crate::CollectionConversionError;
 use crate::CollectionUuid;
 use crate::DistributedSpannParametersFromSegmentError;
 use crate::HnswParametersFromSegmentError;
+use crate::InternalSchema;
 use crate::Metadata;
+use crate::SchemaError;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
 use crate::UpdateMetadata;
@@ -73,7 +75,7 @@ pub enum GetCollectionWithSegmentsError {
     GetSegmentsError(#[from] GetSegmentsError),
     #[error("Grpc error: {0}")]
     Grpc(#[from] Status),
-    #[error("Collection [{0}] does not exists.")]
+    #[error("Collection [{0}] does not exist.")]
     NotFound(String),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
@@ -638,15 +640,18 @@ pub type GetCollectionResponse = Collection;
 
 #[derive(Debug, Error)]
 pub enum GetCollectionError {
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
 }
 
 impl ChromaError for GetCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GetCollectionError::InvalidSchema(e) => e.code(),
             GetCollectionError::Internal(err) => err.code(),
             GetCollectionError::NotFound(_) => ErrorCodes::NotFound,
         }
@@ -663,6 +668,8 @@ pub struct CreateCollectionRequest {
     #[validate(custom(function = "validate_optional_metadata"))]
     pub metadata: Option<Metadata>,
     pub configuration: Option<InternalCollectionConfiguration>,
+    #[validate(custom(function = "validate_schema"))]
+    pub schema: Option<InternalSchema>,
     pub get_or_create: bool,
 }
 
@@ -673,6 +680,7 @@ impl CreateCollectionRequest {
         name: String,
         metadata: Option<Metadata>,
         configuration: Option<InternalCollectionConfiguration>,
+        schema: Option<InternalSchema>,
         get_or_create: bool,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
@@ -681,6 +689,7 @@ impl CreateCollectionRequest {
             name,
             metadata,
             configuration,
+            schema,
             get_or_create,
         };
         request.validate().map_err(ChromaValidationError::from)?;
@@ -705,7 +714,9 @@ pub enum CreateCollectionError {
     #[error("Could not fetch collections: {0}")]
     Get(#[from] GetCollectionsError),
     #[error("Could not deserialize configuration: {0}")]
-    Configuration(#[from] serde_json::Error),
+    Configuration(serde_json::Error),
+    #[error("Could not serialize schema: {0}")]
+    Schema(#[from] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("The operation was aborted, {0}")]
@@ -716,6 +727,8 @@ pub enum CreateCollectionError {
     HnswNotSupported,
     #[error("Failed to parse db id")]
     DatabaseIdParseError,
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(String),
 }
 
 impl ChromaError for CreateCollectionError {
@@ -733,6 +746,8 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
             CreateCollectionError::DatabaseIdParseError => ErrorCodes::Internal,
+            CreateCollectionError::InvalidSchema(_) => ErrorCodes::InvalidArgument,
+            CreateCollectionError::Schema(e) => e.code(),
         }
     }
 }
@@ -873,7 +888,7 @@ pub struct UpdateCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpdateCollectionError {
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
     #[error("Metadata reset unsupported")]
     MetadataResetUnsupported,
@@ -929,7 +944,7 @@ pub struct DeleteCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum DeleteCollectionError {
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
     #[error(transparent)]
     Validation(#[from] ChromaValidationError),
@@ -999,10 +1014,12 @@ pub enum ForkCollectionError {
     Local,
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
     #[error("Failed to convert proto segment")]
     SegmentConversionError(#[from] SegmentConversionError),
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
 }
 
 impl ChromaError for ForkCollectionError {
@@ -1016,6 +1033,7 @@ impl ChromaError for ForkCollectionError {
             ForkCollectionError::Local => ErrorCodes::Unimplemented,
             ForkCollectionError::Internal(e) => e.code(),
             ForkCollectionError::SegmentConversionError(e) => e.code(),
+            ForkCollectionError::InvalidSchema(e) => e.code(),
         }
     }
 }
@@ -1044,7 +1062,7 @@ impl ChromaError for CountForksError {
 pub enum GetCollectionSizeError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
 }
 
@@ -1061,7 +1079,7 @@ impl ChromaError for GetCollectionSizeError {
 pub enum ListCollectionVersionsError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] does not exists")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
 }
 
@@ -2014,6 +2032,119 @@ impl ChromaError for ExecutorError {
             ExecutorError::Internal(e) => e.code(),
             ExecutorError::BackfillError(e) => e.code(),
             ExecutorError::NotImplemented(_) => ErrorCodes::Unimplemented,
+        }
+    }
+}
+
+////////////////////////// Task Operations //////////////////////////
+
+#[non_exhaustive]
+#[derive(Clone, Debug, Deserialize, Serialize, Validate, ToSchema)]
+pub struct CreateTaskRequest {
+    #[validate(length(min = 1))]
+    pub task_name: String,
+    pub operator_name: String,
+    pub output_collection_name: String,
+    #[serde(default = "default_empty_json_object")]
+    pub params: serde_json::Value,
+}
+
+fn default_empty_json_object() -> serde_json::Value {
+    serde_json::json!({})
+}
+
+impl CreateTaskRequest {
+    pub fn try_new(
+        task_name: String,
+        operator_name: String,
+        output_collection_name: String,
+        params: serde_json::Value,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            task_name,
+            operator_name,
+            output_collection_name,
+            params,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct CreateTaskResponse {
+    pub success: bool,
+    pub task_id: String,
+}
+
+#[derive(Error, Debug)]
+pub enum AddTaskError {
+    #[error("Task with name [{0}] already exists")]
+    AlreadyExists(String),
+    #[error("Input collection [{0}] does not exist")]
+    InputCollectionNotFound(String),
+    #[error("Output collection [{0}] already exists")]
+    OutputCollectionExists(String),
+    #[error(transparent)]
+    Validation(#[from] ChromaValidationError),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for AddTaskError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            AddTaskError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            AddTaskError::InputCollectionNotFound(_) => ErrorCodes::NotFound,
+            AddTaskError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
+            AddTaskError::Validation(err) => err.code(),
+            AddTaskError::Internal(err) => err.code(),
+        }
+    }
+}
+
+#[non_exhaustive]
+#[derive(Clone, Debug, Deserialize, Validate, Serialize, ToSchema)]
+pub struct RemoveTaskRequest {
+    #[validate(length(min = 1))]
+    pub task_name: String,
+    /// Whether to delete the output collection as well
+    #[serde(default)]
+    pub delete_output: bool,
+}
+
+impl RemoveTaskRequest {
+    pub fn try_new(task_name: String, delete_output: bool) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            task_name,
+            delete_output,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct RemoveTaskResponse {
+    pub success: bool,
+}
+
+#[derive(Error, Debug)]
+pub enum RemoveTaskError {
+    #[error("Task with name [{0}] does not exist")]
+    NotFound(String),
+    #[error(transparent)]
+    Validation(#[from] ChromaValidationError),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for RemoveTaskError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            RemoveTaskError::NotFound(_) => ErrorCodes::NotFound,
+            RemoveTaskError::Validation(err) => err.code(),
+            RemoveTaskError::Internal(err) => err.code(),
         }
     }
 }

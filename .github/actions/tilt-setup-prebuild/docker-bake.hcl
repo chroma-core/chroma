@@ -4,6 +4,12 @@ target "rust-log-service" {
   tags = [ "rust-log-service:ci" ]
 }
 
+target "heap-tender-service" {
+  dockerfile = "rust/Dockerfile"
+  target = "heap_tender_service"
+  tags = [ "heap-tender-service:ci" ]
+}
+
 target "sysdb" {
   dockerfile = "go/Dockerfile"
   target = "sysdb"
@@ -50,6 +56,7 @@ target "load-service" {
 group "default" {
   targets = [
     "rust-log-service",
+    "heap-tender-service",
     "sysdb",
     "sysdb-migration",
     "rust-frontend-service",

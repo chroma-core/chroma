@@ -51,6 +51,8 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   if [ "$RELEASE_MODE" = "1" ]; then mv target/release/chroma-load ./chroma-load; else mv target/debug/chroma-load ./chroma-load; fi && \
   # Move log service binary
   if [ "$RELEASE_MODE" = "1" ]; then mv target/release/log_service ./log_service; else mv target/debug/log_service ./log_service; fi && \
+  # Move heap tender binary
+  if [ "$RELEASE_MODE" = "1" ]; then mv target/release/heap_tender_service ./heap_tender_service; else mv target/debug/heap_tender_service ./heap_tender_service; fi && \
   # Move query service binary
   if [ "$RELEASE_MODE" = "1" ]; then mv target/release/query_service ./query_service; else mv target/debug/query_service ./query_service; fi && \
   # Move compaction service binary
@@ -84,6 +86,10 @@ ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./chroma-load" ]
 FROM runner AS log_service
 COPY --from=builder /chroma/log_service .
 ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./log_service" ]
+
+FROM runner AS heap_tender_service
+COPY --from=builder /chroma/heap_tender_service .
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./heap_tender_service" ]
 
 FROM runner AS query_service
 COPY --from=builder /chroma/rust/worker/chroma_config.yaml .

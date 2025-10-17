@@ -2,6 +2,7 @@ from typing import Dict, Any, Type, Set
 from chromadb.api.types import (
     EmbeddingFunction,
     DefaultEmbeddingFunction,
+    SparseEmbeddingFunction,
 )
 
 # Import all embedding functions
@@ -76,6 +77,9 @@ from chromadb.utils.embedding_functions.fastembed_sparse_embedding_function impo
 from chromadb.utils.embedding_functions.bm25_embedding_function import (
     Bm25EmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.chroma_cloud_qwen_embedding_function import (
+    ChromaCloudQwenEmbeddingFunction,
+)
 
 
 # Get all the class names for backward compatibility
@@ -107,6 +111,7 @@ _all_classes: Set[str] = {
     "HuggingFaceSparseEmbeddingFunction",
     "FastembedSparseEmbeddingFunction",
     "Bm25EmbeddingFunction",
+    "ChromaCloudQwenEmbeddingFunction",
 }
 
 
@@ -140,6 +145,13 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "default": DefaultEmbeddingFunction,
     "cloudflare_workers_ai": CloudflareWorkersAIEmbeddingFunction,
     "together_ai": TogetherAIEmbeddingFunction,
+    "chroma-cloud-qwen": ChromaCloudQwenEmbeddingFunction,
+}
+
+sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {  # type: ignore
+    "huggingface_sparse": HuggingFaceSparseEmbeddingFunction,
+    "fastembed_sparse": FastembedSparseEmbeddingFunction,
+    "bm25": Bm25EmbeddingFunction,
 }
 
 
@@ -172,6 +184,30 @@ def register_embedding_function(ef_class=None):  # type: ignore
         return _register(ef_class)  # type: ignore
 
     # If called without arguments, return a decorator
+    return _register
+
+
+def register_sparse_embedding_function(ef_class=None):  # type: ignore
+    """Register a custom sparse embedding function.
+
+    Can be used as a decorator:
+        @register_sparse_embedding_function
+        class MySparseEmbeddingFunction(SparseEmbeddingFunction):
+            @classmethod
+            def name(cls): return "my_sparse_embedding"
+    """
+
+    def _register(cls):  # type: ignore
+        try:
+            name = cls.name()
+            sparse_known_embedding_functions[name] = cls
+        except Exception as e:
+            raise ValueError(f"Failed to register sparse embedding function: {e}")
+        return cls  # Return the class unchanged
+
+    if ef_class is not None:
+        return _register(ef_class)  # type: ignore
+
     return _register
 
 
@@ -230,6 +266,7 @@ __all__ = [
     "HuggingFaceSparseEmbeddingFunction",
     "FastembedSparseEmbeddingFunction",
     "Bm25EmbeddingFunction",
+    "ChromaCloudQwenEmbeddingFunction",
     "register_embedding_function",
     "config_to_embedding_function",
     "known_embedding_functions",

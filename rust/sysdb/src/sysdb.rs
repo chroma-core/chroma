@@ -16,15 +16,18 @@ use chroma_types::{
     GetDatabaseResponse, GetSegmentsError, GetTenantError, GetTenantResponse,
     InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
     ListCollectionVersionsError, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
-    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
-    UpdateCollectionError, UpdateTenantError, UpdateTenantResponse, VectorIndexConfiguration,
+    ResetResponse, ScheduleEntry, ScheduleEntryConversionError, SegmentFlushInfo,
+    SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError, UpdateTenantError,
+    UpdateTenantResponse, VectorIndexConfiguration,
 };
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
     FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
-    ForkCollectionError, Segment, SegmentConversionError, SegmentScope, Tenant,
+    ForkCollectionError, InternalSchema, SchemaError, Segment, SegmentConversionError,
+    SegmentScope, Tenant,
 };
+use prost_types;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -36,6 +39,61 @@ use tower::ServiceBuilder;
 use uuid::{Error, Uuid};
 
 pub const VERSION_FILE_S3_PREFIX: &str = "sysdb/version_files/";
+
+// Helper function to convert serde_json::Value to prost_types::Value
+fn json_to_prost_value(json: serde_json::Value) -> prost_types::Value {
+    use prost_types::value::Kind;
+    let kind = match json {
+        serde_json::Value::Null => Kind::NullValue(0),
+        serde_json::Value::Bool(b) => Kind::BoolValue(b),
+        serde_json::Value::Number(n) => {
+            if let Some(f) = n.as_f64() {
+                Kind::NumberValue(f)
+            } else {
+                Kind::NullValue(0)
+            }
+        }
+        serde_json::Value::String(s) => Kind::StringValue(s),
+        serde_json::Value::Array(arr) => Kind::ListValue(prost_types::ListValue {
+            values: arr.into_iter().map(json_to_prost_value).collect(),
+        }),
+        serde_json::Value::Object(map) => Kind::StructValue(prost_types::Struct {
+            fields: map
+                .into_iter()
+                .map(|(k, v)| (k, json_to_prost_value(v)))
+                .collect(),
+        }),
+    };
+    prost_types::Value { kind: Some(kind) }
+}
+
+// Helper function to convert prost_types::Value to serde_json::Value
+fn prost_value_to_json(value: prost_types::Value) -> serde_json::Value {
+    use prost_types::value::Kind;
+    match value.kind {
+        Some(Kind::NullValue(_)) => serde_json::Value::Null,
+        Some(Kind::BoolValue(b)) => serde_json::Value::Bool(b),
+        Some(Kind::NumberValue(n)) => serde_json::Number::from_f64(n)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        Some(Kind::StringValue(s)) => serde_json::Value::String(s),
+        Some(Kind::ListValue(list)) => {
+            serde_json::Value::Array(list.values.into_iter().map(prost_value_to_json).collect())
+        }
+        Some(Kind::StructValue(s)) => prost_struct_to_json(s),
+        None => serde_json::Value::Null,
+    }
+}
+
+// Helper function to convert prost_types::Struct to serde_json::Value
+fn prost_struct_to_json(s: prost_types::Struct) -> serde_json::Value {
+    serde_json::Value::Object(
+        s.fields
+            .into_iter()
+            .map(|(k, v)| (k, prost_value_to_json(v)))
+            .collect(),
+    )
+}
 
 #[derive(Debug, Clone)]
 pub enum SysDb {
@@ -229,6 +287,7 @@ impl SysDb {
         name: String,
         segments: Vec<Segment>,
         configuration: Option<InternalCollectionConfiguration>,
+        schema: Option<InternalSchema>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -239,15 +298,9 @@ impl SysDb {
                 if let Some(hnsw_params) = hnsw_params {
                     config.vector_index = VectorIndexConfiguration::Hnsw(hnsw_params);
                 }
-                config
+                Some(config)
             }
-            None => metadata
-                .clone()
-                .map(|m| {
-                    InternalCollectionConfiguration::from_legacy_metadata(m).map_err(|e| e.boxed())
-                })
-                .transpose()?
-                .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
+            None => None,
         };
 
         match self {
@@ -259,6 +312,7 @@ impl SysDb {
                     name,
                     segments,
                     configuration,
+                    schema,
                     metadata,
                     dimension,
                     get_or_create,
@@ -273,7 +327,7 @@ impl SysDb {
                         collection_id,
                         name,
                         segments,
-                        configuration,
+                        configuration.unwrap_or(InternalCollectionConfiguration::default_hnsw()),
                         metadata,
                         dimension,
                         get_or_create,
@@ -284,7 +338,9 @@ impl SysDb {
                 let collection = Collection {
                     collection_id,
                     name,
-                    config: configuration,
+                    config: configuration
+                        .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
+                    schema,
                     metadata,
                     dimension,
                     tenant: tenant.clone(),
@@ -472,6 +528,17 @@ impl SysDb {
         }
     }
 
+    // Only meant for testing.
+    pub async fn get_all_operators(
+        &mut self,
+    ) -> Result<Vec<(String, uuid::Uuid)>, Box<dyn std::error::Error>> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_all_operators().await,
+            SysDb::Sqlite(_) => unimplemented!("get_all_operators not implemented for sqlite"),
+            SysDb::Test(_) => unimplemented!("get_all_operators not implemented for test"),
+        }
+    }
+
     pub async fn batch_get_collection_version_file_paths(
         &mut self,
         collection_ids: Vec<CollectionUuid>,
@@ -527,6 +594,7 @@ impl SysDb {
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
+        schema: Option<InternalSchema>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -538,6 +606,7 @@ impl SysDb {
                     segment_flush_info,
                     total_records_post_compaction,
                     size_bytes_post_compaction,
+                    schema,
                 )
                 .await
             }
@@ -613,6 +682,17 @@ impl SysDb {
             SysDb::Grpc(grpc) => grpc.reset().await,
             SysDb::Sqlite(sqlite) => sqlite.reset().await,
             SysDb::Test(_) => todo!(),
+        }
+    }
+
+    pub async fn peek_schedule_by_collection_id(
+        &mut self,
+        collection_ids: &[CollectionUuid],
+    ) -> Result<Vec<ScheduleEntry>, PeekScheduleError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.peek_schedule_by_collection_id(collection_ids).await,
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(test) => test.peek_schedule_by_collection_id(collection_ids).await,
         }
     }
 }
@@ -1009,11 +1089,17 @@ impl GrpcSysDb {
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
-        configuration: InternalCollectionConfiguration,
+        configuration: Option<InternalCollectionConfiguration>,
+        schema: Option<InternalSchema>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
     ) -> Result<Collection, CreateCollectionError> {
+        let configuration_json_str = match configuration {
+            Some(configuration) => serde_json::to_string(&configuration)
+                .map_err(CreateCollectionError::Configuration)?,
+            None => "{}".to_string(),
+        };
         let res = self
             .client
             .create_collection(chroma_proto::CreateCollectionRequest {
@@ -1025,11 +1111,18 @@ impl GrpcSysDb {
                     .into_iter()
                     .map(chroma_proto::Segment::from)
                     .collect(),
-                configuration_json_str: serde_json::to_string(&configuration)
-                    .map_err(CreateCollectionError::Configuration)?,
+                configuration_json_str,
                 metadata: metadata.map(|metadata| metadata.into()),
                 dimension,
                 get_or_create: Some(get_or_create),
+                schema_str: schema
+                    .map(|s| serde_json::to_string(&s))
+                    .transpose()
+                    .map_err(|e| {
+                        CreateCollectionError::Schema(SchemaError::InvalidSchema {
+                            reason: e.to_string(),
+                        })
+                    })?,
             })
             .await
             .map_err(|err| match err.code() {
@@ -1046,7 +1139,6 @@ impl GrpcSysDb {
             ))?
             .try_into()
             .map_err(|e: CollectionConversionError| CreateCollectionError::Internal(e.boxed()))?;
-
         Ok(collection)
     }
 
@@ -1356,6 +1448,23 @@ impl GrpcSysDb {
         })
     }
 
+    async fn get_all_operators(
+        &mut self,
+    ) -> Result<Vec<(String, uuid::Uuid)>, Box<dyn std::error::Error>> {
+        let res = self
+            .client
+            .get_operators(chroma_proto::GetOperatorsRequest {})
+            .await?;
+
+        let operators = res.into_inner().operators;
+        let mut result = Vec::new();
+        for op in operators {
+            let id = uuid::Uuid::parse_str(&op.id)?;
+            result.push((op.name, id));
+        }
+        Ok(result)
+    }
+
     async fn batch_get_collection_version_file_paths(
         &mut self,
         collection_ids: Vec<CollectionUuid>,
@@ -1445,6 +1554,7 @@ impl GrpcSysDb {
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
+        schema: Option<InternalSchema>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let segment_compaction_info =
             segment_flush_info
@@ -1462,6 +1572,14 @@ impl GrpcSysDb {
             }
         };
 
+        let schema_str = schema
+            .map(|s| serde_json::to_string(&s))
+            .transpose()
+            .map_err(|e| {
+                FlushCompactionError::Schema(SchemaError::InvalidSchema {
+                    reason: e.to_string(),
+                })
+            })?;
         let req = chroma_proto::FlushCollectionCompactionRequest {
             tenant_id,
             collection_id: collection_id.0.to_string(),
@@ -1470,6 +1588,7 @@ impl GrpcSysDb {
             segment_compaction_info,
             total_records_post_compaction,
             size_bytes_post_compaction,
+            schema_str,
         };
 
         let res = self.client.flush_collection_compaction(req).await;
@@ -1535,6 +1654,216 @@ impl GrpcSysDb {
             .map_err(|e| TonicError(e).boxed())?;
         Ok(ResetResponse {})
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_task(
+        &mut self,
+        name: String,
+        operator_name: String,
+        input_collection_id: chroma_types::CollectionUuid,
+        output_collection_name: String,
+        params: serde_json::Value,
+        tenant_name: String,
+        database_name: String,
+        min_records_for_task: u64,
+    ) -> Result<chroma_types::TaskUuid, CreateTaskError> {
+        // Convert serde_json::Value to prost_types::Struct for gRPC
+        let params_struct = match params {
+            serde_json::Value::Object(map) => Some(prost_types::Struct {
+                fields: map
+                    .into_iter()
+                    .map(|(k, v)| (k, json_to_prost_value(v)))
+                    .collect(),
+            }),
+            _ => None, // Non-object params omitted from proto
+        };
+
+        let req = chroma_proto::CreateTaskRequest {
+            name: name.clone(),
+            operator_name: operator_name.clone(),
+            input_collection_id: input_collection_id.to_string(),
+            output_collection_name: output_collection_name.clone(),
+            params: params_struct,
+            tenant_id: tenant_name.clone(),
+            database: database_name.clone(),
+            min_records_for_task,
+        };
+
+        let response = self.client.create_task(req).await?.into_inner();
+
+        // Parse the returned task_id - this should always succeed since the server generated it
+        // If this fails, it indicates a serious server bug or protocol corruption
+        let task_id = chroma_types::TaskUuid(
+            uuid::Uuid::parse_str(&response.task_id).map_err(|e| {
+                tracing::error!(
+                    task_id = %response.task_id,
+                    error = %e,
+                    "Server returned invalid task_id UUID - task was created but response is corrupt"
+                );
+                CreateTaskError::ServerReturnedInvalidData
+            })?,
+        );
+
+        Ok(task_id)
+    }
+
+    pub async fn get_task_by_name(
+        &mut self,
+        input_collection_id: chroma_types::CollectionUuid,
+        task_name: String,
+    ) -> Result<chroma_types::Task, GetTaskError> {
+        let req = chroma_proto::GetTaskByNameRequest {
+            input_collection_id: input_collection_id.to_string(),
+            task_name: task_name.clone(),
+        };
+
+        let response = match self.client.get_task_by_name(req).await {
+            Ok(resp) => resp,
+            Err(status) => {
+                if status.code() == tonic::Code::NotFound {
+                    return Err(GetTaskError::NotFound);
+                }
+                return Err(GetTaskError::FailedToGetTask(status));
+            }
+        };
+        let response = response.into_inner();
+
+        // If response has no task_id, task was not found
+        if response.task_id.is_none() {
+            return Err(GetTaskError::NotFound);
+        }
+
+        // Parse the response and construct Task
+        let task_id_str = response.task_id.unwrap();
+        let task_id = chroma_types::TaskUuid(uuid::Uuid::parse_str(&task_id_str).map_err(|e| {
+            tracing::error!(
+                task_id = %task_id_str,
+                error = %e,
+                "Server returned invalid task_id UUID"
+            );
+            GetTaskError::ServerReturnedInvalidData
+        })?);
+
+        let operator_id = response.operator_name.ok_or_else(|| {
+            GetTaskError::FailedToGetTask(tonic::Status::internal(
+                "Missing operator_name in response",
+            ))
+        })?;
+
+        let input_collection_id_str = response
+            .input_collection_id
+            .unwrap_or_else(|| input_collection_id.to_string());
+        let parsed_input_collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&input_collection_id_str).map_err(|e| {
+                tracing::error!(
+                    input_collection_id = %input_collection_id_str,
+                    error = %e,
+                    "Server returned invalid input_collection_id UUID"
+                );
+                GetTaskError::ServerReturnedInvalidData
+            })?,
+        );
+
+        // Convert params from Struct to JSON string
+        let params_str = response.params.map(|s| {
+            let json_value = prost_struct_to_json(s);
+            serde_json::to_string(&json_value).unwrap_or_else(|_| "{}".to_string())
+        });
+
+        Ok(chroma_types::Task {
+            id: task_id,
+            name: response.name.unwrap_or(task_name),
+            operator_id,
+            input_collection_id: parsed_input_collection_id,
+            output_collection_name: response.output_collection_name.unwrap_or_default(),
+            output_collection_id: Some(response.output_collection_id.unwrap_or_default()),
+            params: params_str,
+            tenant_id: response.tenant_id.unwrap_or_default(),
+            database_id: response.database_id.unwrap_or_default(),
+            last_run: None,
+            next_run: None,
+            completion_offset: response.completion_offset.unwrap_or(0) as u64,
+            min_records_for_task: response.min_records_for_task.unwrap_or(100),
+            is_deleted: false,
+            created_at: std::time::SystemTime::now(),
+            updated_at: std::time::SystemTime::now(),
+        })
+    }
+
+    pub async fn soft_delete_task(
+        &mut self,
+        _task_id: chroma_types::TaskUuid,
+    ) -> Result<(), DeleteTaskError> {
+        // Note: The gRPC DeleteTask API requires tenant_id, database_id, and task_name.
+        // We cannot implement this method with just a task_id.
+        // Callers should use delete_task_by_name() instead, which has all required parameters.
+        Err(DeleteTaskError::FailedToDeleteTask(
+            tonic::Status::unimplemented(
+                "soft_delete_task by ID not supported - use delete_task_by_name instead",
+            ),
+        ))
+    }
+
+    pub async fn delete_task_by_name(
+        &mut self,
+        input_collection_id: chroma_types::CollectionUuid,
+        task_name: String,
+        delete_output: bool,
+    ) -> Result<(), DeleteTaskError> {
+        let req = chroma_proto::DeleteTaskRequest {
+            input_collection_id: input_collection_id.to_string(),
+            task_name,
+            delete_output,
+        };
+
+        match self.client.delete_task(req).await {
+            Ok(_) => Ok(()),
+            Err(status) => {
+                if status.code() == tonic::Code::NotFound {
+                    Err(DeleteTaskError::NotFound)
+                } else {
+                    Err(DeleteTaskError::FailedToDeleteTask(status))
+                }
+            }
+        }
+    }
+
+    async fn peek_schedule_by_collection_id(
+        &mut self,
+        collection_ids: &[CollectionUuid],
+    ) -> Result<Vec<ScheduleEntry>, PeekScheduleError> {
+        let req = chroma_proto::PeekScheduleByCollectionIdRequest {
+            collection_id: collection_ids.iter().map(|id| id.0.to_string()).collect(),
+        };
+        let res = self
+            .client
+            .peek_schedule_by_collection_id(req)
+            .await
+            .map_err(|e| TonicError(e).boxed())?;
+        res.into_inner()
+            .schedule
+            .into_iter()
+            .map(|entry| entry.try_into())
+            .collect::<Result<Vec<ScheduleEntry>, ScheduleEntryConversionError>>()
+            .map_err(PeekScheduleError::Conversion)
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum PeekScheduleError {
+    #[error("Failed to peek schedule")]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Failed to convert schedule entry")]
+    Conversion(#[from] ScheduleEntryConversionError),
+}
+
+impl ChromaError for PeekScheduleError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            PeekScheduleError::Internal(e) => e.code(),
+            PeekScheduleError::Conversion(_) => ErrorCodes::Internal,
+        }
+    }
 }
 
 #[derive(Error, Debug)]
@@ -1567,6 +1896,8 @@ pub enum FlushCompactionError {
     CollectionNotFound,
     #[error("Segment not found in sysdb")]
     SegmentNotFound,
+    #[error("Failed to serialize schema")]
+    Schema(#[from] SchemaError),
 }
 
 impl ChromaError for FlushCompactionError {
@@ -1583,6 +1914,7 @@ impl ChromaError for FlushCompactionError {
             FlushCompactionError::FlushCompactionResponseConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::CollectionNotFound => ErrorCodes::Internal,
             FlushCompactionError::SegmentNotFound => ErrorCodes::Internal,
+            FlushCompactionError::Schema(e) => e.code(),
         }
     }
 
@@ -1615,6 +1947,166 @@ impl ChromaError for DeleteCollectionVersionError {
     fn code(&self) -> ErrorCodes {
         match self {
             DeleteCollectionVersionError::FailedToDeleteVersion(e) => e.code().into(),
+        }
+    }
+}
+
+////////////////////////// Task Operations //////////////////////////
+
+impl SysDb {
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_task(
+        &mut self,
+        name: String,
+        operator_name: String,
+        input_collection_id: chroma_types::CollectionUuid,
+        output_collection_name: String,
+        params: serde_json::Value,
+        tenant_name: String,
+        database_name: String,
+        min_records_for_task: u64,
+    ) -> Result<chroma_types::TaskUuid, CreateTaskError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.create_task(
+                    name,
+                    operator_name,
+                    input_collection_id,
+                    output_collection_name,
+                    params,
+                    tenant_name,
+                    database_name,
+                    min_records_for_task,
+                )
+                .await
+            }
+            SysDb::Sqlite(sqlite) => {
+                sqlite
+                    .create_task(
+                        name,
+                        operator_name,
+                        input_collection_id,
+                        output_collection_name,
+                        params,
+                        tenant_name,
+                        database_name,
+                        min_records_for_task,
+                    )
+                    .await
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
+    pub async fn get_task_by_name(
+        &mut self,
+        input_collection_id: chroma_types::CollectionUuid,
+        task_name: String,
+    ) -> Result<chroma_types::Task, GetTaskError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_task_by_name(input_collection_id, task_name).await,
+            SysDb::Sqlite(sqlite) => {
+                sqlite
+                    .get_task_by_name(input_collection_id, task_name)
+                    .await
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
+    pub async fn soft_delete_task(
+        &mut self,
+        task_id: chroma_types::TaskUuid,
+    ) -> Result<(), DeleteTaskError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.soft_delete_task(task_id).await,
+            SysDb::Sqlite(sqlite) => sqlite.soft_delete_task(task_id).await,
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
+    pub async fn delete_task_by_name(
+        &mut self,
+        input_collection_id: chroma_types::CollectionUuid,
+        task_name: String,
+        delete_output: bool,
+    ) -> Result<(), DeleteTaskError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.delete_task_by_name(input_collection_id, task_name, delete_output)
+                    .await
+            }
+            SysDb::Sqlite(sqlite) => {
+                sqlite
+                    .delete_task_by_name(input_collection_id, task_name, delete_output)
+                    .await
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum CreateTaskError {
+    #[error("Task already exists")]
+    AlreadyExists,
+    #[error("Failed to create task: {0}")]
+    FailedToCreateTask(#[from] tonic::Status),
+    #[error("Server returned invalid data - task was created but response is corrupt")]
+    ServerReturnedInvalidData,
+}
+
+impl ChromaError for CreateTaskError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CreateTaskError::AlreadyExists => ErrorCodes::AlreadyExists,
+            CreateTaskError::FailedToCreateTask(e) => e.code().into(),
+            CreateTaskError::ServerReturnedInvalidData => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum GetTaskError {
+    #[error("Task not found")]
+    NotFound,
+    #[error("Failed to get task: {0}")]
+    FailedToGetTask(tonic::Status),
+    #[error("Server returned invalid data")]
+    ServerReturnedInvalidData,
+}
+
+impl ChromaError for GetTaskError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetTaskError::NotFound => ErrorCodes::NotFound,
+            GetTaskError::FailedToGetTask(e) => e.code().into(),
+            GetTaskError::ServerReturnedInvalidData => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum DeleteTaskError {
+    #[error("Task not found")]
+    NotFound,
+    #[error("Failed to delete task: {0}")]
+    FailedToDeleteTask(#[from] tonic::Status),
+}
+
+impl ChromaError for DeleteTaskError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            DeleteTaskError::NotFound => ErrorCodes::NotFound,
+            DeleteTaskError::FailedToDeleteTask(e) => e.code().into(),
         }
     }
 }

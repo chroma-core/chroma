@@ -1,6 +1,7 @@
 use crate::{
     operator::{Rank, RankExpr},
-    CollectionMetadataUpdate, Metadata, MetadataValue, UpdateMetadata, UpdateMetadataValue,
+    CollectionMetadataUpdate, InternalSchema, Metadata, MetadataValue, UpdateMetadata,
+    UpdateMetadataValue, DOCUMENT_KEY, EMBEDDING_KEY,
 };
 use regex::Regex;
 use std::collections::HashMap;
@@ -178,6 +179,79 @@ fn validate_rank_expr(expr: &RankExpr) -> Result<(), ValidationError> {
     Ok(())
 }
 
+/// Validate schema
+pub fn validate_schema(schema: &InternalSchema) -> Result<(), ValidationError> {
+    let mut sparse_index_keys = Vec::new();
+    if schema
+        .defaults
+        .float_list
+        .as_ref()
+        .is_some_and(|vt| vt.vector_index.as_ref().is_some_and(|it| it.enabled))
+    {
+        return Err(ValidationError::new("schema").with_message("Vector index cannot be enabled by default. It can only be enabled on #embedding field.".into()));
+    }
+    if schema
+        .defaults
+        .sparse_vector
+        .as_ref()
+        .is_some_and(|vt| vt.sparse_vector_index.as_ref().is_some_and(|it| it.enabled))
+    {
+        return Err(ValidationError::new("schema").with_message("Sparse vector index cannot be enabled by default. Please enable sparse vector index on specific keys. At most one sparse vector index is allowed for the collection.".into()));
+    }
+    if schema
+        .defaults
+        .string
+        .as_ref()
+        .is_some_and(|vt| vt.fts_index.as_ref().is_some_and(|it| it.enabled))
+    {
+        return Err(ValidationError::new("schema").with_message("Full text search / regular expression index cannot be enabled by default. It can only be enabled on #document field.".into()));
+    }
+    for (key, config) in &schema.keys {
+        if let Some(vit) = config
+            .float_list
+            .as_ref()
+            .and_then(|vt| vt.vector_index.as_ref())
+        {
+            if vit.enabled && key != EMBEDDING_KEY {
+                return Err(ValidationError::new("schema").with_message(
+                    format!("Vector index can only be enabled on #embedding field: {key}").into(),
+                ));
+            }
+            if vit
+                .config
+                .source_key
+                .as_ref()
+                .is_some_and(|key| key != DOCUMENT_KEY)
+            {
+                return Err(ValidationError::new("schema")
+                    .with_message("Vector index can only source from #document".into()));
+            }
+        }
+        if config
+            .sparse_vector
+            .as_ref()
+            .is_some_and(|vt| vt.sparse_vector_index.as_ref().is_some_and(|it| it.enabled))
+        {
+            sparse_index_keys.push(key);
+            if sparse_index_keys.len() > 1 {
+                return Err(ValidationError::new("schema").with_message(
+                    format!("At most one sparse vector index is allowed for the collection: {sparse_index_keys:?}")
+                        .into(),
+                ));
+            }
+        }
+        if config
+            .string
+            .as_ref()
+            .is_some_and(|vt| vt.fts_index.as_ref().is_some_and(|it| it.enabled))
+            && key != DOCUMENT_KEY
+        {
+            return Err(ValidationError::new("schema").with_message(format!("Full text search / regular expression index can only be enabled on #document field: {key}").into()));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,6 +265,11 @@ mod tests {
         let sparse = SparseVector::new(vec![1, 2, 3], vec![0.1, 0.2, 0.3]);
         metadata.insert("embedding".to_string(), MetadataValue::SparseVector(sparse));
         assert!(validate_metadata(&metadata).is_ok());
+
+        // Invalid key starting with #
+        let mut metadata = Metadata::new();
+        metadata.insert("#embedding".to_string(), MetadataValue::Int(42));
+        assert!(validate_metadata(&metadata).is_err());
 
         // Invalid key starting with #
         let mut metadata = Metadata::new();

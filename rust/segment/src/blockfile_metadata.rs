@@ -20,6 +20,7 @@ use chroma_index::sparse::types::DEFAULT_BLOCK_SIZE;
 use chroma_index::sparse::writer::SparseFlusher;
 use chroma_index::sparse::writer::SparseWriter;
 use chroma_types::DatabaseUuid;
+use chroma_types::InternalSchema;
 use chroma_types::SegmentType;
 use chroma_types::BOOL_METADATA;
 use chroma_types::F32_METADATA;
@@ -575,8 +576,11 @@ impl<'me> MetadataSegmentWriter<'me> {
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized: &MaterializeLogsResult,
-    ) -> Result<(), ApplyMaterializedLogError> {
+        schema: Option<InternalSchema>,
+    ) -> Result<Option<InternalSchema>, ApplyMaterializedLogError> {
         let mut count = 0u64;
+        let mut schema = schema;
+        let mut schema_modified = false;
 
         let mut full_text_writer_batch = vec![];
         for record in materialized {
@@ -634,57 +638,124 @@ impl<'me> MetadataSegmentWriter<'me> {
                 .await
                 .map_err(ApplyMaterializedLogError::Materialization)?;
             let segment_offset_id = record.get_offset_id();
+
             match record.get_operation() {
                 MaterializedLogOperation::AddNew => {
                     // We can ignore record.0.metadata_to_be_deleted
                     // for fresh adds. TODO on whether to propagate error.
                     if let Some(metadata) = record.get_metadata_to_be_merged() {
+                        for (key, value) in metadata.iter() {
+                            if let Some(schema_mut) = schema.as_mut() {
+                                if schema_mut.ensure_key_from_metadata(key, value.value_type()) {
+                                    schema_modified = true;
+                                }
+                                if !schema_mut.is_metadata_type_index_enabled(key, value.value_type())? {
+                                    continue;
+                                }
+                            }
+                            match self.set_metadata(key, value, segment_offset_id).await {
+                                Ok(()) => {}
+                                Err(_) => {
+                                    return Err(ApplyMaterializedLogError::BlockfileSet);
+                                }
+                            }
+                        }
+                    }
+                }
+                MaterializedLogOperation::DeleteExisting => match record.get_data_record() {
+                    Some(data_record) => {
+                        if let Some(metadata) = &data_record.metadata {
                             for (key, value) in metadata.iter() {
-                                match self.set_metadata(key, value, segment_offset_id).await {
+                                if let Some(ref schema) = schema {
+                                    if !schema.is_metadata_type_index_enabled(key, value.value_type())? {
+                                        continue;
+                                    }
+                                }
+                                match self.delete_metadata(key, value, segment_offset_id).await
+                                {
+                                    Ok(()) => {}
+                                    Err(_) => {
+                                        return Err(
+                                            ApplyMaterializedLogError::BlockfileDelete,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    None => panic!("Invariant violation. Data record should be set by materializer in case of Deletes")
+                },
+                MaterializedLogOperation::UpdateExisting => {
+                    let metadata_delta = record.compute_metadata_delta();
+
+                    // Metadata updates.
+                    for (update_key, (old_value, new_value)) in metadata_delta.metadata_to_update {
+                        if let Some(schema_mut) = schema.as_mut() {
+                            if schema_mut.ensure_key_from_metadata(update_key, new_value.value_type()) {
+                                schema_modified = true;
+                            }
+                            // theres basically 4 cases:
+                            // 1.old value & new value are not indexed -> noop
+                            // 2.old value is indexed & new value is not indexed -> delete old value
+                            // 3.old value is not indexed & new value is indexed -> insert new value
+                            // 4.old value is indexed & new value is indexed -> update old value
+                            let old_is_indexed = schema_mut.is_metadata_type_index_enabled(update_key, old_value.value_type())?;
+                            let new_is_indexed = schema_mut.is_metadata_type_index_enabled(update_key, new_value.value_type())?;
+                            if !old_is_indexed && !new_is_indexed {
+                                continue;
+                            }
+                            else if old_is_indexed && !new_is_indexed {
+                                match self.delete_metadata(update_key, old_value, segment_offset_id).await {
+                                    Ok(()) => {}
+                                    Err(_) => {
+                                        return Err(ApplyMaterializedLogError::BlockfileDelete);
+                                    }
+                                }
+                            }
+                            else if !old_is_indexed && new_is_indexed {
+                                match self.set_metadata(update_key, new_value, segment_offset_id).await {
                                     Ok(()) => {}
                                     Err(_) => {
                                         return Err(ApplyMaterializedLogError::BlockfileSet);
                                     }
                                 }
                             }
-                        }
-
-                }
-                MaterializedLogOperation::DeleteExisting => match record.get_data_record() {
-                    Some(data_record) => {
-                        if let Some(metadata) = &data_record.metadata {
-                                for (key, value) in metadata.iter() {
-                                    match self.delete_metadata(key, value, segment_offset_id).await
-                                    {
-                                        Ok(()) => {}
-                                        Err(_) => {
-                                            return Err(
-                                                ApplyMaterializedLogError::BlockfileDelete,
-                                            );
-                                        }
+                            else if old_is_indexed && new_is_indexed {
+                                match self.update_metadata(update_key, old_value, new_value, segment_offset_id).await {
+                                    Ok(()) => {}
+                                    Err(_) => {
+                                        return Err(ApplyMaterializedLogError::BlockfileUpdate);
                                     }
                                 }
                             }
-
-                    }
-                    None => panic!("Invariant violation. Data record should be set by materializer in case of Deletes")
-                },
-                MaterializedLogOperation::UpdateExisting => {
-                    let metadata_delta = record.compute_metadata_delta();
-                    // Metadata updates.
-                    for (update_key, (old_value, new_value)) in metadata_delta.metadata_to_update {
-                        match self
-                            .update_metadata(update_key, old_value, new_value, segment_offset_id)
-                            .await
-                        {
-                            Ok(()) => {}
-                            Err(_) => {
-                                return Err(ApplyMaterializedLogError::BlockfileUpdate);
+                        } else {
+                            match self
+                                .update_metadata(
+                                    update_key,
+                                    old_value,
+                                    new_value,
+                                    segment_offset_id,
+                                )
+                                .await
+                            {
+                                Ok(()) => {}
+                                Err(_) => {
+                                    return Err(ApplyMaterializedLogError::BlockfileUpdate);
+                                }
                             }
                         }
                     }
+
                     // Metadata inserts.
                     for (insert_key, new_value) in metadata_delta.metadata_to_insert {
+                        if let Some(schema_mut) = schema.as_mut() {
+                            if schema_mut.ensure_key_from_metadata(insert_key, new_value.value_type()) {
+                                schema_modified = true;
+                            }
+                            if !schema_mut.is_metadata_type_index_enabled(insert_key, new_value.value_type())? {
+                                continue;
+                            }
+                        }
                         match self
                             .set_metadata(insert_key, new_value, segment_offset_id)
                             .await
@@ -695,8 +766,14 @@ impl<'me> MetadataSegmentWriter<'me> {
                             }
                         }
                     }
+
                     // Metadata deletes.
                     for (delete_key, old_value) in metadata_delta.metadata_to_delete {
+                        if let Some(ref schema) = schema {
+                            if !schema.is_metadata_type_index_enabled(delete_key, old_value.value_type())? {
+                                continue;
+                            }
+                        }
                         match self
                             .delete_metadata(delete_key, old_value, segment_offset_id)
                             .await
@@ -714,40 +791,53 @@ impl<'me> MetadataSegmentWriter<'me> {
                     match record.get_data_record() {
                         Some(data_record) => {
                             if let Some(metadata) = &data_record.metadata {
-                                    for (key, value) in metadata.iter() {
-                                        match self.delete_metadata(key, value, segment_offset_id).await
-                                        {
-                                            Ok(()) => {}
-                                            Err(_) => {
-                                                return Err(
-                                                    ApplyMaterializedLogError::BlockfileDelete,
-                                                );
-                                            }
+                                for (key, value) in metadata.iter() {
+                                    if let Some(ref schema) = schema {
+                                        if !schema.is_metadata_type_index_enabled(key, value.value_type())? {
+                                            continue;
+                                        }
+                                    }
+                                    match self.delete_metadata(key, value, segment_offset_id).await
+                                    {
+                                        Ok(()) => {}
+                                        Err(_) => {
+                                            return Err(
+                                                ApplyMaterializedLogError::BlockfileDelete,
+                                            );
                                         }
                                     }
                                 }
-
+                            }
                         },
                         None => panic!("Invariant violation. Data record should be set by materializer in case of Deletes")
                     };
+
                     // Add new.
                     if let Some(metadata) = record.get_metadata_to_be_merged() {
-                            for (key, value) in metadata.iter() {
-                                match self.set_metadata(key, value, segment_offset_id).await {
-                                    Ok(()) => {}
-                                    Err(_) => {
-                                        return Err(ApplyMaterializedLogError::BlockfileSet);
-                                    }
+                        for (key, value) in metadata.iter() {
+                            if let Some(schema_mut) = schema.as_mut() {
+                                if schema_mut.ensure_key_from_metadata(key, value.value_type()) {
+                                    schema_modified = true;
+                                }
+                                if !schema_mut.is_metadata_type_index_enabled(key, value.value_type())? {
+                                    continue;
+                                }
+                            }
+                            match self.set_metadata(key, value, segment_offset_id).await {
+                                Ok(()) => {}
+                                Err(_) => {
+                                    return Err(ApplyMaterializedLogError::BlockfileSet);
                                 }
                             }
                         }
-
+                    }
                 },
                 MaterializedLogOperation::Initial => panic!("Not expected mat records in the initial state")
             }
         }
         tracing::info!("Applied {} records to metadata segment", count,);
-        Ok(())
+        // return the schema only if it was modified (so will not affect legacy paths)
+        Ok(if schema_modified { schema } else { None })
     }
 
     pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
@@ -1276,7 +1366,7 @@ mod test {
                 .await
                 .expect("Log materialization failed");
             metadata_writer
-                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records, None)
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
@@ -1353,7 +1443,7 @@ mod test {
             .await
             .expect("Log materialization failed");
         metadata_writer
-            .apply_materialized_log_chunk(&some_reader, &mat_records)
+            .apply_materialized_log_chunk(&some_reader, &mat_records, None)
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
@@ -1443,7 +1533,7 @@ mod test {
             .await
             .expect("Log materialization failed");
         metadata_writer
-            .apply_materialized_log_chunk(&some_reader, &mat_records)
+            .apply_materialized_log_chunk(&some_reader, &mat_records, None)
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
@@ -1598,7 +1688,7 @@ mod test {
                 .await
                 .expect("Log materialization failed");
             metadata_writer
-                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records, None)
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
@@ -1682,7 +1772,7 @@ mod test {
             .await
             .expect("Log materialization failed");
         metadata_writer
-            .apply_materialized_log_chunk(&some_reader, &mat_records)
+            .apply_materialized_log_chunk(&some_reader, &mat_records, None)
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
@@ -1861,7 +1951,7 @@ mod test {
                 .await
                 .expect("Log materialization failed");
             metadata_writer
-                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records, None)
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
@@ -1927,7 +2017,7 @@ mod test {
             .await
             .expect("Log materialization failed");
         metadata_writer
-            .apply_materialized_log_chunk(&some_reader, &mat_records)
+            .apply_materialized_log_chunk(&some_reader, &mat_records, None)
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
@@ -2093,7 +2183,7 @@ mod test {
                 .await
                 .expect("Log materialization failed");
             metadata_writer
-                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records, None)
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
@@ -2157,7 +2247,7 @@ mod test {
             .await
             .expect("Log materialization failed");
         metadata_writer
-            .apply_materialized_log_chunk(&some_reader, &mat_records)
+            .apply_materialized_log_chunk(&some_reader, &mat_records, None)
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
@@ -2335,7 +2425,7 @@ mod test {
                 .await
                 .expect("Log materialization failed");
             metadata_writer
-                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records, None)
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
@@ -2621,7 +2711,7 @@ mod test {
                 .await
                 .expect("Error applying materialized log chunk");
             metadata_writer
-                .apply_materialized_log_chunk(&record_segment_reader, &materialized_logs)
+                .apply_materialized_log_chunk(&record_segment_reader, &materialized_logs, None)
                 .await
                 .expect("Error applying materialized log chunk");
 

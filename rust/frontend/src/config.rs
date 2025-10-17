@@ -69,6 +69,10 @@ pub struct FrontendConfig {
     pub tenants_to_migrate_immediately: Vec<String>,
     #[serde(default = "Default::default")]
     pub tenants_to_migrate_immediately_threshold: Option<String>,
+    #[serde(default = "default_enable_schema")]
+    pub enable_schema: bool,
+    #[serde(default = "default_min_records_for_task")]
+    pub min_records_for_task: u64,
 }
 
 impl FrontendConfig {
@@ -87,6 +91,8 @@ impl FrontendConfig {
             default_knn_index: default_default_knn_index(),
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
+            enable_schema: default_enable_schema(),
+            min_records_for_task: default_min_records_for_task(),
         }
     }
 }
@@ -133,6 +139,14 @@ fn default_max_payload_size_bytes() -> usize {
 
 fn default_enable_span_indexing() -> bool {
     false
+}
+
+fn default_enable_schema() -> bool {
+    false
+}
+
+pub fn default_min_records_for_task() -> u64 {
+    100
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -248,6 +262,7 @@ mod tests {
             CacheConfig::Nop => {}
             _ => {}
         }
+        assert!(config.frontend.enable_schema);
     }
 
     #[test]

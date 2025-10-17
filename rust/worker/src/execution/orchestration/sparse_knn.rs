@@ -209,7 +209,29 @@ impl Orchestrator for SparseKnnOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        if self.use_bm25 {
+        let use_bm25 = self.use_bm25
+            || self
+                .collection_and_segments
+                .collection
+                .schema
+                .as_ref()
+                .is_some_and(|schema| {
+                    if let Some(flag) = schema.keys.get(&self.key).and_then(|uvt| {
+                        uvt.sparse_vector.as_ref().and_then(|vt| {
+                            vt.sparse_vector_index
+                                .as_ref()
+                                .and_then(|it| it.config.bm25)
+                        })
+                    }) {
+                        return flag;
+                    }
+                    schema.defaults.sparse_vector.as_ref().is_some_and(|vt| {
+                        vt.sparse_vector_index
+                            .as_ref()
+                            .is_some_and(|it| it.config.bm25.unwrap_or_default())
+                    })
+                });
+        if use_bm25 {
             let idf_task = wrap(
                 Box::new(Idf {
                     query: self.query.clone(),

@@ -1,1209 +1,2060 @@
-import pytest
-from typing import cast, Any, Dict
 from chromadb.api.types import (
-    Schema, FtsIndexConfig, VectorIndexConfig, SparseVectorIndexConfig,
-    StringInvertedIndexConfig, HnswIndexConfig, Documents, InternalSchema,
-    InternalFtsIndex, InternalVectorIndex, InternalStringInvertedIndex
+    Schema,
+    SparseVectorIndexConfig,
+    SparseEmbeddingFunction,
+    SparseVector,
+    StringInvertedIndexConfig,
+    IntInvertedIndexConfig,
+    FloatInvertedIndexConfig,
+    BoolInvertedIndexConfig,
+    VectorIndexConfig,
+    HnswIndexConfig,
+    SpannIndexConfig,
+    FtsIndexConfig,
+    EmbeddingFunction,
+    Embeddings,
 )
-from chromadb.utils.embedding_functions import EmbeddingFunction
+from typing import List, Dict, Any
+import pytest
 
 
-class TestSchema:
-    """Test cases for the Schema builder class."""
+class MockSparseEmbeddingFunction(SparseEmbeddingFunction[List[str]]):
+    """Mock sparse embedding function for testing."""
 
-    def test_create_index_specific_config_global(self) -> None:
-        """Test creating a specific index type globally."""
+    def __init__(self, name: str = "mock_sparse"):
+        self._name = name
+
+    def __call__(self, input: List[str]) -> List[SparseVector]:
+        return [{"indices": [0, 1], "values": [1.0, 1.0]} for _ in input]
+
+    @staticmethod
+    def name() -> str:
+        return "mock_sparse"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {"name": self._name}
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "MockSparseEmbeddingFunction":
+        return MockSparseEmbeddingFunction(config.get("name", "mock_sparse"))
+
+
+class MockEmbeddingFunction(EmbeddingFunction[List[str]]):
+    """Mock embedding function for testing."""
+
+    def __init__(self, model_name: str = "mock_model"):
+        self._model_name = model_name
+
+    def __call__(self, input: List[str]) -> Embeddings:
+        import numpy as np
+        # Return mock embeddings (3-dimensional)
+        return [np.array([1.0, 2.0, 3.0], dtype=np.float32) for _ in input]
+
+    @staticmethod
+    def name() -> str:
+        return "mock_embedding"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {"model_name": self._model_name}
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "MockEmbeddingFunction":
+        return MockEmbeddingFunction(config.get("model_name", "mock_model"))
+
+    def default_space(self) -> str:  # type: ignore
+        return "cosine"
+
+    def supported_spaces(self) -> List[str]:  # type: ignore
+        return ["cosine", "l2", "ip"]
+
+
+class TestNewSchema:
+    """Test cases for the new Schema class."""
+
+    def test_default_schema_initialization(self) -> None:
+        """Test that Schema() initializes with correct defaults."""
+        schema = Schema()
+
+        # Verify defaults are populated
+        assert schema.defaults is not None
+
+        # Verify string value type defaults
+        assert schema.defaults.string is not None
+        assert schema.defaults.string.fts_index is not None
+        assert schema.defaults.string.fts_index.enabled is False  # Disabled by default
+        assert schema.defaults.string.string_inverted_index is not None
+        assert schema.defaults.string.string_inverted_index.enabled is True  # Enabled by default
+
+        # Verify float_list value type defaults
+        assert schema.defaults.float_list is not None
+        assert schema.defaults.float_list.vector_index is not None
+        assert schema.defaults.float_list.vector_index.enabled is False  # Disabled by default
+
+        # Verify sparse_vector value type defaults
+        assert schema.defaults.sparse_vector is not None
+        assert schema.defaults.sparse_vector.sparse_vector_index is not None
+        assert schema.defaults.sparse_vector.sparse_vector_index.enabled is False  # Disabled by default
+
+        # Verify int_value type defaults
+        assert schema.defaults.int_value is not None
+        assert schema.defaults.int_value.int_inverted_index is not None
+        assert schema.defaults.int_value.int_inverted_index.enabled is True  # Enabled by default
+
+        # Verify float_value type defaults
+        assert schema.defaults.float_value is not None
+        assert schema.defaults.float_value.float_inverted_index is not None
+        assert schema.defaults.float_value.float_inverted_index.enabled is True  # Enabled by default
+
+        # Verify boolean type defaults
+        assert schema.defaults.boolean is not None
+        assert schema.defaults.boolean.bool_inverted_index is not None
+        assert schema.defaults.boolean.bool_inverted_index.enabled is True  # Enabled by default
+
+        # Verify keys are populated
+        assert schema.keys is not None
+        assert len(schema.keys) == 2  # Should have #document and #embedding
+
+        # Verify #document key override (FTS enabled, string inverted disabled)
+        assert "#document" in schema.keys
+        assert schema.keys["#document"].string is not None
+        assert schema.keys["#document"].string.fts_index is not None
+        assert schema.keys["#document"].string.fts_index.enabled is True
+        assert schema.keys["#document"].string.string_inverted_index is not None
+        assert schema.keys["#document"].string.string_inverted_index.enabled is False
+
+        # Verify #embedding key override (vector index enabled)
+        assert "#embedding" in schema.keys
+        assert schema.keys["#embedding"].float_list is not None
+        assert schema.keys["#embedding"].float_list.vector_index is not None
+        assert schema.keys["#embedding"].float_list.vector_index.enabled is True
+        assert schema.keys["#embedding"].float_list.vector_index.config.source_key == "#document"
+
+    def test_create_sparse_vector_index_on_key(self) -> None:
+        """Test creating a sparse vector index on a specific key with default config."""
+        schema = Schema()
+
+        # Create sparse vector index on a custom key with default config
+        config = SparseVectorIndexConfig()
+        result = schema.create_index(config=config, key="custom_sparse_key")
+
+        # Should return self for chaining
+        assert result is schema
+
+        # Verify the key override was created
+        assert "custom_sparse_key" in schema.keys
+
+        # Verify sparse_vector type was set for this key
+        assert schema.keys["custom_sparse_key"].sparse_vector is not None
+        assert schema.keys["custom_sparse_key"].sparse_vector.sparse_vector_index is not None
+
+        # Verify it's enabled and has the correct config
+        assert schema.keys["custom_sparse_key"].sparse_vector.sparse_vector_index.enabled is True
+        assert schema.keys["custom_sparse_key"].sparse_vector.sparse_vector_index.config == config
+
+        # Verify other value types for this key are None (not initialized)
+        assert schema.keys["custom_sparse_key"].string is None
+        assert schema.keys["custom_sparse_key"].float_list is None
+        assert schema.keys["custom_sparse_key"].int_value is None
+        assert schema.keys["custom_sparse_key"].float_value is None
+        assert schema.keys["custom_sparse_key"].boolean is None
+
+        # Verify defaults were not affected
+        assert schema.defaults.sparse_vector is not None
+        assert schema.defaults.sparse_vector.sparse_vector_index is not None
+        assert schema.defaults.sparse_vector.sparse_vector_index.enabled is False  # Still disabled by default
+
+    def test_create_sparse_vector_index_with_custom_config(self) -> None:
+        """Test creating a sparse vector index with custom config including embedding function."""
+        schema = Schema()
+
+        # Create custom sparse vector config with embedding function and source key
+        embedding_func = MockSparseEmbeddingFunction(name="custom_sparse_ef")
+        config = SparseVectorIndexConfig(
+            embedding_function=embedding_func,
+            source_key="custom_document_field"
+        )
+
+        # Create sparse vector index on a custom key
+        result = schema.create_index(config=config, key="sparse_embeddings")
+
+        # Should return self for chaining
+        assert result is schema
+
+        # Verify the key override was created
+        assert "sparse_embeddings" in schema.keys
+        assert schema.keys["sparse_embeddings"].sparse_vector is not None
+        assert schema.keys["sparse_embeddings"].sparse_vector.sparse_vector_index is not None
+
+        # Verify it's enabled
+        sparse_index = schema.keys["sparse_embeddings"].sparse_vector.sparse_vector_index
+        assert sparse_index.enabled is True
+
+        # Verify the config has our custom settings
+        assert sparse_index.config.embedding_function == embedding_func
+        assert sparse_index.config.source_key == "custom_document_field"
+
+        # Verify the embedding function is the same instance
+        assert sparse_index.config.embedding_function.name() == "mock_sparse"
+        assert sparse_index.config.embedding_function.get_config() == {"name": "custom_sparse_ef"}
+
+        # Verify global defaults were not overridden
+        assert schema.defaults.sparse_vector is not None
+        assert schema.defaults.sparse_vector.sparse_vector_index is not None
+        assert schema.defaults.sparse_vector.sparse_vector_index.enabled is False  # Still disabled by default
+        assert schema.defaults.sparse_vector.sparse_vector_index.config.embedding_function is None  # No custom embedding function
+
+    def test_delete_index_on_key(self) -> None:
+        """Test disabling string inverted index on a specific key."""
+        schema = Schema()
+
+        # Create a config and disable it on a specific key
+        config = StringInvertedIndexConfig()
+        result = schema.delete_index(config=config, key="custom_text_key")
+
+        # Should return self for chaining
+        assert result is schema
+
+        # Verify the key override was created
+        assert "custom_text_key" in schema.keys
+
+        # Verify string inverted index is disabled for this key
+        assert schema.keys["custom_text_key"].string is not None
+        assert schema.keys["custom_text_key"].string.string_inverted_index is not None
+        assert schema.keys["custom_text_key"].string.string_inverted_index.enabled is False
+
+        # Verify other keys are not affected - check #document key
+        assert "#document" in schema.keys
+        assert schema.keys["#document"].string is not None
+        assert schema.keys["#document"].string.string_inverted_index is not None
+        assert schema.keys["#document"].string.string_inverted_index.enabled is False  # Was disabled by default in #document
+
+        # Verify other keys are not affected - check #embedding key (shouldn't have string config)
+        assert "#embedding" in schema.keys
+        assert schema.keys["#embedding"].string is None  # #embedding doesn't have string configs
+
+        # Verify global defaults are not affected
+        assert schema.defaults.string is not None
+        assert schema.defaults.string.string_inverted_index is not None
+        assert schema.defaults.string.string_inverted_index.enabled is True  # Global default is still enabled
+
+    def test_chained_create_and_delete_operations(self) -> None:
+        """Test chaining create_index() and delete_index() operations together."""
+        schema = Schema()
+
+        # Chain multiple operations:
+        # 1. Create sparse vector index on "embeddings_key"
+        # 2. Disable string inverted index on "text_key_1"
+        # 3. Disable string inverted index on "text_key_2"
+        sparse_config = SparseVectorIndexConfig(source_key="raw_text")
+        string_config = StringInvertedIndexConfig()
+
+        result = (
+            schema
+            .create_index(config=sparse_config, key="embeddings_key")
+            .delete_index(config=string_config, key="text_key_1")
+            .delete_index(config=string_config, key="text_key_2")
+        )
+
+        # Should return self for chaining
+        assert result is schema
+
+        # Verify all three key overrides were created
+        assert "embeddings_key" in schema.keys
+        assert "text_key_1" in schema.keys
+        assert "text_key_2" in schema.keys
+
+        # Verify sparse vector index on "embeddings_key" is enabled
+        assert schema.keys["embeddings_key"].sparse_vector is not None
+        assert schema.keys["embeddings_key"].sparse_vector.sparse_vector_index is not None
+        assert schema.keys["embeddings_key"].sparse_vector.sparse_vector_index.enabled is True
+        assert schema.keys["embeddings_key"].sparse_vector.sparse_vector_index.config.source_key == "raw_text"
+
+        # Verify only sparse_vector is set for embeddings_key (other types are None)
+        assert schema.keys["embeddings_key"].string is None
+        assert schema.keys["embeddings_key"].float_list is None
+        assert schema.keys["embeddings_key"].int_value is None
+        assert schema.keys["embeddings_key"].float_value is None
+        assert schema.keys["embeddings_key"].boolean is None
+
+        # Verify string inverted index on "text_key_1" is disabled
+        assert schema.keys["text_key_1"].string is not None
+        assert schema.keys["text_key_1"].string.string_inverted_index is not None
+        assert schema.keys["text_key_1"].string.string_inverted_index.enabled is False
+
+        # Verify only string is set for text_key_1 (other types are None)
+        assert schema.keys["text_key_1"].sparse_vector is None
+        assert schema.keys["text_key_1"].float_list is None
+        assert schema.keys["text_key_1"].int_value is None
+        assert schema.keys["text_key_1"].float_value is None
+        assert schema.keys["text_key_1"].boolean is None
+
+        # Verify string inverted index on "text_key_2" is disabled
+        assert schema.keys["text_key_2"].string is not None
+        assert schema.keys["text_key_2"].string.string_inverted_index is not None
+        assert schema.keys["text_key_2"].string.string_inverted_index.enabled is False
+
+        # Verify only string is set for text_key_2 (other types are None)
+        assert schema.keys["text_key_2"].sparse_vector is None
+        assert schema.keys["text_key_2"].float_list is None
+        assert schema.keys["text_key_2"].int_value is None
+        assert schema.keys["text_key_2"].float_value is None
+        assert schema.keys["text_key_2"].boolean is None
+
+        # Verify global defaults are not affected
+        assert schema.defaults.sparse_vector is not None
+        assert schema.defaults.sparse_vector.sparse_vector_index is not None
+        assert schema.defaults.sparse_vector.sparse_vector_index.enabled is False  # Still disabled globally
+
+        assert schema.defaults.string is not None
+        assert schema.defaults.string.string_inverted_index is not None
+        assert schema.defaults.string.string_inverted_index.enabled is True  # Still enabled globally
+
+        # Verify pre-existing key overrides (#document, #embedding) are not affected
+        assert "#document" in schema.keys
+        assert "#embedding" in schema.keys
+        assert schema.keys["#document"].string is not None
+        assert schema.keys["#document"].string.fts_index is not None
+        assert schema.keys["#document"].string.fts_index.enabled is True  # Still enabled
+        assert schema.keys["#embedding"].float_list is not None
+        assert schema.keys["#embedding"].float_list.vector_index is not None
+        assert schema.keys["#embedding"].float_list.vector_index.enabled is True  # Still enabled
+
+    def test_vector_index_config_and_restrictions(self) -> None:
+        """Test vector index configuration and key restrictions."""
+        schema = Schema()
+        vector_config = VectorIndexConfig(space="cosine", source_key="custom_source")
+
+        # Test 1: CAN set vector config globally - applies to defaults and #embedding
+        result = schema.create_index(config=vector_config)
+        assert result is schema  # Should return self for chaining
+
+        # Verify the vector config was applied to defaults (enabled state preserved as False)
+        assert schema.defaults.float_list is not None
+        assert schema.defaults.float_list.vector_index is not None
+        assert schema.defaults.float_list.vector_index.enabled is False  # Still disabled in defaults
+        assert schema.defaults.float_list.vector_index.config.space == "cosine"
+        assert schema.defaults.float_list.vector_index.config.source_key == "custom_source"
+
+        # Verify the vector config was also applied to #embedding (enabled state preserved as True)
+        # Note: source_key should NOT be overridden on #embedding - it should stay as "#document"
+        assert schema.keys["#embedding"].float_list is not None
+        assert schema.keys["#embedding"].float_list.vector_index is not None
+        assert schema.keys["#embedding"].float_list.vector_index.enabled is True  # Still enabled on #embedding
+        assert schema.keys["#embedding"].float_list.vector_index.config.space == "cosine"
+        assert schema.keys["#embedding"].float_list.vector_index.config.source_key == "#document"  # Preserved, NOT overridden
+
+        # Test 2: Cannot create vector index on custom key
+        vector_config2 = VectorIndexConfig(space="l2")
+        with pytest.raises(ValueError, match="Vector index cannot be enabled on specific keys"):
+            schema.create_index(config=vector_config2, key="my_vectors")
+
+        # Test 3: Cannot create vector index on #document key (special key blocked globally)
+        with pytest.raises(ValueError, match="Cannot create index on special key '#document'"):
+            schema.create_index(config=vector_config2, key="#document")
+
+        # Test 4: Cannot create vector index on #embedding key (special key blocked globally)
+        vector_config3 = VectorIndexConfig(space="ip")
+        with pytest.raises(ValueError, match="Cannot create index on special key '#embedding'"):
+            schema.create_index(config=vector_config3, key="#embedding")
+
+    def test_vector_index_with_embedding_function_and_hnsw(self) -> None:
+        """Test setting embedding function and HNSW config for vector index."""
+        schema = Schema()
+
+        # Create a custom embedding function and HNSW config
+        mock_ef = MockEmbeddingFunction(model_name="custom_model_v2")
+        hnsw_config = HnswIndexConfig(
+            ef_construction=200,
+            max_neighbors=32,
+            ef_search=100
+        )
+
+        # Set vector config with embedding function, space, and HNSW config
+        vector_config = VectorIndexConfig(
+            embedding_function=mock_ef,
+            space="l2",  # Override default space from EF
+            hnsw=hnsw_config,
+            source_key="custom_document_field"
+        )
+
+        result = schema.create_index(config=vector_config)
+        assert result is schema
+
+        # Verify defaults: should have EF, space, HNSW, and source_key
+        assert schema.defaults.float_list is not None
+        defaults_vector = schema.defaults.float_list.vector_index
+        assert defaults_vector is not None
+        assert defaults_vector.enabled is False
+        assert defaults_vector.config.embedding_function is mock_ef
+        assert defaults_vector.config.embedding_function.name() == "mock_embedding"
+        assert defaults_vector.config.embedding_function.get_config() == {"model_name": "custom_model_v2"}
+        assert defaults_vector.config.space == "l2"
+        assert defaults_vector.config.hnsw is not None
+        assert defaults_vector.config.hnsw.ef_construction == 200
+        assert defaults_vector.config.hnsw.max_neighbors == 32
+        assert defaults_vector.config.hnsw.ef_search == 100
+        assert defaults_vector.config.source_key == "custom_document_field"
+
+        # Verify #embedding: should have EF, space, HNSW, but source_key is preserved as "#document"
+        assert schema.keys["#embedding"].float_list is not None
+        embedding_vector = schema.keys["#embedding"].float_list.vector_index
+        assert embedding_vector is not None
+        assert embedding_vector.enabled is True
+        assert embedding_vector.config.embedding_function is mock_ef
+        assert embedding_vector.config.space == "l2"
+        assert embedding_vector.config.hnsw is not None
+        assert embedding_vector.config.hnsw.ef_construction == 200
+        assert embedding_vector.config.source_key == "#document"  # Preserved, NOT overridden by user config
+
+    def test_fts_index_config_and_restrictions(self) -> None:
+        """Test FTS index configuration and key restrictions."""
         schema = Schema()
         fts_config = FtsIndexConfig()
 
+        # Test 1: CAN set FTS config globally - applies to defaults and #document
         result = schema.create_index(config=fts_config)
+        assert result is schema  # Should return self for chaining
 
-        # Should return self for chaining
-        assert result is schema
+        # Verify the FTS config was applied to defaults (enabled state preserved as False)
+        assert schema.defaults.string is not None
+        assert schema.defaults.string.fts_index is not None
+        assert schema.defaults.string.fts_index.enabled is False  # Still disabled in defaults
+        assert schema.defaults.string.fts_index.config == fts_config
 
-        # Should have FTS config in global configs
-        assert "FtsIndexConfig" in schema._global_configs
-        assert schema._global_configs["FtsIndexConfig"].config == fts_config
-        assert schema._global_configs["FtsIndexConfig"].enabled is True
+        # Verify the FTS config was also applied to #document (enabled state preserved as True)
+        assert schema.keys["#document"].string is not None
+        assert schema.keys["#document"].string.fts_index is not None
+        assert schema.keys["#document"].string.fts_index.enabled is True  # Still enabled on #document
+        assert schema.keys["#document"].string.fts_index.config == fts_config
 
-        # Should not have any key-specific configs
-        assert len(schema._index_configs) == 0
+        # Test 2: Cannot create FTS index on custom key
+        fts_config2 = FtsIndexConfig()
+        with pytest.raises(ValueError, match="FTS index cannot be enabled on specific keys"):
+            schema.create_index(config=fts_config2, key="custom_text_field")
 
-    def test_create_index_specific_config_key(self) -> None:
-        """Test creating a specific index type for a specific key."""
+        # Test 3: Cannot create FTS index on #embedding key (special key blocked globally)
+        with pytest.raises(ValueError, match="Cannot create index on special key '#embedding'"):
+            schema.create_index(config=fts_config2, key="#embedding")
+
+        # Test 4: Cannot create FTS index on #document key (special key blocked globally)
+        with pytest.raises(ValueError, match="Cannot create index on special key '#document'"):
+            schema.create_index(config=fts_config2, key="#document")
+
+    def test_special_keys_blocked_for_all_index_types(self) -> None:
+        """Test that #embedding and #document keys are blocked for all index types."""
         schema = Schema()
+
+        # Test with StringInvertedIndexConfig on #document
+        string_config = StringInvertedIndexConfig()
+        with pytest.raises(ValueError, match="Cannot create index on special key '#document'"):
+            schema.create_index(config=string_config, key="#document")
+
+        # Test with StringInvertedIndexConfig on #embedding
+        with pytest.raises(ValueError, match="Cannot create index on special key '#embedding'"):
+            schema.create_index(config=string_config, key="#embedding")
+
+        # Test with SparseVectorIndexConfig on #document
+        sparse_config = SparseVectorIndexConfig()
+        with pytest.raises(ValueError, match="Cannot create index on special key '#document'"):
+            schema.create_index(config=sparse_config, key="#document")
+
+        # Test with SparseVectorIndexConfig on #embedding
+        with pytest.raises(ValueError, match="Cannot create index on special key '#embedding'"):
+            schema.create_index(config=sparse_config, key="#embedding")
+
+    def test_cannot_enable_all_indexes_for_key(self) -> None:
+        """Test that enabling all indexes for a key is not allowed."""
+        schema = Schema()
+
+        # Try to enable all indexes for a custom key (config=None, key="my_key")
+        with pytest.raises(ValueError, match="Cannot enable all index types for key 'my_key'"):
+            schema.create_index(key="my_key")
+
+        # Try to disable all indexes for a custom key (config=None, key="my_key")
+        with pytest.raises(ValueError, match="Cannot disable all index types for key 'my_key'"):
+            schema.delete_index(key="my_key")
+
+    def test_cannot_delete_vector_or_fts_index(self) -> None:
+        """Test that deleting vector and FTS indexes is not allowed."""
+        schema = Schema()
+
+        # Try to delete vector index globally
+        vector_config = VectorIndexConfig()
+        with pytest.raises(ValueError, match="Deleting vector index is not currently supported"):
+            schema.delete_index(config=vector_config)
+
+        # Try to delete vector index on a custom key
+        with pytest.raises(ValueError, match="Deleting vector index is not currently supported"):
+            schema.delete_index(config=vector_config, key="my_vectors")
+
+        # Try to delete FTS index globally
         fts_config = FtsIndexConfig()
+        with pytest.raises(ValueError, match="Deleting FTS index is not currently supported"):
+            schema.delete_index(config=fts_config)
 
-        result = schema.create_index(config=fts_config, key="key1")
+        # Try to delete FTS index on a custom key
+        with pytest.raises(ValueError, match="Deleting FTS index is not currently supported"):
+            schema.delete_index(config=fts_config, key="my_text")
 
-        # Should return self for chaining
-        assert result is schema
-
-        # Should have FTS config for key1
-        assert "key1" in schema._index_configs
-        assert "FtsIndexConfig" in schema._index_configs["key1"]
-        assert schema._index_configs["key1"]["FtsIndexConfig"].config == fts_config
-        assert schema._index_configs["key1"]["FtsIndexConfig"].enabled is True
-
-        # Should not have any global configs
-        assert len(schema._global_configs) == 0
-
-    def test_create_index_all_types_key(self) -> None:
-        """Test creating all index types for a specific key."""
+    def test_disable_string_inverted_index_globally(self) -> None:
+        """Test disabling string inverted index globally."""
         schema = Schema()
 
-        result = schema.create_index(key="key1")
+        # Verify string inverted index is enabled by default in global defaults
+        assert schema.defaults.string is not None
+        assert schema.defaults.string.string_inverted_index is not None
+        assert schema.defaults.string.string_inverted_index.enabled is True
 
-        # Should return self for chaining
-        assert result is schema
+        # Disable string inverted index globally
+        string_config = StringInvertedIndexConfig()
+        result = schema.delete_index(config=string_config)
+        assert result is schema  # Should return self for chaining
 
-        # Should have all index types for key1
-        expected_types = [
-            "FtsIndexConfig", "VectorIndexConfig", "SparseVectorIndexConfig",
-            "StringInvertedIndexConfig", "IntInvertedIndexConfig",
-            "FloatInvertedIndexConfig", "BoolInvertedIndexConfig"
-        ]
+        # Verify it's now disabled in defaults
+        assert schema.defaults.string.string_inverted_index is not None
+        assert schema.defaults.string.string_inverted_index.enabled is False
+        assert schema.defaults.string.string_inverted_index.config == string_config
 
-        assert "key1" in schema._index_configs
-        for index_type in expected_types:
-            assert index_type in schema._index_configs["key1"]
-            assert schema._index_configs["key1"][index_type].enabled is True
-            assert schema._index_configs["key1"][index_type].config is not None
+        # Verify key overrides are not affected (e.g., #document still has its config)
+        assert schema.keys["#document"].string is not None
+        assert schema.keys["#document"].string.string_inverted_index is not None
+        assert schema.keys["#document"].string.string_inverted_index.enabled is False  # #document has it disabled
 
-        # Should not have any global configs
-        assert len(schema._global_configs) == 0
-
-    def test_create_index_disallow_both_none(self) -> None:
-        """Test that create_index with both config=None and key=None raises ValueError."""
+    def test_disable_string_inverted_index_on_key(self) -> None:
+        """Test disabling string inverted index on a specific key."""
         schema = Schema()
 
+        # Disable string inverted index on a custom key
+        string_config = StringInvertedIndexConfig()
+        result = schema.delete_index(config=string_config, key="my_text_field")
+        assert result is schema
+
+        # Verify it's disabled on the custom key
+        assert "my_text_field" in schema.keys
+        assert schema.keys["my_text_field"].string is not None
+        assert schema.keys["my_text_field"].string.string_inverted_index is not None
+        assert schema.keys["my_text_field"].string.string_inverted_index.enabled is False
+        assert schema.keys["my_text_field"].string.string_inverted_index.config == string_config
+
+        # Verify other value types on this key are None (sparse override)
+        assert schema.keys["my_text_field"].float_list is None
+        assert schema.keys["my_text_field"].sparse_vector is None
+        assert schema.keys["my_text_field"].int_value is None
+
+        # Verify global defaults are not affected
+        assert schema.defaults.string is not None
+        assert schema.defaults.string.string_inverted_index is not None
+        assert schema.defaults.string.string_inverted_index.enabled is True
+
+        # Verify other key overrides are not affected
+        assert schema.keys["#document"].string is not None
+        assert schema.keys["#document"].string.string_inverted_index is not None
+        assert schema.keys["#document"].string.string_inverted_index.enabled is False
+        assert schema.keys["#embedding"].float_list is not None
+        assert schema.keys["#embedding"].float_list.vector_index is not None
+        assert schema.keys["#embedding"].float_list.vector_index.enabled is True
+
+    def test_disable_int_inverted_index(self) -> None:
+        """Test disabling int inverted index globally and on a specific key."""
+        schema = Schema()
+
+        # Verify int inverted index is enabled by default
+        assert schema.defaults.int_value is not None
+        assert schema.defaults.int_value.int_inverted_index is not None
+        assert schema.defaults.int_value.int_inverted_index.enabled is True
+
+        # Test 1: Disable int inverted index globally
+        int_config = IntInvertedIndexConfig()
+        result = schema.delete_index(config=int_config)
+        assert result is schema
+
+        # Verify it's now disabled in defaults
+        assert schema.defaults.int_value.int_inverted_index.enabled is False
+        assert schema.defaults.int_value.int_inverted_index.config == int_config
+
+        # Test 2: Disable int inverted index on a specific key
+        int_config2 = IntInvertedIndexConfig()
+        result = schema.delete_index(config=int_config2, key="age_field")
+        assert result is schema
+
+        # Verify it's disabled on the custom key
+        assert "age_field" in schema.keys
+        assert schema.keys["age_field"].int_value is not None
+        assert schema.keys["age_field"].int_value.int_inverted_index is not None
+        assert schema.keys["age_field"].int_value.int_inverted_index.enabled is False
+        assert schema.keys["age_field"].int_value.int_inverted_index.config == int_config2
+
+        # Verify sparse override (only int_value is set)
+        assert schema.keys["age_field"].string is None
+        assert schema.keys["age_field"].float_list is None
+        assert schema.keys["age_field"].sparse_vector is None
+        assert schema.keys["age_field"].float_value is None
+        assert schema.keys["age_field"].boolean is None
+
+        # Verify other keys are not affected
+        assert schema.keys["#document"].string is not None
+        assert schema.keys["#embedding"].float_list is not None
+
+    def test_serialize_deserialize_default_schema(self) -> None:
+        """Test serialization and deserialization of a default Schema."""
+        # Create a default schema
+        original = Schema()
+
+        # Serialize to JSON
+        json_data = original.serialize_to_json()
+
+        # Verify the top-level structure
+        assert "defaults" in json_data
+        assert "keys" in json_data
+        assert isinstance(json_data["defaults"], dict)
+        assert isinstance(json_data["keys"], dict)
+
+        # Verify defaults structure in detail
+        defaults = json_data["defaults"]
+
+        # Check string
+        assert "string" in defaults
+        assert "fts_index" in defaults["string"]
+        assert defaults["string"]["fts_index"]["enabled"] is False
+        assert defaults["string"]["fts_index"]["config"] == {}
+        assert "string_inverted_index" in defaults["string"]
+        assert defaults["string"]["string_inverted_index"]["enabled"] is True
+        assert defaults["string"]["string_inverted_index"]["config"] == {}
+
+        # Check float_list
+        assert "float_list" in defaults
+        assert "vector_index" in defaults["float_list"]
+        assert defaults["float_list"]["vector_index"]["enabled"] is False
+        vector_config = defaults["float_list"]["vector_index"]["config"]
+        assert "space" in vector_config
+        assert vector_config["space"] == "l2"  # Default space
+        assert "embedding_function" in vector_config
+        assert vector_config["embedding_function"]["type"] == "known"
+        assert vector_config["embedding_function"]["name"] == "default"
+        assert vector_config["embedding_function"]["config"] == {}
+
+        # Check sparse_vector
+        assert "sparse_vector" in defaults
+        assert "sparse_vector_index" in defaults["sparse_vector"]
+        assert defaults["sparse_vector"]["sparse_vector_index"]["enabled"] is False
+        sparse_vector_config = defaults["sparse_vector"]["sparse_vector_index"]["config"]
+        # SparseVectorIndexConfig has embedding_function field with legacy default
+        assert "embedding_function" in sparse_vector_config
+        assert sparse_vector_config["embedding_function"] == {"type": "legacy"}
+
+        # Check int
+        assert "int" in defaults
+        assert "int_inverted_index" in defaults["int"]
+        assert defaults["int"]["int_inverted_index"]["enabled"] is True
+        assert defaults["int"]["int_inverted_index"]["config"] == {}
+
+        # Check float
+        assert "float" in defaults
+        assert "float_inverted_index" in defaults["float"]
+        assert defaults["float"]["float_inverted_index"]["enabled"] is True
+        assert defaults["float"]["float_inverted_index"]["config"] == {}
+
+        # Check bool
+        assert "bool" in defaults
+        assert "bool_inverted_index" in defaults["bool"]
+        assert defaults["bool"]["bool_inverted_index"]["enabled"] is True
+        assert defaults["bool"]["bool_inverted_index"]["config"] == {}
+
+        # Verify key overrides structure in detail
+        keys = json_data["keys"]
+
+        # Check #document
+        assert "#document" in keys
+        assert "string" in keys["#document"]
+        assert "fts_index" in keys["#document"]["string"]
+        assert keys["#document"]["string"]["fts_index"]["enabled"] is True
+        assert keys["#document"]["string"]["fts_index"]["config"] == {}
+        assert "string_inverted_index" in keys["#document"]["string"]
+        assert keys["#document"]["string"]["string_inverted_index"]["enabled"] is False
+        assert keys["#document"]["string"]["string_inverted_index"]["config"] == {}
+
+        # Check #embedding
+        assert "#embedding" in keys
+        assert "float_list" in keys["#embedding"]
+        assert "vector_index" in keys["#embedding"]["float_list"]
+        assert keys["#embedding"]["float_list"]["vector_index"]["enabled"] is True
+        embedding_vector_config = keys["#embedding"]["float_list"]["vector_index"]["config"]
+        assert "space" in embedding_vector_config
+        assert embedding_vector_config["space"] == "l2"  # Default space
+        assert "source_key" in embedding_vector_config
+        assert embedding_vector_config["source_key"] == "#document"
+        assert "embedding_function" in embedding_vector_config
+        assert embedding_vector_config["embedding_function"]["type"] == "known"
+        assert embedding_vector_config["embedding_function"]["name"] == "default"
+        assert embedding_vector_config["embedding_function"]["config"] == {}
+
+        # Deserialize back to Schema
+        deserialized = Schema.deserialize_from_json(json_data)
+
+        # Verify deserialized schema matches original - exhaustive validation
+        # Check defaults.string
+        assert deserialized.defaults.string is not None
+        assert deserialized.defaults.string.fts_index is not None
+        assert deserialized.defaults.string.fts_index.enabled is False
+        assert deserialized.defaults.string.fts_index.enabled == original.defaults.string.fts_index.enabled  # type: ignore[union-attr]
+        assert deserialized.defaults.string.string_inverted_index is not None
+        assert deserialized.defaults.string.string_inverted_index.enabled is True
+        assert deserialized.defaults.string.string_inverted_index.enabled == original.defaults.string.string_inverted_index.enabled  # type: ignore[union-attr]
+
+        # Check defaults.float_list (vector index)
+        assert deserialized.defaults.float_list is not None
+        assert deserialized.defaults.float_list.vector_index is not None
+        assert deserialized.defaults.float_list.vector_index.enabled is False
+        assert deserialized.defaults.float_list.vector_index.enabled == original.defaults.float_list.vector_index.enabled  # type: ignore[union-attr]
+        # Space is resolved during serialization, so deserialized has explicit value
+        assert deserialized.defaults.float_list.vector_index.config.space == "l2"
+        # Check embedding function is preserved
+        assert deserialized.defaults.float_list.vector_index.config.embedding_function is not None
+        assert deserialized.defaults.float_list.vector_index.config.embedding_function.name() == "default"
+        assert original.defaults.float_list.vector_index.config.embedding_function.name() == "default"  # type: ignore[union-attr]
+
+        # Check defaults.sparse_vector
+        assert deserialized.defaults.sparse_vector is not None
+        assert deserialized.defaults.sparse_vector.sparse_vector_index is not None
+        assert deserialized.defaults.sparse_vector.sparse_vector_index.enabled is False
+        assert deserialized.defaults.sparse_vector.sparse_vector_index.enabled == original.defaults.sparse_vector.sparse_vector_index.enabled  # type: ignore[union-attr]
+
+        # Check defaults.int_value
+        assert deserialized.defaults.int_value is not None
+        assert deserialized.defaults.int_value.int_inverted_index is not None
+        assert deserialized.defaults.int_value.int_inverted_index.enabled is True
+        assert deserialized.defaults.int_value.int_inverted_index.enabled == original.defaults.int_value.int_inverted_index.enabled  # type: ignore[union-attr]
+
+        # Check defaults.float_value
+        assert deserialized.defaults.float_value is not None
+        assert deserialized.defaults.float_value.float_inverted_index is not None
+        assert deserialized.defaults.float_value.float_inverted_index.enabled is True
+        assert deserialized.defaults.float_value.float_inverted_index.enabled == original.defaults.float_value.float_inverted_index.enabled  # type: ignore[union-attr]
+
+        # Check defaults.boolean
+        assert deserialized.defaults.boolean is not None
+        assert deserialized.defaults.boolean.bool_inverted_index is not None
+        assert deserialized.defaults.boolean.bool_inverted_index.enabled is True
+        assert deserialized.defaults.boolean.bool_inverted_index.enabled == original.defaults.boolean.bool_inverted_index.enabled  # type: ignore[union-attr]
+
+        # Check keys.#document
+        assert "#document" in deserialized.keys
+        assert deserialized.keys["#document"].string is not None
+        assert deserialized.keys["#document"].string.fts_index is not None
+        assert deserialized.keys["#document"].string.fts_index.enabled is True
+        assert deserialized.keys["#document"].string.fts_index.enabled == original.keys["#document"].string.fts_index.enabled  # type: ignore[union-attr]
+        assert deserialized.keys["#document"].string.string_inverted_index is not None
+        assert deserialized.keys["#document"].string.string_inverted_index.enabled is False
+        assert deserialized.keys["#document"].string.string_inverted_index.enabled == original.keys["#document"].string.string_inverted_index.enabled  # type: ignore[union-attr]
+
+        # Check keys.#embedding
+        assert "#embedding" in deserialized.keys
+        assert deserialized.keys["#embedding"].float_list is not None
+        assert deserialized.keys["#embedding"].float_list.vector_index is not None
+        assert deserialized.keys["#embedding"].float_list.vector_index.enabled is True
+        assert deserialized.keys["#embedding"].float_list.vector_index.enabled == original.keys["#embedding"].float_list.vector_index.enabled  # type: ignore[union-attr]
+        # Verify source_key is preserved
+        assert deserialized.keys["#embedding"].float_list.vector_index.config.source_key == "#document"
+        assert original.keys["#embedding"].float_list.vector_index.config.source_key == "#document"  # type: ignore[union-attr]
+        # Verify space is preserved (resolved during serialization)
+        assert deserialized.keys["#embedding"].float_list.vector_index.config.space == "l2"
+        # Verify embedding function is preserved
+        assert deserialized.keys["#embedding"].float_list.vector_index.config.embedding_function is not None
+        assert deserialized.keys["#embedding"].float_list.vector_index.config.embedding_function.name() == "default"
+        assert original.keys["#embedding"].float_list.vector_index.config.embedding_function.name() == "default"  # type: ignore[union-attr]
+
+    def test_serialize_deserialize_with_vector_config_no_ef(self) -> None:
+        """Test serialization/deserialization of Schema with vector config where embedding_function=None."""
+        # Create a default schema and modify vector config with ef=None
+        original = Schema()
+        vector_config = VectorIndexConfig(
+            space="cosine",
+            embedding_function=None  # Explicitly set to None
+        )
+        original.create_index(config=vector_config)
+
+        # Serialize to JSON
+        json_data = original.serialize_to_json()
+
+        # Verify defaults structure - vector index should reflect the changes
+        defaults = json_data["defaults"]
+        assert "float_list" in defaults
+        assert "vector_index" in defaults["float_list"]
+        vector_json = defaults["float_list"]["vector_index"]
+        assert vector_json["enabled"] is False  # Still disabled in defaults
+        assert vector_json["config"]["space"] == "cosine"  # User-specified space
+        # When ef=None, it should serialize as legacy
+        assert vector_json["config"]["embedding_function"]["type"] == "legacy"
+
+        # Verify #embedding also has the updated config
+        keys = json_data["keys"]
+        assert "#embedding" in keys
+        embedding_vector_json = keys["#embedding"]["float_list"]["vector_index"]
+        assert embedding_vector_json["enabled"] is True  # Still enabled on #embedding
+        assert embedding_vector_json["config"]["space"] == "cosine"  # User-specified space
+        assert embedding_vector_json["config"]["source_key"] == "#document"  # Preserved
+        # When ef=None, it should serialize as legacy
+        assert embedding_vector_json["config"]["embedding_function"]["type"] == "legacy"
+
+        # Deserialize back to Schema
+        deserialized = Schema.deserialize_from_json(json_data)
+
+        # Verify deserialized schema has the correct values
+        # Check defaults.float_list (vector index)
+        assert deserialized.defaults.float_list is not None
+        assert deserialized.defaults.float_list.vector_index is not None
+        assert deserialized.defaults.float_list.vector_index.enabled is False
+        assert deserialized.defaults.float_list.vector_index.config.space == "cosine"  # User space preserved
+        # ef=None should deserialize as None (legacy)
+        assert deserialized.defaults.float_list.vector_index.config.embedding_function is None
+
+        # Check #embedding vector index
+        assert "#embedding" in deserialized.keys
+        assert deserialized.keys["#embedding"].float_list is not None
+        assert deserialized.keys["#embedding"].float_list.vector_index is not None
+        assert deserialized.keys["#embedding"].float_list.vector_index.enabled is True
+        assert deserialized.keys["#embedding"].float_list.vector_index.config.space == "cosine"  # User space preserved
+        assert deserialized.keys["#embedding"].float_list.vector_index.config.source_key == "#document"  # Preserved
+        # ef=None should deserialize as None (legacy)
+        assert deserialized.keys["#embedding"].float_list.vector_index.config.embedding_function is None
+
+    def test_serialize_deserialize_with_custom_ef(self) -> None:
+        """Test serialization/deserialization of Schema with custom embedding function."""
+        # Register the mock embedding function so it can be deserialized
+        from chromadb.utils.embedding_functions import known_embedding_functions
+        known_embedding_functions["mock_embedding"] = MockEmbeddingFunction
+
+        try:
+            # Create a default schema and modify vector config with custom EF
+            original = Schema()
+            custom_ef = MockEmbeddingFunction(model_name="custom_model_v3")
+            hnsw_config = HnswIndexConfig(
+                ef_construction=256,
+                max_neighbors=48,
+                ef_search=128
+            )
+            vector_config = VectorIndexConfig(
+                embedding_function=custom_ef,
+                space="ip",  # Inner product
+                hnsw=hnsw_config
+            )
+            original.create_index(config=vector_config)
+
+            # Serialize to JSON
+            json_data = original.serialize_to_json()
+
+            # Verify defaults structure - vector index should reflect the changes
+            defaults = json_data["defaults"]
+            assert "float_list" in defaults
+            assert "vector_index" in defaults["float_list"]
+            vector_json = defaults["float_list"]["vector_index"]
+            assert vector_json["enabled"] is False  # Still disabled in defaults
+            assert vector_json["config"]["space"] == "ip"  # User-specified space
+            # Custom EF should serialize as known type
+            assert vector_json["config"]["embedding_function"]["type"] == "known"
+            assert vector_json["config"]["embedding_function"]["name"] == "mock_embedding"
+            assert vector_json["config"]["embedding_function"]["config"]["model_name"] == "custom_model_v3"
+            # HNSW config should be present
+            assert "hnsw" in vector_json["config"]
+            assert vector_json["config"]["hnsw"]["ef_construction"] == 256
+            assert vector_json["config"]["hnsw"]["max_neighbors"] == 48
+            assert vector_json["config"]["hnsw"]["ef_search"] == 128
+
+            # Verify #embedding also has the updated config
+            keys = json_data["keys"]
+            assert "#embedding" in keys
+            embedding_vector_json = keys["#embedding"]["float_list"]["vector_index"]
+            assert embedding_vector_json["enabled"] is True  # Still enabled on #embedding
+            assert embedding_vector_json["config"]["space"] == "ip"  # User-specified space
+            assert embedding_vector_json["config"]["source_key"] == "#document"  # Preserved
+            # Custom EF should serialize as known type
+            assert embedding_vector_json["config"]["embedding_function"]["type"] == "known"
+            assert embedding_vector_json["config"]["embedding_function"]["name"] == "mock_embedding"
+            assert embedding_vector_json["config"]["embedding_function"]["config"]["model_name"] == "custom_model_v3"
+            # HNSW config should be present
+            assert "hnsw" in embedding_vector_json["config"]
+            assert embedding_vector_json["config"]["hnsw"]["ef_construction"] == 256
+            assert embedding_vector_json["config"]["hnsw"]["max_neighbors"] == 48
+            assert embedding_vector_json["config"]["hnsw"]["ef_search"] == 128
+
+            # Deserialize back to Schema
+            deserialized = Schema.deserialize_from_json(json_data)
+
+            # Verify deserialized schema has the correct values
+            # Check defaults.float_list (vector index)
+            assert deserialized.defaults.float_list is not None
+            assert deserialized.defaults.float_list.vector_index is not None
+            assert deserialized.defaults.float_list.vector_index.enabled is False
+            assert deserialized.defaults.float_list.vector_index.config.space == "ip"  # User space preserved
+            # Custom EF should be reconstructed
+            assert deserialized.defaults.float_list.vector_index.config.embedding_function is not None
+            assert deserialized.defaults.float_list.vector_index.config.embedding_function.name() == "mock_embedding"
+            # Verify the EF config is correct
+            ef_config = deserialized.defaults.float_list.vector_index.config.embedding_function.get_config()
+            assert ef_config["model_name"] == "custom_model_v3"
+            # HNSW config should be preserved
+            assert deserialized.defaults.float_list.vector_index.config.hnsw is not None
+            assert deserialized.defaults.float_list.vector_index.config.hnsw.ef_construction == 256
+            assert deserialized.defaults.float_list.vector_index.config.hnsw.max_neighbors == 48
+            assert deserialized.defaults.float_list.vector_index.config.hnsw.ef_search == 128
+
+            # Check #embedding vector index
+            assert "#embedding" in deserialized.keys
+            assert deserialized.keys["#embedding"].float_list is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index.enabled is True
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.space == "ip"  # User space preserved
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.source_key == "#document"  # Preserved
+            # Custom EF should be reconstructed
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.embedding_function is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.embedding_function.name() == "mock_embedding"
+            # Verify the EF config is correct
+            ef_config_embedding = deserialized.keys["#embedding"].float_list.vector_index.config.embedding_function.get_config()
+            assert ef_config_embedding["model_name"] == "custom_model_v3"
+            # HNSW config should be preserved
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.hnsw is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.hnsw.ef_construction == 256
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.hnsw.max_neighbors == 48
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.hnsw.ef_search == 128
+        finally:
+            # Clean up: remove the mock function from known_embedding_functions
+            if "mock_embedding" in known_embedding_functions:
+                del known_embedding_functions["mock_embedding"]
+
+    def test_serialize_deserialize_with_spann_config(self) -> None:
+        """Test serialization/deserialization of Schema with SPANN index config."""
+        # Register the mock embedding function so it can be deserialized
+        from chromadb.utils.embedding_functions import known_embedding_functions
+        known_embedding_functions["mock_embedding"] = MockEmbeddingFunction
+
+        try:
+            # Create a default schema and modify vector config with SPANN
+            original = Schema()
+            custom_ef = MockEmbeddingFunction(model_name="spann_model")
+            spann_config = SpannIndexConfig(
+                search_nprobe=100,
+                write_nprobe=50,
+                ef_construction=200,
+                ef_search=150
+            )
+            vector_config = VectorIndexConfig(
+                embedding_function=custom_ef,
+                space="cosine",
+                spann=spann_config
+            )
+            original.create_index(config=vector_config)
+
+            # Serialize to JSON
+            json_data = original.serialize_to_json()
+
+            # Verify defaults structure - vector index should reflect the changes
+            defaults = json_data["defaults"]
+            assert "float_list" in defaults
+            assert "vector_index" in defaults["float_list"]
+            vector_json = defaults["float_list"]["vector_index"]
+            assert vector_json["enabled"] is False  # Still disabled in defaults
+            assert vector_json["config"]["space"] == "cosine"  # User-specified space
+            # Custom EF should serialize as known type
+            assert vector_json["config"]["embedding_function"]["type"] == "known"
+            assert vector_json["config"]["embedding_function"]["name"] == "mock_embedding"
+            assert vector_json["config"]["embedding_function"]["config"]["model_name"] == "spann_model"
+            # SPANN config should be present
+            assert "spann" in vector_json["config"]
+            assert vector_json["config"]["spann"]["search_nprobe"] == 100
+            assert vector_json["config"]["spann"]["write_nprobe"] == 50
+            assert vector_json["config"]["spann"]["ef_construction"] == 200
+            assert vector_json["config"]["spann"]["ef_search"] == 150
+            # HNSW should not be present
+            assert vector_json["config"].get("hnsw") is None
+
+            # Verify #embedding also has the updated config
+            keys = json_data["keys"]
+            assert "#embedding" in keys
+            embedding_vector_json = keys["#embedding"]["float_list"]["vector_index"]
+            assert embedding_vector_json["enabled"] is True  # Still enabled on #embedding
+            assert embedding_vector_json["config"]["space"] == "cosine"  # User-specified space
+            assert embedding_vector_json["config"]["source_key"] == "#document"  # Preserved
+            # Custom EF should serialize as known type
+            assert embedding_vector_json["config"]["embedding_function"]["type"] == "known"
+            assert embedding_vector_json["config"]["embedding_function"]["name"] == "mock_embedding"
+            assert embedding_vector_json["config"]["embedding_function"]["config"]["model_name"] == "spann_model"
+            # SPANN config should be present
+            assert "spann" in embedding_vector_json["config"]
+            assert embedding_vector_json["config"]["spann"]["search_nprobe"] == 100
+            assert embedding_vector_json["config"]["spann"]["write_nprobe"] == 50
+            assert embedding_vector_json["config"]["spann"]["ef_construction"] == 200
+            assert embedding_vector_json["config"]["spann"]["ef_search"] == 150
+            # HNSW should not be present
+            assert embedding_vector_json["config"].get("hnsw") is None
+
+            # Deserialize back to Schema
+            deserialized = Schema.deserialize_from_json(json_data)
+
+            # Verify deserialized schema has the correct values
+            # Check defaults.float_list (vector index)
+            assert deserialized.defaults.float_list is not None
+            assert deserialized.defaults.float_list.vector_index is not None
+            assert deserialized.defaults.float_list.vector_index.enabled is False
+            assert deserialized.defaults.float_list.vector_index.config.space == "cosine"  # User space preserved
+            # Custom EF should be reconstructed
+            assert deserialized.defaults.float_list.vector_index.config.embedding_function is not None
+            assert deserialized.defaults.float_list.vector_index.config.embedding_function.name() == "mock_embedding"
+            # Verify the EF config is correct
+            ef_config = deserialized.defaults.float_list.vector_index.config.embedding_function.get_config()
+            assert ef_config["model_name"] == "spann_model"
+            # SPANN config should be preserved
+            assert deserialized.defaults.float_list.vector_index.config.spann is not None
+            assert deserialized.defaults.float_list.vector_index.config.spann.search_nprobe == 100
+            assert deserialized.defaults.float_list.vector_index.config.spann.write_nprobe == 50
+            assert deserialized.defaults.float_list.vector_index.config.spann.ef_construction == 200
+            assert deserialized.defaults.float_list.vector_index.config.spann.ef_search == 150
+            # HNSW should be None
+            assert deserialized.defaults.float_list.vector_index.config.hnsw is None
+
+            # Check #embedding vector index
+            assert "#embedding" in deserialized.keys
+            assert deserialized.keys["#embedding"].float_list is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index.enabled is True
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.space == "cosine"  # User space preserved
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.source_key == "#document"  # Preserved
+            # Custom EF should be reconstructed
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.embedding_function is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.embedding_function.name() == "mock_embedding"
+            # Verify the EF config is correct
+            ef_config_embedding = deserialized.keys["#embedding"].float_list.vector_index.config.embedding_function.get_config()
+            assert ef_config_embedding["model_name"] == "spann_model"
+            # SPANN config should be preserved
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.spann is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.spann.search_nprobe == 100
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.spann.write_nprobe == 50
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.spann.ef_construction == 200
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.spann.ef_search == 150
+            # HNSW should be None
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.hnsw is None
+        finally:
+            # Clean up: remove the mock function from known_embedding_functions
+            if "mock_embedding" in known_embedding_functions:
+                del known_embedding_functions["mock_embedding"]
+
+    def test_serialize_deserialize_complex_mixed_modifications(self) -> None:
+        """Test serialization/deserialization with multiple mixed schema modifications."""
+        # Register the mock embedding functions so they can be deserialized
+        from chromadb.utils.embedding_functions import known_embedding_functions
+        known_embedding_functions["mock_embedding"] = MockEmbeddingFunction
+        known_embedding_functions["mock_sparse"] = MockSparseEmbeddingFunction  # type: ignore[assignment]
+
+        try:
+            # Create a default schema and apply multiple modifications
+            original = Schema()
+
+            # 1. Set custom vector config globally (space + HNSW)
+            custom_ef = MockEmbeddingFunction(model_name="mixed_test_model")
+            hnsw_config = HnswIndexConfig(ef_construction=300, max_neighbors=64)
+            vector_config = VectorIndexConfig(
+                embedding_function=custom_ef,
+                space="ip",
+                hnsw=hnsw_config
+            )
+            original.create_index(config=vector_config)
+
+            # 2. Enable sparse vector index on "embeddings_field" key
+            sparse_ef = MockSparseEmbeddingFunction(name="sparse_model")
+            sparse_config = SparseVectorIndexConfig(
+                embedding_function=sparse_ef,
+                source_key="text_field"
+            )
+            original.create_index(config=sparse_config, key="embeddings_field")
+
+            # 3. Disable string_inverted_index on "tags" key
+            string_config = StringInvertedIndexConfig()
+            original.delete_index(config=string_config, key="tags")
+
+            # 4. Disable int_inverted_index on "count" key
+            int_config = IntInvertedIndexConfig()
+            original.delete_index(config=int_config, key="count")
+
+            # 5. Disable float_inverted_index on "price" key
+            float_config = FloatInvertedIndexConfig()
+            original.delete_index(config=float_config, key="price")
+
+            # Serialize to JSON
+            json_data = original.serialize_to_json()
+
+            # Verify JSON structure has all modifications
+            defaults = json_data["defaults"]
+            keys = json_data["keys"]
+
+            # Check defaults reflect global vector config changes
+            assert defaults["float_list"]["vector_index"]["config"]["space"] == "ip"
+            assert defaults["float_list"]["vector_index"]["config"]["hnsw"]["ef_construction"] == 300
+            assert defaults["float_list"]["vector_index"]["config"]["hnsw"]["max_neighbors"] == 64
+
+            # Check key overrides exist for all modified keys
+            assert "embeddings_field" in keys
+            assert "tags" in keys
+            assert "count" in keys
+            assert "price" in keys
+            assert "#document" in keys  # Default key
+            assert "#embedding" in keys  # Default key with vector config
+
+            # Exhaustive validation of embeddings_field
+            embeddings_field_json = keys["embeddings_field"]
+            assert "sparse_vector" in embeddings_field_json
+            assert embeddings_field_json["sparse_vector"]["sparse_vector_index"]["enabled"] is True
+            assert embeddings_field_json["sparse_vector"]["sparse_vector_index"]["config"]["source_key"] == "text_field"
+            assert embeddings_field_json["sparse_vector"]["sparse_vector_index"]["config"]["embedding_function"]["type"] == "known"
+            assert embeddings_field_json["sparse_vector"]["sparse_vector_index"]["config"]["embedding_function"]["name"] == "mock_sparse"
+            assert embeddings_field_json["sparse_vector"]["sparse_vector_index"]["config"]["embedding_function"]["config"]["name"] == "sparse_model"
+            # Verify sparse override: only sparse_vector should be present
+            assert "string" not in embeddings_field_json
+            assert "float_list" not in embeddings_field_json
+            assert "int" not in embeddings_field_json
+            assert "float" not in embeddings_field_json
+            assert "bool" not in embeddings_field_json
+
+            # Exhaustive validation of tags
+            tags_json = keys["tags"]
+            assert "string" in tags_json
+            assert tags_json["string"]["string_inverted_index"]["enabled"] is False
+            assert tags_json["string"]["string_inverted_index"]["config"] == {}
+            # FTS should not be present (not modified)
+            assert "fts_index" not in tags_json["string"]
+            # Verify sparse override: only string should be present
+            assert "sparse_vector" not in tags_json
+            assert "float_list" not in tags_json
+            assert "int" not in tags_json
+            assert "float" not in tags_json
+            assert "bool" not in tags_json
+
+            # Exhaustive validation of count
+            count_json = keys["count"]
+            assert "int" in count_json
+            assert count_json["int"]["int_inverted_index"]["enabled"] is False
+            assert count_json["int"]["int_inverted_index"]["config"] == {}
+            # Verify sparse override: only int should be present
+            assert "string" not in count_json
+            assert "sparse_vector" not in count_json
+            assert "float_list" not in count_json
+            assert "float" not in count_json
+            assert "bool" not in count_json
+
+            # Exhaustive validation of price
+            price_json = keys["price"]
+            assert "float" in price_json
+            assert price_json["float"]["float_inverted_index"]["enabled"] is False
+            assert price_json["float"]["float_inverted_index"]["config"] == {}
+            # Verify sparse override: only float should be present
+            assert "string" not in price_json
+            assert "sparse_vector" not in price_json
+            assert "float_list" not in price_json
+            assert "int" not in price_json
+            assert "bool" not in price_json
+
+            # Exhaustive validation of #embedding
+            embedding_json = keys["#embedding"]
+            assert "float_list" in embedding_json
+            assert embedding_json["float_list"]["vector_index"]["enabled"] is True
+            assert embedding_json["float_list"]["vector_index"]["config"]["space"] == "ip"
+            assert embedding_json["float_list"]["vector_index"]["config"]["source_key"] == "#document"
+            assert embedding_json["float_list"]["vector_index"]["config"]["embedding_function"]["type"] == "known"
+            assert embedding_json["float_list"]["vector_index"]["config"]["embedding_function"]["name"] == "mock_embedding"
+            assert embedding_json["float_list"]["vector_index"]["config"]["embedding_function"]["config"]["model_name"] == "mixed_test_model"
+            assert embedding_json["float_list"]["vector_index"]["config"]["hnsw"]["ef_construction"] == 300
+            assert embedding_json["float_list"]["vector_index"]["config"]["hnsw"]["max_neighbors"] == 64
+            assert embedding_json["float_list"]["vector_index"]["config"].get("spann") is None
+            # Verify sparse override: only float_list should be present
+            assert "string" not in embedding_json
+            assert "sparse_vector" not in embedding_json
+            assert "int" not in embedding_json
+            assert "float" not in embedding_json
+            assert "bool" not in embedding_json
+
+            # Exhaustive validation of #document (unchanged, but with FTS enabled)
+            document_json = keys["#document"]
+            assert "string" in document_json
+            assert document_json["string"]["fts_index"]["enabled"] is True
+            assert document_json["string"]["fts_index"]["config"] == {}
+            assert document_json["string"]["string_inverted_index"]["enabled"] is False
+            assert document_json["string"]["string_inverted_index"]["config"] == {}
+            # Verify sparse override: only string should be present
+            assert "sparse_vector" not in document_json
+            assert "float_list" not in document_json
+            assert "int" not in document_json
+            assert "float" not in document_json
+            assert "bool" not in document_json
+
+            # Deserialize back to Schema
+            deserialized = Schema.deserialize_from_json(json_data)
+
+            # Verify all modifications are preserved after deserialization
+            # 1. Check global vector config
+            assert deserialized.defaults.float_list is not None
+            assert deserialized.defaults.float_list.vector_index is not None
+            assert deserialized.defaults.float_list.vector_index.config.space == "ip"
+            assert deserialized.defaults.float_list.vector_index.config.hnsw is not None
+            assert deserialized.defaults.float_list.vector_index.config.hnsw.ef_construction == 300
+            assert deserialized.defaults.float_list.vector_index.config.hnsw.max_neighbors == 64
+            assert deserialized.defaults.float_list.vector_index.config.embedding_function is not None
+            assert deserialized.defaults.float_list.vector_index.config.embedding_function.name() == "mock_embedding"
+
+            # 2. Check embeddings_field sparse vector
+            assert "embeddings_field" in deserialized.keys
+            assert deserialized.keys["embeddings_field"].sparse_vector is not None
+            assert deserialized.keys["embeddings_field"].sparse_vector.sparse_vector_index is not None
+            assert deserialized.keys["embeddings_field"].sparse_vector.sparse_vector_index.enabled is True
+            assert deserialized.keys["embeddings_field"].sparse_vector.sparse_vector_index.config.source_key == "text_field"
+            # Sparse override: other value types should be None
+            assert deserialized.keys["embeddings_field"].string is None
+            assert deserialized.keys["embeddings_field"].float_list is None
+            assert deserialized.keys["embeddings_field"].int_value is None
+
+            # 3. Check tags has string_inverted_index disabled
+            assert "tags" in deserialized.keys
+            assert deserialized.keys["tags"].string is not None
+            assert deserialized.keys["tags"].string.string_inverted_index is not None
+            assert deserialized.keys["tags"].string.string_inverted_index.enabled is False
+            # Sparse override: other value types should be None
+            assert deserialized.keys["tags"].sparse_vector is None
+            assert deserialized.keys["tags"].float_list is None
+
+            # 4. Check count has int_inverted_index disabled
+            assert "count" in deserialized.keys
+            assert deserialized.keys["count"].int_value is not None
+            assert deserialized.keys["count"].int_value.int_inverted_index is not None
+            assert deserialized.keys["count"].int_value.int_inverted_index.enabled is False
+            # Sparse override: other value types should be None
+            assert deserialized.keys["count"].string is None
+            assert deserialized.keys["count"].float_list is None
+
+            # 5. Check price has float_inverted_index disabled
+            assert "price" in deserialized.keys
+            assert deserialized.keys["price"].float_value is not None
+            assert deserialized.keys["price"].float_value.float_inverted_index is not None
+            assert deserialized.keys["price"].float_value.float_inverted_index.enabled is False
+            # Sparse override: other value types should be None
+            assert deserialized.keys["price"].string is None
+            assert deserialized.keys["price"].sparse_vector is None
+
+            # 6. Check #embedding has updated vector config
+            assert "#embedding" in deserialized.keys
+            assert deserialized.keys["#embedding"].float_list is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.space == "ip"
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.source_key == "#document"
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.hnsw is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.hnsw.ef_construction == 300
+
+            # 7. Verify defaults for unchanged indexes remain correct
+            assert deserialized.defaults.string is not None
+            assert deserialized.defaults.string.string_inverted_index is not None
+            assert deserialized.defaults.string.string_inverted_index.enabled is True  # Still enabled globally
+            assert deserialized.defaults.int_value is not None
+            assert deserialized.defaults.int_value.int_inverted_index is not None
+            assert deserialized.defaults.int_value.int_inverted_index.enabled is True  # Still enabled globally
+            assert deserialized.defaults.sparse_vector is not None
+            assert deserialized.defaults.sparse_vector.sparse_vector_index is not None
+            assert deserialized.defaults.sparse_vector.sparse_vector_index.enabled is False  # Still disabled globally
+        finally:
+            # Clean up: remove the mock functions from known_embedding_functions
+            if "mock_embedding" in known_embedding_functions:
+                del known_embedding_functions["mock_embedding"]
+            if "mock_sparse" in known_embedding_functions:
+                del known_embedding_functions["mock_sparse"]
+
+    def test_multiple_index_types_on_same_key(self) -> None:
+        """Test that multiple index types can coexist on the same key."""
+        schema = Schema()
+
+        # Enable sparse vector on "multi_field"
+        sparse_config = SparseVectorIndexConfig(source_key="source")
+        schema.create_index(config=sparse_config, key="multi_field")
+
+        # Also enable string_inverted_index on the same key
+        string_config = StringInvertedIndexConfig()
+        schema.create_index(config=string_config, key="multi_field")
+
+        # Verify both indexes exist on the same key
+        assert "multi_field" in schema.keys
+        multi_field = schema.keys["multi_field"]
+        assert multi_field.sparse_vector is not None
+        assert multi_field.sparse_vector.sparse_vector_index is not None
+        assert multi_field.sparse_vector.sparse_vector_index.enabled is True
+
+        assert multi_field.string is not None
+        assert multi_field.string.string_inverted_index is not None
+        assert multi_field.string.string_inverted_index.enabled is True
+
+        # Verify other value types are still None (sparse override)
+        assert schema.keys["multi_field"].float_list is None
+        assert schema.keys["multi_field"].int_value is None
+        assert schema.keys["multi_field"].float_value is None
+        assert schema.keys["multi_field"].boolean is None
+
+        # Serialize and verify both are present in JSON
+        json_data = schema.serialize_to_json()
+        multi_field_json = json_data["keys"]["multi_field"]
+        assert "sparse_vector" in multi_field_json
+        assert "string" in multi_field_json
+        assert multi_field_json["sparse_vector"]["sparse_vector_index"]["enabled"] is True
+        assert multi_field_json["string"]["string_inverted_index"]["enabled"] is True
+
+        # Deserialize and verify both survive roundtrip
+        deserialized = Schema.deserialize_from_json(json_data)
+        assert "multi_field" in deserialized.keys
+        des_multi_field = deserialized.keys["multi_field"]
+        assert des_multi_field.sparse_vector is not None
+        assert des_multi_field.sparse_vector.sparse_vector_index is not None
+        assert des_multi_field.sparse_vector.sparse_vector_index.enabled is True
+        assert des_multi_field.string is not None
+        assert des_multi_field.string.string_inverted_index is not None
+        assert des_multi_field.string.string_inverted_index.enabled is True
+
+    def test_override_then_revert_to_default(self) -> None:
+        """Test that disabling an index reverts to default behavior (key may still exist with disabled state)."""
+        schema = Schema()
+
+        # Enable string_inverted_index on "temp_field"
+        string_config = StringInvertedIndexConfig()
+        schema.create_index(config=string_config, key="temp_field")
+
+        # Verify it's enabled
+        assert "temp_field" in schema.keys
+        temp_field_initial = schema.keys["temp_field"]
+        assert temp_field_initial.string is not None
+        assert temp_field_initial.string.string_inverted_index is not None
+        assert temp_field_initial.string.string_inverted_index.enabled is True
+
+        # Now disable it
+        schema.delete_index(config=string_config, key="temp_field")
+
+        # Verify it's now disabled (key still exists but with disabled state)
+        assert "temp_field" in schema.keys
+        temp_field = schema.keys["temp_field"]
+        assert temp_field.string is not None
+        assert temp_field.string.string_inverted_index is not None
+        assert temp_field.string.string_inverted_index.enabled is False
+
+        # Serialize and verify disabled state is preserved
+        json_data = schema.serialize_to_json()
+        assert "temp_field" in json_data["keys"]
+        temp_field_json = json_data["keys"]["temp_field"]
+        assert "string" in temp_field_json
+        assert temp_field_json["string"]["string_inverted_index"]["enabled"] is False
+
+        # Deserialize and verify disabled state survives roundtrip
+        deserialized = Schema.deserialize_from_json(json_data)
+        assert "temp_field" in deserialized.keys
+        des_temp_field = deserialized.keys["temp_field"]
+        assert des_temp_field.string is not None
+        assert des_temp_field.string.string_inverted_index is not None
+        assert des_temp_field.string.string_inverted_index.enabled is False
+
+    def test_error_handling_invalid_operations(self) -> None:
+        """Test that invalid operations raise appropriate errors."""
+        schema = Schema()
+
+        # Test 1: Cannot create index on #embedding key
+        vector_config = VectorIndexConfig()
+        with pytest.raises(ValueError, match="Cannot create index on special key '#embedding'"):
+            schema.create_index(config=vector_config, key="#embedding")
+
+        # Test 2: Cannot create index on #document key
+        fts_config = FtsIndexConfig()
+        with pytest.raises(ValueError, match="Cannot create index on special key '#document'"):
+            schema.create_index(config=fts_config, key="#document")
+
+        # Test 3: Cannot enable all indexes globally
         with pytest.raises(ValueError, match="Cannot enable all index types globally"):
             schema.create_index()
 
-    def test_delete_index_specific_config_global(self) -> None:
-        """Test deleting a specific index type globally."""
-        schema = Schema()
-        fts_config = FtsIndexConfig()
-
-        # First create it
-        schema.create_index(config=fts_config)
-        assert "FtsIndexConfig" in schema._global_configs
-        assert schema._global_configs["FtsIndexConfig"].enabled is True
-
-        # Then delete it
-        result = schema.delete_index(config=fts_config)
-
-        # Should return self for chaining
-        assert result is schema
-
-        # Should still be in global configs but disabled
-        assert "FtsIndexConfig" in schema._global_configs
-        assert schema._global_configs["FtsIndexConfig"].enabled is False
-
-    def test_delete_index_specific_config_key(self) -> None:
-        """Test deleting a specific index type for a specific key."""
-        schema = Schema()
-        fts_config = FtsIndexConfig()
-
-        # First create it
-        schema.create_index(config=fts_config, key="key1")
-        assert schema._index_configs["key1"]["FtsIndexConfig"].enabled is True
-
-        # Then delete it
-        result = schema.delete_index(config=fts_config, key="key1")
-
-        # Should return self for chaining
-        assert result is schema
-
-        # Should still be in key configs but disabled
-        assert "FtsIndexConfig" in schema._index_configs["key1"]
-        assert schema._index_configs["key1"]["FtsIndexConfig"].enabled is False
-
-    def test_delete_index_all_types_key(self) -> None:
-        """Test deleting all index types for a specific key."""
-        schema = Schema()
-
-        # First create all types for key1
-        schema.create_index(key="key1")
-        expected_types = [
-            "FtsIndexConfig", "VectorIndexConfig", "SparseVectorIndexConfig",
-            "StringInvertedIndexConfig", "IntInvertedIndexConfig",
-            "FloatInvertedIndexConfig", "BoolInvertedIndexConfig"
-        ]
-
-        # Verify all are enabled
-        for index_type in expected_types:
-            assert schema._index_configs["key1"][index_type].enabled is True
-
-        # Then delete all for key1
-        result = schema.delete_index(key="key1")
-
-        # Should return self for chaining
-        assert result is schema
-
-        # All should still be present but disabled
-        for index_type in expected_types:
-            assert index_type in schema._index_configs["key1"]
-            assert schema._index_configs["key1"][index_type].enabled is False
-
-    def test_delete_index_disallow_both_none(self) -> None:
-        """Test that delete_index with both config=None and key=None raises ValueError."""
-        schema = Schema()
-
-        with pytest.raises(ValueError, match="Cannot disable all indexes"):
-            schema.delete_index()
-
-    def test_method_chaining(self) -> None:
-        """Test that methods can be chained together."""
-        schema = Schema()
-        fts_config = FtsIndexConfig()
-        string_config = StringInvertedIndexConfig()
-
-        result = (schema
-                  .create_index(config=fts_config, key="key1")
-                  .create_index(config=string_config, key="key2")
-                  .delete_index(config=fts_config, key="key1")
-                  .create_index(key="key3"))
-
-        # Should return the original schema instance
-        assert result is schema
-
-        # Verify the final state
-        assert schema._index_configs["key1"]["FtsIndexConfig"].enabled is False
-        assert schema._index_configs["key2"]["StringInvertedIndexConfig"].enabled is True
-        assert len(schema._index_configs["key3"]) > 0  # All types should be enabled for key3
-
-    def test_multiple_keys_same_index_type(self) -> None:
-        """Test that the same index type can be configured differently for different keys."""
-        schema = Schema()
-        fts_config1 = FtsIndexConfig()
-        fts_config2 = FtsIndexConfig()
-
-        schema.create_index(config=fts_config1, key="key1")
-        schema.create_index(config=fts_config2, key="key2")
-
-        # Both keys should have FTS config
-        assert "FtsIndexConfig" in schema._index_configs["key1"]
-        assert "FtsIndexConfig" in schema._index_configs["key2"]
-
-        # They should be independent
-        assert schema._index_configs["key1"]["FtsIndexConfig"].config == fts_config1
-        assert schema._index_configs["key2"]["FtsIndexConfig"].config == fts_config2
-
-    def test_global_and_key_specific_configs(self) -> None:
-        """Test mixing global and key-specific configurations."""
-        schema = Schema()
-        fts_config = FtsIndexConfig()
-        string_config = StringInvertedIndexConfig()
-
-        # Create global FTS config
-        schema.create_index(config=fts_config)
-
-        # Create key-specific string config
-        schema.create_index(config=string_config, key="key1")
-
-        # Verify global config
-        assert "FtsIndexConfig" in schema._global_configs
-        assert schema._global_configs["FtsIndexConfig"].enabled is True
-
-        # Verify key-specific config
-        assert "StringInvertedIndexConfig" in schema._index_configs["key1"]
-        assert schema._index_configs["key1"]["StringInvertedIndexConfig"].enabled is True
-
-    def test_vector_index_with_hnsw_config(self) -> None:
-        """Test creating a vector index with HNSW configuration."""
-        schema = Schema()
-        hnsw_config = HnswIndexConfig(ef_construction=200)
-
-        # Create a proper mock embedding function that matches the protocol
-        class MockEmbeddingFunction:
-            def __call__(self, input: Any) -> list[list[float]]:
-                return [[1.0, 2.0, 3.0]] if isinstance(input, list) else [[1.0, 2.0, 3.0]]
-
-        vector_config = VectorIndexConfig(
-            space="l2",
-            embedding_function=cast(EmbeddingFunction[Documents], MockEmbeddingFunction()),
-            source_key="embeddings",
-            hnsw=hnsw_config
-        )
-
-        result = schema.create_index(config=vector_config, key="key1")
-
-        assert result is schema
-        assert "VectorIndexConfig" in schema._index_configs["key1"]
-        assert schema._index_configs["key1"]["VectorIndexConfig"].enabled is True
-        assert schema._index_configs["key1"]["VectorIndexConfig"].config == vector_config
-
-    def test_sparse_vector_index_config(self) -> None:
-        """Test creating a sparse vector index configuration."""
-        schema = Schema()
-
-        # Create a proper mock embedding function that matches the protocol
-        class MockEmbeddingFunction:
-            def __call__(self, input: Any) -> list[list[float]]:
-                return [[1.0, 2.0, 3.0]] if isinstance(input, list) else [[1.0, 2.0, 3.0]]
-
-        sparse_config = SparseVectorIndexConfig(
-            embedding_function=cast(EmbeddingFunction[Documents], MockEmbeddingFunction()),
-            source_key="sparse_embeddings"
-        )
-
-        result = schema.create_index(config=sparse_config, key="key1")
-
-        assert result is schema
-        assert "SparseVectorIndexConfig" in schema._index_configs["key1"]
-        assert schema._index_configs["key1"]["SparseVectorIndexConfig"].enabled is True
-
-    def test_empty_schema_initialization(self) -> None:
-        """Test that a new schema starts empty."""
-        schema = Schema()
-
-        assert len(schema._global_configs) == 0
-        assert len(schema._index_configs) == 0
-
-    def test_delete_nonexistent_key(self) -> None:
-        """Test deleting from a key that doesn't exist."""
-        schema = Schema()
-        fts_config = FtsIndexConfig()
-
-        # Try to delete from non-existent key
-        result = schema.delete_index(config=fts_config, key="nonexistent")
-
-        assert result is schema
-        # Should create the key with disabled config
-        assert "nonexistent" in schema._index_configs
-        assert "FtsIndexConfig" in schema._index_configs["nonexistent"]
-        assert schema._index_configs["nonexistent"]["FtsIndexConfig"].enabled is False
-
-    def test_delete_nonexistent_global_config(self) -> None:
-        """Test deleting a global config that doesn't exist."""
-        schema = Schema()
-        fts_config = FtsIndexConfig()
-
-        # Try to delete non-existent global config
-        result = schema.delete_index(config=fts_config)
-
-        assert result is schema
-        # Should create the global config as disabled
-        assert "FtsIndexConfig" in schema._global_configs
-        assert schema._global_configs["FtsIndexConfig"].enabled is False
-
-    def test_complex_workflow(self) -> None:
-        """Test a complex workflow with multiple operations."""
-        schema = Schema()
-        fts_config = FtsIndexConfig()
-        string_config = StringInvertedIndexConfig()
-
-        # Complex workflow
-        result = (schema
-                  .create_index(config=fts_config)  # Global FTS
-                  .create_index(key="key1")  # All types for key1
-                  .create_index(config=string_config, key="key2")  # String for key2
-                  .delete_index(config=fts_config, key="key1")  # Disable FTS for key1
-                  .delete_index(key="key2")  # Disable all for key2
-                  .create_index(config=fts_config, key="key3"))  # FTS for key3
-
-        assert result is schema
-
-        # Verify final state
-        # Global: FTS enabled
-        assert schema._global_configs["FtsIndexConfig"].enabled is True
-
-        # key1: All types enabled except FTS disabled
-        assert schema._index_configs["key1"]["FtsIndexConfig"].enabled is False
-        assert schema._index_configs["key1"]["StringInvertedIndexConfig"].enabled is True
-
-        # key2: All types disabled
-        assert schema._index_configs["key2"]["StringInvertedIndexConfig"].enabled is False
-
-        # key3: FTS enabled
-        assert schema._index_configs["key3"]["FtsIndexConfig"].enabled is True
-
-    def test_to_internal_schema_simple(self) -> None:
-        """Test conversion to InternalSchema with simple configs."""
-        schema = Schema()
-        fts_config = FtsIndexConfig()
-        schema.create_index(config=fts_config, key="title")
-
-        internal = InternalSchema(schema)
-
-        # Check structure
-        assert "defaults" in internal.model_dump()
-        assert "key_overrides" in internal.model_dump()
-
-        # With initialization enabled, defaults are populated with 6 value types
-        assert len(internal.defaults) == 6
-
-        # Check that all expected value types have defaults
-        expected_value_types = ["#string", "#float", "#float_list", "#sparse_vector", "#bool", "#int"]
-        for value_type in expected_value_types:
-            assert value_type in internal.defaults
-
-        # Check key override - uses InternalFtsIndex
-        assert "title" in internal.key_overrides
-        assert "#string" in internal.key_overrides["title"]
-        fts_override = internal.key_overrides["title"]["#string"]["$fts_index"]
-        assert isinstance(fts_override, InternalFtsIndex)
-        assert fts_override.enabled is True
-        assert isinstance(fts_override.config, FtsIndexConfig)
-
-    def test_to_internal_schema_complex(self) -> None:
-        """Test conversion to InternalSchema with complex configs."""
-        schema = Schema()
-
-        # Create a vector config with HNSW parameters
-        class MockEmbeddingFunction:
-            def __call__(self, input: Any) -> list[list[float]]:
-                return [[1.0, 2.0, 3.0]]
-
-        vector_config = VectorIndexConfig(
-            space="cosine",
-            embedding_function=cast(EmbeddingFunction[Documents], MockEmbeddingFunction()),
-            source_key="document",
-            hnsw=HnswIndexConfig(ef_construction=200, max_neighbors=16, ef_search=100)
-        )
-        schema.create_index(config=vector_config, key="embedding")
-
-        internal = InternalSchema(schema)
-
-        # Check that the vector config uses InternalVectorIndex
-        embedding_override = internal.key_overrides["embedding"]["#float_list"]["$vector_index"]
-        assert isinstance(embedding_override, InternalVectorIndex)
-        assert embedding_override.enabled is True
-        assert isinstance(embedding_override.config, VectorIndexConfig)
-        assert embedding_override.config.space == "cosine"
-        assert embedding_override.config.source_key == "document"
-        assert embedding_override.config.embedding_function is not None
-        assert embedding_override.config.hnsw is not None
-        assert embedding_override.config.hnsw.ef_construction == 200
-        assert embedding_override.config.hnsw.max_neighbors == 16
-        assert embedding_override.config.hnsw.ef_search == 100
-
-    def test_to_internal_schema_global_configs(self) -> None:
-        """Test conversion with global configurations."""
-        schema = Schema()
-
-        # Create global string inverted index
-        string_config = StringInvertedIndexConfig()
-        schema.create_index(config=string_config)
-
-        internal = InternalSchema(schema)
-
-        # Check that global config affects defaults - uses InternalStringInvertedIndex
-        string_override = internal.defaults["#string"]["$string_inverted_index"]
-        assert isinstance(string_override, InternalStringInvertedIndex)
-        assert string_override.enabled is True
-        assert isinstance(string_override.config, StringInvertedIndexConfig)
-        # With initialization enabled, FTS index is present in defaults (set to False by default)
-        assert "$fts_index" in internal.defaults["#string"]
-        fts_default = internal.defaults["#string"]["$fts_index"]
-        assert isinstance(fts_default, InternalFtsIndex)
-        assert fts_default.enabled is False
-
-    def test_to_internal_schema_mixed_configs(self) -> None:
-        """Test conversion with both global and key-specific configs."""
-        schema = Schema()
-
-        # Global config
-        string_config = StringInvertedIndexConfig()
-        schema.create_index(config=string_config)
-
-        # Key-specific override
-        fts_config = FtsIndexConfig()
-        schema.create_index(config=fts_config, key="document")
-
-        internal = InternalSchema(schema)
-
-        # Check global defaults - uses InternalStringInvertedIndex
-        string_global = internal.defaults["#string"]["$string_inverted_index"]
-        assert isinstance(string_global, InternalStringInvertedIndex)
-        assert string_global.enabled is True
-        assert isinstance(string_global.config, StringInvertedIndexConfig)
-        # With initialization enabled, FTS index is present in defaults (set to False by default)
-        assert "$fts_index" in internal.defaults["#string"]
-        fts_default = internal.defaults["#string"]["$fts_index"]
-        assert isinstance(fts_default, InternalFtsIndex)
-        assert fts_default.enabled is False
-
-        # Check key override - uses InternalFtsIndex
-        assert "document" in internal.key_overrides
-        fts_override = internal.key_overrides["document"]["#string"]["$fts_index"]
-        assert isinstance(fts_override, InternalFtsIndex)
-        assert fts_override.enabled is True
-        assert isinstance(fts_override.config, FtsIndexConfig)
-
-    def test_to_internal_schema_disabled_config(self) -> None:
-        """Test that disabled configs are preserved with enabled=False."""
-        schema = Schema()
-
-        # Create a vector config with parameters
-        class MockEmbeddingFunction:
-            def __call__(self, input: Any) -> list[list[float]]:
-                return [[1.0, 2.0, 3.0]]
-
-        vector_config = VectorIndexConfig(
-            space="cosine",
-            embedding_function=cast(EmbeddingFunction[Documents], MockEmbeddingFunction()),
-            source_key="document",
-            hnsw=HnswIndexConfig(ef_construction=200, max_neighbors=16)
-        )
-
-        # Add it enabled first, then disable it
-        schema.create_index(config=vector_config, key="embedding")
-        schema.delete_index(config=vector_config, key="embedding")
-
-        internal = InternalSchema(schema)
-
-        # Check that the config is preserved but with enabled=False
-        embedding_override = internal.key_overrides["embedding"]["#float_list"]["$vector_index"]
-        assert isinstance(embedding_override, InternalVectorIndex)
-        assert embedding_override.enabled is False  # ← Disabled but config preserved!
-        assert isinstance(embedding_override.config, VectorIndexConfig)
-        assert embedding_override.config.space == "cosine"  # ← Config params preserved
-        assert embedding_override.config.hnsw is not None
-        assert embedding_override.config.hnsw.ef_construction == 200  # ← Nested config preserved
-
-    def test_default_internal_schema_population(self) -> None:
-        """Test that InternalSchema starts with default population."""
-        # Empty schema should have defaults populated
-        schema = Schema()
-        internal = InternalSchema(schema)
-
-        # With initialization enabled, defaults and key_overrides are populated
-        assert len(internal.defaults) == 6  # 6 value types with defaults
-        assert len(internal.key_overrides) == 2  # $document and $embedding keys
-
-        # Check that all expected value types have defaults
-        expected_value_types = ["#string", "#float", "#float_list", "#sparse_vector", "#bool", "#int"]
-        for value_type in expected_value_types:
-            assert value_type in internal.defaults
-
-    def test_default_key_overrides_population(self) -> None:
-        """Test that InternalSchema starts with default key overrides."""
-        # Empty schema should have key overrides populated
-        schema = Schema()
-        internal = InternalSchema(schema)
-
-        # With initialization enabled, key_overrides are populated with $document and $embedding
-        assert len(internal.key_overrides) == 2
-        assert "$document" in internal.key_overrides
-        assert "$embedding" in internal.key_overrides
-
-    def test_user_config_overrides_defaults(self) -> None:
-        """Test that user configurations are properly stored in defaults."""
-        schema = Schema()
-
-        # User enables FTS globally
-        fts_config = FtsIndexConfig()
-        schema.create_index(config=fts_config)
-
-        # User disables string inverted index globally
-        string_config = StringInvertedIndexConfig()
-        schema.delete_index(config=string_config)
-
-        internal = InternalSchema(schema)
-
-        # Check that user global configs are stored
-        fts_override = internal.defaults["#string"]["$fts_index"]
-        assert isinstance(fts_override, InternalFtsIndex)
-        assert fts_override.enabled is True  # User enabled it
-
-        string_inverted_override = internal.defaults["#string"]["$string_inverted_index"]
-        assert isinstance(string_inverted_override, InternalStringInvertedIndex)
-        assert string_inverted_override.enabled is False  # User disabled it
-
-    def test_user_config_overrides_key_defaults(self) -> None:
-        """Test that user key-specific configs are properly stored."""
-        schema = Schema()
-
-        # User disables FTS for $document
-        fts_config = FtsIndexConfig()
-        schema.delete_index(config=fts_config, key="$document")
-
-        # User adds vector index for custom key
-        vector_config = VectorIndexConfig()
-        schema.create_index(config=vector_config, key="custom_key")
-
-        internal = InternalSchema(schema)
-
-        # Check that user override for $document worked
-        doc_fts_override = internal.key_overrides["$document"]["#string"]["$fts_index"]
-        assert isinstance(doc_fts_override, InternalFtsIndex)
-        assert doc_fts_override.enabled is False  # User disabled it
-
-        # Check that user's custom key was added
-        assert "custom_key" in internal.key_overrides
-        custom_vector_override = internal.key_overrides["custom_key"]["#float_list"]["$vector_index"]
-        assert isinstance(custom_vector_override, InternalVectorIndex)
-        assert custom_vector_override.enabled is True  # User enabled it
-
-    def test_complete_default_structure_matches_spec(self) -> None:
-        """Test that InternalSchema starts empty with no default population."""
-        schema = Schema()
-        internal = InternalSchema(schema)
-
-        # With initialization enabled, both should be populated
-        assert len(internal.defaults) == 6  # 6 value types with defaults
-        assert len(internal.key_overrides) == 2  # $document and $embedding keys
-
-    def test_all_value_types_have_base_defaults(self) -> None:
-        """Test that InternalSchema starts empty with no default population."""
-        schema = Schema()
-        internal = InternalSchema(schema)
-
-        # With initialization enabled, defaults are populated
-        assert len(internal.defaults) == 6  # 6 value types with defaults
-
-    def test_embedding_vector_index_has_source_key(self) -> None:
-        """Test that InternalSchema starts empty with no default population."""
-        schema = Schema()
-        internal = InternalSchema(schema)
-
-        # With initialization enabled, key_overrides are populated
-        assert len(internal.key_overrides) == 2  # $document and $embedding keys
-
-    # Edge Case Tests
-    def test_edge_case_special_character_keys(self) -> None:
-        """Test that keys with special characters work correctly."""
-        schema = Schema()
-
-        # Test various special characters
-        special_keys = [
-            "key-with-dashes",
-            "key_with_underscores",
-            "key.with.dots",
-            "key with spaces",
-            "key@with#symbols$",
-            "key/with/slashes",
-            "key:with:colons",
-            "key[with]brackets",
-            "key{with}braces"
-        ]
-
-        fts_config = FtsIndexConfig()
-        for key in special_keys:
-            schema.create_index(config=fts_config, key=key)
-
-        internal = InternalSchema(schema)
-
-        # Verify all keys are present
-        for key in special_keys:
-            assert key in internal.key_overrides
-            fts_override = internal.key_overrides[key]["#string"]["$fts_index"]
-            assert isinstance(fts_override, InternalFtsIndex)
-            assert fts_override.enabled is True
-
-    def test_edge_case_very_long_keys(self) -> None:
-        """Test that very long key names work correctly."""
-        schema = Schema()
-
-        # Test progressively longer keys
-        long_keys = [
-            "a" * 100,   # 100 chars
-            "b" * 1000,  # 1K chars
-            "c" * 10000,   # 10K chars
-        ]
-
-        fts_config = FtsIndexConfig()
-        for key in long_keys:
-            schema.create_index(config=fts_config, key=key)
-
-        internal = InternalSchema(schema)
-
-        # Verify all long keys work
-        for key in long_keys:
-            assert key in internal.key_overrides
-            fts_override = internal.key_overrides[key]["#string"]["$fts_index"]
-            assert isinstance(fts_override, InternalFtsIndex)
-            assert fts_override.enabled is True
-
-    def test_edge_case_overriding_hardcoded_keys(self) -> None:
-        """Test user-specified $document and $embedding keys."""
-        schema = Schema()
-
-        # User disables FTS for $document
-        fts_config = FtsIndexConfig()
-        schema.delete_index(config=fts_config, key="$document")
-
-        # User adds vector index for $embedding with custom config
-        vector_config = VectorIndexConfig(space="cosine", source_key="custom_source")
-        schema.create_index(config=vector_config, key="$embedding")
-
-        internal = InternalSchema(schema)
-
-        # Verify $document override worked
-        doc_fts = internal.key_overrides["$document"]["#string"]["$fts_index"]
-        assert isinstance(doc_fts, InternalFtsIndex)
-        assert doc_fts.enabled is False  # User disabled it
-
-        # Verify $embedding override worked
-        embedding_vector = internal.key_overrides["$embedding"]["#float_list"]["$vector_index"]
-        assert isinstance(embedding_vector, InternalVectorIndex)
-        assert embedding_vector.enabled is True
-        assert embedding_vector.config.space == "cosine"  # User's setting
-        assert embedding_vector.config.source_key == "custom_source"  # User's setting
-
-    def test_edge_case_same_key_multiple_config_types(self) -> None:
-        """Test adding multiple different config types to the same key."""
-        schema = Schema()
-
-        key = "multi_config_key"
-
-        # Add multiple config types to same key
-        fts_config = FtsIndexConfig()
-        vector_config = VectorIndexConfig(space="l2")
-        string_config = StringInvertedIndexConfig()
-
-        schema.create_index(config=fts_config, key=key)
-        schema.create_index(config=vector_config, key=key)
-        schema.create_index(config=string_config, key=key)
-
-        internal = InternalSchema(schema)
-
-        # Verify all config types are present for the key
-        assert key in internal.key_overrides
-        key_configs = internal.key_overrides[key]
-
-        # Should have both string and float_list value types
-        assert "#string" in key_configs
-        assert "#float_list" in key_configs
-
-        # Check string configs
-        fts_override = key_configs["#string"]["$fts_index"]
-        assert isinstance(fts_override, InternalFtsIndex)
-        assert fts_override.enabled is True
-
-        string_override = key_configs["#string"]["$string_inverted_index"]
-        assert isinstance(string_override, InternalStringInvertedIndex)
-        assert string_override.enabled is True
-
-        # Check vector config
-        vector_override = key_configs["#float_list"]["$vector_index"]
-        assert isinstance(vector_override, InternalVectorIndex)
-        assert vector_override.enabled is True
-        assert vector_override.config.space == "l2"
-
-    def test_edge_case_config_object_reuse(self) -> None:
-        """Test that reusing the same config object works correctly."""
-        schema = Schema()
-
-        # Reuse the same config object for multiple keys
-        shared_fts_config = FtsIndexConfig()
-
-        keys = ["key1", "key2", "key3"]
-        for key in keys:
-            schema.create_index(config=shared_fts_config, key=key)
-
-        internal = InternalSchema(schema)
-
-        # Verify all keys have the config
-        for key in keys:
-            assert key in internal.key_overrides
-            fts_override = internal.key_overrides[key]["#string"]["$fts_index"]
-            assert isinstance(fts_override, InternalFtsIndex)
-            assert fts_override.enabled is True
-            # Each should have its own config instance (not shared reference)
-            assert isinstance(fts_override.config, FtsIndexConfig)
-
-    def test_edge_case_empty_vs_none_embedding_function(self) -> None:
-        """Test VectorIndexConfig with None vs default embedding function."""
-        schema = Schema()
-
-        # Test with None embedding function (legacy behavior)
-        vector_config_none = VectorIndexConfig(embedding_function=None)
-        schema.create_index(config=vector_config_none, key="key_none")
-
-        # Test with no embedding function specified (should default to DefaultEmbeddingFunction)
-        vector_config_default = VectorIndexConfig()
-        schema.create_index(config=vector_config_default, key="key_default")
-
-        internal = InternalSchema(schema)
-
-        # None should remain None (legacy behavior)
-        none_override = internal.key_overrides["key_none"]["#float_list"]["$vector_index"]
-        assert isinstance(none_override, InternalVectorIndex)
-        assert none_override.config.embedding_function is None
-
-        # Default should be DefaultEmbeddingFunction (modern behavior)
-        default_override = internal.key_overrides["key_default"]["#float_list"]["$vector_index"]
-        assert isinstance(default_override, InternalVectorIndex)
-        from chromadb.api.types import DefaultEmbeddingFunction
-        assert isinstance(default_override.config.embedding_function, DefaultEmbeddingFunction)
-
-    def test_edge_case_case_sensitivity(self) -> None:
-        """Test that key names are case sensitive."""
-        schema = Schema()
-
-        fts_config = FtsIndexConfig()
-
-        # Add configs with different cases
-        schema.create_index(config=fts_config, key="MyKey")
-        schema.create_index(config=fts_config, key="mykey")
-        schema.create_index(config=fts_config, key="MYKEY")
-
-        internal = InternalSchema(schema)
-
-        # All should be treated as different keys
-        assert "MyKey" in internal.key_overrides
-        assert "mykey" in internal.key_overrides
-        assert "MYKEY" in internal.key_overrides
-        assert len([k for k in internal.key_overrides.keys() if k.lower() == "mykey"]) == 3
-
-    def test_edge_case_large_number_of_keys(self) -> None:
-        """Test performance with a large number of keys."""
-        schema = Schema()
-
-        # Add 1000 keys
-        num_keys = 1000
-        fts_config = FtsIndexConfig()
-
-        for i in range(num_keys):
-            schema.create_index(config=fts_config, key=f"key_{i:04d}")
-
-        internal = InternalSchema(schema)
-
-        # Should handle large number of keys (plus 2 default keys: $document and $embedding)
-        assert len(internal.key_overrides) == num_keys + 2
-
-        # Spot check a few keys
-        assert "key_0000" in internal.key_overrides
-        assert "key_0500" in internal.key_overrides
-        assert "key_0999" in internal.key_overrides
-
-        # Verify structure is correct
-        test_key = internal.key_overrides["key_0500"]
-        fts_override = test_key["#string"]["$fts_index"]
-        assert isinstance(fts_override, InternalFtsIndex)
-        assert fts_override.enabled is True
-
-    def test_edge_case_mixed_enable_disable_sequence(self) -> None:
-        """Test complex enable/disable sequences on the same key."""
-        schema = Schema()
-
-        fts_config = FtsIndexConfig()
-        key = "toggle_key"
-
-        # Complex sequence: enable -> disable -> enable -> disable
-        schema.create_index(config=fts_config, key=key)  # Enable
-        schema.delete_index(config=fts_config, key=key)  # Disable
-        schema.create_index(config=fts_config, key=key)  # Enable again
-        schema.delete_index(config=fts_config, key=key)  # Disable again
-
-        internal = InternalSchema(schema)
-
-        # Final state should be disabled
-        fts_override = internal.key_overrides[key]["#string"]["$fts_index"]
-        assert isinstance(fts_override, InternalFtsIndex)
-        assert fts_override.enabled is False  # Final state is disabled
-
-    def test_edge_case_all_value_types_single_key(self) -> None:
-        """Test adding configs for all possible value types to a single key."""
-        schema = Schema()
-
-        key = "all_types_key"
-
-        # Add configs for different value types (those that make sense)
-        fts_config = FtsIndexConfig()  # #string
-        string_config = StringInvertedIndexConfig()  # #string
-        vector_config = VectorIndexConfig()  # #float_list
-        sparse_config = SparseVectorIndexConfig()  # #sparse_vector
-
-        schema.create_index(config=fts_config, key=key)
-        schema.create_index(config=string_config, key=key)
-        schema.create_index(config=vector_config, key=key)
-        schema.create_index(config=sparse_config, key=key)
-
-        internal = InternalSchema(schema)
-
-        # Verify all relevant value types are present
-        key_configs = internal.key_overrides[key]
-        assert "#string" in key_configs
-        assert "#float_list" in key_configs
-        assert "#sparse_vector" in key_configs
-
-        # Verify specific configs
-        assert "$fts_index" in key_configs["#string"]
-        assert "$string_inverted_index" in key_configs["#string"]
-        assert "$vector_index" in key_configs["#float_list"]
-        assert "$sparse_vector_index" in key_configs["#sparse_vector"]
-
-    def test_serialize_to_json_basic(self) -> None:
-        """Test basic JSON serialization of InternalSchema."""
-        schema = Schema()
-        internal = InternalSchema(schema)
-
-        json_data = internal.serialize_to_json()
-
-        # Verify structure
-        assert "defaults" in json_data
-        assert "key_overrides" in json_data
-        assert isinstance(json_data["defaults"], dict)
-        assert isinstance(json_data["key_overrides"], dict)
-
-        # With initialization enabled, InternalSchema starts with defaults
-        assert len(json_data["defaults"]) == 6  # 6 value types with defaults
-        assert len(json_data["key_overrides"]) == 2  # $document and $embedding keys
-
-    def test_serialize_to_json_with_configs(self) -> None:
-        """Test JSON serialization of InternalSchema with complex configurations."""
-        schema = Schema()
-        schema.create_index(VectorIndexConfig(source_key="custom_source"), key="test_key")
-
-        internal = InternalSchema(schema)
-        json_data = internal.serialize_to_json()
-
-        # Verify key override serialization
-        assert "test_key" in json_data["key_overrides"]
-        assert "#float_list" in json_data["key_overrides"]["test_key"]
-
-        vector_config = json_data["key_overrides"]["test_key"]["#float_list"]["$vector_index"]
-
-        # Verify Internal*Index object serialization (nested structure)
-        assert isinstance(vector_config, dict)
-        assert "enabled" in vector_config
-        assert vector_config["enabled"] is True
-        assert "config" in vector_config
-        assert vector_config["config"]["source_key"] == "custom_source"
-
-    def test_serialize_to_json_roundtrip_compatibility(self) -> None:
-        """Test that serialized JSON can be converted back to JSON string."""
-        import json
-
-        schema = Schema()
-        schema.create_index(VectorIndexConfig(source_key="test"))
-        schema.create_index(FtsIndexConfig(), key="doc_key")
-
-        internal = InternalSchema(schema)
-        json_data = internal.serialize_to_json()
-
-        # Verify it can be serialized to JSON string without errors
-        json_string = json.dumps(json_data)
-        assert isinstance(json_string, str)
-        assert len(json_string) > 0
-
-        # Verify it can be parsed back
-        parsed_data = json.loads(json_string)
-        assert parsed_data == json_data
-
-    def test_deserialize_from_json_basic(self) -> None:
-        """Test basic JSON deserialization of InternalSchema."""
-        # Create original schema
-        schema = Schema()
-        original = InternalSchema(schema)
-
-        # Serialize and deserialize
+        # Test 4: Cannot enable all indexes for a specific key
+        with pytest.raises(ValueError, match="Cannot enable all index types for key 'mykey'"):
+            schema.create_index(key="mykey")
+
+        # Test 5: Cannot disable all indexes for a specific key
+        with pytest.raises(ValueError, match="Cannot disable all index types for key 'mykey'"):
+            schema.delete_index(key="mykey")
+
+        # Test 6: Cannot delete vector index
+        with pytest.raises(ValueError, match="Deleting vector index is not currently supported"):
+            schema.delete_index(config=vector_config)
+
+        # Test 7: Cannot delete FTS index
+        with pytest.raises(ValueError, match="Deleting FTS index is not currently supported"):
+            schema.delete_index(config=fts_config)
+
+        # Test 8: Cannot create vector index on custom key
+        with pytest.raises(ValueError, match="Vector index cannot be enabled on specific keys"):
+            schema.create_index(config=vector_config, key="custom_field")
+
+        # Test 9: Cannot create FTS index on custom key
+        with pytest.raises(ValueError, match="FTS index cannot be enabled on specific keys"):
+            schema.create_index(config=fts_config, key="custom_field")
+
+    def test_empty_schema_serialization(self) -> None:
+        """Test serialization/deserialization of an unmodified schema."""
+        # Create a schema without any modifications
+        original = Schema()
+
+        # Serialize
         json_data = original.serialize_to_json()
-        deserialized = InternalSchema.deserialize_from_json(json_data)
 
-        # Verify structure matches
-        assert len(deserialized.defaults) == len(original.defaults)
-        assert len(deserialized.key_overrides) == len(original.key_overrides)
+        # Verify only default keys exist in keys
+        assert len(json_data["keys"]) == 2
+        assert "#document" in json_data["keys"]
+        assert "#embedding" in json_data["keys"]
 
-        # With initialization enabled, both should be populated
-        assert len(deserialized.defaults) == 6  # 6 value types with defaults
-        assert len(deserialized.key_overrides) == 2  # $document and $embedding keys
-
-    def test_deserialize_from_json_with_configs(self) -> None:
-        """Test JSON deserialization with complex configurations."""
-        # Create schema with complex config
-        schema = Schema()
-        schema.create_index(VectorIndexConfig(source_key="custom_source"), key="test_key")
-        original = InternalSchema(schema)
-
-        # Serialize and deserialize
-        json_data = original.serialize_to_json()
-        deserialized = InternalSchema.deserialize_from_json(json_data)
-
-        # Verify key override was preserved
-        assert "test_key" in deserialized.key_overrides
-        assert "#float_list" in deserialized.key_overrides["test_key"]
-
-        vector_index = deserialized.key_overrides["test_key"]["#float_list"]["$vector_index"]
-        assert isinstance(vector_index, InternalVectorIndex)
-        assert vector_index.enabled is True
-        assert vector_index.config.source_key == "custom_source"
-
-    def test_serialize_deserialize_roundtrip(self) -> None:
-        """Test complete serialize/deserialize roundtrip preserves all data."""
-        # Create complex schema
-        schema = Schema()
-        schema.create_index(VectorIndexConfig(source_key="doc_source"))  # Global config
-        schema.create_index(FtsIndexConfig(), key="document")  # Key-specific config
-        schema.create_index(VectorIndexConfig(source_key="embed_source"), key="embedding")
-
-        original = InternalSchema(schema)
-
-        # Serialize and deserialize
-        json_data = original.serialize_to_json()
-        deserialized = InternalSchema.deserialize_from_json(json_data)
+        # Deserialize
+        deserialized = Schema.deserialize_from_json(json_data)
 
         # Verify defaults match
-        for value_type in original.defaults:
-            assert value_type in deserialized.defaults
-            for index_name, index_value in original.defaults[value_type].items():
-                deserialized_value = deserialized.defaults[value_type][index_name]
-                if isinstance(index_value, bool):
-                    assert deserialized_value == index_value
-                else:
-                    assert isinstance(deserialized_value, type(index_value))
-                    if hasattr(index_value, 'enabled') and hasattr(deserialized_value, 'enabled'):
-                        assert deserialized_value.enabled == index_value.enabled
+        defaults = deserialized.defaults
+        assert defaults.string is not None
+        assert defaults.string.string_inverted_index is not None
+        assert defaults.string.string_inverted_index.enabled is True
+        assert defaults.string.fts_index is not None
+        assert defaults.string.fts_index.enabled is False
+        assert defaults.float_list is not None
+        assert defaults.float_list.vector_index is not None
+        assert defaults.float_list.vector_index.enabled is False
+        assert defaults.sparse_vector is not None
+        assert defaults.sparse_vector.sparse_vector_index is not None
+        assert defaults.sparse_vector.sparse_vector_index.enabled is False
+        assert defaults.int_value is not None
+        assert defaults.int_value.int_inverted_index is not None
+        assert defaults.int_value.int_inverted_index.enabled is True
+        assert defaults.float_value is not None
+        assert defaults.float_value.float_inverted_index is not None
+        assert defaults.float_value.float_inverted_index.enabled is True
+        assert defaults.boolean is not None
+        assert defaults.boolean.bool_inverted_index is not None
+        assert defaults.boolean.bool_inverted_index.enabled is True
 
-        # Verify key overrides match
-        for key in original.key_overrides:
-            assert key in deserialized.key_overrides
-            for value_type in original.key_overrides[key]:
-                assert value_type in deserialized.key_overrides[key]
-                for index_name, index_value in original.key_overrides[key][value_type].items():
-                    deserialized_value = deserialized.key_overrides[key][value_type][index_name]
-                    if isinstance(index_value, bool):
-                        assert deserialized_value == index_value
-                    else:
-                        assert isinstance(deserialized_value, type(index_value))
-                        if hasattr(index_value, 'enabled') and hasattr(deserialized_value, 'enabled'):
-                            assert deserialized_value.enabled == index_value.enabled
+        # Verify only default keys exist in keys
+        assert len(deserialized.keys) == 2
+        assert "#document" in deserialized.keys
+        assert "#embedding" in deserialized.keys
 
-    def test_deserialize_from_json_preserves_hardcoded_defaults(self) -> None:
-        """Test that deserialization preserves hardcoded key overrides."""
-        # Create empty schema
-        schema = Schema()
-        original = InternalSchema(schema)
+    def test_multiple_serialize_deserialize_roundtrips(self) -> None:
+        """Test that multiple serialization/deserialization cycles preserve schema integrity."""
+        # Register the mock embedding function
+        from chromadb.utils.embedding_functions import known_embedding_functions
+        known_embedding_functions["mock_embedding"] = MockEmbeddingFunction
 
-        # Serialize and deserialize
-        json_data = original.serialize_to_json()
-        deserialized = InternalSchema.deserialize_from_json(json_data)
+        try:
+            # Create a complex schema
+            original = Schema()
+            custom_ef = MockEmbeddingFunction(model_name="roundtrip_model")
+            hnsw_config = HnswIndexConfig(ef_construction=150, max_neighbors=40)
+            vector_config = VectorIndexConfig(
+                embedding_function=custom_ef,
+                space="cosine",
+                hnsw=hnsw_config
+            )
+            original.create_index(config=vector_config)
+            original.create_index(config=SparseVectorIndexConfig(source_key="text"), key="embeddings")
+            original.delete_index(config=StringInvertedIndexConfig(), key="tags")
 
-        # With initialization enabled, both should be populated
-        assert len(deserialized.defaults) == 6  # 6 value types with defaults
-        assert len(deserialized.key_overrides) == 2  # $document and $embedding keys
+            # First roundtrip
+            json1 = original.serialize_to_json()
+            schema1 = Schema.deserialize_from_json(json1)
 
-    def test_deserialize_handles_malformed_json(self) -> None:
-        """Test that deserialization handles malformed JSON with appropriate errors."""
-        # Test with missing fields
-        incomplete_json: Dict[str, Any] = {"defaults": {}}  # Missing key_overrides
-        deserialized = InternalSchema.deserialize_from_json(incomplete_json)
-        assert isinstance(deserialized.defaults, dict)
-        assert isinstance(deserialized.key_overrides, dict)
+            # Second roundtrip
+            json2 = schema1.serialize_to_json()
+            schema2 = Schema.deserialize_from_json(json2)
 
-        # Test with unknown index types (should raise error)
-        json_with_unknown = {
-            "defaults": {
-                "#string": {
-                    "$unknown_index": {"some": "data"}
-                }
-            },
-            "key_overrides": {}
-        }
-        with pytest.raises(ValueError, match="Unknown index type '\\$unknown_index' during deserialization"):
-            InternalSchema.deserialize_from_json(json_with_unknown)
+            # Third roundtrip
+            json3 = schema2.serialize_to_json()
+            schema3 = Schema.deserialize_from_json(json3)
 
-    def test_embedding_function_serialization(self) -> None:
-        """Test that embedding functions are properly serialized in configs."""
-        schema = Schema()
+            # Verify all schemas are identical
+            # Check vector config persists
+            for schema in [schema1, schema2, schema3]:
+                assert schema.defaults.float_list is not None
+                assert schema.defaults.float_list.vector_index is not None
+                assert schema.defaults.float_list.vector_index.config.space == "cosine"
+                assert schema.defaults.float_list.vector_index.config.hnsw is not None
+                assert schema.defaults.float_list.vector_index.config.hnsw.ef_construction == 150
+                assert schema.defaults.float_list.vector_index.config.hnsw.max_neighbors == 40
+                assert schema.defaults.float_list.vector_index.config.embedding_function is not None
+                assert schema.defaults.float_list.vector_index.config.embedding_function.name() == "mock_embedding"
 
-        # Create VectorIndexConfig with None embedding function
-        vector_config = VectorIndexConfig(embedding_function=None, source_key="test_source")
-        schema.create_index(config=vector_config, key="test_key")
+                # Check sparse vector on embeddings key
+                assert "embeddings" in schema.keys
+                embeddings_override = schema.keys["embeddings"]
+                assert embeddings_override.sparse_vector is not None
+                assert embeddings_override.sparse_vector.sparse_vector_index is not None
+                assert embeddings_override.sparse_vector.sparse_vector_index.enabled is True
+                assert embeddings_override.sparse_vector.sparse_vector_index.config.source_key == "text"
 
-        internal = InternalSchema(schema)
-        json_data = internal.serialize_to_json()
+                # Check disabled string index on tags key
+                assert "tags" in schema.keys
+                tags_override = schema.keys["tags"]
+                assert tags_override.string is not None
+                assert tags_override.string.string_inverted_index is not None
+                assert tags_override.string.string_inverted_index.enabled is False
 
-        # Check that embedding function is serialized as {"type": "legacy"} (nested structure)
-        vector_config_data = json_data["key_overrides"]["test_key"]["#float_list"]["$vector_index"]
-        assert "config" in vector_config_data
-        assert "embedding_function" in vector_config_data["config"]
-        assert vector_config_data["config"]["embedding_function"] == {"type": "legacy"}
-        assert vector_config_data["config"]["source_key"] == "test_source"
+            # Verify semantic equivalence: all three schemas should have same number of overrides
+            assert len(schema1.keys) == len(schema2.keys) == len(schema3.keys)
+            assert set(schema1.keys.keys()) == set(schema2.keys.keys()) == set(schema3.keys.keys())
 
-        # Test roundtrip deserialization
-        deserialized = InternalSchema.deserialize_from_json(json_data)
-        assert "test_key" in deserialized.key_overrides
-        assert "#float_list" in deserialized.key_overrides["test_key"]
-        assert "$vector_index" in deserialized.key_overrides["test_key"]["#float_list"]
+        finally:
+            # Clean up
+            if "mock_embedding" in known_embedding_functions:
+                del known_embedding_functions["mock_embedding"]
 
-        # Verify the deserialized config has None embedding function
-        vector_index = deserialized.key_overrides["test_key"]["#float_list"]["$vector_index"]
-        assert isinstance(vector_index, InternalVectorIndex)
-        assert vector_index.config.embedding_function is None
-        assert vector_index.config.source_key == "test_source"
-
-    def test_space_serialization_deserialization(self) -> None:
-        """Test that space is properly serialized and deserialized."""
-        schema = Schema()
-
-        # Create VectorIndexConfig with specific space
-        vector_config = VectorIndexConfig(space="cosine", source_key="test")
-        schema.create_index(config=vector_config, key="test_key")
-
-        # Serialize to JSON
-        internal = InternalSchema(schema)
-        json_data = internal.serialize_to_json()
-
-        # Verify space is in serialized data (nested structure)
-        vector_index_data = json_data["key_overrides"]["test_key"]["#float_list"]["$vector_index"]
-        assert "config" in vector_index_data
-        assert "space" in vector_index_data["config"]
-        assert vector_index_data["config"]["space"] == "cosine"
-
-        # Deserialize back
-        deserialized = InternalSchema.deserialize_from_json(json_data)
-
-        # Verify space is preserved
-        deserialized_vector = deserialized.key_overrides["test_key"]["#float_list"]["$vector_index"]
-        assert isinstance(deserialized_vector, InternalVectorIndex)
-        assert deserialized_vector.config.space == "cosine"
-
-    def test_embedding_function_serialization_deserialization(self) -> None:
-        """Test that embedding functions are properly serialized and deserialized."""
+    def test_many_keys_stress(self) -> None:
+        """Test schema with many key overrides (stress test)."""
         schema = Schema()
 
-        # Use a known embedding function that's registered
-        from chromadb.api.types import DefaultEmbeddingFunction
+        # Create 50 key overrides with different configurations
+        for i in range(50):
+            key_name = f"field_{i}"
+            if i == 0:
+                # Enable sparse vector on ONE key only
+                schema.create_index(config=SparseVectorIndexConfig(source_key=f"source_{i}"), key=key_name)
+            elif i % 2 == 1:
+                # Disable string inverted index
+                schema.delete_index(config=StringInvertedIndexConfig(), key=key_name)
+            else:
+                # Disable int inverted index
+                schema.delete_index(config=IntInvertedIndexConfig(), key=key_name)
 
+        # Verify all 50 keys + 2 defaults exist
+        assert len(schema.keys) == 52  # 50 custom + #document + #embedding
+
+        # Verify a sample of keys
+        assert "field_0" in schema.keys
+        field_0 = schema.keys["field_0"]
+        assert field_0.sparse_vector is not None
+        assert field_0.sparse_vector.sparse_vector_index is not None
+        assert field_0.sparse_vector.sparse_vector_index.enabled is True
+
+        assert "field_1" in schema.keys
+        field_1 = schema.keys["field_1"]
+        assert field_1.string is not None
+        assert field_1.string.string_inverted_index is not None
+        assert field_1.string.string_inverted_index.enabled is False
+
+        assert "field_2" in schema.keys
+        field_2 = schema.keys["field_2"]
+        assert field_2.int_value is not None
+        assert field_2.int_value.int_inverted_index is not None
+        assert field_2.int_value.int_inverted_index.enabled is False
+
+        # Serialize
+        json_data = schema.serialize_to_json()
+        assert len(json_data["keys"]) == 52
+
+        # Deserialize
+        deserialized = Schema.deserialize_from_json(json_data)
+        assert len(deserialized.keys) == 52
+
+        # Spot check deserialized values
+        assert "field_0" in deserialized.keys  # i == 0 -> sparse vector
+        des_field_0 = deserialized.keys["field_0"]
+        assert des_field_0.sparse_vector is not None
+        assert des_field_0.sparse_vector.sparse_vector_index is not None
+        assert des_field_0.sparse_vector.sparse_vector_index.enabled is True
+        assert des_field_0.sparse_vector.sparse_vector_index.config.source_key == "source_0"
+
+        assert "field_49" in deserialized.keys  # 49 % 2 == 1 -> string disabled
+        des_field_49 = deserialized.keys["field_49"]
+        assert des_field_49.string is not None
+        assert des_field_49.string.string_inverted_index is not None
+        assert des_field_49.string.string_inverted_index.enabled is False
+
+        assert "field_48" in deserialized.keys  # 48 % 2 == 0 -> int disabled
+        des_field_48 = deserialized.keys["field_48"]
+        assert des_field_48.int_value is not None
+        assert des_field_48.int_value.int_inverted_index is not None
+        assert des_field_48.int_value.int_inverted_index.enabled is False
+
+    def test_chained_operations(self) -> None:
+        """Test chaining multiple create_index and delete_index operations."""
+        schema = Schema()
+
+        # Chain multiple operations
+        result = (schema
+                  .create_index(config=SparseVectorIndexConfig(source_key="text"), key="field1")
+                  .delete_index(config=StringInvertedIndexConfig(), key="field2")
+                  .delete_index(config=StringInvertedIndexConfig(), key="field3")
+                  .delete_index(config=IntInvertedIndexConfig(), key="field4"))
+
+        # Verify chaining returns the same schema object
+        assert result is schema
+
+        # Verify all operations were applied
+        assert "field1" in schema.keys
+        field1 = schema.keys["field1"]
+        assert field1.sparse_vector is not None
+        assert field1.sparse_vector.sparse_vector_index is not None
+        assert field1.sparse_vector.sparse_vector_index.enabled is True
+
+        assert "field2" in schema.keys
+        field2 = schema.keys["field2"]
+        assert field2.string is not None
+        assert field2.string.string_inverted_index is not None
+        assert field2.string.string_inverted_index.enabled is False
+
+        assert "field3" in schema.keys
+        field3 = schema.keys["field3"]
+        assert field3.string is not None
+        assert field3.string.string_inverted_index is not None
+        assert field3.string.string_inverted_index.enabled is False
+
+        assert "field4" in schema.keys
+        field4 = schema.keys["field4"]
+        assert field4.int_value is not None
+        assert field4.int_value.int_inverted_index is not None
+        assert field4.int_value.int_inverted_index.enabled is False
+
+    def test_float_and_bool_inverted_indexes(self) -> None:
+        """Test enabling/disabling float and bool inverted indexes."""
+        schema = Schema()
+
+        # Verify defaults
+        assert schema.defaults.float_value is not None
+        assert schema.defaults.float_value.float_inverted_index is not None
+        assert schema.defaults.float_value.float_inverted_index.enabled is True
+        assert schema.defaults.boolean is not None
+        assert schema.defaults.boolean.bool_inverted_index is not None
+        assert schema.defaults.boolean.bool_inverted_index.enabled is True
+
+        # Disable float inverted index globally
+        float_config = FloatInvertedIndexConfig()
+        schema.delete_index(config=float_config)
+        assert schema.defaults.float_value.float_inverted_index is not None
+        assert schema.defaults.float_value.float_inverted_index.enabled is False
+
+        # Disable bool inverted index globally
+        bool_config = BoolInvertedIndexConfig()
+        schema.delete_index(config=bool_config)
+        assert schema.defaults.boolean.bool_inverted_index is not None
+        assert schema.defaults.boolean.bool_inverted_index.enabled is False
+
+        # Enable float inverted index on a specific key
+        schema.create_index(config=FloatInvertedIndexConfig(), key="price")
+        assert "price" in schema.keys
+        assert schema.keys["price"].float_value.float_inverted_index.enabled is True
+
+        # Disable bool inverted index on a specific key
+        schema.delete_index(config=BoolInvertedIndexConfig(), key="is_active")
+        assert "is_active" in schema.keys
+        assert schema.keys["is_active"].boolean.bool_inverted_index.enabled is False
+
+        # Serialize and verify
+        json_data = schema.serialize_to_json()
+        assert json_data["defaults"]["float"]["float_inverted_index"]["enabled"] is False
+        assert json_data["defaults"]["bool"]["bool_inverted_index"]["enabled"] is False
+        assert json_data["keys"]["price"]["float"]["float_inverted_index"]["enabled"] is True
+        assert json_data["keys"]["is_active"]["bool"]["bool_inverted_index"]["enabled"] is False
+
+        # Deserialize and verify
+        deserialized = Schema.deserialize_from_json(json_data)
+        assert deserialized.defaults.float_value.float_inverted_index.enabled is False
+        assert deserialized.defaults.boolean.bool_inverted_index.enabled is False
+        assert deserialized.keys["price"].float_value.float_inverted_index.enabled is True
+        assert deserialized.keys["is_active"].boolean.bool_inverted_index.enabled is False
+
+    def test_space_inference_from_embedding_function(self) -> None:
+        """Test that space is correctly inferred from embedding function when not explicitly set."""
+        # Register the mock embedding function
+        from chromadb.utils.embedding_functions import known_embedding_functions
+        known_embedding_functions["mock_embedding"] = MockEmbeddingFunction
+
+        try:
+            schema = Schema()
+
+            # Create vector config with EF but WITHOUT explicit space
+            # MockEmbeddingFunction has default_space() = "cosine"
+            custom_ef = MockEmbeddingFunction(model_name="space_inference_test")
+            vector_config = VectorIndexConfig(
+                embedding_function=custom_ef
+                # Note: space is NOT specified, should be inferred from EF
+            )
+            schema.create_index(config=vector_config)
+
+            # Serialize to JSON
+            json_data = schema.serialize_to_json()
+
+            # Verify that space was inferred and set to "cosine" in serialized JSON
+            defaults_vector = json_data["defaults"]["float_list"]["vector_index"]
+            assert defaults_vector["config"]["space"] == "cosine"  # Inferred from EF
+
+            # Verify #embedding key also has inferred space
+            embedding_vector = json_data["keys"]["#embedding"]["float_list"]["vector_index"]
+            assert embedding_vector["config"]["space"] == "cosine"  # Inferred from EF
+
+            # Deserialize and verify space is preserved
+            deserialized = Schema.deserialize_from_json(json_data)
+            assert deserialized.defaults.float_list is not None
+            assert deserialized.defaults.float_list.vector_index is not None
+            assert deserialized.defaults.float_list.vector_index.config.space == "cosine"
+
+            assert deserialized.keys["#embedding"].float_list is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.space == "cosine"
+
+        finally:
+            # Clean up
+            if "mock_embedding" in known_embedding_functions:
+                del known_embedding_functions["mock_embedding"]
+
+    def test_explicit_space_overrides_embedding_function_default(self) -> None:
+        """Test that explicit space parameter overrides the embedding function's default space."""
+        # Register the mock embedding function
+        from chromadb.utils.embedding_functions import known_embedding_functions
+        known_embedding_functions["mock_embedding"] = MockEmbeddingFunction
+
+        try:
+            schema = Schema()
+
+            # Create vector config with EF and EXPLICIT space that differs from EF default
+            # MockEmbeddingFunction has default_space() = "cosine"
+            # But we explicitly set space = "l2"
+            custom_ef = MockEmbeddingFunction(model_name="override_test")
+            vector_config = VectorIndexConfig(
+                embedding_function=custom_ef,
+                space="l2"  # Explicitly override the EF's default
+            )
+            schema.create_index(config=vector_config)
+
+            # Serialize to JSON
+            json_data = schema.serialize_to_json()
+
+            # Verify that explicit space overrode the EF default
+            defaults_vector = json_data["defaults"]["float_list"]["vector_index"]
+            assert defaults_vector["config"]["space"] == "l2"  # User-specified, not "cosine"
+
+            embedding_vector = json_data["keys"]["#embedding"]["float_list"]["vector_index"]
+            assert embedding_vector["config"]["space"] == "l2"  # User-specified, not "cosine"
+
+            # Deserialize and verify explicit space is preserved
+            deserialized = Schema.deserialize_from_json(json_data)
+            assert deserialized.defaults.float_list is not None
+            assert deserialized.defaults.float_list.vector_index is not None
+            assert deserialized.defaults.float_list.vector_index.config.space == "l2"
+
+            assert deserialized.keys["#embedding"].float_list is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index is not None
+            assert deserialized.keys["#embedding"].float_list.vector_index.config.space == "l2"
+
+        finally:
+            # Clean up
+            if "mock_embedding" in known_embedding_functions:
+                del known_embedding_functions["mock_embedding"]
+
+    def test_space_inference_with_no_embedding_function(self) -> None:
+        """Test space handling when no embedding function is provided (legacy mode)."""
+        schema = Schema()
+
+        # Create vector config with explicit space but NO embedding function (legacy)
         vector_config = VectorIndexConfig(
-            space="l2",
-            embedding_function=DefaultEmbeddingFunction(),
-            source_key="test"
+            embedding_function=None,
+            space="ip"  # Must be explicit since no EF to infer from
         )
-        schema.create_index(config=vector_config, key="test_key")
+        schema.create_index(config=vector_config)
 
         # Serialize to JSON
-        internal = InternalSchema(schema)
-        json_data = internal.serialize_to_json()
+        json_data = schema.serialize_to_json()
 
-        # Verify embedding function is serialized (nested structure)
-        vector_index_data = json_data["key_overrides"]["test_key"]["#float_list"]["$vector_index"]
-        assert "config" in vector_index_data
-        assert "embedding_function" in vector_index_data["config"]
-        ef_config = vector_index_data["config"]["embedding_function"]
-        assert ef_config["type"] == "known"
-        assert ef_config["name"] == "default"
-        assert ef_config["config"] == {}
+        # Verify space is correctly set
+        defaults_vector = json_data["defaults"]["float_list"]["vector_index"]
+        assert defaults_vector["config"]["space"] == "ip"
+        assert defaults_vector["config"]["embedding_function"]["type"] == "legacy"
 
-        # Deserialize back
-        deserialized = InternalSchema.deserialize_from_json(json_data)
+        embedding_vector = json_data["keys"]["#embedding"]["float_list"]["vector_index"]
+        assert embedding_vector["config"]["space"] == "ip"
+        assert embedding_vector["config"]["embedding_function"]["type"] == "legacy"
 
-        # Verify embedding function is reconstructed
-        deserialized_vector = deserialized.key_overrides["test_key"]["#float_list"]["$vector_index"]
-        assert isinstance(deserialized_vector, InternalVectorIndex)
-        assert deserialized_vector.config.embedding_function is not None
-        assert hasattr(deserialized_vector.config.embedding_function, '__call__')
-        assert deserialized_vector.config.embedding_function.name() == "default"
+        # Deserialize and verify
+        deserialized = Schema.deserialize_from_json(json_data)
+        assert deserialized.defaults.float_list is not None
+        assert deserialized.defaults.float_list.vector_index is not None
+        assert deserialized.defaults.float_list.vector_index.config.space == "ip"
+        assert deserialized.defaults.float_list.vector_index.config.embedding_function is None
 
-    def test_legacy_embedding_function_serialization_deserialization(self) -> None:
-        """Test that legacy embedding functions are properly handled."""
+    def test_space_inference_multiple_roundtrips(self) -> None:
+        """Test that inferred space remains stable across multiple serialization roundtrips."""
+        # Register the mock embedding function
+        from chromadb.utils.embedding_functions import known_embedding_functions
+        known_embedding_functions["mock_embedding"] = MockEmbeddingFunction
+
+        try:
+            # Create schema with inferred space (no explicit space)
+            original = Schema()
+            custom_ef = MockEmbeddingFunction(model_name="roundtrip_space_test")
+            vector_config = VectorIndexConfig(embedding_function=custom_ef)  # No explicit space
+            original.create_index(config=vector_config)
+
+            # First roundtrip
+            json1 = original.serialize_to_json()
+            assert json1["defaults"]["float_list"]["vector_index"]["config"]["space"] == "cosine"
+            schema1 = Schema.deserialize_from_json(json1)
+
+            # Second roundtrip
+            json2 = schema1.serialize_to_json()
+            assert json2["defaults"]["float_list"]["vector_index"]["config"]["space"] == "cosine"
+            schema2 = Schema.deserialize_from_json(json2)
+
+            # Third roundtrip
+            json3 = schema2.serialize_to_json()
+            assert json3["defaults"]["float_list"]["vector_index"]["config"]["space"] == "cosine"
+
+            # Verify all schemas have the inferred space
+            for schema in [schema1, schema2]:
+                assert schema.defaults.float_list is not None
+                assert schema.defaults.float_list.vector_index is not None
+                assert schema.defaults.float_list.vector_index.config.space == "cosine"
+
+        finally:
+            # Clean up
+            if "mock_embedding" in known_embedding_functions:
+                del known_embedding_functions["mock_embedding"]
+
+    def test_keys_have_independent_configs(self) -> None:
+        """Test that each key override has its own independent config (no inheritance from defaults)."""
         schema = Schema()
 
-        # Create VectorIndexConfig with None embedding function (legacy)
-        vector_config = VectorIndexConfig(space="l2", embedding_function=None, source_key="test")
-        schema.create_index(config=vector_config, key="test_key")
+        # Enable sparse vector on a key - it gets exactly what we specify
+        sparse_config = SparseVectorIndexConfig(source_key="default_source")
+        schema.create_index(config=sparse_config, key="field1")
 
-        # Serialize to JSON
-        internal = InternalSchema(schema)
-        json_data = internal.serialize_to_json()
+        # Verify field1 has the sparse vector with the specified source_key
+        assert "field1" in schema.keys
+        field1 = schema.keys["field1"]
+        assert field1.sparse_vector is not None
+        assert field1.sparse_vector.sparse_vector_index is not None
+        assert field1.sparse_vector.sparse_vector_index.enabled is True
+        assert field1.sparse_vector.sparse_vector_index.config.source_key == "default_source"
 
-        # Verify legacy embedding function is serialized (nested structure)
-        vector_index_data = json_data["key_overrides"]["test_key"]["#float_list"]["$vector_index"]
-        assert "config" in vector_index_data
-        assert "embedding_function" in vector_index_data["config"]
-        ef_config = vector_index_data["config"]["embedding_function"]
-        assert ef_config["type"] == "legacy"
+        # Now create another key with a DIFFERENT config (use string_inverted_index instead)
+        string_config = StringInvertedIndexConfig()
+        schema.create_index(config=string_config, key="field2")
 
-        # Deserialize back
-        deserialized = InternalSchema.deserialize_from_json(json_data)
+        # Verify field2 has its own config
+        assert "field2" in schema.keys
+        field2 = schema.keys["field2"]
+        assert field2.string is not None
+        assert field2.string.string_inverted_index is not None
+        assert field2.string.string_inverted_index.enabled is True
 
-        # Verify legacy embedding function is handled
-        deserialized_vector = deserialized.key_overrides["test_key"]["#float_list"]["$vector_index"]
-        assert isinstance(deserialized_vector, InternalVectorIndex)
-        assert deserialized_vector.config.embedding_function is None
+        # Verify field1 is unchanged
+        assert field1.sparse_vector.sparse_vector_index.config.source_key == "default_source"
 
-    def test_space_resolution_from_embedding_function(self) -> None:
-        """Test that space is resolved from embedding function when not provided."""
+    def test_global_default_changes_dont_affect_existing_overrides(self) -> None:
+        """Test that changes to global defaults don't affect already-created key overrides."""
+        # Register the mock embedding function
+        from chromadb.utils.embedding_functions import known_embedding_functions
+        known_embedding_functions["mock_embedding"] = MockEmbeddingFunction
+
+        try:
+            schema = Schema()
+
+            # Create initial vector config with HNSW
+            ef1 = MockEmbeddingFunction(model_name="initial_model")
+            hnsw1 = HnswIndexConfig(ef_construction=100, max_neighbors=16)
+            vector_config1 = VectorIndexConfig(
+                embedding_function=ef1,
+                space="cosine",
+                hnsw=hnsw1
+            )
+            schema.create_index(config=vector_config1)
+
+            # Capture the initial state of #embedding
+            initial_embedding_hnsw = schema.keys["#embedding"].float_list.vector_index.config.hnsw  # type: ignore[union-attr]
+            assert initial_embedding_hnsw is not None
+            assert initial_embedding_hnsw.ef_construction == 100
+            assert initial_embedding_hnsw.max_neighbors == 16
+
+            # Now change the global vector config to different values
+            ef2 = MockEmbeddingFunction(model_name="updated_model")
+            hnsw2 = HnswIndexConfig(ef_construction=200, max_neighbors=32)
+            vector_config2 = VectorIndexConfig(
+                embedding_function=ef2,
+                space="l2",
+                hnsw=hnsw2
+            )
+            schema.create_index(config=vector_config2)
+
+            # Verify global defaults changed
+            assert schema.defaults.float_list is not None
+            assert schema.defaults.float_list.vector_index is not None
+            assert schema.defaults.float_list.vector_index.config.space == "l2"
+            assert schema.defaults.float_list.vector_index.config.hnsw is not None
+            assert schema.defaults.float_list.vector_index.config.hnsw.ef_construction == 200
+            assert schema.defaults.float_list.vector_index.config.hnsw.max_neighbors == 32
+
+            # Verify #embedding was also updated (since it's the target of vector config)
+            assert schema.keys["#embedding"].float_list is not None
+            assert schema.keys["#embedding"].float_list.vector_index is not None
+            updated_embedding_hnsw = schema.keys["#embedding"].float_list.vector_index.config.hnsw
+            assert updated_embedding_hnsw is not None
+            assert updated_embedding_hnsw.ef_construction == 200
+            assert updated_embedding_hnsw.max_neighbors == 32
+            assert schema.keys["#embedding"].float_list.vector_index.config.space == "l2"
+
+        finally:
+            # Clean up
+            if "mock_embedding" in known_embedding_functions:
+                del known_embedding_functions["mock_embedding"]
+
+    def test_key_specific_overrides_are_independent(self) -> None:
+        """Test that modifying one key's overrides doesn't affect other keys."""
         schema = Schema()
 
-        # Create VectorIndexConfig without space (should be resolved from embedding function)
-        class MockEmbeddingFunction:
+        # Create sparse vector on one key and string indexes on others
+        schema.create_index(config=SparseVectorIndexConfig(source_key="source_a"), key="key_a")
+        schema.create_index(config=StringInvertedIndexConfig(), key="key_b")
+        schema.create_index(config=StringInvertedIndexConfig(), key="key_c")
 
-            def __call__(self, input: Any) -> list[list[float]]:
-                return [[1.0, 2.0, 3.0]]
+        # Verify each key has its own config
+        assert schema.keys["key_a"].sparse_vector.sparse_vector_index.config.source_key == "source_a"  # type: ignore[union-attr]
+        assert schema.keys["key_b"].string.string_inverted_index.enabled is True  # type: ignore[union-attr]
+        assert schema.keys["key_c"].string.string_inverted_index.enabled is True  # type: ignore[union-attr]
 
-            def name(self) -> str:
-                return "MockEmbeddingFunction"
+        # Now disable string inverted index on key_b
+        schema.delete_index(config=StringInvertedIndexConfig(), key="key_b")
 
-            def get_config(self) -> Dict[str, Any]:
-                return {"param": "value"}
+        # Verify key_b is disabled
+        assert schema.keys["key_b"].string.string_inverted_index.enabled is False  # type: ignore[union-attr]
 
-            def is_legacy(self) -> bool:
-                return False
+        # Verify key_a and key_c are unaffected
+        key_a = schema.keys["key_a"]
+        assert key_a.sparse_vector is not None
+        assert key_a.sparse_vector.sparse_vector_index is not None
+        assert key_a.sparse_vector.sparse_vector_index.enabled is True
+        assert key_a.sparse_vector.sparse_vector_index.config.source_key == "source_a"
 
-            def default_space(self) -> str:
-                return "l2"
+        key_c = schema.keys["key_c"]
+        assert key_c.string is not None
+        assert key_c.string.string_inverted_index is not None
+        assert key_c.string.string_inverted_index.enabled is True
 
-            def supported_spaces(self) -> list[str]:
-                return ["l2", "cosine", "ip"]
+        # Serialize and deserialize to ensure independence is preserved
+        json_data = schema.serialize_to_json()
+        deserialized = Schema.deserialize_from_json(json_data)
 
-        vector_config = VectorIndexConfig(
-            embedding_function=cast(EmbeddingFunction[Documents], MockEmbeddingFunction()),
-            source_key="test"
-        )
-        schema.create_index(config=vector_config, key="test_key")
+        # Verify after roundtrip
+        assert deserialized.keys["key_a"].sparse_vector.sparse_vector_index.config.source_key == "source_a"
+        assert deserialized.keys["key_b"].string.string_inverted_index.enabled is False
+        assert deserialized.keys["key_c"].string.string_inverted_index.enabled is True
 
-        # Serialize to JSON
-        internal = InternalSchema(schema)
-        json_data = internal.serialize_to_json()
-
-        # Verify space is resolved and serialized (nested structure)
-        vector_index_data = json_data["key_overrides"]["test_key"]["#float_list"]["$vector_index"]
-        assert "config" in vector_index_data
-        assert "space" in vector_index_data["config"]
-        # MockEmbeddingFunction should have default space "l2"
-        assert vector_index_data["config"]["space"] == "l2"
-
-        # Deserialize back
-        deserialized = InternalSchema.deserialize_from_json(json_data)
-
-        # Verify space is preserved
-        deserialized_vector = deserialized.key_overrides["test_key"]["#float_list"]["$vector_index"]
-        assert isinstance(deserialized_vector, InternalVectorIndex)
-        assert deserialized_vector.config.space == "l2"
-
-    def test_space_validation_with_embedding_function(self) -> None:
-        """Test that space validation works with embedding function."""
+    def test_global_default_disable_then_key_enable(self) -> None:
+        """Test disabling an index globally, then enabling it on specific keys."""
         schema = Schema()
 
-        # Create VectorIndexConfig with a space that's not supported by the embedding function
-        class MockEmbeddingFunction:
+        # Verify string_inverted_index is enabled by default
+        assert schema.defaults.string is not None
+        assert schema.defaults.string.string_inverted_index is not None
+        assert schema.defaults.string.string_inverted_index.enabled is True
 
-            def __call__(self, input: Any) -> list[list[float]]:
-                return [[1.0, 2.0, 3.0]]
+        # Disable string_inverted_index globally
+        schema.delete_index(config=StringInvertedIndexConfig())
+        assert schema.defaults.string.string_inverted_index.enabled is False
 
-            def name(self) -> str:
-                return "MockEmbeddingFunction"
+        # Now enable it on specific keys
+        schema.create_index(config=StringInvertedIndexConfig(), key="important_field")
+        schema.create_index(config=StringInvertedIndexConfig(), key="searchable_field")
 
-            def get_config(self) -> Dict[str, Any]:
-                return {"param": "value"}
+        # Verify global default is still disabled
+        assert schema.defaults.string.string_inverted_index.enabled is False
 
-            def is_legacy(self) -> bool:
-                return False
+        # Verify specific keys have it enabled
+        important = schema.keys["important_field"]
+        assert important.string is not None
+        assert important.string.string_inverted_index is not None
+        assert important.string.string_inverted_index.enabled is True
 
-            def default_space(self) -> str:
-                return "l2"
+        searchable = schema.keys["searchable_field"]
+        assert searchable.string is not None
+        assert searchable.string.string_inverted_index is not None
+        assert searchable.string.string_inverted_index.enabled is True
 
-            def supported_spaces(self) -> list[str]:
-                return ["l2", "cosine"]  # Only supports l2 and cosine, not ip
+        # Verify other keys would inherit the disabled global default
+        # (by checking serialization - keys without overrides shouldn't appear)
+        json_data = schema.serialize_to_json()
 
-        vector_config = VectorIndexConfig(
-            space="ip",  # This should trigger a warning since MockEmbeddingFunction doesn't support "ip"
-            embedding_function=cast(EmbeddingFunction[Documents], MockEmbeddingFunction()),
-            source_key="test"
-        )
-        schema.create_index(config=vector_config, key="test_key")
+        # Only our explicitly modified keys + defaults (#document, #embedding) should be in overrides
+        assert "important_field" in json_data["keys"]
+        assert "searchable_field" in json_data["keys"]
+        assert "#document" in json_data["keys"]
+        assert "#embedding" in json_data["keys"]
 
-        # Serialize to JSON (should trigger warning)
-        internal = InternalSchema(schema)
-        with pytest.warns(UserWarning, match="space ip is not supported"):
-            json_data = internal.serialize_to_json()
+        # A hypothetical "other_field" would NOT be in overrides (uses global default)
+        assert "other_field" not in json_data["keys"]
 
-        # Verify the space is still serialized (with warning) (nested structure)
-        vector_index_data = json_data["key_overrides"]["test_key"]["#float_list"]["$vector_index"]
-        assert vector_index_data["config"]["space"] == "ip"
+    def test_partial_override_fills_from_defaults(self) -> None:
+        """Test that when you override one aspect of a value type, other indexes still follow defaults."""
+        schema = Schema()
+
+        # Enable sparse vector on a key
+        schema.create_index(config=SparseVectorIndexConfig(source_key="my_source"), key="multi_index_field")
+
+        # This key now has sparse_vector overridden, but string, int, etc. should still follow global defaults
+        field = schema.keys["multi_index_field"]
+
+        # Sparse vector is explicitly set
+        assert field.sparse_vector is not None
+        assert field.sparse_vector.sparse_vector_index is not None
+        assert field.sparse_vector.sparse_vector_index.enabled is True
+
+        # Other value types are None (will fall back to global defaults)
+        assert field.string is None
+        assert field.int_value is None
+        assert field.float_value is None
+        assert field.boolean is None
+        assert field.float_list is None
+
+        # Serialize to verify sparse override behavior
+        json_data = schema.serialize_to_json()
+        field_json = json_data["keys"]["multi_index_field"]
+
+        # Only sparse_vector should be in the JSON for this key
+        assert "sparse_vector" in field_json
+        assert "string" not in field_json  # Falls back to global
+        assert "int" not in field_json
+        assert "float" not in field_json
+        assert "bool" not in field_json
+        assert "float_list" not in field_json
+
+        # Deserialize and verify
+        deserialized = Schema.deserialize_from_json(json_data)
+        des_field = deserialized.keys["multi_index_field"]
+
+        # Sparse vector is set
+        assert des_field.sparse_vector is not None
+        assert des_field.sparse_vector.sparse_vector_index is not None
+        assert des_field.sparse_vector.sparse_vector_index.enabled is True
+
+        # Others are None (sparse override)
+        assert des_field.string is None
+        assert des_field.int_value is None
+
+
+def test_sparse_vector_cannot_be_created_globally() -> None:
+    """Test that sparse vector index cannot be created globally (without a key)."""
+    schema = Schema()
+    sparse_config = SparseVectorIndexConfig()
+
+    # Try to enable sparse vector globally - should fail
+    with pytest.raises(ValueError, match="Sparse vector index must be created on a specific key"):
+        schema.create_index(config=sparse_config)
+
+
+def test_sparse_vector_cannot_be_deleted() -> None:
+    """Test that sparse vector index cannot be deleted (temporarily disallowed)."""
+    schema = Schema()
+    sparse_config = SparseVectorIndexConfig()
+
+    # Create sparse vector on a key first
+    schema.create_index(config=sparse_config, key="my_key")
+    assert schema.keys["my_key"].sparse_vector is not None
+    assert schema.keys["my_key"].sparse_vector.sparse_vector_index is not None
+    assert schema.keys["my_key"].sparse_vector.sparse_vector_index.enabled is True
+
+    # Try to delete it - should fail
+    with pytest.raises(ValueError, match="Deleting sparse vector index is not currently supported"):
+        schema.delete_index(config=sparse_config, key="my_key")

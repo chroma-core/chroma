@@ -23,53 +23,57 @@ import cloudflareWorkersAiSchema from "../../../../../../schemas/embedding_funct
 import togetherAiSchema from "../../../../../../schemas/embedding_functions/together_ai.json";
 import mistralSchema from "../../../../../../schemas/embedding_functions/mistral.json";
 import morphSchema from "../../../../../../schemas/embedding_functions/morph.json";
+import chromaCloudQwenSchema from "../../../../../../schemas/embedding_functions/chroma-cloud-qwen.json";
+import chromaCloudSpladeSchema from "../../../../../../schemas/embedding_functions/chroma-cloud-splade.json";
 import Ajv from "ajv";
 
 // Define a common interface for all schemas
 interface Schema {
-  $schema: string;
-  title?: string;
-  description?: string;
-  version?: string;
-  type: string;
-  properties: Record<string, any>;
-  required?: string[];
-  additionalProperties?: boolean;
-  [key: string]: any; // Allow for other properties
+	$schema: string;
+	title?: string;
+	description?: string;
+	version?: string;
+	type: string;
+	properties: Record<string, any>;
+	required?: string[];
+	additionalProperties?: boolean;
+	[key: string]: any; // Allow for other properties
 }
 
 const ajv = new Ajv({
-  strict: false, // Allow unknown keywords
-  allErrors: true,
+	strict: false, // Allow unknown keywords
+	allErrors: true,
 });
 
 // Map of schema names to schema objects
 const schemaMap = {
-  "amazon-bedrock": amazonBedrockSchema as Schema,
-  "base-schema": baseSchema as Schema,
-  "chroma-langchain": chromaLangchainSchema as Schema,
-  cohere: cohereSchema as Schema,
-  default: defaultSchema as Schema,
-  "google-generative-ai": googleGenerativeAiSchema as Schema,
-  "google-palm": googlePalmSchema as Schema,
-  "google-vertex": googleVertexSchema as Schema,
-  huggingface: huggingfaceSchema as Schema,
-  "huggingface-server": huggingfaceServerSchema as Schema,
-  instructor: instructorSchema as Schema,
-  jina: jinaSchema as Schema,
-  ollama: ollamaSchema as Schema,
-  "onnx-mini-lm-l6-v2": onnxMiniLmL6V2Schema as Schema,
-  "open-clip": openClipSchema as Schema,
-  openai: openaiSchema as Schema,
-  roboflow: roboflowSchema as Schema,
-  "sentence-transformer": sentenceTransformerSchema as Schema,
-  text2vec: text2vecSchema as Schema,
-  transformers: transformersSchema as Schema,
-  voyageai: voyageaiSchema as Schema,
-  "cloudflare-worker-ai": cloudflareWorkersAiSchema as Schema,
-  "together-ai": togetherAiSchema as Schema,
-  mistral: mistralSchema as Schema,
-  morph: morphSchema as Schema,
+	"amazon-bedrock": amazonBedrockSchema as Schema,
+	"base-schema": baseSchema as Schema,
+	"chroma-langchain": chromaLangchainSchema as Schema,
+	cohere: cohereSchema as Schema,
+	default: defaultSchema as Schema,
+	"google-generative-ai": googleGenerativeAiSchema as Schema,
+	"google-palm": googlePalmSchema as Schema,
+	"google-vertex": googleVertexSchema as Schema,
+	huggingface: huggingfaceSchema as Schema,
+	"huggingface-server": huggingfaceServerSchema as Schema,
+	instructor: instructorSchema as Schema,
+	jina: jinaSchema as Schema,
+	ollama: ollamaSchema as Schema,
+	"onnx-mini-lm-l6-v2": onnxMiniLmL6V2Schema as Schema,
+	"open-clip": openClipSchema as Schema,
+	openai: openaiSchema as Schema,
+	roboflow: roboflowSchema as Schema,
+	"sentence-transformer": sentenceTransformerSchema as Schema,
+	text2vec: text2vecSchema as Schema,
+	transformers: transformersSchema as Schema,
+	voyageai: voyageaiSchema as Schema,
+	"cloudflare-worker-ai": cloudflareWorkersAiSchema as Schema,
+	"together-ai": togetherAiSchema as Schema,
+	mistral: mistralSchema as Schema,
+	morph: morphSchema as Schema,
+	"chroma-cloud-qwen": chromaCloudQwenSchema as Schema,
+	"chroma-cloud-splade": chromaCloudSpladeSchema as Schema,
 };
 
 /**
@@ -80,11 +84,11 @@ const schemaMap = {
  * @throws Error if the schema is not available
  */
 export function loadSchema(schemaName: keyof typeof schemaMap): Schema {
-  if (!schemaMap[schemaName]) {
-    throw new Error(`Schema '${schemaName}' not found`);
-  }
+	if (!schemaMap[schemaName]) {
+		throw new Error(`Schema '${schemaName}' not found`);
+	}
 
-  return schemaMap[schemaName];
+	return schemaMap[schemaName];
 }
 
 /**
@@ -95,23 +99,23 @@ export function loadSchema(schemaName: keyof typeof schemaMap): Schema {
  * @throws Error if the configuration does not match the schema
  */
 export function validateConfigSchema(
-  config: Record<string, any>,
-  schemaName: keyof typeof schemaMap,
+	config: Record<string, any>,
+	schemaName: keyof typeof schemaMap,
 ): void {
-  const schema = loadSchema(schemaName);
+	const schema = loadSchema(schemaName);
 
-  const validate = ajv.compile(schema);
-  const valid = validate(config);
+	const validate = ajv.compile(schema);
+	const valid = validate(config);
 
-  if (!valid) {
-    const errors = validate.errors || [];
-    const errorPaths = errors
-      .map((e) => `${e.instancePath || "/"}: ${e.message}`)
-      .join(", ");
-    throw new Error(
-      `Config validation failed for schema '${schemaName}': ${errorPaths}`,
-    );
-  }
+	if (!valid) {
+		const errors = validate.errors || [];
+		const errorPaths = errors
+			.map((e) => `${e.instancePath || "/"}: ${e.message}`)
+			.join(", ");
+		throw new Error(
+			`Config validation failed for schema '${schemaName}': ${errorPaths}`,
+		);
+	}
 }
 
 /**
@@ -122,8 +126,8 @@ export function validateConfigSchema(
  * @throws Error if the schema file does not exist or is not valid JSON
  */
 export function getSchemaVersion(schemaName: keyof typeof schemaMap): string {
-  const schema = loadSchema(schemaName);
-  return schema.version || "1.0.0";
+	const schema = loadSchema(schemaName);
+	return schema.version || "1.0.0";
 }
 
 /**
@@ -132,9 +136,9 @@ export function getSchemaVersion(schemaName: keyof typeof schemaMap): string {
  * @returns A list of schema names (without .json extension)
  */
 export function getAvailableSchemas(): (keyof typeof schemaMap)[] {
-  return Object.keys(schemaMap).filter(
-    (name) => name !== "base_schema",
-  ) as (keyof typeof schemaMap)[];
+	return Object.keys(schemaMap).filter(
+		(name) => name !== "base_schema",
+	) as (keyof typeof schemaMap)[];
 }
 
 /**
@@ -143,26 +147,26 @@ export function getAvailableSchemas(): (keyof typeof schemaMap)[] {
  * @returns A dictionary mapping schema names to information about the schema
  */
 export function getSchemaInfo(): Record<
-  string,
-  { version: string; title: string; description: string }
+	string,
+	{ version: string; title: string; description: string }
 > {
-  const schemaInfo: Record<
-    string,
-    { version: string; title: string; description: string }
-  > = {};
+	const schemaInfo: Record<
+		string,
+		{ version: string; title: string; description: string }
+	> = {};
 
-  for (const schemaName of getAvailableSchemas()) {
-    try {
-      const schema = schemaMap[schemaName];
-      schemaInfo[schemaName] = {
-        version: schema.version || "1.0.0",
-        title: schema.title || "",
-        description: schema.description || "",
-      };
-    } catch (error) {
-      console.error(`Failed to load schema '${schemaName}':`, error);
-    }
-  }
+	for (const schemaName of getAvailableSchemas()) {
+		try {
+			const schema = schemaMap[schemaName];
+			schemaInfo[schemaName] = {
+				version: schema.version || "1.0.0",
+				title: schema.title || "",
+				description: schema.description || "",
+			};
+		} catch (error) {
+			console.error(`Failed to load schema '${schemaName}':`, error);
+		}
+	}
 
-  return schemaInfo;
+	return schemaInfo;
 }

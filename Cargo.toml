@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/metering-macros", "rust/metering", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server", "rust/s3heap"]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/metering-macros", "rust/metering", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server", "rust/s3heap", "rust/s3heap-service"]
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -41,7 +41,7 @@ setsum = "0.7"
 sprs = "0.11"
 tantivy = "0.22.0"
 thiserror = "1.0.69"
-tokio = { version = "1.41", features = ["fs", "macros", "rt-multi-thread", "time", "io-util"] }
+tokio = { version = "1.41", features = ["fs", "macros", "rt-multi-thread", "time", "io-util", "signal"] }
 tokio-util = "0.7.12"
 tonic = "0.12"
 tonic-health = "0.12.3"
@@ -94,6 +94,8 @@ chroma-sqlite = { path = "rust/sqlite" }
 chroma-cli = { path = "rust/cli" }
 chroma-jemalloc-pprof-server = { path = "rust/jemalloc-pprof-server" }
 mdac = { path = "rust/mdac" }
+s3heap = { path = "rust/s3heap" }
+s3heap-service = { path = "rust/s3heap-service" }
 wal3 = { path = "rust/wal3" }
 worker = { path = "rust/worker" }
 

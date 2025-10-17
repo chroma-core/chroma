@@ -21,6 +21,7 @@ from chromadb.api.types import (
     Include,
     Loadable,
     Metadatas,
+    Schema,
     URIs,
     Where,
     QueryResult,
@@ -361,6 +362,7 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
     async def create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
@@ -430,6 +432,7 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
     async def get_or_create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
@@ -582,6 +585,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     async def create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
@@ -603,6 +607,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     async def get_or_create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,

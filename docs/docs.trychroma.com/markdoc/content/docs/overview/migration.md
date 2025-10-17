@@ -23,7 +23,7 @@ We will aim to provide:
 
 ## Migration Log
 
-### v1.0.0
+### v1.0.0 - March 1, 2025
 
 In this release, we've rewritten much of Chroma in Rust. Performance has significantly improved across the board.
 
@@ -84,7 +84,7 @@ you should now start it with:
 docker run -p 8000:8000 -v ./chroma:/data chroma-core/chroma
 ```
 
-### v0.6.0
+### v0.6.0 - December 30, 2024
 
 Previously, `list_collections` returned a list of `Collection` objects. This could lead to some errors if any of your collections were created with a custom embedding function (i.e. not the default). So moving forward, `list_collections` will only return collections names.
 
@@ -103,7 +103,7 @@ In the future, we plan on supporting embedding function persistence, so `list_co
 
 Additionally, we have dropped support for Python 3.8
 
-### v0.5.17
+### v0.5.17 - October 30, 2024
 
 We no longer support sending empty lists or dictionaries for metadata filtering, ID filtering, etc. For example,
 
@@ -120,7 +120,7 @@ is not supported. Instead, use:
 collection.get(ids=["id1", "id2", "id3", ...])
 ```
 
-### v0.5.12
+### v0.5.12 - October 8, 2024
 
 The operators `$ne` (not equal) and `$nin` (not in) in `where` clauses have been updated:
 
@@ -138,7 +138,7 @@ In other words, `$not_contains` now matches the exact opposite set of records th
 
 `RateLimitingProvider` is now deprecated and replaced by `RateLimitEnforcer`. This new interface allows you to wrap server calls with rate limiting logic. The default `SimpleRateLimitEnforcer` implementation allows all requests, but you can create custom implementations for more advanced rate limiting strategies.
 
-### v0.5.11
+### v0.5.11 - September 26, 2024
 
 The results returned by `collection.get()` is now ordered by internal ids. Whereas previously, the results were ordered by user provided ids, although this behavior was not explicitly documented. We would like to make the change because using user provided ids may not be ideal for performance in hosted Chroma, and we hope to propagate the change to local Chroma for consistency of behavior. In general, newer documents in Chroma has larger internal ids.
 
@@ -148,7 +148,7 @@ We have also modified the behavior of `client.get_or_create`. Previously, if a c
 
 Finally, the embeddings returned from `collection.get()`, `collection.query()`, and `collection.peek()` are now represented as 2-dimensional NumPy arrays instead of Python lists. When adding embeddings, you can still use either a Python list or a NumPy array. If your request returns multiple embeddings, the result will be a Python list containing 2-dimensional NumPy arrays. This change is part of our effort to enhance performance in Local Chroma by using NumPy arrays for internal representation of embeddings.
 
-### v0.5.6
+### v0.5.6 - September 16, 2024
 
 Chroma internally uses a write-ahead log. In all versions prior to v0.5.6, this log was never pruned. This resulted in the data directory being much larger than it needed to be, as well as the directory size not decreasing by the expected amount after deleting a collection.
 
@@ -156,7 +156,7 @@ In v0.5.6 the write-ahead log is pruned automatically. However, this is not enab
 
 This does not need to be run regularly and does not need to be run on new databases created with v0.5.6 or later.
 
-### v0.5.1
+### v0.5.1 - June 7, 2024
 
 On the Python client, the `max_batch_size` property was removed. It wasn't previously documented, but if you were reading it, you should now use `get_max_batch_size()`.
 

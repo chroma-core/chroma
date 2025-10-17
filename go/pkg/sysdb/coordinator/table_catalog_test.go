@@ -98,12 +98,14 @@ func TestCatalog_GetCollections(t *testing.T) {
 	testValue := "test_value"
 	dbId := types.NewUniqueID()
 	collectionConfigurationJsonStr := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
+	collectionSchemaStr := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
 	collectionAndMetadataList := []*dbmodel.CollectionAndMetadata{
 		{
 			Collection: &dbmodel.Collection{
 				ID:                   "00000000-0000-0000-0000-000000000001",
 				Name:                 &name,
 				ConfigurationJsonStr: &collectionConfigurationJsonStr,
+				SchemaStr:            &collectionSchemaStr,
 				Ts:                   types.Timestamp(1234567890),
 				DatabaseID:           dbId.String(),
 				UpdatedAt:            now,
@@ -138,6 +140,7 @@ func TestCatalog_GetCollections(t *testing.T) {
 			ID:                   types.MustParse("00000000-0000-0000-0000-000000000001"),
 			Name:                 "test_collection",
 			ConfigurationJsonStr: collectionConfigurationJsonStr,
+			SchemaStr:            &collectionSchemaStr,
 			Ts:                   types.Timestamp(1234567890),
 			Metadata:             metadata,
 			DatabaseId:           dbId,
@@ -162,6 +165,7 @@ func TestCatalog_GetCollectionByResourceName(t *testing.T) {
 	collectionID := "00000000-0000-0000-0000-000000000001"
 	collectionName := "test_collection"
 	configurationJson := "{test_config}"
+	schemaJson := "{test_schema}"
 	dim := int32(128)
 
 	mockCollectionEntry := &dbmodel.CollectionAndMetadata{
@@ -169,6 +173,7 @@ func TestCatalog_GetCollectionByResourceName(t *testing.T) {
 			ID:                   collectionID,
 			Name:                 &collectionName,
 			ConfigurationJsonStr: &configurationJson,
+			SchemaStr:            &schemaJson,
 			Dimension:            &dim,
 			DatabaseID:           databaseID,
 			Ts:                   types.Timestamp(0),
@@ -192,6 +197,7 @@ func TestCatalog_GetCollectionByResourceName(t *testing.T) {
 	assert.Equal(t, collectionID, result.ID.String())
 	assert.Equal(t, collectionName, result.Name)
 	assert.Equal(t, configurationJson, result.ConfigurationJsonStr)
+	assert.Equal(t, &schemaJson, result.SchemaStr)
 	assert.Equal(t, dim, *result.Dimension)
 	assert.Equal(t, databaseID, result.DatabaseId.String())
 
@@ -390,6 +396,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 
 	collectionName := "test_collection"
 	configurationJson := "{test_config}"
+	schemaJson := "{test_schema}"
 	dim := int32(128)
 
 	mockCollectionsAndMetadata := []*dbmodel.CollectionAndMetadata{
@@ -399,6 +406,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 				ID:                         collectionID.String(),
 				Name:                       &collectionName,
 				ConfigurationJsonStr:       &configurationJson,
+				SchemaStr:                  &schemaJson,
 				Dimension:                  &dim,
 				DatabaseID:                 dbId,
 				Ts:                         types.Timestamp(0),
@@ -461,6 +469,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 		uint64(1),
 		mock.Anything,
 		mock.Anything,
+		mock.Anything,
 	).Return(int64(1), nil)
 
 	mockTenantDb.On("UpdateTenantLastCompactionTime", tenantID, mock.Anything).Return(nil)
@@ -491,6 +500,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 		FlushSegmentCompactions:    flushSegment,
 		TotalRecordsPostCompaction: 1,
 		SizeBytesPostCompaction:    1,
+		SchemaStr:                  func() *string { s := "{}"; return &s }(),
 	}
 
 	// Execute test
@@ -595,6 +605,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollectionWithEmptyFilePat
 
 	collectionName := "test_collection"
 	configurationJson := "{test_config}"
+	schemaJson := "{test_schema}"
 	dim := int32(128)
 
 	mockCollectionsAndMetadata := []*dbmodel.CollectionAndMetadata{
@@ -604,6 +615,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollectionWithEmptyFilePat
 				ID:                         collectionID.String(),
 				Name:                       &collectionName,
 				ConfigurationJsonStr:       &configurationJson,
+				SchemaStr:                  &schemaJson,
 				Dimension:                  &dim,
 				DatabaseID:                 dbId,
 				Ts:                         types.Timestamp(0),
@@ -666,6 +678,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollectionWithEmptyFilePat
 		uint64(1),
 		mock.Anything,
 		mock.Anything,
+		mock.Anything,
 	).Return(int64(1), nil)
 
 	mockTenantDb.On("UpdateTenantLastCompactionTime", tenantID, mock.Anything).Return(nil)
@@ -688,6 +701,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollectionWithEmptyFilePat
 		FlushSegmentCompactions:    flushSegment,
 		TotalRecordsPostCompaction: 1,
 		SizeBytesPostCompaction:    1,
+		SchemaStr:                  func() *string { s := "{}"; return &s }(),
 	}
 
 	// Execute test

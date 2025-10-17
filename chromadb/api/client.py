@@ -24,6 +24,7 @@ from chromadb.api.types import (
     Loadable,
     Metadatas,
     QueryResult,
+    Schema,
     URIs,
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
@@ -82,9 +83,13 @@ class Client(SharedSystemClient, ClientAPI):
 
         # this should not happen unless types are invalidated
         if maybe_tenant is None and tenant is None:
-            raise ChromaAuthError("Could not determine a tenant from the current authentication method. Please provide a tenant.")
+            raise ChromaAuthError(
+                "Could not determine a tenant from the current authentication method. Please provide a tenant."
+            )
         if maybe_database is None and database is None:
-            raise ChromaAuthError("Could not determine a database name from the current authentication method. Please provide a database name.")
+            raise ChromaAuthError(
+                "Could not determine a database name from the current authentication method. Please provide a database name."
+            )
 
         if maybe_tenant:
             self.tenant = maybe_tenant
@@ -152,6 +157,7 @@ class Client(SharedSystemClient, ClientAPI):
     def create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
@@ -176,6 +182,7 @@ class Client(SharedSystemClient, ClientAPI):
 
         model = self._server.create_collection(
             name=name,
+            schema=schema,
             metadata=metadata,
             tenant=self.tenant,
             database=self.database,
@@ -220,6 +227,7 @@ class Client(SharedSystemClient, ClientAPI):
     def get_or_create_collection(
         self,
         name: str,
+        schema: Optional[Schema] = None,
         configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
@@ -240,6 +248,7 @@ class Client(SharedSystemClient, ClientAPI):
             configuration["embedding_function"] = embedding_function
         model = self._server.get_or_create_collection(
             name=name,
+            schema=schema,
             metadata=metadata,
             tenant=self.tenant,
             database=self.database,
@@ -464,9 +473,7 @@ class Client(SharedSystemClient, ClientAPI):
         self._validate_tenant_database(tenant=self.tenant, database=database)
         self.database = database
 
-    def _validate_tenant_database(
-        self, tenant: str, database: str
-    ) -> None:
+    def _validate_tenant_database(self, tenant: str, database: str) -> None:
         try:
             self._admin_client.get_tenant(name=tenant)
         except httpx.ConnectError:

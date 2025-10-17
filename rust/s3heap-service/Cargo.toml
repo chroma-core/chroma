@@ -1,0 +1,29 @@
+[package]
+name = "s3heap-service"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = { workspace = true }
+chrono = { workspace = true }
+figment = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+tonic-health = { workspace = true }
+tracing = { workspace = true }
+
+chroma-config = { workspace = true }
+chroma-error = { workspace = true }
+chroma-storage = { workspace = true }
+chroma-sysdb = { workspace = true }
+chroma-tracing = { workspace = true, features = ["grpc"] }
+chroma-types = { workspace = true }
+s3heap = { workspace = true }
+uuid = { workspace = true }
+wal3 = { workspace = true }
+
+[dev-dependencies]
+uuid = { workspace = true }
