@@ -638,9 +638,9 @@ class TestNewSchema:
         assert "sparse_vector_index" in defaults["sparse_vector"]
         assert defaults["sparse_vector"]["sparse_vector_index"]["enabled"] is False
         sparse_vector_config = defaults["sparse_vector"]["sparse_vector_index"]["config"]
-        # SparseVectorIndexConfig has embedding_function field with legacy default
+        # SparseVectorIndexConfig has embedding_function field with unknown default
         assert "embedding_function" in sparse_vector_config
-        assert sparse_vector_config["embedding_function"] == {"type": "legacy"}
+        assert sparse_vector_config["embedding_function"] == {"type": "unknown"}
 
         # Check int
         assert "int" in defaults
