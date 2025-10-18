@@ -1,8 +1,9 @@
 use crate::client::utils::{send_request, EmptyResponse};
 use crate::utils::{get_address_book, Profile};
 use axum::http::{HeaderMap, HeaderValue, Method};
+use chroma::types::GetUserIdentityResponse;
 use chroma_frontend::server::CreateDatabasePayload;
-use chroma_types::{Database, GetDatabaseResponse, GetUserIdentityResponse, ListDatabasesResponse};
+use chroma_types::{Database, GetDatabaseResponse, ListDatabasesResponse};
 use serde::Deserialize;
 use thiserror::Error;
 

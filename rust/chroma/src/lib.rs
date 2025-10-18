@@ -1,3 +1,4 @@
-#[allow(dead_code)] // TODO: remove
-mod client;
+pub mod client;
 pub mod types;
+
+pub use client::ChromaClient;
