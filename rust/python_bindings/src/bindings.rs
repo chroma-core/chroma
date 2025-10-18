@@ -252,12 +252,13 @@ impl Bindings {
 
     #[allow(clippy::too_many_arguments)]
     #[pyo3(
-        signature = (name, configuration_json_str, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+        signature = (name, configuration_json_str = None, schema_json_str = None, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
     )]
     fn create_collection(
         &self,
         name: String,
         configuration_json_str: Option<String>,
+        schema_json_str: Option<String>,
         metadata: Option<Metadata>,
         get_or_create: bool,
         tenant: String,
@@ -265,9 +266,8 @@ impl Bindings {
     ) -> ChromaPyResult<Collection> {
         let configuration_json = match configuration_json_str {
             Some(configuration_json_str) => {
-                let configuration_json =
-                    serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
-                        .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
+                let configuration_json = serde_json::from_str(&configuration_json_str)
+                    .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
 
                 Some(configuration_json)
             }
@@ -291,13 +291,19 @@ impl Bindings {
             )?),
         };
 
+        let schema = match schema_json_str {
+            Some(schema_json_string) => serde_json::from_str(&schema_json_string)
+                .map_err(WrappedSerdeJsonError::SerdeJsonError)?,
+            None => None,
+        };
+
         let request = CreateCollectionRequest::try_new(
             tenant,
             database,
             name,
             metadata,
             configuration,
-            None,
+            schema,
             get_or_create,
         )?;
 

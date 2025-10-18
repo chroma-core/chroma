@@ -43,6 +43,7 @@ pub enum Collections {
     Dimension,
     DatabaseId,
     ConfigJsonStr,
+    SchemaJsonStr,
 }
 
 #[derive(Iden)]

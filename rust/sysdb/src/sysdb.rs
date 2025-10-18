@@ -320,6 +320,13 @@ impl SysDb {
                 .await
             }
             SysDb::Sqlite(sqlite) => {
+                let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+                    schema,
+                    configuration,
+                )
+                .map_err(|err| {
+                    CreateCollectionError::Schema(SchemaError::InvalidSchema { reason: err })
+                })?;
                 sqlite
                     .create_collection(
                         tenant,
@@ -327,7 +334,7 @@ impl SysDb {
                         collection_id,
                         name,
                         segments,
-                        configuration.unwrap_or(InternalCollectionConfiguration::default_hnsw()),
+                        reconciled_schema,
                         metadata,
                         dimension,
                         get_or_create,

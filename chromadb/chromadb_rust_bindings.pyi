@@ -95,6 +95,7 @@ class Bindings:
         self,
         name: str,
         configuration_json_str: Optional[str] = None,
+        schema_json_str: Optional[str] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
