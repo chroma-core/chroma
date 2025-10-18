@@ -58,7 +58,7 @@ impl ChromaAuthMethod {
 
 #[derive(Debug, Clone)]
 pub struct ChromaClientOptions {
-    pub base_url: String,
+    pub base_url: reqwest::Url,
     pub auth_method: ChromaAuthMethod,
     pub retry_options: ChromaRetryOptions,
     /// Will be automatically resolved at request time if not provided
@@ -70,7 +70,7 @@ pub struct ChromaClientOptions {
 impl Default for ChromaClientOptions {
     fn default() -> Self {
         ChromaClientOptions {
-            base_url: "https://api.trychroma.com".to_string(),
+            base_url: "https://api.trychroma.com".parse().unwrap(),
             auth_method: ChromaAuthMethod::None,
             retry_options: ChromaRetryOptions::default(),
             tenant_id: None,

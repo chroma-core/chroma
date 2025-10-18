@@ -1,11 +1,17 @@
 use backon::ExponentialBuilder;
 use backon::Retryable;
+use parking_lot::Mutex;
 use reqwest::Method;
 use reqwest::StatusCode;
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::Mutex;
+
+const USER_AGENT: &str = concat!(
+    "Chroma Rust Client v",
+    env!("CARGO_PKG_VERSION"),
+    " (https://github.com/chroma-core/chroma)"
+);
 
 use crate::{
     client::ChromaClientOptions,
@@ -22,15 +28,30 @@ pub enum ChromaClientError {
     SerdeError(#[from] serde_json::Error),
 }
 
-#[derive(Clone)]
 pub struct ChromaClient {
-    base_url: String,
+    base_url: reqwest::Url,
     client: reqwest::Client,
     retry_policy: ExponentialBuilder,
     tenant_id: Arc<Mutex<Option<String>>>,
     default_database_id: Arc<Mutex<Option<String>>>,
+    resolve_tenant_or_database_lock: Arc<tokio::sync::Mutex<()>>,
     #[cfg(feature = "opentelemetry")]
     metrics: crate::client::metrics::Metrics,
+}
+
+impl Clone for ChromaClient {
+    fn clone(&self) -> Self {
+        ChromaClient {
+            base_url: self.base_url.clone(),
+            client: self.client.clone(),
+            retry_policy: self.retry_policy,
+            tenant_id: Arc::new(Mutex::new(self.tenant_id.lock().clone())),
+            default_database_id: Arc::new(Mutex::new(self.default_database_id.lock().clone())),
+            resolve_tenant_or_database_lock: Arc::new(tokio::sync::Mutex::new(())),
+            #[cfg(feature = "opentelemetry")]
+            metrics: self.metrics.clone(),
+        }
+    }
 }
 
 // TODO: remove and replace with actual Database struct
@@ -43,9 +64,11 @@ pub struct Database {
 
 impl ChromaClient {
     pub fn new(options: ChromaClientOptions) -> Self {
-        // todo: add user-agent
+        let mut headers = options.headers();
+        headers.append("user-agent", USER_AGENT.try_into().unwrap());
+
         let client = reqwest::Client::builder()
-            .default_headers(options.headers())
+            .default_headers(headers)
             .build()
             .expect("Failed to initialize TLS backend");
 
@@ -55,13 +78,14 @@ impl ChromaClient {
             retry_policy: options.retry_options.into(),
             tenant_id: Arc::new(Mutex::new(options.tenant_id)),
             default_database_id: Arc::new(Mutex::new(options.default_database_id)),
+            resolve_tenant_or_database_lock: Arc::new(tokio::sync::Mutex::new(())),
             #[cfg(feature = "opentelemetry")]
             metrics: crate::client::metrics::Metrics::new(),
         }
     }
 
-    pub async fn set_default_database_id(&self, database_id: String) {
-        let mut lock = self.default_database_id.lock().await;
+    pub fn set_default_database_id(&self, database_id: String) {
+        let mut lock = self.default_database_id.lock();
         *lock = Some(database_id);
     }
 
@@ -169,9 +193,20 @@ impl ChromaClient {
             return Ok(id);
         }
 
-        let mut database_id_lock = self.default_database_id.lock().await;
-        if let Some(database_id) = &*database_id_lock {
-            return Ok(database_id.clone());
+        {
+            let database_id_lock = self.default_database_id.lock();
+            if let Some(database_id) = &*database_id_lock {
+                return Ok(database_id.clone());
+            }
+        }
+
+        let _guard = self.resolve_tenant_or_database_lock.lock().await;
+
+        {
+            let database_id_lock = self.default_database_id.lock();
+            if let Some(database_id) = &*database_id_lock {
+                return Ok(database_id.clone());
+            }
         }
 
         let identity = self.get_auth_identity().await?;
@@ -188,19 +223,38 @@ impl ChromaClient {
             )
         })?;
 
-        *database_id_lock = Some(database_id.clone());
+        {
+            let mut database_id_lock = self.default_database_id.lock();
+            *database_id_lock = Some(database_id.clone());
+        }
+
         Ok(database_id.clone())
     }
 
     async fn get_tenant_id(&self) -> Result<String, ChromaClientError> {
-        let mut tenant_id_lock = self.tenant_id.lock().await;
-        if let Some(tenant_id) = &*tenant_id_lock {
-            return Ok(tenant_id.clone());
+        {
+            let tenant_id_lock = self.tenant_id.lock();
+            if let Some(tenant_id) = &*tenant_id_lock {
+                return Ok(tenant_id.clone());
+            }
+        }
+
+        let _guard = self.resolve_tenant_or_database_lock.lock().await;
+        {
+            let tenant_id_lock = self.tenant_id.lock();
+            if let Some(tenant_id) = &*tenant_id_lock {
+                return Ok(tenant_id.clone());
+            }
         }
 
         let identity = self.get_auth_identity().await?;
         let tenant_id = identity.tenant;
-        *tenant_id_lock = Some(tenant_id.clone());
+
+        {
+            let mut tenant_id_lock = self.tenant_id.lock();
+            *tenant_id_lock = Some(tenant_id.clone());
+        }
+
         Ok(tenant_id)
     }
 
@@ -212,11 +266,12 @@ impl ChromaClient {
         body: Option<Body>,
         query_params: Option<QueryParams>,
     ) -> Result<Response, ChromaClientError> {
-        // todo: / normalization
-        let url = format!("{}{}", self.base_url, path);
+        let url = self.base_url.join(&path).expect(
+            "The base URL is valid and we control all path construction, so this should never fail",
+        );
 
         let attempt = || async {
-            let mut request = self.client.request(method.clone(), &url);
+            let mut request = self.client.request(method.clone(), url.clone());
             if let Some(body) = &body {
                 request = request.json(body);
             }
@@ -224,7 +279,7 @@ impl ChromaClient {
                 request = request.query(query_params);
             }
 
-            tracing::trace!(url = url, method =? method, "Sending request");
+            tracing::trace!(url = %url, method =? method, "Sending request");
 
             #[cfg(feature = "opentelemetry")]
             let started_at = std::time::Instant::now();
@@ -252,7 +307,7 @@ impl ChromaClient {
             .retry(&self.retry_policy)
             .notify(|err, _| {
                 tracing::warn!(
-                    url = url,
+                    url = %url,
                     method =? method,
                     status =? err.status(),
                     "Request failed with retryable error. Retrying...",
@@ -273,7 +328,7 @@ impl ChromaClient {
 
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
-                url = url,
+                url = %url,
                 method =? method,
                 "Received response: {}",
                 serde_json::to_string_pretty(&json).unwrap_or_else(|_| "<failed to serialize>".to_string())
@@ -310,7 +365,9 @@ mod tests {
 
         ChromaClientOptions {
             base_url: std::env::var("CHROMA_ENDPOINT")
-                .unwrap_or_else(|_| "https://api.trychroma.com".to_string()),
+                .unwrap_or_else(|_| "https://api.trychroma.com".to_string())
+                .parse()
+                .unwrap(),
             auth_method: ChromaAuthMethod::cloud_api_key(
                 &std::env::var("CHROMA_CLOUD_API_KEY").unwrap(),
             )
@@ -336,7 +393,7 @@ mod tests {
             .unwrap()
             .id
             .clone();
-        client.set_default_database_id(database_id.clone()).await;
+        client.set_default_database_id(database_id.clone());
 
         let result = std::panic::AssertUnwindSafe(callback(client.clone()))
             .catch_unwind()
@@ -399,7 +456,7 @@ mod tests {
             .await;
 
         let client = ChromaClient::new(ChromaClientOptions {
-            base_url: server.base_url(),
+            base_url: server.base_url().parse().unwrap(),
             retry_options: ChromaRetryOptions {
                 max_retries: 3,
                 min_delay: Duration::from_millis(1),
@@ -453,7 +510,7 @@ mod tests {
             .await;
 
         let client = ChromaClient::new(ChromaClientOptions {
-            base_url: server.base_url(),
+            base_url: server.base_url().parse().unwrap(),
             retry_options: ChromaRetryOptions {
                 max_retries: 2,
                 min_delay: Duration::from_millis(1),
