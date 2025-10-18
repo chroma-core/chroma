@@ -1485,6 +1485,7 @@ dependencies = [
  "futures-util",
  "httpmock",
  "opentelemetry",
+ "parking_lot",
  "reqwest 0.12.24",
  "serde",
  "serde_json",
