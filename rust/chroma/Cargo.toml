@@ -28,3 +28,4 @@ futures-util = "0.3.31"
 test-log = { version = "0.2.18", features = ["trace"] }
 tokio.workspace = true
 uuid.workspace = true
+httpmock = "0.8.2"
