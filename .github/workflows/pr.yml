@@ -173,6 +173,16 @@ jobs:
     with:
       property_testing_preset: 'normal'
 
+  python-tests-windows:
+    uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
+    with:
+      # we only run windows tests on 3.12 because windows runners are expensive
+      # and we usually don't see failures that are isolated to a specific version
+      python_versions: '["3.12"]'
+      property_testing_preset: "normal"
+      runner: blacksmith-8vcpu-windows-2025
+
   python-vulnerability-scan:
     name: Python vulnerability scan
     needs: change-detection

@@ -8,7 +8,7 @@ on:
         required: false
   push:
     tags:
-      - 'cli_release_[0-9]*.[0-9]*.[0-9]*'
+      - "cli_release_[0-9]*.[0-9]*.[0-9]*"
 
 jobs:
   build-linux:
@@ -43,7 +43,7 @@ jobs:
 
   build-windows:
     name: Build Windows binary
-    runs-on: 8core-32gb-windows-latest
+    runs-on: blacksmith-8vcpu-windows-2025
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -98,7 +98,6 @@ jobs:
       - name: Build macOS Intel binary
         run: cargo build --bin chroma --release --target x86_64-apple-darwin --manifest-path rust/cli/Cargo.toml
 
-
       - name: Build macOS ARM64 binary
         run: cargo build --bin chroma --release --target aarch64-apple-darwin --manifest-path rust/cli/Cargo.toml
 
@@ -123,7 +122,7 @@ jobs:
   release:
     name: Create GitHub Release and Attach Assets
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [ build-linux, build-windows, build-macos ]
+    needs: [build-linux, build-windows, build-macos]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
