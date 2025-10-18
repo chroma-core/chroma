@@ -129,7 +129,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                         return Err(DeleteUnusedLogsError::Gc(err));
                     };
                     match self.mode {
-                        CleanupMode::Delete | CleanupMode::DeleteV2 => {
+                        CleanupMode::DeleteV2 => {
                             if let Err(err) = writer.garbage_collect_phase3_delete_garbage(&GarbageCollectionOptions::default()).await {
                                 tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
                                 return Err(DeleteUnusedLogsError::Wal3{ collection_id, err});
@@ -149,7 +149,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
             );
         }
         match self.mode {
-            CleanupMode::Delete | CleanupMode::DeleteV2 => {
+            CleanupMode::DeleteV2 => {
                 if !input.collections_to_destroy.is_empty() {
                     let mut log_destroy_futures =
                         Vec::with_capacity(input.collections_to_destroy.len());

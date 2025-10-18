@@ -94,7 +94,7 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
         // It's possible that the file was already renamed/deleted in the last run that
         // did not finish successfully (i.e. crashed before committing the work to SysDb).
         match self.cleanup_mode {
-            CleanupMode::DryRun | CleanupMode::DryRunV2 => {}
+            CleanupMode::DryRunV2 => {}
             CleanupMode::Rename => {
                 // Soft delete - rename the file
                 if !all_files.is_empty() {
@@ -121,7 +121,7 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
                     }
                 }
             }
-            CleanupMode::Delete | CleanupMode::DeleteV2 => {
+            CleanupMode::DeleteV2 => {
                 // Hard delete - remove the file
                 if !all_files.is_empty() {
                     // The S3 DeleteObjects API allows up to 1000 objects per request
@@ -197,7 +197,7 @@ mod tests {
 
         let operator = DeleteUnusedFilesOperator::new(
             storage.clone(),
-            CleanupMode::DryRun,
+            CleanupMode::DryRunV2,
             "test_tenant".to_string(),
         );
         let input = DeleteUnusedFilesInput {
@@ -268,7 +268,7 @@ mod tests {
 
         let operator = DeleteUnusedFilesOperator::new(
             storage.clone(),
-            CleanupMode::Delete,
+            CleanupMode::DeleteV2,
             "test_tenant".to_string(),
         );
         let input = DeleteUnusedFilesInput {
@@ -301,7 +301,7 @@ mod tests {
         // Test Delete mode - should succeed but record the error in deletion list
         let delete_operator = DeleteUnusedFilesOperator::new(
             storage.clone(),
-            CleanupMode::Delete,
+            CleanupMode::DeleteV2,
             "test_tenant".to_string(),
         );
         let result = delete_operator
@@ -327,8 +327,11 @@ mod tests {
         assert!(result.is_ok());
 
         // Test DryRun mode with nonexistent files (should succeed)
-        let list_operator =
-            DeleteUnusedFilesOperator::new(storage, CleanupMode::DryRun, "test_tenant".to_string());
+        let list_operator = DeleteUnusedFilesOperator::new(
+            storage,
+            CleanupMode::DryRunV2,
+            "test_tenant".to_string(),
+        );
         let result = list_operator
             .run(&DeleteUnusedFilesInput {
                 unused_s3_files: unused_files,

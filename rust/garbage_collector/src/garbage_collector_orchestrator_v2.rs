@@ -822,7 +822,7 @@ impl GarbageCollectorOrchestrator {
             return Ok(());
         }
 
-        if self.cleanup_mode == CleanupMode::DryRun {
+        if self.cleanup_mode == CleanupMode::DryRunV2 {
             tracing::info!("Dry run mode, skipping actual deletion");
             let response = GarbageCollectorResponse {
                 num_versions_deleted: 0,
@@ -1305,7 +1305,7 @@ mod tests {
             storage,
             logs,
             root_manager,
-            crate::types::CleanupMode::Delete,
+            crate::types::CleanupMode::DeleteV2,
             1,
             true,
             false,
