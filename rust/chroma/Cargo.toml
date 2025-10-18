@@ -12,8 +12,10 @@ opentelemetry = { version = ">=0.27,<0.32", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 utoipa = { version = "5.0.0", features = ["macros", "axum_extras", "debug", "uuid"], optional = true }
+tokio = { version = ">=1,<2", features = ["sync"] }
 thiserror.workspace = true
 tracing.workspace = true
+bon = "3.8.1"
 
 [features]
 default = ["native-tls"]
@@ -22,5 +24,7 @@ rustls = ["reqwest/rustls-tls"]
 
 [dev-dependencies]
 dotenvy = "0.15.7"
+futures-util = "0.3.31"
 test-log = { version = "0.2.18", features = ["trace"] }
 tokio.workspace = true
+uuid.workspace = true
