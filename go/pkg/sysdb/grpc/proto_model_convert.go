@@ -236,7 +236,7 @@ func convertSegmentMetadataToProto(segmentMetadata *model.SegmentMetadata[model.
 	return metadatapb
 }
 
-func convertProtoSegment(segmentpb *coordinatorpb.Segment) (*model.Segment, error) {
+func convertSegmentToModel(segmentpb *coordinatorpb.Segment) (*model.CreateSegment, error) {
 	segmentID, err := types.ToUniqueID(&segmentpb.Id)
 	if err != nil {
 		log.Error("segment id format error", zap.String("segment.id", segmentpb.Id))
@@ -261,7 +261,7 @@ func convertProtoSegment(segmentpb *coordinatorpb.Segment) (*model.Segment, erro
 		filePaths[t] = paths.Paths
 	}
 
-	return &model.Segment{
+	return &model.CreateSegment{
 		ID:           segmentID,
 		Type:         segmentpb.Type,
 		Scope:        segmentpb.Scope.String(),
