@@ -25,6 +25,10 @@ impl ChromaAuthMethod {
 pub struct ChromaClientOptions {
     pub base_url: String,
     pub auth_method: ChromaAuthMethod,
+    /// Will be automatically resolved at request time if not provided
+    pub tenant_id: Option<String>,
+    /// Will be automatically resolved at request time if not provided. It can only be resolved automatically if this client has access to exactly one database.
+    pub default_database_id: Option<String>,
 }
 
 impl Default for ChromaClientOptions {
@@ -32,6 +36,8 @@ impl Default for ChromaClientOptions {
         ChromaClientOptions {
             base_url: "https://api.trychroma.com".to_string(),
             auth_method: ChromaAuthMethod::None,
+            tenant_id: None,
+            default_database_id: None,
         }
     }
 }
