@@ -76,6 +76,18 @@ collection = await client.getCollection({
 });
 ```
 
+To use the OpenAI embedding models on other platforms such as GitHub AI Models, you can use the `apiBase` parameter:
+```typescript
+import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
+
+const embeddingFunction = new OpenAIEmbeddingFunction({
+  apiKey: "apiKey",
+  apiBase: "https://models.github.ai/inference",
+  modelName: "text-embedding-3-small",
+});
+```
+
+
 {% /Tab %}
 
 {% /Tabs %}
