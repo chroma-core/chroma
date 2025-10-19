@@ -14,6 +14,7 @@ export interface OpenAIConfig {
   model_name: string;
   organization_id?: string;
   dimensions?: number;
+  api_base?: string;
 }
 
 export interface OpenAIArgs {
@@ -84,6 +85,7 @@ export class OpenAIEmbeddingFunction implements EmbeddingFunction {
       modelName: config.model_name,
       organizationId: config.organization_id,
       dimensions: config.dimensions,
+      apiBase: config.api_base,
     });
   }
 
@@ -93,6 +95,7 @@ export class OpenAIEmbeddingFunction implements EmbeddingFunction {
       model_name: this.modelName,
       organization_id: this.organizationId,
       dimensions: this.dimensions,
+      api_base: this.apiBase,
     };
   }
 
