@@ -25,6 +25,8 @@ pub struct ChromaClient {
     client: reqwest::Client,
     tenant_id: Arc<Mutex<Option<String>>>,
     default_database_id: Arc<Mutex<Option<String>>>,
+    #[cfg(feature = "opentelemetry")]
+    metrics: crate::client::metrics::Metrics,
 }
 
 // TODO: remove and replace with actual Database struct
@@ -48,6 +50,8 @@ impl ChromaClient {
             client,
             tenant_id: Arc::new(Mutex::new(options.tenant_id)),
             default_database_id: Arc::new(Mutex::new(options.default_database_id)),
+            #[cfg(feature = "opentelemetry")]
+            metrics: crate::client::metrics::Metrics::new(),
         }
     }
 
@@ -59,6 +63,7 @@ impl ChromaClient {
     pub async fn create_database(&self, name: String) -> Result<(), ChromaClientError> {
         // Returns empty map ({})
         self.send::<_, (), serde_json::Value>(
+            "create_database",
             Method::POST,
             format!("/api/v2/tenants/{}/databases", self.get_tenant_id().await?),
             Some(serde_json::json!({ "name": name })),
@@ -69,10 +74,11 @@ impl ChromaClient {
         Ok(())
     }
 
-    pub async fn get_databases(&self) -> Result<Vec<Database>, ChromaClientError> {
+    pub async fn list_databases(&self) -> Result<Vec<Database>, ChromaClientError> {
         let tenant_id = self.get_tenant_id().await?;
 
         self.send::<(), (), _>(
+            "list_databases",
             Method::GET,
             format!("/api/v2/tenants/{}/databases", tenant_id),
             None,
@@ -84,6 +90,7 @@ impl ChromaClient {
     pub async fn delete_database(&self, database_name: String) -> Result<(), ChromaClientError> {
         // Returns empty map ({})
         self.send::<(), (), serde_json::Value>(
+            "delete_database",
             Method::DELETE,
             format!(
                 "/api/v2/tenants/{}/databases/{}",
@@ -99,13 +106,25 @@ impl ChromaClient {
     }
 
     pub async fn get_auth_identity(&self) -> Result<GetUserIdentityResponse, ChromaClientError> {
-        self.send::<(), (), _>(Method::GET, "/api/v2/auth/identity".to_string(), None, None)
-            .await
+        self.send::<(), (), _>(
+            "get_auth_identity",
+            Method::GET,
+            "/api/v2/auth/identity".to_string(),
+            None,
+            None,
+        )
+        .await
     }
 
     pub async fn heartbeat(&self) -> Result<HeartbeatResponse, ChromaClientError> {
-        self.send::<(), (), _>(Method::GET, "/api/v2/heartbeat".to_string(), None, None)
-            .await
+        self.send::<(), (), _>(
+            "heartbeat",
+            Method::GET,
+            "/api/v2/heartbeat".to_string(),
+            None,
+            None,
+        )
+        .await
     }
 
     pub async fn list_collections(
@@ -122,6 +141,7 @@ impl ChromaClient {
         }
 
         self.send::<(), _, _>(
+            "list_collections",
             Method::GET,
             format!(
                 "/api/v2/tenants/{}/databases/{}/collections",
@@ -181,6 +201,7 @@ impl ChromaClient {
 
     async fn send<Body: Serialize, QueryParams: Serialize, Response: DeserializeOwned>(
         &self,
+        operation_name: &str,
         method: Method,
         path: String,
         body: Option<Body>,
@@ -198,7 +219,24 @@ impl ChromaClient {
         }
 
         tracing::trace!(url = url, method =? method, "Sending request");
+
+        #[cfg(feature = "opentelemetry")]
+        let started_at = std::time::Instant::now();
+
         let response = request.send().await?;
+
+        #[cfg(feature = "opentelemetry")]
+        {
+            self.metrics.record_request(
+                operation_name,
+                response.status().as_u16(),
+                started_at.elapsed().as_secs_f64() * 1000.0,
+            );
+        }
+        #[cfg(not(feature = "opentelemetry"))]
+        {
+            let _ = operation_name;
+        }
 
         response.error_for_status_ref()?;
         let json = response.json::<serde_json::Value>().await?;
@@ -258,7 +296,7 @@ mod tests {
         // Create isolated database for test
         let database_name = format!("test_db_{}", uuid::Uuid::new_v4());
         client.create_database(database_name.clone()).await.unwrap();
-        let databases = client.get_databases().await.unwrap();
+        let databases = client.list_databases().await.unwrap();
         let database_id = databases
             .iter()
             .find(|db| db.name == database_name)
