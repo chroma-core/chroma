@@ -7,16 +7,15 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
 
+use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse, ListCollectionsRequest};
+
+use crate::client::ChromaClientOptions;
+
 const USER_AGENT: &str = concat!(
     "Chroma Rust Client v",
     env!("CARGO_PKG_VERSION"),
     " (https://github.com/chroma-core/chroma)"
 );
-
-use crate::{
-    client::ChromaClientOptions,
-    types::{GetUserIdentityResponse, HeartbeatResponse, ListCollectionsRequest},
-};
 
 #[derive(Error, Debug)]
 pub enum ChromaClientError {

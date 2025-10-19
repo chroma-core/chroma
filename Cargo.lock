@@ -1480,7 +1480,7 @@ name = "chroma"
 version = "0.1.0"
 dependencies = [
  "backon",
- "bon",
+ "chroma-api-types",
  "dotenvy",
  "futures-util",
  "httpmock",
@@ -1493,8 +1493,16 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
- "utoipa",
  "uuid",
+]
+
+[[package]]
+name = "chroma-api-types"
+version = "0.1.0"
+dependencies = [
+ "bon",
+ "serde",
+ "utoipa",
 ]
 
 [[package]]
@@ -1586,6 +1594,7 @@ dependencies = [
  "arboard",
  "axum 0.8.1",
  "chroma",
+ "chroma-api-types",
  "chroma-config",
  "chroma-frontend",
  "chroma-log",
@@ -1666,6 +1675,7 @@ dependencies = [
  "backon",
  "base64 0.22.1",
  "chroma",
+ "chroma-api-types",
  "chroma-cache",
  "chroma-config",
  "chroma-distance",

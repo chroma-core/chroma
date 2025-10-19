@@ -4,7 +4,7 @@ use crate::{
     CollectionsWithSegmentsProvider,
 };
 use backon::{ExponentialBuilder, Retryable};
-use chroma::types::HeartbeatResponse;
+use chroma_api_types::HeartbeatResponse;
 use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
