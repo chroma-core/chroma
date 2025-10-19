@@ -1,0 +1,11 @@
+[package]
+name = "chroma-api-types"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde.workspace = true
+utoipa = { version = "5.0.0", features = ["macros", "axum_extras", "debug", "uuid"], optional = true }
+
+[features]
+utoipa = ["dep:utoipa"]

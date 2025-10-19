@@ -7,16 +7,17 @@ license = "Apache-2.0"
 
 [dependencies]
 backon = "1.5"
+bon = "3.8.1"
 reqwest = { version = ">=0.12.0,<0.13.0", features = ["json", "charset", "system-proxy", "http2"], default-features = false }
 opentelemetry = { version = ">=0.27,<0.32", optional = true }
 serde.workspace = true
 serde_json.workspace = true
-utoipa = { version = "5.0.0", features = ["macros", "axum_extras", "debug", "uuid"], optional = true }
 tokio = { version = ">=1,<2", features = ["sync"] }
 thiserror.workspace = true
 tracing.workspace = true
-bon = "3.8.1"
 parking_lot.workspace = true
+
+chroma-api-types = { workspace = true }
 
 [features]
 default = ["native-tls"]

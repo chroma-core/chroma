@@ -5,7 +5,7 @@ use axum::{
     routing::{get, patch, post},
     Json, Router, ServiceExt,
 };
-use chroma::types::{GetUserIdentityResponse, HeartbeatResponse};
+use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse};
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
     ExternalCollectionReadContext, MeteredFutureExt, ReadAction, StartRequest, WriteAction,

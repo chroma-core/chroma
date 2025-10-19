@@ -5,7 +5,7 @@ use std::pin::Pin;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 
-use chroma::types::GetUserIdentityResponse;
+use chroma_api_types::GetUserIdentityResponse;
 use chroma_types::Collection;
 use serde::Serialize;
 
