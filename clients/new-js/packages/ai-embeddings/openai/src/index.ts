@@ -5,6 +5,7 @@ import {
   registerEmbeddingFunction,
 } from "chromadb";
 import OpenAI from "openai";
+import type { ClientOptions } from 'openai';
 import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 
 const NAME = "openai";
@@ -57,7 +58,7 @@ export class OpenAIEmbeddingFunction implements EmbeddingFunction {
     this.dimensions = dimensions;
     this.apiBase = apiBase;
 
-    let clientConfig = { apiKey, organization: this.organizationId };
+    let clientConfig: ClientOptions = { apiKey, organization: this.organizationId };
     if (this.apiBase) clientConfig.baseURL = this.apiBase;
     this.client = new OpenAI(clientConfig);
   }
