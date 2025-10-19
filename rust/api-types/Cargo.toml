@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bon = "3.8.1"
 serde.workspace = true
 utoipa = { version = "5.0.0", features = ["macros", "axum_extras", "debug", "uuid"], optional = true }
 

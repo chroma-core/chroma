@@ -1480,6 +1480,7 @@ name = "chroma"
 version = "0.1.0"
 dependencies = [
  "backon",
+ "bon",
  "chroma-api-types",
  "dotenvy",
  "futures-util",
@@ -1500,7 +1501,6 @@ dependencies = [
 name = "chroma-api-types"
 version = "0.1.0"
 dependencies = [
- "bon",
  "serde",
  "utoipa",
 ]
@@ -2951,7 +2951,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.0",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

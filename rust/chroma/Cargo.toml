@@ -7,6 +7,7 @@ license = "Apache-2.0"
 
 [dependencies]
 backon = "1.5"
+bon = "3.8.1"
 reqwest = { version = ">=0.12.0,<0.13.0", features = ["json", "charset", "system-proxy", "http2"], default-features = false }
 opentelemetry = { version = ">=0.27,<0.32", optional = true }
 serde.workspace = true
