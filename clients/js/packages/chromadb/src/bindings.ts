@@ -22,6 +22,8 @@ if (process.platform === "darwin") {
 } else if (process.platform === "win32") {
   if (process.arch === "arm64") {
     binding = require("chromadb-js-bindings-win32-arm64-msvc");
+  } else if (process.arch === "x64") {
+    binding = require("chromadb-js-bindings-win32-x64-msvc");
   } else {
     throw new Error(
       `Unsupported Windows architecture: ${process.arch}. Only ARM64 is supported.`,
