@@ -1,6 +1,6 @@
 from chromadb.api.types import (
     SparseEmbeddingFunction,
-    SparseEmbeddings,
+    SparseVectors,
     Documents,
 )
 from typing import Dict, Any
@@ -66,7 +66,7 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         if hasattr(self, "_session"):
             self._session.close()
 
-    def __call__(self, input: Documents) -> SparseEmbeddings:
+    def __call__(self, input: Documents) -> SparseVectors:
         """
         Generate embeddings for the given documents.
 
@@ -100,14 +100,14 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         except Exception as e:
             raise RuntimeError(f"Unexpected error calling Chroma Cloud API: {e}")
 
-    def _parse_response(self, response: Any) -> SparseEmbeddings:
+    def _parse_response(self, response: Any) -> SparseVectors:
         """
         Parse the response from the Chroma Cloud Sparse Embedding API.
         """
         raw_embeddings = response["embeddings"]
 
         # Normalize each sparse vector (sort indices and validate)
-        normalized_embeddings: SparseEmbeddings = []
+        normalized_vectors: SparseVectors = []
         for emb in raw_embeddings:
             # Handle both dict format and SparseVector format
             if isinstance(emb, dict):
@@ -118,11 +118,11 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
                 indices = emb.indices
                 values = emb.values
 
-            normalized_embeddings.append(
+            normalized_vectors.append(
                 normalize_sparse_vector(indices=indices, values=values)
             )
 
-        return normalized_embeddings
+        return normalized_vectors
 
     @staticmethod
     def name() -> str:

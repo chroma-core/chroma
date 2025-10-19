@@ -1,6 +1,6 @@
 from chromadb.api.types import (
     SparseEmbeddingFunction,
-    SparseEmbeddings,
+    SparseVectors,
     Documents,
 )
 from typing import Dict, Any, TypedDict, Optional
@@ -65,7 +65,7 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
             model_name, cache_dir, threads, cuda, device_ids, lazy_load, **kwargs
         )
 
-    def __call__(self, input: Documents) -> SparseEmbeddings:
+    def __call__(self, input: Documents) -> SparseVectors:
         """Generate embeddings for the given documents.
 
         Args:
@@ -92,18 +92,18 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         else:
             raise ValueError(f"Invalid task: {self.task}")
 
-        sparse_embeddings: SparseEmbeddings = []
+        sparse_vectors: SparseVectors = []
 
         for vec in embeddings:
-            sparse_embeddings.append(
+            sparse_vectors.append(
                 normalize_sparse_vector(
                     indices=vec.indices.tolist(), values=vec.values.tolist()
                 )
             )
 
-        return sparse_embeddings
+        return sparse_vectors
 
-    def embed_query(self, input: Documents) -> SparseEmbeddings:
+    def embed_query(self, input: Documents) -> SparseVectors:
         try:
             from fastembed import SparseTextEmbedding
         except ImportError:
@@ -124,16 +124,16 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
             else:
                 raise ValueError(f"Invalid task: {task}")
 
-            sparse_embeddings: SparseEmbeddings = []
+            sparse_vectors: SparseVectors = []
 
             for vec in embeddings:
-                sparse_embeddings.append(
+                sparse_vectors.append(
                     normalize_sparse_vector(
                         indices=vec.indices.tolist(), values=vec.values.tolist()
                     )
                 )
 
-            return sparse_embeddings
+            return sparse_vectors
 
         else:
             return self.__call__(input)

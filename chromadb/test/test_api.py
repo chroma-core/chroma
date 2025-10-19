@@ -14,7 +14,13 @@ import pytest
 import chromadb
 import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
-from chromadb.api.types import Document, EmbeddingFunction, QueryResult
+from chromadb.api.types import (
+    Document,
+    EmbeddingFunction,
+    QueryResult,
+    TYPE_KEY,
+    SPARSE_VECTOR_TYPE_VALUE,
+)
 from chromadb.config import Settings
 from chromadb.errors import (
     ChromaError,
@@ -2018,7 +2024,7 @@ def test_sparse_vector_dict_format_normalization():
     metadata_dict_format = {
         "text": "test document",
         "sparse": {
-            "#type": "sparse_vector",
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
             "indices": [0, 2, 5],
             "values": [1.0, 2.0, 3.0],
         },
@@ -2047,7 +2053,7 @@ def test_sparse_vector_dict_format_normalization():
     metadata_unsorted = {
         "text": "unsorted",
         "sparse": {
-            "#type": "sparse_vector",
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
             "indices": [5, 0, 2],
             "values": [3.0, 1.0, 2.0],
         },
@@ -2061,7 +2067,7 @@ def test_sparse_vector_dict_format_normalization():
     metadata_duplicates = {
         "text": "duplicates",
         "sparse": {
-            "#type": "sparse_vector",
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
             "indices": [0, 2, 2],
             "values": [1.0, 2.0, 3.0],
         },
@@ -2075,7 +2081,7 @@ def test_sparse_vector_dict_format_normalization():
     metadata_negative = {
         "text": "negative",
         "sparse": {
-            "#type": "sparse_vector",
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
             "indices": [-1, 0, 2],
             "values": [1.0, 2.0, 3.0],
         },
@@ -2087,7 +2093,7 @@ def test_sparse_vector_dict_format_normalization():
     metadata_mismatch = {
         "text": "mismatch",
         "sparse": {
-            "#type": "sparse_vector",
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
             "indices": [0, 2],
             "values": [1.0, 2.0, 3.0],
         },
@@ -2109,7 +2115,7 @@ def test_sparse_vector_dict_format_normalization():
     # Test 8: Empty sparse vector in dict format
     metadata_empty = {
         "text": "empty",
-        "sparse": {"#type": "sparse_vector", "indices": [], "values": []},
+        "sparse": {TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE, "indices": [], "values": []},
     }
     normalized4 = normalize_metadata(metadata_empty)
     assert isinstance(normalized4["sparse"], SparseVector)
@@ -2118,8 +2124,16 @@ def test_sparse_vector_dict_format_normalization():
 
     # Test 9: Multiple sparse vectors in dict format
     metadata_multiple = {
-        "sparse1": {"#type": "sparse_vector", "indices": [0, 1], "values": [1.0, 2.0]},
-        "sparse2": {"#type": "sparse_vector", "indices": [2, 3], "values": [3.0, 4.0]},
+        "sparse1": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [0, 1],
+            "values": [1.0, 2.0],
+        },
+        "sparse2": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [2, 3],
+            "values": [3.0, 4.0],
+        },
         "regular": 42,
     }
     normalized5 = normalize_metadata(metadata_multiple)
@@ -2144,7 +2158,7 @@ def test_sparse_vector_dict_format_in_record_set():
             {
                 "text": "test1",
                 "sparse": {
-                    "#type": "sparse_vector",
+                    TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
                     "indices": [0, 2],
                     "values": [1.0, 2.0],
                 },

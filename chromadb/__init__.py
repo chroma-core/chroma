@@ -28,7 +28,7 @@ from chromadb.api.types import (
     WhereDocument,
     UpdateCollectionMetadata,
     SparseVector,
-    SparseEmbeddings,
+    SparseVectors,
     SparseEmbeddingFunction,
     Schema,
     VectorIndexConfig,
@@ -84,7 +84,7 @@ __all__ = [
     "Rrf",
     # Sparse Vector Types
     "SparseVector",
-    "SparseEmbeddings",
+    "SparseVectors",
     "SparseEmbeddingFunction",
     # Schema and Index Configuration
     "Schema",

@@ -110,6 +110,8 @@ __all__ = [
     "SPANN_INDEX_NAME",
     "DOCUMENT_KEY",
     "EMBEDDING_KEY",
+    "TYPE_KEY",
+    "SPARSE_VECTOR_TYPE_VALUE",
     # Space type
     "Space",
     # Embedding Functions
@@ -117,6 +119,10 @@ __all__ = [
     "SparseEmbeddingFunction",
     "validate_embedding_function",
     "validate_sparse_embedding_function",
+    # Sparse vectors
+    "SparseVector",
+    "SparseVectors",
+    "validate_sparse_vectors",
 ]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
@@ -144,8 +150,7 @@ PyEmbedding = PyVector
 PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
 Embeddings = List[Embedding]
-SparseEmbedding = SparseVector
-SparseEmbeddings = List[SparseEmbedding]
+SparseVectors = List[SparseVector]
 
 
 @lru_cache
@@ -267,7 +272,7 @@ def normalize_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:
 
     normalized = {}
     for key, value in metadata.items():
-        if isinstance(value, dict) and value.get("#type") == "sparse_vector":
+        if isinstance(value, dict) and value.get(TYPE_KEY) == SPARSE_VECTOR_TYPE_VALUE:
             # Convert dict format to SparseVector (validates via __post_init__)
             normalized[key] = SparseVector.from_dict(value)
         else:
@@ -1073,7 +1078,7 @@ def deserialize_metadata(
 
     result: Dict[str, Any] = {}
     for key, value in metadata.items():
-        if isinstance(value, dict) and value.get("#type") == "sparse_vector":
+        if isinstance(value, dict) and value.get(TYPE_KEY) == SPARSE_VECTOR_TYPE_VALUE:
             result[key] = SparseVector.from_dict(value)
         else:
             result[key] = value
@@ -1294,12 +1299,12 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     return embeddings
 
 
-def validate_sparse_embeddings(embeddings: SparseEmbeddings) -> SparseEmbeddings:
-    """Validates sparse embeddings to ensure it is a non-empty list of SparseVector instances.
+def validate_sparse_vectors(vectors: SparseVectors) -> SparseVectors:
+    """Validates sparse vectors to ensure it is a non-empty list of SparseVector instances.
 
-    This function validates the structure and types of sparse embeddings returned by
+    This function validates the structure and types of sparse vectors returned by
     SparseEmbeddingFunction implementations. It ensures:
-    - Embeddings is a list
+    - Vectors is a list
     - List is non-empty
     - All items are SparseVector instances
 
@@ -1307,20 +1312,20 @@ def validate_sparse_embeddings(embeddings: SparseEmbeddings) -> SparseEmbeddings
     happens automatically in SparseVector.__post_init__ when each instance is created.
     This function only validates the list structure and instance types.
     """
-    if not isinstance(embeddings, list):
+    if not isinstance(vectors, list):
         raise ValueError(
-            f"Expected sparse embeddings to be a list, got {type(embeddings).__name__}"
+            f"Expected sparse vectors to be a list, got {type(vectors).__name__}"
         )
-    if len(embeddings) == 0:
+    if len(vectors) == 0:
         raise ValueError(
-            f"Expected sparse embeddings to be a non-empty list, got {len(embeddings)} sparse embeddings"
+            f"Expected sparse vectors to be a non-empty list, got {len(vectors)} sparse vectors"
         )
-    for i, embedding in enumerate(embeddings):
-        if not isinstance(embedding, SparseVector):
+    for i, vector in enumerate(vectors):
+        if not isinstance(vector, SparseVector):
             raise ValueError(
-                f"Expected SparseVector instance at position {i}, got {type(embedding).__name__}"
+                f"Expected SparseVector instance at position {i}, got {type(vector).__name__}"
             )
-    return embeddings
+    return vectors
 
 
 def validate_documents(documents: Documents, nullable: bool = False) -> None:
@@ -1382,7 +1387,7 @@ def convert_list_embeddings_to_np(embeddings: PyEmbeddings) -> Embeddings:
 @runtime_checkable
 class SparseEmbeddingFunction(Protocol[D]):
     """
-    A protocol for sparse embedding functions. To implement a new sparse embedding function,
+    A protocol for sparse vector functions. To implement a new sparse vector function,
     you need to implement the following methods at minimum:
     - __call__
 
@@ -1394,10 +1399,10 @@ class SparseEmbeddingFunction(Protocol[D]):
     """
 
     @abstractmethod
-    def __call__(self, input: D) -> SparseEmbeddings:
+    def __call__(self, input: D) -> SparseVectors:
         ...
 
-    def embed_query(self, input: D) -> SparseEmbeddings:
+    def embed_query(self, input: D) -> SparseVectors:
         """
         Get the embeddings for a query input.
         This method is optional, and if not implemented, the default behavior is to call __call__.
@@ -1409,17 +1414,17 @@ class SparseEmbeddingFunction(Protocol[D]):
         # Raise an exception if __call__ is not defined since it is expected to be defined
         call = getattr(cls, "__call__")
 
-        def __call__(self: SparseEmbeddingFunction[D], input: D) -> SparseEmbeddings:
+        def __call__(self: SparseEmbeddingFunction[D], input: D) -> SparseVectors:
             result = call(self, input)
             assert result is not None
-            return validate_sparse_embeddings(cast(SparseEmbeddings, result))
+            return validate_sparse_vectors(cast(SparseVectors, result))
 
         setattr(cls, "__call__", __call__)
 
     def embed_with_retries(
         self, input: D, **retry_kwargs: Dict[str, Any]
-    ) -> SparseEmbeddings:
-        return cast(SparseEmbeddings, retry(**retry_kwargs)(self.__call__)(input))  # type: ignore[call-overload]
+    ) -> SparseVectors:
+        return cast(SparseVectors, retry(**retry_kwargs)(self.__call__)(input))  # type: ignore[call-overload]
 
     @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -1472,11 +1477,11 @@ class SparseEmbeddingFunction(Protocol[D]):
 
 
 def validate_sparse_embedding_function(
-    sparse_embedding_function: SparseEmbeddingFunction[Embeddable],
+    sparse_vector_function: SparseEmbeddingFunction[Embeddable],
 ) -> None:
-    """Validate that a sparse embedding function conforms to the SparseEmbeddingFunction protocol."""
+    """Validate that a sparse vector function conforms to the SparseEmbeddingFunction protocol."""
     function_signature = signature(
-        sparse_embedding_function.__class__.__call__
+        sparse_vector_function.__class__.__call__
     ).parameters.keys()
     protocol_signature = signature(SparseEmbeddingFunction.__call__).parameters.keys()
 
@@ -1554,11 +1559,11 @@ class SparseVectorIndexConfig(BaseModel):
     @field_validator("embedding_function", mode="before")
     @classmethod
     def validate_embedding_function_field(cls, v: Any) -> Any:
-        # Validate sparse embedding function for sparse vector index
+        # Validate sparse vector function for sparse vector index
         if v is None:
             return v
         if callable(v):
-            # Use the sparse embedding function validation
+            # Use the sparse vector function validation
             validate_sparse_embedding_function(v)
             return v
         raise ValueError(
@@ -1624,6 +1629,10 @@ SPANN_INDEX_NAME: Final[str] = "spann_index"
 # Special key constants
 DOCUMENT_KEY: Final[str] = "#document"
 EMBEDDING_KEY: Final[str] = "#embedding"
+TYPE_KEY: Final[str] = "#type"
+
+# Type value constants
+SPARSE_VECTOR_TYPE_VALUE: Final[str] = "sparse_vector"
 
 
 # Index Type Classes
