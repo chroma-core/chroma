@@ -1,4 +1,7 @@
+use backon::ExponentialBuilder;
+use backon::Retryable;
 use reqwest::Method;
+use reqwest::StatusCode;
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -23,6 +26,7 @@ pub enum ChromaClientError {
 pub struct ChromaClient {
     base_url: String,
     client: reqwest::Client,
+    retry_policy: ExponentialBuilder,
     tenant_id: Arc<Mutex<Option<String>>>,
     default_database_id: Arc<Mutex<Option<String>>>,
     #[cfg(feature = "opentelemetry")]
@@ -48,6 +52,7 @@ impl ChromaClient {
         ChromaClient {
             base_url: options.base_url.clone(),
             client,
+            retry_policy: options.retry_options.into(),
             tenant_id: Arc::new(Mutex::new(options.tenant_id)),
             default_database_id: Arc::new(Mutex::new(options.default_database_id)),
             #[cfg(feature = "opentelemetry")]
@@ -210,35 +215,60 @@ impl ChromaClient {
         // todo: / normalization
         let url = format!("{}{}", self.base_url, path);
 
-        let mut request = self.client.request(method.clone(), &url);
-        if let Some(body) = body {
-            request = request.json(&body);
-        }
-        if let Some(query_params) = query_params {
-            request = request.query(&query_params);
-        }
+        let attempt = || async {
+            let mut request = self.client.request(method.clone(), &url);
+            if let Some(body) = &body {
+                request = request.json(body);
+            }
+            if let Some(query_params) = &query_params {
+                request = request.query(query_params);
+            }
 
-        tracing::trace!(url = url, method =? method, "Sending request");
+            tracing::trace!(url = url, method =? method, "Sending request");
 
-        #[cfg(feature = "opentelemetry")]
-        let started_at = std::time::Instant::now();
+            #[cfg(feature = "opentelemetry")]
+            let started_at = std::time::Instant::now();
 
-        let response = request.send().await?;
+            let response = request.send().await?;
 
-        #[cfg(feature = "opentelemetry")]
-        {
-            self.metrics.record_request(
-                operation_name,
-                response.status().as_u16(),
-                started_at.elapsed().as_secs_f64() * 1000.0,
-            );
-        }
-        #[cfg(not(feature = "opentelemetry"))]
-        {
-            let _ = operation_name;
-        }
+            #[cfg(feature = "opentelemetry")]
+            {
+                self.metrics.record_request(
+                    operation_name,
+                    response.status().as_u16(),
+                    started_at.elapsed().as_secs_f64() * 1000.0,
+                );
+            }
+            #[cfg(not(feature = "opentelemetry"))]
+            {
+                let _ = operation_name;
+            }
 
-        response.error_for_status_ref()?;
+            response.error_for_status_ref()?;
+            Ok::<_, reqwest::Error>(response)
+        };
+
+        let response = attempt
+            .retry(&self.retry_policy)
+            .notify(|err, _| {
+                tracing::warn!(
+                    url = url,
+                    method =? method,
+                    status =? err.status(),
+                    "Request failed with retryable error. Retrying...",
+                );
+
+                #[cfg(feature = "opentelemetry")]
+                self.metrics.increment_retry(operation_name);
+            })
+            .when(|err| {
+                err.status()
+                    .map(|status| status == StatusCode::TOO_MANY_REQUESTS)
+                    .unwrap_or_default()
+                    || method == Method::GET
+            })
+            .await?;
+
         let json = response.json::<serde_json::Value>().await?;
 
         if tracing::enabled!(tracing::Level::TRACE) {
@@ -259,9 +289,12 @@ impl ChromaClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::ChromaAuthMethod;
+    use crate::client::{ChromaAuthMethod, ChromaRetryOptions};
     use futures_util::FutureExt;
+    use httpmock::{HttpMockResponse, MockServer};
+    use std::sync::atomic::AtomicBool;
     use std::sync::LazyLock;
+    use std::time::Duration;
 
     static CHROMA_CLIENT_OPTIONS: LazyLock<ChromaClientOptions> = LazyLock::new(|| {
         match dotenvy::dotenv() {
@@ -335,6 +368,114 @@ mod tests {
             assert!(!identity.tenant.is_empty());
         })
         .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_retries_get_requests() {
+        let server = MockServer::start_async().await;
+
+        let was_called = Arc::new(AtomicBool::new(false));
+        let mock = server
+            .mock_async(|when, then| {
+                when.method("GET").path("/retry-get");
+                // then.status(500);
+
+                let was_called = was_called.clone();
+                then.respond_with(move |_| {
+                    if was_called.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        return HttpMockResponse::builder()
+                            .status(200)
+                            .body(r#"{"value": "ok"}"#)
+                            .build();
+                    }
+
+                    HttpMockResponse::builder()
+                        .status(500)
+                        .body("Internal Server Error")
+                        .build()
+                });
+            })
+            .await;
+
+        let client = ChromaClient::new(ChromaClientOptions {
+            base_url: server.base_url(),
+            retry_options: ChromaRetryOptions {
+                max_retries: 3,
+                min_delay: Duration::from_millis(1),
+                max_delay: Duration::from_millis(1),
+                jitter: false,
+            },
+            ..Default::default()
+        });
+
+        let response: serde_json::Value = client
+            .send::<(), (), serde_json::Value>(
+                "retry_get",
+                Method::GET,
+                "/retry-get".into(),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response, serde_json::json!({"value": "ok"}));
+        assert_eq!(mock.calls(), 2);
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_retries_non_get_on_429() {
+        let server = MockServer::start_async().await;
+
+        let was_called = Arc::new(AtomicBool::new(false));
+        let mock = server
+            .mock_async(|when, then| {
+                when.method("POST").path("/retry-post");
+
+                let was_called = was_called.clone();
+
+                then.respond_with(move |_| {
+                    if was_called.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        return HttpMockResponse::builder()
+                            .status(200)
+                            .body(r#"{"status": "ok"}"#)
+                            .build();
+                    }
+
+                    HttpMockResponse::builder()
+                        .status(429)
+                        .body("Too Many Requests")
+                        .build()
+                });
+            })
+            .await;
+
+        let client = ChromaClient::new(ChromaClientOptions {
+            base_url: server.base_url(),
+            retry_options: ChromaRetryOptions {
+                max_retries: 2,
+                min_delay: Duration::from_millis(1),
+                max_delay: Duration::from_millis(1),
+                jitter: false,
+            },
+            ..Default::default()
+        });
+
+        let response: serde_json::Value = client
+            .send::<serde_json::Value, (), serde_json::Value>(
+                "retry_post",
+                Method::POST,
+                "/retry-post".into(),
+                Some(serde_json::json!({"request": "body"})),
+                None::<()>,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response, serde_json::json!({"status": "ok"}));
+        assert_eq!(mock.calls(), 2);
     }
 
     #[tokio::test]
