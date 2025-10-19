@@ -246,6 +246,55 @@ Metadatas = List[Metadata]
 CollectionMetadata = Dict[str, Any]
 UpdateCollectionMetadata = UpdateMetadata
 
+
+def normalize_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:
+    """
+    Normalize metadata by converting dict-format sparse vectors to SparseVector instances.
+
+    Accepts:
+    - SparseVector instances (pass through)
+    - Dict with #type='sparse_vector' (convert to SparseVector)
+    - Other primitive types (pass through)
+
+    Returns: Metadata with all sparse vectors as SparseVector instances
+
+    Note: This allows users to provide sparse vectors in dict format for convenience.
+    The dict format is automatically converted to SparseVector instances, which are
+    then validated by SparseVector.__post_init__.
+    """
+    if metadata is None:
+        return metadata
+
+    normalized = {}
+    for key, value in metadata.items():
+        if isinstance(value, dict) and value.get("#type") == "sparse_vector":
+            # Convert dict format to SparseVector (validates via __post_init__)
+            normalized[key] = SparseVector.from_dict(value)
+        else:
+            # Pass through (including existing SparseVector instances)
+            normalized[key] = value
+
+    return normalized
+
+
+def normalize_metadatas(
+    metadatas: Optional[OneOrMany[Metadata]],
+) -> Optional[List[Optional[Metadata]]]:
+    """
+    Normalize metadatas list, converting dict-format sparse vectors to instances.
+
+    Handles both single metadata dict and list of metadata dicts.
+    Converts any dict-format sparse vectors to SparseVector instances.
+
+    Note: Individual items can be None (e.g., when embeddings are provided without metadata).
+    """
+    unpacked = maybe_cast_one_to_many(metadatas)
+    if unpacked is None:
+        return None
+
+    return [normalize_metadata(m) for m in unpacked]
+
+
 # Documents
 Document = str
 Documents = List[Document]
@@ -333,6 +382,11 @@ def normalize_insert_record_set(
 ) -> InsertRecordSet:
     """
     Unpacks and normalizes the fields of an InsertRecordSet.
+
+    Normalization includes:
+    - Converting various embedding formats to List[np.ndarray]
+    - Converting dict-format sparse vectors to SparseVector instances
+    - Converting single values to lists where appropriate
     """
     base_record_set = normalize_base_record_set(
         embeddings=embeddings, documents=documents, images=images, uris=uris
@@ -340,7 +394,7 @@ def normalize_insert_record_set(
 
     return InsertRecordSet(
         ids=cast(IDs, maybe_cast_one_to_many(ids)),
-        metadatas=maybe_cast_one_to_many(metadatas),
+        metadatas=normalize_metadatas(metadatas),  # type: ignore[typeddict-item]
         embeddings=base_record_set["embeddings"],
         documents=base_record_set["documents"],
         images=base_record_set["images"],
@@ -722,7 +776,7 @@ class EmbeddingFunction(Protocol[D]):
     def embed_with_retries(
         self, input: D, **retry_kwargs: Dict[str, Any]
     ) -> Embeddings:
-        return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))
+        return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))  # type: ignore[call-overload]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         """
@@ -920,9 +974,6 @@ def validate_ids(ids: IDs) -> IDs:
             message = f"Expected IDs to be unique, found {n_dups} duplicated IDs: {example_string}"
         raise errors.DuplicateIDError(message)
     return ids
-
-
-
 
 
 def validate_metadata(metadata: Metadata) -> Metadata:
@@ -1244,7 +1295,18 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
 
 
 def validate_sparse_embeddings(embeddings: SparseEmbeddings) -> SparseEmbeddings:
-    """Validates sparse embeddings to ensure it is a list of sparse vectors"""
+    """Validates sparse embeddings to ensure it is a non-empty list of SparseVector instances.
+
+    This function validates the structure and types of sparse embeddings returned by
+    SparseEmbeddingFunction implementations. It ensures:
+    - Embeddings is a list
+    - List is non-empty
+    - All items are SparseVector instances
+
+    Note: Individual SparseVector validation (sorted indices, non-negative values, etc.)
+    happens automatically in SparseVector.__post_init__ when each instance is created.
+    This function only validates the list structure and instance types.
+    """
     if not isinstance(embeddings, list):
         raise ValueError(
             f"Expected sparse embeddings to be a list, got {type(embeddings).__name__}"
@@ -1253,10 +1315,10 @@ def validate_sparse_embeddings(embeddings: SparseEmbeddings) -> SparseEmbeddings
         raise ValueError(
             f"Expected sparse embeddings to be a non-empty list, got {len(embeddings)} sparse embeddings"
         )
-    for embedding in embeddings:
+    for i, embedding in enumerate(embeddings):
         if not isinstance(embedding, SparseVector):
             raise ValueError(
-                f"Expected SparseVector dataclass instance, got {type(embedding).__name__}"
+                f"Expected SparseVector instance at position {i}, got {type(embedding).__name__}"
             )
     return embeddings
 
@@ -1357,7 +1419,7 @@ class SparseEmbeddingFunction(Protocol[D]):
     def embed_with_retries(
         self, input: D, **retry_kwargs: Dict[str, Any]
     ) -> SparseEmbeddings:
-        return cast(SparseEmbeddings, retry(**retry_kwargs)(self.__call__)(input))
+        return cast(SparseEmbeddings, retry(**retry_kwargs)(self.__call__)(input))  # type: ignore[call-overload]
 
     @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -2114,7 +2176,9 @@ class Schema:
 
         # Serialize each value type if it exists
         if value_types.string is not None:
-            result[STRING_VALUE_NAME] = self._serialize_string_value_type(value_types.string)
+            result[STRING_VALUE_NAME] = self._serialize_string_value_type(
+                value_types.string
+            )
 
         if value_types.float_list is not None:
             result[FLOAT_LIST_VALUE_NAME] = self._serialize_float_list_value_type(
@@ -2127,13 +2191,19 @@ class Schema:
             )
 
         if value_types.int_value is not None:
-            result[INT_VALUE_NAME] = self._serialize_int_value_type(value_types.int_value)
+            result[INT_VALUE_NAME] = self._serialize_int_value_type(
+                value_types.int_value
+            )
 
         if value_types.float_value is not None:
-            result[FLOAT_VALUE_NAME] = self._serialize_float_value_type(value_types.float_value)
+            result[FLOAT_VALUE_NAME] = self._serialize_float_value_type(
+                value_types.float_value
+            )
 
         if value_types.boolean is not None:
-            result[BOOL_VALUE_NAME] = self._serialize_bool_value_type(value_types.boolean)
+            result[BOOL_VALUE_NAME] = self._serialize_bool_value_type(
+                value_types.boolean
+            )
 
         return result
 
@@ -2304,7 +2374,9 @@ class Schema:
             )
 
         if INT_VALUE_NAME in value_types_json:
-            result.int_value = cls._deserialize_int_value_type(value_types_json[INT_VALUE_NAME])
+            result.int_value = cls._deserialize_int_value_type(
+                value_types_json[INT_VALUE_NAME]
+            )
 
         if FLOAT_VALUE_NAME in value_types_json:
             result.float_value = cls._deserialize_float_value_type(
@@ -2312,7 +2384,9 @@ class Schema:
             )
 
         if BOOL_VALUE_NAME in value_types_json:
-            result.boolean = cls._deserialize_bool_value_type(value_types_json[BOOL_VALUE_NAME])
+            result.boolean = cls._deserialize_bool_value_type(
+                value_types_json[BOOL_VALUE_NAME]
+            )
 
         return result
 
@@ -2406,7 +2480,10 @@ class Schema:
             # Handle embedding function deserialization
             if "embedding_function" in config_data:
                 ef_config = config_data["embedding_function"]
-                if ef_config.get("type") == "unknown" or ef_config.get("type") == "legacy":
+                if (
+                    ef_config.get("type") == "unknown"
+                    or ef_config.get("type") == "legacy"
+                ):
                     config_data["embedding_function"] = None
                 else:
                     try:
