@@ -22,6 +22,7 @@ export interface OpenAIArgs {
   organizationId?: string;
   dimensions?: number;
   apiKey?: string;
+  apiBase?: string;
 }
 
 export class OpenAIEmbeddingFunction implements EmbeddingFunction {
@@ -30,6 +31,7 @@ export class OpenAIEmbeddingFunction implements EmbeddingFunction {
   private readonly modelName: string;
   private readonly dimensions: number | undefined;
   private readonly organizationId: string | undefined;
+  private readonly apiBase: string | undefined;
   private client: OpenAI;
 
   constructor(args: OpenAIArgs) {
@@ -38,6 +40,7 @@ export class OpenAIEmbeddingFunction implements EmbeddingFunction {
       modelName,
       dimensions,
       organizationId,
+      apiBase = "",
     } = args;
 
     const apiKey = args.apiKey || process.env[apiKeyEnvVar];
@@ -51,8 +54,9 @@ export class OpenAIEmbeddingFunction implements EmbeddingFunction {
     this.organizationId = organizationId;
     this.apiKeyEnvVar = apiKeyEnvVar;
     this.dimensions = dimensions;
+    this.apiBase = apiBase;
 
-    this.client = new OpenAI({ apiKey, organization: this.organizationId });
+    this.client = new OpenAI({ apiKey, organization: this.organizationId, baseURL: this.apiBase });
   }
 
   public async generate(texts: string[]): Promise<number[][]> {
