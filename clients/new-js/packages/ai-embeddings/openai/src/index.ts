@@ -40,7 +40,7 @@ export class OpenAIEmbeddingFunction implements EmbeddingFunction {
       modelName,
       dimensions,
       organizationId,
-      apiBase = "",
+      apiBase,
     } = args;
 
     const apiKey = args.apiKey || process.env[apiKeyEnvVar];
@@ -56,7 +56,9 @@ export class OpenAIEmbeddingFunction implements EmbeddingFunction {
     this.dimensions = dimensions;
     this.apiBase = apiBase;
 
-    this.client = new OpenAI({ apiKey, organization: this.organizationId, baseURL: this.apiBase });
+    let arguments = { apiKey, organization: this.organizationId };
+    if(this.apiBase) arguments.baseURL = this.apiBase;
+    this.client = new OpenAI(arguments);
   }
 
   public async generate(texts: string[]): Promise<number[][]> {
