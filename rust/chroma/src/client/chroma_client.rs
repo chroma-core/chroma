@@ -7,9 +7,8 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
 
-use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse, ListCollectionsRequest};
-
 use crate::client::ChromaClientOptions;
+use crate::types::{GetUserIdentityResponse, HeartbeatResponse, ListCollectionsRequest};
 
 const USER_AGENT: &str = concat!(
     "Chroma Rust Client v",
