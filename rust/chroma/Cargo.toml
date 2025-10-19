@@ -6,6 +6,7 @@ description = "Placeholder for trychroma.com"
 license = "Apache-2.0"
 
 [dependencies]
+async-trait = { workspace = true }
 backon = "1.5"
 bon = "3.8.1"
 reqwest = { version = ">=0.12.0,<0.13.0", features = ["json", "charset", "system-proxy", "http2"], default-features = false }
@@ -21,9 +22,10 @@ chroma-api-types = { workspace = true }
 chroma-types = { workspace = true }
 
 [features]
-default = ["rustls"]
+default = ["rustls", "ollama"]
 native-tls = ["reqwest/default-tls", "reqwest/default"]
 rustls = ["reqwest/rustls-tls"]
+ollama = []
 
 [dev-dependencies]
 dotenvy = "0.15.7"
