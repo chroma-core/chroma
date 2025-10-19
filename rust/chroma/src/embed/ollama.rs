@@ -40,8 +40,8 @@ impl EmbeddingFunction for OllamaEmbeddingFunction {
     type Error = OllamaEmbeddingError;
 
     async fn embed(&self, batches: &[&str]) -> Result<Vec<Vec<f32>>, Self::Error> {
-        let model = self.model.clone();
-        let input = batches.iter().map(|s| s.to_string()).collect();
+        let model = &self.model;
+        let input = batches;
         let req = EmbedRequest { model, input };
         let resp = req
             .make_request(&self.host)
@@ -57,15 +57,15 @@ impl EmbeddingFunction for OllamaEmbeddingFunction {
 /////////////////////////////////////////// EmbedRequest ///////////////////////////////////////////
 
 /// A request to embed multiple input documents.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct EmbedRequest {
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct EmbedRequest<'a> {
     /// The name of the model to use for embedding.
-    pub model: String,
+    pub model: &'a str,
     /// The input texts to embed.
-    pub input: Vec<String>,
+    pub input: &'a [&'a str],
 }
 
-impl EmbedRequest {
+impl EmbedRequest<'_> {
     /// Create a new RequestBuilder for this embed request.
     pub fn make_request(&self, ollama_host: &str) -> RequestBuilder {
         reqwest::Client::new()
@@ -77,7 +77,7 @@ impl EmbedRequest {
 /////////////////////////////////////////// EmbedResponse //////////////////////////////////////////
 
 /// A response to an embed response.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize)]
 pub struct EmbedResponse {
     /// The name of the model used to generate the response.
     pub model: String,
