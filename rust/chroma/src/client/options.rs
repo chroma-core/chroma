@@ -64,7 +64,7 @@ pub struct ChromaClientOptions {
     /// Will be automatically resolved at request time if not provided
     pub tenant_id: Option<String>,
     /// Will be automatically resolved at request time if not provided. It can only be resolved automatically if this client has access to exactly one database.
-    pub default_database_id: Option<String>,
+    pub default_database_name: Option<String>,
 }
 
 impl Default for ChromaClientOptions {
@@ -74,7 +74,7 @@ impl Default for ChromaClientOptions {
             auth_method: ChromaAuthMethod::None,
             retry_options: ChromaRetryOptions::default(),
             tenant_id: None,
-            default_database_id: None,
+            default_database_name: None,
         }
     }
 }

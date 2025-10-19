@@ -14,8 +14,8 @@ use crate::{client::ChromaClientError, ChromaClient};
 
 #[derive(Clone, Debug)]
 pub struct ChromaCollection {
-    client: ChromaClient,
-    collection: Arc<Collection>,
+    pub(crate) client: ChromaClient,
+    pub(crate) collection: Arc<Collection>,
 }
 
 impl ChromaCollection {
