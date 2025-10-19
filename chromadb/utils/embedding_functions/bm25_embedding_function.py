@@ -3,11 +3,10 @@ from chromadb.api.types import (
     SparseEmbeddings,
     Documents,
 )
-from chromadb.base_types import SparseVector
 from typing import Dict, Any, TypedDict, Optional
 from typing import cast, Literal
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
-from chromadb.utils.sparse_embedding_utils import _sort_sparse_vectors
+from chromadb.utils.sparse_embedding_utils import normalize_sparse_vector
 
 TaskType = Literal["document", "query"]
 
@@ -117,10 +116,11 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
 
         for vec in embeddings:
             sparse_embeddings.append(
-                SparseVector(indices=vec.indices.tolist(), values=vec.values.tolist())
+                normalize_sparse_vector(
+                    indices=vec.indices.tolist(), values=vec.values.tolist()
+                )
             )
 
-        _sort_sparse_vectors(sparse_embeddings)
         return sparse_embeddings
 
     def embed_query(self, input: Documents) -> SparseEmbeddings:
@@ -148,12 +148,11 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
 
             for vec in embeddings:
                 sparse_embeddings.append(
-                    SparseVector(
+                    normalize_sparse_vector(
                         indices=vec.indices.tolist(), values=vec.values.tolist()
                     )
                 )
 
-            _sort_sparse_vectors(sparse_embeddings)
             return sparse_embeddings
 
         else:

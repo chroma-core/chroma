@@ -27,6 +27,19 @@ from chromadb.api.types import (
     GetResult,
     WhereDocument,
     UpdateCollectionMetadata,
+    SparseVector,
+    SparseEmbeddings,
+    SparseEmbeddingFunction,
+    Schema,
+    VectorIndexConfig,
+    HnswIndexConfig,
+    SpannIndexConfig,
+    FtsIndexConfig,
+    SparseVectorIndexConfig,
+    StringInvertedIndexConfig,
+    IntInvertedIndexConfig,
+    FloatInvertedIndexConfig,
+    BoolInvertedIndexConfig,
 )
 
 # Import Search API components
@@ -69,6 +82,21 @@ __all__ = [
     "K",
     "Knn",
     "Rrf",
+    # Sparse Vector Types
+    "SparseVector",
+    "SparseEmbeddings",
+    "SparseEmbeddingFunction",
+    # Schema and Index Configuration
+    "Schema",
+    "VectorIndexConfig",
+    "HnswIndexConfig",
+    "SpannIndexConfig",
+    "FtsIndexConfig",
+    "SparseVectorIndexConfig",
+    "StringInvertedIndexConfig",
+    "IntInvertedIndexConfig",
+    "FloatInvertedIndexConfig",
+    "BoolInvertedIndexConfig",
 ]
 
 from chromadb.types import CloudClientArg
