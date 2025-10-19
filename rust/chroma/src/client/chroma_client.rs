@@ -26,6 +26,7 @@ pub enum ChromaClientError {
     SerdeError(#[from] serde_json::Error),
 }
 
+#[derive(Debug)]
 pub struct ChromaClient {
     base_url: reqwest::Url,
     client: reqwest::Client,
@@ -256,7 +257,11 @@ impl ChromaClient {
         Ok(tenant_id)
     }
 
-    async fn send<Body: Serialize, QueryParams: Serialize, Response: DeserializeOwned>(
+    pub(crate) async fn send<
+        Body: Serialize,
+        QueryParams: Serialize,
+        Response: DeserializeOwned,
+    >(
         &self,
         operation_name: &str,
         method: Method,
