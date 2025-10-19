@@ -16,6 +16,7 @@ tokio = { version = ">=1,<2", features = ["sync"] }
 thiserror.workspace = true
 tracing.workspace = true
 bon = "3.8.1"
+parking_lot.workspace = true
 
 [features]
 default = ["native-tls"]
