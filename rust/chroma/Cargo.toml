@@ -19,6 +19,7 @@ tracing.workspace = true
 parking_lot.workspace = true
 
 chroma-api-types = { workspace = true }
+chroma-error = { workspace = true }
 chroma-types = { workspace = true }
 
 [features]

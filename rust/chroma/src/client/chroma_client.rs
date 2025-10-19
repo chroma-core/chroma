@@ -1,5 +1,6 @@
 use backon::ExponentialBuilder;
 use backon::Retryable;
+use chroma_error::ChromaValidationError;
 use parking_lot::Mutex;
 use reqwest::Method;
 use reqwest::StatusCode;
@@ -24,6 +25,8 @@ pub enum ChromaClientError {
     CouldNotResolveDatabaseId(String),
     #[error("Serialization/Deserialization error: {0}")]
     SerdeError(#[from] serde_json::Error),
+    #[error("Validation error: {0}")]
+    ValidationError(#[from] ChromaValidationError),
 }
 
 #[derive(Debug)]

@@ -1202,7 +1202,7 @@ impl UpdateCollectionRecordsRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct UpdateCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -1266,7 +1266,7 @@ impl UpsertCollectionRecordsRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct UpsertCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -1326,7 +1326,7 @@ impl DeleteCollectionRecordsRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct DeleteCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]

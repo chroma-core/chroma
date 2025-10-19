@@ -1428,6 +1428,7 @@ dependencies = [
  "backon",
  "bon",
  "chroma-api-types",
+ "chroma-error",
  "chroma-types",
  "dotenvy",
  "futures-util",
