@@ -20,7 +20,7 @@ parking_lot.workspace = true
 chroma-api-types = { workspace = true }
 
 [features]
-default = ["native-tls"]
+default = ["rustls"]
 native-tls = ["reqwest/default-tls", "reqwest/default"]
 rustls = ["reqwest/rustls-tls"]
 
