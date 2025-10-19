@@ -110,6 +110,8 @@ __all__ = [
     "SPANN_INDEX_NAME",
     "DOCUMENT_KEY",
     "EMBEDDING_KEY",
+    "TYPE_KEY",
+    "SPARSE_VECTOR_TYPE_VALUE",
     # Space type
     "Space",
     # Embedding Functions
@@ -117,6 +119,10 @@ __all__ = [
     "SparseEmbeddingFunction",
     "validate_embedding_function",
     "validate_sparse_embedding_function",
+    # Sparse vectors
+    "SparseVector",
+    "SparseVectors",
+    "validate_sparse_vectors",
 ]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
@@ -144,8 +150,7 @@ PyEmbedding = PyVector
 PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
 Embeddings = List[Embedding]
-SparseEmbedding = SparseVector
-SparseEmbeddings = List[SparseEmbedding]
+SparseVectors = List[SparseVector]
 
 
 @lru_cache
@@ -246,6 +251,55 @@ Metadatas = List[Metadata]
 CollectionMetadata = Dict[str, Any]
 UpdateCollectionMetadata = UpdateMetadata
 
+
+def normalize_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:
+    """
+    Normalize metadata by converting dict-format sparse vectors to SparseVector instances.
+
+    Accepts:
+    - SparseVector instances (pass through)
+    - Dict with #type='sparse_vector' (convert to SparseVector)
+    - Other primitive types (pass through)
+
+    Returns: Metadata with all sparse vectors as SparseVector instances
+
+    Note: This allows users to provide sparse vectors in dict format for convenience.
+    The dict format is automatically converted to SparseVector instances, which are
+    then validated by SparseVector.__post_init__.
+    """
+    if metadata is None:
+        return metadata
+
+    normalized = {}
+    for key, value in metadata.items():
+        if isinstance(value, dict) and value.get(TYPE_KEY) == SPARSE_VECTOR_TYPE_VALUE:
+            # Convert dict format to SparseVector (validates via __post_init__)
+            normalized[key] = SparseVector.from_dict(value)
+        else:
+            # Pass through (including existing SparseVector instances)
+            normalized[key] = value
+
+    return normalized
+
+
+def normalize_metadatas(
+    metadatas: Optional[OneOrMany[Metadata]],
+) -> Optional[List[Optional[Metadata]]]:
+    """
+    Normalize metadatas list, converting dict-format sparse vectors to instances.
+
+    Handles both single metadata dict and list of metadata dicts.
+    Converts any dict-format sparse vectors to SparseVector instances.
+
+    Note: Individual items can be None (e.g., when embeddings are provided without metadata).
+    """
+    unpacked = maybe_cast_one_to_many(metadatas)
+    if unpacked is None:
+        return None
+
+    return [normalize_metadata(m) for m in unpacked]
+
+
 # Documents
 Document = str
 Documents = List[Document]
@@ -333,6 +387,11 @@ def normalize_insert_record_set(
 ) -> InsertRecordSet:
     """
     Unpacks and normalizes the fields of an InsertRecordSet.
+
+    Normalization includes:
+    - Converting various embedding formats to List[np.ndarray]
+    - Converting dict-format sparse vectors to SparseVector instances
+    - Converting single values to lists where appropriate
     """
     base_record_set = normalize_base_record_set(
         embeddings=embeddings, documents=documents, images=images, uris=uris
@@ -340,7 +399,7 @@ def normalize_insert_record_set(
 
     return InsertRecordSet(
         ids=cast(IDs, maybe_cast_one_to_many(ids)),
-        metadatas=maybe_cast_one_to_many(metadatas),
+        metadatas=normalize_metadatas(metadatas),  # type: ignore[typeddict-item]
         embeddings=base_record_set["embeddings"],
         documents=base_record_set["documents"],
         images=base_record_set["images"],
@@ -722,7 +781,7 @@ class EmbeddingFunction(Protocol[D]):
     def embed_with_retries(
         self, input: D, **retry_kwargs: Dict[str, Any]
     ) -> Embeddings:
-        return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))
+        return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))  # type: ignore[call-overload]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         """
@@ -922,9 +981,6 @@ def validate_ids(ids: IDs) -> IDs:
     return ids
 
 
-
-
-
 def validate_metadata(metadata: Metadata) -> Metadata:
     """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats, bools, or SparseVectors"""
     if not isinstance(metadata, dict) and metadata is not None:
@@ -1022,7 +1078,7 @@ def deserialize_metadata(
 
     result: Dict[str, Any] = {}
     for key, value in metadata.items():
-        if isinstance(value, dict) and value.get("#type") == "sparse_vector":
+        if isinstance(value, dict) and value.get(TYPE_KEY) == SPARSE_VECTOR_TYPE_VALUE:
             result[key] = SparseVector.from_dict(value)
         else:
             result[key] = value
@@ -1243,22 +1299,33 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     return embeddings
 
 
-def validate_sparse_embeddings(embeddings: SparseEmbeddings) -> SparseEmbeddings:
-    """Validates sparse embeddings to ensure it is a list of sparse vectors"""
-    if not isinstance(embeddings, list):
+def validate_sparse_vectors(vectors: SparseVectors) -> SparseVectors:
+    """Validates sparse vectors to ensure it is a non-empty list of SparseVector instances.
+
+    This function validates the structure and types of sparse vectors returned by
+    SparseEmbeddingFunction implementations. It ensures:
+    - Vectors is a list
+    - List is non-empty
+    - All items are SparseVector instances
+
+    Note: Individual SparseVector validation (sorted indices, non-negative values, etc.)
+    happens automatically in SparseVector.__post_init__ when each instance is created.
+    This function only validates the list structure and instance types.
+    """
+    if not isinstance(vectors, list):
         raise ValueError(
-            f"Expected sparse embeddings to be a list, got {type(embeddings).__name__}"
+            f"Expected sparse vectors to be a list, got {type(vectors).__name__}"
         )
-    if len(embeddings) == 0:
+    if len(vectors) == 0:
         raise ValueError(
-            f"Expected sparse embeddings to be a non-empty list, got {len(embeddings)} sparse embeddings"
+            f"Expected sparse vectors to be a non-empty list, got {len(vectors)} sparse vectors"
         )
-    for embedding in embeddings:
-        if not isinstance(embedding, SparseVector):
+    for i, vector in enumerate(vectors):
+        if not isinstance(vector, SparseVector):
             raise ValueError(
-                f"Expected SparseVector dataclass instance, got {type(embedding).__name__}"
+                f"Expected SparseVector instance at position {i}, got {type(vector).__name__}"
             )
-    return embeddings
+    return vectors
 
 
 def validate_documents(documents: Documents, nullable: bool = False) -> None:
@@ -1320,7 +1387,7 @@ def convert_list_embeddings_to_np(embeddings: PyEmbeddings) -> Embeddings:
 @runtime_checkable
 class SparseEmbeddingFunction(Protocol[D]):
     """
-    A protocol for sparse embedding functions. To implement a new sparse embedding function,
+    A protocol for sparse vector functions. To implement a new sparse vector function,
     you need to implement the following methods at minimum:
     - __call__
 
@@ -1332,10 +1399,10 @@ class SparseEmbeddingFunction(Protocol[D]):
     """
 
     @abstractmethod
-    def __call__(self, input: D) -> SparseEmbeddings:
+    def __call__(self, input: D) -> SparseVectors:
         ...
 
-    def embed_query(self, input: D) -> SparseEmbeddings:
+    def embed_query(self, input: D) -> SparseVectors:
         """
         Get the embeddings for a query input.
         This method is optional, and if not implemented, the default behavior is to call __call__.
@@ -1347,17 +1414,17 @@ class SparseEmbeddingFunction(Protocol[D]):
         # Raise an exception if __call__ is not defined since it is expected to be defined
         call = getattr(cls, "__call__")
 
-        def __call__(self: SparseEmbeddingFunction[D], input: D) -> SparseEmbeddings:
+        def __call__(self: SparseEmbeddingFunction[D], input: D) -> SparseVectors:
             result = call(self, input)
             assert result is not None
-            return validate_sparse_embeddings(cast(SparseEmbeddings, result))
+            return validate_sparse_vectors(cast(SparseVectors, result))
 
         setattr(cls, "__call__", __call__)
 
     def embed_with_retries(
         self, input: D, **retry_kwargs: Dict[str, Any]
-    ) -> SparseEmbeddings:
-        return cast(SparseEmbeddings, retry(**retry_kwargs)(self.__call__)(input))
+    ) -> SparseVectors:
+        return cast(SparseVectors, retry(**retry_kwargs)(self.__call__)(input))  # type: ignore[call-overload]
 
     @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -1410,11 +1477,11 @@ class SparseEmbeddingFunction(Protocol[D]):
 
 
 def validate_sparse_embedding_function(
-    sparse_embedding_function: SparseEmbeddingFunction[Embeddable],
+    sparse_vector_function: SparseEmbeddingFunction[Embeddable],
 ) -> None:
-    """Validate that a sparse embedding function conforms to the SparseEmbeddingFunction protocol."""
+    """Validate that a sparse vector function conforms to the SparseEmbeddingFunction protocol."""
     function_signature = signature(
-        sparse_embedding_function.__class__.__call__
+        sparse_vector_function.__class__.__call__
     ).parameters.keys()
     protocol_signature = signature(SparseEmbeddingFunction.__call__).parameters.keys()
 
@@ -1492,11 +1559,11 @@ class SparseVectorIndexConfig(BaseModel):
     @field_validator("embedding_function", mode="before")
     @classmethod
     def validate_embedding_function_field(cls, v: Any) -> Any:
-        # Validate sparse embedding function for sparse vector index
+        # Validate sparse vector function for sparse vector index
         if v is None:
             return v
         if callable(v):
-            # Use the sparse embedding function validation
+            # Use the sparse vector function validation
             validate_sparse_embedding_function(v)
             return v
         raise ValueError(
@@ -1562,6 +1629,10 @@ SPANN_INDEX_NAME: Final[str] = "spann_index"
 # Special key constants
 DOCUMENT_KEY: Final[str] = "#document"
 EMBEDDING_KEY: Final[str] = "#embedding"
+TYPE_KEY: Final[str] = "#type"
+
+# Type value constants
+SPARSE_VECTOR_TYPE_VALUE: Final[str] = "sparse_vector"
 
 
 # Index Type Classes
@@ -2114,7 +2185,9 @@ class Schema:
 
         # Serialize each value type if it exists
         if value_types.string is not None:
-            result[STRING_VALUE_NAME] = self._serialize_string_value_type(value_types.string)
+            result[STRING_VALUE_NAME] = self._serialize_string_value_type(
+                value_types.string
+            )
 
         if value_types.float_list is not None:
             result[FLOAT_LIST_VALUE_NAME] = self._serialize_float_list_value_type(
@@ -2127,13 +2200,19 @@ class Schema:
             )
 
         if value_types.int_value is not None:
-            result[INT_VALUE_NAME] = self._serialize_int_value_type(value_types.int_value)
+            result[INT_VALUE_NAME] = self._serialize_int_value_type(
+                value_types.int_value
+            )
 
         if value_types.float_value is not None:
-            result[FLOAT_VALUE_NAME] = self._serialize_float_value_type(value_types.float_value)
+            result[FLOAT_VALUE_NAME] = self._serialize_float_value_type(
+                value_types.float_value
+            )
 
         if value_types.boolean is not None:
-            result[BOOL_VALUE_NAME] = self._serialize_bool_value_type(value_types.boolean)
+            result[BOOL_VALUE_NAME] = self._serialize_bool_value_type(
+                value_types.boolean
+            )
 
         return result
 
@@ -2304,7 +2383,9 @@ class Schema:
             )
 
         if INT_VALUE_NAME in value_types_json:
-            result.int_value = cls._deserialize_int_value_type(value_types_json[INT_VALUE_NAME])
+            result.int_value = cls._deserialize_int_value_type(
+                value_types_json[INT_VALUE_NAME]
+            )
 
         if FLOAT_VALUE_NAME in value_types_json:
             result.float_value = cls._deserialize_float_value_type(
@@ -2312,7 +2393,9 @@ class Schema:
             )
 
         if BOOL_VALUE_NAME in value_types_json:
-            result.boolean = cls._deserialize_bool_value_type(value_types_json[BOOL_VALUE_NAME])
+            result.boolean = cls._deserialize_bool_value_type(
+                value_types_json[BOOL_VALUE_NAME]
+            )
 
         return result
 
@@ -2406,7 +2489,10 @@ class Schema:
             # Handle embedding function deserialization
             if "embedding_function" in config_data:
                 ef_config = config_data["embedding_function"]
-                if ef_config.get("type") == "unknown" or ef_config.get("type") == "legacy":
+                if (
+                    ef_config.get("type") == "unknown"
+                    or ef_config.get("type") == "legacy"
+                ):
                     config_data["embedding_function"] = None
                 else:
                     try:

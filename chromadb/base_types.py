@@ -1,8 +1,12 @@
 from typing import Dict, List, Mapping, Optional, Sequence, Union, Any
-from typing_extensions import Literal
+from typing_extensions import Literal, Final
 from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
+
+# Type tag constants
+TYPE_KEY: Final[str] = "#type"
+SPARSE_VECTOR_TYPE_VALUE: Final[str] = "sparse_vector"
 
 
 @dataclass
@@ -12,7 +16,7 @@ class SparseVector:
     Attributes:
         indices: List of dimension indices (must be non-negative integers, sorted in strictly ascending order)
         values: List of values corresponding to each index (floats)
-    
+
     Note:
         - Indices must be sorted in strictly ascending order (no duplicates)
         - Indices and values must have the same length
@@ -55,7 +59,7 @@ class SparseVector:
                 raise ValueError(
                     f"SparseVector values must be numbers, got {type(val).__name__} at position {i}"
                 )
-        
+
         # Validate indices are sorted in strictly ascending order
         if len(self.indices) > 1:
             for i in range(1, len(self.indices)):
@@ -68,7 +72,7 @@ class SparseVector:
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to transport format with type tag."""
         return {
-            "#type": "sparse_vector",
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
             "indices": self.indices,
             "values": self.values,
         }
@@ -76,8 +80,10 @@ class SparseVector:
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SparseVector":
         """Deserialize from transport format (strict - requires #type field)."""
-        if d.get("#type") != "sparse_vector":
-            raise ValueError(f"Expected #type='sparse_vector', got {d.get('#type')}")
+        if d.get(TYPE_KEY) != SPARSE_VECTOR_TYPE_VALUE:
+            raise ValueError(
+                f"Expected {TYPE_KEY}='{SPARSE_VECTOR_TYPE_VALUE}', got {d.get(TYPE_KEY)}"
+            )
         return cls(indices=d["indices"], values=d["values"])
 
 

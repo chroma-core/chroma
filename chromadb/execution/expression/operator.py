@@ -9,6 +9,8 @@ from chromadb.api.types import (
     IDs,
     Include,
     SparseVector,
+    TYPE_KEY,
+    SPARSE_VECTOR_TYPE_VALUE,
     normalize_embeddings,
     validate_embeddings,
 )
@@ -672,12 +674,12 @@ class Rank:
 
             if isinstance(query, dict):
                 # SparseVector case - deserialize from transport format
-                if query.get("#type") == "sparse_vector":
+                if query.get(TYPE_KEY) == SPARSE_VECTOR_TYPE_VALUE:
                     query = SparseVector.from_dict(query)
                 else:
                     # Old format or invalid - try to construct directly
                     raise ValueError(
-                        f"Expected dict with #type='sparse_vector', got {query}"
+                        f"Expected dict with {TYPE_KEY}='{SPARSE_VECTOR_TYPE_VALUE}', got {query}"
                     )
 
             elif isinstance(query, (list, tuple, np.ndarray)):
