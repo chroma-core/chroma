@@ -15,6 +15,7 @@ use thiserror::Error;
 use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse};
 
 use crate::client::ChromaClientOptions;
+use crate::client::ChromaClientOptionsError;
 use crate::collection::ChromaCollection;
 
 const USER_AGENT: &str = concat!(
@@ -47,6 +48,12 @@ pub struct ChromaHttpClient {
     resolve_tenant_or_database_lock: Arc<tokio::sync::Mutex<()>>,
     #[cfg(feature = "opentelemetry")]
     metrics: crate::client::metrics::Metrics,
+}
+
+impl Default for ChromaHttpClient {
+    fn default() -> Self {
+        Self::new(ChromaClientOptions::default())
+    }
 }
 
 impl Clone for ChromaHttpClient {
@@ -83,7 +90,7 @@ impl ChromaHttpClient {
             .expect("Failed to initialize TLS backend");
 
         ChromaHttpClient {
-            base_url: options.base_url.clone(),
+            base_url: options.endpoint.clone(),
             client,
             retry_policy: options.retry_options.into(),
             tenant_id: Arc::new(Mutex::new(options.tenant_id)),
@@ -92,6 +99,14 @@ impl ChromaHttpClient {
             #[cfg(feature = "opentelemetry")]
             metrics: crate::client::metrics::Metrics::new(),
         }
+    }
+
+    pub fn from_env() -> Result<Self, ChromaClientOptionsError> {
+        Ok(Self::new(ChromaClientOptions::from_env()?))
+    }
+
+    pub fn cloud() -> Result<Self, ChromaClientOptionsError> {
+        Ok(Self::new(ChromaClientOptions::from_cloud_env()?))
     }
 
     pub fn set_default_database_name(&self, database_name: impl AsRef<str>) {
@@ -533,7 +548,7 @@ mod tests {
         };
 
         ChromaClientOptions {
-            base_url: std::env::var("CHROMA_ENDPOINT")
+            endpoint: std::env::var("CHROMA_ENDPOINT")
                 .unwrap_or_else(|_| "https://api.trychroma.com".to_string())
                 .parse()
                 .unwrap(),
@@ -618,7 +633,7 @@ mod tests {
             .await;
 
         let client = ChromaHttpClient::new(ChromaClientOptions {
-            base_url: server.base_url().parse().unwrap(),
+            endpoint: server.base_url().parse().unwrap(),
             retry_options: ChromaRetryOptions {
                 max_retries: 3,
                 min_delay: Duration::from_millis(1),
@@ -672,7 +687,7 @@ mod tests {
             .await;
 
         let client = ChromaHttpClient::new(ChromaClientOptions {
-            base_url: server.base_url().parse().unwrap(),
+            endpoint: server.base_url().parse().unwrap(),
             retry_options: ChromaRetryOptions {
                 max_retries: 2,
                 min_delay: Duration::from_millis(1),
