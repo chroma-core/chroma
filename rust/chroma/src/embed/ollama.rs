@@ -108,16 +108,17 @@ impl OllamaEmbeddingFunction {
     /// # }
     /// ```
     pub async fn heartbeat(&self) -> Result<(), OllamaEmbeddingError> {
-        self.embed(&["heartbeat"]).await?;
+        self.embed_strs(&["heartbeat"]).await?;
         Ok(())
     }
 }
 
 #[async_trait::async_trait]
 impl EmbeddingFunction for OllamaEmbeddingFunction {
+    type Embedding = Vec<f32>;
     type Error = OllamaEmbeddingError;
 
-    async fn embed(&self, batches: &[&str]) -> Result<Vec<Vec<f32>>, Self::Error> {
+    async fn embed_strs(&self, batches: &[&str]) -> Result<Vec<Vec<f32>>, Self::Error> {
         let model = &self.model;
         let input = batches;
         let req = EmbedRequest { model, input };

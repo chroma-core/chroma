@@ -1,17 +1,24 @@
 //! Embedding function abstractions for converting text to vector representations.
 //!
 //! This module provides the [`EmbeddingFunction`] trait that defines how to transform
-//! text strings into dense vector embeddings. Implementations are available for various
-//! embedding models, including Ollama when the `ollama` feature is enabled.
+//! text strings into embeddings. Implementations are available for various
+//! embedding models, including dense embeddings (Ollama) and sparse embeddings (BM25).
 
+use std::{
+    error::Error,
+    fmt::{Debug, Display},
+};
+
+pub mod bm25;
 #[cfg(feature = "ollama")]
 pub mod ollama;
 
-/// Transforms text strings into dense vector embeddings.
+/// Transforms text strings into embeddings.
 ///
 /// Embedding functions are the bridge between human-readable text and the vector space
-/// where similarity search operates. Implementations must be thread-safe and support
-/// batch processing for efficiency.
+/// where similarity search operates. This trait supports both dense embeddings (e.g., from
+/// neural models) and sparse embeddings (e.g., BM25 token weights). Implementations must
+/// be thread-safe and support batch processing for efficiency.
 ///
 /// # Examples
 ///
@@ -19,23 +26,29 @@ pub mod ollama;
 /// use chroma::embed::EmbeddingFunction;
 ///
 /// async fn process_documents<E: EmbeddingFunction>(embedder: E, docs: Vec<&str>) {
-///     let vectors = embedder.embed(&docs).await.unwrap();
-///     assert_eq!(vectors.len(), docs.len());
+///     let embeddings = embedder.embed_strs(&docs).await.unwrap();
+///     assert_eq!(embeddings.len(), docs.len());
 /// }
 /// ```
 #[async_trait::async_trait]
 pub trait EmbeddingFunction: Send + Sync + 'static {
+    /// The embedding type produced by this function.
+    ///
+    /// Can be dense vectors (`Vec<f32>`) for neural embeddings or sparse representations
+    /// for token-based models like BM25.
+    type Embedding: Debug;
+
     /// The error type returned when embedding fails.
     ///
     /// Must implement standard error traits to enable composition with other error types
     /// and display meaningful diagnostic information.
-    type Error: std::error::Error + std::fmt::Display;
+    type Error: Error + Display;
 
-    /// Converts a batch of text strings into their vector representations.
+    /// Converts a batch of text strings into their embedding representations.
     ///
     /// Processes all inputs in a single request to the underlying model, returning embeddings
-    /// in the same order as the input strings. The dimensionality of returned vectors depends
-    /// on the specific model implementation.
+    /// in the same order as the input strings. The type and dimensionality of returned embeddings
+    /// depend on the specific model implementation.
     ///
     /// # Errors
     ///
@@ -48,10 +61,10 @@ pub trait EmbeddingFunction: Send + Sync + 'static {
     /// # use chroma::embed::EmbeddingFunction;
     /// # async fn example<E: EmbeddingFunction>(embedder: E) -> Result<(), E::Error> {
     /// let texts = vec!["Hello world", "Embedding example"];
-    /// let vectors = embedder.embed(&texts).await?;
-    /// assert_eq!(vectors.len(), 2);
+    /// let embeddings = embedder.embed_strs(&texts).await?;
+    /// assert_eq!(embeddings.len(), 2);
     /// # Ok(())
     /// # }
     /// ```
-    async fn embed(&self, batches: &[&str]) -> Result<Vec<Vec<f32>>, Self::Error>;
+    async fn embed_strs(&self, batches: &[&str]) -> Result<Vec<Self::Embedding>, Self::Error>;
 }
