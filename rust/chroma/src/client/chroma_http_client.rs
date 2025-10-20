@@ -38,7 +38,7 @@ pub enum ChromaClientError {
 }
 
 #[derive(Debug)]
-pub struct ChromaClient {
+pub struct ChromaHttpClient {
     base_url: reqwest::Url,
     client: reqwest::Client,
     retry_policy: ExponentialBuilder,
@@ -49,9 +49,9 @@ pub struct ChromaClient {
     metrics: crate::client::metrics::Metrics,
 }
 
-impl Clone for ChromaClient {
+impl Clone for ChromaHttpClient {
     fn clone(&self) -> Self {
-        ChromaClient {
+        ChromaHttpClient {
             base_url: self.base_url.clone(),
             client: self.client.clone(),
             retry_policy: self.retry_policy,
@@ -72,7 +72,7 @@ pub struct Database {
     name: String,
 }
 
-impl ChromaClient {
+impl ChromaHttpClient {
     pub fn new(options: ChromaClientOptions) -> Self {
         let mut headers = options.headers();
         headers.append("user-agent", USER_AGENT.try_into().unwrap());
@@ -82,7 +82,7 @@ impl ChromaClient {
             .build()
             .expect("Failed to initialize TLS backend");
 
-        ChromaClient {
+        ChromaHttpClient {
             base_url: options.base_url.clone(),
             client,
             retry_policy: options.retry_options.into(),
@@ -547,10 +547,10 @@ mod tests {
 
     async fn with_client<F, Fut>(callback: F)
     where
-        F: FnOnce(ChromaClient) -> Fut,
+        F: FnOnce(ChromaHttpClient) -> Fut,
         Fut: std::future::Future<Output = ()>,
     {
-        let client = ChromaClient::new(CHROMA_CLIENT_OPTIONS.clone());
+        let client = ChromaHttpClient::new(CHROMA_CLIENT_OPTIONS.clone());
 
         // Create isolated database for test
         let database_name = format!("test_db_{}", uuid::Uuid::new_v4());
@@ -617,7 +617,7 @@ mod tests {
             })
             .await;
 
-        let client = ChromaClient::new(ChromaClientOptions {
+        let client = ChromaHttpClient::new(ChromaClientOptions {
             base_url: server.base_url().parse().unwrap(),
             retry_options: ChromaRetryOptions {
                 max_retries: 3,
@@ -671,7 +671,7 @@ mod tests {
             })
             .await;
 
-        let client = ChromaClient::new(ChromaClientOptions {
+        let client = ChromaHttpClient::new(ChromaClientOptions {
             base_url: server.base_url().parse().unwrap(),
             retry_options: ChromaRetryOptions {
                 max_retries: 2,
