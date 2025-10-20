@@ -188,6 +188,51 @@ impl ChromaClient {
             .await
     }
 
+    pub async fn get_collection(
+        &self,
+        name: String,
+    ) -> Result<ChromaCollection, ChromaClientError> {
+        let tenant_id = self.get_tenant_id().await?;
+        let database_name = self.get_database_name().await?;
+
+        let collection: chroma_types::Collection = self
+            .send::<(), _, chroma_types::Collection>(
+                "get_collection",
+                Method::GET,
+                format!(
+                    "/api/v2/tenants/{}/databases/{}/collections/{}",
+                    tenant_id, database_name, name
+                ),
+                None,
+                None::<()>,
+            )
+            .await?;
+
+        Ok(ChromaCollection {
+            client: self.clone(),
+            collection: Arc::new(collection),
+        })
+    }
+
+    pub async fn delete_collection(&self, name: String) -> Result<(), ChromaClientError> {
+        let tenant_id = self.get_tenant_id().await?;
+        let database_name = self.get_database_name().await?;
+
+        self.send::<(), (), serde_json::Value>(
+            "delete_collection",
+            Method::DELETE,
+            format!(
+                "/api/v2/tenants/{}/databases/{}/collections/{}",
+                tenant_id, database_name, name
+            ),
+            None,
+            None,
+        )
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn list_collections(
         &self,
         limit: usize,
@@ -394,7 +439,8 @@ impl ChromaClient {
                 err.status()
                     .map(|status| status == StatusCode::TOO_MANY_REQUESTS)
                     .unwrap_or_default()
-                    || method == Method::GET
+                    || (method == Method::GET
+                        && err.status().map(|s| s.is_server_error()).unwrap_or(true))
             })
             .await;
 
@@ -703,6 +749,55 @@ mod tests {
                 .get_or_create_collection("foo", None, None)
                 .await
                 .unwrap();
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_live_cloud_get_collection() {
+        with_client(|client| async move {
+            client
+                .create_collection("my_collection".to_string(), None, None)
+                .await
+                .unwrap();
+
+            let collection = client
+                .get_collection("my_collection".to_string())
+                .await
+                .unwrap();
+
+            assert_eq!(collection.collection.name, "my_collection");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_live_cloud_delete_collection() {
+        with_client(|client| async move {
+            client
+                .create_collection("to_be_deleted".to_string(), None, None)
+                .await
+                .unwrap();
+
+            client
+                .delete_collection("to_be_deleted".to_string())
+                .await
+                .unwrap();
+
+            let err = client
+                .get_collection("to_be_deleted".to_string())
+                .await
+                .unwrap_err();
+
+            match err {
+                ChromaClientError::ApiError(msg, status) => {
+                    assert_eq!(status, StatusCode::NOT_FOUND);
+                    assert!(msg.contains("does not exist"));
+                }
+                _ => panic!("Expected ApiError"),
+            };
         })
         .await;
     }
