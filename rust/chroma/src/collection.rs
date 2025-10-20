@@ -11,11 +11,11 @@ use chroma_types::{
 use reqwest::Method;
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{client::ChromaClientError, ChromaClient};
+use crate::{client::ChromaClientError, ChromaHttpClient};
 
 #[derive(Clone, Debug)]
 pub struct ChromaCollection {
-    pub(crate) client: ChromaClient,
+    pub(crate) client: ChromaHttpClient,
     pub(crate) collection: Arc<Collection>,
 }
 
