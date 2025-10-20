@@ -7,6 +7,7 @@ use super::{
 use crate::{chroma_proto, validators::validate_rank};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+#[cfg(feature = "utoipa")]
 use utoipa::{
     openapi::{
         schema::{Schema, SchemaType},
@@ -158,6 +159,7 @@ pub struct SearchPayload {
     pub select: Select,
 }
 
+#[cfg(feature = "utoipa")]
 impl PartialSchema for SearchPayload {
     fn schema() -> RefOr<Schema> {
         RefOr::T(Schema::Object(
@@ -200,6 +202,7 @@ impl PartialSchema for SearchPayload {
     }
 }
 
+#[cfg(feature = "utoipa")]
 impl utoipa::ToSchema for SearchPayload {}
 
 impl TryFrom<chroma_proto::SearchPayload> for SearchPayload {

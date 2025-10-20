@@ -2,7 +2,6 @@ use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
-use utoipa::ToSchema;
 
 use crate::collection_configuration::{
     EmbeddingFunctionConfiguration, InternalCollectionConfiguration, VectorIndexConfiguration,
@@ -90,7 +89,8 @@ pub const EMBEDDING_KEY: &str = "#embedding";
 /// Internal schema representation for collection index configurations
 /// This represents the server-side schema structure used for index management
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct InternalSchema {
     /// Default index configurations for each value type
     pub defaults: ValueTypes,
@@ -134,7 +134,8 @@ pub fn is_hnsw_config_default(hnsw_config: &HnswIndexConfig) -> bool {
 
 /// Strongly-typed value type configurations
 /// Contains optional configurations for each supported value type
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ValueTypes {
     #[serde(
         rename = "string",
@@ -182,7 +183,8 @@ pub struct ValueTypes {
 }
 
 /// String value type index configurations
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct StringValueType {
     #[serde(
         rename = "fts_index",
@@ -200,7 +202,8 @@ pub struct StringValueType {
 }
 
 /// Float list value type index configurations (for vectors)
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct FloatListValueType {
     #[serde(
         rename = "vector_index",
@@ -211,7 +214,8 @@ pub struct FloatListValueType {
 }
 
 /// Sparse vector value type index configurations
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SparseVectorValueType {
     #[serde(
         rename = "sparse_vector_index", // SPARSE_VECTOR_INDEX_NAME
@@ -222,7 +226,8 @@ pub struct SparseVectorValueType {
 }
 
 /// Integer value type index configurations
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct IntValueType {
     #[serde(
         rename = "int_inverted_index",
@@ -234,7 +239,8 @@ pub struct IntValueType {
 }
 
 /// Float value type index configurations
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct FloatValueType {
     #[serde(
         rename = "float_inverted_index", // FLOAT_INVERTED_INDEX_NAME
@@ -245,7 +251,8 @@ pub struct FloatValueType {
 }
 
 /// Boolean value type index configurations
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct BoolValueType {
     #[serde(
         rename = "bool_inverted_index", // BOOL_INVERTED_INDEX_NAME
@@ -256,43 +263,50 @@ pub struct BoolValueType {
 }
 
 // Individual index type structs with enabled status and config
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct FtsIndexType {
     pub enabled: bool,
     pub config: FtsIndexConfig,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct VectorIndexType {
     pub enabled: bool,
     pub config: VectorIndexConfig,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SparseVectorIndexType {
     pub enabled: bool,
     pub config: SparseVectorIndexConfig,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct StringInvertedIndexType {
     pub enabled: bool,
     pub config: StringInvertedIndexConfig,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct IntInvertedIndexType {
     pub enabled: bool,
     pub config: IntInvertedIndexConfig,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct FloatInvertedIndexType {
     pub enabled: bool,
     pub config: FloatInvertedIndexConfig,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct BoolInvertedIndexType {
     pub enabled: bool,
     pub config: BoolInvertedIndexConfig,
@@ -1379,7 +1393,8 @@ impl InternalSchema {
 // INDEX CONFIGURATION STRUCTURES
 // ============================================================================
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct VectorIndexConfig {
     /// Vector space for similarity calculation (cosine, l2, ip)
@@ -1400,7 +1415,8 @@ pub struct VectorIndexConfig {
 }
 
 /// Configuration for HNSW vector index algorithm parameters
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct HnswIndexConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1420,7 +1436,8 @@ pub struct HnswIndexConfig {
 }
 
 /// Configuration for SPANN vector index algorithm parameters
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct SpannIndexConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1498,7 +1515,8 @@ impl SpannIndexConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct SparseVectorIndexConfig {
     /// Embedding function configuration
@@ -1512,31 +1530,36 @@ pub struct SparseVectorIndexConfig {
     pub bm25: Option<bool>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct FtsIndexConfig {
     // FTS index typically has no additional parameters
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct StringInvertedIndexConfig {
     // String inverted index typically has no additional parameters
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct IntInvertedIndexConfig {
     // Integer inverted index typically has no additional parameters
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct FloatInvertedIndexConfig {
     // Float inverted index typically has no additional parameters
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct BoolInvertedIndexConfig {
     // Boolean inverted index typically has no additional parameters
