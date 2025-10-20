@@ -4,7 +4,7 @@ use chroma_log::Log;
 use chroma_sysdb::FlushCompactionError;
 use chroma_sysdb::SysDb;
 use chroma_system::Operator;
-use chroma_types::InternalSchema;
+use chroma_types::Schema;
 use chroma_types::{CollectionUuid, FlushCompactionResponse, SegmentFlushInfo};
 use std::sync::Arc;
 use thiserror::Error;
@@ -47,7 +47,7 @@ pub struct RegisterInput {
     collection_logical_size_bytes: u64,
     sysdb: SysDb,
     log: Log,
-    schema: Option<InternalSchema>,
+    schema: Option<Schema>,
 }
 
 impl RegisterInput {
@@ -63,7 +63,7 @@ impl RegisterInput {
         collection_logical_size_bytes: u64,
         sysdb: SysDb,
         log: Log,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
     ) -> Self {
         RegisterInput {
             tenant,

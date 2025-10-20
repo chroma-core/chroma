@@ -3,7 +3,7 @@ use std::str::FromStr;
 use super::{Metadata, MetadataValueConversionError};
 use crate::{
     chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration,
-    InternalSchema, Segment, SegmentScope, UpdateCollectionConfiguration, UpdateMetadata,
+    Schema, Segment, SegmentScope, UpdateCollectionConfiguration, UpdateMetadata,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
@@ -109,7 +109,7 @@ pub struct Collection {
     )]
     #[cfg_attr(feature = "utoipa", schema(value_type = CollectionConfiguration))]
     pub config: InternalCollectionConfiguration,
-    pub schema: Option<InternalSchema>,
+    pub schema: Option<Schema>,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
     pub tenant: String,
@@ -378,7 +378,7 @@ impl CollectionAndSegments {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateCollectionPayload {
     pub name: String,
-    pub schema: Option<InternalSchema>,
+    pub schema: Option<Schema>,
     pub configuration: Option<CollectionConfiguration>,
     pub metadata: Option<Metadata>,
     #[serde(default)]
@@ -399,8 +399,8 @@ mod test {
 
     #[test]
     fn test_collection_try_from() {
-        // Create a valid InternalSchema and serialize it
-        let schema = InternalSchema::new_default(crate::KnnIndex::Spann);
+        // Create a valid Schema and serialize it
+        let schema = Schema::new_default(crate::KnnIndex::Spann);
         let schema_str = serde_json::to_string(&schema).unwrap();
 
         let proto_collection = chroma_proto::Collection {

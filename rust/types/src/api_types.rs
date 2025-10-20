@@ -20,7 +20,7 @@ use crate::CollectionUuid;
 use crate::DistributedSpannParametersFromSegmentError;
 use crate::EmbeddingsPayload;
 use crate::HnswParametersFromSegmentError;
-use crate::InternalSchema;
+use crate::Schema;
 use crate::Metadata;
 use crate::RawWhereFields;
 use crate::SchemaError;
@@ -677,7 +677,7 @@ pub struct CreateCollectionRequest {
     pub metadata: Option<Metadata>,
     pub configuration: Option<InternalCollectionConfiguration>,
     #[validate(custom(function = "validate_schema"))]
-    pub schema: Option<InternalSchema>,
+    pub schema: Option<Schema>,
     pub get_or_create: bool,
 }
 
@@ -688,7 +688,7 @@ impl CreateCollectionRequest {
         name: String,
         metadata: Option<Metadata>,
         configuration: Option<InternalCollectionConfiguration>,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
         get_or_create: bool,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
