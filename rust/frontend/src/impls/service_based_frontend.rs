@@ -33,16 +33,16 @@ use chroma_types::{
     GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
     GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
     GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
-    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include,
-    Schema, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
-    ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError,
-    QueryRequest, QueryResponse, RemoveTaskError, RemoveTaskRequest, RemoveTaskResponse,
-    ResetError, ResetResponse, SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope,
-    SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
-    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
-    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
-    VectorIndexConfiguration, Where,
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include, KnnIndex,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
+    ListDatabasesResponse, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse,
+    RemoveTaskError, RemoveTaskRequest, RemoveTaskResponse, ResetError, ResetResponse, Schema,
+    SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
+    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
+    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
+    Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -504,8 +504,7 @@ impl ServiceBasedFrontend {
             // when configuration is None, we then populate in sysdb with empty config {}
             // this allows for easier migration paths in the future
             let config_for_reconcile = configuration.take();
-            match Schema::reconcile_schema_and_config(schema.clone(), config_for_reconcile)
-            {
+            match Schema::reconcile_schema_and_config(schema.clone(), config_for_reconcile) {
                 Ok(schema) => Some(schema),
                 Err(e) => return Err(CreateCollectionError::InvalidSchema(e)),
             }

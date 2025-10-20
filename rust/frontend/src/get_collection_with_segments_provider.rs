@@ -4,8 +4,7 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
 use chroma_types::{
-    CollectionAndSegments, CollectionUuid, GetCollectionWithSegmentsError, Schema,
-    SchemaError,
+    CollectionAndSegments, CollectionUuid, GetCollectionWithSegmentsError, Schema, SchemaError,
 };
 use serde::{Deserialize, Serialize};
 use std::{

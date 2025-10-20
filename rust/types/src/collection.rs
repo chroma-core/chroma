@@ -2,8 +2,8 @@ use std::str::FromStr;
 
 use super::{Metadata, MetadataValueConversionError};
 use crate::{
-    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration,
-    Schema, Segment, SegmentScope, UpdateCollectionConfiguration, UpdateMetadata,
+    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Schema,
+    Segment, SegmentScope, UpdateCollectionConfiguration, UpdateMetadata,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};

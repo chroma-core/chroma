@@ -1,8 +1,8 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    logical_size_of_metadata, Chunk, DataRecord, DeletedMetadata, Schema, LogRecord,
+    logical_size_of_metadata, Chunk, DataRecord, DeletedMetadata, LogRecord,
     MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue, MetadataValueConversionError,
-    Operation, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
+    Operation, Schema, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;

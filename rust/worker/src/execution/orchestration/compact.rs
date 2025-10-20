@@ -29,7 +29,7 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    Chunk, Collection, CollectionUuid, Schema, LogRecord, SchemaError, SegmentFlushInfo,
+    Chunk, Collection, CollectionUuid, LogRecord, Schema, SchemaError, SegmentFlushInfo,
     SegmentType, SegmentUuid,
 };
 use opentelemetry::trace::TraceContextExt;

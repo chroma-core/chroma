@@ -24,8 +24,8 @@ use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
     FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
-    ForkCollectionError, Schema, SchemaError, Segment, SegmentConversionError,
-    SegmentScope, Tenant,
+    ForkCollectionError, Schema, SchemaError, Segment, SegmentConversionError, SegmentScope,
+    Tenant,
 };
 use prost_types;
 use std::collections::HashMap;

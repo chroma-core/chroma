@@ -1,7 +1,7 @@
 use crate::{
     operator::{Rank, RankExpr},
-    CollectionMetadataUpdate, Schema, Metadata, MetadataValue, UpdateMetadata,
-    UpdateMetadataValue, DOCUMENT_KEY, EMBEDDING_KEY,
+    CollectionMetadataUpdate, Metadata, MetadataValue, Schema, UpdateMetadata, UpdateMetadataValue,
+    DOCUMENT_KEY, EMBEDDING_KEY,
 };
 use regex::Regex;
 use std::collections::HashMap;

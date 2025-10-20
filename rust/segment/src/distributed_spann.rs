@@ -621,8 +621,8 @@ mod test {
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
         Chunk, Collection, CollectionUuid, DatabaseUuid, InternalCollectionConfiguration,
-        Schema, InternalSpannConfiguration, LogRecord, Operation, OperationRecord,
-        SegmentUuid, SpannPostingList,
+        InternalSpannConfiguration, LogRecord, Operation, OperationRecord, Schema, SegmentUuid,
+        SpannPostingList,
     };
 
     use crate::{
