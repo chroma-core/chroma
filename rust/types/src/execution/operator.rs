@@ -1,4 +1,4 @@
-use serde::{de::Error, Deserialize, Deserializer, Serialize};
+use serde::{de::Error, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use std::{
     cmp::Ordering,
@@ -124,12 +124,55 @@ pub struct FetchLog {
 /// # Parameters
 /// - `query_ids`: The user provided ids, which specifies the domain of the filter if provided
 /// - `where_clause`: The predicate on individual record
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default)]
 pub struct Filter {
-    #[serde(default)]
     pub query_ids: Option<Vec<String>>,
-    #[serde(default)]
     pub where_clause: Option<Where>,
+}
+
+impl Serialize for Filter {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // For the search API, serialize directly as the where clause (or empty object if None)
+        // If query_ids are present, they should be combined with the where_clause as Key::ID.is_in([...])
+        
+        match (&self.query_ids, &self.where_clause) {
+            (None, None) => {
+                // No filter at all - serialize empty object
+                let map = serializer.serialize_map(Some(0))?;
+                map.end()
+            }
+            (None, Some(where_clause)) => {
+                // Only where clause - serialize it directly
+                where_clause.serialize(serializer)
+            }
+            (Some(ids), None) => {
+                // Only query_ids - create Where clause: Key::ID.is_in(ids)
+                let id_where = Where::Metadata(MetadataExpression {
+                    key: "#id".to_string(),
+                    comparison: MetadataComparison::Set(
+                        SetOperator::In,
+                        MetadataSetValue::Str(ids.clone()),
+                    ),
+                });
+                id_where.serialize(serializer)
+            }
+            (Some(ids), Some(where_clause)) => {
+                // Both present - combine with AND: Key::ID.is_in(ids) & where_clause
+                let id_where = Where::Metadata(MetadataExpression {
+                    key: "#id".to_string(),
+                    comparison: MetadataComparison::Set(
+                        SetOperator::In,
+                        MetadataSetValue::Str(ids.clone()),
+                    ),
+                });
+                let combined = Where::conjunction(vec![id_where, where_clause.clone()]);
+                combined.serialize(serializer)
+            }
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for Filter {
