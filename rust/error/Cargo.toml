@@ -1,7 +1,6 @@
 [package]
 name = "chroma-error"
 version = "0.1.0"
-authors = ["Max Isom <max@trychroma.com>", "Hammad Bashir hammad@trychroma.com", "Robert Escriva <robert@trychroma.com>"]
 edition = "2021"
 description = "Chroma-provided crate for errors returned from Chroma."
 license = "Apache-2.0"
