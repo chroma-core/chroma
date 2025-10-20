@@ -79,7 +79,6 @@ ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./garbage_collector_service" ]
 
 FROM runner AS load_service
 COPY --from=builder /chroma/chroma-load .
-COPY --from=builder /chroma/chroma-load-start .
 ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./chroma-load" ]
 
 FROM runner AS log_service
