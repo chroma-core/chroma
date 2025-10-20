@@ -50,7 +50,7 @@ impl EmbeddingFunction for OllamaEmbeddingFunction {
         let input = batches;
         let req = EmbedRequest { model, input };
         let resp = req
-            .make_request(&self)
+            .make_request(self)
             .send()
             .await?
             .error_for_status()?
