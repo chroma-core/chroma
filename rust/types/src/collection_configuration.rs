@@ -16,7 +16,6 @@ use crate::{
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use utoipa::ToSchema;
 
 #[derive(Deserialize, Serialize, Clone, Debug, Copy)]
 pub enum KnnIndex {
@@ -30,7 +29,8 @@ pub fn default_default_knn_index() -> KnnIndex {
     KnnIndex::Hnsw
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(tag = "type")]
 pub enum EmbeddingFunctionConfiguration {
     #[serde(rename = "legacy")]
@@ -51,13 +51,15 @@ impl EmbeddingFunctionConfiguration {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct EmbeddingFunctionNewConfiguration {
     pub name: String,
     pub config: serde_json::Value,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum VectorIndexConfiguration {
     Hnsw(InternalHnswConfiguration),
@@ -103,7 +105,8 @@ fn default_vector_index_config() -> VectorIndexConfiguration {
     VectorIndexConfiguration::Hnsw(InternalHnswConfiguration::default())
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct InternalCollectionConfiguration {
     #[serde(default = "default_vector_index_config")]
     pub vector_index: VectorIndexConfiguration,
@@ -403,7 +406,8 @@ impl ChromaError for CollectionConfigurationToInternalConfigurationError {
     }
 }
 
-#[derive(Default, Deserialize, Serialize, ToSchema, Debug, Clone)]
+#[derive(Default, Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct CollectionConfiguration {
     pub hnsw: Option<HnswConfiguration>,
@@ -427,7 +431,8 @@ impl From<InternalCollectionConfiguration> for CollectionConfiguration {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateVectorIndexConfiguration {
     Hnsw(Option<UpdateHnswConfiguration>),
@@ -460,7 +465,8 @@ impl ChromaError for UpdateCollectionConfigurationToInternalConfigurationError {
     }
 }
 
-#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct UpdateCollectionConfiguration {
     pub hnsw: Option<UpdateHnswConfiguration>,
@@ -468,7 +474,8 @@ pub struct UpdateCollectionConfiguration {
     pub embedding_function: Option<EmbeddingFunctionConfiguration>,
 }
 
-#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct InternalUpdateCollectionConfiguration {
     pub vector_index: Option<UpdateVectorIndexConfiguration>,
     pub embedding_function: Option<EmbeddingFunctionConfiguration>,

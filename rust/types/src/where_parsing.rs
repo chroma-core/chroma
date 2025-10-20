@@ -5,9 +5,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
-use utoipa::ToSchema;
 
-#[derive(Deserialize, Debug, Clone, Serialize, ToSchema)]
+#[derive(Deserialize, Debug, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RawWhereFields {
     #[serde(default)]
     r#where: Value,

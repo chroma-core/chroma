@@ -8,7 +8,6 @@ use std::{
     ops::{Add, Div, Mul, Neg, Sub},
 };
 use thiserror::Error;
-use utoipa::ToSchema;
 
 use crate::{
     chroma_proto, logical_size_of_metadata, parse_where, CollectionAndSegments, CollectionUuid,
@@ -1265,7 +1264,8 @@ impl TryFrom<RankExpr> for chroma_proto::RankExpr {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum Key {
     // Predefined keys
     Document,
@@ -1496,7 +1496,8 @@ impl TryFrom<Select> for chroma_proto::SelectOperator {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SearchRecord {
     pub id: String,
     pub document: Option<String>,

@@ -2031,7 +2031,7 @@ mod tests {
     use chroma_types::Collection;
     use uuid::Uuid;
 
-    use crate::server::CreateCollectionPayload;
+    use chroma_types::CreateCollectionPayload;
 
     use super::*;
 

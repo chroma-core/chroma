@@ -22,7 +22,7 @@ pyo3 = { workspace = true, optional = true }
 validator = { workspace = true }
 regex = { workspace = true }
 regex-syntax = { workspace = true }
-utoipa = { workspace = true }
+utoipa = { workspace = true, optional = true }
 sprs = { workspace = true }
 
 # (Cross-crate testing dependencies)
@@ -36,3 +36,4 @@ tonic-build = "0.10"
 
 [features]
 testing = ["dep:proptest", "dep:proptest-derive"]
+utoipa = ["dep:utoipa"]

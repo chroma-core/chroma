@@ -12,9 +12,10 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
 
+use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse};
+
 use crate::client::ChromaClientOptions;
 use crate::collection::ChromaCollection;
-use crate::types::{GetUserIdentityResponse, HeartbeatResponse};
 
 const USER_AGENT: &str = concat!(
     "Chroma Rust Client v",

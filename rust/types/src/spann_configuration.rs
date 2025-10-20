@@ -2,7 +2,6 @@ use crate::hnsw_configuration::Space;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use utoipa::ToSchema;
 use validator::Validate;
 
 pub fn default_search_nprobe() -> u32 {
@@ -94,7 +93,8 @@ impl ChromaError for DistributedSpannParametersFromSegmentError {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct InternalSpannConfiguration {
     #[serde(default = "default_search_nprobe")]
     pub search_nprobe: u32,
@@ -147,7 +147,8 @@ impl Default for InternalSpannConfiguration {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct SpannConfiguration {
     pub search_nprobe: Option<u32>,
@@ -204,7 +205,8 @@ impl Default for SpannConfiguration {
     }
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, Validate, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct UpdateSpannConfiguration {

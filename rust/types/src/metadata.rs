@@ -9,7 +9,6 @@ use std::{
     ops::{BitAnd, BitOr},
 };
 use thiserror::Error;
-use utoipa::ToSchema;
 
 use crate::chroma_proto;
 
@@ -33,7 +32,8 @@ struct SparseVectorSerdeHelper {
 /// and new format `{"#type": "sparse_vector", "indices": [...], "values": [...]}`.
 ///
 /// On serialization: always includes `#type` field with value `"sparse_vector"`.
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SparseVector {
     /// Dimension indices
     pub indices: Vec<u32>,
@@ -204,7 +204,8 @@ impl<'py> pyo3::FromPyObject<'py> for SparseVector {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 #[serde(untagged)]
 pub enum UpdateMetadataValue {
@@ -340,7 +341,8 @@ MetadataValue
 ===========================================
 */
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 #[cfg_attr(feature = "pyo3", derive(pyo3::FromPyObject, pyo3::IntoPyObject))]
 #[serde(untagged)]
@@ -865,7 +867,8 @@ impl WhereConversionError {
 /// present we simply create a conjunction of both clauses as the actual filter. This is consistent with
 /// the semantics we used to have when the `where` and `where_document` clauses are treated seperately.
 // TODO: Remove this note once the `where` clause and `where_document` clause is unified in the API level.
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum Where {
     Composite(CompositeExpression),
     Document(DocumentExpression),
@@ -1125,7 +1128,8 @@ impl TryFrom<Where> for chroma_proto::Where {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CompositeExpression {
     pub operator: BooleanOperator,
     pub children: Vec<Where>,
@@ -1161,7 +1165,8 @@ impl TryFrom<CompositeExpression> for chroma_proto::WhereChildren {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum BooleanOperator {
     And,
     Or,
@@ -1185,7 +1190,8 @@ impl From<BooleanOperator> for chroma_proto::BooleanOperator {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DocumentExpression {
     pub operator: DocumentOperator,
     pub pattern: String,
@@ -1209,7 +1215,8 @@ impl From<DocumentExpression> for chroma_proto::DirectWhereDocument {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum DocumentOperator {
     Contains,
     NotContains,
@@ -1238,7 +1245,8 @@ impl From<DocumentOperator> for chroma_proto::WhereDocumentOperator {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct MetadataExpression {
     pub key: String,
     pub comparison: MetadataComparison,
@@ -1369,7 +1377,8 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum MetadataComparison {
     Primitive(PrimitiveOperator, MetadataValue),
     Set(SetOperator, MetadataSetValue),
