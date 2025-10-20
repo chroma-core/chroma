@@ -1363,7 +1363,7 @@ impl Key {
     }
 
     /// Contains text: Key::Document.contains("search term")
-    pub fn contains(self, text: impl Into<String>) -> Where {
+    pub fn contains<S: Into<String>>(self, text: S) -> Where {
         Where::Document(DocumentExpression {
             operator: DocumentOperator::Contains,
             pattern: text.into(),
@@ -1371,7 +1371,7 @@ impl Key {
     }
 
     /// Does not contain text: Key::Document.not_contains("exclude term")
-    pub fn not_contains(self, text: impl Into<String>) -> Where {
+    pub fn not_contains<S: Into<String>>(self, text: S) -> Where {
         Where::Document(DocumentExpression {
             operator: DocumentOperator::NotContains,
             pattern: text.into(),
@@ -1379,7 +1379,7 @@ impl Key {
     }
 
     /// Regex match: Key::field("email").regex(r"^.*@example\.com$")
-    pub fn regex(self, pattern: impl Into<String>) -> Where {
+    pub fn regex<S: Into<String>>(self, pattern: S) -> Where {
         Where::Document(DocumentExpression {
             operator: DocumentOperator::Regex,
             pattern: pattern.into(),
@@ -1387,7 +1387,7 @@ impl Key {
     }
 
     /// Negative regex match: Key::field("email").not_regex(r"^.*@spam\.com$")
-    pub fn not_regex(self, pattern: impl Into<String>) -> Where {
+    pub fn not_regex<S: Into<String>>(self, pattern: S) -> Where {
         Where::Document(DocumentExpression {
             operator: DocumentOperator::NotRegex,
             pattern: pattern.into(),
@@ -1599,15 +1599,15 @@ pub fn rrf(
     let k = k.unwrap_or(60);
 
     if ranks.is_empty() {
-        return Err(QueryConversionError::Field(
-            "RRF requires at least one rank expression".into(),
+        return Err(QueryConversionError::validation(
+            "RRF requires at least one rank expression",
         ));
     }
 
     let weights = weights.unwrap_or_else(|| vec![1.0; ranks.len()]);
 
     if weights.len() != ranks.len() {
-        return Err(QueryConversionError::Field(format!(
+        return Err(QueryConversionError::validation(format!(
             "RRF weights length ({}) must match ranks length ({})",
             weights.len(),
             ranks.len()
@@ -1617,8 +1617,8 @@ pub fn rrf(
     let weights = if normalize {
         let sum: f32 = weights.iter().sum();
         if sum == 0.0 {
-            return Err(QueryConversionError::Field(
-                "RRF weights sum to zero, cannot normalize".into(),
+            return Err(QueryConversionError::validation(
+                "RRF weights sum to zero, cannot normalize",
             ));
         }
         weights.into_iter().map(|w| w / sum).collect()
