@@ -1,5 +1,5 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Number, Value};
 use sprs::CsVec;
 use std::{
@@ -873,11 +873,74 @@ pub enum Where {
 }
 
 impl serde::Serialize for Where {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        todo!()
+        match self {
+            Where::Composite(composite) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                let op_key = match composite.operator {
+                    BooleanOperator::And => "$and",
+                    BooleanOperator::Or => "$or",
+                };
+                map.serialize_entry(op_key, &composite.children)?;
+                map.end()
+            }
+            Where::Document(doc) => {
+                let mut outer_map = serializer.serialize_map(Some(1))?;
+                let mut inner_map = serde_json::Map::new();
+                let op_key = match doc.operator {
+                    DocumentOperator::Contains => "$contains",
+                    DocumentOperator::NotContains => "$not_contains",
+                    DocumentOperator::Regex => "$regex",
+                    DocumentOperator::NotRegex => "$not_regex",
+                };
+                inner_map.insert(
+                    op_key.to_string(),
+                    serde_json::Value::String(doc.pattern.clone()),
+                );
+                outer_map.serialize_entry("#document", &inner_map)?;
+                outer_map.end()
+            }
+            Where::Metadata(meta) => {
+                let mut outer_map = serializer.serialize_map(Some(1))?;
+                let mut inner_map = serde_json::Map::new();
+
+                match &meta.comparison {
+                    MetadataComparison::Primitive(op, value) => {
+                        let op_key = match op {
+                            PrimitiveOperator::Equal => "$eq",
+                            PrimitiveOperator::NotEqual => "$ne",
+                            PrimitiveOperator::GreaterThan => "$gt",
+                            PrimitiveOperator::GreaterThanOrEqual => "$gte",
+                            PrimitiveOperator::LessThan => "$lt",
+                            PrimitiveOperator::LessThanOrEqual => "$lte",
+                        };
+                        let value_json =
+                            serde_json::to_value(value).map_err(serde::ser::Error::custom)?;
+                        inner_map.insert(op_key.to_string(), value_json);
+                    }
+                    MetadataComparison::Set(op, set_value) => {
+                        let op_key = match op {
+                            SetOperator::In => "$in",
+                            SetOperator::NotIn => "$nin",
+                        };
+                        let values_json = match set_value {
+                            MetadataSetValue::Bool(v) => serde_json::to_value(v),
+                            MetadataSetValue::Int(v) => serde_json::to_value(v),
+                            MetadataSetValue::Float(v) => serde_json::to_value(v),
+                            MetadataSetValue::Str(v) => serde_json::to_value(v),
+                        }
+                        .map_err(serde::ser::Error::custom)?;
+                        inner_map.insert(op_key.to_string(), values_json);
+                    }
+                }
+
+                outer_map.serialize_entry(&meta.key, &inner_map)?;
+                outer_map.end()
+            }
+        }
     }
 }
 
