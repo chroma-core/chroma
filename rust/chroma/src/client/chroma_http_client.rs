@@ -25,20 +25,33 @@ const USER_AGENT: &str = concat!(
     " (https://github.com/chroma-core/chroma)"
 );
 
+/// Errors that originate from the Chroma client during request execution.
 #[derive(Error, Debug)]
 pub enum ChromaHttpClientError {
+    /// Network-level HTTP request failed.
     #[error("Request error: {0:?}")]
     RequestError(#[from] reqwest::Error),
+    /// Chroma API returned an error status with a structured error message.
+    ///
+    /// Contains the error message from the server and the HTTP status code that triggered the error.
     #[error("API error: {0:?} ({1})")]
     ApiError(String, reqwest::StatusCode),
+    /// Client lacks access to a unique database or cannot determine which database to use.
     #[error("Could not resolve database ID: {0}")]
     CouldNotResolveDatabaseId(String),
+    /// JSON serialization or deserialization of request/response bodies failed.
     #[error("Serialization/Deserialization error: {0}")]
     SerdeError(#[from] serde_json::Error),
+    /// Request parameters failed validation checks before transmission.
     #[error("Validation error: {0}")]
     ValidationError(#[from] ChromaValidationError),
     // NOTE(rescrv):  The where validation drops the ChromaValidationError.  Bigger refactor.
     // TODO(rescrv):  Address the above note.
+    /// Where clause failed validation checks.
+    ///
+    /// This error is returned when a where clause provided to a query operation contains
+    /// invalid syntax or semantics. It represents a simplified version of the underlying
+    /// validation error from the where clause parser.
     #[error("Invalid where clause")]
     InvalidWhere,
 }
@@ -56,6 +69,43 @@ impl From<WhereError> for ChromaHttpClientError {
 static METRICS: std::sync::LazyLock<crate::client::metrics::Metrics> =
     std::sync::LazyLock::new(crate::client::metrics::Metrics::new);
 
+/// Client handle for interacting with a Chroma AI-native database deployment.
+///
+/// This is the primary entry point for all database-level operations. A `ChromaClient` manages
+/// connection state, authentication, automatic retries, and tenant/database resolution.
+/// Operations include database lifecycle management, collection enumeration, and system health checks.
+///
+/// # Architecture
+///
+/// Each client maintains:
+/// - An HTTP client pool for concurrent requests
+/// - Cached tenant and database IDs resolved from authentication
+/// - A retry policy with exponential backoff
+/// - Optional OpenTelemetry metrics when the `opentelemetry` feature is enabled
+///
+/// # Cloning
+///
+/// `ChromaClient` implements `Clone` with shared connection pooling but independent cached state.
+/// This enables spawning concurrent operations while maintaining efficient resource usage.
+///
+/// # Examples
+///
+/// ```
+/// use chroma::{ChromaHttpClient, client::ChromaClientOptions, client::ChromaAuthMethod};
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let options = ChromaClientOptions {
+///     endpoint: "https://api.trychroma.com".parse()?,
+///     auth_method: ChromaAuthMethod::cloud_api_key("my-key")?,
+///     ..Default::default()
+/// };
+/// let client = ChromaHttpClient::new(options);
+///
+/// let heartbeat = client.heartbeat().await?;
+/// assert!(heartbeat.nanosecond_heartbeat > 0);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug)]
 pub struct ChromaHttpClient {
     base_url: reqwest::Url,
@@ -85,15 +135,41 @@ impl Clone for ChromaHttpClient {
     }
 }
 
+/// Represents a database within a Chroma tenant.
+///
+/// A database is a logical namespace for organizing collections. Each database has a unique
+/// identifier and a user-assigned name. This struct is returned by [`ChromaClient::list_databases`].
 // TODO: remove and replace with actual Database struct
 #[derive(serde::Deserialize, Debug)]
 #[allow(dead_code)]
 pub struct Database {
-    id: String,
-    name: String,
+    /// The unique identifier for this database.
+    pub id: String,
+    /// The user-assigned name for this database.
+    pub name: String,
 }
 
 impl ChromaHttpClient {
+    /// Constructs a client from explicit configuration options.
+    ///
+    /// Initializes the HTTP client with the specified endpoint, authentication, and retry behavior.
+    /// The client immediately becomes ready to make API calls without requiring additional setup.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma::{ChromaHttpClient, client::ChromaClientOptions, client::ChromaAuthMethod};
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let options = ChromaClientOptions {
+    ///     endpoint: "https://api.trychroma.com".parse()?,
+    ///     auth_method: ChromaAuthMethod::cloud_api_key("my-key")?,
+    ///     ..Default::default()
+    /// };
+    /// let client = ChromaHttpClient::new(options);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn new(options: ChromaHttpClientOptions) -> Self {
         let mut headers = options.headers();
         headers.append("user-agent", USER_AGENT.try_into().unwrap());
@@ -113,19 +189,91 @@ impl ChromaHttpClient {
         }
     }
 
+    /// Constructs a client from environment variables.
+    ///
+    /// Reads configuration from `CHROMA_ENDPOINT`, `CHROMA_TENANT`, and `CHROMA_DATABASE`.
+    /// Falls back to default local endpoint if `CHROMA_ENDPOINT` is not set.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the endpoint URL is malformed.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use chroma::ChromaHttpClient;
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = ChromaHttpClient::from_env()?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn from_env() -> Result<Self, ChromaHttpClientOptionsError> {
         Ok(Self::new(ChromaHttpClientOptions::from_env()?))
     }
 
+    /// Constructs a client configured for Chroma Cloud from environment variables.
+    ///
+    /// Reads `CHROMA_API_KEY` (required), `CHROMA_ENDPOINT` (defaults to Chroma Cloud),
+    /// `CHROMA_TENANT`, and `CHROMA_DATABASE` from the environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `CHROMA_API_KEY` is not set or the endpoint URL is malformed.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use chroma::ChromaHttpClient;
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = ChromaHttpClient::cloud()?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn cloud() -> Result<Self, ChromaHttpClientOptionsError> {
         Ok(Self::new(ChromaHttpClientOptions::from_cloud_env()?))
     }
 
+    /// Assigns the database to use for subsequent collection operations.
+    ///
+    /// Overrides any previously cached or configured database name. Operations after this call
+    /// will target the specified database until changed again.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # fn example(client: ChromaHttpClient) {
+    /// client.set_database_name("production");
+    /// # }
+    /// ```
     pub fn set_database_name(&self, database_name: impl AsRef<str>) {
         let mut lock = self.database_name.lock();
         *lock = Some(database_name.as_ref().to_string());
     }
 
+    /// Creates a new database within the authenticated tenant.
+    ///
+    /// The database becomes immediately available for collection operations after creation.
+    /// Database names must be unique within a tenant.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - A database with the same name already exists
+    /// - Network communication fails
+    /// - The tenant ID cannot be resolved
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// client.create_database("analytics").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn create_database(
         &self,
         name: impl AsRef<str>,
@@ -143,6 +291,24 @@ impl ChromaHttpClient {
         Ok(())
     }
 
+    /// Enumerates all databases accessible to this client within the authenticated tenant.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if network communication fails or tenant ID cannot be resolved.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let databases = client.list_databases().await?;
+    /// for db in databases {
+    ///     println!("Database: {} (ID: {})", db.name, db.id);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn list_databases(&self) -> Result<Vec<Database>, ChromaHttpClientError> {
         let tenant_id = self.get_tenant_id().await?;
 
@@ -156,6 +322,7 @@ impl ChromaHttpClient {
         .await
     }
 
+    /// Deletes a database from the current tenant.
     pub async fn delete_database(
         &self,
         database_name: impl AsRef<str>,
@@ -177,6 +344,27 @@ impl ChromaHttpClient {
         Ok(())
     }
 
+    /// Retrieves identity information for the authenticated user.
+    ///
+    /// Returns the tenant and database access details for the current authentication credentials.
+    /// This is used internally to resolve tenant and database IDs but can also be called directly
+    /// to verify authentication status.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if authentication fails or network communication fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let identity = client.get_auth_identity().await?;
+    /// println!("Tenant: {}", identity.tenant);
+    /// println!("Databases: {}", identity.databases.len());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn get_auth_identity(
         &self,
     ) -> Result<GetUserIdentityResponse, ChromaHttpClientError> {
@@ -190,6 +378,25 @@ impl ChromaHttpClient {
         .await
     }
 
+    /// Performs a health check against the Chroma server.
+    ///
+    /// Sends a lightweight request to verify server availability and responsiveness.
+    /// The response contains a nanosecond-precision timestamp from the server.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the server is unreachable or returns an error status.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let heartbeat = client.heartbeat().await?;
+    /// assert!(heartbeat.nanosecond_heartbeat > 0);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn heartbeat(&self) -> Result<HeartbeatResponse, ChromaHttpClientError> {
         self.send::<(), (), _>(
             "heartbeat",
@@ -201,6 +408,32 @@ impl ChromaHttpClient {
         .await
     }
 
+    /// Retrieves an existing collection or creates it if it doesn't exist.
+    ///
+    /// Idempotent collection access that always succeeds if the name is valid. If a collection
+    /// with the given name already exists, returns a handle to it. Otherwise, creates a new
+    /// collection with the specified configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Network communication fails
+    /// - The database name cannot be resolved
+    /// - Request validation fails
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let collection = client.get_or_create_collection(
+    ///     "my_vectors",
+    ///     None,
+    ///     None
+    /// ).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn get_or_create_collection(
         &self,
         name: impl AsRef<str>,
@@ -211,6 +444,32 @@ impl ChromaHttpClient {
             .await
     }
 
+    /// Creates a new collection with the specified parameters.
+    ///
+    /// Fails if a collection with the same name already exists in the database.
+    /// To get an existing collection or create it if missing, use [`get_or_create_collection`](Self::get_or_create_collection).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - A collection with the same name already exists
+    /// - Network communication fails
+    /// - The database name cannot be resolved
+    /// - Request validation fails
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let collection = client.create_collection(
+    ///     "embeddings",
+    ///     None,
+    ///     None
+    /// ).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn create_collection(
         &self,
         name: impl AsRef<str>,
@@ -221,6 +480,7 @@ impl ChromaHttpClient {
             .await
     }
 
+    /// Retrieves an existing collection by name.
     pub async fn get_collection(
         &self,
         name: impl AsRef<str>,
@@ -249,6 +509,27 @@ impl ChromaHttpClient {
         })
     }
 
+    /// Removes a collection and all its records from the database.
+    ///
+    /// Permanently deletes the collection and all contained embeddings, metadata, and documents.
+    /// This operation cannot be undone.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The collection does not exist
+    /// - Network communication fails
+    /// - The database or tenant cannot be resolved
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// client.delete_collection("old_embeddings").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn delete_collection(
         &self,
         name: impl AsRef<str>,
@@ -273,6 +554,33 @@ impl ChromaHttpClient {
         Ok(())
     }
 
+    /// Enumerates collections in the specified database with pagination support.
+    ///
+    /// Returns collection handles that can be used to perform read and write operations.
+    /// Results are ordered consistently but the specific ordering is implementation-defined.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Network communication fails
+    /// - The database name cannot be resolved
+    /// - The authenticated user lacks read permissions
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let collections = client.list_collections(
+    ///     10,
+    ///     Some(0)
+    /// ).await?;
+    /// for collection in collections {
+    ///     println!("Collection: {}", collection.name());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn list_collections(
         &self,
         limit: usize,
@@ -383,6 +691,10 @@ impl ChromaHttpClient {
         Ok(database_name.clone())
     }
 
+    /// Resolves the tenant ID for the authenticated user.
+    ///
+    /// Returns the cached tenant ID if available, otherwise fetches and caches the user's
+    /// identity information. Uses a lock to prevent concurrent resolution attempts.
     async fn get_tenant_id(&self) -> Result<String, ChromaHttpClientError> {
         {
             let tenant_id_lock = self.tenant_id.lock();
@@ -410,6 +722,21 @@ impl ChromaHttpClient {
         Ok(tenant_id)
     }
 
+    /// Executes an HTTP request with automatic retry logic and OpenTelemetry metrics.
+    ///
+    /// This is the core transport method used by all higher-level operations. It handles:
+    /// - Request serialization and query parameter encoding
+    /// - Exponential backoff retry for GET requests and 429 responses
+    /// - Response deserialization with detailed tracing
+    /// - Metrics recording when the `opentelemetry` feature is enabled
+    ///
+    /// # Retry Behavior
+    ///
+    /// Retries automatically for:
+    /// - Any GET request that fails with a retryable error
+    /// - Any request (GET/POST/DELETE) that receives a 429 (Too Many Requests) response
+    ///
+    /// Non-GET requests with other error statuses fail immediately without retry.
     pub(crate) async fn send<
         Body: Serialize,
         QueryParams: Serialize,

@@ -1,3 +1,112 @@
+//! Rust client library for the Chroma AI-native database.
+//!
+//! This crate provides a comprehensive, production-ready client for interacting with [Chroma](https://www.trychroma.com),
+//! an AI-native open-source embedding database. Chroma transforms embeddings into queryable databases,
+//! enabling similarity search, filtering, and retrieval operations over high-dimensional vector data.
+//!
+//! # Features
+//!
+//! - **Async-first API** - Built on tokio for high-performance concurrent operations
+//! - **Type-safe requests** - Strongly-typed request and response models prevent runtime errors
+//! - **Automatic retries** - Configurable exponential backoff with jitter for resilient network operations
+//! - **OpenTelemetry support** - Optional metrics collection for observability (enable `opentelemetry` feature)
+//! - **TLS flexibility** - Support for both native-tls and rustls backends
+//!
+//! # Core Types
+//!
+//! - [`ChromaHttpClient`] - Main client for database-level operations (create/list/delete collections)
+//! - [`ChromaCollection`] - Collection handle for CRUD operations on records (add/get/query/update/delete)
+//! - [`ChromaClientOptions`] - Configuration for client initialization including auth and retry behavior
+//!
+//! # Quick Start
+//!
+//! ## Connecting to Chroma Cloud
+//!
+//! ```
+//! use chroma::{ChromaHttpClient, client::ChromaClientOptions, client::ChromaAuthMethod};
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let options = ChromaClientOptions {
+//!     endpoint: "https://api.trychroma.com".parse()?,
+//!     auth_method: ChromaAuthMethod::cloud_api_key("your-api-key")?,
+//!     ..Default::default()
+//! };
+//!
+//! let client = ChromaHttpClient::new(options);
+//!
+//! let heartbeat = client.heartbeat().await?;
+//! println!("Connected! Heartbeat: {}", heartbeat.nanosecond_heartbeat);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Managing Databases
+//!
+//! ```
+//! # use chroma::ChromaHttpClient;
+//! # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+//! client.create_database("my_database".to_string()).await?;
+//!
+//! let databases = client.list_databases().await?;
+//! for db in databases {
+//!     println!("Found database: {}", db.name);
+//! }
+//!
+//! client.delete_database("my_database".to_string()).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Working with Collections
+//!
+//! ```
+//! # use chroma::ChromaHttpClient;
+//! # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+//! let collections = client
+//!     .list_collections(100, None)
+//!     .await?;
+//!
+//! for collection in collections {
+//!     println!("Collection: {}", collection.name());
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Authentication
+//!
+//! The client supports multiple authentication methods:
+//!
+//! - **Cloud API Key** - For Chroma Cloud deployments using `ChromaAuthMethod::cloud_api_key`
+//! - **Custom Headers** - For self-hosted instances with custom auth via `ChromaAuthMethod::HeaderAuth`
+//! - **No Auth** - For local development with `ChromaAuthMethod::None`
+//!
+//! # Error Handling
+//!
+//! All operations return `Result<T, ChromaClientError>` where [`ChromaClientError`](client::ChromaClientError)
+//! captures network errors, serialization failures, and validation errors.
+//!
+//! ```
+//! # use chroma::ChromaHttpClient;
+//! # use chroma::client::ChromaClientError;
+//! # async fn example(client: ChromaHttpClient) {
+//! match client.heartbeat().await {
+//!     Ok(response) => println!("Heartbeat: {}", response.nanosecond_heartbeat),
+//!     Err(ChromaClientError::RequestError(e)) => eprintln!("Network error: {}", e),
+//!     Err(e) => eprintln!("Other error: {}", e),
+//! }
+//! # }
+//! ```
+//!
+//! # Feature Flags
+//!
+//! - `default` - Enables `native-tls` for TLS support
+//! - `native-tls` - Use native system TLS (OpenSSL on Linux, Secure Transport on macOS)
+//! - `rustls` - Use pure-Rust TLS implementation
+//! - `opentelemetry` - Enable metrics collection for request latency and retry counts
+
+#![deny(missing_docs)]
+
 pub mod client;
 pub mod collection;
 pub mod embed;
