@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashSet},
+    fmt,
     hash::Hash,
     ops::{Add, Div, Mul, Neg, Sub},
 };
@@ -719,7 +720,7 @@ impl From<SparseVector> for QueryVector {
 #[derive(Clone, Debug, PartialEq)]
 pub struct KnnQuery {
     pub query: QueryVector,
-    pub key: String,
+    pub key: Key,
     pub limit: u32,
 }
 
@@ -773,7 +774,7 @@ pub enum RankExpr {
     Knn {
         query: QueryVector,
         #[serde(default = "RankExpr::default_knn_key")]
-        key: String,
+        key: Key,
         #[serde(default = "RankExpr::default_knn_limit")]
         limit: u32,
         #[serde(default)]
@@ -801,8 +802,8 @@ pub enum RankExpr {
 }
 
 impl RankExpr {
-    pub fn default_knn_key() -> String {
-        "#embedding".to_string()
+    pub fn default_knn_key() -> Key {
+        Key::Embedding
     }
 
     pub fn default_knn_limit() -> u32 {
@@ -1080,9 +1081,20 @@ impl TryFrom<chroma_proto::RankExpr> for RankExpr {
                     .query
                     .ok_or(QueryConversionError::field("query"))?
                     .try_into()?;
+                let key = if knn.key.starts_with('#') {
+                    match knn.key.as_str() {
+                        "#document" => Key::Document,
+                        "#embedding" => Key::Embedding,
+                        "#metadata" => Key::Metadata,
+                        "#score" => Key::Score,
+                        _ => Key::MetadataField(knn.key),
+                    }
+                } else {
+                    Key::MetadataField(knn.key)
+                };
                 Ok(RankExpr::Knn {
                     query,
-                    key: knn.key,
+                    key,
                     limit: knn.limit,
                     default: knn.default,
                     return_rank: knn.return_rank,
@@ -1162,7 +1174,7 @@ impl TryFrom<RankExpr> for chroma_proto::RankExpr {
                 return_rank,
             } => chroma_proto::rank_expr::Rank::Knn(chroma_proto::rank_expr::Knn {
                 query: Some(query.try_into()?),
-                key,
+                key: key.to_string(),
                 limit,
                 default,
                 return_rank,
@@ -1263,21 +1275,22 @@ impl<'de> Deserialize<'de> for Key {
     }
 }
 
+impl fmt::Display for Key {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Key::Document => write!(f, "#document"),
+            Key::Embedding => write!(f, "#embedding"),
+            Key::Metadata => write!(f, "#metadata"),
+            Key::Score => write!(f, "#score"),
+            Key::MetadataField(field) => write!(f, "{}", field),
+        }
+    }
+}
+
 impl Key {
     /// Create a Key for a metadata field
     pub fn field(name: impl Into<String>) -> Self {
         Key::MetadataField(name.into())
-    }
-
-    /// Helper to convert Key to string for metadata key
-    fn to_string(&self) -> String {
-        match self {
-            Key::Document => "#document".to_string(),
-            Key::Embedding => "#embedding".to_string(),
-            Key::Metadata => "#metadata".to_string(),
-            Key::Score => "#score".to_string(),
-            Key::MetadataField(field) => field.clone(),
-        }
     }
 
     /// Equality: Key::field("status").eq("active")
