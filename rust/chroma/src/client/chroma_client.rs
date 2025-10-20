@@ -3,6 +3,8 @@ use backon::Retryable;
 use chroma_api_types::ErrorResponse;
 use chroma_error::ChromaValidationError;
 use chroma_types::Collection;
+use chroma_types::CollectionConfiguration;
+use chroma_types::Metadata;
 use parking_lot::Mutex;
 use reqwest::Method;
 use reqwest::StatusCode;
@@ -12,9 +14,7 @@ use thiserror::Error;
 
 use crate::client::ChromaClientOptions;
 use crate::collection::ChromaCollection;
-use crate::types::{
-    CreateCollectionRequest, GetUserIdentityResponse, HeartbeatResponse, ListCollectionsRequest,
-};
+use crate::types::{GetUserIdentityResponse, HeartbeatResponse};
 
 const USER_AGENT: &str = concat!(
     "Chroma Rust Client v",
@@ -125,7 +125,10 @@ impl ChromaClient {
         .await
     }
 
-    pub async fn delete_database(&self, database_name: String) -> Result<(), ChromaClientError> {
+    pub async fn delete_database(
+        &self,
+        database_name: impl Into<String>,
+    ) -> Result<(), ChromaClientError> {
         // Returns empty map ({})
         self.send::<(), (), serde_json::Value>(
             "delete_database",
@@ -133,7 +136,7 @@ impl ChromaClient {
             format!(
                 "/api/v2/tenants/{}/databases/{}",
                 self.get_tenant_id().await?,
-                database_name
+                database_name.into()
             ),
             None,
             None,
@@ -167,24 +170,31 @@ impl ChromaClient {
 
     pub async fn get_or_create_collection(
         &self,
-        params: CreateCollectionRequest,
+        name: impl Into<String>,
+        configuration: Option<CollectionConfiguration>,
+        metadata: Option<Metadata>,
     ) -> Result<ChromaCollection, ChromaClientError> {
-        self.common_create_collection(params, true).await
+        self.common_create_collection(name, configuration, metadata, true)
+            .await
     }
 
     pub async fn create_collection(
         &self,
-        params: CreateCollectionRequest,
+        name: impl Into<String>,
+        configuration: Option<CollectionConfiguration>,
+        metadata: Option<Metadata>,
     ) -> Result<ChromaCollection, ChromaClientError> {
-        self.common_create_collection(params, false).await
+        self.common_create_collection(name, configuration, metadata, false)
+            .await
     }
 
     pub async fn list_collections(
         &self,
-        params: ListCollectionsRequest,
+        limit: usize,
+        offset: Option<usize>,
     ) -> Result<Vec<ChromaCollection>, ChromaClientError> {
         let tenant_id = self.get_tenant_id().await?;
-        let database_name = self.get_database_name(params.database_name).await?;
+        let database_name = self.get_database_name().await?;
 
         #[derive(Serialize)]
         struct QueryParams {
@@ -201,10 +211,7 @@ impl ChromaClient {
                     tenant_id, database_name
                 ),
                 None,
-                Some(QueryParams {
-                    limit: params.limit,
-                    offset: params.offset,
-                }),
+                Some(QueryParams { limit, offset }),
             )
             .await?;
 
@@ -219,11 +226,13 @@ impl ChromaClient {
 
     async fn common_create_collection(
         &self,
-        params: CreateCollectionRequest,
+        name: impl Into<String>,
+        configuration: Option<CollectionConfiguration>,
+        metadata: Option<Metadata>,
         get_or_create: bool,
     ) -> Result<ChromaCollection, ChromaClientError> {
         let tenant_id = self.get_tenant_id().await?;
-        let database_name = self.get_database_name(params.database_name).await?;
+        let database_name = self.get_database_name().await?;
 
         let collection: chroma_types::Collection = self
             .send(
@@ -234,9 +243,9 @@ impl ChromaClient {
                     tenant_id, database_name
                 ),
                 Some(serde_json::json!({
-                    "name": params.name,
-                    "configuration": params.configuration,
-                    "metadata": params.metadata,
+                    "name": name.into(),
+                    "configuration": configuration,
+                    "metadata": metadata,
                     "get_or_create": get_or_create,
                 })),
                 None::<()>,
@@ -249,14 +258,7 @@ impl ChromaClient {
         })
     }
 
-    async fn get_database_name(
-        &self,
-        name_override: Option<String>,
-    ) -> Result<String, ChromaClientError> {
-        if let Some(id) = name_override {
-            return Ok(id);
-        }
-
+    async fn get_database_name(&self) -> Result<String, ChromaClientError> {
         {
             let database_name_lock = self.default_database_name.lock();
             if let Some(database_name) = &*database_name_lock {
@@ -648,21 +650,10 @@ mod tests {
     #[test_log::test]
     async fn test_live_cloud_parses_error() {
         with_client(|client| async move {
-            client
-                .create_collection(
-                    CreateCollectionRequest::builder()
-                        .name("foo".to_string())
-                        .build(),
-                )
-                .await
-                .unwrap();
+            client.create_collection("foo", None, None).await.unwrap();
 
             let err = client
-                .create_collection(
-                    CreateCollectionRequest::builder()
-                        .name("foo".to_string())
-                        .build(),
-                )
+                .create_collection("foo", None, None)
                 .await
                 .unwrap_err();
 
@@ -681,40 +672,20 @@ mod tests {
     #[test_log::test]
     async fn test_live_cloud_list_collections() {
         with_client(|client| async move {
-            let collections = client
-                .list_collections(ListCollectionsRequest::builder().build())
-                .await
-                .unwrap();
+            let collections = client.list_collections(100, None).await.unwrap();
             assert!(collections.is_empty());
 
+            client.create_collection("first", None, None).await.unwrap();
+
             client
-                .create_collection(
-                    CreateCollectionRequest::builder()
-                        .name("first".to_string())
-                        .build(),
-                )
+                .create_collection("second", None, None)
                 .await
                 .unwrap();
 
-            client
-                .create_collection(
-                    CreateCollectionRequest::builder()
-                        .name("second".to_string())
-                        .build(),
-                )
-                .await
-                .unwrap();
-
-            let collections = client
-                .list_collections(ListCollectionsRequest::builder().build())
-                .await
-                .unwrap();
+            let collections = client.list_collections(100, None).await.unwrap();
             assert_eq!(collections.len(), 2);
 
-            let collections = client
-                .list_collections(ListCollectionsRequest::builder().limit(1).offset(1).build())
-                .await
-                .unwrap();
+            let collections = client.list_collections(1, Some(1)).await.unwrap();
             assert_eq!(collections.len(), 1);
             assert_eq!(collections[0].collection.name, "second");
         })
@@ -725,22 +696,11 @@ mod tests {
     #[test_log::test]
     async fn test_live_cloud_create_collection() {
         with_client(|client| async move {
-            let collection = client
-                .create_collection(
-                    CreateCollectionRequest::builder()
-                        .name("foo".to_string())
-                        .build(),
-                )
-                .await
-                .unwrap();
+            let collection = client.create_collection("foo", None, None).await.unwrap();
             assert_eq!(collection.collection.name, "foo");
 
             client
-                .get_or_create_collection(
-                    CreateCollectionRequest::builder()
-                        .name("foo".to_string())
-                        .build(),
-                )
+                .get_or_create_collection("foo", None, None)
                 .await
                 .unwrap();
         })
