@@ -247,6 +247,54 @@ impl<'py> pyo3::FromPyObject<'py> for UpdateMetadataValue {
     }
 }
 
+impl From<bool> for UpdateMetadataValue {
+    fn from(b: bool) -> Self {
+        Self::Bool(b)
+    }
+}
+
+impl From<i64> for UpdateMetadataValue {
+    fn from(v: i64) -> Self {
+        Self::Int(v)
+    }
+}
+
+impl From<i32> for UpdateMetadataValue {
+    fn from(v: i32) -> Self {
+        Self::Int(v as i64)
+    }
+}
+
+impl From<f64> for UpdateMetadataValue {
+    fn from(v: f64) -> Self {
+        Self::Float(v)
+    }
+}
+
+impl From<f32> for UpdateMetadataValue {
+    fn from(v: f32) -> Self {
+        Self::Float(v as f64)
+    }
+}
+
+impl From<String> for UpdateMetadataValue {
+    fn from(v: String) -> Self {
+        Self::Str(v)
+    }
+}
+
+impl From<&str> for UpdateMetadataValue {
+    fn from(v: &str) -> Self {
+        Self::Str(v.to_string())
+    }
+}
+
+impl From<SparseVector> for UpdateMetadataValue {
+    fn from(v: SparseVector) -> Self {
+        Self::SparseVector(v)
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum UpdateMetadataValueConversionError {
     #[error("Invalid metadata value, valid values are: Int, Float, Str, Bool, None")]
