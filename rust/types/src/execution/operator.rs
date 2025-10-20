@@ -1081,20 +1081,9 @@ impl TryFrom<chroma_proto::RankExpr> for RankExpr {
                     .query
                     .ok_or(QueryConversionError::field("query"))?
                     .try_into()?;
-                let key = if knn.key.starts_with('#') {
-                    match knn.key.as_str() {
-                        "#document" => Key::Document,
-                        "#embedding" => Key::Embedding,
-                        "#metadata" => Key::Metadata,
-                        "#score" => Key::Score,
-                        _ => Key::MetadataField(knn.key),
-                    }
-                } else {
-                    Key::MetadataField(knn.key)
-                };
                 Ok(RankExpr::Knn {
                     query,
-                    key,
+                    key: Key::from(knn.key),
                     limit: knn.limit,
                     default: knn.default,
                     return_rank: knn.return_rank,
@@ -1264,14 +1253,7 @@ impl<'de> Deserialize<'de> for Key {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Ok(match s.as_str() {
-            "#document" => Key::Document,
-            "#embedding" => Key::Embedding,
-            "#metadata" => Key::Metadata,
-            "#score" => Key::Score,
-            // Any other string is treated as a metadata field key
-            field => Key::MetadataField(field.to_string()),
-        })
+        Ok(Key::from(s))
     }
 }
 
@@ -1284,6 +1266,25 @@ impl fmt::Display for Key {
             Key::Score => write!(f, "#score"),
             Key::MetadataField(field) => write!(f, "{}", field),
         }
+    }
+}
+
+impl From<&str> for Key {
+    fn from(s: &str) -> Self {
+        match s {
+            "#document" => Key::Document,
+            "#embedding" => Key::Embedding,
+            "#metadata" => Key::Metadata,
+            "#score" => Key::Score,
+            // Any other string is treated as a metadata field key
+            field => Key::MetadataField(field.to_string()),
+        }
+    }
+}
+
+impl From<String> for Key {
+    fn from(s: String) -> Self {
+        Key::from(s.as_str())
     }
 }
 
@@ -1645,13 +1646,44 @@ pub fn rrf(
         .map(|(w, rank)| RankExpr::Value(w) / (RankExpr::Value(k as f32) + rank))
         .collect();
 
-    let sum = terms.into_iter().reduce(|a, b| a + b).unwrap();
+    // Safe: ranks is validated as non-empty above, so terms cannot be empty.
+    // Using unwrap_or_else as defensive programming to avoid panic.
+    let sum = terms
+        .into_iter()
+        .reduce(|a, b| a + b)
+        .unwrap_or(RankExpr::Value(0.0));
     Ok(-sum)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_key_from_string() {
+        // Test predefined keys
+        assert_eq!(Key::from("#document"), Key::Document);
+        assert_eq!(Key::from("#embedding"), Key::Embedding);
+        assert_eq!(Key::from("#metadata"), Key::Metadata);
+        assert_eq!(Key::from("#score"), Key::Score);
+
+        // Test metadata field keys
+        assert_eq!(
+            Key::from("custom_field"),
+            Key::MetadataField("custom_field".to_string())
+        );
+        assert_eq!(
+            Key::from("author"),
+            Key::MetadataField("author".to_string())
+        );
+
+        // Test String variant
+        assert_eq!(Key::from("#embedding".to_string()), Key::Embedding);
+        assert_eq!(
+            Key::from("year".to_string()),
+            Key::MetadataField("year".to_string())
+        );
+    }
 
     #[test]
     fn test_query_vector_dense_proto_conversion() {

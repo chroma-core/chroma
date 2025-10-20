@@ -6,6 +6,7 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     mem::size_of_val,
+    ops::{BitAnd, BitOr},
 };
 use thiserror::Error;
 use utoipa::ToSchema;
@@ -929,8 +930,6 @@ impl Where {
         }
     }
 }
-
-use std::ops::{BitAnd, BitOr};
 
 impl BitAnd for Where {
     type Output = Where;
