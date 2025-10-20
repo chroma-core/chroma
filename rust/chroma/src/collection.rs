@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use chroma_types::{
     plan::SearchPayload, AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection,
-    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, ForkCollectionRequest,
+    DeleteCollectionRecordsRequest,
+    DeleteCollectionRecordsResponse, /*ForkCollectionRequest,*/
     GetRequest, GetResponse, IncludeList, InternalSchema, Metadata, QueryRequest, QueryResponse,
     SearchRequest, SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
     UpdateMetadata, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
@@ -179,6 +180,7 @@ impl ChromaCollection {
         self.send("delete", Method::POST, Some(request)).await
     }
 
+    /*
     pub async fn fork(
         &self,
         new_name: impl Into<String>,
@@ -196,6 +198,7 @@ impl ChromaCollection {
             collection: Arc::new(collection),
         })
     }
+    */
 
     async fn send<Body: Serialize, Response: DeserializeOwned>(
         &self,
