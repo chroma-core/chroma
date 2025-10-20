@@ -1,7 +1,11 @@
 [package]
 name = "chroma-types"
 version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
+description = "Chroma-provided crate for internal types used in the Chroma API."
+license = "Apache-2.0"
+repository = "https://github.com/chroma-core/chroma"
 
 [lib]
 path = "src/lib.rs"
