@@ -13,6 +13,7 @@ pub enum OllamaEmbeddingError {
 ////////////////////////////////////// OllamaEmbeddingFunction /////////////////////////////////////
 
 pub struct OllamaEmbeddingFunction {
+    client: reqwest::Client,
     host: String,
     model: String,
 }
@@ -22,9 +23,14 @@ impl OllamaEmbeddingFunction {
         host: impl Into<String>,
         model: impl Into<String>,
     ) -> Result<Self, OllamaEmbeddingError> {
+        let client = reqwest::Client::new();
         let host = host.into();
         let model = model.into();
-        let this = Self { host, model };
+        let this = Self {
+            client,
+            host,
+            model,
+        };
         this.heartbeat().await?;
         Ok(this)
     }
@@ -44,7 +50,7 @@ impl EmbeddingFunction for OllamaEmbeddingFunction {
         let input = batches;
         let req = EmbedRequest { model, input };
         let resp = req
-            .make_request(&self.host)
+            .make_request(self)
             .send()
             .await?
             .error_for_status()?
@@ -67,10 +73,8 @@ pub struct EmbedRequest<'a> {
 
 impl EmbedRequest<'_> {
     /// Create a new RequestBuilder for this embed request.
-    pub fn make_request(&self, ollama_host: &str) -> RequestBuilder {
-        reqwest::Client::new()
-            .post(format!("{}/api/embed", ollama_host))
-            .json(self)
+    pub fn make_request(&self, ef: &OllamaEmbeddingFunction) -> RequestBuilder {
+        ef.client.post(format!("{}/api/embed", ef.host)).json(self)
     }
 }
 
