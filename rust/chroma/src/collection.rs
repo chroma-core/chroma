@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use chroma_types::{
     plan::SearchPayload, AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection,
-    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, ForkCollectionRequest,
+    DeleteCollectionRecordsRequest,
+    DeleteCollectionRecordsResponse, /*ForkCollectionRequest,*/
     GetRequest, GetResponse, IncludeList, InternalSchema, Metadata, QueryRequest, QueryResponse,
     SearchRequest, SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
     UpdateMetadata, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
