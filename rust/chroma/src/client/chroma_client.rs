@@ -1,5 +1,6 @@
 use backon::ExponentialBuilder;
 use backon::Retryable;
+use chroma_api_types::ErrorResponse;
 use chroma_error::ChromaValidationError;
 use chroma_types::Collection;
 use parking_lot::Mutex;
@@ -25,6 +26,8 @@ const USER_AGENT: &str = concat!(
 pub enum ChromaClientError {
     #[error("Request error: {0:?}")]
     RequestError(#[from] reqwest::Error),
+    #[error("API error: {0:?} ({1})")]
+    ApiError(String, reqwest::StatusCode),
     #[error("Could not resolve database ID: {0}")]
     CouldNotResolveDatabaseId(String),
     #[error("Serialization/Deserialization error: {0}")]
@@ -397,7 +400,24 @@ impl ChromaClient {
             Ok(response) => response,
             Err((err, maybe_response)) => {
                 if let Some(response) = maybe_response {
-                    let json = response.json::<serde_json::Value>().await?;
+                    let status = response.status();
+                    let text = response.text().await.unwrap_or_default();
+                    let json = match serde_json::from_str::<serde_json::Value>(&text) {
+                        Ok(json) => json,
+                        Err(_) => {
+                            tracing::trace!(
+                                url = %url,
+                                method =? method,
+                                "Received non-JSON error response: {}",
+                                text
+                            );
+
+                            return Err(ChromaClientError::ApiError(
+                                format!("Non-JSON error response: {}", text),
+                                status,
+                            ));
+                        }
+                    };
 
                     if tracing::enabled!(tracing::Level::TRACE) {
                         tracing::trace!(
@@ -406,6 +426,13 @@ impl ChromaClient {
                             "Received response: {}",
                             serde_json::to_string_pretty(&json).unwrap_or_else(|_| "<failed to serialize>".to_string())
                         );
+                    }
+
+                    if let Ok(api_error) = serde_json::from_value::<ErrorResponse>(json) {
+                        return Err(ChromaClientError::ApiError(
+                            format!("{}: {}", api_error.error, api_error.message),
+                            status,
+                        ));
                     }
                 }
 
@@ -615,6 +642,39 @@ mod tests {
 
         assert_eq!(response, serde_json::json!({"status": "ok"}));
         assert_eq!(mock.calls(), 2);
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_live_cloud_parses_error() {
+        with_client(|client| async move {
+            client
+                .create_collection(
+                    CreateCollectionRequest::builder()
+                        .name("foo".to_string())
+                        .build(),
+                )
+                .await
+                .unwrap();
+
+            let err = client
+                .create_collection(
+                    CreateCollectionRequest::builder()
+                        .name("foo".to_string())
+                        .build(),
+                )
+                .await
+                .unwrap_err();
+
+            match err {
+                ChromaClientError::ApiError(msg, status) => {
+                    assert_eq!(status, StatusCode::CONFLICT);
+                    assert!(msg.contains("already exists"));
+                }
+                _ => panic!("Expected ApiError"),
+            };
+        })
+        .await;
     }
 
     #[tokio::test]
