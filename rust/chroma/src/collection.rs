@@ -179,6 +179,7 @@ impl ChromaCollection {
         self.send("delete", Method::POST, Some(request)).await
     }
 
+    /*
     pub async fn fork(
         &self,
         new_name: impl Into<String>,
@@ -196,6 +197,7 @@ impl ChromaCollection {
             collection: Arc::new(collection),
         })
     }
+    */
 
     async fn send<Body: Serialize, Response: DeserializeOwned>(
         &self,
