@@ -80,6 +80,19 @@ impl Default for ChromaClientOptions {
 }
 
 impl ChromaClientOptions {
+    pub fn chroma_cloud(
+        api_key: impl Into<String>,
+        database_name: impl Into<String>,
+    ) -> Result<Self, InvalidHeaderValue> {
+        let api_key = api_key.into();
+        let database_name = database_name.into();
+        Ok(ChromaClientOptions {
+            default_database_name: Some(database_name),
+            auth_method: ChromaAuthMethod::cloud_api_key(&api_key)?,
+            ..Default::default()
+        })
+    }
+
     pub(crate) fn headers(&self) -> HeaderMap {
         let mut headers = HeaderMap::new();
         match &self.auth_method {
