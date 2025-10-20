@@ -179,7 +179,10 @@ impl ChromaCollection {
         self.send("delete", Method::POST, Some(request)).await
     }
 
-    pub async fn fork(&self, new_name: impl Into<String>) -> Result<Collection, ChromaClientError> {
+    pub async fn fork(
+        &self,
+        new_name: impl Into<String>,
+    ) -> Result<ChromaCollection, ChromaClientError> {
         let request = ForkCollectionRequest::try_new(
             self.collection.tenant.clone(),
             self.collection.database.clone(),
@@ -187,7 +190,11 @@ impl ChromaCollection {
             new_name.into(),
         )?;
 
-        self.send("fork", Method::POST, Some(request)).await
+        let collection: Collection = self.send("fork", Method::POST, Some(request)).await?;
+        Ok(ChromaCollection {
+            client: self.client.clone(),
+            collection: Arc::new(collection),
+        })
     }
 
     async fn send<Body: Serialize, Response: DeserializeOwned>(
