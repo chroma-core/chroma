@@ -192,6 +192,13 @@ jobs:
     uses: ./.github/workflows/_rust-tests.yml
     secrets: inherit
 
+  rust-feature-tests:
+    name: Rust feature tests
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
+    uses: ./.github/workflows/_check_rust_release.yml
+    secrets: inherit
+
   go-tests:
     name: Go tests
     needs: change-detection
