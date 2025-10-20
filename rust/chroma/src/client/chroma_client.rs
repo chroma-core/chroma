@@ -93,18 +93,18 @@ impl ChromaClient {
         }
     }
 
-    pub fn set_default_database_name(&self, database_name: String) {
+    pub fn set_default_database_name(&self, database_name: impl AsRef<str>) {
         let mut lock = self.default_database_name.lock();
-        *lock = Some(database_name);
+        *lock = Some(database_name.as_ref().to_string());
     }
 
-    pub async fn create_database(&self, name: String) -> Result<(), ChromaClientError> {
+    pub async fn create_database(&self, name: impl AsRef<str>) -> Result<(), ChromaClientError> {
         // Returns empty map ({})
         self.send::<_, (), serde_json::Value>(
             "create_database",
             Method::POST,
             format!("/api/v2/tenants/{}/databases", self.get_tenant_id().await?),
-            Some(serde_json::json!({ "name": name })),
+            Some(serde_json::json!({ "name": name.as_ref() })),
             None,
         )
         .await?;
@@ -127,7 +127,7 @@ impl ChromaClient {
 
     pub async fn delete_database(
         &self,
-        database_name: impl Into<String>,
+        database_name: impl AsRef<str>,
     ) -> Result<(), ChromaClientError> {
         // Returns empty map ({})
         self.send::<(), (), serde_json::Value>(
@@ -136,7 +136,7 @@ impl ChromaClient {
             format!(
                 "/api/v2/tenants/{}/databases/{}",
                 self.get_tenant_id().await?,
-                database_name.into()
+                database_name.as_ref()
             ),
             None,
             None,
@@ -170,7 +170,7 @@ impl ChromaClient {
 
     pub async fn get_or_create_collection(
         &self,
-        name: impl Into<String>,
+        name: impl AsRef<str>,
         configuration: Option<CollectionConfiguration>,
         metadata: Option<Metadata>,
     ) -> Result<ChromaCollection, ChromaClientError> {
@@ -180,7 +180,7 @@ impl ChromaClient {
 
     pub async fn create_collection(
         &self,
-        name: impl Into<String>,
+        name: impl AsRef<str>,
         configuration: Option<CollectionConfiguration>,
         metadata: Option<Metadata>,
     ) -> Result<ChromaCollection, ChromaClientError> {
@@ -190,7 +190,7 @@ impl ChromaClient {
 
     pub async fn get_collection(
         &self,
-        name: String,
+        name: impl AsRef<str>,
     ) -> Result<ChromaCollection, ChromaClientError> {
         let tenant_id = self.get_tenant_id().await?;
         let database_name = self.get_database_name().await?;
@@ -201,7 +201,9 @@ impl ChromaClient {
                 Method::GET,
                 format!(
                     "/api/v2/tenants/{}/databases/{}/collections/{}",
-                    tenant_id, database_name, name
+                    tenant_id,
+                    database_name,
+                    name.as_ref()
                 ),
                 None,
                 None::<()>,
@@ -214,7 +216,7 @@ impl ChromaClient {
         })
     }
 
-    pub async fn delete_collection(&self, name: String) -> Result<(), ChromaClientError> {
+    pub async fn delete_collection(&self, name: impl AsRef<str>) -> Result<(), ChromaClientError> {
         let tenant_id = self.get_tenant_id().await?;
         let database_name = self.get_database_name().await?;
 
@@ -223,7 +225,9 @@ impl ChromaClient {
             Method::DELETE,
             format!(
                 "/api/v2/tenants/{}/databases/{}/collections/{}",
-                tenant_id, database_name, name
+                tenant_id,
+                database_name,
+                name.as_ref()
             ),
             None,
             None,
@@ -271,7 +275,7 @@ impl ChromaClient {
 
     async fn common_create_collection(
         &self,
-        name: impl Into<String>,
+        name: impl AsRef<str>,
         configuration: Option<CollectionConfiguration>,
         metadata: Option<Metadata>,
         get_or_create: bool,
@@ -288,7 +292,7 @@ impl ChromaClient {
                     tenant_id, database_name
                 ),
                 Some(serde_json::json!({
-                    "name": name.into(),
+                    "name": name.as_ref(),
                     "configuration": configuration,
                     "metadata": metadata,
                     "get_or_create": get_or_create,
