@@ -1723,7 +1723,10 @@ impl ServiceBasedFrontend {
                         let knn_queries = rank_expr.knn_queries();
                         for knn_query in knn_queries {
                             schema
-                                .is_knn_key_indexing_enabled(&knn_query.key, &knn_query.query)
+                                .is_knn_key_indexing_enabled(
+                                    &knn_query.key.to_string(),
+                                    &knn_query.query,
+                                )
                                 .map_err(|err| {
                                     QueryError::Other(Box::new(err) as Box<dyn ChromaError>)
                                 })?;

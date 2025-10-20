@@ -3,14 +3,18 @@ use serde_json::Value;
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashSet},
+    fmt,
     hash::Hash,
+    ops::{Add, Div, Mul, Neg, Sub},
 };
 use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::{
     chroma_proto, logical_size_of_metadata, parse_where, CollectionAndSegments, CollectionUuid,
-    Metadata, ScalarEncoding, SparseVector, Where,
+    DocumentExpression, DocumentOperator, Metadata, MetadataComparison, MetadataExpression,
+    MetadataSetValue, MetadataValue, PrimitiveOperator, ScalarEncoding, SetOperator, SparseVector,
+    Where,
 };
 
 use super::error::QueryConversionError;
@@ -701,10 +705,22 @@ impl TryFrom<QueryVector> for chroma_proto::QueryVector {
     }
 }
 
+impl From<Vec<f32>> for QueryVector {
+    fn from(vec: Vec<f32>) -> Self {
+        QueryVector::Dense(vec)
+    }
+}
+
+impl From<SparseVector> for QueryVector {
+    fn from(sparse: SparseVector) -> Self {
+        QueryVector::Sparse(sparse)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct KnnQuery {
     pub query: QueryVector,
-    pub key: String,
+    pub key: Key,
     pub limit: u32,
 }
 
@@ -758,7 +774,7 @@ pub enum RankExpr {
     Knn {
         query: QueryVector,
         #[serde(default = "RankExpr::default_knn_key")]
-        key: String,
+        key: Key,
         #[serde(default = "RankExpr::default_knn_limit")]
         limit: u32,
         #[serde(default)]
@@ -786,12 +802,12 @@ pub enum RankExpr {
 }
 
 impl RankExpr {
-    pub fn default_knn_key() -> String {
-        "#embedding".to_string()
+    pub fn default_knn_key() -> Key {
+        Key::Embedding
     }
 
     pub fn default_knn_limit() -> u32 {
-        128
+        16
     }
 
     pub fn knn_queries(&self) -> Vec<KnnQuery> {
@@ -822,6 +838,223 @@ impl RankExpr {
             }],
         }
     }
+
+    /// Exponential: rank.exp()
+    pub fn exp(self) -> Self {
+        RankExpr::Exponentiation(Box::new(self))
+    }
+
+    /// Natural logarithm: rank.log()
+    pub fn log(self) -> Self {
+        RankExpr::Logarithm(Box::new(self))
+    }
+
+    /// Absolute value: rank.abs()
+    pub fn abs(self) -> Self {
+        RankExpr::Absolute(Box::new(self))
+    }
+
+    /// Maximum: rank.max(other)
+    pub fn max(self, other: impl Into<RankExpr>) -> Self {
+        let other = other.into();
+
+        match self {
+            RankExpr::Maximum(mut exprs) => match other {
+                RankExpr::Maximum(other_exprs) => {
+                    exprs.extend(other_exprs);
+                    RankExpr::Maximum(exprs)
+                }
+                _ => {
+                    exprs.push(other);
+                    RankExpr::Maximum(exprs)
+                }
+            },
+            _ => match other {
+                RankExpr::Maximum(mut exprs) => {
+                    exprs.insert(0, self);
+                    RankExpr::Maximum(exprs)
+                }
+                _ => RankExpr::Maximum(vec![self, other]),
+            },
+        }
+    }
+
+    /// Minimum: rank.min(other)
+    pub fn min(self, other: impl Into<RankExpr>) -> Self {
+        let other = other.into();
+
+        match self {
+            RankExpr::Minimum(mut exprs) => match other {
+                RankExpr::Minimum(other_exprs) => {
+                    exprs.extend(other_exprs);
+                    RankExpr::Minimum(exprs)
+                }
+                _ => {
+                    exprs.push(other);
+                    RankExpr::Minimum(exprs)
+                }
+            },
+            _ => match other {
+                RankExpr::Minimum(mut exprs) => {
+                    exprs.insert(0, self);
+                    RankExpr::Minimum(exprs)
+                }
+                _ => RankExpr::Minimum(vec![self, other]),
+            },
+        }
+    }
+}
+
+impl Add for RankExpr {
+    type Output = RankExpr;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        match self {
+            RankExpr::Summation(mut exprs) => match rhs {
+                RankExpr::Summation(rhs_exprs) => {
+                    exprs.extend(rhs_exprs);
+                    RankExpr::Summation(exprs)
+                }
+                _ => {
+                    exprs.push(rhs);
+                    RankExpr::Summation(exprs)
+                }
+            },
+            _ => match rhs {
+                RankExpr::Summation(mut exprs) => {
+                    exprs.insert(0, self);
+                    RankExpr::Summation(exprs)
+                }
+                _ => RankExpr::Summation(vec![self, rhs]),
+            },
+        }
+    }
+}
+
+impl Add<f32> for RankExpr {
+    type Output = RankExpr;
+
+    fn add(self, rhs: f32) -> Self::Output {
+        self + RankExpr::Value(rhs)
+    }
+}
+
+impl Add<RankExpr> for f32 {
+    type Output = RankExpr;
+
+    fn add(self, rhs: RankExpr) -> Self::Output {
+        RankExpr::Value(self) + rhs
+    }
+}
+
+impl Sub for RankExpr {
+    type Output = RankExpr;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        RankExpr::Subtraction {
+            left: Box::new(self),
+            right: Box::new(rhs),
+        }
+    }
+}
+
+impl Sub<f32> for RankExpr {
+    type Output = RankExpr;
+
+    fn sub(self, rhs: f32) -> Self::Output {
+        self - RankExpr::Value(rhs)
+    }
+}
+
+impl Sub<RankExpr> for f32 {
+    type Output = RankExpr;
+
+    fn sub(self, rhs: RankExpr) -> Self::Output {
+        RankExpr::Value(self) - rhs
+    }
+}
+
+impl Mul for RankExpr {
+    type Output = RankExpr;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        match self {
+            RankExpr::Multiplication(mut exprs) => match rhs {
+                RankExpr::Multiplication(rhs_exprs) => {
+                    exprs.extend(rhs_exprs);
+                    RankExpr::Multiplication(exprs)
+                }
+                _ => {
+                    exprs.push(rhs);
+                    RankExpr::Multiplication(exprs)
+                }
+            },
+            _ => match rhs {
+                RankExpr::Multiplication(mut exprs) => {
+                    exprs.insert(0, self);
+                    RankExpr::Multiplication(exprs)
+                }
+                _ => RankExpr::Multiplication(vec![self, rhs]),
+            },
+        }
+    }
+}
+
+impl Mul<f32> for RankExpr {
+    type Output = RankExpr;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        self * RankExpr::Value(rhs)
+    }
+}
+
+impl Mul<RankExpr> for f32 {
+    type Output = RankExpr;
+
+    fn mul(self, rhs: RankExpr) -> Self::Output {
+        RankExpr::Value(self) * rhs
+    }
+}
+
+impl Div for RankExpr {
+    type Output = RankExpr;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        RankExpr::Division {
+            left: Box::new(self),
+            right: Box::new(rhs),
+        }
+    }
+}
+
+impl Div<f32> for RankExpr {
+    type Output = RankExpr;
+
+    fn div(self, rhs: f32) -> Self::Output {
+        self / RankExpr::Value(rhs)
+    }
+}
+
+impl Div<RankExpr> for f32 {
+    type Output = RankExpr;
+
+    fn div(self, rhs: RankExpr) -> Self::Output {
+        RankExpr::Value(self) / rhs
+    }
+}
+
+impl Neg for RankExpr {
+    type Output = RankExpr;
+
+    fn neg(self) -> Self::Output {
+        RankExpr::Value(-1.0) * self
+    }
+}
+
+impl From<f32> for RankExpr {
+    fn from(v: f32) -> Self {
+        RankExpr::Value(v)
+    }
 }
 
 impl TryFrom<chroma_proto::RankExpr> for RankExpr {
@@ -850,7 +1083,7 @@ impl TryFrom<chroma_proto::RankExpr> for RankExpr {
                     .try_into()?;
                 Ok(RankExpr::Knn {
                     query,
-                    key: knn.key,
+                    key: Key::from(knn.key),
                     limit: knn.limit,
                     default: knn.default,
                     return_rank: knn.return_rank,
@@ -930,7 +1163,7 @@ impl TryFrom<RankExpr> for chroma_proto::RankExpr {
                 return_rank,
             } => chroma_proto::rank_expr::Rank::Knn(chroma_proto::rank_expr::Knn {
                 query: Some(query.try_into()?),
-                key,
+                key: key.to_string(),
                 limit,
                 default,
                 return_rank,
@@ -1020,13 +1253,158 @@ impl<'de> Deserialize<'de> for Key {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Ok(match s.as_str() {
+        Ok(Key::from(s))
+    }
+}
+
+impl fmt::Display for Key {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Key::Document => write!(f, "#document"),
+            Key::Embedding => write!(f, "#embedding"),
+            Key::Metadata => write!(f, "#metadata"),
+            Key::Score => write!(f, "#score"),
+            Key::MetadataField(field) => write!(f, "{}", field),
+        }
+    }
+}
+
+impl From<&str> for Key {
+    fn from(s: &str) -> Self {
+        match s {
             "#document" => Key::Document,
             "#embedding" => Key::Embedding,
             "#metadata" => Key::Metadata,
             "#score" => Key::Score,
             // Any other string is treated as a metadata field key
             field => Key::MetadataField(field.to_string()),
+        }
+    }
+}
+
+impl From<String> for Key {
+    fn from(s: String) -> Self {
+        Key::from(s.as_str())
+    }
+}
+
+impl Key {
+    /// Create a Key for a metadata field
+    pub fn field(name: impl Into<String>) -> Self {
+        Key::MetadataField(name.into())
+    }
+
+    /// Equality: Key::field("status").eq("active")
+    pub fn eq<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Primitive(PrimitiveOperator::Equal, value.into()),
+        })
+    }
+
+    /// Not equal: Key::field("status").ne("deleted")
+    pub fn ne<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Primitive(PrimitiveOperator::NotEqual, value.into()),
+        })
+    }
+
+    /// Greater than: Key::field("score").gt(0.5)
+    pub fn gt<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Primitive(PrimitiveOperator::GreaterThan, value.into()),
+        })
+    }
+
+    /// Greater than or equal: Key::field("score").gte(0.5)
+    pub fn gte<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::GreaterThanOrEqual,
+                value.into(),
+            ),
+        })
+    }
+
+    /// Less than: Key::field("score").lt(0.9)
+    pub fn lt<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Primitive(PrimitiveOperator::LessThan, value.into()),
+        })
+    }
+
+    /// Less than or equal: Key::field("score").lte(0.9)
+    pub fn lte<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::LessThanOrEqual,
+                value.into(),
+            ),
+        })
+    }
+
+    /// In set: Key::field("year").is_in(vec![2023, 2024, 2025])
+    /// Also accepts arrays, slices, and any iterator
+    pub fn is_in<I, T>(self, values: I) -> Where
+    where
+        I: IntoIterator<Item = T>,
+        Vec<T>: Into<MetadataSetValue>,
+    {
+        let vec: Vec<T> = values.into_iter().collect();
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Set(SetOperator::In, vec.into()),
+        })
+    }
+
+    /// Not in set: Key::field("status").not_in(vec!["deleted", "archived"])
+    /// Also accepts arrays, slices, and any iterator
+    pub fn not_in<I, T>(self, values: I) -> Where
+    where
+        I: IntoIterator<Item = T>,
+        Vec<T>: Into<MetadataSetValue>,
+    {
+        let vec: Vec<T> = values.into_iter().collect();
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Set(SetOperator::NotIn, vec.into()),
+        })
+    }
+
+    /// Contains text: Key::Document.contains("search term")
+    pub fn contains<S: Into<String>>(self, text: S) -> Where {
+        Where::Document(DocumentExpression {
+            operator: DocumentOperator::Contains,
+            pattern: text.into(),
+        })
+    }
+
+    /// Does not contain text: Key::Document.not_contains("exclude term")
+    pub fn not_contains<S: Into<String>>(self, text: S) -> Where {
+        Where::Document(DocumentExpression {
+            operator: DocumentOperator::NotContains,
+            pattern: text.into(),
+        })
+    }
+
+    /// Regex match: Key::field("email").regex(r"^.*@example\.com$")
+    pub fn regex<S: Into<String>>(self, pattern: S) -> Where {
+        Where::Document(DocumentExpression {
+            operator: DocumentOperator::Regex,
+            pattern: pattern.into(),
+        })
+    }
+
+    /// Negative regex match: Key::field("email").not_regex(r"^.*@spam\.com$")
+    pub fn not_regex<S: Into<String>>(self, pattern: S) -> Where {
+        Where::Document(DocumentExpression {
+            operator: DocumentOperator::NotRegex,
+            pattern: pattern.into(),
         })
     }
 }
@@ -1224,9 +1602,88 @@ impl TryFrom<SearchResult> for chroma_proto::SearchResult {
     }
 }
 
+/// Reciprocal Rank Fusion: combines multiple rank expressions
+/// Formula: -sum(weight_i / (k + rank_i))
+pub fn rrf(
+    ranks: Vec<RankExpr>,
+    k: Option<u32>,
+    weights: Option<Vec<f32>>,
+    normalize: bool,
+) -> Result<RankExpr, QueryConversionError> {
+    let k = k.unwrap_or(60);
+
+    if ranks.is_empty() {
+        return Err(QueryConversionError::validation(
+            "RRF requires at least one rank expression",
+        ));
+    }
+
+    let weights = weights.unwrap_or_else(|| vec![1.0; ranks.len()]);
+
+    if weights.len() != ranks.len() {
+        return Err(QueryConversionError::validation(format!(
+            "RRF weights length ({}) must match ranks length ({})",
+            weights.len(),
+            ranks.len()
+        )));
+    }
+
+    let weights = if normalize {
+        let sum: f32 = weights.iter().sum();
+        if sum == 0.0 {
+            return Err(QueryConversionError::validation(
+                "RRF weights sum to zero, cannot normalize",
+            ));
+        }
+        weights.into_iter().map(|w| w / sum).collect()
+    } else {
+        weights
+    };
+
+    let terms: Vec<RankExpr> = weights
+        .into_iter()
+        .zip(ranks)
+        .map(|(w, rank)| RankExpr::Value(w) / (RankExpr::Value(k as f32) + rank))
+        .collect();
+
+    // Safe: ranks is validated as non-empty above, so terms cannot be empty.
+    // Using unwrap_or_else as defensive programming to avoid panic.
+    let sum = terms
+        .into_iter()
+        .reduce(|a, b| a + b)
+        .unwrap_or(RankExpr::Value(0.0));
+    Ok(-sum)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_key_from_string() {
+        // Test predefined keys
+        assert_eq!(Key::from("#document"), Key::Document);
+        assert_eq!(Key::from("#embedding"), Key::Embedding);
+        assert_eq!(Key::from("#metadata"), Key::Metadata);
+        assert_eq!(Key::from("#score"), Key::Score);
+
+        // Test metadata field keys
+        assert_eq!(
+            Key::from("custom_field"),
+            Key::MetadataField("custom_field".to_string())
+        );
+        assert_eq!(
+            Key::from("author"),
+            Key::MetadataField("author".to_string())
+        );
+
+        // Test String variant
+        assert_eq!(Key::from("#embedding".to_string()), Key::Embedding);
+        assert_eq!(
+            Key::from("year".to_string()),
+            Key::MetadataField("year".to_string())
+        );
+    }
 
     #[test]
     fn test_query_vector_dense_proto_conversion() {
