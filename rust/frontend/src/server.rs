@@ -5,7 +5,7 @@ use axum::{
     routing::{get, patch, post},
     Json, Router, ServiceExt,
 };
-use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse};
+use chroma_api_types::{ForkCollectionPayload, GetUserIdentityResponse, HeartbeatResponse};
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
     ExternalCollectionReadContext, MeteredFutureExt, ReadAction, StartRequest, WriteAction,
@@ -1250,11 +1250,6 @@ async fn delete_collection(
     server.frontend.delete_collection(request).await?;
 
     Ok(Json(UpdateCollectionResponse {}))
-}
-
-#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
-pub struct ForkCollectionPayload {
-    pub new_name: String,
 }
 
 /// Forks an existing collection.
