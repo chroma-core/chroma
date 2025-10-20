@@ -3,8 +3,8 @@ use std::sync::Arc;
 use chroma_api_types::ForkCollectionPayload;
 use chroma_types::{
     plan::SearchPayload, AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection,
-    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest, GetResponse,
-    IncludeList, InternalSchema, Metadata, QueryRequest, QueryResponse, SearchRequest,
+    CollectionUuid, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest,
+    GetResponse, IncludeList, InternalSchema, Metadata, QueryRequest, QueryResponse, SearchRequest,
     SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
     UpdateMetadata, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
 };
@@ -34,6 +34,18 @@ impl ChromaCollection {
 
     pub fn tenant(&self) -> &str {
         &self.collection.tenant
+    }
+
+    pub fn name(&self) -> &str {
+        &self.collection.name
+    }
+
+    pub fn id(&self) -> CollectionUuid {
+        self.collection.collection_id
+    }
+
+    pub fn version(&self) -> i32 {
+        self.collection.version
     }
 
     pub async fn count(&self) -> Result<u32, ChromaClientError> {
