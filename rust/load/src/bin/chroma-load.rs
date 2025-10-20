@@ -1,6 +1,6 @@
-//! The main chroma-load service.
-
-#[tokio::main]
-async fn main() {
-    chroma_load::entrypoint().await;
+fn main() {
+    loop {
+        println!("moo!");
+        std::thread::sleep(std::time::Duration::from_secs(600));
+    }
 }
