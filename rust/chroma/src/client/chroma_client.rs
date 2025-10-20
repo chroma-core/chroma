@@ -16,7 +16,6 @@ use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse};
 
 use crate::client::ChromaClientOptions;
 use crate::collection::ChromaCollection;
-use crate::embed::EmbeddingFunction;
 
 const USER_AGENT: &str = concat!(
     "Chroma Rust Client v",
