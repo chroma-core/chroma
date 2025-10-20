@@ -21,7 +21,7 @@ jobs:
       - uses: ./.github/actions/python
         with:
           python-version: "3.12"
-      - uses: useblacksmith/build-push-action@v1.1
+      - uses: useblacksmith/build-push-action@v2
         with:
           setup-only: true
       - uses: ./.github/actions/tilt

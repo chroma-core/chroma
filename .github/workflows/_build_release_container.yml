@@ -101,7 +101,7 @@ jobs:
           docker pull --platform ${{ matrix.docker_platform }} debian:stable-slim
 
       - name: Build and push image
-        uses: useblacksmith/build-push-action@v1.1
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: rust/Dockerfile
