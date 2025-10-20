@@ -13,7 +13,6 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse};
-use chroma_types::{Collection, CreateCollectionPayload, InternalSchema, Metadata};
 
 use crate::client::ChromaClientOptions;
 use crate::collection::ChromaCollection;
