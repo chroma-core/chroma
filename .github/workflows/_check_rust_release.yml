@@ -1,5 +1,8 @@
 name: Rust tests
 
+on:
+  workflow_call:
+
 jobs:
   test:
     strategy:
