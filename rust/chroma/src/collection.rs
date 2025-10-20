@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use chroma_types::{
     plan::SearchPayload, AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection,
-    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest, GetResponse,
-    IncludeList, InternalSchema, Metadata, QueryRequest, QueryResponse, SearchRequest,
-    SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, ForkCollectionRequest,
+    GetRequest, GetResponse, IncludeList, InternalSchema, Metadata, QueryRequest, QueryResponse,
+    SearchRequest, SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
     UpdateMetadata, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
 };
 use reqwest::Method;
@@ -177,6 +177,24 @@ impl ChromaCollection {
         )?;
 
         self.send("delete", Method::POST, Some(request)).await
+    }
+
+    pub async fn fork(
+        &self,
+        new_name: impl Into<String>,
+    ) -> Result<ChromaCollection, ChromaClientError> {
+        let request = ForkCollectionRequest::try_new(
+            self.collection.tenant.clone(),
+            self.collection.database.clone(),
+            self.collection.collection_id,
+            new_name.into(),
+        )?;
+
+        let collection: Collection = self.send("fork", Method::POST, Some(request)).await?;
+        Ok(ChromaCollection {
+            client: self.client.clone(),
+            collection: Arc::new(collection),
+        })
     }
 
     async fn send<Body: Serialize, Response: DeserializeOwned>(
