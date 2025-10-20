@@ -1,7 +1,10 @@
 [package]
 name = "chroma-api-types"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+description = "Chroma-provided crate for api-types used in the Chroma API."
+license = "Apache-2.0"
+repository = "https://github.com/chroma-core/chroma"
 
 [dependencies]
 serde.workspace = true

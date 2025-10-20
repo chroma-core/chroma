@@ -2,7 +2,7 @@
 name = "chroma"
 version = "0.1.0"
 edition = "2021"
-description = "Placeholder for trychroma.com"
+description = "Client for Chroma, the AI-native cloud database."
 license = "Apache-2.0"
 
 [dependencies]
