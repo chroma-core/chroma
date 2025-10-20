@@ -387,6 +387,54 @@ impl From<&MetadataValue> for MetadataValueType {
     }
 }
 
+impl From<bool> for MetadataValue {
+    fn from(v: bool) -> Self {
+        MetadataValue::Bool(v)
+    }
+}
+
+impl From<i64> for MetadataValue {
+    fn from(v: i64) -> Self {
+        MetadataValue::Int(v)
+    }
+}
+
+impl From<i32> for MetadataValue {
+    fn from(v: i32) -> Self {
+        MetadataValue::Int(v as i64)
+    }
+}
+
+impl From<f64> for MetadataValue {
+    fn from(v: f64) -> Self {
+        MetadataValue::Float(v)
+    }
+}
+
+impl From<f32> for MetadataValue {
+    fn from(v: f32) -> Self {
+        MetadataValue::Float(v as f64)
+    }
+}
+
+impl From<String> for MetadataValue {
+    fn from(v: String) -> Self {
+        MetadataValue::Str(v)
+    }
+}
+
+impl From<&str> for MetadataValue {
+    fn from(v: &str) -> Self {
+        MetadataValue::Str(v.to_string())
+    }
+}
+
+impl From<SparseVector> for MetadataValue {
+    fn from(v: SparseVector) -> Self {
+        MetadataValue::SparseVector(v)
+    }
+}
+
 /// We need `Eq` and `Ord` since we want to use this as a key in `BTreeMap`
 ///
 /// For cross-type comparisons, we define a consistent ordering based on variant position:
@@ -882,6 +930,96 @@ impl Where {
     }
 }
 
+use std::ops::{BitAnd, BitOr};
+
+impl BitAnd for Where {
+    type Output = Where;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        match self {
+            Where::Composite(CompositeExpression {
+                operator: BooleanOperator::And,
+                mut children,
+            }) => match rhs {
+                Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::And,
+                    children: rhs_children,
+                }) => {
+                    children.extend(rhs_children);
+                    Where::Composite(CompositeExpression {
+                        operator: BooleanOperator::And,
+                        children,
+                    })
+                }
+                _ => {
+                    children.push(rhs);
+                    Where::Composite(CompositeExpression {
+                        operator: BooleanOperator::And,
+                        children,
+                    })
+                }
+            },
+            _ => match rhs {
+                Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::And,
+                    mut children,
+                }) => {
+                    children.insert(0, self);
+                    Where::Composite(CompositeExpression {
+                        operator: BooleanOperator::And,
+                        children,
+                    })
+                }
+                _ => Where::conjunction(vec![self, rhs]),
+            },
+        }
+    }
+}
+
+impl BitOr for Where {
+    type Output = Where;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        match self {
+            Where::Composite(CompositeExpression {
+                operator: BooleanOperator::Or,
+                mut children,
+            }) => match rhs {
+                Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::Or,
+                    children: rhs_children,
+                }) => {
+                    children.extend(rhs_children);
+                    Where::Composite(CompositeExpression {
+                        operator: BooleanOperator::Or,
+                        children,
+                    })
+                }
+                _ => {
+                    children.push(rhs);
+                    Where::Composite(CompositeExpression {
+                        operator: BooleanOperator::Or,
+                        children,
+                    })
+                }
+            },
+            _ => match rhs {
+                Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::Or,
+                    mut children,
+                }) => {
+                    children.insert(0, self);
+                    Where::Composite(CompositeExpression {
+                        operator: BooleanOperator::Or,
+                        children,
+                    })
+                }
+                _ => Where::disjunction(vec![self, rhs]),
+            },
+        }
+    }
+}
+
 impl TryFrom<chroma_proto::Where> for Where {
     type Error = WhereConversionError;
 
@@ -1276,6 +1414,48 @@ impl MetadataSetValue {
             MetadataSetValue::Float(_) => MetadataValueType::Float,
             MetadataSetValue::Str(_) => MetadataValueType::Str,
         }
+    }
+}
+
+impl From<Vec<bool>> for MetadataSetValue {
+    fn from(values: Vec<bool>) -> Self {
+        MetadataSetValue::Bool(values)
+    }
+}
+
+impl From<Vec<i64>> for MetadataSetValue {
+    fn from(values: Vec<i64>) -> Self {
+        MetadataSetValue::Int(values)
+    }
+}
+
+impl From<Vec<i32>> for MetadataSetValue {
+    fn from(values: Vec<i32>) -> Self {
+        MetadataSetValue::Int(values.into_iter().map(|v| v as i64).collect())
+    }
+}
+
+impl From<Vec<f64>> for MetadataSetValue {
+    fn from(values: Vec<f64>) -> Self {
+        MetadataSetValue::Float(values)
+    }
+}
+
+impl From<Vec<f32>> for MetadataSetValue {
+    fn from(values: Vec<f32>) -> Self {
+        MetadataSetValue::Float(values.into_iter().map(|v| v as f64).collect())
+    }
+}
+
+impl From<Vec<String>> for MetadataSetValue {
+    fn from(values: Vec<String>) -> Self {
+        MetadataSetValue::Str(values)
+    }
+}
+
+impl From<Vec<&str>> for MetadataSetValue {
+    fn from(values: Vec<&str>) -> Self {
+        MetadataSetValue::Str(values.into_iter().map(|s| s.to_string()).collect())
     }
 }
 
