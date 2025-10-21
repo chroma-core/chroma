@@ -1,7 +1,7 @@
 use chroma_types::SparseVector;
 use thiserror::Error;
 
-use crate::embed::fastembed_bm25_tokenizer::FastembedBM25Tokenizer;
+use crate::embed::bm25_tokenizer::Bm25Tokenizer;
 use crate::embed::murmur3_abs_hasher::Murmur3AbsHasher;
 use crate::embed::{EmbeddingFunction, TokenHasher, Tokenizer};
 
@@ -23,7 +23,7 @@ pub enum BM25SparseEmbeddingError {}
 /// - k, b, avg_len: BM25 parameters
 ///
 /// Type parameters:
-/// - T: Tokenizer implementation (e.g., FastembedBM25Tokenizer)
+/// - T: Tokenizer implementation (e.g., Bm25Tokenizer)
 /// - H: TokenHasher implementation (e.g., Murmur3AbsHasher)
 pub struct BM25SparseEmbeddingFunction<T, H>
 where
@@ -37,8 +37,8 @@ where
     pub avg_len: f32,
 }
 
-impl Default for BM25SparseEmbeddingFunction<FastembedBM25Tokenizer, Murmur3AbsHasher> {
-    /// Create a default BM25 implementation using FastembedBM25Tokenizer and Murmur3AbsHasher.
+impl Default for BM25SparseEmbeddingFunction<Bm25Tokenizer, Murmur3AbsHasher> {
+    /// Create a default BM25 implementation using Bm25Tokenizer and Murmur3AbsHasher.
     ///
     /// Default parameters:
     /// - k: 1.2 (BM25 saturation parameter)
@@ -46,8 +46,8 @@ impl Default for BM25SparseEmbeddingFunction<FastembedBM25Tokenizer, Murmur3AbsH
     /// - avg_len: 256.0 (average document length in tokens)
     fn default() -> Self {
         Self {
-            tokenizer: FastembedBM25Tokenizer::new(),
-            hasher: Murmur3AbsHasher::new(),
+            tokenizer: Bm25Tokenizer::default(),
+            hasher: Murmur3AbsHasher::default(),
             k: 1.2,
             b: 0.75,
             avg_len: 256.0,

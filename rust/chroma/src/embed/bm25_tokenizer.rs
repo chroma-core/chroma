@@ -1,14 +1,14 @@
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
 use rust_stemmers::{Algorithm, Stemmer};
 
 use crate::embed::Tokenizer;
 
-/// Default English stopwords matching fastembed.
+/// Default English stopwords array for BM25 tokenization.
 ///
-/// This list is derived from NLTK's English stopwords, which is what
-/// fastembed uses internally. Total: 179 stopwords.
-const DEFAULT_ENGLISH_STOPWORDS: &[&str] = &[
+/// This list is derived from NLTK's English stopwords. Total: 179 stopwords.
+const DEFAULT_ENGLISH_STOPWORDS_ARRAY: &[&str] = &[
     "a",
     "about",
     "above",
@@ -190,7 +190,17 @@ const DEFAULT_ENGLISH_STOPWORDS: &[&str] = &[
     "yourselves",
 ];
 
-/// Tokenizer that mirrors Python fastembed's BM25 behavior.
+/// Default English stopwords as a HashSet, lazily initialized.
+///
+/// This is computed once and reused across all default tokenizer instances.
+static DEFAULT_ENGLISH_STOPWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
+    DEFAULT_ENGLISH_STOPWORDS_ARRAY
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+});
+
+/// Standard BM25 tokenizer with stemming and stopword filtering.
 ///
 /// Processing pipeline:
 /// 1. Remove non-alphanumeric characters (replace with spaces)
@@ -199,59 +209,24 @@ const DEFAULT_ENGLISH_STOPWORDS: &[&str] = &[
 /// 4. Filter tokens longer than max length
 /// 5. Apply Snowball stemming
 ///
-/// This matches the behavior of fastembed's Bm25 class.
-pub struct FastembedBM25Tokenizer {
-    stemmer: Stemmer,
-    stopwords: HashSet<String>,
-    token_max_length: usize,
+/// All fields are public for direct construction and customization.
+pub struct Bm25Tokenizer {
+    pub stemmer: Stemmer,
+    pub stopwords: HashSet<String>,
+    pub token_max_length: usize,
 }
 
-impl FastembedBM25Tokenizer {
-    /// Create a new tokenizer for English with default settings.
-    ///
-    /// Default stopwords list matches fastembed's English stopwords.
-    /// Default max token length is 40 characters.
-    pub fn new() -> Self {
-        Self::with_language(Algorithm::English)
-    }
-
-    /// Create a tokenizer for a specific language.
-    pub fn with_language(language: Algorithm) -> Self {
-        let stemmer = Stemmer::create(language);
-        let stopwords = Self::default_english_stopwords();
-
+impl Default for Bm25Tokenizer {
+    fn default() -> Self {
         Self {
-            stemmer,
-            stopwords,
+            stemmer: Stemmer::create(Algorithm::English),
+            stopwords: DEFAULT_ENGLISH_STOPWORDS.clone(),
             token_max_length: 40,
         }
     }
+}
 
-    /// Create a tokenizer with custom stopwords.
-    pub fn with_stopwords(language: Algorithm, stopwords: HashSet<String>) -> Self {
-        let stemmer = Stemmer::create(language);
-
-        Self {
-            stemmer,
-            stopwords,
-            token_max_length: 40,
-        }
-    }
-
-    /// Set the maximum token length (default: 40).
-    pub fn with_max_length(mut self, max_length: usize) -> Self {
-        self.token_max_length = max_length;
-        self
-    }
-
-    /// Get default English stopwords as a HashSet.
-    fn default_english_stopwords() -> HashSet<String> {
-        DEFAULT_ENGLISH_STOPWORDS
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
-    }
-
+impl Bm25Tokenizer {
     /// Remove non-alphanumeric characters, replacing with spaces.
     ///
     /// Matches Python's: re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
@@ -278,13 +253,7 @@ impl FastembedBM25Tokenizer {
     }
 }
 
-impl Default for FastembedBM25Tokenizer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Tokenizer for FastembedBM25Tokenizer {
+impl Tokenizer for Bm25Tokenizer {
     fn tokenize(&self, text: &str) -> Vec<String> {
         // Step 1: Remove non-alphanumeric characters
         let cleaned = self.remove_non_alphanumeric(text);

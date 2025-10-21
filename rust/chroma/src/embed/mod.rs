@@ -10,7 +10,7 @@ use std::{
 };
 
 pub mod bm25;
-pub mod fastembed_bm25_tokenizer;
+pub mod bm25_tokenizer;
 pub mod murmur3_abs_hasher;
 #[cfg(feature = "ollama")]
 pub mod ollama;

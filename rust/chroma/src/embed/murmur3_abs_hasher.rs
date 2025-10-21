@@ -4,31 +4,15 @@ use murmur3::murmur3_32;
 
 use crate::embed::TokenHasher;
 
-/// Hasher that uses MurmurHash3 with absolute value,
-/// matching Python's abs(mmh3.hash(token)) behavior.
+/// Hasher that uses MurmurHash3 with absolute value.
 ///
-/// Python's mmh3.hash() returns a signed i32, and fastembed uses abs() to convert
-/// negative values to positive. This hasher replicates that behavior.
+/// This matches Python's abs(mmh3.hash(token)) behavior, where the signed i32
+/// hash is converted to its absolute value.
+///
+/// The seed field is public for direct customization.
+#[derive(Default)]
 pub struct Murmur3AbsHasher {
-    seed: u32,
-}
-
-impl Murmur3AbsHasher {
-    /// Create a new hasher with seed 0 (matching fastembed default).
-    pub fn new() -> Self {
-        Self { seed: 0 }
-    }
-
-    /// Create a new hasher with a custom seed.
-    pub fn with_seed(seed: u32) -> Self {
-        Self { seed }
-    }
-}
-
-impl Default for Murmur3AbsHasher {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub seed: u32,
 }
 
 impl TokenHasher for Murmur3AbsHasher {
