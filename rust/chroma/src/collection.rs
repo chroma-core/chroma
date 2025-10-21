@@ -64,6 +64,34 @@ impl ChromaCollection {
         self.send::<(), u32>("count", Method::GET, None).await
     }
 
+    pub async fn modify(
+        &mut self,
+        new_name: Option<impl AsRef<str>>,
+        new_metadata: Option<Metadata>,
+    ) -> Result<(), ChromaClientError> {
+        self.send::<_, ()>(
+            "modify",
+            Method::PUT,
+            Some(serde_json::json!({
+                "new_name": new_name.as_ref().map(|s| s.as_ref()),
+                "new_metadata": new_metadata,
+            })),
+        )
+        .await?;
+
+        let mut updated_collection = (*self.collection).clone();
+        if let Some(name) = new_name {
+            updated_collection.name = name.as_ref().to_string();
+        }
+        if let Some(metadata) = new_metadata {
+            updated_collection.metadata = Some(metadata);
+        }
+
+        self.collection = Arc::new(updated_collection);
+
+        Ok(())
+    }
+
     pub async fn get(
         &self,
         ids: Option<Vec<String>>,
