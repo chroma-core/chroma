@@ -101,6 +101,123 @@ pub struct Schema {
     pub keys: HashMap<String, ValueTypes>,
 }
 
+impl Default for Schema {
+    /// Create a default Schema that matches Python's behavior exactly.
+    ///
+    /// Python creates a Schema with:
+    /// - All inverted indexes enabled by default (string, int, float, bool)
+    /// - Vector and FTS indexes disabled in defaults
+    /// - Special keys configured: #document (FTS enabled) and #embedding (vector enabled)
+    /// - Vector config has space=None, hnsw=None, spann=None (deferred to backend)
+    ///
+    /// # Examples
+    /// ```
+    /// use chroma_types::Schema;
+    ///
+    /// let schema = Schema::default();
+    /// assert!(schema.keys.contains_key("#document"));
+    /// assert!(schema.keys.contains_key("#embedding"));
+    /// ```
+    fn default() -> Self {
+        // Initialize defaults - match Python's _initialize_defaults()
+        let defaults = ValueTypes {
+            string: Some(StringValueType {
+                fts_index: Some(FtsIndexType {
+                    enabled: false,
+                    config: FtsIndexConfig {},
+                }),
+                string_inverted_index: Some(StringInvertedIndexType {
+                    enabled: true,
+                    config: StringInvertedIndexConfig {},
+                }),
+            }),
+            float_list: Some(FloatListValueType {
+                vector_index: Some(VectorIndexType {
+                    enabled: false,
+                    config: VectorIndexConfig {
+                        space: None, // Python leaves as None (resolved on serialization)
+                        embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+                        source_key: None,
+                        hnsw: None,  // Python doesn't specify
+                        spann: None, // Python doesn't specify
+                    },
+                }),
+            }),
+            sparse_vector: Some(SparseVectorValueType {
+                sparse_vector_index: Some(SparseVectorIndexType {
+                    enabled: false,
+                    config: SparseVectorIndexConfig {
+                        embedding_function: None,
+                        source_key: None,
+                        bm25: None,
+                    },
+                }),
+            }),
+            int: Some(IntValueType {
+                int_inverted_index: Some(IntInvertedIndexType {
+                    enabled: true,
+                    config: IntInvertedIndexConfig {},
+                }),
+            }),
+            float: Some(FloatValueType {
+                float_inverted_index: Some(FloatInvertedIndexType {
+                    enabled: true,
+                    config: FloatInvertedIndexConfig {},
+                }),
+            }),
+            boolean: Some(BoolValueType {
+                bool_inverted_index: Some(BoolInvertedIndexType {
+                    enabled: true,
+                    config: BoolInvertedIndexConfig {},
+                }),
+            }),
+        };
+
+        // Initialize key-specific overrides - match Python's _initialize_keys()
+        let mut keys = HashMap::new();
+
+        // #document: FTS enabled, string inverted disabled
+        keys.insert(
+            DOCUMENT_KEY.to_string(),
+            ValueTypes {
+                string: Some(StringValueType {
+                    fts_index: Some(FtsIndexType {
+                        enabled: true,
+                        config: FtsIndexConfig {},
+                    }),
+                    string_inverted_index: Some(StringInvertedIndexType {
+                        enabled: false,
+                        config: StringInvertedIndexConfig {},
+                    }),
+                }),
+                ..Default::default()
+            },
+        );
+
+        // #embedding: Vector index enabled with source_key=#document
+        keys.insert(
+            EMBEDDING_KEY.to_string(),
+            ValueTypes {
+                float_list: Some(FloatListValueType {
+                    vector_index: Some(VectorIndexType {
+                        enabled: true,
+                        config: VectorIndexConfig {
+                            space: None, // Python leaves as None (resolved on serialization)
+                            embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+                            source_key: Some(DOCUMENT_KEY.to_string()),
+                            hnsw: None,  // Python doesn't specify
+                            spann: None, // Python doesn't specify
+                        },
+                    }),
+                }),
+                ..Default::default()
+            },
+        );
+
+        Schema { defaults, keys }
+    }
+}
+
 pub fn is_embedding_function_default(
     embedding_function: &Option<EmbeddingFunctionConfiguration>,
 ) -> bool {
@@ -1434,18 +1551,18 @@ impl Schema {
     ///
     /// # Examples
     /// ```
-    /// use chroma_types::{Schema, IndexConfig, VectorIndexConfig, StringInvertedIndexConfig, KnnIndex, Space};
+    /// use chroma_types::{Schema, VectorIndexConfig, StringInvertedIndexConfig, Space};
     ///
     /// # fn main() -> Result<(), String> {
-    /// let schema = Schema::new_default(KnnIndex::Hnsw)
-    ///     .create_index(None, IndexConfig::Vector(VectorIndexConfig {
+    /// let schema = Schema::default()
+    ///     .create_index(None, VectorIndexConfig {
     ///         space: Some(Space::Cosine),
     ///         embedding_function: None,
     ///         source_key: None,
     ///         hnsw: None,
     ///         spann: None,
-    ///     }))?
-    ///     .create_index(Some("category"), IndexConfig::StringInverted(StringInvertedIndexConfig {}))?;
+    ///     }.into())?
+    ///     .create_index(Some("category"), StringInvertedIndexConfig {}.into())?;
     /// # Ok(())
     /// # }
     /// ```
@@ -1521,11 +1638,11 @@ impl Schema {
     ///
     /// # Examples
     /// ```
-    /// use chroma_types::{Schema, IndexConfig, StringInvertedIndexConfig, KnnIndex};
+    /// use chroma_types::{Schema, StringInvertedIndexConfig};
     ///
     /// # fn main() -> Result<(), String> {
-    /// let schema = Schema::new_default(KnnIndex::Hnsw)
-    ///     .delete_index(Some("category"), IndexConfig::StringInverted(StringInvertedIndexConfig {}))?;
+    /// let schema = Schema::default()
+    ///     .delete_index(Some("category"), StringInvertedIndexConfig {}.into())?;
     /// # Ok(())
     /// # }
     /// ```
@@ -4089,5 +4206,144 @@ mod tests {
                 .unwrap()
                 .enabled
         );
+    }
+
+    #[test]
+    fn test_schema_default_matches_python() {
+        // Test that Schema::default() matches Python's Schema() behavior exactly
+        let schema = Schema::default();
+
+        // ============================================================================
+        // VERIFY DEFAULTS (match Python's _initialize_defaults)
+        // ============================================================================
+
+        // String defaults: FTS disabled, string inverted enabled
+        assert!(schema.defaults.string.is_some());
+        let string = schema.defaults.string.as_ref().unwrap();
+        assert_eq!(string.fts_index.as_ref().unwrap().enabled, false);
+        assert_eq!(string.string_inverted_index.as_ref().unwrap().enabled, true);
+
+        // Float list defaults: vector index disabled
+        assert!(schema.defaults.float_list.is_some());
+        let float_list = schema.defaults.float_list.as_ref().unwrap();
+        assert_eq!(float_list.vector_index.as_ref().unwrap().enabled, false);
+        let vector_config = &float_list.vector_index.as_ref().unwrap().config;
+        assert_eq!(vector_config.space, None); // Python leaves as None
+        assert_eq!(vector_config.hnsw, None); // Python doesn't specify
+        assert_eq!(vector_config.spann, None); // Python doesn't specify
+        assert_eq!(vector_config.source_key, None);
+
+        // Sparse vector defaults: disabled
+        assert!(schema.defaults.sparse_vector.is_some());
+        let sparse = schema.defaults.sparse_vector.as_ref().unwrap();
+        assert_eq!(sparse.sparse_vector_index.as_ref().unwrap().enabled, false);
+
+        // Int defaults: inverted index enabled
+        assert!(schema.defaults.int.is_some());
+        assert_eq!(
+            schema
+                .defaults
+                .int
+                .as_ref()
+                .unwrap()
+                .int_inverted_index
+                .as_ref()
+                .unwrap()
+                .enabled,
+            true
+        );
+
+        // Float defaults: inverted index enabled
+        assert!(schema.defaults.float.is_some());
+        assert_eq!(
+            schema
+                .defaults
+                .float
+                .as_ref()
+                .unwrap()
+                .float_inverted_index
+                .as_ref()
+                .unwrap()
+                .enabled,
+            true
+        );
+
+        // Bool defaults: inverted index enabled
+        assert!(schema.defaults.boolean.is_some());
+        assert_eq!(
+            schema
+                .defaults
+                .boolean
+                .as_ref()
+                .unwrap()
+                .bool_inverted_index
+                .as_ref()
+                .unwrap()
+                .enabled,
+            true
+        );
+
+        // ============================================================================
+        // VERIFY SPECIAL KEYS (match Python's _initialize_keys)
+        // ============================================================================
+
+        // #document: FTS enabled, string inverted disabled
+        assert!(schema.keys.contains_key(DOCUMENT_KEY));
+        let doc = schema.keys.get(DOCUMENT_KEY).unwrap();
+        assert!(doc.string.is_some());
+        assert_eq!(
+            doc.string
+                .as_ref()
+                .unwrap()
+                .fts_index
+                .as_ref()
+                .unwrap()
+                .enabled,
+            true
+        );
+        assert_eq!(
+            doc.string
+                .as_ref()
+                .unwrap()
+                .string_inverted_index
+                .as_ref()
+                .unwrap()
+                .enabled,
+            false
+        );
+
+        // #embedding: vector index enabled with source_key=#document
+        assert!(schema.keys.contains_key(EMBEDDING_KEY));
+        let embedding = schema.keys.get(EMBEDDING_KEY).unwrap();
+        assert!(embedding.float_list.is_some());
+        let vec_idx = embedding
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+        assert_eq!(vec_idx.enabled, true);
+        assert_eq!(vec_idx.config.source_key, Some(DOCUMENT_KEY.to_string()));
+        assert_eq!(vec_idx.config.space, None); // Python leaves as None
+        assert_eq!(vec_idx.config.hnsw, None); // Python doesn't specify
+        assert_eq!(vec_idx.config.spann, None); // Python doesn't specify
+
+        // Verify only these two special keys exist
+        assert_eq!(schema.keys.len(), 2);
+    }
+
+    #[test]
+    fn test_schema_default_works_with_builder() {
+        // Test that Schema::default() can be used with builder pattern
+        let schema = Schema::default()
+            .create_index(Some("category"), StringInvertedIndexConfig {}.into())
+            .expect("should succeed");
+
+        // Verify the new index was added
+        assert!(schema.keys.contains_key("category"));
+        assert!(schema.keys.contains_key(DOCUMENT_KEY));
+        assert!(schema.keys.contains_key(EMBEDDING_KEY));
+        assert_eq!(schema.keys.len(), 3);
     }
 }
