@@ -1284,10 +1284,22 @@ impl Schema {
         configuration: Option<InternalCollectionConfiguration>,
     ) -> Result<Schema, SchemaError> {
         let (collection_config_ef, collection_config_space) = match &configuration {
-            Some(config) => (
-                config.embedding_function.clone(),
-                config.vector_index.get_space(),
-            ),
+            Some(config) => match &config.embedding_function {
+                Some(ef) => {
+                    if ef.is_default() {
+                        (Some(ef.clone()), config.vector_index.get_space())
+                    } else {
+                        (
+                            Some(EmbeddingFunctionConfiguration::Legacy),
+                            default_space(),
+                        )
+                    }
+                }
+                None => (
+                    Some(EmbeddingFunctionConfiguration::Legacy),
+                    default_space(),
+                ),
+            },
             None => (
                 Some(EmbeddingFunctionConfiguration::Legacy),
                 default_space(),
