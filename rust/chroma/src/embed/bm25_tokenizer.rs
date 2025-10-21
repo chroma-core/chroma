@@ -204,6 +204,7 @@ static DEFAULT_ENGLISH_STOPWORDS: LazyLock<HashSet<&'static str>> =
 /// 5. Apply Snowball stemming
 ///
 /// All fields are public for direct construction and customization.
+// NOTE(sicheng): Add config to support more languages
 pub struct Bm25Tokenizer {
     pub stemmer: Stemmer,
     pub stopwords: HashSet<&'static str>,
