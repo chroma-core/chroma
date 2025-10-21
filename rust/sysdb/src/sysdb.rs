@@ -6,6 +6,8 @@ use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
+use chroma_types::chroma_proto::AdvanceTaskRequest;
+use chroma_types::chroma_proto::FinishTaskRequest;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
     chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments,
@@ -21,11 +23,12 @@ use chroma_types::{
     UpdateTenantResponse, VectorIndexConfiguration,
 };
 use chroma_types::{
-    BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
-    CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
-    FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
-    ForkCollectionError, Schema, SchemaError, Segment, SegmentConversionError, SegmentScope,
-    Tenant,
+    AdvanceTaskError, AdvanceTaskResponse, BatchGetCollectionSoftDeleteStatusError,
+    BatchGetCollectionVersionFilePathsError, Collection, CollectionConversionError, CollectionUuid,
+    CountForksError, DatabaseUuid, FinishDatabaseDeletionError, FinishTaskError,
+    FlushCompactionAndTaskResponse, FlushCompactionResponse,
+    FlushCompactionResponseConversionError, ForkCollectionError, Schema, SchemaError, Segment,
+    SegmentConversionError, SegmentScope, TaskUpdateInfo, TaskUuid, Tenant,
 };
 use prost_types;
 use std::collections::HashMap;
@@ -626,6 +629,39 @@ impl SysDb {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn flush_compaction_and_task(
+        &mut self,
+        tenant_id: String,
+        collection_id: CollectionUuid,
+        log_position: i64,
+        collection_version: i32,
+        segment_flush_info: Arc<[SegmentFlushInfo]>,
+        total_records_post_compaction: u64,
+        size_bytes_post_compaction: u64,
+        schema: Option<Schema>,
+        task_update: TaskUpdateInfo,
+    ) -> Result<FlushCompactionAndTaskResponse, FlushCompactionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.flush_compaction_and_task(
+                    tenant_id,
+                    collection_id,
+                    log_position,
+                    collection_version,
+                    segment_flush_info,
+                    total_records_post_compaction,
+                    size_bytes_post_compaction,
+                    schema,
+                    task_update,
+                )
+                .await
+            }
+            SysDb::Sqlite(_) => todo!(),
+            SysDb::Test(_) => todo!(),
+        }
+    }
+
     pub async fn list_collection_versions(
         &mut self,
         collection_id: CollectionUuid,
@@ -693,6 +729,36 @@ impl SysDb {
             SysDb::Grpc(grpc) => grpc.peek_schedule_by_collection_id(collection_ids).await,
             SysDb::Sqlite(_) => unimplemented!(),
             SysDb::Test(test) => test.peek_schedule_by_collection_id(collection_ids).await,
+        }
+    }
+
+    pub async fn finish_task(&mut self, task_id: TaskUuid) -> Result<(), FinishTaskError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.finish_task(task_id).await,
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(test) => test.finish_task(task_id).await,
+        }
+    }
+
+    pub async fn advance_task(
+        &mut self,
+        task_id: TaskUuid,
+        task_run_nonce: uuid::Uuid,
+        completion_offset: i64,
+        next_run_delay_secs: u64,
+    ) -> Result<AdvanceTaskResponse, AdvanceTaskError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.advance_task(
+                    task_id,
+                    task_run_nonce,
+                    completion_offset,
+                    next_run_delay_secs,
+                )
+                .await
+            }
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(_) => unimplemented!(),
         }
     }
 }
@@ -1609,6 +1675,87 @@ impl GrpcSysDb {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn flush_compaction_and_task(
+        &mut self,
+        tenant_id: String,
+        collection_id: CollectionUuid,
+        log_position: i64,
+        collection_version: i32,
+        segment_flush_info: Arc<[SegmentFlushInfo]>,
+        total_records_post_compaction: u64,
+        size_bytes_post_compaction: u64,
+        schema: Option<Schema>,
+        task_update: TaskUpdateInfo,
+    ) -> Result<FlushCompactionAndTaskResponse, FlushCompactionError> {
+        let segment_compaction_info =
+            segment_flush_info
+                .iter()
+                .map(|segment_flush_info| segment_flush_info.try_into())
+                .collect::<Result<
+                    Vec<chroma_proto::FlushSegmentCompactionInfo>,
+                    SegmentFlushInfoConversionError,
+                >>();
+
+        let segment_compaction_info = match segment_compaction_info {
+            Ok(segment_compaction_info) => segment_compaction_info,
+            Err(e) => {
+                return Err(FlushCompactionError::SegmentFlushInfoConversionError(e));
+            }
+        };
+
+        let schema_str = schema.and_then(|s| {
+            serde_json::to_string(&s).ok().or_else(|| {
+                tracing::error!("Failed to serialize schema for flush_compaction_and_task");
+                None
+            })
+        });
+
+        let flush_compaction = Some(chroma_proto::FlushCollectionCompactionRequest {
+            tenant_id,
+            collection_id: collection_id.0.to_string(),
+            log_position,
+            collection_version,
+            segment_compaction_info,
+            total_records_post_compaction,
+            size_bytes_post_compaction,
+            schema_str,
+        });
+
+        let task_update_proto = Some(chroma_proto::TaskUpdateInfo {
+            task_id: task_update.task_id.0.to_string(),
+            task_run_nonce: task_update.task_run_nonce.to_string(),
+            completion_offset: task_update.completion_offset,
+        });
+
+        let req = chroma_proto::FlushCollectionCompactionAndTaskRequest {
+            flush_compaction,
+            task_update: task_update_proto,
+        };
+
+        let res = self.client.flush_collection_compaction_and_task(req).await;
+        match res {
+            Ok(res) => {
+                let res = res.into_inner();
+                let res = match res.try_into() {
+                    Ok(res) => res,
+                    Err(e) => {
+                        return Err(
+                            FlushCompactionError::FlushCompactionResponseConversionError(e),
+                        );
+                    }
+                };
+                Ok(res)
+            }
+            Err(e) => {
+                if e.code() == Code::FailedPrecondition {
+                    return Err(FlushCompactionError::FailedToFlushCompaction(e));
+                }
+                Err(FlushCompactionError::FailedToFlushCompaction(e))
+            }
+        }
+    }
+
     async fn mark_version_for_deletion(
         &mut self,
         epoch_id: i64,
@@ -1655,6 +1802,68 @@ impl GrpcSysDb {
         Ok(ResetResponse {})
     }
 
+    async fn finish_task(&mut self, task_id: TaskUuid) -> Result<(), FinishTaskError> {
+        let req = FinishTaskRequest {
+            task_id: task_id.0.to_string(),
+        };
+        self.client.finish_task(req).await.map_err(|e| {
+            if e.code() == Code::NotFound {
+                FinishTaskError::TaskNotFound
+            } else {
+                FinishTaskError::FailedToFinishTask(e)
+            }
+        })?;
+        Ok(())
+    }
+
+    async fn advance_task(
+        &mut self,
+        task_id: TaskUuid,
+        task_run_nonce: uuid::Uuid,
+        completion_offset: i64,
+        next_run_delay_secs: u64,
+    ) -> Result<AdvanceTaskResponse, AdvanceTaskError> {
+        let req = AdvanceTaskRequest {
+            collection_id: None, // Not used by coordinator
+            task_id: Some(task_id.0.to_string()),
+            task_run_nonce: Some(task_run_nonce.to_string()),
+            completion_offset: Some(completion_offset),
+            next_run_delay_secs: Some(next_run_delay_secs),
+        };
+
+        let response = self.client.advance_task(req).await.map_err(|e| {
+            if e.code() == Code::NotFound {
+                AdvanceTaskError::TaskNotFound
+            } else {
+                AdvanceTaskError::FailedToAdvanceTask(e)
+            }
+        })?;
+
+        let response = response.into_inner();
+
+        // Parse next_nonce
+        let next_nonce = uuid::Uuid::parse_str(&response.next_run_nonce).map_err(|e| {
+            tracing::error!(
+                next_nonce = %response.next_run_nonce,
+                error = %e,
+                "Server returned invalid next_nonce UUID"
+            );
+            AdvanceTaskError::FailedToAdvanceTask(tonic::Status::internal(
+                "Invalid next_nonce in response",
+            ))
+        })?;
+
+        // Parse next_run timestamp
+        let next_run =
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(response.next_run_at);
+
+        Ok(AdvanceTaskResponse {
+            next_nonce,
+            next_run,
+            completion_offset: response.completion_offset as u64,
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn create_task(
         &mut self,
@@ -1677,7 +1886,6 @@ impl GrpcSysDb {
             }),
             _ => None, // Non-object params omitted from proto
         };
-
         let req = chroma_proto::CreateTaskRequest {
             name: name.clone(),
             operator_name: operator_name.clone(),
@@ -1688,9 +1896,7 @@ impl GrpcSysDb {
             database: database_name.clone(),
             min_records_for_task,
         };
-
         let response = self.client.create_task(req).await?.into_inner();
-
         // Parse the returned task_id - this should always succeed since the server generated it
         // If this fails, it indicates a serious server bug or protocol corruption
         let task_id = chroma_types::TaskUuid(
@@ -1703,7 +1909,6 @@ impl GrpcSysDb {
                 CreateTaskError::ServerReturnedInvalidData
             })?,
         );
-
         Ok(task_id)
     }
 
@@ -1728,29 +1933,27 @@ impl GrpcSysDb {
         };
         let response = response.into_inner();
 
-        // If response has no task_id, task was not found
-        if response.task.is_none() {
-            return Err(GetTaskError::NotFound);
-        }
+        // Extract the nested task from response
+        let task = response.task.as_ref().ok_or_else(|| {
+            GetTaskError::FailedToGetTask(tonic::Status::internal("Missing task in response"))
+        })?;
 
-        // Parse the response and construct Task
-        let task_id_str = response.task.as_ref().unwrap().task_id.clone();
-        let task_id = chroma_types::TaskUuid(uuid::Uuid::parse_str(&task_id_str).map_err(|e| {
-            tracing::error!(
-                task_id = %task_id_str,
-                error = %e,
-                "Server returned invalid task_id UUID"
-            );
-            GetTaskError::ServerReturnedInvalidData
-        })?);
-
-        let operator_id = response.task.as_ref().unwrap().operator_name.clone();
-
-        let input_collection_id_str = response.task.as_ref().unwrap().input_collection_id.clone();
-        let parsed_input_collection_id = chroma_types::CollectionUuid(
-            uuid::Uuid::parse_str(&input_collection_id_str).map_err(|e| {
+        // Parse task_id
+        let task_id =
+            chroma_types::TaskUuid(uuid::Uuid::parse_str(&task.task_id).map_err(|e| {
                 tracing::error!(
-                    input_collection_id = %input_collection_id_str,
+                    task_id = %task.task_id,
+                    error = %e,
+                    "Server returned invalid task_id UUID"
+                );
+                GetTaskError::ServerReturnedInvalidData
+            })?);
+
+        // Parse input_collection_id
+        let parsed_input_collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&task.input_collection_id).map_err(|e| {
+                tracing::error!(
+                    input_collection_id = %task.input_collection_id,
                     error = %e,
                     "Server returned invalid input_collection_id UUID"
                 );
@@ -1758,32 +1961,234 @@ impl GrpcSysDb {
             })?,
         );
 
+        // Parse next_run timestamp from microseconds
+        let next_run =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(task.next_run_at);
+
+        // Parse nonces
+        let lowest_live_nonce = if task.lowest_live_nonce.is_empty() {
+            None
+        } else {
+            Some(
+                uuid::Uuid::parse_str(&task.lowest_live_nonce)
+                    .map(chroma_types::NonceUuid)
+                    .map_err(|e| {
+                        tracing::error!(
+                            lowest_live_nonce = %task.lowest_live_nonce,
+                            error = %e,
+                            "Server returned invalid lowest_live_nonce UUID"
+                        );
+                        GetTaskError::ServerReturnedInvalidData
+                    })?,
+            )
+        };
+
+        let next_nonce = uuid::Uuid::parse_str(&task.next_nonce)
+            .map(chroma_types::NonceUuid)
+            .map_err(|e| {
+                tracing::error!(
+                    next_nonce = %task.next_nonce,
+                    error = %e,
+                    "Server returned invalid next_nonce UUID"
+                );
+                GetTaskError::ServerReturnedInvalidData
+            })?;
+
         // Convert params from Struct to JSON string
-        let params_str = response.task.as_ref().unwrap().params.clone().map(|s| {
+        let params_str = task.params.clone().map(|s| {
             let json_value = prost_struct_to_json(s);
             serde_json::to_string(&json_value).unwrap_or_else(|_| "{}".to_string())
         });
 
-        let task = response.task.as_ref().unwrap();
+        let parsed_output_collection_id = task.output_collection_id.clone().map(|id| {
+            uuid::Uuid::parse_str(&id)
+                .map(chroma_types::CollectionUuid)
+                .ok()
+                .unwrap()
+        });
 
         Ok(chroma_types::Task {
             id: task_id,
             name: task.name.clone(),
-            operator_id,
+            operator_id: task.operator_name.clone(),
             input_collection_id: parsed_input_collection_id,
             output_collection_name: task.output_collection_name.clone(),
-            output_collection_id: task.output_collection_id.clone(),
+            output_collection_id: parsed_output_collection_id,
             params: params_str,
             tenant_id: task.tenant_id.clone(),
             database_id: task.database_id.clone(),
             last_run: None,
-            next_run: None,
+            next_run: next_run,
+            lowest_live_nonce,
+            next_nonce,
             completion_offset: task.completion_offset as u64,
             min_records_for_task: task.min_records_for_task,
             is_deleted: false,
             created_at: std::time::SystemTime::now(),
             updated_at: std::time::SystemTime::now(),
         })
+    }
+
+    pub async fn get_task_by_uuid(
+        &mut self,
+        task_uuid: chroma_types::TaskUuid,
+    ) -> Result<chroma_types::Task, GetTaskError> {
+        let req = chroma_proto::GetTaskByUuidRequest {
+            task_id: task_uuid.0.to_string(),
+        };
+
+        let response = match self.client.get_task_by_uuid(req).await {
+            Ok(resp) => resp,
+            Err(status) => {
+                if status.code() == tonic::Code::NotFound {
+                    return Err(GetTaskError::NotFound);
+                }
+                return Err(GetTaskError::FailedToGetTask(status));
+            }
+        };
+        let response = response.into_inner();
+
+        // Extract the nested task from response
+        let task = response.task.ok_or_else(|| {
+            GetTaskError::FailedToGetTask(tonic::Status::internal("Missing task in response"))
+        })?;
+
+        // Parse task_id
+        let task_id =
+            chroma_types::TaskUuid(uuid::Uuid::parse_str(&task.task_id).map_err(|e| {
+                tracing::error!(
+                    task_id = %task.task_id,
+                    error = %e,
+                    "Server returned invalid task_id UUID"
+                );
+                GetTaskError::ServerReturnedInvalidData
+            })?);
+
+        // Parse input_collection_id
+        let parsed_input_collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&task.input_collection_id).map_err(|e| {
+                tracing::error!(
+                    input_collection_id = %task.input_collection_id,
+                    error = %e,
+                    "Server returned invalid input_collection_id UUID"
+                );
+                GetTaskError::ServerReturnedInvalidData
+            })?,
+        );
+
+        // Parse next_run timestamp from microseconds
+        let next_run =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(task.next_run_at);
+
+        // Parse nonces
+        let lowest_live_nonce = if task.lowest_live_nonce.is_empty() {
+            None
+        } else {
+            Some(
+                uuid::Uuid::parse_str(&task.lowest_live_nonce)
+                    .map(chroma_types::NonceUuid)
+                    .map_err(|e| {
+                        tracing::error!(
+                            lowest_live_nonce = %task.lowest_live_nonce,
+                            error = %e,
+                            "Server returned invalid lowest_live_nonce UUID"
+                        );
+                        GetTaskError::ServerReturnedInvalidData
+                    })?,
+            )
+        };
+
+        let next_nonce = uuid::Uuid::parse_str(&task.next_nonce)
+            .map(chroma_types::NonceUuid)
+            .map_err(|e| {
+                tracing::error!(
+                    next_nonce = %task.next_nonce,
+                    error = %e,
+                    "Server returned invalid next_nonce UUID"
+                );
+                GetTaskError::ServerReturnedInvalidData
+            })?;
+
+        // Convert params from Struct to JSON string
+        let params_str = task.params.map(|s| {
+            let json_value = prost_struct_to_json(s);
+            serde_json::to_string(&json_value).unwrap_or_else(|_| "{}".to_string())
+        });
+
+        // Parse output_collection_id if present
+        let parsed_output_collection_id = task.output_collection_id.as_ref().and_then(|id_str| {
+            if id_str.is_empty() {
+                None
+            } else {
+                uuid::Uuid::parse_str(id_str)
+                    .map(chroma_types::CollectionUuid)
+                    .ok()
+            }
+        });
+
+        Ok(chroma_types::Task {
+            id: task_id,
+            name: task.name,
+            operator_id: task.operator_name,
+            input_collection_id: parsed_input_collection_id,
+            output_collection_name: task.output_collection_name,
+            output_collection_id: parsed_output_collection_id,
+            params: params_str,
+            tenant_id: task.tenant_id,
+            database_id: task.database_id,
+            last_run: None,
+            next_run,
+            lowest_live_nonce,
+            next_nonce,
+            completion_offset: task.completion_offset as u64,
+            min_records_for_task: task.min_records_for_task,
+            is_deleted: false,
+            created_at: std::time::SystemTime::now(),
+            updated_at: std::time::SystemTime::now(),
+        })
+    }
+
+    pub async fn create_output_collection_for_task(
+        &mut self,
+        task_id: chroma_types::TaskUuid,
+        collection_name: String,
+        tenant_id: String,
+        database_id: String,
+    ) -> Result<CollectionUuid, CreateOutputCollectionForTaskError> {
+        let req = chroma_proto::CreateOutputCollectionForTaskRequest {
+            task_id: task_id.0.to_string(),
+            collection_name,
+            tenant_id,
+            database_id,
+        };
+
+        let response = self
+            .client
+            .create_output_collection_for_task(req)
+            .await
+            .map_err(|e| {
+                if e.code() == tonic::Code::NotFound {
+                    return CreateOutputCollectionForTaskError::TaskNotFound;
+                }
+                if e.code() == tonic::Code::AlreadyExists {
+                    return CreateOutputCollectionForTaskError::OutputCollectionAlreadyExists;
+                }
+                CreateOutputCollectionForTaskError::FailedToCreateOutputCollectionForTask(e)
+            })?;
+
+        let response = response.into_inner();
+
+        // Parse the returned collection_id
+        let collection_id = uuid::Uuid::parse_str(&response.collection_id).map_err(|e| {
+            tracing::error!(
+                collection_id = %response.collection_id,
+                error = %e,
+                "Server returned invalid collection_id UUID"
+            );
+            CreateOutputCollectionForTaskError::ServerReturnedInvalidData
+        })?;
+
+        Ok(CollectionUuid(collection_id))
     }
 
     pub async fn soft_delete_task(
@@ -2014,6 +2419,45 @@ impl SysDb {
         }
     }
 
+    pub async fn get_task_by_uuid(
+        &mut self,
+        task_uuid: chroma_types::TaskUuid,
+    ) -> Result<chroma_types::Task, GetTaskError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_task_by_uuid(task_uuid).await,
+            SysDb::Sqlite(_) => {
+                // TODO: Implement for Sqlite
+                Err(GetTaskError::NotFound)
+            }
+            SysDb::Test(_) => {
+                // TODO: Implement for TestSysDb
+                Err(GetTaskError::NotFound)
+            }
+        }
+    }
+
+    pub async fn create_output_collection_for_task(
+        &mut self,
+        task_id: chroma_types::TaskUuid,
+        collection_name: String,
+        tenant_id: String,
+        database_id: String,
+    ) -> Result<CollectionUuid, CreateOutputCollectionForTaskError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.create_output_collection_for_task(
+                    task_id,
+                    collection_name,
+                    tenant_id,
+                    database_id,
+                )
+                .await
+            }
+            SysDb::Sqlite(_) => todo!(),
+            SysDb::Test(_) => todo!(),
+        }
+    }
+
     pub async fn soft_delete_task(
         &mut self,
         task_id: chroma_types::TaskUuid,
@@ -2086,6 +2530,33 @@ impl ChromaError for GetTaskError {
             GetTaskError::NotFound => ErrorCodes::NotFound,
             GetTaskError::FailedToGetTask(e) => e.code().into(),
             GetTaskError::ServerReturnedInvalidData => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum CreateOutputCollectionForTaskError {
+    #[error("Task not found")]
+    TaskNotFound,
+    #[error("Output collection already exists")]
+    OutputCollectionAlreadyExists,
+    #[error("Failed to create output collection for task: {0}")]
+    FailedToCreateOutputCollectionForTask(#[from] tonic::Status),
+    #[error("Server returned invalid data")]
+    ServerReturnedInvalidData,
+}
+
+impl ChromaError for CreateOutputCollectionForTaskError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CreateOutputCollectionForTaskError::TaskNotFound => ErrorCodes::NotFound,
+            CreateOutputCollectionForTaskError::OutputCollectionAlreadyExists => {
+                ErrorCodes::AlreadyExists
+            }
+            CreateOutputCollectionForTaskError::FailedToCreateOutputCollectionForTask(e) => {
+                e.code().into()
+            }
+            CreateOutputCollectionForTaskError::ServerReturnedInvalidData => ErrorCodes::Internal,
         }
     }
 }

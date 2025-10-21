@@ -18,7 +18,9 @@ use chroma_tracing::OtelFilterLevel;
 use chroma_types::chroma_proto::heap_tender_service_server::{
     HeapTenderService, HeapTenderServiceServer,
 };
-use chroma_types::chroma_proto::{HeapSummaryRequest, HeapSummaryResponse};
+use chroma_types::chroma_proto::{
+    HeapSummaryRequest, HeapSummaryResponse, ScheduleTaskRequest, ScheduleTaskResponse,
+};
 use chroma_types::{dirty_log_path_from_hostname, CollectionUuid, DirtyMarker, ScheduleEntry};
 use chrono::{DateTime, Utc};
 use s3heap::{
@@ -269,7 +271,7 @@ impl HeapTender {
                         let schedule = Schedule {
                             triggerable,
                             next_scheduled,
-                            nonce: s.task_run_nonce,
+                            nonce: s.task_run_nonce.0,
                         };
                         Ok(Some(schedule))
                     } else {
@@ -699,6 +701,14 @@ impl HeapTenderService for HeapTenderServer {
             newest_bucket,
             bucket_count,
         }))
+    }
+
+    async fn schedule_task(
+        &self,
+        _request: Request<ScheduleTaskRequest>,
+    ) -> Result<Response<ScheduleTaskResponse>, Status> {
+        // Stub implementation - full implementation added in integration branch
+        todo!("schedule_task not yet implemented");
     }
 }
 
