@@ -26,7 +26,12 @@ Where:
 
 The score is negative because Chroma uses ascending order (lower scores = better matches).
 
-{% Tabs %}
+{% Banner type="tip" %}
+**Important:** The legacy `query` API outputs *distances*, where **lower values are closer matches**. In contrast, RRF produces *scores*, where **higher values indicate better matches** (since RRF scores are negative and sorted ascending for ranking).
+{% /Banner %}
+
+
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -54,7 +59,7 @@ The score is negative because Chroma uses ascending order (lower scores = better
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Rrf Parameters
 
@@ -72,7 +77,7 @@ The score is negative because Chroma uses ascending order (lower scores = better
 | **RRF** | Different score scales (e.g., dense + sparse) | Scale-agnostic, robust to outliers | Requires `return_rank=True` |
 | **Linear Combination** | Same score scales | Simple, preserves distances | Sensitive to scale differences |
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -103,13 +108,13 @@ const linear = Knn({ query: "machine learning" }).multiply(0.7)
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## The return_rank Requirement
 
 RRF requires rank positions (0, 1, 2...) not distance scores. Always set `return_rank=True` on all Knn expressions used in RRF.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -149,11 +154,11 @@ const rrf2 = Rrf({
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Weight Configuration
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -215,7 +220,7 @@ const rrf3 = Rrf({
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## The k Parameter
 
@@ -224,7 +229,7 @@ The `k` parameter controls how much emphasis is placed on top-ranked results:
 - **Default k (60)**: Balanced emphasis (standard in literature)
 - **Large k (e.g., 100+)**: More uniform weighting across ranks
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -264,13 +269,13 @@ const rrf3 = Rrf({ ranks: [...], k: 200 });
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Common Use Case: Dense + Sparse
 
 The most common RRF use case is combining dense semantic embeddings with sparse keyword embeddings.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -349,14 +354,14 @@ const results = await collection.search(search);
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Edge Cases and Important Behavior
 
 ### Component Ranking Behavior
 Each Knn component in RRF operates on the documents that pass the filter. The number of results from each component is the minimum of its `limit` parameter and the number of filtered documents. RRF handles varying result counts gracefully - documents from any ranking are scored.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -382,7 +387,7 @@ const rrf = Rrf({
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### Minimum Requirements
 - At least one ranking expression is required
@@ -392,7 +397,7 @@ const rrf = Rrf({
 ### Document Selection with RRF
 Documents must appear in at least one component ranking to be scored. To include documents that don't appear in a specific Knn's results, set the `default` parameter on that Knn:
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -432,12 +437,12 @@ const rrf2 = Rrf({
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### RRF as a Convenience Wrapper
 `Rrf` is a convenience class that constructs the underlying ranking expression. You can manually build the same expression if needed:
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -474,13 +479,13 @@ const manualRrf = Val(-0.7).divide(Val(60).add(rank1))
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Complete Example
 
 Here's a practical example showing RRF with filtering and result processing:
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -499,7 +504,7 @@ hybrid_rank = Rrf(
 # Build complete search
 search = (Search()
     .where(
-        (K("language") == "en") & 
+        (K("language") == "en") &
         (K("year") >= 2020)
     )
     .rank(hybrid_rank)
@@ -518,16 +523,6 @@ for i, row in enumerate(rows, 1):
     print()
 ```
 
-Example output:
-```
-1. Introduction to Neural Networks (2023)
-   RRF Score: -0.0428
-   Preview: Neural networks are computational models inspired by biological neural networks...
-
-2. Deep Learning Fundamentals (2022)
-   RRF Score: -0.0385
-   Preview: This comprehensive guide covers the fundamental concepts of deep learning...
-```
 {% /Tab %}
 
 {% Tab label="typescript" %}
@@ -566,6 +561,10 @@ for (const [i, row] of rows.entries()) {
 }
 ```
 
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
 Example output:
 ```
 1. Introduction to Neural Networks (2023)
@@ -576,9 +575,6 @@ Example output:
    RRF Score: -0.0385
    Preview: This comprehensive guide covers the fundamental concepts of deep learning...
 ```
-{% /Tab %}
-
-{% /Tabs %}
 
 ## Tips and Best Practices
 

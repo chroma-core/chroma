@@ -7,11 +7,18 @@ name: Migration Guide
 
 Migrate from the legacy `query()` and `get()` methods to the new Search API.
 
-{% Note type="info" %}
-The Search API is available in Chroma Cloud. This guide uses dictionary syntax for minimal migration effort.
-{% /Note %}
+{% Banner type="tip" %}
+The `query()` and `get()` methods will continue to be supported, so migration to the Search API is optional.
+{% /Banner %}
+
+
 
 ## Parameter Mapping
+
+{% Banner type="info" %}
+The Search API is available in Chroma Cloud. This guide uses dictionary syntax for minimal migration effort.
+{% /Banner %}
+
 
 ### query() Parameters
 
@@ -200,7 +207,7 @@ results = collection.get(
     ids=["id1", "id2", "id3"]
 )
 
-# Search API  
+# Search API
 results = collection.search(
     Search(
         where={"#id": {"$in": ["id1", "id2", "id3"]}}
@@ -215,7 +222,7 @@ const results = await collection.get({
   ids: ["id1", "id2", "id3"]
 });
 
-// Search API  
+// Search API
 const results2 = await collection.search(
   new Search({
     where: { "#id": { $in: ["id1", "id2", "id3"] } }
@@ -272,7 +279,7 @@ const results2 = await collection.search(
 
 The Search API supports text queries directly - they are automatically converted to embeddings using the collection's configured embedding function.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -296,13 +303,13 @@ await collection.search(
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### New Capabilities
 
 - **Advanced filtering** - Complex logical expressions
 - **Custom ranking** - Combine and transform ranking expressions
-- **Hybrid search** - RRF for combining multiple strategies  
+- **Hybrid search** - RRF for combining multiple strategies
 - **Selective fields** - Return only needed fields
 - **Flexible batch operations** - Different parameters per search in batch
 
@@ -310,7 +317,7 @@ await collection.search(
 
 The Search API allows different parameters for each search in a batch:
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -350,12 +357,12 @@ const results2 = await collection.search(searches);
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Migration Tips
 
 - Start with simple queries before complex ones
-- Test both APIs in parallel during migration  
+- Test both APIs in parallel during migration
 - Use batch operations to reduce API calls
 - Text queries are now supported - use them directly in the Search API
 

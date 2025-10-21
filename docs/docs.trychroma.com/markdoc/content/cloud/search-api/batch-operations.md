@@ -11,7 +11,7 @@ Execute multiple searches in a single API call for better performance and easier
 
 Pass a list of Search objects to execute them in a single request. Each search operates independently and returns its own results.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -77,7 +77,7 @@ const results = await collection.search(searches);
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Why Use Batch Operations
 
@@ -99,7 +99,7 @@ Each field in the SearchResult maintains a list where each index corresponds to 
 - `results.metadatas[i]` - Metadata from search at index i (if selected)
 - `results.scores[i]` - Scores from search at index i (if ranking was used)
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -151,7 +151,7 @@ for (const [searchIndex, rows] of allRows.entries()) {
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 
 
@@ -160,7 +160,7 @@ for (const [searchIndex, rows] of allRows.entries()) {
 ### Comparing Different Queries
 Test multiple query variations to find the most relevant results.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -217,12 +217,12 @@ const results = await collection.search(searches);
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### A/B Testing Ranking Strategies
 Compare different ranking approaches on the same query.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -286,12 +286,12 @@ const results = await collection.search(searches);
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### Multiple Filters on Same Data
 Apply different filters to explore different subsets of your data.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -328,13 +328,13 @@ const results = await collection.search(searches);
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Performance Benefits
 
 Batch operations are significantly faster than running searches sequentially:
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -363,7 +363,7 @@ const results2 = await collection.search(searches);  // Single API call for all
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 Batch operations reduce network overhead and enable server-side parallelization, often providing 3-10x speedup depending on the number and complexity of searches.
 
@@ -378,7 +378,7 @@ For Chroma Cloud users, batch operations may be subject to quota limits on the t
 ### Mixed Field Selection
 Different searches can select different fields - each search's results will contain only its requested fields.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -410,13 +410,13 @@ const results = await collection.search(searches);
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Complete Example
 
 Here's a practical example using batch operations to find and compare relevant documents across different categories:
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -464,21 +464,6 @@ query_text = "artificial intelligence applications"
 compare_category_relevance(collection, query_text, categories)
 ```
 
-Example output:
-```
-Top results in technology:
-  1. AI in Software Development
-     Score: 0.234
-     Preview: The integration of artificial intelligence in modern software development has revolutionized...
-  2. Machine Learning Frameworks
-     Score: 0.312
-     Preview: Popular frameworks for building AI applications include TensorFlow, PyTorch, and...
-
-Top results in science:
-  1. Neural Networks Research
-     Score: 0.289
-     Preview: Recent advances in neural network architectures have enabled breakthrough applications...
-```
 {% /Tab %}
 
 {% Tab label="typescript" %}
@@ -533,6 +518,9 @@ const queryText = "artificial intelligence applications";
 
 await compareCategoryRelevance(collection, queryText, categories);
 ```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
 
 Example output:
 ```
@@ -549,9 +537,6 @@ Top results in science:
      Score: 0.289
      Preview: Recent advances in neural network architectures have enabled breakthrough applications...
 ```
-{% /Tab %}
-
-{% /Tabs %}
 
 ## Tips and Best Practices
 

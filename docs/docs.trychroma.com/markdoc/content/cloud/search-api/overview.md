@@ -7,13 +7,25 @@ name: Overview
 
 The Search API is a powerful, flexible interface for hybrid search operations in Chroma Cloud, combining vector similarity search with metadata filtering and custom ranking expressions.
 
-{% Note type="info" %}
-The Search API is available exclusively for Chroma Cloud users.
-{% /Note %}
+{% Banner type="tip" %}
+**Search API is available in Chroma Cloud only.** Future support on single-node Chroma is planned.
+{% /Banner %}
+
+## What is the Search API?
+
+The Search API provides a powerful, unified interface for all search operations in Chroma. Instead of using separate `query()` and `get()` methods with different parameters, the Search API offers:
+
+- **Unified interface**: One consistent API replaces both `query()` and `get()` methods
+- **Expression-based queries**: Use `K()` expressions for powerful filtering and field selection
+- **Composable operations**: Chain methods to build complex queries naturally
+- **Type safety**: Full type hints, IDE autocomplete, and clear error messages
+- **Advanced capabilities**: Hybrid search with RRF, custom ranking expressions, and batch operations
+- **Flexible result selection**: Choose exactly which fields to return, reducing payload size
+
 
 ## Quick Start
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -57,22 +69,11 @@ result = await collection.search(search.rank(Knn({ query: queryText })));
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 {% Note type="info" %}
 When passing text to `Knn()`, the embedding is automatically created using the collection's schema configuration. By default, `Knn` uses the `#embedding` key, which corresponds to the default vector index. You can specify a different key with the `key` parameter (e.g., `Knn(query=query_text, key="my_custom_embedding")`). If the specified key doesn't have an embedding configuration in the collection schema, an error will be thrown.
 {% /Note %}
-
-## What is the Search API?
-
-The Search API provides a powerful, unified interface for all search operations in Chroma. Instead of using separate `query()` and `get()` methods with different parameters, the Search API offers:
-
-- **Unified interface**: One consistent API replaces both `query()` and `get()` methods
-- **Expression-based queries**: Use `K()` expressions for powerful filtering and field selection
-- **Composable operations**: Chain methods to build complex queries naturally
-- **Type safety**: Full type hints, IDE autocomplete, and clear error messages
-- **Advanced capabilities**: Hybrid search with RRF, custom ranking expressions, and batch operations
-- **Flexible result selection**: Choose exactly which fields to return, reducing payload size
 
 ## Feature Comparison
 
@@ -94,7 +95,7 @@ The Search API is available for Chroma Cloud. Support for local Chroma deploymen
 
 To use the Search API, you'll need to import the necessary components:
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -114,7 +115,7 @@ import { Rrf } from 'chromadb';  // For hybrid search
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 Make sure you're connected to a Chroma Cloud instance, as the Search API is currently only available for cloud deployments.
 
@@ -122,7 +123,7 @@ Make sure you're connected to a Chroma Cloud instance, as the Search API is curr
 
 Here's a practical example searching for science articles:
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -165,19 +166,6 @@ for row in rows:
     print("---")
 ```
 
-Example output:
-```
-ID: doc_123
-Title: Advances in Quantum Computing
-Distance: 0.234
-Document: Recent developments in quantum computing have shown promising results for...
----
-ID: doc_456
-Title: Machine Learning in Biology
-Distance: 0.412
-Document: The application of machine learning techniques to biological data has...
----
-```
 {% /Tab %}
 
 {% Tab label="typescript" %}
@@ -219,6 +207,10 @@ for (const row of rows) {
 }
 ```
 
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
 Example output:
 ```
 ID: doc_123
@@ -232,9 +224,6 @@ Distance: 0.412
 Document: The application of machine learning techniques to biological data has...
 ---
 ```
-{% /Tab %}
-
-{% /Tabs %}
 
 ## Performance
 

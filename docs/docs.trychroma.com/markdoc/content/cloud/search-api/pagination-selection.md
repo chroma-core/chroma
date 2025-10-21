@@ -11,7 +11,7 @@ Control how many results to return and which fields to include in your search re
 
 Use `limit()` to control how many results to return and `offset` to skip results for pagination.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -43,7 +43,7 @@ const search3 = new Search();  // Be careful with large collections!
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Limit Parameters
 
@@ -58,7 +58,7 @@ For Chroma Cloud users: The actual number of results returned will be capped by 
 
 ## Pagination Patterns
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -101,7 +101,7 @@ function getPage(pageNumber: number, pageSize = 10) {
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 {% Note type="info" %}
 Pagination uses 0-based indexing. The first page is page 0, not page 1.
@@ -111,7 +111,7 @@ Pagination uses 0-based indexing. The first page is page 0, not page 1.
 
 Control which fields are returned in your results to optimize data transfer and processing.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -157,7 +157,7 @@ const search5 = new Search().selectAll();
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Selectable Fields
 
@@ -183,7 +183,7 @@ Selecting fewer fields improves performance by reducing data transfer:
 - **Heavy**: Including documents and embeddings - larger payloads
 - **Maximum**: `select_all()` - returns everything
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -217,14 +217,14 @@ const search4 = new Search().limit(100).selectAll();
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Edge Cases
 
 ### No Limit Specified
 Without a limit, the search attempts to return all matching results, but will be capped by quota limits in Chroma Cloud.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -242,7 +242,7 @@ const search = new Search().where(K("status").eq("active"));  // No limit()
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### Empty Results
 When no documents match, results will have empty lists/arrays.
@@ -250,7 +250,7 @@ When no documents match, results will have empty lists/arrays.
 ### Non-existent Fields
 Selecting non-existent metadata fields simply omits them from the results - they won't appear in the metadata dict.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -272,13 +272,13 @@ const search = new Search().select("title", "non_existent_field");
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Complete Example
 
 Here's a practical example combining pagination with field selection:
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -372,7 +372,7 @@ async function searchWithPagination(
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Tips and Best Practices
 

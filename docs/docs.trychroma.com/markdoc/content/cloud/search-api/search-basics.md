@@ -14,7 +14,7 @@ This page covers the basics of Search construction. For detailed usage of specif
 
 ## The Search Class
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -50,7 +50,7 @@ const search2 = new Search({
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Constructor Parameters
 
@@ -84,7 +84,7 @@ For detailed usage of each builder method, see the respective sections:
 - `.limit()` - See [Pagination](./pagination-selection#pagination)
 - `.select()` and `.select_all()` - See [Field selection](./pagination-selection#field-selection)
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -136,7 +136,7 @@ search2 = search2.select(K.DOCUMENT, K.METADATA);
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 **Benefits of immutability:**
 - Base queries can be reused safely
@@ -147,7 +147,7 @@ search2 = search2.select(K.DOCUMENT, K.METADATA);
 
 You can create Search objects directly with various parameter types:
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -228,7 +228,7 @@ const search6 = new Search({ rank: Knn({ query: "artificial intelligence" }) });
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Dictionary Format Specification
 
@@ -236,7 +236,7 @@ When using dictionaries to construct Search objects, follow this format. For com
 - [Where dictionary operators](./filtering#dictionary-format) - `$eq`, `$gt`, `$in`, etc.
 - [Rank dictionary operators](./ranking#dictionary-format) - `$knn` and ranking expressions
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -392,13 +392,13 @@ const search = new Search({
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Empty Search Behavior
 
 An empty Search object has specific default behaviors:
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -442,7 +442,7 @@ const result2 = await collection.search(search2);
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 {% Note type="info" %}
 When no limit is specified, Chroma Cloud will apply a default limit based on your quota to prevent returning excessive results. For production use, it's recommended to always specify an explicit limit.
@@ -452,7 +452,7 @@ When no limit is specified, Chroma Cloud will apply a default limit based on you
 
 Here are common patterns for building Search queries:
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -522,7 +522,7 @@ function searchRecentScience(query: string) {
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 
 

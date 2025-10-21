@@ -11,7 +11,7 @@ Complete end-to-end examples demonstrating real-world use cases of the Search AP
 
 A complete example showing how to build a product search with filters, ranking, and pagination.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -97,18 +97,6 @@ for i, product in enumerate(products, 1):
     print()
 ```
 
-Example output:
-```
-1. Sony WH-1000XM5 Wireless Headphones
-   Price: $279.99 | Rating: 4.8/5
-   Premium noise cancelling headphones with exceptional sound quality, perfect for long flights and commutes. Features 30-hour battery life...
-   Relevance: 0.234
-
-2. Bose QuietComfort 45
-   Price: $249.99 | Rating: 4.7/5
-   Industry-leading noise cancellation with comfortable over-ear design. Ideal for frequent travelers with adjustable ANC levels...
-   Relevance: 0.267
-```
 {% /Tab %}
 
 {% Tab label="typescript" %}
@@ -207,13 +195,26 @@ for (const [i, product] of products.entries()) {
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
+
+Example output:
+```
+1. Sony WH-1000XM5 Wireless Headphones
+   Price: $279.99 | Rating: 4.8/5
+   Premium noise cancelling headphones with exceptional sound quality, perfect for long flights and commutes. Features 30-hour battery life...
+   Relevance: 0.234
+
+2. Bose QuietComfort 45
+   Price: $249.99 | Rating: 4.7/5
+   Industry-leading noise cancellation with comfortable over-ear design. Ideal for frequent travelers with adjustable ANC levels...
+   Relevance: 0.267
+```
 
 ## Example 2: Content Recommendation System
 
 Build a personalized content recommendation system that excludes already-seen items and respects user preferences.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -322,22 +323,6 @@ for i, rec in enumerate(recommendations, 1):
     print(f"   Match Score: {rec['relevance_score']:.3f}")
 ```
 
-Example output:
-```
-Personalized Recommendations:
-
-1. Advanced Transformer Architectures in 2024
-   Category: technology | Author: Dr. Sarah Chen
-   Rating: 4.5/5 | Published: 2024-10-15
-   An in-depth exploration of the latest transformer models and their applications in modern NLP tasks. This article covers attention mechanisms, positional encodings...
-   Match Score: -0.0342
-
-2. Practical Guide to Neural Network Optimization
-   Category: research | Author: Prof. James Wilson
-   Rating: 4.7/5 | Published: 2024-09-28
-   Learn cutting-edge techniques for optimizing deep neural networks, including adaptive learning rates, batch normalization strategies, and efficient backpropagation...
-   Match Score: -0.0389
-```
 {% /Tab %}
 
 {% Tab label="typescript" %}
@@ -449,13 +434,30 @@ for (const [i, rec] of recommendations.entries()) {
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
+
+Example output:
+```
+Personalized Recommendations:
+
+1. Advanced Transformer Architectures in 2024
+   Category: technology | Author: Dr. Sarah Chen
+   Rating: 4.5/5 | Published: 2024-10-15
+   An in-depth exploration of the latest transformer models and their applications in modern NLP tasks. This article covers attention mechanisms, positional encodings...
+   Match Score: -0.0342
+
+2. Practical Guide to Neural Network Optimization
+   Category: research | Author: Prof. James Wilson
+   Rating: 4.7/5 | Published: 2024-09-28
+   Learn cutting-edge techniques for optimizing deep neural networks, including adaptive learning rates, batch normalization strategies, and efficient backpropagation...
+   Match Score: -0.0389
+```
 
 ## Example 3: Multi-Category Search with Batch Operations
 
 Use batch operations to search across multiple categories simultaneously and compare results.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -530,31 +532,6 @@ for category, results in results_by_category.items():
         print(f"     Relevance: {result['score']:.3f}")
 ```
 
-Example output:
-```
-============================================================
-Category: TECHNOLOGY
-============================================================
-
-  1. Solar Panel Efficiency Breakthrough
-     Date: 2024-10-20
-     New silicon-carbon composite cells achieve 31% efficiency, setting industry records. Researchers at MIT have developed...
-     Relevance: 0.245
-
-  2. Wind Turbine Design Innovations
-     Date: 2024-10-15
-     Advanced blade designs increase energy capture by 18% while reducing noise pollution. The new turbines feature...
-     Relevance: 0.289
-
-============================================================
-Category: SCIENCE
-============================================================
-
-  1. Photosynthesis-Inspired Energy Storage
-     Date: 2024-10-18
-     Scientists develop bio-inspired battery system that mimics natural photosynthesis for efficient solar energy storage...
-     Relevance: 0.256
-```
 {% /Tab %}
 
 {% Tab label="typescript" %}
@@ -627,7 +604,33 @@ for (const [category, results] of Object.entries(resultsByCategory)) {
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
+
+Example output:
+```
+============================================================
+Category: TECHNOLOGY
+============================================================
+
+  1. Solar Panel Efficiency Breakthrough
+     Date: 2024-10-20
+     New silicon-carbon composite cells achieve 31% efficiency, setting industry records. Researchers at MIT have developed...
+     Relevance: 0.245
+
+  2. Wind Turbine Design Innovations
+     Date: 2024-10-15
+     Advanced blade designs increase energy capture by 18% while reducing noise pollution. The new turbines feature...
+     Relevance: 0.289
+
+============================================================
+Category: SCIENCE
+============================================================
+
+  1. Photosynthesis-Inspired Energy Storage
+     Date: 2024-10-18
+     Scientists develop bio-inspired battery system that mimics natural photosynthesis for efficient solar energy storage...
+     Relevance: 0.256
+```
 
 ## Best Practices
 

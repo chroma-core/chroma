@@ -11,7 +11,7 @@ Learn how to filter search results using Where expressions and the Key/K class t
 
 The `Key` class (aliased as `K` for brevity) provides a fluent interface for building filter expressions. Use `K` to reference document fields, IDs, and metadata properties.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -45,7 +45,7 @@ K.ID.isIn(["doc1", "doc2", "doc3"]);
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Filterable Fields
 
@@ -65,7 +65,7 @@ K.ID.isIn(["doc1", "doc2", "doc3"]);
 - `<` - Less than (numeric only)
 - `<=` - Less than or equal (numeric only)
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -97,7 +97,7 @@ K("discount").lte(0.25);         // Less than or equal
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 {% Note type="info" %}
 Chroma supports three data types for metadata: strings, numbers (int/float), and booleans. Order comparison operators (`>`, `<`, `>=`, `<=`) currently only work with numeric types.
@@ -113,7 +113,7 @@ Chroma supports three data types for metadata: strings, numbers (int/float), and
 - `regex()` - String matches regex pattern (currently K.DOCUMENT only)
 - `not_regex()` - String doesn't match regex pattern (currently K.DOCUMENT only)
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -151,7 +151,7 @@ K.DOCUMENT.regex("\\bAPI\\b");                 // Match whole word "API" in docu
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 {% Note type="info" %}
 String operations like `contains()` and `regex()` are case-sensitive by default. The `is_in()` operator is efficient even with large lists.
@@ -165,7 +165,7 @@ String operations like `contains()` and `regex()` are case-sensitive by default.
 
 Combine multiple conditions using these operators. Always use parentheses to ensure correct precedence.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -209,7 +209,7 @@ K("status").eq("published")
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 {% Note type="warning" %}
 Always use parentheses around each condition when using logical operators. Python's operator precedence may not work as expected without them.
@@ -236,7 +236,7 @@ You can also use dictionary syntax instead of K expressions. This is useful when
 - `$and` - Logical AND
 - `$or` - Logical OR
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -346,7 +346,7 @@ You can also use dictionary syntax instead of K expressions. This is useful when
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 {% Note type="info" %}
 Each dictionary can only contain one field or one logical operator (`$and`/`$or`). For field dictionaries, only one operator is allowed per field.
@@ -354,7 +354,7 @@ Each dictionary can only contain one field or one logical operator (`$and`/`$or`
 
 ## Common Filtering Patterns
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -422,7 +422,7 @@ const search6 = new Search().where(
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 
 
@@ -438,7 +438,7 @@ When filtering on a metadata field that doesn't exist for a document:
 - `!=` evaluates to `true` - documents without the field are considered "not equal" to any value
 - `not_in()` evaluates to `true` - documents without the field are not in any list
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -460,12 +460,12 @@ K("category").notIn(["tech"]);   // true - will match
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### Mixed Types
 Avoid storing different data types under the same metadata key across documents. Query behavior is undefined when comparing values of different types.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -495,7 +495,7 @@ K("score").gt(90);  // Undefined results when mixed types exist
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### String Pattern Matching Limitations
 
@@ -503,7 +503,7 @@ K("score").gt(90);  // Undefined results when mixed types exist
 
 Additionally, the pattern must contain at least 3 literal characters to ensure accurate results.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -541,7 +541,7 @@ K.DOCUMENT.regex("\\d+");                // ✗ No literal characters - may give
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 {% Note type="warning" %}
 String pattern matching currently only works on `K.DOCUMENT`. Support for metadata fields is not yet available. Also, patterns with fewer than 3 literal characters may return incorrect results.
@@ -555,7 +555,7 @@ String pattern matching on metadata fields is not currently supported. Full supp
 
 Here's a practical example combining different filter types:
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -618,7 +618,7 @@ const results = await collection.search(search);
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Tips and Best Practices
 

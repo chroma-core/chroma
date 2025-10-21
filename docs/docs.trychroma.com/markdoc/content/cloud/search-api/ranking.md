@@ -26,7 +26,7 @@ A ranking expression determines which documents are scored and how they're order
 
 ### Document Selection and Scoring
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -78,7 +78,7 @@ const rank3 = Knn({ query: "AI research", limit: 100 }).multiply(0.5)
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 {% Note type="warning" %}
 When combining multiple `Knn` expressions, documents must appear in at least one `Knn`'s results AND must appear in every `Knn` where `default=None`. To avoid excluding documents, set `default` values on your `Knn` expressions.
@@ -88,7 +88,7 @@ When combining multiple `Knn` expressions, documents must appear in at least one
 
 The `Knn` class performs K-nearest neighbor search to find similar vectors. It's the primary way to add vector similarity scoring to your searches.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -130,7 +130,7 @@ Knn({ query: "machine learning", key: "sparse_embedding" });
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Knn Parameters
 
@@ -150,7 +150,7 @@ Knn({ query: "machine learning", key: "sparse_embedding" });
 
 ### Text Queries
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -174,11 +174,11 @@ Knn({ query: "What are the latest advances in quantum computing?" });
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### Dense Vectors
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -203,11 +203,11 @@ Knn({ query: embedding });
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### Sparse Vectors
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -235,7 +235,7 @@ Knn({ query: sparseVector, key: "sparse_embedding" });
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### Embedding Fields
 
@@ -243,7 +243,7 @@ Chroma currently supports:
 1. **Dense embeddings** - Stored in the default embedding field (`"#embedding"` or `K.EMBEDDING`) 
 2. **Sparse embeddings** - Can be stored in metadata under a consistent key
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -277,7 +277,7 @@ Knn({ query: "machine learning", key: "sparse_embedding" });  // Search sparse e
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 {% Note type="warning" %}
 Currently, dense embeddings can only be stored in the default embedding field (`#embedding`). Only sparse vector embeddings can be stored in metadata, and they must be stored consistently under the same key across all documents. Additionally, only one sparse vector index is allowed per collection in metadata.
@@ -298,7 +298,7 @@ Support for multiple dense embedding fields and multiple sparse vector indices i
 
 Combine ranking expressions using arithmetic operators. Operator precedence follows Python's standard rules.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -340,7 +340,7 @@ const finalScore = Knn({ query: "deep learning" }).multiply(0.5)
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 {% Note type="info" %}
 Numbers in expressions are automatically converted to `Val` constants. For example, `Knn(query=v) * 0.5` is equivalent to `Knn(query=v) * Val(0.5)`.
@@ -355,7 +355,7 @@ Numbers in expressions are automatically converted to `Val` constants. For examp
 - `min()` - Minimum of two values
 - `max()` - Maximum of two values
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -399,13 +399,13 @@ const positiveOnly = Knn({ query: "quantum computing" }).min(0.0);
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Val for Constant Values
 
 The `Val` class represents constant values in ranking expressions. Numbers are automatically converted to `Val`, but you can use it explicitly for clarity.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -447,13 +447,13 @@ const adjusted = Knn({ query: "deep learning" }).max(threshold).subtract(penalty
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Combining Ranking Expressions
 
 You can combine multiple Knn searches using arithmetic operations for custom scoring strategies.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -493,7 +493,7 @@ const finalScore = baseScore.multiply(Val(1).add(Val(0.1)));  // Fixed 10% boost
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 {% Note type="info" %}
 For advanced hybrid search combining multiple ranking strategies, consider using [RRF (Reciprocal Rank Fusion)](./hybrid-search) which is specifically designed for this purpose.
@@ -516,7 +516,7 @@ You can also construct ranking expressions using dictionary syntax. This is usef
 - `$max` - Maximum of multiple ranks
 - `$min` - Minimum of multiple ranks
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -620,7 +620,7 @@ const search = new Search({ rank: rankDict });
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Understanding Scores
 
@@ -634,7 +634,7 @@ const search = new Search({ rank: rankDict });
 ### Default Ranking
 When no ranking is specified (`rank=None`), results are returned in index order (typically insertion order). This is useful when you only need filtering without scoring.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -652,12 +652,12 @@ const search = new Search().where(K("status").eq("active")).limit(10);
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### Combining Knn Expressions with default=None
 Documents must appear in at least one `Knn`'s results to be candidates, AND must appear in ALL `Knn` results where `default=None`.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -692,12 +692,12 @@ const rank2 = Knn({ query: "machine learning", limit: 100, default: 10.0 }).mult
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### Vector Dimension Mismatch
 Query vectors must match the dimension of the indexed embeddings. Mismatched dimensions will result in an error.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -715,12 +715,12 @@ Knn({ query: Array(384).fill(0.1) });   // ✓ Correct - 384 dimensions
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### The return_rank Parameter
 Set `return_rank=True` when using Knn with RRF to get rank positions (0, 1, 2...) instead of distances.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -742,12 +742,12 @@ Knn({ query: "machine learning", returnRank: true });  // Returns: 0, 1, 2...
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ### The limit Parameter
 The `limit` parameter in Knn controls how many candidates are considered, not the final result count. Use `Search.limit()` to control the number of results returned.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -769,13 +769,13 @@ const search = new Search().rank(rank).limit(10);  // Return top 10 results
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Complete Example
 
 Here's a practical example combining different ranking features:
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
@@ -846,7 +846,7 @@ for (const [i, row] of rows.entries()) {
 ```
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
 
 ## Tips and Best Practices
 
