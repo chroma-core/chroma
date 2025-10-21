@@ -1,7 +1,7 @@
 # Chroma
 
-This crate provides the official Chroma rust client.  Chroma is an open-source AI-native database
-intended for AI-applications.  Chroma focuses on search, enabling your application to customize the
+This crate provides the official Chroma Rust client.  Chroma is an open-source AI-native database
+intended for AI applications.  Chroma focuses on search, enabling your application to customize the
 search methods it needs most.
 
 Specifically, there are multiple modes of search supported by Chroma.
@@ -13,8 +13,10 @@ Specifically, there are multiple modes of search supported by Chroma.
 - Chroma supports sparse embeddings like BM25 or SPLADE-v3.  Briefly, sparse embeddings also give a
   numeric score for the difference between two strings.  Unlike dense embeddings, sparse embeddings
   are sensitive to the literal words in documents.
+- Full-text search enables applications to find literal matches in code.
+- Metadata search allows for a variety of queries against the metadata for a record.
 
-Chroma natively supports both dense and sparse vectors via its `search` endpoint, which can do a
+Chroma natively supports hybrid search of all search modes via its `search` endpoint, which can do a
 weighted hybrid search across both modes of search, enabling applications to mix and match search
 strategies.
 
@@ -22,7 +24,7 @@ strategies.
 
 Already know what Chroma is?  Get started fast:
 
-1.  Add Chroma to your rust project.
+1.  Add Chroma to your Rust project.
 
 ```console
 cargo add chroma
@@ -34,11 +36,11 @@ cargo add chroma
 let client = ChromaHttpClient::cloud()?;
 ```
 
-This will automatically read the following environment variables to setup a Chroma client:
+This will automatically read the following environment variables to set up a Chroma client:
 - `CHROMA_ENDPOINT` sets the URL for Chroma.  For chroma-cloud this is `https://api.trychroma.com`.
   There is no need to set this environment variable if you want to work with Cloud directly.
 - `CHROMA_API_KEY` sets the API key to authenticate to Chroma.  This should be a Chroma-provided API
-  key.  To generate a key, login to [the Chroma dashboard](https://trychroma.com), create or select
+  key.  To generate a key, log in to [the Chroma dashboard](https://trychroma.com), create or select
   a database, and look for how to connect to your database under "settings".
 - `CHROMA_TENANT` sets the tenant.  If you provide an API key, this will be inferred automatically
   on start.
@@ -54,7 +56,7 @@ let client = ChromaHttpClient::from_env()?;
 This is sufficient for developing from localhost.
 
 For more complex configurations see `ChromaHttpClientOptions` in this crate by visiting [the
-documentation](https://docs.rs/chroma/latest/chroma/)
+documentation](https://docs.rs/chroma/latest/chroma/).
 
 ## Client Features
 
