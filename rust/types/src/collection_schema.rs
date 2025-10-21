@@ -3834,10 +3834,13 @@ mod tests {
     }
 
     #[test]
-    fn test_builder_pattern_error_cases() {
-        // Test that error cases are properly handled
+    fn test_builder_create_index_validation_errors() {
+        // Test all validation errors for create_index() as documented in the docstring:
+        // - Attempting to create index on special keys (#document, #embedding)
+        // - Invalid configuration (e.g., vector index on non-embedding key)
+        // - Conflicting with existing indexes (e.g., multiple sparse vector indexes)
 
-        // Error: Vector index on specific key
+        // Error: Vector index on specific key (must be global)
         let result = Schema::new_default(KnnIndex::Hnsw).create_index(
             Some("my_vectors"),
             IndexConfig::Vector(VectorIndexConfig {
@@ -3853,7 +3856,7 @@ mod tests {
             .unwrap_err()
             .contains("Vector index cannot be enabled on specific keys"));
 
-        // Error: FTS index on specific key
+        // Error: FTS index on specific key (must be global)
         let result = Schema::new_default(KnnIndex::Hnsw)
             .create_index(Some("my_text"), IndexConfig::Fts(FtsIndexConfig {}));
         assert!(result.is_err());
@@ -3861,7 +3864,7 @@ mod tests {
             .unwrap_err()
             .contains("FTS index cannot be enabled on specific keys"));
 
-        // Error: Special key usage
+        // Error: Cannot create index on special key #document
         let result = Schema::new_default(KnnIndex::Hnsw).create_index(
             Some(DOCUMENT_KEY),
             IndexConfig::StringInverted(StringInvertedIndexConfig {}),
@@ -3871,7 +3874,17 @@ mod tests {
             .unwrap_err()
             .contains("Cannot create index on special key"));
 
-        // Error: Sparse vector without key
+        // Error: Cannot create index on special key #embedding
+        let result = Schema::new_default(KnnIndex::Hnsw).create_index(
+            Some(EMBEDDING_KEY),
+            IndexConfig::IntInverted(IntInvertedIndexConfig {}),
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Cannot create index on special key"));
+
+        // Error: Sparse vector without key (must specify key)
         let result = Schema::new_default(KnnIndex::Hnsw).create_index(
             None,
             IndexConfig::SparseVector(SparseVectorIndexConfig {
@@ -3885,7 +3898,7 @@ mod tests {
             .unwrap_err()
             .contains("Sparse vector index must be created on a specific key"));
 
-        // Error: Multiple sparse vector indexes
+        // Error: Multiple sparse vector indexes (only one allowed per collection)
         let result = Schema::new_default(KnnIndex::Hnsw)
             .create_index(
                 Some("sparse1"),
@@ -3908,8 +3921,35 @@ mod tests {
         assert!(result
             .unwrap_err()
             .contains("At most one sparse vector index is allowed"));
+    }
 
-        // Error: Delete vector index (not supported)
+    #[test]
+    fn test_builder_delete_index_validation_errors() {
+        // Test all validation errors for delete_index() as documented in the docstring:
+        // - Attempting to delete index on special keys (#document, #embedding)
+        // - Attempting to delete vector, FTS, or sparse vector indexes (not currently supported)
+
+        // Error: Delete on special key #embedding
+        let result = Schema::new_default(KnnIndex::Hnsw).delete_index(
+            Some(EMBEDDING_KEY),
+            IndexConfig::StringInverted(StringInvertedIndexConfig {}),
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Cannot delete index on special key"));
+
+        // Error: Delete on special key #document
+        let result = Schema::new_default(KnnIndex::Hnsw).delete_index(
+            Some(DOCUMENT_KEY),
+            IndexConfig::IntInverted(IntInvertedIndexConfig {}),
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Cannot delete index on special key"));
+
+        // Error: Delete vector index (not currently supported)
         let result = Schema::new_default(KnnIndex::Hnsw).delete_index(
             None,
             IndexConfig::Vector(VectorIndexConfig {
@@ -3925,7 +3965,7 @@ mod tests {
             .unwrap_err()
             .contains("Deleting vector index is not currently supported"));
 
-        // Error: Delete FTS index (not supported)
+        // Error: Delete FTS index (not currently supported)
         let result = Schema::new_default(KnnIndex::Hnsw)
             .delete_index(None, IndexConfig::Fts(FtsIndexConfig {}));
         assert!(result.is_err());
@@ -3933,7 +3973,7 @@ mod tests {
             .unwrap_err()
             .contains("Deleting FTS index is not currently supported"));
 
-        // Error: Delete sparse vector index (not supported)
+        // Error: Delete sparse vector index (not currently supported)
         let result = Schema::new_default(KnnIndex::Hnsw)
             .create_index(
                 Some("sparse"),
@@ -3956,16 +3996,6 @@ mod tests {
         assert!(result
             .unwrap_err()
             .contains("Deleting sparse vector index is not currently supported"));
-
-        // Error: Delete on special key
-        let result = Schema::new_default(KnnIndex::Hnsw).delete_index(
-            Some(EMBEDDING_KEY),
-            IndexConfig::StringInverted(StringInvertedIndexConfig {}),
-        );
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("Cannot delete index on special key"));
     }
 
     #[test]
