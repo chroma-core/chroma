@@ -13,10 +13,22 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{client::ChromaClientError, ChromaHttpClient};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ChromaCollection {
     pub(crate) client: ChromaHttpClient,
     pub(crate) collection: Arc<Collection>,
+}
+
+impl std::fmt::Debug for ChromaCollection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChromaCollection")
+            .field("database", &self.collection.database)
+            .field("tenant", &self.collection.tenant)
+            .field("name", &self.collection.name)
+            .field("collection_id", &self.collection.collection_id)
+            .field("version", &self.collection.version)
+            .finish()
+    }
 }
 
 impl ChromaCollection {
