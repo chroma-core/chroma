@@ -68,7 +68,7 @@ impl ChromaCollection {
         &mut self,
         new_name: Option<impl AsRef<str>>,
         new_metadata: Option<Metadata>,
-    ) -> Result<(), ChromaClientError> {
+    ) -> Result<(), ChromaHttpClientError> {
         self.send::<_, ()>(
             "modify",
             Method::PUT,
