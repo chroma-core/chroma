@@ -4220,13 +4220,13 @@ mod tests {
         // String defaults: FTS disabled, string inverted enabled
         assert!(schema.defaults.string.is_some());
         let string = schema.defaults.string.as_ref().unwrap();
-        assert_eq!(string.fts_index.as_ref().unwrap().enabled, false);
-        assert_eq!(string.string_inverted_index.as_ref().unwrap().enabled, true);
+        assert!(!string.fts_index.as_ref().unwrap().enabled);
+        assert!(string.string_inverted_index.as_ref().unwrap().enabled);
 
         // Float list defaults: vector index disabled
         assert!(schema.defaults.float_list.is_some());
         let float_list = schema.defaults.float_list.as_ref().unwrap();
-        assert_eq!(float_list.vector_index.as_ref().unwrap().enabled, false);
+        assert!(!float_list.vector_index.as_ref().unwrap().enabled);
         let vector_config = &float_list.vector_index.as_ref().unwrap().config;
         assert_eq!(vector_config.space, None); // Python leaves as None
         assert_eq!(vector_config.hnsw, None); // Python doesn't specify
@@ -4236,11 +4236,11 @@ mod tests {
         // Sparse vector defaults: disabled
         assert!(schema.defaults.sparse_vector.is_some());
         let sparse = schema.defaults.sparse_vector.as_ref().unwrap();
-        assert_eq!(sparse.sparse_vector_index.as_ref().unwrap().enabled, false);
+        assert!(!sparse.sparse_vector_index.as_ref().unwrap().enabled);
 
         // Int defaults: inverted index enabled
         assert!(schema.defaults.int.is_some());
-        assert_eq!(
+        assert!(
             schema
                 .defaults
                 .int
@@ -4249,13 +4249,12 @@ mod tests {
                 .int_inverted_index
                 .as_ref()
                 .unwrap()
-                .enabled,
-            true
+                .enabled
         );
 
         // Float defaults: inverted index enabled
         assert!(schema.defaults.float.is_some());
-        assert_eq!(
+        assert!(
             schema
                 .defaults
                 .float
@@ -4264,13 +4263,12 @@ mod tests {
                 .float_inverted_index
                 .as_ref()
                 .unwrap()
-                .enabled,
-            true
+                .enabled
         );
 
         // Bool defaults: inverted index enabled
         assert!(schema.defaults.boolean.is_some());
-        assert_eq!(
+        assert!(
             schema
                 .defaults
                 .boolean
@@ -4279,8 +4277,7 @@ mod tests {
                 .bool_inverted_index
                 .as_ref()
                 .unwrap()
-                .enabled,
-            true
+                .enabled
         );
 
         // ============================================================================
@@ -4291,25 +4288,23 @@ mod tests {
         assert!(schema.keys.contains_key(DOCUMENT_KEY));
         let doc = schema.keys.get(DOCUMENT_KEY).unwrap();
         assert!(doc.string.is_some());
-        assert_eq!(
+        assert!(
             doc.string
                 .as_ref()
                 .unwrap()
                 .fts_index
                 .as_ref()
                 .unwrap()
-                .enabled,
-            true
+                .enabled
         );
-        assert_eq!(
-            doc.string
+        assert!(
+            !doc.string
                 .as_ref()
                 .unwrap()
                 .string_inverted_index
                 .as_ref()
                 .unwrap()
-                .enabled,
-            false
+                .enabled
         );
 
         // #embedding: vector index enabled with source_key=#document
@@ -4323,7 +4318,7 @@ mod tests {
             .vector_index
             .as_ref()
             .unwrap();
-        assert_eq!(vec_idx.enabled, true);
+        assert!(vec_idx.enabled);
         assert_eq!(vec_idx.config.source_key, Some(DOCUMENT_KEY.to_string()));
         assert_eq!(vec_idx.config.space, None); // Python leaves as None
         assert_eq!(vec_idx.config.hnsw, None); // Python doesn't specify
