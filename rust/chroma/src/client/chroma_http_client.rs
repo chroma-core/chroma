@@ -253,6 +253,81 @@ impl ChromaHttpClient {
         *lock = Some(database_name.as_ref().to_string());
     }
 
+    /// Resolves the database name for collection operations.
+    ///
+    /// Returns the cached database name if available, otherwise fetches and caches the user's
+    /// identity information. Uses a lock to prevent concurrent resolution attempts.
+    pub async fn get_database_name(&self) -> Result<String, ChromaHttpClientError> {
+        {
+            let database_name_lock = self.database_name.lock();
+            if let Some(database_name) = &*database_name_lock {
+                return Ok(database_name.clone());
+            }
+        }
+
+        let _guard = self.resolve_tenant_or_database_lock.lock().await;
+
+        {
+            let database_name_lock = self.database_name.lock();
+            if let Some(database_name) = &*database_name_lock {
+                return Ok(database_name.clone());
+            }
+        }
+
+        let identity = self.get_auth_identity().await?;
+
+        if identity.databases.len() > 1 {
+            return Err(ChromaHttpClientError::CouldNotResolveDatabaseId(
+                "Client has access to multiple databases; please provide a database_name"
+                    .to_string(),
+            ));
+        }
+
+        let database_name = identity.databases.into_iter().next().ok_or_else(|| {
+            ChromaHttpClientError::CouldNotResolveDatabaseId(
+                "Client has access to no databases".to_string(),
+            )
+        })?;
+
+        {
+            let mut database_name_lock = self.database_name.lock();
+            *database_name_lock = Some(database_name.clone());
+        }
+
+        Ok(database_name.clone())
+    }
+
+    /// Resolves the tenant ID for the authenticated user.
+    ///
+    /// Returns the cached tenant ID if available, otherwise fetches and caches the user's
+    /// identity information. Uses a lock to prevent concurrent resolution attempts.
+    pub async fn get_tenant_id(&self) -> Result<String, ChromaHttpClientError> {
+        {
+            let tenant_id_lock = self.tenant_id.lock();
+            if let Some(tenant_id) = &*tenant_id_lock {
+                return Ok(tenant_id.clone());
+            }
+        }
+
+        let _guard = self.resolve_tenant_or_database_lock.lock().await;
+        {
+            let tenant_id_lock = self.tenant_id.lock();
+            if let Some(tenant_id) = &*tenant_id_lock {
+                return Ok(tenant_id.clone());
+            }
+        }
+
+        let identity = self.get_auth_identity().await?;
+        let tenant_id = identity.tenant;
+
+        {
+            let mut tenant_id_lock = self.tenant_id.lock();
+            *tenant_id_lock = Some(tenant_id.clone());
+        }
+
+        Ok(tenant_id)
+    }
+
     /// Creates a new database within the authenticated tenant.
     ///
     /// The database becomes immediately available for collection operations after creation.
@@ -649,77 +724,6 @@ impl ChromaHttpClient {
             client: self.clone(),
             collection: Arc::new(collection),
         })
-    }
-
-    async fn get_database_name(&self) -> Result<String, ChromaHttpClientError> {
-        {
-            let database_name_lock = self.database_name.lock();
-            if let Some(database_name) = &*database_name_lock {
-                return Ok(database_name.clone());
-            }
-        }
-
-        let _guard = self.resolve_tenant_or_database_lock.lock().await;
-
-        {
-            let database_name_lock = self.database_name.lock();
-            if let Some(database_name) = &*database_name_lock {
-                return Ok(database_name.clone());
-            }
-        }
-
-        let identity = self.get_auth_identity().await?;
-
-        if identity.databases.len() > 1 {
-            return Err(ChromaHttpClientError::CouldNotResolveDatabaseId(
-                "Client has access to multiple databases; please provide a database_name"
-                    .to_string(),
-            ));
-        }
-
-        let database_name = identity.databases.into_iter().next().ok_or_else(|| {
-            ChromaHttpClientError::CouldNotResolveDatabaseId(
-                "Client has access to no databases".to_string(),
-            )
-        })?;
-
-        {
-            let mut database_name_lock = self.database_name.lock();
-            *database_name_lock = Some(database_name.clone());
-        }
-
-        Ok(database_name.clone())
-    }
-
-    /// Resolves the tenant ID for the authenticated user.
-    ///
-    /// Returns the cached tenant ID if available, otherwise fetches and caches the user's
-    /// identity information. Uses a lock to prevent concurrent resolution attempts.
-    async fn get_tenant_id(&self) -> Result<String, ChromaHttpClientError> {
-        {
-            let tenant_id_lock = self.tenant_id.lock();
-            if let Some(tenant_id) = &*tenant_id_lock {
-                return Ok(tenant_id.clone());
-            }
-        }
-
-        let _guard = self.resolve_tenant_or_database_lock.lock().await;
-        {
-            let tenant_id_lock = self.tenant_id.lock();
-            if let Some(tenant_id) = &*tenant_id_lock {
-                return Ok(tenant_id.clone());
-            }
-        }
-
-        let identity = self.get_auth_identity().await?;
-        let tenant_id = identity.tenant;
-
-        {
-            let mut tenant_id_lock = self.tenant_id.lock();
-            *tenant_id_lock = Some(tenant_id.clone());
-        }
-
-        Ok(tenant_id)
     }
 
     /// Executes an HTTP request with automatic retry logic and OpenTelemetry metrics.
