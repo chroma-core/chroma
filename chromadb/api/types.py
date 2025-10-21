@@ -74,7 +74,7 @@ __all__ = [
     "FloatInvertedIndexConfig",
     "BoolInvertedIndexConfig",
     "IndexConfig",
-    # New Schema System (mirrors Rust InternalSchema)
+    # New Schema System (mirrors Rust Schema)
     "Schema",
     "ValueTypes",
     "StringValueType",

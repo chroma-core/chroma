@@ -19,30 +19,7 @@ use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_types::{
-    operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
-    plan::{Count, Get, Knn, Search},
-    AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    AddTaskError, Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
-    CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError,
-    CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTaskRequest, CreateTaskResponse, CreateTenantError,
-    CreateTenantRequest, CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
-    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
-    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError,
-    ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
-    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
-    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
-    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include, KnnIndex,
-    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
-    ListDatabasesResponse, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse,
-    RemoveTaskError, RemoveTaskRequest, RemoveTaskResponse, ResetError, ResetResponse, Schema,
-    SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
-    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where,
+    operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan}, plan::{Count, Get, Knn, Search}, AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse, AddTaskError, Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTaskRequest, CreateTaskResponse, CreateTenantError, CreateTenantRequest, CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError, GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include, InternalCollectionConfiguration, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, RemoveTaskError, RemoveTaskRequest, RemoveTaskResponse, ResetError, ResetResponse, Schema, SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -380,21 +357,18 @@ impl ServiceBasedFrontend {
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
             for collection in collections.iter_mut() {
-                let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+                let reconciled_schema = Schema::reconcile_schema_and_config(
                     collection.schema.clone(),
                     Some(collection.config.clone()),
                 )
                 .map_err(|reason| {
                     GetCollectionsError::InvalidSchema(SchemaError::InvalidSchema { reason })
                 })?;
-                collection.schema = Some(reconciled_schema.clone());
-                collection.config =
-                    InternalSchema::convert_schema_to_collection_config(reconciled_schema)
-                        .map_err(|reason| {
-                            GetCollectionsError::InvalidSchema(SchemaError::InvalidSchema {
-                                reason,
-                            })
-                        })?;
+                collection.config = InternalCollectionConfiguration::try_from(&reconciled_schema)
+                    .map_err(|reason| {
+                    GetCollectionsError::InvalidSchema(SchemaError::InvalidSchema { reason })
+                })?;
+                collection.schema = Some(reconciled_schema);
             }
         }
         Ok(collections)
@@ -443,12 +417,11 @@ impl ServiceBasedFrontend {
                 .map_err(|reason| {
                     GetCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
                 })?;
-                collection.schema = Some(reconciled_schema.clone());
-                collection.config =
-                    InternalSchema::convert_schema_to_collection_config(reconciled_schema)
-                        .map_err(|reason| {
-                            GetCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
-                        })?;
+                collection.config = InternalCollectionConfiguration::try_from(&reconciled_schema)
+                    .map_err(|reason| {
+                    GetCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
+                })?;
+                collection.schema = Some(reconciled_schema);
             }
         }
         collections
@@ -632,10 +605,9 @@ impl ServiceBasedFrontend {
                 Some(collection.config.clone()),
             )
             .map_err(CreateCollectionError::InvalidSchema)?;
-            collection.schema = Some(reconciled_schema.clone());
-            collection.config =
-                InternalSchema::convert_schema_to_collection_config(reconciled_schema)
-                    .map_err(CreateCollectionError::InvalidSchema)?;
+            collection.config = InternalCollectionConfiguration::try_from(&reconciled_schema)
+                .map_err(CreateCollectionError::InvalidSchema)?;
+            collection.schema = Some(reconciled_schema);
         }
         Ok(collection)
     }
@@ -744,11 +716,11 @@ impl ServiceBasedFrontend {
         .map_err(|reason| {
             ForkCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
         })?;
-        collection_and_segments.collection.schema = Some(reconciled_schema.clone());
         collection_and_segments.collection.config =
-            InternalSchema::convert_schema_to_collection_config(reconciled_schema).map_err(
-                |reason| ForkCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason }),
-            )?;
+            InternalCollectionConfiguration::try_from(&reconciled_schema).map_err(|reason| {
+                ForkCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
+            })?;
+        collection_and_segments.collection.schema = Some(reconciled_schema);
         let collection = collection_and_segments.collection.clone();
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection

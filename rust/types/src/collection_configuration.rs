@@ -9,9 +9,7 @@ use crate::{
     default_write_rng_factor,
 };
 use crate::{
-    HnswConfiguration, HnswParametersFromSegmentError, InternalHnswConfiguration,
-    InternalSpannConfiguration, Metadata, Segment, SpannConfiguration, UpdateHnswConfiguration,
-    UpdateSpannConfiguration,
+    HnswConfiguration, HnswParametersFromSegmentError, InternalHnswConfiguration, InternalSpannConfiguration, Metadata, Schema, Segment, SpannConfiguration, UpdateHnswConfiguration, UpdateSpannConfiguration, VectorIndexConfig, EMBEDDING_KEY
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
@@ -385,6 +383,64 @@ impl TryFrom<CollectionConfiguration> for InternalCollectionConfiguration {
                 vector_index: InternalHnswConfiguration::default().into(),
                 embedding_function: value.embedding_function,
             }),
+        }
+    }
+}
+
+impl TryFrom<&Schema> for InternalCollectionConfiguration {
+    type Error = String;
+
+    fn try_from(schema: &Schema) -> Result<Self, Self::Error> {
+        let vector_config = schema
+            .keys
+            .get(EMBEDDING_KEY)
+            .and_then(|value_types| value_types.float_list.as_ref())
+            .and_then(|float_list| float_list.vector_index.as_ref())
+            .map(|vector_index| vector_index.config.clone())
+            .or_else(|| {
+                schema
+                    .defaults
+                    .float_list
+                    .as_ref()
+                    .and_then(|float_list| float_list.vector_index.as_ref())
+                    .map(|vector_index| vector_index.config.clone())
+            })
+            .ok_or_else(|| "Missing vector index configuration for #embedding".to_string())?;
+
+        let VectorIndexConfig {
+            space,
+            embedding_function,
+            hnsw,
+            spann,
+            ..
+        } = vector_config;
+
+        match (hnsw, spann) {
+            (Some(_), Some(_)) => Err(
+                "Vector index configuration must not contain both HNSW and SPANN settings"
+                    .to_string(),
+            ),
+            (Some(hnsw_config), None) => {
+                let internal_hnsw = (space.as_ref(), Some(&hnsw_config)).into();
+                Ok(InternalCollectionConfiguration {
+                    vector_index: VectorIndexConfiguration::Hnsw(internal_hnsw),
+                    embedding_function,
+                })
+            }
+            (None, Some(spann_config)) => {
+                let internal_spann = (space.as_ref(), &spann_config).into();
+                Ok(InternalCollectionConfiguration {
+                    vector_index: VectorIndexConfiguration::Spann(internal_spann),
+                    embedding_function,
+                })
+            }
+            (None, None) => {
+                let internal_hnsw = (space.as_ref(), None).into();
+                Ok(InternalCollectionConfiguration {
+                    vector_index: VectorIndexConfiguration::Hnsw(internal_hnsw),
+                    embedding_function,
+                })
+            }
         }
     }
 }

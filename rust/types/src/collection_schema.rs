@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::collection_configuration::{
     EmbeddingFunctionConfiguration, InternalCollectionConfiguration, VectorIndexConfiguration,
 };
-use crate::hnsw_configuration::{InternalHnswConfiguration, Space};
+use crate::hnsw_configuration::Space;
 use crate::metadata::{MetadataComparison, MetadataValueType, Where};
 use crate::operator::QueryVector;
 use crate::{
@@ -481,7 +481,7 @@ impl Schema {
                 .config
                 .spann
                 .clone()
-                .map(|config| config.into_internal_configuration(space))
+                .map(|config| (space.as_ref(), &config).into())
         };
 
         self.keys
@@ -1172,101 +1172,6 @@ impl Schema {
         Ok(schema)
     }
 
-    /// Convert InternalSchema back into an InternalCollectionConfiguration
-    pub fn convert_schema_to_collection_config(
-        schema: InternalSchema,
-    ) -> Result<InternalCollectionConfiguration, String> {
-        let vector_config = schema
-            .keys
-            .get(EMBEDDING_KEY)
-            .and_then(|value_types| value_types.float_list.as_ref())
-            .and_then(|float_list| float_list.vector_index.as_ref())
-            .map(|vector_index| vector_index.config.clone())
-            .or_else(|| {
-                schema
-                    .defaults
-                    .float_list
-                    .as_ref()
-                    .and_then(|float_list| float_list.vector_index.as_ref())
-                    .map(|vector_index| vector_index.config.clone())
-            })
-            .ok_or_else(|| "Missing vector index configuration for #embedding".to_string())?;
-
-        let VectorIndexConfig {
-            space,
-            embedding_function,
-            hnsw,
-            spann,
-            ..
-        } = vector_config;
-
-        match (hnsw, spann) {
-            (Some(_), Some(_)) => Err(
-                "Vector index configuration must not contain both HNSW and SPANN settings"
-                    .to_string(),
-            ),
-            (Some(hnsw_config), None) => {
-                let internal_hnsw =
-                    Self::build_internal_hnsw_configuration(space.clone(), Some(hnsw_config));
-                Ok(InternalCollectionConfiguration {
-                    vector_index: VectorIndexConfiguration::Hnsw(internal_hnsw),
-                    embedding_function,
-                })
-            }
-            (None, Some(spann_config)) => {
-                let internal_spann = spann_config.into_internal_configuration(space);
-                Ok(InternalCollectionConfiguration {
-                    vector_index: VectorIndexConfiguration::Spann(internal_spann),
-                    embedding_function,
-                })
-            }
-            (None, None) => {
-                let internal_hnsw = Self::build_internal_hnsw_configuration(space, None);
-                Ok(InternalCollectionConfiguration {
-                    vector_index: VectorIndexConfiguration::Hnsw(internal_hnsw),
-                    embedding_function,
-                })
-            }
-        }
-    }
-
-    fn build_internal_hnsw_configuration(
-        space: Option<Space>,
-        config: Option<HnswIndexConfig>,
-    ) -> InternalHnswConfiguration {
-        let mut internal = InternalHnswConfiguration::default();
-
-        if let Some(space) = space {
-            internal.space = space;
-        }
-
-        if let Some(config) = config {
-            if let Some(ef_construction) = config.ef_construction {
-                internal.ef_construction = ef_construction;
-            }
-            if let Some(max_neighbors) = config.max_neighbors {
-                internal.max_neighbors = max_neighbors;
-            }
-            if let Some(ef_search) = config.ef_search {
-                internal.ef_search = ef_search;
-            }
-            if let Some(num_threads) = config.num_threads {
-                internal.num_threads = num_threads;
-            }
-            if let Some(batch_size) = config.batch_size {
-                internal.batch_size = batch_size;
-            }
-            if let Some(sync_threshold) = config.sync_threshold {
-                internal.sync_threshold = sync_threshold;
-            }
-            if let Some(resize_factor) = config.resize_factor {
-                internal.resize_factor = resize_factor;
-            }
-        }
-
-        internal
-    }
-
     /// Check if a specific metadata key-value should be indexed based on schema configuration
     pub fn is_metadata_type_index_enabled(
         &self,
@@ -1567,47 +1472,6 @@ pub struct SpannIndexConfig {
     pub ef_search: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_neighbors: Option<usize>,
-}
-
-impl SpannIndexConfig {
-    pub fn into_internal_configuration(
-        self,
-        vector_space: Option<Space>,
-    ) -> InternalSpannConfiguration {
-        InternalSpannConfiguration {
-            search_nprobe: self.search_nprobe.unwrap_or(default_search_nprobe()),
-            search_rng_factor: self
-                .search_rng_factor
-                .unwrap_or(default_search_rng_factor()),
-            search_rng_epsilon: self
-                .search_rng_epsilon
-                .unwrap_or(default_search_rng_epsilon()),
-            nreplica_count: self.nreplica_count.unwrap_or(default_nreplica_count()),
-            write_rng_factor: self.write_rng_factor.unwrap_or(default_write_rng_factor()),
-            write_rng_epsilon: self
-                .write_rng_epsilon
-                .unwrap_or(default_write_rng_epsilon()),
-            split_threshold: self.split_threshold.unwrap_or(default_split_threshold()),
-            num_samples_kmeans: self
-                .num_samples_kmeans
-                .unwrap_or(default_num_samples_kmeans()),
-            initial_lambda: self.initial_lambda.unwrap_or(default_initial_lambda()),
-            reassign_neighbor_count: self
-                .reassign_neighbor_count
-                .unwrap_or(default_reassign_neighbor_count()),
-            merge_threshold: self.merge_threshold.unwrap_or(default_merge_threshold()),
-            num_centers_to_merge_to: self
-                .num_centers_to_merge_to
-                .unwrap_or(default_num_centers_to_merge_to()),
-            write_nprobe: self.write_nprobe.unwrap_or(default_write_nprobe()),
-            ef_construction: self
-                .ef_construction
-                .unwrap_or(default_construction_ef_spann()),
-            ef_search: self.ef_search.unwrap_or(default_search_ef_spann()),
-            max_neighbors: self.max_neighbors.unwrap_or(default_m_spann()),
-            space: vector_space.unwrap_or(default_space()),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1923,8 +1787,8 @@ mod tests {
         };
 
         let schema =
-            InternalSchema::convert_collection_config_to_schema(collection_config.clone()).unwrap();
-        let reconstructed = InternalSchema::convert_schema_to_collection_config(schema).unwrap();
+            Schema::convert_collection_config_to_schema(collection_config.clone()).unwrap();
+        let reconstructed = InternalCollectionConfiguration::try_from(&schema).unwrap();
 
         assert_eq!(reconstructed, collection_config);
     }
@@ -1956,15 +1820,15 @@ mod tests {
         };
 
         let schema =
-            InternalSchema::convert_collection_config_to_schema(collection_config.clone()).unwrap();
-        let reconstructed = InternalSchema::convert_schema_to_collection_config(schema).unwrap();
+            Schema::convert_collection_config_to_schema(collection_config.clone()).unwrap();
+        let reconstructed = InternalCollectionConfiguration::try_from(&schema).unwrap();
 
         assert_eq!(reconstructed, collection_config);
     }
 
     #[test]
     fn test_convert_schema_to_collection_config_rejects_mixed_index() {
-        let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
         if let Some(embedding) = schema.keys.get_mut(EMBEDDING_KEY) {
             if let Some(float_list) = &mut embedding.float_list {
                 if let Some(vector_index) = &mut float_list.vector_index {
@@ -1990,7 +1854,7 @@ mod tests {
             }
         }
 
-        let result = InternalSchema::convert_schema_to_collection_config(schema);
+        let result = InternalCollectionConfiguration::try_from(&schema);
         assert!(result.is_err());
     }
 
@@ -2216,9 +2080,7 @@ mod tests {
             max_neighbors: Some(32),
         };
 
-        let with_space = config
-            .clone()
-            .into_internal_configuration(Some(Space::Cosine));
+        let with_space: InternalSpannConfiguration = (Some(&Space::Cosine), &config).into();
         assert_eq!(with_space.space, Space::Cosine);
         assert_eq!(with_space.search_nprobe, 33);
         assert_eq!(with_space.search_rng_factor, 1.2);
@@ -2230,7 +2092,7 @@ mod tests {
         assert_eq!(with_space.max_neighbors, 32);
         assert_eq!(with_space.merge_threshold, default_merge_threshold());
 
-        let default_space_config = config.into_internal_configuration(None);
+        let default_space_config: InternalSpannConfiguration = (None, &config).into();
         assert_eq!(default_space_config.space, default_space());
     }
 
