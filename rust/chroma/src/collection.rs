@@ -325,87 +325,144 @@ impl ChromaCollection {
         self.send("query", Method::POST, Some(request)).await
     }
 
-    /// Executes advanced search with multiple search payloads in a single request.
+    /// Performs hybrid search on the collection using the new Search API.
     ///
-    /// Each [`SearchPayload`] can specify distinct query vectors, filters, and result counts,
-    /// enabling efficient batch similarity search with heterogeneous parameters.
+    /// The Search API provides a powerful, flexible interface for vector similarity search
+    /// combined with metadata filtering and custom ranking expressions.
     ///
-    /// # Errors
+    /// # Arguments
     ///
-    /// Returns an error if:
-    /// - Any search payload fails validation
-    /// - Network communication fails
+    /// * `searches` - One or more search payloads to execute in a single request
+    ///
+    /// # Returns
+    ///
+    /// A `SearchResponse` containing results for each search payload
     ///
     /// # Examples
     ///
-    /// Basic search with default parameters:
-    /// ```
-    /// # use chroma::collection::ChromaCollection;
-    /// # use chroma_types::plan::SearchPayload;
-    /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
-    /// let search1 = SearchPayload {
-    ///     filter: Default::default(),
-    ///     rank: Default::default(),
-    ///     limit: Default::default(),
-    ///     select: Default::default(),
-    /// };
-    /// let search2 = SearchPayload {
-    ///     filter: Default::default(),
-    ///     rank: Default::default(),
-    ///     limit: Default::default(),
-    ///     select: Default::default(),
-    /// };
+    /// ## Basic similarity search
     ///
-    /// let response = collection.search(vec![search1, search2]).await?;
-    /// println!("Executed {} searches", response.ids.len());
+    /// ```no_run
+    /// use chroma_types::plan::SearchPayload;
+    /// use chroma_types::operator::{RankExpr, QueryVector, Key};
+    ///
+    /// # async fn example(collection: &chroma::collection::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Search with a query vector
+    /// let search = SearchPayload::default()
+    ///     .rank(RankExpr::Knn {
+    ///         query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    ///         key: Key::Embedding,
+    ///         limit: 100,
+    ///         default: None,
+    ///         return_rank: false,
+    ///     })
+    ///     .limit(Some(10), 0)
+    ///     .select([Key::Document, Key::Score]);
+    ///
+    /// let results = collection.search(vec![search]).await?;
     /// # Ok(())
     /// # }
     /// ```
     ///
-    /// Advanced search with all fields configured:
+    /// ## Filtered search with metadata
+    ///
+    /// ```no_run
+    /// use chroma_types::plan::SearchPayload;
+    /// use chroma_types::operator::{RankExpr, QueryVector, Key};
+    ///
+    /// # async fn example(collection: &chroma::collection::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Filter by category and year, then rank by similarity
+    /// let search = SearchPayload::default()
+    ///     .r#where(
+    ///         Key::field("category").eq("science")
+    ///             & Key::field("year").gte(2020)
+    ///     )
+    ///     .rank(RankExpr::Knn {
+    ///         query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    ///         key: Key::Embedding,
+    ///         limit: 200,
+    ///         default: None,
+    ///         return_rank: false,
+    ///     })
+    ///     .limit(Some(5), 0)
+    ///     .select([Key::Document, Key::Score, Key::field("title")]);
+    ///
+    /// let results = collection.search(vec![search]).await?;
+    /// # Ok(())
+    /// # }
     /// ```
-    /// # use chroma::collection::ChromaCollection;
-    /// # use chroma_types::plan::SearchPayload;
-    /// # use chroma_types::{Filter, Rank, RankExpr, QueryVector, Key, Limit, Select};
-    /// # use chroma_types::{Where, MetadataExpression, MetadataComparison, PrimitiveOperator, MetadataValue};
-    /// # use std::collections::HashSet;
-    /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
-    /// let search = SearchPayload {
-    ///     filter: Filter {
-    ///         query_ids: Some(vec!["doc1".to_string(), "doc2".to_string()]),
-    ///         where_clause: Some(Where::Metadata(MetadataExpression {
-    ///             key: "category".to_string(),
-    ///             comparison: MetadataComparison::Primitive(
-    ///                 PrimitiveOperator::Equal,
-    ///                 MetadataValue::Str("research".to_string()),
-    ///             ),
-    ///         })),
-    ///     },
-    ///     rank: Rank {
-    ///         expr: Some(RankExpr::Knn {
-    ///             query: QueryVector::Dense(vec![0.1, 0.2, 0.3, 0.4]),
-    ///             key: Key::Embedding,
-    ///             limit: 50,
-    ///             default: None,
-    ///             return_rank: false,
-    ///         }),
-    ///     },
-    ///     limit: Limit {
-    ///         offset: 0,
-    ///         limit: Some(10),
-    ///     },
-    ///     select: Select {
-    ///         keys: HashSet::from([
-    ///             Key::Document,
-    ///             Key::Metadata,
-    ///             Key::Embedding,
-    ///             Key::Score,
-    ///         ]),
-    ///     },
+    ///
+    /// ## Hybrid search with custom ranking
+    ///
+    /// ```no_run
+    /// use chroma_types::plan::SearchPayload;
+    /// use chroma_types::operator::{RankExpr, QueryVector, Key};
+    ///
+    /// # async fn example(collection: &chroma::collection::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Combine two KNN searches with weights
+    /// let dense_knn = RankExpr::Knn {
+    ///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    ///     key: Key::Embedding,
+    ///     limit: 200,
+    ///     default: None,
+    ///     return_rank: false,
     /// };
     ///
-    /// let response = collection.search(vec![search]).await?;
-    /// println!("Found {} results", response.ids[0].len());
+    /// let sparse_knn = RankExpr::Knn {
+    ///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]), // Use sparse vector in practice
+    ///     key: Key::field("sparse_embedding"),
+    ///     limit: 200,
+    ///     default: None,
+    ///     return_rank: false,
+    /// };
+    ///
+    /// // Weighted combination: 70% dense + 30% sparse
+    /// let hybrid_rank = dense_knn * 0.7 + sparse_knn * 0.3;
+    ///
+    /// let search = SearchPayload::default()
+    ///     .rank(hybrid_rank)
+    ///     .limit(Some(10), 0)
+    ///     .select([Key::Document, Key::Score]);
+    ///
+    /// let results = collection.search(vec![search]).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// ## Batch operations
+    ///
+    /// ```no_run
+    /// use chroma_types::plan::SearchPayload;
+    /// use chroma_types::operator::{RankExpr, QueryVector, Key};
+    ///
+    /// # async fn example(collection: &chroma::collection::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Run multiple searches in one request
+    /// let searches = vec![
+    ///     SearchPayload::default()
+    ///         .r#where(Key::field("category").eq("tech"))
+    ///         .rank(RankExpr::Knn {
+    ///             query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    ///             key: Key::Embedding,
+    ///             limit: 100,
+    ///             default: None,
+    ///             return_rank: false,
+    ///         })
+    ///         .limit(Some(5), 0),
+    ///     SearchPayload::default()
+    ///         .r#where(Key::field("category").eq("science"))
+    ///         .rank(RankExpr::Knn {
+    ///             query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    ///             key: Key::Embedding,
+    ///             limit: 100,
+    ///             default: None,
+    ///             return_rank: false,
+    ///         })
+    ///         .limit(Some(5), 0),
+    /// ];
+    ///
+    /// let results = collection.search(searches).await?;
+    /// // results.results[0] contains first search results
+    /// // results.results[1] contains second search results
     /// # Ok(())
     /// # }
     /// ```
