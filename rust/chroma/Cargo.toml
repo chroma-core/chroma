@@ -6,21 +6,23 @@ description = "Client for Chroma, the AI-native cloud database."
 license = "Apache-2.0"
 
 [dependencies]
-async-trait = { workspace = true }
+async-trait.workspace = true
 backon = "1.5"
 bon = "3.8.1"
-reqwest = { version = ">=0.12.0,<0.13.0", features = ["json", "charset", "system-proxy", "http2"], default-features = false }
+murmur3.workspace = true
 opentelemetry = { version = ">=0.27,<0.32", optional = true }
+parking_lot.workspace = true
+reqwest = { version = ">=0.12.0,<0.13.0", features = ["json", "charset", "system-proxy", "http2"], default-features = false }
+rust-stemmers = "1.2"
 serde.workspace = true
 serde_json.workspace = true
 tokio = { version = ">=1,<2", features = ["sync"] }
 thiserror.workspace = true
 tracing.workspace = true
-parking_lot.workspace = true
 
-chroma-api-types = { workspace = true }
-chroma-error = { workspace = true }
-chroma-types = { workspace = true }
+chroma-api-types.workspace = true
+chroma-error.workspace = true
+chroma-types.workspace = true
 
 [features]
 default = ["rustls", "ollama"]
