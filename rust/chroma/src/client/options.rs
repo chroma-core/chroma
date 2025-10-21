@@ -77,7 +77,7 @@ pub struct ChromaClientOptions {
     /// Will be automatically resolved at request time if not provided
     pub tenant_id: Option<String>,
     /// Will be automatically resolved at request time if not provided. It can only be resolved automatically if this client has access to exactly one database.
-    pub default_database_name: Option<String>,
+    pub database_name: Option<String>,
 }
 
 impl Default for ChromaClientOptions {
@@ -87,7 +87,7 @@ impl Default for ChromaClientOptions {
             auth_method: ChromaAuthMethod::None,
             retry_options: ChromaRetryOptions::default(),
             tenant_id: None,
-            default_database_name: None,
+            database_name: None,
         }
     }
 }
@@ -104,7 +104,7 @@ impl ChromaClientOptions {
             std::env::var("CHROMA_DATABASE").unwrap_or("default_database".to_string());
 
         Ok(ChromaClientOptions {
-            default_database_name: Some(database_name),
+            database_name: Some(database_name),
             tenant_id: Some(tenant_id),
             endpoint,
             ..Default::default()
@@ -125,7 +125,7 @@ impl ChromaClientOptions {
         let database_name = std::env::var("CHROMA_DATABASE").ok();
 
         Ok(ChromaClientOptions {
-            default_database_name: database_name,
+            database_name,
             tenant_id,
             endpoint,
             auth_method: ChromaAuthMethod::cloud_api_key(&api_key)?,
@@ -140,7 +140,7 @@ impl ChromaClientOptions {
         let api_key = api_key.into();
         let database_name = database_name.into();
         Ok(ChromaClientOptions {
-            default_database_name: Some(database_name),
+            database_name: Some(database_name),
             auth_method: ChromaAuthMethod::cloud_api_key(&api_key)?,
             endpoint: DEFAULT_CLOUD_ENDPOINT.parse().expect("valid URL"),
             ..Default::default()
