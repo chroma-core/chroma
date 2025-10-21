@@ -191,12 +191,8 @@ const DEFAULT_ENGLISH_STOPWORDS_ARRAY: &[&str] = &[
 ];
 
 /// Default English stopwords as a HashSet, lazily initialized.
-///
-/// Uses `&'static str` for memory efficiency - cloning only copies pointers,
-/// not the underlying string data.
-static DEFAULT_ENGLISH_STOPWORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    DEFAULT_ENGLISH_STOPWORDS_ARRAY.iter().copied().collect()
-});
+static DEFAULT_ENGLISH_STOPWORDS: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| DEFAULT_ENGLISH_STOPWORDS_ARRAY.iter().copied().collect());
 
 /// Standard BM25 tokenizer with stemming and stopword filtering.
 ///
