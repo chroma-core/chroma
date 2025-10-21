@@ -1,7 +1,7 @@
 # Chroma
 
 This crate provides the official Chroma Rust client.  Chroma is an open-source AI-native search
-database that makes it easy to get private, offline, and realtime data that large language models
+database that makes it easy to get private, offline, and real-time data that large language models
 were not trained on into their context.  Where the language models provide reasoning, Chroma focuses
 on search, enabling your application to customize the search methods it needs most.
 
