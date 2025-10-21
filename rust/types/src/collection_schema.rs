@@ -470,14 +470,26 @@ pub struct BoolInvertedIndexType {
 }
 
 impl Schema {
-    /// Create a new Schema with strongly-typed default configurations
     pub fn new_default(default_knn_index: KnnIndex) -> Self {
+        Self::new_default_with_ef_and_space(
+            default_knn_index,
+            Some(EmbeddingFunctionConfiguration::Legacy),
+            default_space(),
+        )
+    }
+
+    /// Create a new Schema with strongly-typed default configurations
+    pub fn new_default_with_ef_and_space(
+        default_knn_index: KnnIndex,
+        ef: Option<EmbeddingFunctionConfiguration>,
+        space: Space,
+    ) -> Self {
         // Vector index disabled on all keys except #embedding.
         let vector_config = VectorIndexType {
             enabled: false,
             config: VectorIndexConfig {
-                space: Some(default_space()),
-                embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+                space: Some(space.clone()),
+                embedding_function: ef.clone(),
                 source_key: None,
                 hnsw: match default_knn_index {
                     KnnIndex::Hnsw => Some(HnswIndexConfig {
@@ -569,8 +581,8 @@ impl Schema {
                 vector_index: Some(VectorIndexType {
                     enabled: true,
                     config: VectorIndexConfig {
-                        space: Some(default_space()),
-                        embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+                        space: Some(space),
+                        embedding_function: ef,
                         source_key: Some(DOCUMENT_KEY.to_string()),
                         hnsw: match default_knn_index {
                             KnnIndex::Hnsw => Some(HnswIndexConfig {
@@ -655,14 +667,27 @@ impl Schema {
             })
     }
 
+    pub fn reconcile_with_defaults(user_schema: Option<Schema>) -> Result<Self, SchemaError> {
+        Self::reconcile_with_defaults_with_ef_and_space(
+            user_schema,
+            Some(EmbeddingFunctionConfiguration::Legacy),
+            default_space(),
+        )
+    }
+
     /// Reconcile user-provided schema with system defaults
     ///
     /// This method merges user configurations with system defaults, ensuring that:
     /// - User overrides take precedence over defaults
     /// - Missing user configurations fall back to system defaults
     /// - Field-level merging for complex configurations (Vector, HNSW, SPANN, etc.)
-    pub fn reconcile_with_defaults(user_schema: Option<Schema>) -> Result<Self, SchemaError> {
-        let default_schema = Schema::new_default(KnnIndex::Spann);
+    pub fn reconcile_with_defaults_with_ef_and_space(
+        user_schema: Option<Schema>,
+        embedding_function: Option<EmbeddingFunctionConfiguration>,
+        space: Space,
+    ) -> Result<Self, SchemaError> {
+        let default_schema =
+            Schema::new_default_with_ef_and_space(KnnIndex::Spann, embedding_function, space);
 
         match user_schema {
             Some(user) => {
@@ -1258,7 +1283,21 @@ impl Schema {
         schema: Option<Schema>,
         configuration: Option<InternalCollectionConfiguration>,
     ) -> Result<Schema, SchemaError> {
-        let reconciled_schema = Self::reconcile_with_defaults(schema)?;
+        let (collection_config_ef, collection_config_space) = match &configuration {
+            Some(config) => (
+                config.embedding_function.clone(),
+                config.vector_index.get_space(),
+            ),
+            None => (
+                Some(EmbeddingFunctionConfiguration::Legacy),
+                default_space(),
+            ),
+        };
+        let reconciled_schema = Self::reconcile_with_defaults_with_ef_and_space(
+            schema,
+            collection_config_ef,
+            collection_config_space,
+        )?;
         if let Some(config) = configuration {
             Self::reconcile_with_collection_config(reconciled_schema, config)
         } else {

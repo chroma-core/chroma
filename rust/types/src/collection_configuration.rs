@@ -10,7 +10,7 @@ use crate::{
 };
 use crate::{
     HnswConfiguration, HnswParametersFromSegmentError, InternalHnswConfiguration,
-    InternalSpannConfiguration, Metadata, Schema, Segment, SpannConfiguration,
+    InternalSpannConfiguration, Metadata, Schema, Segment, Space, SpannConfiguration,
     UpdateHnswConfiguration, UpdateSpannConfiguration, VectorIndexConfig, EMBEDDING_KEY,
 };
 use chroma_error::{ChromaError, ErrorCodes};
@@ -86,6 +86,13 @@ impl VectorIndexConfiguration {
                 // For now, we don't support converting between different index types
                 // This could be implemented in the future if needed
             }
+        }
+    }
+
+    pub fn get_space(&self) -> Space {
+        match &self {
+            VectorIndexConfiguration::Hnsw(config) => config.space.clone(),
+            VectorIndexConfiguration::Spann(config) => config.space.clone(),
         }
     }
 }
