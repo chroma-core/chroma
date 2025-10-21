@@ -91,10 +91,10 @@ static METRICS: std::sync::LazyLock<crate::client::metrics::Metrics> =
 /// # Examples
 ///
 /// ```
-/// use chroma::{ChromaHttpClient, client::ChromaClientOptions, client::ChromaAuthMethod};
+/// use chroma::{ChromaHttpClient, client::ChromaHttpClientOptions, client::ChromaAuthMethod};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let options = ChromaClientOptions {
+/// let options = ChromaHttpClientOptions {
 ///     endpoint: "https://api.trychroma.com".parse()?,
 ///     auth_method: ChromaAuthMethod::cloud_api_key("my-key")?,
 ///     ..Default::default()
@@ -158,10 +158,10 @@ impl ChromaHttpClient {
     /// # Examples
     ///
     /// ```
-    /// use chroma::{ChromaHttpClient, client::ChromaClientOptions, client::ChromaAuthMethod};
+    /// use chroma::{ChromaHttpClient, client::ChromaHttpClientOptions, client::ChromaAuthMethod};
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let options = ChromaClientOptions {
+    /// let options = ChromaHttpClientOptions {
     ///     endpoint: "https://api.trychroma.com".parse()?,
     ///     auth_method: ChromaAuthMethod::cloud_api_key("my-key")?,
     ///     ..Default::default()

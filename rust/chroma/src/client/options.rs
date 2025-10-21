@@ -157,10 +157,10 @@ impl ChromaHttpClientOptions {
     /// # Examples
     ///
     /// ```no_run
-    /// use chroma::client::ChromaClientOptions;
+    /// use chroma::client::ChromaHttpClientOptions;
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let options = ChromaClientOptions::from_env()?;
+    /// let options = ChromaHttpClientOptions::from_env()?;
     /// # Ok(())
     /// # }
     /// ```
@@ -200,10 +200,10 @@ impl ChromaHttpClientOptions {
     /// # Examples
     ///
     /// ```no_run
-    /// use chroma::client::ChromaClientOptions;
+    /// use chroma::client::ChromaHttpClientOptions;
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let options = ChromaClientOptions::from_cloud_env()?;
+    /// let options = ChromaHttpClientOptions::from_cloud_env()?;
     /// # Ok(())
     /// # }
     /// ```
@@ -241,10 +241,10 @@ impl ChromaHttpClientOptions {
     /// # Examples
     ///
     /// ```
-    /// use chroma::client::ChromaClientOptions;
+    /// use chroma::client::ChromaHttpClientOptions;
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let options = ChromaClientOptions::cloud("my-api-key", "production-db")?;
+    /// let options = ChromaHttpClientOptions::cloud("my-api-key", "production-db")?;
     /// # Ok(())
     /// # }
     /// ```

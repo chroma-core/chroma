@@ -42,8 +42,8 @@ use crate::{client::ChromaHttpClientError, ChromaHttpClient};
 ///
 /// ```
 /// # use chroma::collection::ChromaCollection;
-/// # use chroma::client::ChromaClientError;
-/// # async fn example(collection: ChromaCollection) -> Result<(), ChromaClientError> {
+/// # use chroma::client::ChromaHttpClientError;
+/// # async fn example(collection: ChromaCollection) -> Result<(), ChromaHttpClientError> {
 /// let count = collection.count().await?;
 /// println!("Collection contains {} records", count);
 ///
@@ -325,7 +325,7 @@ impl ChromaCollection {
         self.send("query", Method::POST, Some(request)).await
     }
 
-    /// Performs hybrid search on the collection using the new Search API.
+    /// Performs hybrid search on the collection using the Search API.
     ///
     /// The Search API provides a powerful, flexible interface for vector similarity search
     /// combined with metadata filtering and custom ranking expressions.
@@ -342,7 +342,7 @@ impl ChromaCollection {
     ///
     /// ## Basic similarity search
     ///
-    /// ```no_run
+    /// ```
     /// use chroma_types::plan::SearchPayload;
     /// use chroma_types::operator::{RankExpr, QueryVector, Key};
     ///
@@ -366,7 +366,7 @@ impl ChromaCollection {
     ///
     /// ## Filtered search with metadata
     ///
-    /// ```no_run
+    /// ```
     /// use chroma_types::plan::SearchPayload;
     /// use chroma_types::operator::{RankExpr, QueryVector, Key};
     ///
@@ -394,7 +394,7 @@ impl ChromaCollection {
     ///
     /// ## Hybrid search with custom ranking
     ///
-    /// ```no_run
+    /// ```
     /// use chroma_types::plan::SearchPayload;
     /// use chroma_types::operator::{RankExpr, QueryVector, Key};
     ///
@@ -431,7 +431,7 @@ impl ChromaCollection {
     ///
     /// ## Batch operations
     ///
-    /// ```no_run
+    /// ```
     /// use chroma_types::plan::SearchPayload;
     /// use chroma_types::operator::{RankExpr, QueryVector, Key};
     ///

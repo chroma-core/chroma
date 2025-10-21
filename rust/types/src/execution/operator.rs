@@ -118,7 +118,7 @@ pub struct FetchLog {
     pub start_log_offset_id: u32,
 }
 
-/// Filter for narrowing search results.
+/// Filter the search results.
 ///
 /// Combines document ID filtering with metadata and document content predicates.
 /// For the Search API, use `where_clause` with Key expressions.
@@ -1968,8 +1968,8 @@ impl Key {
     /// // With Vec
     /// let filter = Key::field("year").is_in(vec![2023, 2024, 2025]);
     ///
-    /// // With array (converted to Vec)
-    /// let filter = Key::field("category").is_in(vec!["tech", "science", "math"]);
+    /// // With array
+    /// let filter = Key::field("category").is_in(["tech", "science", "math"]);
     ///
     /// // With owned strings
     /// let categories = vec!["tech".to_string(), "science".to_string()];
