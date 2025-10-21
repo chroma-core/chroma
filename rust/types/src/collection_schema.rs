@@ -2057,7 +2057,7 @@ mod tests {
             write_rng_epsilon: Some(6.0), // Must be 5.0-10.0
             split_threshold: Some(100),   // Must be 50-200
             num_samples_kmeans: Some(100),
-            initial_lambda: Some(0.5),
+            initial_lambda: Some(100.0), // Must be exactly 100.0
             reassign_neighbor_count: Some(50),
             merge_threshold: Some(50),        // Must be 25-100
             num_centers_to_merge_to: Some(4), // Max is 8
@@ -2096,7 +2096,7 @@ mod tests {
         // Check defaults preserved
         assert_eq!(result.search_rng_factor, Some(1.0));
         assert_eq!(result.nreplica_count, Some(3));
-        assert_eq!(result.initial_lambda, Some(0.5));
+        assert_eq!(result.initial_lambda, Some(100.0));
     }
 
     #[test]
@@ -3238,16 +3238,22 @@ mod tests {
         };
         assert!(valid_num_samples_kmeans.validate().is_ok());
 
-        // Invalid: initial_lambda too large (max 100.0)
-        let invalid_initial_lambda = SpannIndexConfig {
+        // Invalid: initial_lambda not exactly 100.0 (min 100.0, max 100.0)
+        let invalid_initial_lambda_high = SpannIndexConfig {
             initial_lambda: Some(150.0),
             ..Default::default()
         };
-        assert!(invalid_initial_lambda.validate().is_err());
+        assert!(invalid_initial_lambda_high.validate().is_err());
 
-        // Valid: initial_lambda within range
-        let valid_initial_lambda = SpannIndexConfig {
+        let invalid_initial_lambda_low = SpannIndexConfig {
             initial_lambda: Some(50.0),
+            ..Default::default()
+        };
+        assert!(invalid_initial_lambda_low.validate().is_err());
+
+        // Valid: initial_lambda exactly 100.0
+        let valid_initial_lambda = SpannIndexConfig {
+            initial_lambda: Some(100.0),
             ..Default::default()
         };
         assert!(valid_initial_lambda.validate().is_ok());
