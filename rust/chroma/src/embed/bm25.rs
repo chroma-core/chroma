@@ -107,3 +107,63 @@ where
         batches.iter().map(|text| self.encode(text)).collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tests comprehensive tokenization covering:
+    /// - Possessive forms (Bolt's)
+    /// - Special characters (~, parentheses)
+    /// - Numbers (27.8, 44.72)
+    /// - Mixed case and abbreviations (mph, km/h)
+    /// - Hyphens in compound words
+    /// - Maximum token variety (12 unique tokens after processing)
+    #[test]
+    fn test_bm25_comprehensive_tokenization() {
+        let bm25 = BM25SparseEmbeddingFunction::default();
+        let text = "Usain Bolt's top speed reached ~27.8 mph (44.72 km/h)";
+
+        let result = bm25.encode(text).unwrap();
+
+        let expected_indices = vec![
+            230246813, 395514983, 458027949, 488165615, 729632045, 734978415, 997512866,
+            1114505193, 1381820790, 1501587190, 1649421877, 1837285388,
+        ];
+        let expected_value = 1.6391152502910362;
+
+        assert_eq!(result.indices.len(), 12);
+        assert_eq!(result.indices, expected_indices);
+
+        for &value in &result.values {
+            assert!((value - expected_value).abs() < 1e-6);
+        }
+    }
+
+    /// Tests tokenizer's handling of:
+    /// - Stopword filtering ("The" is filtered out)
+    /// - Multiple consecutive spaces
+    /// - Hyphens in compound words (space-time)
+    /// - Full uppercase words (WARPS)
+    /// - Trailing punctuation (...)
+    /// - Stemming (objects -> object)
+    #[test]
+    fn test_bm25_stopwords_and_punctuation() {
+        let bm25 = BM25SparseEmbeddingFunction::default();
+        let text = "The   space-time   continuum   WARPS   near   massive   objects...";
+
+        let result = bm25.encode(text).unwrap();
+
+        let expected_indices = vec![
+            90097469, 519064992, 737893654, 1110755108, 1950894484, 2031641008, 2058513491,
+        ];
+        let expected_value = 1.6608670008846949;
+
+        assert_eq!(result.indices.len(), 7);
+        assert_eq!(result.indices, expected_indices);
+
+        for &value in &result.values {
+            assert!((value - expected_value).abs() < 1e-6);
+        }
+    }
+}
