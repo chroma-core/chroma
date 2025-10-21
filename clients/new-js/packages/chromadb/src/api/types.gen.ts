@@ -244,6 +244,72 @@ export type IntValueType = {
     int_inverted_index?: null | IntInvertedIndexType;
 };
 
+/**
+ * Represents a field key in search queries.
+ *
+ * Used for both selecting fields to return and building filter expressions.
+ * Predefined keys access special fields, while custom keys access metadata.
+ *
+ * # Predefined Keys
+ *
+ * - `Key::Document` - Document text content (`#document`)
+ * - `Key::Embedding` - Vector embeddings (`#embedding`)
+ * - `Key::Metadata` - All metadata fields (`#metadata`)
+ * - `Key::Score` - Search scores (`#score`)
+ *
+ * # Custom Keys
+ *
+ * Use `Key::field()` or `Key::from()` to reference metadata fields:
+ *
+ * ```
+ * use chroma_types::operator::Key;
+ *
+ * let key = Key::field("author");
+ * let key = Key::from("title");
+ * ```
+ *
+ * # Examples
+ *
+ * ## Building filters
+ *
+ * ```
+ * use chroma_types::operator::Key;
+ *
+ * // Equality
+ * let filter = Key::field("status").eq("published");
+ *
+ * // Comparisons
+ * let filter = Key::field("year").gte(2020);
+ * let filter = Key::field("score").lt(0.9);
+ *
+ * // Set operations
+ * let filter = Key::field("category").is_in(vec!["tech", "science"]);
+ * let filter = Key::field("status").not_in(vec!["deleted", "archived"]);
+ *
+ * // Document content
+ * let filter = Key::Document.contains("machine learning");
+ * let filter = Key::Document.regex(r"\bAPI\b");
+ *
+ * // Combining filters
+ * let filter = Key::field("status").eq("published")
+ * & Key::field("year").gte(2020);
+ * ```
+ *
+ * ## Selecting fields
+ *
+ * ```
+ * use chroma_types::plan::SearchPayload;
+ * use chroma_types::operator::Key;
+ *
+ * let search = SearchPayload::default()
+ * .select([
+ * Key::Document,
+ * Key::Score,
+ * Key::field("title"),
+ * Key::field("author"),
+ * ]);
+ * ```
+ */
 export type Key = 'Document' | 'Embedding' | 'Metadata' | 'Score' | {
     MetadataField: string;
 };
