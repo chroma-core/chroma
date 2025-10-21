@@ -72,8 +72,6 @@ jobs:
           ghcr-password: ${{ secrets.GITHUB_TOKEN }}
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
-          # Calling useblacksmith/build-push-action twice in the same job leads to strange errors
-          setup-blacksmith: false
 
       - name: Compute arch-specific tags
         id: tags
