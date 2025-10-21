@@ -188,11 +188,7 @@ impl CollectionsWithSegmentsProvider {
             collection_and_segments_sysdb.collection.schema.clone(),
             Some(collection_and_segments_sysdb.collection.config.clone()),
         )
-        .map_err(|reason| {
-            CollectionsWithSegmentsProviderError::InvalidSchema(SchemaError::InvalidSchema {
-                reason,
-            })
-        })?;
+        .map_err(CollectionsWithSegmentsProviderError::InvalidSchema)?;
         collection_and_segments_sysdb.collection.schema = Some(reconciled_schema);
         self.set_collection_with_segments(collection_and_segments_sysdb.clone())
             .await;

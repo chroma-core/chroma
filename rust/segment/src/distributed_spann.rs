@@ -115,9 +115,7 @@ impl SpannSegmentWriter {
             collection.schema.clone(),
             Some(collection.config.clone()),
         )
-        .map_err(|e| {
-            SpannSegmentWriterError::InvalidSchema(SchemaError::InvalidSchema { reason: e })
-        })?;
+        .map_err(SpannSegmentWriterError::InvalidSchema)?;
 
         let params = reconciled_schema
             .get_internal_spann_config()
