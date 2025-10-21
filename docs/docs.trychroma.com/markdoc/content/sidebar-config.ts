@@ -138,7 +138,7 @@ const sidebarConfig: AppSection[] = [
       },
       {
         id: "search-api",
-        name: "Search API (Beta)",
+        name: "Search API",
         pages: [
           { id: "overview", name: "Overview" },
           { id: "search-basics", name: "Search Basics" },
