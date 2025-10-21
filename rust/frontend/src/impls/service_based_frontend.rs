@@ -367,7 +367,8 @@ impl ServiceBasedFrontend {
             ..
         }: ListCollectionsRequest,
     ) -> Result<ListCollectionsResponse, GetCollectionsError> {
-        self.sysdb_client
+        let mut collections = self
+            .sysdb_client
             .get_collections(GetCollectionsOptions {
                 tenant: Some(tenant_id.clone()),
                 database: Some(database_name.clone()),
@@ -376,6 +377,27 @@ impl ServiceBasedFrontend {
                 ..Default::default()
             })
             .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        if self.enable_schema {
+            for collection in collections.iter_mut() {
+                let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+                    collection.schema.clone(),
+                    Some(collection.config.clone()),
+                )
+                .map_err(|reason| {
+                    GetCollectionsError::InvalidSchema(SchemaError::InvalidSchema { reason })
+                })?;
+                collection.schema = Some(reconciled_schema.clone());
+                collection.config =
+                    InternalSchema::convert_schema_to_collection_config(reconciled_schema)
+                        .map_err(|reason| {
+                            GetCollectionsError::InvalidSchema(SchemaError::InvalidSchema {
+                                reason,
+                            })
+                        })?;
+            }
+        }
+        Ok(collections)
     }
 
     pub async fn count_collections(
@@ -421,7 +443,12 @@ impl ServiceBasedFrontend {
                 .map_err(|reason| {
                     GetCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
                 })?;
-                collection.schema = Some(reconciled_schema);
+                collection.schema = Some(reconciled_schema.clone());
+                collection.config =
+                    InternalSchema::convert_schema_to_collection_config(reconciled_schema)
+                        .map_err(|reason| {
+                            GetCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
+                        })?;
             }
         }
         collections
@@ -605,7 +632,10 @@ impl ServiceBasedFrontend {
                 Some(collection.config.clone()),
             )
             .map_err(CreateCollectionError::InvalidSchema)?;
-            collection.schema = Some(reconciled_schema);
+            collection.schema = Some(reconciled_schema.clone());
+            collection.config =
+                InternalSchema::convert_schema_to_collection_config(reconciled_schema)
+                    .map_err(CreateCollectionError::InvalidSchema)?;
         }
         Ok(collection)
     }
@@ -714,7 +744,11 @@ impl ServiceBasedFrontend {
         .map_err(|reason| {
             ForkCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
         })?;
-        collection_and_segments.collection.schema = Some(reconciled_schema);
+        collection_and_segments.collection.schema = Some(reconciled_schema.clone());
+        collection_and_segments.collection.config =
+            InternalSchema::convert_schema_to_collection_config(reconciled_schema).map_err(
+                |reason| ForkCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason }),
+            )?;
         let collection = collection_and_segments.collection.clone();
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection

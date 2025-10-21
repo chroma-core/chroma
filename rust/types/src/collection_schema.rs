@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::collection_configuration::{
     EmbeddingFunctionConfiguration, InternalCollectionConfiguration, VectorIndexConfiguration,
 };
-use crate::hnsw_configuration::Space;
+use crate::hnsw_configuration::{InternalHnswConfiguration, Space};
 use crate::metadata::{MetadataComparison, MetadataValueType, Where};
 use crate::operator::QueryVector;
 use crate::{
@@ -1172,6 +1172,101 @@ impl Schema {
         Ok(schema)
     }
 
+    /// Convert InternalSchema back into an InternalCollectionConfiguration
+    pub fn convert_schema_to_collection_config(
+        schema: InternalSchema,
+    ) -> Result<InternalCollectionConfiguration, String> {
+        let vector_config = schema
+            .keys
+            .get(EMBEDDING_KEY)
+            .and_then(|value_types| value_types.float_list.as_ref())
+            .and_then(|float_list| float_list.vector_index.as_ref())
+            .map(|vector_index| vector_index.config.clone())
+            .or_else(|| {
+                schema
+                    .defaults
+                    .float_list
+                    .as_ref()
+                    .and_then(|float_list| float_list.vector_index.as_ref())
+                    .map(|vector_index| vector_index.config.clone())
+            })
+            .ok_or_else(|| "Missing vector index configuration for #embedding".to_string())?;
+
+        let VectorIndexConfig {
+            space,
+            embedding_function,
+            hnsw,
+            spann,
+            ..
+        } = vector_config;
+
+        match (hnsw, spann) {
+            (Some(_), Some(_)) => Err(
+                "Vector index configuration must not contain both HNSW and SPANN settings"
+                    .to_string(),
+            ),
+            (Some(hnsw_config), None) => {
+                let internal_hnsw =
+                    Self::build_internal_hnsw_configuration(space.clone(), Some(hnsw_config));
+                Ok(InternalCollectionConfiguration {
+                    vector_index: VectorIndexConfiguration::Hnsw(internal_hnsw),
+                    embedding_function,
+                })
+            }
+            (None, Some(spann_config)) => {
+                let internal_spann = spann_config.into_internal_configuration(space);
+                Ok(InternalCollectionConfiguration {
+                    vector_index: VectorIndexConfiguration::Spann(internal_spann),
+                    embedding_function,
+                })
+            }
+            (None, None) => {
+                let internal_hnsw = Self::build_internal_hnsw_configuration(space, None);
+                Ok(InternalCollectionConfiguration {
+                    vector_index: VectorIndexConfiguration::Hnsw(internal_hnsw),
+                    embedding_function,
+                })
+            }
+        }
+    }
+
+    fn build_internal_hnsw_configuration(
+        space: Option<Space>,
+        config: Option<HnswIndexConfig>,
+    ) -> InternalHnswConfiguration {
+        let mut internal = InternalHnswConfiguration::default();
+
+        if let Some(space) = space {
+            internal.space = space;
+        }
+
+        if let Some(config) = config {
+            if let Some(ef_construction) = config.ef_construction {
+                internal.ef_construction = ef_construction;
+            }
+            if let Some(max_neighbors) = config.max_neighbors {
+                internal.max_neighbors = max_neighbors;
+            }
+            if let Some(ef_search) = config.ef_search {
+                internal.ef_search = ef_search;
+            }
+            if let Some(num_threads) = config.num_threads {
+                internal.num_threads = num_threads;
+            }
+            if let Some(batch_size) = config.batch_size {
+                internal.batch_size = batch_size;
+            }
+            if let Some(sync_threshold) = config.sync_threshold {
+                internal.sync_threshold = sync_threshold;
+            }
+            if let Some(resize_factor) = config.resize_factor {
+                internal.resize_factor = resize_factor;
+            }
+        }
+
+        internal
+    }
+
     /// Check if a specific metadata key-value should be indexed based on schema configuration
     pub fn is_metadata_type_index_enabled(
         &self,
@@ -1570,7 +1665,10 @@ mod tests {
     use super::*;
     use crate::hnsw_configuration::Space;
     use crate::metadata::SparseVector;
-    use crate::{InternalHnswConfiguration, InternalSpannConfiguration};
+    use crate::{
+        EmbeddingFunctionNewConfiguration, InternalHnswConfiguration, InternalSpannConfiguration,
+    };
+    use serde_json::json;
 
     #[test]
     fn test_reconcile_with_defaults_none_user_schema() {
@@ -1801,6 +1899,99 @@ mod tests {
             vector_config.config.source_key,
             Some("custom_embedding_key".to_string())
         );
+    }
+
+    #[test]
+    fn test_convert_schema_to_collection_config_hnsw_roundtrip() {
+        let collection_config = InternalCollectionConfiguration {
+            vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
+                space: Space::Cosine,
+                ef_construction: 128,
+                ef_search: 96,
+                max_neighbors: 42,
+                num_threads: 8,
+                resize_factor: 1.5,
+                sync_threshold: 2_000,
+                batch_size: 256,
+            }),
+            embedding_function: Some(EmbeddingFunctionConfiguration::Known(
+                EmbeddingFunctionNewConfiguration {
+                    name: "custom".to_string(),
+                    config: json!({"alpha": 1}),
+                },
+            )),
+        };
+
+        let schema =
+            InternalSchema::convert_collection_config_to_schema(collection_config.clone()).unwrap();
+        let reconstructed = InternalSchema::convert_schema_to_collection_config(schema).unwrap();
+
+        assert_eq!(reconstructed, collection_config);
+    }
+
+    #[test]
+    fn test_convert_schema_to_collection_config_spann_roundtrip() {
+        let spann_config = InternalSpannConfiguration {
+            space: Space::Cosine,
+            search_nprobe: 11,
+            search_rng_factor: 1.7,
+            write_nprobe: 5,
+            nreplica_count: 3,
+            split_threshold: 150,
+            merge_threshold: 80,
+            ef_construction: 120,
+            ef_search: 90,
+            max_neighbors: 40,
+            ..Default::default()
+        };
+
+        let collection_config = InternalCollectionConfiguration {
+            vector_index: VectorIndexConfiguration::Spann(spann_config.clone()),
+            embedding_function: Some(EmbeddingFunctionConfiguration::Known(
+                EmbeddingFunctionNewConfiguration {
+                    name: "custom".to_string(),
+                    config: json!({"beta": true}),
+                },
+            )),
+        };
+
+        let schema =
+            InternalSchema::convert_collection_config_to_schema(collection_config.clone()).unwrap();
+        let reconstructed = InternalSchema::convert_schema_to_collection_config(schema).unwrap();
+
+        assert_eq!(reconstructed, collection_config);
+    }
+
+    #[test]
+    fn test_convert_schema_to_collection_config_rejects_mixed_index() {
+        let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        if let Some(embedding) = schema.keys.get_mut(EMBEDDING_KEY) {
+            if let Some(float_list) = &mut embedding.float_list {
+                if let Some(vector_index) = &mut float_list.vector_index {
+                    vector_index.config.spann = Some(SpannIndexConfig {
+                        search_nprobe: Some(1),
+                        search_rng_factor: Some(1.0),
+                        search_rng_epsilon: Some(0.1),
+                        nreplica_count: Some(1),
+                        write_rng_factor: Some(1.0),
+                        write_rng_epsilon: Some(0.1),
+                        split_threshold: Some(100),
+                        num_samples_kmeans: Some(10),
+                        initial_lambda: Some(0.5),
+                        reassign_neighbor_count: Some(10),
+                        merge_threshold: Some(50),
+                        num_centers_to_merge_to: Some(3),
+                        write_nprobe: Some(1),
+                        ef_construction: Some(50),
+                        ef_search: Some(40),
+                        max_neighbors: Some(20),
+                    });
+                }
+            }
+        }
+
+        let result = InternalSchema::convert_schema_to_collection_config(schema);
+        assert!(result.is_err());
     }
 
     #[test]

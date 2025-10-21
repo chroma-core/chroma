@@ -776,6 +776,8 @@ impl ChromaError for CountCollectionsError {
 
 #[derive(Debug, Error)]
 pub enum GetCollectionsError {
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Could not deserialize configuration")]
@@ -789,6 +791,7 @@ pub enum GetCollectionsError {
 impl ChromaError for GetCollectionsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GetCollectionsError::InvalidSchema(e) => e.code(),
             GetCollectionsError::Internal(err) => err.code(),
             GetCollectionsError::Configuration(_) => ErrorCodes::Internal,
             GetCollectionsError::CollectionId(_) => ErrorCodes::Internal,
