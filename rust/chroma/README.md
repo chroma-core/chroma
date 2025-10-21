@@ -8,7 +8,7 @@ Specifically, there are multiple modes of search supported by Chroma.
 
 - Chroma supports dense embeddings for similarity search.  Briefly, embeddings give a numeric score
   for the difference between two strings.  For example, the string, "I like apples" is significantly
-  closer to "I love apples" than it is to "I'm using chroma to compare apples to apples."  Chroma
+  closer to "I love apples" than it is to "I'm using Chroma to compare apples to apples."  Chroma
   automatically indexes your data so that you may query for similar text.
 - Chroma supports sparse embeddings like BM25 or SPLADE-v3.  Briefly, sparse embeddings also give a
   numeric score for the difference between two strings.  Unlike dense embeddings, sparse embeddings
@@ -24,20 +24,22 @@ strategies.
 
 Already know what Chroma is?  Get started fast:
 
-1.  Add Chroma to your Rust project.
+1.  Get started with Chroma.  The easiest route is to sign up for [Chroma Cloud](https://trychroma.com/signup).  If the cloud isn't yet your thing, `pip install chromadb` and `chroma run` will get you much of the same experience.
+
+2.  Add Chroma to your Rust project.
 
 ```console
 cargo add chroma
 ```
 
-2.  Initiate a ChromaHttpClient.
+3.  Initiate a ChromaHttpClient.
 
 ```rust
 let client = ChromaHttpClient::cloud()?;
 ```
 
 This will automatically read the following environment variables to set up a Chroma client:
-- `CHROMA_ENDPOINT` sets the URL for Chroma.  For chroma-cloud this is `https://api.trychroma.com`.
+- `CHROMA_ENDPOINT` sets the URL for Chroma.  For Chroma Cloud this is `https://api.trychroma.com`.
   There is no need to set this environment variable if you want to work with Cloud directly.
 - `CHROMA_API_KEY` sets the API key to authenticate to Chroma.  This should be a Chroma-provided API
   key.  To generate a key, log in to [the Chroma dashboard](https://trychroma.com), create or select
@@ -64,3 +66,11 @@ The Chroma client is designed for production use and includes the following feat
 - Optional automatic handling of rate limiting and backoff/retry for Chroma Cloud and compatible
   implementations.
 - Support via the `metrics` feature for the OpenTelemetry standard.
+
+## Learn More
+
+[Learn more about Chroma](https://github.com/chroma-core/chroma)
+
+- [💬 Community Discord](https://discord.gg/MMeYNTmh3x)
+- [📖 Documentation](https://docs.trychroma.com/)
+- [🏠 Homepage](https://www.trychroma.com/)
