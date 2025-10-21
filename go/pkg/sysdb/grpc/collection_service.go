@@ -10,9 +10,11 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/types"
+	"github.com/google/uuid"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func (s *Server) ResetState(context.Context, *emptypb.Empty) (*coordinatorpb.ResetStateResponse, error) {
@@ -567,6 +569,107 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		CollectionVersion:  flushCollectionInfo.CollectionVersion,
 		LastCompactionTime: flushCollectionInfo.TenantLastCompactionTime,
 	}
+	return res, nil
+}
+
+func (s *Server) FlushCollectionCompactionAndTask(ctx context.Context, req *coordinatorpb.FlushCollectionCompactionAndTaskRequest) (*coordinatorpb.FlushCollectionCompactionAndTaskResponse, error) {
+	// Parse the flush compaction request (nested message)
+	flushReq := req.GetFlushCompaction()
+	if flushReq == nil {
+		log.Error("FlushCollectionCompactionAndTask failed. flush_compaction is nil")
+		return nil, grpcutils.BuildInternalGrpcError("flush_compaction is required")
+	}
+
+	// Parse task update info
+	taskUpdate := req.GetTaskUpdate()
+	if taskUpdate == nil {
+		log.Error("FlushCollectionCompactionAndTask failed. task_update is nil")
+		return nil, grpcutils.BuildInternalGrpcError("task_update is required")
+	}
+
+	taskID, err := uuid.Parse(taskUpdate.TaskId)
+	if err != nil {
+		log.Error("FlushCollectionCompactionAndTask failed. error parsing task id", zap.Error(err), zap.String("task_id", taskUpdate.TaskId))
+		return nil, grpcutils.BuildInternalGrpcError("invalid task_id: " + err.Error())
+	}
+
+	taskRunNonce, err := uuid.Parse(taskUpdate.TaskRunNonce)
+	if err != nil {
+		log.Error("FlushCollectionCompactionAndTask failed. error parsing task run nonce", zap.Error(err), zap.String("task_run_nonce", taskUpdate.TaskRunNonce))
+		return nil, grpcutils.BuildInternalGrpcError("invalid task_run_nonce: " + err.Error())
+	}
+
+	// Parse collection and segment info (reuse logic from FlushCollectionCompaction)
+	collectionID, err := types.ToUniqueID(&flushReq.CollectionId)
+	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
+	if err != nil {
+		log.Error("FlushCollectionCompactionAndTask failed. error parsing collection id", zap.Error(err), zap.String("collection_id", flushReq.CollectionId))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	segmentCompactionInfo := make([]*model.FlushSegmentCompaction, 0, len(flushReq.SegmentCompactionInfo))
+	for _, flushSegmentCompaction := range flushReq.SegmentCompactionInfo {
+		segmentID, err := types.ToUniqueID(&flushSegmentCompaction.SegmentId)
+		err = grpcutils.BuildErrorForUUID(segmentID, "segment", err)
+		if err != nil {
+			log.Error("FlushCollectionCompactionAndTask failed. error parsing segment id", zap.Error(err), zap.String("collection_id", flushReq.CollectionId))
+			return nil, grpcutils.BuildInternalGrpcError(err.Error())
+		}
+		filePaths := make(map[string][]string)
+		for key, filePath := range flushSegmentCompaction.FilePaths {
+			filePaths[key] = filePath.Paths
+		}
+		segmentCompactionInfo = append(segmentCompactionInfo, &model.FlushSegmentCompaction{
+			ID:        segmentID,
+			FilePaths: filePaths,
+		})
+	}
+
+	flushCollectionCompaction := &model.FlushCollectionCompaction{
+		ID:                         collectionID,
+		TenantID:                   flushReq.TenantId,
+		LogPosition:                flushReq.LogPosition,
+		CurrentCollectionVersion:   flushReq.CollectionVersion,
+		FlushSegmentCompactions:    segmentCompactionInfo,
+		TotalRecordsPostCompaction: flushReq.TotalRecordsPostCompaction,
+		SizeBytesPostCompaction:    flushReq.SizeBytesPostCompaction,
+	}
+
+	flushCollectionInfo, err := s.coordinator.FlushCollectionCompactionAndTask(
+		ctx,
+		flushCollectionCompaction,
+		taskID,
+		taskRunNonce,
+		taskUpdate.CompletionOffset,
+	)
+	if err != nil {
+		log.Error("FlushCollectionCompactionAndTask failed", zap.Error(err), zap.String("collection_id", flushReq.CollectionId), zap.String("task_id", taskUpdate.TaskId))
+		if err == common.ErrCollectionSoftDeleted {
+			return nil, grpcutils.BuildFailedPreconditionGrpcError(err.Error())
+		}
+		if err == common.ErrTaskNotFound {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	res := &coordinatorpb.FlushCollectionCompactionAndTaskResponse{
+		CollectionId:       flushCollectionInfo.ID,
+		CollectionVersion:  flushCollectionInfo.CollectionVersion,
+		LastCompactionTime: flushCollectionInfo.TenantLastCompactionTime,
+	}
+
+	// Populate task fields with authoritative values from database
+	if flushCollectionInfo.TaskNextNonce != nil {
+		res.NextNonce = flushCollectionInfo.TaskNextNonce.String()
+	}
+	if flushCollectionInfo.TaskNextRun != nil {
+		res.NextRun = timestamppb.New(*flushCollectionInfo.TaskNextRun)
+	}
+	if flushCollectionInfo.TaskCompletionOffset != nil {
+		res.CompletionOffset = *flushCollectionInfo.TaskCompletionOffset
+	}
+
 	return res, nil
 }
 

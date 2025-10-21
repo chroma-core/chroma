@@ -67,6 +67,10 @@ enum Command {
         task_id: String,
         #[arg(long, help = "Nonce identifying the specific task run")]
         task_run_nonce: String,
+        #[arg(long, help = "Completion offset")]
+        completion_offset: u64,
+        #[arg(long, help = "Next run delay in seconds")]
+        next_run_delay_secs: u64,
     },
     #[command(about = "Get all operators")]
     GetOperators,
@@ -158,14 +162,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             let response = client.get_task_by_name(request).await?;
-            let task = response.into_inner();
+            let task = response.into_inner().task.unwrap();
 
             println!("Task ID: {:?}", task.task_id);
             println!("Name: {:?}", task.name);
             println!("Operator: {:?}", task.operator_name);
             println!("Input Collection: {:?}", task.input_collection_id);
             println!("Output Collection Name: {:?}", task.output_collection_name);
-            println!("Output Collection ID: {:?}", task.output_collection_id);
             println!("Params: {:?}", task.params);
             println!("Completion Offset: {:?}", task.completion_offset);
             println!("Min Records: {:?}", task.min_records_for_task);
@@ -188,11 +191,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             collection_id,
             task_id,
             task_run_nonce,
+            completion_offset,
+            next_run_delay_secs,
         } => {
             let request = chroma_proto::AdvanceTaskRequest {
                 collection_id: Some(collection_id),
                 task_id: Some(task_id),
                 task_run_nonce: Some(task_run_nonce),
+                completion_offset: Some(completion_offset.try_into().unwrap()),
+                next_run_delay_secs: Some(next_run_delay_secs),
             };
 
             client.advance_task(request).await?;
