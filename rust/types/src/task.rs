@@ -7,6 +7,26 @@ use uuid::Uuid;
 use crate::CollectionUuid;
 
 define_uuid_newtype!(
+    /// JobId is a wrapper around Uuid to provide a unified type for job identifiers.
+    /// Jobs can be either collection compaction jobs or task execution jobs.
+    JobId,
+    new_v4
+);
+
+// Custom From implementations for JobId
+impl From<CollectionUuid> for JobId {
+    fn from(collection_uuid: CollectionUuid) -> Self {
+        JobId(collection_uuid.0)
+    }
+}
+
+impl From<TaskUuid> for JobId {
+    fn from(task_uuid: TaskUuid) -> Self {
+        JobId(task_uuid.0)
+    }
+}
+
+define_uuid_newtype!(
     /// TaskUuid is a wrapper around Uuid to provide a type for task identifiers.
     #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
     TaskUuid,
