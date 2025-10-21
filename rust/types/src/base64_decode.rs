@@ -2,6 +2,7 @@ use base64::{engine::general_purpose, Engine as _};
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+#[cfg(feature = "utoipa")]
 use utoipa::ToSchema;
 
 #[derive(Error, Debug)]
@@ -20,14 +21,16 @@ impl ChromaError for Base64DecodeError {
     }
 }
 
-#[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(untagged)]
 pub enum EmbeddingsPayload {
     JsonArrays(Vec<Vec<f32>>),
     Base64Binary(Vec<String>),
 }
 
-#[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(untagged)]
 pub enum UpdateEmbeddingsPayload {
     JsonArrays(Vec<Option<Vec<f32>>>),
@@ -114,6 +117,7 @@ pub fn decode_base64_embedding(base64_str: &String) -> Result<Vec<f32>, Base64De
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "testing")]
     use proptest::prelude::*;
 
     #[test]
@@ -234,6 +238,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "testing")]
     fn encode_floats_to_base64(floats: &[f32]) -> String {
         let mut bytes = Vec::with_capacity(floats.len() * 4);
         for &f in floats {
@@ -242,10 +247,12 @@ mod tests {
         general_purpose::STANDARD.encode(&bytes)
     }
 
+    #[cfg(feature = "testing")]
     fn embeddings_strategy() -> impl Strategy<Value = Vec<Vec<f32>>> {
         any::<Vec<Vec<f32>>>()
     }
 
+    #[cfg(feature = "testing")]
     proptest! {
         #[test]
         fn test_decode_base64_embeddings_prop(embeddings in embeddings_strategy()) {
