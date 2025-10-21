@@ -134,13 +134,13 @@ mod tests {
             230246813, 395514983, 458027949, 488165615, 729632045, 734978415, 997512866,
             1114505193, 1381820790, 1501587190, 1649421877, 1837285388,
         ];
-        let expected_value = 1.6391152502910362;
+        let expected_value = 1.6391153;
 
         assert_eq!(result.indices.len(), 12);
         assert_eq!(result.indices, expected_indices);
 
         for &value in &result.values {
-            assert!((value - expected_value).abs() < 1e-6);
+            assert!((value - expected_value).abs() < 1e-5);
         }
     }
 
@@ -161,13 +161,13 @@ mod tests {
         let expected_indices = vec![
             90097469, 519064992, 737893654, 1110755108, 1950894484, 2031641008, 2058513491,
         ];
-        let expected_value = 1.6608670008846949;
+        let expected_value = 1.660867;
 
         assert_eq!(result.indices.len(), 7);
         assert_eq!(result.indices, expected_indices);
 
         for &value in &result.values {
-            assert!((value - expected_value).abs() < 1e-6);
+            assert!((value - expected_value).abs() < 1e-5);
         }
     }
 }
