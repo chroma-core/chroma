@@ -13,10 +13,6 @@ inputs:
   dockerhub-password:
     description: "DockerHub password"
     required: false
-  setup-blacksmith:
-    description: "Setup blacksmith"
-    required: false
-    default: "true"
 
 runs:
   using: "composite"
@@ -35,7 +31,4 @@ runs:
         username: ${{ inputs.dockerhub-username }}
         password: ${{ inputs.dockerhub-password }}
     - name: Set up Blacksmith builder
-      if: ${{ inputs.setup-blacksmith == 'true' }}
-      uses: useblacksmith/build-push-action@v2
-      with:
-        setup-only: true
+      uses: useblacksmith/setup-docker-builder@v1
