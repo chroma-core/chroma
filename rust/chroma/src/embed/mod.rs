@@ -10,6 +10,8 @@ use std::{
 };
 
 pub mod bm25;
+pub mod fastembed_bm25_tokenizer;
+pub mod murmur3_abs_hasher;
 #[cfg(feature = "ollama")]
 pub mod ollama;
 
@@ -67,4 +69,16 @@ pub trait EmbeddingFunction: Send + Sync + 'static {
     /// # }
     /// ```
     async fn embed_strs(&self, batches: &[&str]) -> Result<Vec<Self::Embedding>, Self::Error>;
+}
+
+/// Generic tokenizer interface for text processing.
+pub trait Tokenizer {
+    /// Tokenize text into a vector of tokens.
+    fn tokenize(&self, text: &str) -> Vec<String>;
+}
+
+/// Hashes tokens to u32 identifiers for sparse representations.
+pub trait TokenHasher {
+    /// Hash a token string to a u32 identifier.
+    fn hash(&self, token: &str) -> u32;
 }

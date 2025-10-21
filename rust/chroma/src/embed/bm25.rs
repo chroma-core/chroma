@@ -1,86 +1,105 @@
-use std::io::{self, Cursor};
-
 use chroma_types::SparseVector;
-use murmur3::murmur3_32;
-use parking_lot::Mutex;
-use tantivy::tokenizer::{
-    AlphaNumOnlyFilter, Language, LowerCaser, RemoveLongFilter, SimpleTokenizer, Stemmer,
-    StopWordFilter, TextAnalyzer,
-};
 use thiserror::Error;
 
-use crate::embed::EmbeddingFunction;
+use crate::embed::fastembed_bm25_tokenizer::FastembedBM25Tokenizer;
+use crate::embed::murmur3_abs_hasher::Murmur3AbsHasher;
+use crate::embed::{EmbeddingFunction, TokenHasher, Tokenizer};
 
+/// Error type for BM25 sparse embedding.
+/// 
+/// This is an empty enum (uninhabited type), meaning it can never be constructed.
+/// BM25 encoding with infallible tokenizers and hashers cannot fail.
 #[derive(Debug, Error)]
-pub enum BM25SparseEmbeddingError {
-    #[error("Unable to hash token: {0}")]
-    Murmur3(#[from] io::Error),
-}
+pub enum BM25SparseEmbeddingError {}
 
-pub struct BM25SparseEmbeddingFunction {
-    pub analyzer: Mutex<TextAnalyzer>,
-    pub avg_len: f32,
-    pub b: f32,
+/// BM25 sparse embedding function parameterized by tokenizer and hasher.
+///
+/// The BM25 formula used:
+/// score = tf * (k + 1) / (tf + k * (1 - b + b * doc_len / avg_len))
+///
+/// Where:
+/// - tf: term frequency (count of token in document)
+/// - doc_len: document length in tokens (not characters)
+/// - k, b, avg_len: BM25 parameters
+///
+/// Type parameters:
+/// - T: Tokenizer implementation (e.g., FastembedBM25Tokenizer)
+/// - H: TokenHasher implementation (e.g., Murmur3AbsHasher)
+pub struct BM25SparseEmbeddingFunction<T, H>
+where
+    T: Tokenizer,
+    H: TokenHasher,
+{
+    pub tokenizer: T,
+    pub hasher: H,
     pub k: f32,
+    pub b: f32,
+    pub avg_len: f32,
 }
 
-impl BM25SparseEmbeddingFunction {
-    pub fn default_en_analyzer() -> TextAnalyzer {
-        TextAnalyzer::builder(SimpleTokenizer::default())
-            .filter(AlphaNumOnlyFilter)
-            .filter(LowerCaser)
-            .filter(
-                StopWordFilter::new(Language::English)
-                    .expect("English stop word filter should be present"),
-            ) // SAFETY(sicheng): Tantivy source code suggests this should not panic. Go to definition for details.
-            .filter(RemoveLongFilter::limit(40))
-            .filter(Stemmer::new(Language::English))
-            .build()
-    }
-
-    pub fn encode(&self, text: &str) -> Result<SparseVector, BM25SparseEmbeddingError> {
-        let text_len = text.len();
-        let mut tokens = Vec::with_capacity(text_len);
-
-        {
-            let mut analyzer = self.analyzer.lock();
-            let mut token_stream = analyzer.token_stream(text);
-            while token_stream.advance() {
-                let token = token_stream.token();
-                let id = murmur3_32(&mut Cursor::new(&token.text), 0)?;
-                tokens.push(id);
-            }
-        };
-
-        tokens.sort_unstable();
-
-        Ok(SparseVector::from_pairs(
-            tokens.chunk_by(|l, r| l == r).map(|chunk| {
-                let id = chunk.first().cloned().unwrap_or_default();
-                let tf = chunk.len() as f32;
-                (
-                    id,
-                    tf * (self.k + 1.0)
-                        / (tf + self.k * (1.0 - self.b + self.b * text_len as f32 / self.avg_len)),
-                )
-            }),
-        ))
-    }
-}
-
-impl Default for BM25SparseEmbeddingFunction {
+impl Default for BM25SparseEmbeddingFunction<FastembedBM25Tokenizer, Murmur3AbsHasher> {
+    /// Create a default BM25 implementation using FastembedBM25Tokenizer and Murmur3AbsHasher.
+    ///
+    /// Default parameters:
+    /// - k: 1.2 (BM25 saturation parameter)
+    /// - b: 0.75 (length normalization parameter)
+    /// - avg_len: 256.0 (average document length in tokens)
     fn default() -> Self {
         Self {
-            analyzer: Mutex::new(Self::default_en_analyzer()),
-            avg_len: 256.0,
-            b: 0.75,
+            tokenizer: FastembedBM25Tokenizer::new(),
+            hasher: Murmur3AbsHasher::new(),
             k: 1.2,
+            b: 0.75,
+            avg_len: 256.0,
         }
     }
 }
 
+impl<T, H> BM25SparseEmbeddingFunction<T, H>
+where
+    T: Tokenizer,
+    H: TokenHasher,
+{
+    /// Encode a single text string into a sparse vector.
+    pub fn encode(&self, text: &str) -> Result<SparseVector, BM25SparseEmbeddingError> {
+        // Step 1: Tokenize text
+        let tokens = self.tokenizer.tokenize(text);
+
+        // Step 2: Document length = token count (following fastembed standard)
+        let doc_len = tokens.len() as f32;
+
+        // Step 3: Hash tokens to IDs
+        let mut token_ids = Vec::with_capacity(tokens.len());
+        for token in tokens {
+            let id = self.hasher.hash(&token);
+            token_ids.push(id);
+        }
+
+        // Step 4: Sort token IDs to group identical IDs together
+        token_ids.sort_unstable();
+
+        // Step 5: Calculate BM25 scores for each unique token
+        let sparse_pairs = token_ids.chunk_by(|a, b| a == b).map(|chunk| {
+            let id = chunk[0];
+            let tf = chunk.len() as f32;
+
+            // BM25 formula
+            let score =
+                tf * (self.k + 1.0) / (tf + self.k * (1.0 - self.b + self.b * doc_len / self.avg_len));
+
+            (id, score)
+        });
+
+        Ok(SparseVector::from_pairs(sparse_pairs))
+    }
+}
+
 #[async_trait::async_trait]
-impl EmbeddingFunction for BM25SparseEmbeddingFunction {
+impl<T, H> EmbeddingFunction for BM25SparseEmbeddingFunction<T, H>
+where
+    T: Tokenizer + Send + Sync + 'static,
+    H: TokenHasher + Send + Sync + 'static,
+{
     type Embedding = SparseVector;
     type Error = BM25SparseEmbeddingError;
 
