@@ -35,7 +35,6 @@ pub struct FinishTaskInput {
 
 impl FinishTaskInput {
     /// Create a new finish task input.
-    #[allow(dead_code)]
     pub fn new(updated_task: Task) -> Self {
         FinishTaskInput { updated_task }
     }

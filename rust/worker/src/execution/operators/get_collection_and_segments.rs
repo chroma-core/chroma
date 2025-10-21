@@ -6,25 +6,32 @@ use chroma_types::{CollectionAndSegments, CollectionUuid, GetCollectionWithSegme
 use thiserror::Error;
 
 /// The `GetCollectionAndSegmentsOperator` fetches a consistent snapshot of collection and segment information
+/// for both input and output collections (which may be the same for regular compaction).
 ///
 /// # Parameters
 /// - `sysdb`: The sysdb client
-/// - `collection_id`: The id for the collection to be fetched
+/// - `input_collection_id`: The id for the input collection to be fetched
+/// - `output_collection_id`: The id for the output collection to be fetched
 ///
 /// # Inputs
 /// - No input is required
 ///
 /// # Outputs
-/// - The collection and segments information. If not found, an error will be thrown
+/// - The input and output collection and segments information. If not found, an error will be thrown
 #[derive(Clone, Debug)]
 pub struct GetCollectionAndSegmentsOperator {
     pub sysdb: SysDb,
-    pub collection_id: CollectionUuid,
+    pub input_collection_id: CollectionUuid,
+    pub output_collection_id: CollectionUuid,
 }
 
 type GetCollectionAndSegmentsInput = ();
 
-pub type GetCollectionAndSegmentsOutput = CollectionAndSegments;
+#[derive(Clone, Debug)]
+pub struct GetCollectionAndSegmentsOutput {
+    pub input: CollectionAndSegments,
+    pub output: CollectionAndSegments,
+}
 
 #[derive(Debug, Error)]
 pub enum GetCollectionAndSegmentsError {
@@ -60,14 +67,29 @@ impl Operator<GetCollectionAndSegmentsInput, GetCollectionAndSegmentsOutput>
         _: &GetCollectionAndSegmentsInput,
     ) -> Result<GetCollectionAndSegmentsOutput, GetCollectionAndSegmentsError> {
         tracing::trace!(
-            "[{}]: Collection ID {}",
+            "[{}]: Fetching input collection {} and output collection {}",
             self.get_name(),
-            self.collection_id.0
+            self.input_collection_id.0,
+            self.output_collection_id.0
         );
-        Ok(self
-            .sysdb
-            .clone()
-            .get_collection_with_segments(self.collection_id)
-            .await?)
+
+        let mut sysdb = self.sysdb.clone();
+
+        // Fetch input collection and segments
+        let input = sysdb
+            .get_collection_with_segments(self.input_collection_id)
+            .await?;
+
+        // Fetch output collection and segments
+        // If input and output are the same collection, clone instead of fetching twice
+        let output = if self.input_collection_id == self.output_collection_id {
+            input.clone()
+        } else {
+            sysdb
+                .get_collection_with_segments(self.output_collection_id)
+                .await?
+        };
+
+        Ok(GetCollectionAndSegmentsOutput { input, output })
     }
 }
