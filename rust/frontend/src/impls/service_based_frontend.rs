@@ -34,6 +34,7 @@ use chroma_types::{
     GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
     GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
     GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include,
+<<<<<<< HEAD
     InternalSchema, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
     ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError,
     QueryRequest, QueryResponse, RemoveTaskError, RemoveTaskRequest, RemoveTaskResponse,
@@ -43,6 +44,17 @@ use chroma_types::{
     UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
     UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
     VectorIndexConfiguration, Where,
+=======
+    InternalCollectionConfiguration, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
+    QueryError, QueryRequest, QueryResponse, RemoveTaskError, RemoveTaskRequest,
+    RemoveTaskResponse, ResetError, ResetResponse, Schema, SchemaError, SearchRequest,
+    SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
+>>>>>>> e165e3a50 ([ENH] Reconcile schema -> config for old clients (#5684))
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -367,7 +379,8 @@ impl ServiceBasedFrontend {
             ..
         }: ListCollectionsRequest,
     ) -> Result<ListCollectionsResponse, GetCollectionsError> {
-        self.sysdb_client
+        let mut collections = self
+            .sysdb_client
             .get_collections(GetCollectionsOptions {
                 tenant: Some(tenant_id.clone()),
                 database: Some(database_name.clone()),
@@ -376,6 +389,24 @@ impl ServiceBasedFrontend {
                 ..Default::default()
             })
             .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        if self.enable_schema {
+            for collection in collections.iter_mut() {
+                let reconciled_schema = Schema::reconcile_schema_and_config(
+                    collection.schema.clone(),
+                    Some(collection.config.clone()),
+                )
+                .map_err(|reason| {
+                    GetCollectionsError::InvalidSchema(SchemaError::InvalidSchema { reason })
+                })?;
+                collection.config = InternalCollectionConfiguration::try_from(&reconciled_schema)
+                    .map_err(|reason| {
+                    GetCollectionsError::InvalidSchema(SchemaError::InvalidSchema { reason })
+                })?;
+                collection.schema = Some(reconciled_schema);
+            }
+        }
+        Ok(collections)
     }
 
     pub async fn count_collections(
@@ -419,6 +450,10 @@ impl ServiceBasedFrontend {
                     Some(collection.config.clone()),
                 )
                 .map_err(|reason| {
+                    GetCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
+                })?;
+                collection.config = InternalCollectionConfiguration::try_from(&reconciled_schema)
+                    .map_err(|reason| {
                     GetCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
                 })?;
                 collection.schema = Some(reconciled_schema);
@@ -606,6 +641,8 @@ impl ServiceBasedFrontend {
                 Some(collection.config.clone()),
             )
             .map_err(CreateCollectionError::InvalidSchema)?;
+            collection.config = InternalCollectionConfiguration::try_from(&reconciled_schema)
+                .map_err(CreateCollectionError::InvalidSchema)?;
             collection.schema = Some(reconciled_schema);
         }
         Ok(collection)
@@ -715,6 +752,10 @@ impl ServiceBasedFrontend {
         .map_err(|reason| {
             ForkCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
         })?;
+        collection_and_segments.collection.config =
+            InternalCollectionConfiguration::try_from(&reconciled_schema).map_err(|reason| {
+                ForkCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
+            })?;
         collection_and_segments.collection.schema = Some(reconciled_schema);
         let collection = collection_and_segments.collection.clone();
         let latest_collection_logical_size_bytes = collection_and_segments
