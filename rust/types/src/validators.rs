@@ -1,7 +1,7 @@
 use crate::{
     operator::{Rank, RankExpr},
-    CollectionMetadataUpdate, InternalSchema, Metadata, MetadataValue, UpdateMetadata,
-    UpdateMetadataValue, DOCUMENT_KEY, EMBEDDING_KEY,
+    CollectionMetadataUpdate, Metadata, MetadataValue, Schema, UpdateMetadata, UpdateMetadataValue,
+    DOCUMENT_KEY, EMBEDDING_KEY,
 };
 use regex::Regex;
 use std::collections::HashMap;
@@ -180,7 +180,7 @@ fn validate_rank_expr(expr: &RankExpr) -> Result<(), ValidationError> {
 }
 
 /// Validate schema
-pub fn validate_schema(schema: &InternalSchema) -> Result<(), ValidationError> {
+pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
     let mut sparse_index_keys = Vec::new();
     if schema
         .defaults

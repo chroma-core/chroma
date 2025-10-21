@@ -41,7 +41,7 @@ export type Collection = {
     log_position: number;
     metadata?: null | HashMap;
     name: string;
-    schema?: null | InternalSchema;
+    schema?: null | Schema;
     tenant: string;
     version: number;
 };
@@ -62,7 +62,7 @@ export type CreateCollectionPayload = {
     get_or_create?: boolean;
     metadata?: null | HashMap;
     name: string;
-    schema?: null | InternalSchema;
+    schema?: null | Schema;
 };
 
 export type CreateDatabasePayload = {
@@ -244,24 +244,6 @@ export type IntValueType = {
     int_inverted_index?: null | IntInvertedIndexType;
 };
 
-/**
- * Internal schema representation for collection index configurations
- * This represents the server-side schema structure used for index management
- */
-export type InternalSchema = {
-    /**
-     * Default index configurations for each value type
-     */
-    defaults: ValueTypes;
-    /**
-     * Key-specific index overrides
-     * TODO(Sanket): Needed for backwards compatibility. Should remove after deploy.
-     */
-    keys: {
-        [key: string]: ValueTypes;
-    };
-};
-
 export type Key = 'Document' | 'Embedding' | 'Metadata' | 'Score' | {
     MetadataField: string;
 };
@@ -298,6 +280,24 @@ export type RemoveTaskRequest = {
 
 export type RemoveTaskResponse = {
     success: boolean;
+};
+
+/**
+ * Schema representation for collection index configurations
+ * This represents the server-side schema structure used for index management
+ */
+export type Schema = {
+    /**
+     * Default index configurations for each value type
+     */
+    defaults: ValueTypes;
+    /**
+     * Key-specific index overrides
+     * TODO(Sanket): Needed for backwards compatibility. Should remove after deploy.
+     */
+    keys: {
+        [key: string]: ValueTypes;
+    };
 };
 
 export type SearchPayload = {
@@ -513,7 +513,7 @@ export type Vec = Array<{
     log_position: number;
     metadata?: null | HashMap;
     name: string;
-    schema?: null | InternalSchema;
+    schema?: null | Schema;
     tenant: string;
     version: number;
 }>;

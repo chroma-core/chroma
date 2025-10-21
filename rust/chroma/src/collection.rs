@@ -4,7 +4,7 @@ use chroma_api_types::ForkCollectionPayload;
 use chroma_types::{
     plan::SearchPayload, AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection,
     CollectionUuid, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest,
-    GetResponse, IncludeList, InternalSchema, Metadata, QueryRequest, QueryResponse, SearchRequest,
+    GetResponse, IncludeList, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest,
     SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
     UpdateMetadata, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
 };
@@ -40,7 +40,7 @@ impl ChromaCollection {
         &self.collection.metadata
     }
 
-    pub fn schema(&self) -> &Option<InternalSchema> {
+    pub fn schema(&self) -> &Option<Schema> {
         &self.collection.schema
     }
 

@@ -86,12 +86,12 @@ pub const EMBEDDING_KEY: &str = "#embedding";
 // SCHEMA STRUCTURES
 // ============================================================================
 
-/// Internal schema representation for collection index configurations
+/// Schema representation for collection index configurations
 /// This represents the server-side schema structure used for index management
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct InternalSchema {
+pub struct Schema {
     /// Default index configurations for each value type
     pub defaults: ValueTypes,
     /// Key-specific index overrides
@@ -312,8 +312,8 @@ pub struct BoolInvertedIndexType {
     pub config: BoolInvertedIndexConfig,
 }
 
-impl InternalSchema {
-    /// Create a new InternalSchema with strongly-typed default configurations
+impl Schema {
+    /// Create a new Schema with strongly-typed default configurations
     pub fn new_default(default_knn_index: KnnIndex) -> Self {
         // Vector index disabled on all keys except #embedding.
         let vector_config = VectorIndexType {
@@ -471,7 +471,7 @@ impl InternalSchema {
         };
         keys.insert(DOCUMENT_KEY.to_string(), document_defaults);
 
-        InternalSchema { defaults, keys }
+        Schema { defaults, keys }
     }
 
     pub fn get_internal_spann_config(&self) -> Option<InternalSpannConfiguration> {
@@ -504,8 +504,8 @@ impl InternalSchema {
     /// - User overrides take precedence over defaults
     /// - Missing user configurations fall back to system defaults
     /// - Field-level merging for complex configurations (Vector, HNSW, SPANN, etc.)
-    pub fn reconcile_with_defaults(user_schema: Option<InternalSchema>) -> Result<Self, String> {
-        let default_schema = InternalSchema::new_default(KnnIndex::Spann);
+    pub fn reconcile_with_defaults(user_schema: Option<Schema>) -> Result<Self, String> {
+        let default_schema = Schema::new_default(KnnIndex::Spann);
 
         match user_schema {
             Some(user) => {
@@ -527,7 +527,7 @@ impl InternalSchema {
                     }
                 }
 
-                Ok(InternalSchema {
+                Ok(Schema {
                     defaults: merged_defaults,
                     keys: merged_keys,
                 })
@@ -537,7 +537,7 @@ impl InternalSchema {
     }
 
     /// Merge two schemas together, combining key overrides when possible.
-    pub fn merge(&self, other: &InternalSchema) -> Result<InternalSchema, SchemaError> {
+    pub fn merge(&self, other: &Schema) -> Result<Schema, SchemaError> {
         if self.defaults != other.defaults {
             return Err(SchemaError::InvalidSchema {
                 reason: "Cannot merge schemas with differing defaults".to_string(),
@@ -555,7 +555,7 @@ impl InternalSchema {
             }
         }
 
-        Ok(InternalSchema {
+        Ok(Schema {
             defaults: self.defaults.clone(),
             keys,
         })
@@ -1052,16 +1052,16 @@ impl InternalSchema {
         }
     }
 
-    /// Reconcile InternalSchema with InternalCollectionConfiguration
+    /// Reconcile Schema with InternalCollectionConfiguration
     ///
     /// Simple reconciliation logic:
     /// 1. If collection config is default → return schema (schema is source of truth)
     /// 2. If collection config is non-default and schema is non-default → error (both set)
     /// 3. If collection config is non-default and schema is default → override schema with collection config
     pub fn reconcile_with_collection_config(
-        schema: InternalSchema,
+        schema: Schema,
         collection_config: InternalCollectionConfiguration,
-    ) -> Result<InternalSchema, String> {
+    ) -> Result<Schema, String> {
         // 1. Check if collection config is default
         if collection_config.is_default() {
             // Collection config is default → schema is source of truth
@@ -1081,9 +1081,9 @@ impl InternalSchema {
     }
 
     pub fn reconcile_schema_and_config(
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
         configuration: Option<InternalCollectionConfiguration>,
-    ) -> Result<InternalSchema, String> {
+    ) -> Result<Schema, String> {
         let reconciled_schema = Self::reconcile_with_defaults(schema)?;
         if let Some(config) = configuration {
             Self::reconcile_with_collection_config(reconciled_schema, config)
@@ -1093,20 +1093,20 @@ impl InternalSchema {
     }
 
     /// Check if schema is default by comparing it word-by-word with new_default
-    fn is_schema_default(schema: &InternalSchema) -> bool {
+    fn is_schema_default(schema: &Schema) -> bool {
         // Compare with both possible default schemas (HNSW and SPANN)
-        let default_hnsw = InternalSchema::new_default(KnnIndex::Hnsw);
-        let default_spann = InternalSchema::new_default(KnnIndex::Spann);
+        let default_hnsw = Schema::new_default(KnnIndex::Hnsw);
+        let default_spann = Schema::new_default(KnnIndex::Spann);
 
         schema == &default_hnsw || schema == &default_spann
     }
 
-    /// Convert InternalCollectionConfiguration to InternalSchema
+    /// Convert InternalCollectionConfiguration to Schema
     fn convert_collection_config_to_schema(
         collection_config: InternalCollectionConfiguration,
-    ) -> Result<InternalSchema, String> {
+    ) -> Result<Schema, String> {
         // Start with a default schema structure
-        let mut schema = InternalSchema::new_default(KnnIndex::Spann); // Default to HNSW, will be overridden
+        let mut schema = Schema::new_default(KnnIndex::Spann); // Default to HNSW, will be overridden
 
         // Convert vector index configuration
         let vector_config = match collection_config.vector_index {
@@ -1575,28 +1575,28 @@ mod tests {
     #[test]
     fn test_reconcile_with_defaults_none_user_schema() {
         // Test that when no user schema is provided, we get the default schema
-        let result = InternalSchema::reconcile_with_defaults(None).unwrap();
-        let expected = InternalSchema::new_default(KnnIndex::Spann);
+        let result = Schema::reconcile_with_defaults(None).unwrap();
+        let expected = Schema::new_default(KnnIndex::Spann);
         assert_eq!(result, expected);
     }
 
     #[test]
     fn test_reconcile_with_defaults_empty_user_schema() {
         // Test merging with an empty user schema
-        let user_schema = InternalSchema {
+        let user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
         };
 
-        let result = InternalSchema::reconcile_with_defaults(Some(user_schema)).unwrap();
-        let expected = InternalSchema::new_default(KnnIndex::Spann);
+        let result = Schema::reconcile_with_defaults(Some(user_schema)).unwrap();
+        let expected = Schema::new_default(KnnIndex::Spann);
         assert_eq!(result, expected);
     }
 
     #[test]
     fn test_reconcile_with_defaults_user_overrides_string_enabled() {
         // Test that user can override string inverted index enabled state
-        let mut user_schema = InternalSchema {
+        let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
         };
@@ -1609,7 +1609,7 @@ mod tests {
             fts_index: None,
         });
 
-        let result = InternalSchema::reconcile_with_defaults(Some(user_schema)).unwrap();
+        let result = Schema::reconcile_with_defaults(Some(user_schema)).unwrap();
 
         // Check that the user override took precedence
         assert!(
@@ -1631,7 +1631,7 @@ mod tests {
     #[test]
     fn test_reconcile_with_defaults_user_overrides_vector_config() {
         // Test field-level merging for vector configurations
-        let mut user_schema = InternalSchema {
+        let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
         };
@@ -1659,22 +1659,20 @@ mod tests {
 
         // Use HNSW defaults for this test so we have HNSW config to merge with
         let result = {
-            let default_schema = InternalSchema::new_default(KnnIndex::Hnsw);
+            let default_schema = Schema::new_default(KnnIndex::Hnsw);
             let merged_defaults =
-                InternalSchema::merge_value_types(&default_schema.defaults, &user_schema.defaults)
-                    .unwrap();
+                Schema::merge_value_types(&default_schema.defaults, &user_schema.defaults).unwrap();
             let mut merged_keys = default_schema.keys.clone();
             for (key, user_value_types) in user_schema.keys {
                 if let Some(default_value_types) = merged_keys.get(&key) {
                     let merged_value_types =
-                        InternalSchema::merge_value_types(default_value_types, &user_value_types)
-                            .unwrap();
+                        Schema::merge_value_types(default_value_types, &user_value_types).unwrap();
                     merged_keys.insert(key, merged_value_types);
                 } else {
                     merged_keys.insert(key, user_value_types);
                 }
             }
-            InternalSchema {
+            Schema {
                 defaults: merged_defaults,
                 keys: merged_keys,
             }
@@ -1713,7 +1711,7 @@ mod tests {
     #[test]
     fn test_reconcile_with_defaults_keys() {
         // Test that key overrides are properly merged
-        let mut user_schema = InternalSchema {
+        let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
         };
@@ -1736,7 +1734,7 @@ mod tests {
             .keys
             .insert("custom_key".to_string(), custom_key_types);
 
-        let result = InternalSchema::reconcile_with_defaults(Some(user_schema)).unwrap();
+        let result = Schema::reconcile_with_defaults(Some(user_schema)).unwrap();
 
         // Check that default key overrides are preserved
         assert!(result.keys.contains_key(EMBEDDING_KEY));
@@ -1760,7 +1758,7 @@ mod tests {
     #[test]
     fn test_reconcile_with_defaults_override_existing_key() {
         // Test overriding an existing key override (like #embedding)
-        let mut user_schema = InternalSchema {
+        let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
         };
@@ -1785,7 +1783,7 @@ mod tests {
             .keys
             .insert(EMBEDDING_KEY.to_string(), embedding_override);
 
-        let result = InternalSchema::reconcile_with_defaults(Some(user_schema)).unwrap();
+        let result = Schema::reconcile_with_defaults(Some(user_schema)).unwrap();
 
         let embedding_config = result.keys.get(EMBEDDING_KEY).unwrap();
         let vector_config = &embedding_config
@@ -1807,7 +1805,7 @@ mod tests {
 
     #[test]
     fn test_ensure_key_from_metadata_no_changes_for_existing_key() {
-        let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
         let before = schema.clone();
         let modified = schema.ensure_key_from_metadata(DOCUMENT_KEY, MetadataValueType::Str);
         assert!(!modified);
@@ -1816,7 +1814,7 @@ mod tests {
 
     #[test]
     fn test_ensure_key_from_metadata_populates_new_key_with_default_value_type() {
-        let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
         assert!(!schema.keys.contains_key("custom_field"));
 
         let modified = schema.ensure_key_from_metadata("custom_field", MetadataValueType::Bool);
@@ -1836,7 +1834,7 @@ mod tests {
 
     #[test]
     fn test_ensure_key_from_metadata_adds_missing_value_type_to_existing_key() {
-        let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
         let initial_len = schema.keys.len();
         schema.keys.insert(
             "custom_field".to_string(),
@@ -1860,7 +1858,7 @@ mod tests {
 
     #[test]
     fn test_is_knn_key_indexing_enabled_sparse_disabled_errors() {
-        let schema = InternalSchema::new_default(KnnIndex::Spann);
+        let schema = Schema::new_default(KnnIndex::Spann);
         let result = schema.is_knn_key_indexing_enabled(
             "custom_sparse",
             &QueryVector::Sparse(SparseVector::new(vec![0_u32], vec![1.0_f32])),
@@ -1878,7 +1876,7 @@ mod tests {
 
     #[test]
     fn test_is_knn_key_indexing_enabled_sparse_enabled_succeeds() {
-        let mut schema = InternalSchema::new_default(KnnIndex::Spann);
+        let mut schema = Schema::new_default(KnnIndex::Spann);
         schema.keys.insert(
             "sparse_enabled".to_string(),
             ValueTypes {
@@ -1906,7 +1904,7 @@ mod tests {
 
     #[test]
     fn test_is_knn_key_indexing_enabled_dense_succeeds() {
-        let schema = InternalSchema::new_default(KnnIndex::Spann);
+        let schema = Schema::new_default(KnnIndex::Spann);
         let result = schema.is_knn_key_indexing_enabled(
             EMBEDDING_KEY,
             &QueryVector::Dense(vec![0.1_f32, 0.2_f32]),
@@ -1938,8 +1936,7 @@ mod tests {
             resize_factor: None,        // Will use default
         };
 
-        let result =
-            InternalSchema::merge_hnsw_configs(Some(&default_hnsw), Some(&user_hnsw)).unwrap();
+        let result = Schema::merge_hnsw_configs(Some(&default_hnsw), Some(&user_hnsw)).unwrap();
 
         // Check user overrides
         assert_eq!(result.ef_construction, Some(300));
@@ -1994,8 +1991,7 @@ mod tests {
             max_neighbors: None,
         };
 
-        let result =
-            InternalSchema::merge_spann_configs(Some(&default_spann), Some(&user_spann)).unwrap();
+        let result = Schema::merge_spann_configs(Some(&default_spann), Some(&user_spann)).unwrap();
 
         // Check user overrides
         assert_eq!(result.search_nprobe, Some(20));
@@ -2071,26 +2067,26 @@ mod tests {
             fts_index: None, // Will use default
         };
 
-        let result = InternalSchema::merge_string_type(Some(&default), Some(&user))
+        let result = Schema::merge_string_type(Some(&default), Some(&user))
             .unwrap()
             .unwrap();
         assert!(!result.string_inverted_index.as_ref().unwrap().enabled); // User override
         assert!(!result.fts_index.as_ref().unwrap().enabled); // Default preserved
 
         // Default Some, User None - should return default
-        let result = InternalSchema::merge_string_type(Some(&default), None)
+        let result = Schema::merge_string_type(Some(&default), None)
             .unwrap()
             .unwrap();
         assert!(result.string_inverted_index.as_ref().unwrap().enabled);
 
         // Default None, User Some - should return user
-        let result = InternalSchema::merge_string_type(None, Some(&user))
+        let result = Schema::merge_string_type(None, Some(&user))
             .unwrap()
             .unwrap();
         assert!(!result.string_inverted_index.as_ref().unwrap().enabled);
 
         // Both None - should return None
-        let result = InternalSchema::merge_string_type(None, None).unwrap();
+        let result = Schema::merge_string_type(None, None).unwrap();
         assert!(result.is_none());
     }
 
@@ -2146,8 +2142,7 @@ mod tests {
             }), // Add SPANN config
         };
 
-        let result =
-            InternalSchema::merge_vector_index_config(&default_config, &user_config).unwrap();
+        let result = Schema::merge_vector_index_config(&default_config, &user_config).unwrap();
 
         // Check field-level merging
         assert_eq!(result.space, Some(Space::L2)); // User override
@@ -2182,8 +2177,7 @@ mod tests {
         };
 
         let result =
-            InternalSchema::merge_sparse_vector_index_config(&default_config, &user_config)
-                .unwrap();
+            Schema::merge_sparse_vector_index_config(&default_config, &user_config).unwrap();
 
         // Check user override
         assert_eq!(result.source_key, Some("user_sparse_key".to_string()));
@@ -2197,7 +2191,7 @@ mod tests {
     #[test]
     fn test_complex_nested_merging_scenario() {
         // Test a complex scenario with multiple levels of merging
-        let mut user_schema = InternalSchema {
+        let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
         };
@@ -2252,22 +2246,20 @@ mod tests {
 
         // Use HNSW defaults for this test so we have HNSW config to merge with
         let result = {
-            let default_schema = InternalSchema::new_default(KnnIndex::Hnsw);
+            let default_schema = Schema::new_default(KnnIndex::Hnsw);
             let merged_defaults =
-                InternalSchema::merge_value_types(&default_schema.defaults, &user_schema.defaults)
-                    .unwrap();
+                Schema::merge_value_types(&default_schema.defaults, &user_schema.defaults).unwrap();
             let mut merged_keys = default_schema.keys.clone();
             for (key, user_value_types) in user_schema.keys {
                 if let Some(default_value_types) = merged_keys.get(&key) {
                     let merged_value_types =
-                        InternalSchema::merge_value_types(default_value_types, &user_value_types)
-                            .unwrap();
+                        Schema::merge_value_types(default_value_types, &user_value_types).unwrap();
                     merged_keys.insert(key, merged_value_types);
                 } else {
                     merged_keys.insert(key, user_value_types);
                 }
             }
-            InternalSchema {
+            Schema {
                 defaults: merged_defaults,
                 keys: merged_keys,
             }
@@ -2354,19 +2346,18 @@ mod tests {
     #[test]
     fn test_reconcile_with_collection_config_default_config() {
         // Test that when collection config is default, schema is returned as-is
-        let schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        let schema = Schema::new_default(KnnIndex::Hnsw);
         let collection_config = InternalCollectionConfiguration::default_hnsw();
 
         let result =
-            InternalSchema::reconcile_with_collection_config(schema.clone(), collection_config)
-                .unwrap();
+            Schema::reconcile_with_collection_config(schema.clone(), collection_config).unwrap();
         assert_eq!(result, schema);
     }
 
     #[test]
     fn test_reconcile_with_collection_config_both_non_default() {
         // Test that when both schema and collection config are non-default, it returns an error
-        let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
         schema.defaults.string = Some(StringValueType {
             fts_index: Some(FtsIndexType {
                 enabled: true,
@@ -2382,7 +2373,7 @@ mod tests {
             hnsw_config.ef_construction = 500; // Non-default value
         }
 
-        let result = InternalSchema::reconcile_with_collection_config(schema, collection_config);
+        let result = Schema::reconcile_with_collection_config(schema, collection_config);
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
@@ -2393,7 +2384,7 @@ mod tests {
     #[test]
     fn test_reconcile_with_collection_config_hnsw_override() {
         // Test that non-default HNSW collection config overrides default schema
-        let schema = InternalSchema::new_default(KnnIndex::Hnsw); // Use actual default schema
+        let schema = Schema::new_default(KnnIndex::Hnsw); // Use actual default schema
 
         let collection_config = InternalCollectionConfiguration {
             vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
@@ -2409,8 +2400,7 @@ mod tests {
             embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
         };
 
-        let result =
-            InternalSchema::reconcile_with_collection_config(schema, collection_config).unwrap();
+        let result = Schema::reconcile_with_collection_config(schema, collection_config).unwrap();
 
         // Check that #embedding key override was created with the collection config settings
         let embedding_override = result.keys.get(EMBEDDING_KEY).unwrap();
@@ -2448,7 +2438,7 @@ mod tests {
     #[test]
     fn test_reconcile_with_collection_config_spann_override() {
         // Test that non-default SPANN collection config overrides default schema
-        let schema = InternalSchema::new_default(KnnIndex::Spann); // Use actual default schema
+        let schema = Schema::new_default(KnnIndex::Spann); // Use actual default schema
 
         let collection_config = InternalCollectionConfiguration {
             vector_index: VectorIndexConfiguration::Spann(InternalSpannConfiguration {
@@ -2473,8 +2463,7 @@ mod tests {
             embedding_function: None,
         };
 
-        let result =
-            InternalSchema::reconcile_with_collection_config(schema, collection_config).unwrap();
+        let result = Schema::reconcile_with_collection_config(schema, collection_config).unwrap();
 
         // Check that #embedding key override was created with the collection config settings
         let embedding_override = result.keys.get(EMBEDDING_KEY).unwrap();
@@ -2519,7 +2508,7 @@ mod tests {
     fn test_reconcile_with_collection_config_updates_both_defaults_and_embedding() {
         // Test that collection config updates BOTH defaults.float_list.vector_index
         // AND keys["embedding"].float_list.vector_index
-        let schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        let schema = Schema::new_default(KnnIndex::Hnsw);
 
         let collection_config = InternalCollectionConfiguration {
             vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
@@ -2535,8 +2524,7 @@ mod tests {
             embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
         };
 
-        let result =
-            InternalSchema::reconcile_with_collection_config(schema, collection_config).unwrap();
+        let result = Schema::reconcile_with_collection_config(schema, collection_config).unwrap();
 
         // Check that defaults.float_list.vector_index was updated
         let defaults_vector_index = result
@@ -2594,43 +2582,41 @@ mod tests {
     #[test]
     fn test_is_schema_default() {
         // Test that actual default schemas are correctly identified
-        let default_hnsw_schema = InternalSchema::new_default(KnnIndex::Hnsw);
-        assert!(InternalSchema::is_schema_default(&default_hnsw_schema));
+        let default_hnsw_schema = Schema::new_default(KnnIndex::Hnsw);
+        assert!(Schema::is_schema_default(&default_hnsw_schema));
 
-        let default_spann_schema = InternalSchema::new_default(KnnIndex::Spann);
-        assert!(InternalSchema::is_schema_default(&default_spann_schema));
+        let default_spann_schema = Schema::new_default(KnnIndex::Spann);
+        assert!(Schema::is_schema_default(&default_spann_schema));
 
         // Test that an empty schema is NOT considered default (since it doesn't match new_default structure)
-        let empty_schema = InternalSchema {
+        let empty_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
         };
-        assert!(!InternalSchema::is_schema_default(&empty_schema));
+        assert!(!Schema::is_schema_default(&empty_schema));
 
         // Test that a modified default schema is not considered default
-        let mut modified_schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut modified_schema = Schema::new_default(KnnIndex::Hnsw);
         // Make a clear modification - change the string inverted index enabled state
         if let Some(ref mut string_type) = modified_schema.defaults.string {
             if let Some(ref mut string_inverted) = string_type.string_inverted_index {
                 string_inverted.enabled = false; // Default is true, so this should make it non-default
             }
         }
-        assert!(!InternalSchema::is_schema_default(&modified_schema));
+        assert!(!Schema::is_schema_default(&modified_schema));
 
         // Test that schema with additional key overrides is not default
-        let mut schema_with_extra_overrides = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut schema_with_extra_overrides = Schema::new_default(KnnIndex::Hnsw);
         schema_with_extra_overrides
             .keys
             .insert("custom_key".to_string(), ValueTypes::default());
-        assert!(!InternalSchema::is_schema_default(
-            &schema_with_extra_overrides
-        ));
+        assert!(!Schema::is_schema_default(&schema_with_extra_overrides));
     }
 
     #[test]
     fn test_add_merges_keys_by_value_type() {
-        let mut schema_a = InternalSchema::new_default(KnnIndex::Hnsw);
-        let mut schema_b = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut schema_a = Schema::new_default(KnnIndex::Hnsw);
+        let mut schema_b = Schema::new_default(KnnIndex::Hnsw);
 
         let string_override = ValueTypes {
             string: Some(StringValueType {
@@ -2688,8 +2674,8 @@ mod tests {
 
     #[test]
     fn test_add_rejects_different_defaults() {
-        let schema_a = InternalSchema::new_default(KnnIndex::Hnsw);
-        let mut schema_b = InternalSchema::new_default(KnnIndex::Hnsw);
+        let schema_a = Schema::new_default(KnnIndex::Hnsw);
+        let mut schema_b = Schema::new_default(KnnIndex::Hnsw);
 
         if let Some(string_type) = schema_b.defaults.string.as_mut() {
             if let Some(string_index) = string_type.string_inverted_index.as_mut() {
@@ -2708,8 +2694,8 @@ mod tests {
 
     #[test]
     fn test_add_detects_conflicting_value_type_configuration() {
-        let mut schema_a = InternalSchema::new_default(KnnIndex::Hnsw);
-        let mut schema_b = InternalSchema::new_default(KnnIndex::Hnsw);
+        let mut schema_a = Schema::new_default(KnnIndex::Hnsw);
+        let mut schema_b = Schema::new_default(KnnIndex::Hnsw);
 
         let string_override_enabled = ValueTypes {
             string: Some(StringValueType {
@@ -2789,7 +2775,7 @@ mod tests {
             }
         }"###;
 
-        let schema_from_old: InternalSchema = serde_json::from_str(old_format_json).unwrap();
+        let schema_from_old: Schema = serde_json::from_str(old_format_json).unwrap();
 
         // Test that new format without prefixes and keys can be deserialized
         let new_format_json = r###"{
@@ -2829,7 +2815,7 @@ mod tests {
             }
         }"###;
 
-        let schema_from_new: InternalSchema = serde_json::from_str(new_format_json).unwrap();
+        let schema_from_new: Schema = serde_json::from_str(new_format_json).unwrap();
 
         // Both should deserialize to the same structure
         assert_eq!(schema_from_old, schema_from_new);

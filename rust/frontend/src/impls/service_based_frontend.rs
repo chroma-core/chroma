@@ -33,16 +33,16 @@ use chroma_types::{
     GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
     GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
     GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
-    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include,
-    InternalSchema, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
-    ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError,
-    QueryRequest, QueryResponse, RemoveTaskError, RemoveTaskRequest, RemoveTaskResponse,
-    ResetError, ResetResponse, SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope,
-    SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
-    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
-    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
-    VectorIndexConfiguration, Where,
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include, KnnIndex,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
+    ListDatabasesResponse, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse,
+    RemoveTaskError, RemoveTaskRequest, RemoveTaskResponse, ResetError, ResetResponse, Schema,
+    SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
+    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
+    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
+    Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -414,7 +414,7 @@ impl ServiceBasedFrontend {
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
             for collection in &mut collections {
-                let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+                let reconciled_schema = Schema::reconcile_schema_and_config(
                     collection.schema.clone(),
                     Some(collection.config.clone()),
                 )
@@ -504,8 +504,7 @@ impl ServiceBasedFrontend {
             // when configuration is None, we then populate in sysdb with empty config {}
             // this allows for easier migration paths in the future
             let config_for_reconcile = configuration.take();
-            match InternalSchema::reconcile_schema_and_config(schema.clone(), config_for_reconcile)
-            {
+            match Schema::reconcile_schema_and_config(schema.clone(), config_for_reconcile) {
                 Ok(schema) => Some(schema),
                 Err(e) => return Err(CreateCollectionError::InvalidSchema(e)),
             }
@@ -601,7 +600,7 @@ impl ServiceBasedFrontend {
         // this is done in the case that get_or_create was a get, in which case we should reconcile the schema and config
         // that was retrieved from sysdb, rather than the one that was passed in
         if self.enable_schema {
-            let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+            let reconciled_schema = Schema::reconcile_schema_and_config(
                 collection.schema.clone(),
                 Some(collection.config.clone()),
             )
@@ -708,7 +707,7 @@ impl ServiceBasedFrontend {
                 target_collection_name,
             )
             .await?;
-        let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+        let reconciled_schema = Schema::reconcile_schema_and_config(
             collection_and_segments.collection.schema.clone(),
             Some(collection_and_segments.collection.config.clone()),
         )

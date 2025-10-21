@@ -24,8 +24,8 @@ use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
     FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
-    ForkCollectionError, InternalSchema, SchemaError, Segment, SegmentConversionError,
-    SegmentScope, Tenant,
+    ForkCollectionError, Schema, SchemaError, Segment, SegmentConversionError, SegmentScope,
+    Tenant,
 };
 use prost_types;
 use std::collections::HashMap;
@@ -287,7 +287,7 @@ impl SysDb {
         name: String,
         segments: Vec<Segment>,
         configuration: Option<InternalCollectionConfiguration>,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -594,7 +594,7 @@ impl SysDb {
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -1090,7 +1090,7 @@ impl GrpcSysDb {
         name: String,
         segments: Vec<Segment>,
         configuration: Option<InternalCollectionConfiguration>,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -1554,7 +1554,7 @@ impl GrpcSysDb {
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let segment_compaction_info =
             segment_flush_info

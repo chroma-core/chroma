@@ -4,8 +4,7 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
 use chroma_types::{
-    CollectionAndSegments, CollectionUuid, GetCollectionWithSegmentsError, InternalSchema,
-    SchemaError,
+    CollectionAndSegments, CollectionUuid, GetCollectionWithSegmentsError, Schema, SchemaError,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -185,7 +184,7 @@ impl CollectionsWithSegmentsProvider {
         };
 
         // reconcile schema and config
-        let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+        let reconciled_schema = Schema::reconcile_schema_and_config(
             collection_and_segments_sysdb.collection.schema.clone(),
             Some(collection_and_segments_sysdb.collection.config.clone()),
         )
