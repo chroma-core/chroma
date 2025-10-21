@@ -29,6 +29,7 @@ use crate::SegmentScopeConversionError;
 use crate::UpdateEmbeddingsPayload;
 use crate::UpdateMetadata;
 use crate::Where;
+use crate::WhereValidationError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
@@ -1451,12 +1452,9 @@ impl DeleteCollectionRecordsRequest {
         Ok(request)
     }
 
-    pub fn into_payload(self) -> Result<DeleteCollectionRecordsPayload, serde_json::Error> {
-        let where_fields = if let Some(r#where) = self.r#where {
-            RawWhereFields {
-                r#where: serde_json::to_value(&r#where)?,
-                where_document: serde_json::json! {{}},
-            }
+    pub fn into_payload(self) -> Result<DeleteCollectionRecordsPayload, WhereError> {
+        let where_fields = if let Some(r#where) = self.r#where.as_ref() {
+            RawWhereFields::from_json_str(Some(&serde_json::to_string(r#where)?), None)?
         } else {
             RawWhereFields::default()
         };
@@ -1610,6 +1608,16 @@ impl CountRequest {
 
 pub type CountResponse = u32;
 
+//////////////////////// Payload Err ////////////////////
+
+#[derive(Debug, thiserror::Error)]
+pub enum WhereError {
+    #[error("serialization: {0}")]
+    Serialization(#[from] serde_json::Error),
+    #[error("validation: {0}")]
+    Validation(#[from] WhereValidationError),
+}
+
 ////////////////////////// Get //////////////////////////
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1664,12 +1672,9 @@ impl GetRequest {
         Ok(request)
     }
 
-    pub fn into_payload(self) -> Result<GetRequestPayload, serde_json::Error> {
-        let where_fields = if let Some(r#where) = self.r#where {
-            RawWhereFields {
-                r#where: serde_json::to_value(&r#where)?,
-                where_document: serde_json::json! {{}},
-            }
+    pub fn into_payload(self) -> Result<GetRequestPayload, WhereError> {
+        let where_fields = if let Some(r#where) = self.r#where.as_ref() {
+            RawWhereFields::from_json_str(Some(&serde_json::to_string(r#where)?), None)?
         } else {
             RawWhereFields::default()
         };
@@ -1865,12 +1870,9 @@ impl QueryRequest {
         Ok(request)
     }
 
-    pub fn into_payload(self) -> Result<QueryRequestPayload, serde_json::Error> {
-        let where_fields = if let Some(r#where) = self.r#where {
-            RawWhereFields {
-                r#where: serde_json::to_value(&r#where)?,
-                where_document: serde_json::json! {{}},
-            }
+    pub fn into_payload(self) -> Result<QueryRequestPayload, WhereError> {
+        let where_fields = if let Some(r#where) = self.r#where.as_ref() {
+            RawWhereFields::from_json_str(Some(&serde_json::to_string(r#where)?), None)?
         } else {
             RawWhereFields::default()
         };
