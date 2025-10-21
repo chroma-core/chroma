@@ -88,13 +88,6 @@ impl VectorIndexConfiguration {
             }
         }
     }
-
-    pub fn get_space(&self) -> Space {
-        match &self {
-            VectorIndexConfiguration::Hnsw(config) => config.space.clone(),
-            VectorIndexConfiguration::Spann(config) => config.space.clone(),
-        }
-    }
 }
 impl From<InternalHnswConfiguration> for VectorIndexConfiguration {
     fn from(config: InternalHnswConfiguration) -> Self {
