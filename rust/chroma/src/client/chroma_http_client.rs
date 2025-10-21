@@ -138,7 +138,7 @@ impl Clone for ChromaHttpClient {
 /// Represents a database within a Chroma tenant.
 ///
 /// A database is a logical namespace for organizing collections. Each database has a unique
-/// identifier and a user-assigned name. This struct is returned by [`ChromaClient::list_databases`].
+/// identifier and a user-assigned name. This struct is returned by [`ChromaHttpClient::list_databases`].
 // TODO: remove and replace with actual Database struct
 #[derive(serde::Deserialize, Debug)]
 #[allow(dead_code)]

@@ -6,8 +6,6 @@
 //!
 //! # Features
 //!
-//! - **Async-first API** - Built on tokio for high-performance concurrent operations
-//! - **Type-safe requests** - Strongly-typed request and response models prevent runtime errors
 //! - **Automatic retries** - Configurable exponential backoff with jitter for resilient network operations
 //! - **OpenTelemetry support** - Optional metrics collection for observability (enable `opentelemetry` feature)
 //! - **TLS flexibility** - Support for both native-tls and rustls backends
@@ -15,24 +13,19 @@
 //! # Core Types
 //!
 //! - [`ChromaHttpClient`] - Main client for database-level operations (create/list/delete collections)
-//! - [`ChromaCollection`] - Collection handle for CRUD operations on records (add/get/query/update/delete)
-//! - [`ChromaClientOptions`] - Configuration for client initialization including auth and retry behavior
+//! - [`collection::ChromaCollection`] - Collection handle for CRUD operations on records (add/get/query/update/delete)
+//! - [`ChromaHttpClientOptions`] - Configuration for client initialization including auth and retry behavior
 //!
 //! # Quick Start
 //!
 //! ## Connecting to Chroma Cloud
 //!
 //! ```
-//! use chroma::{ChromaHttpClient, client::ChromaClientOptions, client::ChromaAuthMethod};
+//! use chroma::{ChromaHttpClient, client::ChromaHttpClientOptions, client::ChromaAuthMethod};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let options = ChromaClientOptions {
-//!     endpoint: "https://api.trychroma.com".parse()?,
-//!     auth_method: ChromaAuthMethod::cloud_api_key("your-api-key")?,
-//!     ..Default::default()
-//! };
 //!
-//! let client = ChromaHttpClient::new(options);
+//! let client = ChromaHttpClient::cloud()?;
 //!
 //! let heartbeat = client.heartbeat().await?;
 //! println!("Connected! Heartbeat: {}", heartbeat.nanosecond_heartbeat);
@@ -83,16 +76,16 @@
 //!
 //! # Error Handling
 //!
-//! All operations return `Result<T, ChromaClientError>` where [`ChromaClientError`](client::ChromaClientError)
+//! All operations return `Result<T, ChromaHttpClientError>` where [`ChromaHttpClientError`](client::ChromaHttpClientError)
 //! captures network errors, serialization failures, and validation errors.
 //!
 //! ```
 //! # use chroma::ChromaHttpClient;
-//! # use chroma::client::ChromaClientError;
+//! # use chroma::client::ChromaHttpClientError;
 //! # async fn example(client: ChromaHttpClient) {
 //! match client.heartbeat().await {
 //!     Ok(response) => println!("Heartbeat: {}", response.nanosecond_heartbeat),
-//!     Err(ChromaClientError::RequestError(e)) => eprintln!("Network error: {}", e),
+//!     Err(ChromaHttpClientError::RequestError(e)) => eprintln!("Network error: {}", e),
 //!     Err(e) => eprintln!("Other error: {}", e),
 //! }
 //! # }

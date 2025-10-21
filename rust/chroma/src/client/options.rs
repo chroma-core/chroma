@@ -113,7 +113,7 @@ const DEFAULT_CLOUD_ENDPOINT: &str = "https://api.trychroma.com";
 /// Configuration bundle for initializing a Chroma client.
 ///
 /// Aggregates connection parameters, authentication credentials, and operational policies
-/// into a single structure. Used to construct [`ChromaClient`](crate::ChromaClient) instances.
+/// into a single structure. Used to construct [`ChromaHttpClient`](crate::ChromaHttpClient) instances.
 #[derive(Debug, Clone)]
 pub struct ChromaHttpClientOptions {
     /// The base URL of the Chroma server (e.g., `https://api.trychroma.com`).

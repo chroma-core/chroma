@@ -1,11 +1,11 @@
 //! Client configuration and connection management for Chroma.
 //!
 //! This module contains:
-//! - [`ChromaClient`] - The main client handle for database operations
-//! - [`ChromaClientOptions`] - Configuration builder for client initialization
+//! - [`ChromaHttpClient`] - The main client handle for database operations
+//! - [`ChromaHttpClientOptions`] - Configuration builder for client initialization
 //! - [`ChromaAuthMethod`] - Authentication strategy enumeration
 //! - [`ChromaRetryOptions`] - Retry behavior configuration
-//! - [`ChromaClientError`] - Error type for client operations
+//! - [`ChromaHttpClientError`] - Error type for client operations
 //!
 //! When the `opentelemetry` feature is enabled, metrics collection is available
 //! through internal instrumentation.
