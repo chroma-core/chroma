@@ -33,6 +33,7 @@ use chroma_types::{
     GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
     GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
     GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
+<<<<<<< HEAD
     GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include,
     InternalCollectionConfiguration, InternalSchema, KnnIndex, ListCollectionsRequest,
     ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
@@ -43,6 +44,18 @@ use chroma_types::{
     UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
     UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
     UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
+=======
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include, KnnIndex,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
+    ListDatabasesResponse, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse,
+    RemoveTaskError, RemoveTaskRequest, RemoveTaskResponse, ResetError, ResetResponse, Schema,
+    SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
+    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
+    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
+    Where,
+>>>>>>> c67669083 ([ENH] Add schema reconciliation to get_collection_by_crn (#5696))
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -380,6 +393,7 @@ impl ServiceBasedFrontend {
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
             for collection in collections.iter_mut() {
+<<<<<<< HEAD
                 let reconciled_schema = InternalSchema::reconcile_schema_and_config(
                     collection.schema.clone(),
                     Some(collection.config.clone()),
@@ -392,6 +406,11 @@ impl ServiceBasedFrontend {
                     GetCollectionsError::InvalidSchema(SchemaError::InvalidSchema { reason })
                 })?;
                 collection.schema = Some(reconciled_schema);
+=======
+                collection
+                    .reconcile_schema_with_config()
+                    .map_err(GetCollectionsError::InvalidSchema)?;
+>>>>>>> c67669083 ([ENH] Add schema reconciliation to get_collection_by_crn (#5696))
             }
         }
         Ok(collections)
@@ -433,6 +452,7 @@ impl ServiceBasedFrontend {
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
             for collection in &mut collections {
+<<<<<<< HEAD
                 let reconciled_schema = InternalSchema::reconcile_schema_and_config(
                     collection.schema.clone(),
                     Some(collection.config.clone()),
@@ -445,6 +465,11 @@ impl ServiceBasedFrontend {
                     GetCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
                 })?;
                 collection.schema = Some(reconciled_schema);
+=======
+                collection
+                    .reconcile_schema_with_config()
+                    .map_err(GetCollectionError::InvalidSchema)?;
+>>>>>>> c67669083 ([ENH] Add schema reconciliation to get_collection_by_crn (#5696))
             }
         }
         collections
@@ -456,7 +481,7 @@ impl ServiceBasedFrontend {
         &mut self,
         GetCollectionByCrnRequest { parsed_crn, .. }: GetCollectionByCrnRequest,
     ) -> Result<GetCollectionByCrnResponse, GetCollectionByCrnError> {
-        let collection = self
+        let mut collection = self
             .sysdb_client
             .get_collection_by_crn(
                 parsed_crn.tenant_resource_name.clone(),
@@ -466,6 +491,11 @@ impl ServiceBasedFrontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
+        if self.enable_schema {
+            collection
+                .reconcile_schema_with_config()
+                .map_err(GetCollectionByCrnError::InvalidSchema)?;
+        }
         Ok(collection)
     }
 
@@ -530,7 +560,11 @@ impl ServiceBasedFrontend {
             match InternalSchema::reconcile_schema_and_config(schema.clone(), config_for_reconcile)
             {
                 Ok(schema) => Some(schema),
-                Err(e) => return Err(CreateCollectionError::InvalidSchema(e)),
+                Err(e) => {
+                    return Err(CreateCollectionError::InvalidSchema(
+                        SchemaError::InvalidSchema { reason: e },
+                    ));
+                }
             }
         } else {
             None
@@ -624,14 +658,18 @@ impl ServiceBasedFrontend {
         // this is done in the case that get_or_create was a get, in which case we should reconcile the schema and config
         // that was retrieved from sysdb, rather than the one that was passed in
         if self.enable_schema {
+<<<<<<< HEAD
             let reconciled_schema = InternalSchema::reconcile_schema_and_config(
                 collection.schema.clone(),
                 Some(collection.config.clone()),
             )
             .map_err(CreateCollectionError::InvalidSchema)?;
             collection.config = InternalCollectionConfiguration::try_from(&reconciled_schema)
+=======
+            collection
+                .reconcile_schema_with_config()
+>>>>>>> c67669083 ([ENH] Add schema reconciliation to get_collection_by_crn (#5696))
                 .map_err(CreateCollectionError::InvalidSchema)?;
-            collection.schema = Some(reconciled_schema);
         }
         Ok(collection)
     }
@@ -733,6 +771,7 @@ impl ServiceBasedFrontend {
                 target_collection_name,
             )
             .await?;
+<<<<<<< HEAD
         let reconciled_schema = InternalSchema::reconcile_schema_and_config(
             collection_and_segments.collection.schema.clone(),
             Some(collection_and_segments.collection.config.clone()),
@@ -745,6 +784,12 @@ impl ServiceBasedFrontend {
                 ForkCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason })
             })?;
         collection_and_segments.collection.schema = Some(reconciled_schema);
+=======
+        collection_and_segments
+            .collection
+            .reconcile_schema_with_config()
+            .map_err(ForkCollectionError::InvalidSchema)?;
+>>>>>>> c67669083 ([ENH] Add schema reconciliation to get_collection_by_crn (#5696))
         let collection = collection_and_segments.collection.clone();
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
