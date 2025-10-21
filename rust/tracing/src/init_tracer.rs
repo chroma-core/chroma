@@ -47,7 +47,6 @@ pub fn init_global_filter_layer(
     // converts all hyphens in crate names to underscores to make them valid
     // Rust identifiers
     let default_crate_names = vec![
-        "chroma",
         "chroma_blockstore",
         "chroma_config",
         "chroma_cache",
