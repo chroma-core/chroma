@@ -674,10 +674,17 @@ impl TestSysDb {
 
     pub(crate) async fn finish_task(
         &mut self,
-        _task_id: chroma_types::TaskUuid,
+        task_id: chroma_types::TaskUuid,
     ) -> Result<(), chroma_types::FinishTaskError> {
-        // For testing, always succeed
-        // In a real implementation, this would update lowest_live_nonce = next_nonce
+        let mut inner = self.inner.lock();
+        let task = inner
+            .tasks
+            .get_mut(&task_id)
+            .ok_or(chroma_types::FinishTaskError::TaskNotFound)?;
+
+        // Update lowest_live_nonce to equal next_nonce
+        // This marks the current epoch as verified and complete
+        task.lowest_live_nonce = Some(task.next_nonce);
         Ok(())
     }
 }

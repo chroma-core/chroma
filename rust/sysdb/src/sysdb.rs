@@ -744,7 +744,7 @@ impl SysDb {
         &mut self,
         task_id: TaskUuid,
         task_run_nonce: uuid::Uuid,
-        completion_offset: i64,
+        completion_offset: u64,
         next_run_delay_secs: u64,
     ) -> Result<AdvanceTaskResponse, AdvanceTaskError> {
         match self {
@@ -1820,7 +1820,7 @@ impl GrpcSysDb {
         &mut self,
         task_id: TaskUuid,
         task_run_nonce: uuid::Uuid,
-        completion_offset: i64,
+        completion_offset: u64,
         next_run_delay_secs: u64,
     ) -> Result<AdvanceTaskResponse, AdvanceTaskError> {
         let req = AdvanceTaskRequest {
@@ -1860,7 +1860,7 @@ impl GrpcSysDb {
         Ok(AdvanceTaskResponse {
             next_nonce,
             next_run,
-            completion_offset: response.completion_offset as u64,
+            completion_offset: response.completion_offset,
         })
     }
 
@@ -1912,147 +1912,8 @@ impl GrpcSysDb {
         Ok(task_id)
     }
 
-    pub async fn get_task_by_name(
-        &mut self,
-        input_collection_id: chroma_types::CollectionUuid,
-        task_name: String,
-    ) -> Result<chroma_types::Task, GetTaskError> {
-        let req = chroma_proto::GetTaskByNameRequest {
-            input_collection_id: input_collection_id.to_string(),
-            task_name: task_name.clone(),
-        };
-
-        let response = match self.client.get_task_by_name(req).await {
-            Ok(resp) => resp,
-            Err(status) => {
-                if status.code() == tonic::Code::NotFound {
-                    return Err(GetTaskError::NotFound);
-                }
-                return Err(GetTaskError::FailedToGetTask(status));
-            }
-        };
-        let response = response.into_inner();
-
-        // Extract the nested task from response
-        let task = response.task.as_ref().ok_or_else(|| {
-            GetTaskError::FailedToGetTask(tonic::Status::internal("Missing task in response"))
-        })?;
-
-        // Parse task_id
-        let task_id =
-            chroma_types::TaskUuid(uuid::Uuid::parse_str(&task.task_id).map_err(|e| {
-                tracing::error!(
-                    task_id = %task.task_id,
-                    error = %e,
-                    "Server returned invalid task_id UUID"
-                );
-                GetTaskError::ServerReturnedInvalidData
-            })?);
-
-        // Parse input_collection_id
-        let parsed_input_collection_id = chroma_types::CollectionUuid(
-            uuid::Uuid::parse_str(&task.input_collection_id).map_err(|e| {
-                tracing::error!(
-                    input_collection_id = %task.input_collection_id,
-                    error = %e,
-                    "Server returned invalid input_collection_id UUID"
-                );
-                GetTaskError::ServerReturnedInvalidData
-            })?,
-        );
-
-        // Parse next_run timestamp from microseconds
-        let next_run =
-            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(task.next_run_at);
-
-        // Parse nonces
-        let lowest_live_nonce = if task.lowest_live_nonce.is_empty() {
-            None
-        } else {
-            Some(
-                uuid::Uuid::parse_str(&task.lowest_live_nonce)
-                    .map(chroma_types::NonceUuid)
-                    .map_err(|e| {
-                        tracing::error!(
-                            lowest_live_nonce = %task.lowest_live_nonce,
-                            error = %e,
-                            "Server returned invalid lowest_live_nonce UUID"
-                        );
-                        GetTaskError::ServerReturnedInvalidData
-                    })?,
-            )
-        };
-
-        let next_nonce = uuid::Uuid::parse_str(&task.next_nonce)
-            .map(chroma_types::NonceUuid)
-            .map_err(|e| {
-                tracing::error!(
-                    next_nonce = %task.next_nonce,
-                    error = %e,
-                    "Server returned invalid next_nonce UUID"
-                );
-                GetTaskError::ServerReturnedInvalidData
-            })?;
-
-        // Convert params from Struct to JSON string
-        let params_str = task.params.clone().map(|s| {
-            let json_value = prost_struct_to_json(s);
-            serde_json::to_string(&json_value).unwrap_or_else(|_| "{}".to_string())
-        });
-
-        let parsed_output_collection_id = task.output_collection_id.clone().map(|id| {
-            uuid::Uuid::parse_str(&id)
-                .map(chroma_types::CollectionUuid)
-                .ok()
-                .unwrap()
-        });
-
-        Ok(chroma_types::Task {
-            id: task_id,
-            name: task.name.clone(),
-            operator_id: task.operator_name.clone(),
-            input_collection_id: parsed_input_collection_id,
-            output_collection_name: task.output_collection_name.clone(),
-            output_collection_id: parsed_output_collection_id,
-            params: params_str,
-            tenant_id: task.tenant_id.clone(),
-            database_id: task.database_id.clone(),
-            last_run: None,
-            next_run: next_run,
-            lowest_live_nonce,
-            next_nonce,
-            completion_offset: task.completion_offset as u64,
-            min_records_for_task: task.min_records_for_task,
-            is_deleted: false,
-            created_at: std::time::SystemTime::now(),
-            updated_at: std::time::SystemTime::now(),
-        })
-    }
-
-    pub async fn get_task_by_uuid(
-        &mut self,
-        task_uuid: chroma_types::TaskUuid,
-    ) -> Result<chroma_types::Task, GetTaskError> {
-        let req = chroma_proto::GetTaskByUuidRequest {
-            task_id: task_uuid.0.to_string(),
-        };
-
-        let response = match self.client.get_task_by_uuid(req).await {
-            Ok(resp) => resp,
-            Err(status) => {
-                if status.code() == tonic::Code::NotFound {
-                    return Err(GetTaskError::NotFound);
-                }
-                return Err(GetTaskError::FailedToGetTask(status));
-            }
-        };
-        let response = response.into_inner();
-
-        // Extract the nested task from response
-        let task = response.task.ok_or_else(|| {
-            GetTaskError::FailedToGetTask(tonic::Status::internal("Missing task in response"))
-        })?;
-
+    /// Helper function to convert a proto Task to a chroma_types::Task
+    fn task_from_proto(task: chroma_proto::Task) -> Result<chroma_types::Task, GetTaskError> {
         // Parse task_id
         let task_id =
             chroma_types::TaskUuid(uuid::Uuid::parse_str(&task.task_id).map_err(|e| {
@@ -2116,15 +1977,24 @@ impl GrpcSysDb {
         });
 
         // Parse output_collection_id if present
-        let parsed_output_collection_id = task.output_collection_id.as_ref().and_then(|id_str| {
+        let parsed_output_collection_id = if let Some(id_str) = task.output_collection_id.as_ref() {
             if id_str.is_empty() {
                 None
             } else {
-                uuid::Uuid::parse_str(id_str)
-                    .map(chroma_types::CollectionUuid)
-                    .ok()
+                Some(chroma_types::CollectionUuid(
+                    uuid::Uuid::parse_str(id_str).map_err(|e| {
+                        tracing::error!(
+                            output_collection_id = %id_str,
+                            error = %e,
+                            "Server returned invalid output_collection_id UUID"
+                        );
+                        GetTaskError::ServerReturnedInvalidData
+                    })?,
+                ))
             }
-        });
+        } else {
+            None
+        };
 
         Ok(chroma_types::Task {
             id: task_id,
@@ -2140,12 +2010,70 @@ impl GrpcSysDb {
             next_run,
             lowest_live_nonce,
             next_nonce,
-            completion_offset: task.completion_offset as u64,
+            completion_offset: task.completion_offset,
             min_records_for_task: task.min_records_for_task,
             is_deleted: false,
-            created_at: std::time::SystemTime::now(),
-            updated_at: std::time::SystemTime::now(),
+            created_at: std::time::SystemTime::UNIX_EPOCH
+                + std::time::Duration::from_micros(task.created_at),
+            updated_at: std::time::SystemTime::UNIX_EPOCH
+                + std::time::Duration::from_micros(task.updated_at),
         })
+    }
+
+    pub async fn get_task_by_name(
+        &mut self,
+        input_collection_id: chroma_types::CollectionUuid,
+        task_name: String,
+    ) -> Result<chroma_types::Task, GetTaskError> {
+        let req = chroma_proto::GetTaskByNameRequest {
+            input_collection_id: input_collection_id.to_string(),
+            task_name: task_name.clone(),
+        };
+
+        let response = match self.client.get_task_by_name(req).await {
+            Ok(resp) => resp,
+            Err(status) => {
+                if status.code() == tonic::Code::NotFound {
+                    return Err(GetTaskError::NotFound);
+                }
+                return Err(GetTaskError::FailedToGetTask(status));
+            }
+        };
+        let response = response.into_inner();
+
+        // Extract the nested task from response
+        let task = response.task.ok_or_else(|| {
+            GetTaskError::FailedToGetTask(tonic::Status::internal("Missing task in response"))
+        })?;
+
+        Self::task_from_proto(task)
+    }
+
+    pub async fn get_task_by_uuid(
+        &mut self,
+        task_uuid: chroma_types::TaskUuid,
+    ) -> Result<chroma_types::Task, GetTaskError> {
+        let req = chroma_proto::GetTaskByUuidRequest {
+            task_id: task_uuid.0.to_string(),
+        };
+
+        let response = match self.client.get_task_by_uuid(req).await {
+            Ok(resp) => resp,
+            Err(status) => {
+                if status.code() == tonic::Code::NotFound {
+                    return Err(GetTaskError::NotFound);
+                }
+                return Err(GetTaskError::FailedToGetTask(status));
+            }
+        };
+        let response = response.into_inner();
+
+        // Extract the nested task from response
+        let task = response.task.ok_or_else(|| {
+            GetTaskError::FailedToGetTask(tonic::Status::internal("Missing task in response"))
+        })?;
+
+        Self::task_from_proto(task)
     }
 
     pub async fn create_output_collection_for_task(

@@ -4,7 +4,9 @@ use chroma_error::ChromaError;
 use chroma_log::Log;
 use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError};
 use chroma_system::{Operator, OperatorType};
-use chroma_types::{Chunk, LogRecord, Operation, OperationRecord, Segment, UpdateMetadataValue};
+use chroma_types::{
+    Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, Segment, UpdateMetadataValue,
+};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -84,7 +86,7 @@ pub struct ExecuteTaskInput {
     /// The tenant ID
     pub tenant_id: String,
     /// The output collection ID where results are written
-    pub output_collection_id: String,
+    pub output_collection_id: CollectionUuid,
     /// The current completion offset
     pub completion_offset: u64,
     /// The output collection's record segment to read existing data
@@ -110,6 +112,8 @@ pub enum ExecuteTaskError {
     RecordReader(#[from] RecordSegmentReaderCreationError),
     #[error("Invalid collection UUID: {0}")]
     InvalidUuid(String),
+    #[error("Log offset arithmetic overflow: base_offset={0}, record_index={1}")]
+    LogOffsetOverflow(i64, usize),
 }
 
 impl ChromaError for ExecuteTaskError {
@@ -118,6 +122,7 @@ impl ChromaError for ExecuteTaskError {
             ExecuteTaskError::SegmentRead(e) => e.code(),
             ExecuteTaskError::RecordReader(e) => e.code(),
             ExecuteTaskError::InvalidUuid(_) => chroma_error::ErrorCodes::InvalidArgument,
+            ExecuteTaskError::LogOffsetOverflow(_, _) => chroma_error::ErrorCodes::Internal,
         }
     }
 }
@@ -163,20 +168,27 @@ impl Operator<ExecuteTaskInput, ExecuteTaskOutput> for ExecuteTaskOperator {
             .map_err(ExecuteTaskError::SegmentRead)?;
 
         // Update log offsets for output records
-        // completion_offset = -1 means "no records processed yet", treat as 0
-        let base_offset = if input.completion_offset == u64::MAX {
-            0i64
-        } else {
-            input.completion_offset as i64
-        };
+        // Convert u64 completion_offset to i64 for LogRecord (which uses i64)
+        let base_offset: i64 = input
+            .completion_offset
+            .try_into()
+            .map_err(|_| ExecuteTaskError::LogOffsetOverflow(input.completion_offset as i64, 0))?;
+
         let output_records_with_offsets: Vec<LogRecord> = output_records
             .iter()
             .enumerate()
-            .map(|(i, (log_record, _))| LogRecord {
-                log_offset: base_offset + i as i64,
-                record: log_record.record.clone(),
+            .map(|(i, (log_record, _))| {
+                let i_i64 = i64::try_from(i)
+                    .map_err(|_| ExecuteTaskError::LogOffsetOverflow(base_offset, i))?;
+                let offset = base_offset
+                    .checked_add(i_i64)
+                    .ok_or_else(|| ExecuteTaskError::LogOffsetOverflow(base_offset, i))?;
+                Ok(LogRecord {
+                    log_offset: offset,
+                    record: log_record.record.clone(),
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, ExecuteTaskError>>()?;
 
         tracing::info!(
             "[ExecuteTask]: Task executed successfully, produced {} output records",

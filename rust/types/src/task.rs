@@ -6,134 +6,18 @@ use uuid::Uuid;
 
 use crate::CollectionUuid;
 
-/// JobUuid is a wrapper around Uuid to provide a unified type for job identifiers.
-/// Jobs can be either collection compaction jobs or task execution jobs.
-#[derive(
-    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
-)]
-pub struct JobUuid(pub Uuid);
+define_uuid_newtype!(
+    /// TaskUuid is a wrapper around Uuid to provide a type for task identifiers.
+    #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+    TaskUuid,
+    new_v4
+);
 
-impl JobUuid {
-    pub fn new() -> Self {
-        JobUuid(Uuid::new_v4())
-    }
-}
-
-impl From<CollectionUuid> for JobUuid {
-    fn from(collection_uuid: CollectionUuid) -> Self {
-        JobUuid(collection_uuid.0)
-    }
-}
-
-impl From<TaskUuid> for JobUuid {
-    fn from(task_uuid: TaskUuid) -> Self {
-        JobUuid(task_uuid.0)
-    }
-}
-
-impl std::str::FromStr for JobUuid {
-    type Err = uuid::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match Uuid::parse_str(s) {
-            Ok(uuid) => Ok(JobUuid(uuid)),
-            Err(err) => Err(err),
-        }
-    }
-}
-
-impl std::fmt::Display for JobUuid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// TaskUuid is a wrapper around Uuid to provide a type for task identifiers.
-#[derive(
-    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
-)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct TaskUuid(pub Uuid);
-
-impl TaskUuid {
-    pub fn new() -> Self {
-        TaskUuid(Uuid::new_v4())
-    }
-}
-
-impl std::str::FromStr for TaskUuid {
-    type Err = uuid::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match Uuid::parse_str(s) {
-            Ok(uuid) => Ok(TaskUuid(uuid)),
-            Err(err) => Err(err),
-        }
-    }
-}
-
-impl std::fmt::Display for TaskUuid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-#[derive(
-    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
-)]
-pub struct TaskRunUuid(pub Uuid);
-
-impl TaskRunUuid {
-    pub fn new() -> Self {
-        TaskRunUuid(Uuid::now_v7())
-    }
-}
-
-impl std::str::FromStr for TaskRunUuid {
-    type Err = uuid::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match Uuid::parse_str(s) {
-            Ok(uuid) => Ok(TaskRunUuid(uuid)),
-            Err(err) => Err(err),
-        }
-    }
-}
-
-impl std::fmt::Display for TaskRunUuid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// NonceUuid is a wrapper around Uuid to provide a type for task execution nonces.
-#[derive(
-    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
-)]
-pub struct NonceUuid(pub Uuid);
-
-impl NonceUuid {
-    pub fn new() -> Self {
-        NonceUuid(Uuid::now_v7())
-    }
-}
-
-impl std::str::FromStr for NonceUuid {
-    type Err = uuid::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match Uuid::parse_str(s) {
-            Ok(uuid) => Ok(NonceUuid(uuid)),
-            Err(err) => Err(err),
-        }
-    }
-}
-
-impl std::fmt::Display for NonceUuid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+define_uuid_newtype!(
+    /// NonceUuid is a wrapper around Uuid to provide a type for task execution nonces.
+    NonceUuid,
+    now_v7
+);
 
 /// Task represents an asynchronous task that is triggered by collection writes
 /// to map records from a source collection to a target collection.

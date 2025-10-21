@@ -21,7 +21,7 @@ pub struct SegmentFlushInfo {
 pub struct TaskUpdateInfo {
     pub task_id: TaskUuid,
     pub task_run_nonce: uuid::Uuid,
-    pub completion_offset: i64,
+    pub completion_offset: u64,
 }
 
 #[derive(Error, Debug)]
@@ -162,7 +162,7 @@ impl TryFrom<FlushCollectionCompactionAndTaskResponse> for FlushCompactionAndTas
             collection_id: CollectionUuid(id),
             collection_version: value.collection_version,
             last_compaction_time: value.last_compaction_time,
-            completion_offset: value.completion_offset as u64,
+            completion_offset: value.completion_offset,
         })
     }
 }

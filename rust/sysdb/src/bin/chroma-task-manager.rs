@@ -199,7 +199,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 collection_id: Some(collection_id),
                 task_id: Some(task_id),
                 task_run_nonce: Some(task_run_nonce),
-                completion_offset: Some(completion_offset as i64),
+                completion_offset: Some(completion_offset),
                 next_run_delay_secs: Some(next_run_delay_secs),
             };
 
