@@ -7142,6 +7142,7 @@ dependencies = [
  "chrono",
  "figment",
  "futures",
+ "prost-types 0.13.5",
  "s3heap",
  "serde",
  "serde_json",
