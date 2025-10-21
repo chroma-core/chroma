@@ -88,6 +88,7 @@ pub const EMBEDDING_KEY: &str = "#embedding";
 // ============================================================================
 
 /// Schema representation for collection index configurations
+///
 /// This represents the server-side schema structure used for index management
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1112,6 +1113,25 @@ impl Schema {
         } else {
             Ok(reconciled_schema)
         }
+    }
+
+    pub fn default_with_embedding_function(
+        embedding_function: EmbeddingFunctionConfiguration,
+    ) -> Schema {
+        let mut schema = Schema::new_default(KnnIndex::Spann);
+        if let Some(float_list) = &mut schema.defaults.float_list {
+            if let Some(vector_index) = &mut float_list.vector_index {
+                vector_index.config.embedding_function = Some(embedding_function.clone());
+            }
+        }
+        if let Some(embedding_types) = schema.keys.get_mut(EMBEDDING_KEY) {
+            if let Some(float_list) = &mut embedding_types.float_list {
+                if let Some(vector_index) = &mut float_list.vector_index {
+                    vector_index.config.embedding_function = Some(embedding_function);
+                }
+            }
+        }
+        schema
     }
 
     /// Check if schema is default by comparing it word-by-word with new_default

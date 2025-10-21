@@ -3,8 +3,8 @@ use backon::Retryable;
 use chroma_api_types::ErrorResponse;
 use chroma_error::ChromaValidationError;
 use chroma_types::Collection;
-use chroma_types::CollectionConfiguration;
 use chroma_types::Metadata;
+use chroma_types::Schema;
 use parking_lot::Mutex;
 use reqwest::Method;
 use reqwest::StatusCode;
@@ -187,20 +187,20 @@ impl ChromaHttpClient {
     pub async fn get_or_create_collection(
         &self,
         name: impl AsRef<str>,
-        configuration: Option<CollectionConfiguration>,
+        schema: Option<Schema>,
         metadata: Option<Metadata>,
     ) -> Result<ChromaCollection, ChromaClientError> {
-        self.common_create_collection(name, configuration, metadata, true)
+        self.common_create_collection(name, schema, metadata, true)
             .await
     }
 
     pub async fn create_collection(
         &self,
         name: impl AsRef<str>,
-        configuration: Option<CollectionConfiguration>,
+        schema: Option<Schema>,
         metadata: Option<Metadata>,
     ) -> Result<ChromaCollection, ChromaClientError> {
-        self.common_create_collection(name, configuration, metadata, false)
+        self.common_create_collection(name, schema, metadata, false)
             .await
     }
 
@@ -292,7 +292,7 @@ impl ChromaHttpClient {
     async fn common_create_collection(
         &self,
         name: impl AsRef<str>,
-        configuration: Option<CollectionConfiguration>,
+        schema: Option<Schema>,
         metadata: Option<Metadata>,
         get_or_create: bool,
     ) -> Result<ChromaCollection, ChromaClientError> {
@@ -309,7 +309,7 @@ impl ChromaHttpClient {
                 ),
                 Some(serde_json::json!({
                     "name": name.as_ref(),
-                    "configuration": configuration,
+                    "schema": schema,
                     "metadata": metadata,
                     "get_or_create": get_or_create,
                 })),
@@ -529,6 +529,7 @@ impl ChromaHttpClient {
 mod tests {
     use super::*;
     use crate::client::{ChromaAuthMethod, ChromaRetryOptions};
+    use chroma_types::{EmbeddingFunctionConfiguration, EmbeddingFunctionNewConfiguration};
     use futures_util::FutureExt;
     use httpmock::{HttpMockResponse, MockServer};
     use std::sync::atomic::AtomicBool;
@@ -762,13 +763,23 @@ mod tests {
     #[test_log::test]
     async fn test_live_cloud_create_collection() {
         with_client(|client| async move {
-            let collection = client.create_collection("foo", None, None).await.unwrap();
+            let schema = Schema::default_with_embedding_function(
+                EmbeddingFunctionConfiguration::Known(EmbeddingFunctionNewConfiguration {
+                    name: "bar".to_string(),
+                    config: serde_json::json!({}),
+                }),
+            );
+            let collection = client
+                .create_collection("foo", Some(schema.clone()), None)
+                .await
+                .unwrap();
             assert_eq!(collection.collection.name, "foo");
 
-            client
+            let collection = client
                 .get_or_create_collection("foo", None, None)
                 .await
                 .unwrap();
+            assert_eq!(collection.schema().clone().unwrap(), schema);
         })
         .await;
     }
