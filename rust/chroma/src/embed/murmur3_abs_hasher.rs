@@ -12,6 +12,7 @@ use crate::embed::TokenHasher;
 /// The seed field is public for direct customization.
 #[derive(Default)]
 pub struct Murmur3AbsHasher {
+    /// Seed value for MurmurHash3 (typically 0).
     pub seed: u32,
 }
 

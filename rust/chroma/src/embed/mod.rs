@@ -9,8 +9,11 @@ use std::{
     fmt::{Debug, Display},
 };
 
+/// BM25 sparse embedding implementation.
 pub mod bm25;
+/// Text tokenization utilities for BM25.
 pub mod bm25_tokenizer;
+/// MurmurHash3 absolute value hasher for token hashing.
 pub mod murmur3_abs_hasher;
 #[cfg(feature = "ollama")]
 pub mod ollama;

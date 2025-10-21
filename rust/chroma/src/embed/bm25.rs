@@ -30,10 +30,15 @@ where
     T: Tokenizer,
     H: TokenHasher,
 {
+    /// Tokenizer for converting text into tokens.
     pub tokenizer: T,
+    /// Hasher for converting tokens into u32 identifiers.
     pub hasher: H,
+    /// BM25 saturation parameter (typically 1.2).
     pub k: f32,
+    /// BM25 length normalization parameter (typically 0.75).
     pub b: f32,
+    /// Average document length in tokens for normalization.
     pub avg_len: f32,
 }
 
@@ -66,23 +71,18 @@ where
 {
     /// Encode a single text string into a sparse vector.
     pub fn encode(&self, text: &str) -> Result<SparseVector, BM25SparseEmbeddingError> {
-        // Step 1: Tokenize text
         let tokens = self.tokenizer.tokenize(text);
 
-        // Step 2: Document length = token count (following fastembed standard)
         let doc_len = tokens.len() as f32;
 
-        // Step 3: Hash tokens to IDs
         let mut token_ids = Vec::with_capacity(tokens.len());
         for token in tokens {
             let id = self.hasher.hash(&token);
             token_ids.push(id);
         }
 
-        // Step 4: Sort token IDs to group identical IDs together
         token_ids.sort_unstable();
 
-        // Step 5: Calculate BM25 scores for each unique token
         let sparse_pairs = token_ids.chunk_by(|a, b| a == b).map(|chunk| {
             let id = chunk[0];
             let tf = chunk.len() as f32;

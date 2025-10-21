@@ -206,8 +206,11 @@ static DEFAULT_ENGLISH_STOPWORDS: LazyLock<HashSet<&'static str>> =
 /// All fields are public for direct construction and customization.
 // NOTE(sicheng): Add config to support more languages
 pub struct Bm25Tokenizer {
+    /// Snowball stemmer for reducing words to their root form.
     pub stemmer: Stemmer,
+    /// Set of stopwords to filter out during tokenization.
     pub stopwords: HashSet<&'static str>,
+    /// Maximum token length; longer tokens are discarded.
     pub token_max_length: usize,
 }
 
