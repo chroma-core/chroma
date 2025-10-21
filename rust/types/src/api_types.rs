@@ -1431,29 +1431,50 @@ impl TryFrom<&str> for Include {
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct IncludeList(pub Vec<Include>);
 
+impl std::ops::BitAnd for Include {
+    type Output = IncludeList;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        IncludeList(vec![self, rhs])
+    }
+}
+
+impl std::ops::BitAnd<IncludeList> for Include {
+    type Output = IncludeList;
+
+    fn bitand(self, mut rhs: IncludeList) -> Self::Output {
+        rhs.0.push(self);
+        rhs
+    }
+}
+
+impl std::ops::BitAnd<Include> for IncludeList {
+    type Output = IncludeList;
+
+    fn bitand(self, rhs: Include) -> Self::Output {
+        let mut includes = self.0;
+        includes.push(rhs);
+        IncludeList(includes)
+    }
+}
+
 impl IncludeList {
     pub fn empty() -> Self {
         Self(Vec::new())
     }
 
     pub fn default_query() -> Self {
-        Self(vec![
-            Include::Document,
-            Include::Metadata,
-            Include::Distance,
-        ])
+        Include::Document & Include::Metadata & Include::Distance
     }
     pub fn default_get() -> Self {
-        Self(vec![Include::Document, Include::Metadata])
+        Include::Document & Include::Metadata
     }
     pub fn all() -> Self {
-        Self(vec![
-            Include::Document,
-            Include::Metadata,
-            Include::Distance,
-            Include::Embedding,
-            Include::Uri,
-        ])
+        Include::Document
+            & Include::Metadata
+            & Include::Distance
+            & Include::Embedding
+            & Include::Uri
     }
 }
 
