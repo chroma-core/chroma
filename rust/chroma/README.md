@@ -1,8 +1,9 @@
 # Chroma
 
-This crate provides the official Chroma Rust client.  Chroma is an open-source AI-native database
-intended for AI applications.  Chroma focuses on search, enabling your application to customize the
-search methods it needs most.
+This crate provides the official Chroma Rust client.  Chroma is an open-source AI-native search
+database that makes it easy to get private, offline, and realtime data that large language models
+were not trained on into their context.  Where the language models provide reasoning, Chroma focuses
+on search, enabling your application to customize the search methods it needs most.
 
 Specifically, there are multiple modes of search supported by Chroma.
 
@@ -11,8 +12,8 @@ Specifically, there are multiple modes of search supported by Chroma.
   closer to "I love apples" than it is to "I'm using Chroma to compare apples to apples."  Chroma
   automatically indexes your data so that you may query for similar text.
 - Chroma supports sparse embeddings like BM25 or SPLADE-v3.  Briefly, sparse embeddings also give a
-  numeric score for the difference between two strings.  Unlike dense embeddings, sparse embeddings
-  are sensitive to the literal words in documents.
+  numeric score for the difference between two strings.  More so than dense embeddings, sparse
+  embeddings are sensitive to the literal words in documents.
 - Full-text search enables applications to find literal matches in code.
 - Metadata search allows for a variety of queries against the metadata for a record.
 
