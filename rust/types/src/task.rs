@@ -85,7 +85,7 @@ pub struct TaskRunUuid(pub Uuid);
 
 impl TaskRunUuid {
     pub fn new() -> Self {
-        TaskRunUuid(Uuid::new_v4())
+        TaskRunUuid(Uuid::now_v7())
     }
 }
 
@@ -114,7 +114,7 @@ pub struct NonceUuid(pub Uuid);
 
 impl NonceUuid {
     pub fn new() -> Self {
-        NonceUuid(Uuid::new_v4())
+        NonceUuid(Uuid::now_v7())
     }
 }
 
