@@ -349,7 +349,7 @@ impl ChromaHttpClient {
             ));
         }
 
-        let database_name = identity.databases.first().ok_or_else(|| {
+        let database_name = identity.databases.into_iter().next().ok_or_else(|| {
             ChromaClientError::CouldNotResolveDatabaseId(
                 "Client has access to no databases".to_string(),
             )
