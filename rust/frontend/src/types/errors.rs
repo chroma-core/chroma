@@ -5,14 +5,13 @@ use axum::{
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    CollectionConfigurationToInternalConfigurationError, GetCollectionError, UpdateCollectionError,
+    Base64DecodeError, CollectionConfigurationToInternalConfigurationError, GetCollectionError,
+    UpdateCollectionError,
 };
 use serde::Serialize;
 use std::fmt;
 use thiserror::Error;
 use utoipa::ToSchema;
-
-use crate::base64_decode::Base64DecodeError;
 
 #[derive(Error, Debug)]
 pub enum ValidationError {

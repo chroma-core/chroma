@@ -1,5 +1,5 @@
-use crate::types::errors::ValidationError;
 use base64::{engine::general_purpose, Engine as _};
+use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
@@ -12,6 +12,12 @@ pub enum Base64DecodeError {
     InvalidByteLength { byte_length: usize },
     #[error("Failed to convert embedding {embedding_index} to byte array")]
     EmbeddingConversionFailed { embedding_index: usize },
+}
+
+impl ChromaError for Base64DecodeError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
 }
 
 #[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
@@ -28,9 +34,9 @@ pub enum UpdateEmbeddingsPayload {
     Base64Binary(Vec<Option<String>>),
 }
 
-pub(crate) fn decode_embeddings(
+pub fn decode_embeddings(
     embeddings: EmbeddingsPayload,
-) -> Result<Vec<Vec<f32>>, ValidationError> {
+) -> Result<Vec<Vec<f32>>, Base64DecodeError> {
     match embeddings {
         EmbeddingsPayload::Base64Binary(base64_strings) => {
             Ok(decode_base64_embeddings(&base64_strings)?)
@@ -39,9 +45,9 @@ pub(crate) fn decode_embeddings(
     }
 }
 
-pub(crate) fn maybe_decode_update_embeddings(
+pub fn maybe_decode_update_embeddings(
     embeddings: Option<UpdateEmbeddingsPayload>,
-) -> Result<Option<Vec<Option<Vec<f32>>>>, ValidationError> {
+) -> Result<Option<Vec<Option<Vec<f32>>>>, Base64DecodeError> {
     match embeddings {
         Some(UpdateEmbeddingsPayload::Base64Binary(base64_data)) => {
             Ok(Some(decode_base64_update_embeddings(&base64_data)?))
@@ -133,12 +139,7 @@ mod tests {
         let invalid_embeddings = EmbeddingsPayload::Base64Binary(vec!["invalid!@#$".to_string()]);
         let result = decode_embeddings(invalid_embeddings);
 
-        assert!(matches!(
-            result,
-            Err(ValidationError::Base64Decode(
-                Base64DecodeError::InvalidBase64(_)
-            ))
-        ));
+        assert!(matches!(result, Err(Base64DecodeError::InvalidBase64(_))));
     }
 
     #[test]
@@ -163,12 +164,7 @@ mod tests {
             EmbeddingsPayload::Base64Binary(vec![valid_base64, "invalid!@#$".to_string()]);
 
         let result = decode_embeddings(embeddings);
-        assert!(matches!(
-            result,
-            Err(ValidationError::Base64Decode(
-                Base64DecodeError::InvalidBase64(_)
-            ))
-        ));
+        assert!(matches!(result, Err(Base64DecodeError::InvalidBase64(_))));
     }
 
     #[test]

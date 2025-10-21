@@ -58,7 +58,7 @@ impl ChromaCollection {
             offset.unwrap_or_default(),
             include.unwrap_or_else(IncludeList::default_get),
         )?;
-
+        let request = request.into_payload()?;
         self.send("get", Method::POST, Some(request)).await
     }
 
@@ -80,7 +80,7 @@ impl ChromaCollection {
             n_results.unwrap_or(10),
             include.unwrap_or_else(IncludeList::default_query),
         )?;
-
+        let request = request.into_payload()?;
         self.send("query", Method::POST, Some(request)).await
     }
 
@@ -94,7 +94,7 @@ impl ChromaCollection {
             self.collection.collection_id,
             searches,
         )?;
-
+        let request = request.into_payload();
         self.send("search", Method::POST, Some(request)).await
     }
 
@@ -116,7 +116,7 @@ impl ChromaCollection {
             uris,
             metadatas,
         )?;
-
+        let request = request.into_payload();
         self.send("add", Method::POST, Some(request)).await
     }
 
@@ -138,7 +138,7 @@ impl ChromaCollection {
             uris,
             metadatas,
         )?;
-
+        let request = request.into_payload();
         self.send("update", Method::POST, Some(request)).await
     }
 
@@ -160,7 +160,7 @@ impl ChromaCollection {
             uris,
             metadatas,
         )?;
-
+        let request = request.into_payload();
         self.send("upsert", Method::POST, Some(request)).await
     }
 
@@ -176,7 +176,7 @@ impl ChromaCollection {
             ids,
             r#where,
         )?;
-
+        let request = request.into_payload()?;
         self.send("delete", Method::POST, Some(request)).await
     }
 

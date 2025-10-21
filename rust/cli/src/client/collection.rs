@@ -1,9 +1,9 @@
 use crate::client::chroma_client::ChromaClient;
 use crate::client::prelude::CollectionModel;
 use crate::client::utils::send_request;
-use chroma_frontend::server::AddCollectionRecordsPayload;
 use chroma_types::{
-    AddCollectionRecordsResponse, CountResponse, GetResponse, IncludeList, Metadata,
+    AddCollectionRecordsPayload, AddCollectionRecordsResponse, CountResponse, GetResponse,
+    IncludeList, Metadata,
 };
 use reqwest::Method;
 use serde_json::{json, Map, Value};

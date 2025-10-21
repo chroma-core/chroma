@@ -6,13 +6,13 @@ use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 
-#[derive(Deserialize, Debug, Clone, Serialize)]
+#[derive(Default, Deserialize, Debug, Clone, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RawWhereFields {
     #[serde(default)]
-    r#where: Value,
+    pub r#where: Value,
     #[serde(default)]
-    where_document: Value,
+    pub where_document: Value,
 }
 
 impl RawWhereFields {

@@ -11,6 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 async-trait = { workspace = true }
+base64 = { workspace = true }
 chrono = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
@@ -36,6 +37,7 @@ chroma-error = { workspace = true, features = ["tonic", "validator"] }
 
 [build-dependencies]
 tonic-build = "0.10"
+criterion = { workspace = true }
 
 [features]
 testing = ["dep:proptest", "dep:proptest-derive"]
