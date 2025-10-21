@@ -28,7 +28,6 @@ sysdb:
     requests:
       cpu: '1000m'
       memory: '512Mi'
-  flags:
 rustLogService:
   image:
     repository: 'rust-log-service'

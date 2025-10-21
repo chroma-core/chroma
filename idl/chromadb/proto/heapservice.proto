@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package chroma;
 
+option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
+
 import "chromadb/proto/chroma.proto";
 import "google/protobuf/timestamp.proto";
 

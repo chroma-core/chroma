@@ -254,6 +254,24 @@ func (_m *ITaskDb) UpdateCompletionOffset(taskID uuid.UUID, taskRunNonce uuid.UU
 	return r0
 }
 
+// UpdateLowestLiveNonce provides a mock function with given fields: taskID, lowestLiveNonce
+func (_m *ITaskDb) UpdateLowestLiveNonce(taskID uuid.UUID, lowestLiveNonce uuid.UUID) error {
+	ret := _m.Called(taskID, lowestLiveNonce)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateLowestLiveNonce")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(uuid.UUID, uuid.UUID) error); ok {
+		r0 = rf(taskID, lowestLiveNonce)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // UpdateOutputCollectionID provides a mock function with given fields: taskID, outputCollectionID
 func (_m *ITaskDb) UpdateOutputCollectionID(taskID uuid.UUID, outputCollectionID *string) error {
 	ret := _m.Called(taskID, outputCollectionID)
@@ -270,6 +288,36 @@ func (_m *ITaskDb) UpdateOutputCollectionID(taskID uuid.UUID, outputCollectionID
 	}
 
 	return r0
+}
+
+// CleanupExpiredPartialTasks provides a mock function with given fields: maxAgeSeconds
+func (_m *ITaskDb) CleanupExpiredPartialTasks(maxAgeSeconds uint64) ([]uuid.UUID, error) {
+	ret := _m.Called(maxAgeSeconds)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CleanupExpiredPartialTasks")
+	}
+
+	var r0 []uuid.UUID
+	var r1 error
+	if rf, ok := ret.Get(0).(func(uint64) ([]uuid.UUID, error)); ok {
+		return rf(maxAgeSeconds)
+	}
+	if rf, ok := ret.Get(0).(func(uint64) []uuid.UUID); ok {
+		r0 = rf(maxAgeSeconds)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]uuid.UUID)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(uint64) error); ok {
+		r1 = rf(maxAgeSeconds)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // NewITaskDb creates a new instance of ITaskDb. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

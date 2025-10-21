@@ -3,7 +3,9 @@ package memberlist_manager
 import (
 	"context"
 	"errors"
+	"fmt"
 
+	"github.com/chroma-core/chroma/go/pkg/utils"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -22,6 +24,25 @@ type Member struct {
 	id   string
 	ip   string
 	node string
+}
+
+// NewMember creates a new Member with the given id, ip, and node
+func NewMember(id, ip, node string) Member {
+	return Member{
+		id:   id,
+		ip:   ip,
+		node: node,
+	}
+}
+
+// GetIP returns the IP address of the member
+func (m Member) GetIP() string {
+	return m.ip
+}
+
+// GetID returns the ID of the member
+func (m Member) GetID() string {
+	return m.id
 }
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface
@@ -60,6 +81,18 @@ func NewCRMemberlistStore(dynamicClient dynamic.Interface, coordinatorNamespace 
 		coordinatorNamespace:     coordinatorNamespace,
 		memberlistCustomResource: memberlistCustomResource,
 	}
+}
+
+// NewCRMemberlistStoreFromK8s creates a CRMemberlistStore by automatically
+// creating a Kubernetes dynamic client. This is a convenience function for
+// the common case where you need to access a memberlist CRD in Kubernetes.
+func NewCRMemberlistStoreFromK8s(namespace, memberlistName string) (IMemberlistStore, error) {
+	dynamicClient, err := utils.GetKubernetesDynamicInterface()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kubernetes dynamic client: %w", err)
+	}
+
+	return NewCRMemberlistStore(dynamicClient, namespace, memberlistName), nil
 }
 
 func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlist Memberlist, resourceVersion string, err error) {

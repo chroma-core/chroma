@@ -2200,7 +2200,7 @@ mod tests {
             .get_task_by_name(input_collection_id, task_name.to_string())
             .await
             .expect("Task should be found");
-        let execution_nonce = task_before_run.next_nonce;
+        let execution_nonce = task_before_run.lowest_live_nonce.unwrap();
 
         // Run first compaction (PrepareTask will fetch and populate the task)
         let compact_orchestrator = CompactOrchestrator::new_for_task(
@@ -2217,7 +2217,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             None,
-            task_id,
+            task_before_run.id,
             execution_nonce,
         );
         let result = compact_orchestrator.run(system.clone()).await;
