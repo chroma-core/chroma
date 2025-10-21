@@ -1409,6 +1409,364 @@ impl Schema {
         }
         false
     }
+
+    // ========================================================================
+    // BUILDER PATTERN METHODS
+    // ========================================================================
+
+    /// Create an index configuration (builder pattern)
+    ///
+    /// This method allows fluent, chainable configuration of indexes on a schema.
+    /// It matches the Python API's `.create_index()` method.
+    ///
+    /// # Arguments
+    /// * `key` - Optional key name for per-key index. `None` applies to defaults/special keys
+    /// * `config` - Index configuration to create
+    ///
+    /// # Returns
+    /// `Self` for method chaining
+    ///
+    /// # Errors
+    /// Returns error if:
+    /// - Attempting to create index on special keys (`#document`, `#embedding`)
+    /// - Invalid configuration (e.g., vector index on non-embedding key)
+    /// - Conflicting with existing indexes (e.g., multiple sparse vector indexes)
+    ///
+    /// # Examples
+    /// ```
+    /// use chroma_types::{Schema, IndexConfig, VectorIndexConfig, StringInvertedIndexConfig, KnnIndex, Space};
+    ///
+    /// # fn main() -> Result<(), String> {
+    /// let schema = Schema::new_default(KnnIndex::Hnsw)
+    ///     .create_index(None, IndexConfig::Vector(VectorIndexConfig {
+    ///         space: Some(Space::Cosine),
+    ///         embedding_function: None,
+    ///         source_key: None,
+    ///         hnsw: None,
+    ///         spann: None,
+    ///     }))?
+    ///     .create_index(Some("category"), IndexConfig::StringInverted(StringInvertedIndexConfig {}))?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn create_index(mut self, key: Option<&str>, config: IndexConfig) -> Result<Self, String> {
+        // Handle special cases: Vector and FTS (global configs only)
+        match (&key, &config) {
+            (None, IndexConfig::Vector(cfg)) => {
+                self._set_vector_index_config_builder(cfg.clone())?;
+                return Ok(self);
+            }
+            (None, IndexConfig::Fts(cfg)) => {
+                self._set_fts_index_config_builder(cfg.clone())?;
+                return Ok(self);
+            }
+            (Some(_), IndexConfig::Vector(_)) => {
+                return Err(
+                    "Vector index cannot be enabled on specific keys. Use create_index(None, config) to configure the vector index globally."
+                        .to_string(),
+                );
+            }
+            (Some(_), IndexConfig::Fts(_)) => {
+                return Err(
+                    "FTS index cannot be enabled on specific keys. Use create_index(None, config) to configure the FTS index globally."
+                        .to_string(),
+                );
+            }
+            _ => {}
+        }
+
+        // Validate special keys
+        if let Some(k) = key {
+            if k == DOCUMENT_KEY || k == EMBEDDING_KEY {
+                return Err(format!(
+                    "Cannot create index on special key '{}'. These keys are managed automatically by the system.",
+                    k
+                ));
+            }
+        }
+
+        // Validate sparse vector requires key
+        if key.is_none() && matches!(config, IndexConfig::SparseVector(_)) {
+            return Err(
+                "Sparse vector index must be created on a specific key. Please specify a key."
+                    .to_string(),
+            );
+        }
+
+        // Dispatch to appropriate helper
+        match key {
+            Some(k) => self._set_index_for_key_builder(k, config, true)?,
+            None => self._set_index_in_defaults_builder(config, true)?,
+        }
+
+        Ok(self)
+    }
+
+    /// Delete/disable an index configuration (builder pattern)
+    ///
+    /// This method allows disabling indexes on a schema.
+    /// It matches the Python API's `.delete_index()` method.
+    ///
+    /// # Arguments
+    /// * `key` - Optional key name for per-key index. `None` applies to defaults
+    /// * `config` - Index configuration to disable
+    ///
+    /// # Returns
+    /// `Self` for method chaining
+    ///
+    /// # Errors
+    /// Returns error if:
+    /// - Attempting to delete index on special keys (`#document`, `#embedding`)
+    /// - Attempting to delete vector, FTS, or sparse vector indexes (not currently supported)
+    ///
+    /// # Examples
+    /// ```
+    /// use chroma_types::{Schema, IndexConfig, StringInvertedIndexConfig, KnnIndex};
+    ///
+    /// # fn main() -> Result<(), String> {
+    /// let schema = Schema::new_default(KnnIndex::Hnsw)
+    ///     .delete_index(Some("category"), IndexConfig::StringInverted(StringInvertedIndexConfig {}))?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn delete_index(mut self, key: Option<&str>, config: IndexConfig) -> Result<Self, String> {
+        // Validate special keys
+        if let Some(k) = key {
+            if k == DOCUMENT_KEY || k == EMBEDDING_KEY {
+                return Err(format!(
+                    "Cannot delete index on special key '{}'. These keys are managed automatically by the system.",
+                    k
+                ));
+            }
+        }
+
+        // Disallow deleting vector, FTS, and sparse vector indexes (match Python restrictions)
+        match &config {
+            IndexConfig::Vector(_) => {
+                return Err("Deleting vector index is not currently supported.".to_string());
+            }
+            IndexConfig::Fts(_) => {
+                return Err("Deleting FTS index is not currently supported.".to_string());
+            }
+            IndexConfig::SparseVector(_) => {
+                return Err("Deleting sparse vector index is not currently supported.".to_string());
+            }
+            _ => {}
+        }
+
+        // Dispatch to appropriate helper (enabled=false)
+        match key {
+            Some(k) => self._set_index_for_key_builder(k, config, false)?,
+            None => self._set_index_in_defaults_builder(config, false)?,
+        }
+
+        Ok(self)
+    }
+
+    /// Set vector index config globally (applies to #embedding)
+    fn _set_vector_index_config_builder(
+        &mut self,
+        config: VectorIndexConfig,
+    ) -> Result<(), String> {
+        // Update defaults (disabled, just config update)
+        if let Some(float_list) = &mut self.defaults.float_list {
+            if let Some(vector_index) = &mut float_list.vector_index {
+                vector_index.config = config.clone();
+            }
+        }
+
+        // Update #embedding key (enabled, config update, preserve source_key=#document)
+        if let Some(embedding_types) = self.keys.get_mut(EMBEDDING_KEY) {
+            if let Some(float_list) = &mut embedding_types.float_list {
+                if let Some(vector_index) = &mut float_list.vector_index {
+                    let mut updated_config = config;
+                    // Preserve source_key as #document
+                    updated_config.source_key = Some(DOCUMENT_KEY.to_string());
+                    vector_index.config = updated_config;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Set FTS index config globally (applies to #document)
+    fn _set_fts_index_config_builder(&mut self, config: FtsIndexConfig) -> Result<(), String> {
+        // Update defaults (disabled, just config update)
+        if let Some(string) = &mut self.defaults.string {
+            if let Some(fts_index) = &mut string.fts_index {
+                fts_index.config = config.clone();
+            }
+        }
+
+        // Update #document key (enabled, config update)
+        if let Some(document_types) = self.keys.get_mut(DOCUMENT_KEY) {
+            if let Some(string) = &mut document_types.string {
+                if let Some(fts_index) = &mut string.fts_index {
+                    fts_index.config = config;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Set index configuration for a specific key
+    fn _set_index_for_key_builder(
+        &mut self,
+        key: &str,
+        config: IndexConfig,
+        enabled: bool,
+    ) -> Result<(), String> {
+        // Check for multiple sparse vector indexes BEFORE getting mutable reference
+        if enabled && matches!(config, IndexConfig::SparseVector(_)) {
+            // Count existing sparse vector indexes
+            let sparse_count = self
+                .keys
+                .iter()
+                .filter(|(k, v)| {
+                    k.as_str() != key
+                        && v.sparse_vector
+                            .as_ref()
+                            .and_then(|sv| sv.sparse_vector_index.as_ref())
+                            .map(|idx| idx.enabled)
+                            .unwrap_or(false)
+                })
+                .count();
+
+            if sparse_count > 0 {
+                return Err("At most one sparse vector index is allowed per collection".to_string());
+            }
+        }
+
+        // Get or create ValueTypes for this key
+        let value_types = self.keys.entry(key.to_string()).or_default();
+
+        // Set the appropriate index based on config type
+        match config {
+            IndexConfig::Vector(_) => {
+                return Err("Vector index can only be configured globally".to_string());
+            }
+            IndexConfig::Fts(_) => {
+                return Err("FTS index can only be configured globally".to_string());
+            }
+            IndexConfig::SparseVector(cfg) => {
+                value_types.sparse_vector = Some(SparseVectorValueType {
+                    sparse_vector_index: Some(SparseVectorIndexType {
+                        enabled,
+                        config: cfg,
+                    }),
+                });
+            }
+            IndexConfig::StringInverted(cfg) => {
+                if value_types.string.is_none() {
+                    value_types.string = Some(StringValueType {
+                        fts_index: None,
+                        string_inverted_index: None,
+                    });
+                }
+                if let Some(string) = &mut value_types.string {
+                    string.string_inverted_index = Some(StringInvertedIndexType {
+                        enabled,
+                        config: cfg,
+                    });
+                }
+            }
+            IndexConfig::IntInverted(cfg) => {
+                value_types.int = Some(IntValueType {
+                    int_inverted_index: Some(IntInvertedIndexType {
+                        enabled,
+                        config: cfg,
+                    }),
+                });
+            }
+            IndexConfig::FloatInverted(cfg) => {
+                value_types.float = Some(FloatValueType {
+                    float_inverted_index: Some(FloatInvertedIndexType {
+                        enabled,
+                        config: cfg,
+                    }),
+                });
+            }
+            IndexConfig::BoolInverted(cfg) => {
+                value_types.boolean = Some(BoolValueType {
+                    bool_inverted_index: Some(BoolInvertedIndexType {
+                        enabled,
+                        config: cfg,
+                    }),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Set index configuration in defaults
+    fn _set_index_in_defaults_builder(
+        &mut self,
+        config: IndexConfig,
+        enabled: bool,
+    ) -> Result<(), String> {
+        match config {
+            IndexConfig::Vector(_) => {
+                return Err("Use create_index(None, IndexConfig::Vector(...)) for vector index configuration".to_string());
+            }
+            IndexConfig::Fts(_) => {
+                return Err(
+                    "Use create_index(None, IndexConfig::Fts(...)) for FTS index configuration"
+                        .to_string(),
+                );
+            }
+            IndexConfig::SparseVector(cfg) => {
+                self.defaults.sparse_vector = Some(SparseVectorValueType {
+                    sparse_vector_index: Some(SparseVectorIndexType {
+                        enabled,
+                        config: cfg,
+                    }),
+                });
+            }
+            IndexConfig::StringInverted(cfg) => {
+                if self.defaults.string.is_none() {
+                    self.defaults.string = Some(StringValueType {
+                        fts_index: None,
+                        string_inverted_index: None,
+                    });
+                }
+                if let Some(string) = &mut self.defaults.string {
+                    string.string_inverted_index = Some(StringInvertedIndexType {
+                        enabled,
+                        config: cfg,
+                    });
+                }
+            }
+            IndexConfig::IntInverted(cfg) => {
+                self.defaults.int = Some(IntValueType {
+                    int_inverted_index: Some(IntInvertedIndexType {
+                        enabled,
+                        config: cfg,
+                    }),
+                });
+            }
+            IndexConfig::FloatInverted(cfg) => {
+                self.defaults.float = Some(FloatValueType {
+                    float_inverted_index: Some(FloatInvertedIndexType {
+                        enabled,
+                        config: cfg,
+                    }),
+                });
+            }
+            IndexConfig::BoolInverted(cfg) => {
+                self.defaults.boolean = Some(BoolValueType {
+                    bool_inverted_index: Some(BoolInvertedIndexType {
+                        enabled,
+                        config: cfg,
+                    }),
+                });
+            }
+        }
+
+        Ok(())
+    }
 }
 
 // ============================================================================
@@ -1562,6 +1920,65 @@ pub struct FloatInvertedIndexConfig {
 #[serde(deny_unknown_fields)]
 pub struct BoolInvertedIndexConfig {
     // Boolean inverted index typically has no additional parameters
+}
+
+// ============================================================================
+// BUILDER PATTERN SUPPORT
+// ============================================================================
+
+/// Union type for all index configurations (used by builder pattern)
+#[derive(Clone, Debug)]
+pub enum IndexConfig {
+    Vector(VectorIndexConfig),
+    SparseVector(SparseVectorIndexConfig),
+    Fts(FtsIndexConfig),
+    StringInverted(StringInvertedIndexConfig),
+    IntInverted(IntInvertedIndexConfig),
+    FloatInverted(FloatInvertedIndexConfig),
+    BoolInverted(BoolInvertedIndexConfig),
+}
+
+// Convenience From implementations for ergonomic usage
+impl From<VectorIndexConfig> for IndexConfig {
+    fn from(config: VectorIndexConfig) -> Self {
+        IndexConfig::Vector(config)
+    }
+}
+
+impl From<SparseVectorIndexConfig> for IndexConfig {
+    fn from(config: SparseVectorIndexConfig) -> Self {
+        IndexConfig::SparseVector(config)
+    }
+}
+
+impl From<FtsIndexConfig> for IndexConfig {
+    fn from(config: FtsIndexConfig) -> Self {
+        IndexConfig::Fts(config)
+    }
+}
+
+impl From<StringInvertedIndexConfig> for IndexConfig {
+    fn from(config: StringInvertedIndexConfig) -> Self {
+        IndexConfig::StringInverted(config)
+    }
+}
+
+impl From<IntInvertedIndexConfig> for IndexConfig {
+    fn from(config: IntInvertedIndexConfig) -> Self {
+        IndexConfig::IntInverted(config)
+    }
+}
+
+impl From<FloatInvertedIndexConfig> for IndexConfig {
+    fn from(config: FloatInvertedIndexConfig) -> Self {
+        IndexConfig::FloatInverted(config)
+    }
+}
+
+impl From<BoolInvertedIndexConfig> for IndexConfig {
+    fn from(config: BoolInvertedIndexConfig) -> Self {
+        IndexConfig::BoolInverted(config)
+    }
 }
 
 #[cfg(test)]
@@ -3263,5 +3680,384 @@ mod tests {
             ..Default::default()
         };
         assert!(all_none_config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_builder_pattern_crud_workflow() {
+        // Test comprehensive CRUD workflow using the builder pattern
+
+        // CREATE: Build a schema with multiple indexes
+        let schema = Schema::new_default(KnnIndex::Hnsw)
+            .create_index(
+                None,
+                IndexConfig::Vector(VectorIndexConfig {
+                    space: Some(Space::Cosine),
+                    embedding_function: None,
+                    source_key: None,
+                    hnsw: Some(HnswIndexConfig {
+                        ef_construction: Some(200),
+                        max_neighbors: Some(32),
+                        ef_search: Some(50),
+                        num_threads: None,
+                        batch_size: None,
+                        sync_threshold: None,
+                        resize_factor: None,
+                    }),
+                    spann: None,
+                }),
+            )
+            .expect("vector config should succeed")
+            .create_index(
+                Some("category"),
+                IndexConfig::StringInverted(StringInvertedIndexConfig {}),
+            )
+            .expect("string inverted on key should succeed")
+            .create_index(
+                Some("year"),
+                IndexConfig::IntInverted(IntInvertedIndexConfig {}),
+            )
+            .expect("int inverted on key should succeed")
+            .create_index(
+                Some("rating"),
+                IndexConfig::FloatInverted(FloatInvertedIndexConfig {}),
+            )
+            .expect("float inverted on key should succeed")
+            .create_index(
+                Some("is_active"),
+                IndexConfig::BoolInverted(BoolInvertedIndexConfig {}),
+            )
+            .expect("bool inverted on key should succeed");
+
+        // READ: Verify the schema was built correctly
+        // Check vector config
+        assert!(schema.keys.contains_key(EMBEDDING_KEY));
+        let embedding = schema.keys.get(EMBEDDING_KEY).unwrap();
+        assert!(embedding.float_list.is_some());
+        let vector_index = embedding
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+        assert!(vector_index.enabled);
+        assert_eq!(vector_index.config.space, Some(Space::Cosine));
+        assert_eq!(
+            vector_index.config.hnsw.as_ref().unwrap().ef_construction,
+            Some(200)
+        );
+
+        // Check per-key indexes
+        assert!(schema.keys.contains_key("category"));
+        assert!(schema.keys.contains_key("year"));
+        assert!(schema.keys.contains_key("rating"));
+        assert!(schema.keys.contains_key("is_active"));
+
+        // Verify category string inverted index
+        let category = schema.keys.get("category").unwrap();
+        assert!(category.string.is_some());
+        let string_idx = category
+            .string
+            .as_ref()
+            .unwrap()
+            .string_inverted_index
+            .as_ref()
+            .unwrap();
+        assert!(string_idx.enabled);
+
+        // Verify year int inverted index
+        let year = schema.keys.get("year").unwrap();
+        assert!(year.int.is_some());
+        let int_idx = year
+            .int
+            .as_ref()
+            .unwrap()
+            .int_inverted_index
+            .as_ref()
+            .unwrap();
+        assert!(int_idx.enabled);
+
+        // UPDATE/DELETE: Disable some indexes
+        let schema = schema
+            .delete_index(
+                Some("category"),
+                IndexConfig::StringInverted(StringInvertedIndexConfig {}),
+            )
+            .expect("delete string inverted should succeed")
+            .delete_index(
+                Some("year"),
+                IndexConfig::IntInverted(IntInvertedIndexConfig {}),
+            )
+            .expect("delete int inverted should succeed");
+
+        // VERIFY DELETE: Check that indexes were disabled
+        let category = schema.keys.get("category").unwrap();
+        let string_idx = category
+            .string
+            .as_ref()
+            .unwrap()
+            .string_inverted_index
+            .as_ref()
+            .unwrap();
+        assert!(!string_idx.enabled); // Should be disabled now
+
+        let year = schema.keys.get("year").unwrap();
+        let int_idx = year
+            .int
+            .as_ref()
+            .unwrap()
+            .int_inverted_index
+            .as_ref()
+            .unwrap();
+        assert!(!int_idx.enabled); // Should be disabled now
+
+        // Verify other indexes still enabled
+        let rating = schema.keys.get("rating").unwrap();
+        let float_idx = rating
+            .float
+            .as_ref()
+            .unwrap()
+            .float_inverted_index
+            .as_ref()
+            .unwrap();
+        assert!(float_idx.enabled); // Should still be enabled
+
+        let is_active = schema.keys.get("is_active").unwrap();
+        let bool_idx = is_active
+            .boolean
+            .as_ref()
+            .unwrap()
+            .bool_inverted_index
+            .as_ref()
+            .unwrap();
+        assert!(bool_idx.enabled); // Should still be enabled
+    }
+
+    #[test]
+    fn test_builder_pattern_error_cases() {
+        // Test that error cases are properly handled
+
+        // Error: Vector index on specific key
+        let result = Schema::new_default(KnnIndex::Hnsw).create_index(
+            Some("my_vectors"),
+            IndexConfig::Vector(VectorIndexConfig {
+                space: Some(Space::L2),
+                embedding_function: None,
+                source_key: None,
+                hnsw: None,
+                spann: None,
+            }),
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Vector index cannot be enabled on specific keys"));
+
+        // Error: FTS index on specific key
+        let result = Schema::new_default(KnnIndex::Hnsw)
+            .create_index(Some("my_text"), IndexConfig::Fts(FtsIndexConfig {}));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("FTS index cannot be enabled on specific keys"));
+
+        // Error: Special key usage
+        let result = Schema::new_default(KnnIndex::Hnsw).create_index(
+            Some(DOCUMENT_KEY),
+            IndexConfig::StringInverted(StringInvertedIndexConfig {}),
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Cannot create index on special key"));
+
+        // Error: Sparse vector without key
+        let result = Schema::new_default(KnnIndex::Hnsw).create_index(
+            None,
+            IndexConfig::SparseVector(SparseVectorIndexConfig {
+                embedding_function: None,
+                source_key: None,
+                bm25: None,
+            }),
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Sparse vector index must be created on a specific key"));
+
+        // Error: Multiple sparse vector indexes
+        let result = Schema::new_default(KnnIndex::Hnsw)
+            .create_index(
+                Some("sparse1"),
+                IndexConfig::SparseVector(SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                }),
+            )
+            .expect("first sparse should succeed")
+            .create_index(
+                Some("sparse2"),
+                IndexConfig::SparseVector(SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                }),
+            );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("At most one sparse vector index is allowed"));
+
+        // Error: Delete vector index (not supported)
+        let result = Schema::new_default(KnnIndex::Hnsw).delete_index(
+            None,
+            IndexConfig::Vector(VectorIndexConfig {
+                space: None,
+                embedding_function: None,
+                source_key: None,
+                hnsw: None,
+                spann: None,
+            }),
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Deleting vector index is not currently supported"));
+
+        // Error: Delete FTS index (not supported)
+        let result = Schema::new_default(KnnIndex::Hnsw)
+            .delete_index(None, IndexConfig::Fts(FtsIndexConfig {}));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Deleting FTS index is not currently supported"));
+
+        // Error: Delete sparse vector index (not supported)
+        let result = Schema::new_default(KnnIndex::Hnsw)
+            .create_index(
+                Some("sparse"),
+                IndexConfig::SparseVector(SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                }),
+            )
+            .expect("create should succeed")
+            .delete_index(
+                Some("sparse"),
+                IndexConfig::SparseVector(SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                }),
+            );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Deleting sparse vector index is not currently supported"));
+
+        // Error: Delete on special key
+        let result = Schema::new_default(KnnIndex::Hnsw).delete_index(
+            Some(EMBEDDING_KEY),
+            IndexConfig::StringInverted(StringInvertedIndexConfig {}),
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Cannot delete index on special key"));
+    }
+
+    #[test]
+    fn test_builder_pattern_chaining() {
+        // Test complex chaining scenario
+        let schema = Schema::new_default(KnnIndex::Hnsw)
+            .create_index(Some("tag1"), StringInvertedIndexConfig {}.into())
+            .unwrap()
+            .create_index(Some("tag2"), StringInvertedIndexConfig {}.into())
+            .unwrap()
+            .create_index(Some("tag3"), StringInvertedIndexConfig {}.into())
+            .unwrap()
+            .create_index(Some("count"), IntInvertedIndexConfig {}.into())
+            .unwrap()
+            .delete_index(Some("tag2"), StringInvertedIndexConfig {}.into())
+            .unwrap()
+            .create_index(Some("score"), FloatInvertedIndexConfig {}.into())
+            .unwrap();
+
+        // Verify tag1 is enabled
+        assert!(
+            schema
+                .keys
+                .get("tag1")
+                .unwrap()
+                .string
+                .as_ref()
+                .unwrap()
+                .string_inverted_index
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
+
+        // Verify tag2 is disabled
+        assert!(
+            !schema
+                .keys
+                .get("tag2")
+                .unwrap()
+                .string
+                .as_ref()
+                .unwrap()
+                .string_inverted_index
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
+
+        // Verify tag3 is enabled
+        assert!(
+            schema
+                .keys
+                .get("tag3")
+                .unwrap()
+                .string
+                .as_ref()
+                .unwrap()
+                .string_inverted_index
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
+
+        // Verify count is enabled
+        assert!(
+            schema
+                .keys
+                .get("count")
+                .unwrap()
+                .int
+                .as_ref()
+                .unwrap()
+                .int_inverted_index
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
+
+        // Verify score is enabled
+        assert!(
+            schema
+                .keys
+                .get("score")
+                .unwrap()
+                .float
+                .as_ref()
+                .unwrap()
+                .float_inverted_index
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
     }
 }
