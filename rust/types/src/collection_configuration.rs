@@ -9,9 +9,9 @@ use crate::{
     default_write_rng_factor,
 };
 use crate::{
-    HnswConfiguration, HnswParametersFromSegmentError, InternalHnswConfiguration,
-    InternalSpannConfiguration, Metadata, Schema, Segment, SpannConfiguration,
-    UpdateHnswConfiguration, UpdateSpannConfiguration, VectorIndexConfig, EMBEDDING_KEY,
+    HnswConfiguration, HnswParametersFromSegmentError, InternalHnswConfiguration, InternalSchema,
+    InternalSpannConfiguration, Metadata, Segment, SpannConfiguration, UpdateHnswConfiguration,
+    UpdateSpannConfiguration, VectorIndexConfig, EMBEDDING_KEY,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
@@ -386,10 +386,10 @@ impl TryFrom<CollectionConfiguration> for InternalCollectionConfiguration {
     }
 }
 
-impl TryFrom<&Schema> for InternalCollectionConfiguration {
+impl TryFrom<&InternalSchema> for InternalCollectionConfiguration {
     type Error = String;
 
-    fn try_from(schema: &Schema) -> Result<Self, Self::Error> {
+    fn try_from(schema: &InternalSchema) -> Result<Self, Self::Error> {
         let vector_config = schema
             .keys
             .get(EMBEDDING_KEY)

@@ -1457,53 +1457,7 @@ pub struct SpannIndexConfig {
     pub max_neighbors: Option<usize>,
 }
 
-<<<<<<< HEAD
-impl SpannIndexConfig {
-    pub fn into_internal_configuration(
-        self,
-        vector_space: Option<Space>,
-    ) -> InternalSpannConfiguration {
-        InternalSpannConfiguration {
-            search_nprobe: self.search_nprobe.unwrap_or(default_search_nprobe()),
-            search_rng_factor: self
-                .search_rng_factor
-                .unwrap_or(default_search_rng_factor()),
-            search_rng_epsilon: self
-                .search_rng_epsilon
-                .unwrap_or(default_search_rng_epsilon()),
-            nreplica_count: self.nreplica_count.unwrap_or(default_nreplica_count()),
-            write_rng_factor: self.write_rng_factor.unwrap_or(default_write_rng_factor()),
-            write_rng_epsilon: self
-                .write_rng_epsilon
-                .unwrap_or(default_write_rng_epsilon()),
-            split_threshold: self.split_threshold.unwrap_or(default_split_threshold()),
-            num_samples_kmeans: self
-                .num_samples_kmeans
-                .unwrap_or(default_num_samples_kmeans()),
-            initial_lambda: self.initial_lambda.unwrap_or(default_initial_lambda()),
-            reassign_neighbor_count: self
-                .reassign_neighbor_count
-                .unwrap_or(default_reassign_neighbor_count()),
-            merge_threshold: self.merge_threshold.unwrap_or(default_merge_threshold()),
-            num_centers_to_merge_to: self
-                .num_centers_to_merge_to
-                .unwrap_or(default_num_centers_to_merge_to()),
-            write_nprobe: self.write_nprobe.unwrap_or(default_write_nprobe()),
-            ef_construction: self
-                .ef_construction
-                .unwrap_or(default_construction_ef_spann()),
-            ef_search: self.ef_search.unwrap_or(default_search_ef_spann()),
-            max_neighbors: self.max_neighbors.unwrap_or(default_m_spann()),
-            space: vector_space.unwrap_or(default_space()),
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
-=======
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
->>>>>>> e165e3a50 ([ENH] Reconcile schema -> config for old clients (#5684))
 #[serde(deny_unknown_fields)]
 pub struct SparseVectorIndexConfig {
     /// Embedding function configuration
@@ -1812,7 +1766,7 @@ mod tests {
         };
 
         let schema =
-            Schema::convert_collection_config_to_schema(collection_config.clone()).unwrap();
+            InternalSchema::convert_collection_config_to_schema(collection_config.clone()).unwrap();
         let reconstructed = InternalCollectionConfiguration::try_from(&schema).unwrap();
 
         assert_eq!(reconstructed, collection_config);
@@ -1845,7 +1799,7 @@ mod tests {
         };
 
         let schema =
-            Schema::convert_collection_config_to_schema(collection_config.clone()).unwrap();
+            InternalSchema::convert_collection_config_to_schema(collection_config.clone()).unwrap();
         let reconstructed = InternalCollectionConfiguration::try_from(&schema).unwrap();
 
         assert_eq!(reconstructed, collection_config);
@@ -1853,7 +1807,7 @@ mod tests {
 
     #[test]
     fn test_convert_schema_to_collection_config_rejects_mixed_index() {
-        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
         if let Some(embedding) = schema.keys.get_mut(EMBEDDING_KEY) {
             if let Some(float_list) = &mut embedding.float_list {
                 if let Some(vector_index) = &mut float_list.vector_index {

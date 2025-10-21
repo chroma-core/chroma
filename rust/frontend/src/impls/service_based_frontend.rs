@@ -34,27 +34,15 @@ use chroma_types::{
     GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
     GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
     GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include,
-<<<<<<< HEAD
-    InternalSchema, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
-    ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError,
-    QueryRequest, QueryResponse, RemoveTaskError, RemoveTaskRequest, RemoveTaskResponse,
-    ResetError, ResetResponse, SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope,
-    SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
-    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
-    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
-    VectorIndexConfiguration, Where,
-=======
-    InternalCollectionConfiguration, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
-    QueryError, QueryRequest, QueryResponse, RemoveTaskError, RemoveTaskRequest,
-    RemoveTaskResponse, ResetError, ResetResponse, Schema, SchemaError, SearchRequest,
+    InternalCollectionConfiguration, InternalSchema, KnnIndex, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
+    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, RemoveTaskError,
+    RemoveTaskRequest, RemoveTaskResponse, ResetError, ResetResponse, SchemaError, SearchRequest,
     SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
     UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
     UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
     UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
     UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
->>>>>>> e165e3a50 ([ENH] Reconcile schema -> config for old clients (#5684))
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -392,7 +380,7 @@ impl ServiceBasedFrontend {
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
             for collection in collections.iter_mut() {
-                let reconciled_schema = Schema::reconcile_schema_and_config(
+                let reconciled_schema = InternalSchema::reconcile_schema_and_config(
                     collection.schema.clone(),
                     Some(collection.config.clone()),
                 )

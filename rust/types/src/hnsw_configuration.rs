@@ -104,9 +104,6 @@ impl Default for InternalHnswConfiguration {
     }
 }
 
-<<<<<<< HEAD
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, ToSchema)]
-=======
 impl From<(Option<&Space>, Option<&HnswIndexConfig>)> for InternalHnswConfiguration {
     fn from((space, config): (Option<&Space>, Option<&HnswIndexConfig>)) -> Self {
         let mut internal = InternalHnswConfiguration::default();
@@ -143,9 +140,7 @@ impl From<(Option<&Space>, Option<&HnswIndexConfig>)> for InternalHnswConfigurat
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
->>>>>>> e165e3a50 ([ENH] Reconcile schema -> config for old clients (#5684))
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, ToSchema)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct HnswConfiguration {

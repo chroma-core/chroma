@@ -147,9 +147,6 @@ impl Default for InternalSpannConfiguration {
     }
 }
 
-<<<<<<< HEAD
-#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
-=======
 impl From<(Option<&Space>, &SpannIndexConfig)> for InternalSpannConfiguration {
     fn from((space, config): (Option<&Space>, &SpannIndexConfig)) -> Self {
         InternalSpannConfiguration {
@@ -190,9 +187,7 @@ impl From<(Option<&Space>, &SpannIndexConfig)> for InternalSpannConfiguration {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
->>>>>>> e165e3a50 ([ENH] Reconcile schema -> config for old clients (#5684))
+#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SpannConfiguration {
     pub search_nprobe: Option<u32>,
