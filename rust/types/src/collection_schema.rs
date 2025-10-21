@@ -1287,7 +1287,7 @@ impl Schema {
             Some(config) => match &config.embedding_function {
                 Some(ef) => {
                     if ef.is_default() {
-                        (Some(ef.clone()), config.vector_index.get_space())
+                        (Some(ef.clone()), default_space())
                     } else {
                         (
                             Some(EmbeddingFunctionConfiguration::Legacy),
