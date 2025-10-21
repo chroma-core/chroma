@@ -92,7 +92,7 @@ impl RegisterInput {
 #[derive(Debug)]
 pub struct RegisterOutput {
     _sysdb_registration_result: FlushCompactionResponse,
-    pub _updated_task: Option<chroma_types::Task>,
+    pub updated_task: Option<chroma_types::Task>,
 }
 
 #[derive(Error, Debug)]
@@ -156,7 +156,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
                 };
                 let task_update = chroma_types::TaskUpdateInfo {
                     task_id: task.id,
-                    task_run_nonce: task_context.execution_nonce,
+                    task_run_nonce: task_context.execution_nonce.0,
                     completion_offset: last_offset_processed,
                 };
                 // Task-based compaction
@@ -187,7 +187,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
                         collection_version: task_response.collection_version,
                         last_compaction_time: task_response.last_compaction_time,
                     },
-                    _updated_task: Some(updated_task),
+                    updated_task: Some(updated_task),
                 })
             }
             None => {
@@ -218,7 +218,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
 
                 Ok(RegisterOutput {
                     _sysdb_registration_result: response,
-                    _updated_task: None,
+                    updated_task: None,
                 })
             }
         }
