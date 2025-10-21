@@ -284,6 +284,7 @@ export type RemoveTaskResponse = {
 
 /**
  * Schema representation for collection index configurations
+ *
  * This represents the server-side schema structure used for index management
  */
 export type Schema = {
