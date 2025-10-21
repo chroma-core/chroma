@@ -55,3 +55,10 @@ This is sufficient for developing from localhost.
 
 For more complex configurations see `ChromaHttpClientOptions` in this crate by visiting [the
 documentation](https://docs.rs/chroma/latest/chroma/)
+
+## Client Features
+
+The Chroma client is designed for production use and includes the following features:
+- Optional automatic handling of rate limiting and backoff/retry for Chroma Cloud and compatible
+  implementations.
+- Support via the `metrics` feature for the OpenTelemetry standard.
