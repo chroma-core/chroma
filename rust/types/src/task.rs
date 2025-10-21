@@ -6,6 +6,48 @@ use uuid::Uuid;
 
 use crate::CollectionUuid;
 
+/// JobUuid is a wrapper around Uuid to provide a unified type for job identifiers.
+/// Jobs can be either collection compaction jobs or task execution jobs.
+#[derive(
+    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
+)]
+pub struct JobUuid(pub Uuid);
+
+impl JobUuid {
+    pub fn new() -> Self {
+        JobUuid(Uuid::new_v4())
+    }
+}
+
+impl From<CollectionUuid> for JobUuid {
+    fn from(collection_uuid: CollectionUuid) -> Self {
+        JobUuid(collection_uuid.0)
+    }
+}
+
+impl From<TaskUuid> for JobUuid {
+    fn from(task_uuid: TaskUuid) -> Self {
+        JobUuid(task_uuid.0)
+    }
+}
+
+impl std::str::FromStr for JobUuid {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match Uuid::parse_str(s) {
+            Ok(uuid) => Ok(JobUuid(uuid)),
+            Err(err) => Err(err),
+        }
+    }
+}
+
+impl std::fmt::Display for JobUuid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// TaskUuid is a wrapper around Uuid to provide a type for task identifiers.
 #[derive(
     Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
@@ -36,8 +78,69 @@ impl std::fmt::Display for TaskUuid {
     }
 }
 
+#[derive(
+    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
+)]
+pub struct TaskRunUuid(pub Uuid);
+
+impl TaskRunUuid {
+    pub fn new() -> Self {
+        TaskRunUuid(Uuid::now_v7())
+    }
+}
+
+impl std::str::FromStr for TaskRunUuid {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match Uuid::parse_str(s) {
+            Ok(uuid) => Ok(TaskRunUuid(uuid)),
+            Err(err) => Err(err),
+        }
+    }
+}
+
+impl std::fmt::Display for TaskRunUuid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// NonceUuid is a wrapper around Uuid to provide a type for task execution nonces.
+#[derive(
+    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
+)]
+pub struct NonceUuid(pub Uuid);
+
+impl NonceUuid {
+    pub fn new() -> Self {
+        NonceUuid(Uuid::now_v7())
+    }
+}
+
+impl std::str::FromStr for NonceUuid {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match Uuid::parse_str(s) {
+            Ok(uuid) => Ok(NonceUuid(uuid)),
+            Err(err) => Err(err),
+        }
+    }
+}
+
+impl std::fmt::Display for NonceUuid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Task represents an asynchronous task that is triggered by collection writes
 /// to map records from a source collection to a target collection.
+fn default_systemtime() -> SystemTime {
+    SystemTime::UNIX_EPOCH
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Task {
     /// Unique identifier for the task
@@ -51,7 +154,7 @@ pub struct Task {
     /// Name of target collection where task output is stored
     pub output_collection_name: String,
     /// ID of the output collection (lazily filled in after creation)
-    pub output_collection_id: Option<String>,
+    pub output_collection_id: Option<CollectionUuid>,
     /// Optional JSON parameters for the operator
     pub params: Option<String>,
     /// Tenant name this task belongs to (despite field name, this is a name not a UUID)
@@ -61,9 +164,9 @@ pub struct Task {
     /// Timestamp of the last successful task run
     #[serde(skip, default)]
     pub last_run: Option<SystemTime>,
-    /// Timestamp when the task should next run (None if not yet scheduled)
-    #[serde(skip, default)]
-    pub next_run: Option<SystemTime>,
+    /// Timestamp when the task should next run
+    #[serde(skip, default = "default_systemtime")]
+    pub next_run: SystemTime,
     /// Completion offset: the WAL position up to which the task has processed records
     pub completion_offset: u64,
     /// Minimum number of new records required before the task runs again
@@ -72,9 +175,18 @@ pub struct Task {
     #[serde(skip, default)]
     pub is_deleted: bool,
     /// Timestamp when the task was created
+    #[serde(default = "default_systemtime")]
     pub created_at: SystemTime,
     /// Timestamp when the task was last updated
+    #[serde(default = "default_systemtime")]
     pub updated_at: SystemTime,
+    /// Next nonce (UUIDv7) for task execution tracking
+    pub next_nonce: NonceUuid,
+    /// Lowest live nonce (UUIDv7) - marks the earliest epoch that still needs verification
+    /// When lowest_live_nonce is Some and < next_nonce, it indicates finish_task failed and we should
+    /// skip execution and only run the scout_logs recheck phase
+    /// None indicates the task has never been scheduled (brand new task)
+    pub lowest_live_nonce: Option<NonceUuid>,
 }
 
 /// ScheduleEntry represents a scheduled task run for a collection.
@@ -82,7 +194,7 @@ pub struct Task {
 pub struct ScheduleEntry {
     pub collection_id: CollectionUuid,
     pub task_id: Uuid,
-    pub task_run_nonce: Uuid,
+    pub task_run_nonce: NonceUuid,
     pub when_to_run: Option<DateTime<Utc>>,
 }
 
@@ -117,7 +229,7 @@ impl TryFrom<crate::chroma_proto::ScheduleEntry> for ScheduleEntry {
                 "task_run_nonce".to_string(),
             ))
             .and_then(|nonce| {
-                Uuid::parse_str(&nonce).map_err(|_| {
+                Uuid::parse_str(&nonce).map(NonceUuid).map_err(|_| {
                     ScheduleEntryConversionError::InvalidUuid("task_run_nonce".to_string())
                 })
             })?;

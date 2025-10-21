@@ -45,7 +45,7 @@ impl HeapScheduler for SysDbScheduler {
                 results.push(true);
                 continue;
             };
-            results.push(schedule.task_run_nonce != *nonce);
+            results.push(schedule.task_run_nonce.0 != *nonce);
         }
         Ok(results)
     }
@@ -67,7 +67,7 @@ impl HeapScheduler for SysDbScheduler {
                         partitioning: schedule.collection_id.0.into(),
                         scheduling: schedule.task_id.into(),
                     },
-                    nonce: schedule.task_run_nonce,
+                    nonce: schedule.task_run_nonce.0,
                     next_scheduled: when_to_run,
                 });
             }

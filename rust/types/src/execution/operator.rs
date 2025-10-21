@@ -136,7 +136,7 @@ impl Serialize for Filter {
     {
         // For the search API, serialize directly as the where clause (or empty object if None)
         // If query_ids are present, they should be combined with the where_clause as Key::ID.is_in([...])
-        
+
         match (&self.query_ids, &self.where_clause) {
             (None, None) => {
                 // No filter at all - serialize empty object

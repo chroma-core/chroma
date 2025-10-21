@@ -566,6 +566,40 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	return result.RowsAffected, nil
 }
 
+func (s *collectionDb) UpdateVersionInfo(
+	collectionID string,
+	currentCollectionVersion int32,
+	currentVersionFileName string,
+	newCollectionVersion int32,
+	newVersionFileName string,
+	totalRecordsPostCompaction uint64,
+	sizeBytesPostCompaction uint64,
+	lastCompactionTimeSecs uint64,
+	numVersions uint64,
+) (int64, error) {
+	// Similar to UpdateLogPositionAndVersionInfo but does NOT update log_position
+	// Used for task-based flushes where the collection's log position should remain unchanged
+	result := s.db.Model(&dbmodel.Collection{}).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND version = ? AND (version_file_name IS NULL OR version_file_name = ?)",
+			collectionID,
+			currentCollectionVersion,
+			currentVersionFileName).
+		Updates(map[string]interface{}{
+			// NOTE: log_position is NOT updated here
+			"version":                       newCollectionVersion,
+			"version_file_name":             newVersionFileName,
+			"total_records_post_compaction": totalRecordsPostCompaction,
+			"size_bytes_post_compaction":    sizeBytesPostCompaction,
+			"last_compaction_time_secs":     lastCompactionTimeSecs,
+			"num_versions":                  numVersions,
+		})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
 func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, tenant string, schemaStr *string) (int32, error) {
 	log.Info("update log position, version, and total records post compaction", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion), zap.Uint64("totalRecords", totalRecordsPostCompaction))
 	var collection dbmodel.Collection

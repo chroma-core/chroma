@@ -7,6 +7,18 @@ import "chromadb/proto/chroma.proto";
 message HeapSummaryRequest {}
 message HeapSummaryResponse {}
 
+message ScheduleTaskRequest {
+    string collection_id = 1;
+    string task_id = 2;
+    uint64 when_to_run = 3;
+    string task_run_nonce = 4;
+}
+
+message ScheduleTaskResponse {
+    bool success = 1;
+}
+
 service HeapTenderService {
     rpc Summary(HeapSummaryRequest) returns (HeapSummaryResponse) {}
+    rpc ScheduleTask(ScheduleTaskRequest) returns (ScheduleTaskResponse) {}
 }

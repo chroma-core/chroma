@@ -1,14 +1,17 @@
 pub mod apply_log_to_segment_writer;
 pub mod commit_segment_writer;
-pub(super) mod count_records;
+pub mod count_records;
+pub mod execute_task;
+pub mod fetch_log;
+pub(super) mod finish_task;
 pub mod flush_segment_writer;
 pub mod materialize_logs;
+pub(super) mod prepare_task;
 pub(super) mod register;
 pub mod spann_bf_pl;
 pub(super) mod spann_centers_search;
 pub(super) mod spann_fetch_pl;
 
-pub mod fetch_log;
 pub mod filter;
 pub mod get_collection_and_segments;
 pub mod idf;

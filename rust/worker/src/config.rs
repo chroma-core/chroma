@@ -228,6 +228,8 @@ pub struct CompactionServiceConfig {
     #[serde(default)]
     pub compactor: crate::compactor::config::CompactorConfig,
     #[serde(default)]
+    pub taskrunner: Option<crate::compactor::config::TaskRunnerConfig>,
+    #[serde(default)]
     pub blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
     #[serde(default)]
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,

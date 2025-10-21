@@ -42,6 +42,7 @@ struct Inner {
     tenant_resource_names: HashMap<String, String>,
     collection_to_version_file: HashMap<CollectionUuid, CollectionVersionFile>,
     soft_deleted_collections: HashSet<CollectionUuid>,
+    tasks: HashMap<chroma_types::TaskUuid, chroma_types::Task>,
     #[derivative(Debug = "ignore")]
     storage: Option<chroma_storage::Storage>,
     mock_time: u64,
@@ -58,6 +59,7 @@ impl TestSysDb {
                 tenant_resource_names: HashMap::new(),
                 collection_to_version_file: HashMap::new(),
                 soft_deleted_collections: HashSet::new(),
+                tasks: HashMap::new(),
                 storage: None,
                 mock_time: 0,
             })),
@@ -668,5 +670,14 @@ impl TestSysDb {
         _collection_ids: &[CollectionUuid],
     ) -> Result<Vec<chroma_types::ScheduleEntry>, crate::sysdb::PeekScheduleError> {
         Ok(vec![])
+    }
+
+    pub(crate) async fn finish_task(
+        &mut self,
+        _task_id: chroma_types::TaskUuid,
+    ) -> Result<(), chroma_types::FinishTaskError> {
+        // For testing, always succeed
+        // In a real implementation, this would update lowest_live_nonce = next_nonce
+        Ok(())
     }
 }

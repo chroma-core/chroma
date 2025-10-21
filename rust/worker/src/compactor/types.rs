@@ -1,4 +1,4 @@
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, JobUuid};
 use tokio::sync::oneshot;
 
 #[derive(Clone, Eq, PartialEq, Debug)]
@@ -21,5 +21,5 @@ pub struct RebuildMessage {
 
 #[derive(Debug)]
 pub struct ListDeadJobsMessage {
-    pub response_tx: oneshot::Sender<Vec<CollectionUuid>>,
+    pub response_tx: oneshot::Sender<Vec<JobUuid>>,
 }

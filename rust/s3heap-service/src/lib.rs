@@ -2,10 +2,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
 use figment::providers::{Env, Format, Yaml};
 use futures::stream::StreamExt;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
+use tower::ServiceBuilder;
 
 use chroma_config::helpers::{deserialize_duration_from_seconds, serialize_duration_to_seconds};
 use chroma_config::Configurable;
@@ -15,10 +19,13 @@ use chroma_storage::Storage;
 use chroma_sysdb::{SysDb, SysDbConfig};
 use chroma_tracing::OtelFilter;
 use chroma_tracing::OtelFilterLevel;
+use chroma_types::chroma_proto::heap_tender_service_client::HeapTenderServiceClient;
 use chroma_types::chroma_proto::heap_tender_service_server::{
     HeapTenderService, HeapTenderServiceServer,
 };
-use chroma_types::chroma_proto::{HeapSummaryRequest, HeapSummaryResponse};
+use chroma_types::chroma_proto::{
+    HeapSummaryRequest, HeapSummaryResponse, ScheduleTaskRequest, ScheduleTaskResponse,
+};
 use chroma_types::{dirty_log_path_from_hostname, CollectionUuid, DirtyMarker, ScheduleEntry};
 use s3heap::{heap_path_from_hostname, Configuration, HeapWriter, Schedule, Triggerable};
 use wal3::{
@@ -138,7 +145,7 @@ impl HeapTender {
                         let schedule = Schedule {
                             triggerable,
                             next_scheduled,
-                            nonce: s.task_run_nonce,
+                            nonce: s.task_run_nonce.0,
                         };
                         Ok(Some(schedule))
                     } else {
@@ -373,6 +380,178 @@ impl HeapTenderService for HeapTenderServer {
         _request: Request<HeapSummaryRequest>,
     ) -> Result<Response<HeapSummaryResponse>, Status> {
         todo!();
+    }
+
+    async fn schedule_task(
+        &self,
+        request: Request<ScheduleTaskRequest>,
+    ) -> Result<Response<ScheduleTaskResponse>, Status> {
+        let req = request.into_inner();
+
+        // Parse collection_id
+        let collection_id = match Uuid::parse_str(&req.collection_id) {
+            Ok(uuid) => CollectionUuid(uuid),
+            Err(e) => {
+                return Err(Status::invalid_argument(format!(
+                    "Invalid collection_id: {}",
+                    e
+                )));
+            }
+        };
+
+        // Parse task_id
+        let task_id = match Uuid::parse_str(&req.task_id) {
+            Ok(uuid) => uuid,
+            Err(e) => {
+                return Err(Status::invalid_argument(format!("Invalid task_id: {}", e)));
+            }
+        };
+
+        // Parse task_run_nonce
+        let task_run_nonce = match Uuid::parse_str(&req.task_run_nonce) {
+            Ok(uuid) => uuid,
+            Err(e) => {
+                return Err(Status::invalid_argument(format!(
+                    "Invalid task_run_nonce: {}",
+                    e
+                )));
+            }
+        };
+
+        // Convert timestamp from microseconds to DateTime<Utc>
+        let when_to_run = DateTime::<Utc>::from_timestamp_micros(req.when_to_run as i64)
+            .ok_or_else(|| Status::invalid_argument("Invalid when_to_run timestamp"))?;
+
+        // Create the triggerable and schedule
+        let triggerable = Triggerable {
+            partitioning: s3heap::UnitOfPartitioningUuid::new(collection_id.0),
+            scheduling: s3heap::UnitOfSchedulingUuid::new(task_id),
+        };
+
+        let schedule = Schedule {
+            triggerable,
+            next_scheduled: when_to_run,
+            nonce: task_run_nonce,
+        };
+
+        // Push to the heap writer
+        match self.tender.writer.push(&[schedule]).await {
+            Ok(_) => {
+                tracing::info!(
+                    "Manually scheduled task {} for collection {} at timestamp {}",
+                    req.task_id,
+                    req.collection_id,
+                    req.when_to_run
+                );
+                Ok(Response::new(ScheduleTaskResponse { success: true }))
+            }
+            Err(e) => {
+                tracing::error!("Failed to schedule task: {:?}", e);
+                Err(Status::internal(format!(
+                    "Failed to schedule task: {:?}",
+                    e
+                )))
+            }
+        }
+    }
+}
+
+///////////////////////////////////////// HeapTenderClient /////////////////////////////////////////
+
+/// Configuration for connecting to a HeapTender gRPC service.
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct HeapTenderClientConfig {
+    /// The hostname or IP address of the HeapTender service.
+    #[serde(default = "HeapTenderClientConfig::default_host")]
+    pub host: String,
+    /// The port of the HeapTender service.
+    #[serde(default = "HeapTenderClientConfig::default_port")]
+    pub port: u16,
+}
+
+impl HeapTenderClientConfig {
+    fn default_host() -> String {
+        "heap-tender-service".to_string()
+    }
+
+    fn default_port() -> u16 {
+        50052
+    }
+}
+
+impl Default for HeapTenderClientConfig {
+    fn default() -> Self {
+        Self {
+            host: Self::default_host(),
+            port: Self::default_port(),
+        }
+    }
+}
+
+/// Client for connecting to and calling the HeapTender gRPC service.
+#[derive(Clone, Debug)]
+pub struct HeapTenderClient {
+    client:
+        HeapTenderServiceClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>,
+}
+
+impl HeapTenderClient {
+    /// Schedule a task with the heap tender service.
+    ///
+    /// # Arguments
+    /// * `collection_id` - The UUID of the collection as a string
+    /// * `task_id` - The UUID of the task as a string
+    /// * `when_to_run` - Timestamp in microseconds when the task should run
+    /// * `task_run_nonce` - The UUID nonce for this task run as a string
+    pub async fn schedule_task(
+        &mut self,
+        collection_id: &str,
+        task_id: &str,
+        when_to_run: u64,
+        task_run_nonce: &str,
+    ) -> Result<(), Error> {
+        let request = tonic::Request::new(ScheduleTaskRequest {
+            collection_id: collection_id.to_string(),
+            task_id: task_id.to_string(),
+            when_to_run,
+            task_run_nonce: task_run_nonce.to_string(),
+        });
+
+        self.client
+            .schedule_task(request)
+            .await
+            .map_err(|e| Error::Internal(format!("Failed to schedule task: {}", e)))?;
+
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Configurable<HeapTenderClientConfig> for HeapTenderClient {
+    async fn try_from_config(
+        config: &HeapTenderClientConfig,
+        _registry: &chroma_config::registry::Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let uri = format!("http://{}:{}", config.host, config.port);
+        let channel = tonic::transport::Channel::from_shared(uri)
+            .map_err(|e| -> Box<dyn ChromaError> {
+                Box::new(s3heap::Error::Internal(format!("Invalid URI: {}", e)))
+            })?
+            .connect()
+            .await
+            .map_err(|e| -> Box<dyn ChromaError> {
+                Box::new(s3heap::Error::Internal(format!(
+                    "Failed to connect to heap tender service: {}",
+                    e
+                )))
+            })?;
+
+        let channel = ServiceBuilder::new()
+            .layer(chroma_tracing::GrpcClientTraceLayer)
+            .service(channel);
+
+        let client = HeapTenderServiceClient::new(channel);
+        Ok(HeapTenderClient { client })
     }
 }
 
