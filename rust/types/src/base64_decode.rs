@@ -1,8 +1,7 @@
-use crate::types::errors::ValidationError;
 use base64::{engine::general_purpose, Engine as _};
+use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use utoipa::ToSchema;
 
 #[derive(Error, Debug)]
 pub enum Base64DecodeError {
@@ -14,23 +13,31 @@ pub enum Base64DecodeError {
     EmbeddingConversionFailed { embedding_index: usize },
 }
 
-#[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
+impl ChromaError for Base64DecodeError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(untagged)]
 pub enum EmbeddingsPayload {
     JsonArrays(Vec<Vec<f32>>),
     Base64Binary(Vec<String>),
 }
 
-#[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(untagged)]
 pub enum UpdateEmbeddingsPayload {
     JsonArrays(Vec<Option<Vec<f32>>>),
     Base64Binary(Vec<Option<String>>),
 }
 
-pub(crate) fn decode_embeddings(
+pub fn decode_embeddings(
     embeddings: EmbeddingsPayload,
-) -> Result<Vec<Vec<f32>>, ValidationError> {
+) -> Result<Vec<Vec<f32>>, Base64DecodeError> {
     match embeddings {
         EmbeddingsPayload::Base64Binary(base64_strings) => {
             Ok(decode_base64_embeddings(&base64_strings)?)
@@ -39,9 +46,9 @@ pub(crate) fn decode_embeddings(
     }
 }
 
-pub(crate) fn maybe_decode_update_embeddings(
+pub fn maybe_decode_update_embeddings(
     embeddings: Option<UpdateEmbeddingsPayload>,
-) -> Result<Option<Vec<Option<Vec<f32>>>>, ValidationError> {
+) -> Result<Option<Vec<Option<Vec<f32>>>>, Base64DecodeError> {
     match embeddings {
         Some(UpdateEmbeddingsPayload::Base64Binary(base64_data)) => {
             Ok(Some(decode_base64_update_embeddings(&base64_data)?))
@@ -108,6 +115,7 @@ pub fn decode_base64_embedding(base64_str: &String) -> Result<Vec<f32>, Base64De
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "testing")]
     use proptest::prelude::*;
 
     #[test]
@@ -133,12 +141,7 @@ mod tests {
         let invalid_embeddings = EmbeddingsPayload::Base64Binary(vec!["invalid!@#$".to_string()]);
         let result = decode_embeddings(invalid_embeddings);
 
-        assert!(matches!(
-            result,
-            Err(ValidationError::Base64Decode(
-                Base64DecodeError::InvalidBase64(_)
-            ))
-        ));
+        assert!(matches!(result, Err(Base64DecodeError::InvalidBase64(_))));
     }
 
     #[test]
@@ -163,12 +166,7 @@ mod tests {
             EmbeddingsPayload::Base64Binary(vec![valid_base64, "invalid!@#$".to_string()]);
 
         let result = decode_embeddings(embeddings);
-        assert!(matches!(
-            result,
-            Err(ValidationError::Base64Decode(
-                Base64DecodeError::InvalidBase64(_)
-            ))
-        ));
+        assert!(matches!(result, Err(Base64DecodeError::InvalidBase64(_))));
     }
 
     #[test]
@@ -238,6 +236,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "testing")]
     fn encode_floats_to_base64(floats: &[f32]) -> String {
         let mut bytes = Vec::with_capacity(floats.len() * 4);
         for &f in floats {
@@ -246,10 +245,12 @@ mod tests {
         general_purpose::STANDARD.encode(&bytes)
     }
 
+    #[cfg(feature = "testing")]
     fn embeddings_strategy() -> impl Strategy<Value = Vec<Vec<f32>>> {
         any::<Vec<Vec<f32>>>()
     }
 
+    #[cfg(feature = "testing")]
     proptest! {
         #[test]
         fn test_decode_base64_embeddings_prop(embeddings in embeddings_strategy()) {

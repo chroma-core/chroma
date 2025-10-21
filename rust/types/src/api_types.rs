@@ -18,12 +18,15 @@ use crate::CollectionConfigurationToInternalConfigurationError;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
 use crate::DistributedSpannParametersFromSegmentError;
+use crate::EmbeddingsPayload;
 use crate::HnswParametersFromSegmentError;
 use crate::InternalSchema;
 use crate::Metadata;
+use crate::RawWhereFields;
 use crate::SchemaError;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
+use crate::UpdateEmbeddingsPayload;
 use crate::UpdateMetadata;
 use crate::Where;
 use chroma_error::ChromaValidationError;
@@ -1113,6 +1116,34 @@ pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
 ////////////////////////// AddCollectionRecords //////////////////////////
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AddCollectionRecordsPayload {
+    pub ids: Vec<String>,
+    pub embeddings: EmbeddingsPayload,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<Metadata>>>,
+}
+
+impl AddCollectionRecordsPayload {
+    pub fn new(
+        ids: Vec<String>,
+        embeddings: Vec<Vec<f32>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        metadatas: Option<Vec<Option<Metadata>>>,
+    ) -> Self {
+        Self {
+            ids,
+            embeddings: EmbeddingsPayload::JsonArrays(embeddings),
+            documents,
+            uris,
+            metadatas,
+        }
+    }
+}
+
 #[non_exhaustive]
 #[derive(Debug, Clone, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -1154,6 +1185,16 @@ impl AddCollectionRecordsRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> AddCollectionRecordsPayload {
+        AddCollectionRecordsPayload {
+            ids: self.ids,
+            embeddings: EmbeddingsPayload::JsonArrays(self.embeddings),
+            documents: self.documents,
+            uris: self.uris,
+            metadatas: self.metadatas,
+        }
+    }
 }
 
 fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
@@ -1189,6 +1230,16 @@ impl ChromaError for AddCollectionRecordsError {
 }
 
 ////////////////////////// UpdateCollectionRecords //////////////////////////
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct UpdateCollectionRecordsPayload {
+    pub ids: Vec<String>,
+    pub embeddings: Option<UpdateEmbeddingsPayload>,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
+}
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Validate, Serialize)]
@@ -1230,6 +1281,16 @@ impl UpdateCollectionRecordsRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> UpdateCollectionRecordsPayload {
+        UpdateCollectionRecordsPayload {
+            ids: self.ids,
+            embeddings: self.embeddings.map(UpdateEmbeddingsPayload::JsonArrays),
+            documents: self.documents,
+            uris: self.uris,
+            metadatas: self.metadatas,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1254,6 +1315,16 @@ impl ChromaError for UpdateCollectionRecordsError {
 }
 
 ////////////////////////// UpsertCollectionRecords //////////////////////////
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct UpsertCollectionRecordsPayload {
+    pub ids: Vec<String>,
+    pub embeddings: EmbeddingsPayload,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
+}
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Validate, Serialize)]
@@ -1296,6 +1367,16 @@ impl UpsertCollectionRecordsRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> UpsertCollectionRecordsPayload {
+        UpsertCollectionRecordsPayload {
+            ids: self.ids.clone(),
+            embeddings: EmbeddingsPayload::JsonArrays(self.embeddings.clone()),
+            documents: self.documents.clone(),
+            uris: self.uris.clone(),
+            metadatas: self.metadatas.clone(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1320,6 +1401,14 @@ impl ChromaError for UpsertCollectionRecordsError {
 }
 
 ////////////////////////// DeleteCollectionRecords //////////////////////////
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct DeleteCollectionRecordsPayload {
+    pub ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub where_fields: RawWhereFields,
+}
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Validate, Serialize)]
@@ -1357,6 +1446,21 @@ impl DeleteCollectionRecordsRequest {
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
+    }
+
+    pub fn into_payload(self) -> Result<DeleteCollectionRecordsPayload, serde_json::Error> {
+        let where_fields = if let Some(r#where) = self.r#where {
+            RawWhereFields {
+                r#where: serde_json::to_value(&r#where)?,
+                where_document: serde_json::json! {{}},
+            }
+        } else {
+            RawWhereFields::default()
+        };
+        Ok(DeleteCollectionRecordsPayload {
+            ids: self.ids.clone(),
+            where_fields,
+        })
     }
 }
 
@@ -1505,6 +1609,18 @@ pub type CountResponse = u32;
 
 ////////////////////////// Get //////////////////////////
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetRequestPayload {
+    pub ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub where_fields: RawWhereFields,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    #[serde(default = "IncludeList::default_get")]
+    pub include: IncludeList,
+}
+
 #[non_exhaustive]
 #[derive(Debug, Clone, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -1543,6 +1659,24 @@ impl GetRequest {
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
+    }
+
+    pub fn into_payload(self) -> Result<GetRequestPayload, serde_json::Error> {
+        let where_fields = if let Some(r#where) = self.r#where {
+            RawWhereFields {
+                r#where: serde_json::to_value(&r#where)?,
+                where_document: serde_json::json! {{}},
+            }
+        } else {
+            RawWhereFields::default()
+        };
+        Ok(GetRequestPayload {
+            ids: self.ids,
+            where_fields,
+            limit: self.limit,
+            offset: Some(self.offset),
+            include: self.include,
+        })
     }
 }
 
@@ -1676,6 +1810,18 @@ impl From<(GetResult, IncludeList)> for GetResponse {
 
 ////////////////////////// Query //////////////////////////
 
+#[derive(Deserialize, Debug, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct QueryRequestPayload {
+    pub ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub where_fields: RawWhereFields,
+    pub query_embeddings: Vec<Vec<f32>>,
+    pub n_results: Option<u32>,
+    #[serde(default = "IncludeList::default_query")]
+    pub include: IncludeList,
+}
+
 #[non_exhaustive]
 #[derive(Debug, Clone, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -1714,6 +1860,24 @@ impl QueryRequest {
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
+    }
+
+    pub fn into_payload(self) -> Result<QueryRequestPayload, serde_json::Error> {
+        let where_fields = if let Some(r#where) = self.r#where {
+            RawWhereFields {
+                r#where: serde_json::to_value(&r#where)?,
+                where_document: serde_json::json! {{}},
+            }
+        } else {
+            RawWhereFields::default()
+        };
+        Ok(QueryRequestPayload {
+            ids: self.ids,
+            where_fields,
+            query_embeddings: self.embeddings,
+            n_results: Some(self.n_results),
+            include: self.include,
+        })
     }
 }
 
@@ -1886,6 +2050,12 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SearchRequestPayload {
+    pub searches: Vec<SearchPayload>,
+}
+
 #[non_exhaustive]
 #[derive(Clone, Debug, Serialize, Validate)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -1911,6 +2081,12 @@ impl SearchRequest {
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
+    }
+
+    pub fn into_payload(self) -> SearchRequestPayload {
+        SearchRequestPayload {
+            searches: self.searches,
+        }
     }
 }
 

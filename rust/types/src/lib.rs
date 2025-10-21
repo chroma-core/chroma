@@ -1,6 +1,7 @@
 #[macro_use]
 mod types;
 mod api_types;
+mod base64_decode;
 mod collection;
 mod collection_configuration;
 mod collection_schema;
@@ -35,6 +36,7 @@ pub use hnsw_configuration::Space;
 
 // Re-export the types module, so that we can use it as a single import in other modules.
 pub use api_types::*;
+pub use base64_decode::*;
 pub use collection::*;
 pub use collection_configuration::*;
 pub use collection_schema::*;
