@@ -2,8 +2,6 @@ use base64::{engine::general_purpose, Engine as _};
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-#[cfg(feature = "utoipa")]
-use utoipa::ToSchema;
 
 #[derive(Error, Debug)]
 pub enum Base64DecodeError {
