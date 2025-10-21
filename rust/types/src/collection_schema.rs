@@ -1489,7 +1489,7 @@ pub struct SpannIndexConfig {
     #[validate(range(max = 1000))]
     pub num_samples_kmeans: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[validate(range(max = 100.0))]
+    #[validate(range(min = 100.0, max = 100.0))]
     pub initial_lambda: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(max = 64))]
