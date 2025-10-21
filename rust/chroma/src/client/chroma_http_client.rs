@@ -43,7 +43,7 @@ pub struct ChromaHttpClient {
     client: reqwest::Client,
     retry_policy: ExponentialBuilder,
     tenant_id: Arc<Mutex<Option<String>>>,
-    default_database_name: Arc<Mutex<Option<String>>>,
+    database_name: Arc<Mutex<Option<String>>>,
     resolve_tenant_or_database_lock: Arc<tokio::sync::Mutex<()>>,
     #[cfg(feature = "opentelemetry")]
     metrics: crate::client::metrics::Metrics,
@@ -56,7 +56,7 @@ impl Clone for ChromaHttpClient {
             client: self.client.clone(),
             retry_policy: self.retry_policy,
             tenant_id: Arc::new(Mutex::new(self.tenant_id.lock().clone())),
-            default_database_name: Arc::new(Mutex::new(self.default_database_name.lock().clone())),
+            database_name: Arc::new(Mutex::new(self.database_name.lock().clone())),
             resolve_tenant_or_database_lock: Arc::new(tokio::sync::Mutex::new(())),
             #[cfg(feature = "opentelemetry")]
             metrics: self.metrics.clone(),
@@ -87,15 +87,15 @@ impl ChromaHttpClient {
             client,
             retry_policy: options.retry_options.into(),
             tenant_id: Arc::new(Mutex::new(options.tenant_id)),
-            default_database_name: Arc::new(Mutex::new(options.default_database_name)),
+            database_name: Arc::new(Mutex::new(options.database_name)),
             resolve_tenant_or_database_lock: Arc::new(tokio::sync::Mutex::new(())),
             #[cfg(feature = "opentelemetry")]
             metrics: crate::client::metrics::Metrics::new(),
         }
     }
 
-    pub fn set_default_database_name(&self, database_name: impl AsRef<str>) {
-        let mut lock = self.default_database_name.lock();
+    pub fn set_database_name(&self, database_name: impl AsRef<str>) {
+        let mut lock = self.database_name.lock();
         *lock = Some(database_name.as_ref().to_string());
     }
 
@@ -310,7 +310,7 @@ impl ChromaHttpClient {
 
     async fn get_database_name(&self) -> Result<String, ChromaClientError> {
         {
-            let database_name_lock = self.default_database_name.lock();
+            let database_name_lock = self.database_name.lock();
             if let Some(database_name) = &*database_name_lock {
                 return Ok(database_name.clone());
             }
@@ -319,7 +319,7 @@ impl ChromaHttpClient {
         let _guard = self.resolve_tenant_or_database_lock.lock().await;
 
         {
-            let database_name_lock = self.default_database_name.lock();
+            let database_name_lock = self.database_name.lock();
             if let Some(database_name) = &*database_name_lock {
                 return Ok(database_name.clone());
             }
@@ -341,7 +341,7 @@ impl ChromaHttpClient {
         })?;
 
         {
-            let mut database_name_lock = self.default_database_name.lock();
+            let mut database_name_lock = self.database_name.lock();
             *database_name_lock = Some(database_name.clone());
         }
 
@@ -555,7 +555,7 @@ mod tests {
         // Create isolated database for test
         let database_name = format!("test_db_{}", uuid::Uuid::new_v4());
         client.create_database(database_name.clone()).await.unwrap();
-        client.set_default_database_name(database_name.clone());
+        client.set_database_name(database_name.clone());
 
         let result = std::panic::AssertUnwindSafe(callback(client.clone()))
             .catch_unwind()

@@ -64,7 +64,7 @@ pub struct ChromaClientOptions {
     /// Will be automatically resolved at request time if not provided
     pub tenant_id: Option<String>,
     /// Will be automatically resolved at request time if not provided. It can only be resolved automatically if this client has access to exactly one database.
-    pub default_database_name: Option<String>,
+    pub database_name: Option<String>,
 }
 
 impl Default for ChromaClientOptions {
@@ -74,7 +74,7 @@ impl Default for ChromaClientOptions {
             auth_method: ChromaAuthMethod::None,
             retry_options: ChromaRetryOptions::default(),
             tenant_id: None,
-            default_database_name: None,
+            database_name: None,
         }
     }
 }
@@ -87,7 +87,7 @@ impl ChromaClientOptions {
         let api_key = api_key.into();
         let database_name = database_name.into();
         Ok(ChromaClientOptions {
-            default_database_name: Some(database_name),
+            database_name: Some(database_name),
             auth_method: ChromaAuthMethod::cloud_api_key(&api_key)?,
             ..Default::default()
         })
