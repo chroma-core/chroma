@@ -4,7 +4,12 @@ use super::{
         Filter, KnnBatch, KnnProjection, Limit, Projection, Rank, Scan, ScanToProtoError, Select,
     },
 };
-use crate::{chroma_proto, validators::validate_rank};
+use crate::{
+    chroma_proto,
+    operator::{Key, RankExpr},
+    validators::validate_rank,
+    Where,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 #[cfg(feature = "utoipa")]
@@ -146,7 +151,7 @@ impl TryFrom<Knn> for chroma_proto::KnnPlan {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, Validate)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, Validate)]
 pub struct SearchPayload {
     #[serde(default)]
     pub filter: Filter,
@@ -157,6 +162,30 @@ pub struct SearchPayload {
     pub limit: Limit,
     #[serde(default)]
     pub select: Select,
+}
+
+impl SearchPayload {
+    pub fn limit(mut self, limit: Option<u32>, offset: u32) -> Self {
+        self.limit.limit = limit;
+        self.limit.offset = offset;
+        self
+    }
+    pub fn rank(mut self, expr: RankExpr) -> Self {
+        self.rank.expr = Some(expr);
+        self
+    }
+    pub fn select<I, T>(mut self, keys: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<Key>,
+    {
+        self.select.keys = keys.into_iter().map(Into::into).collect();
+        self
+    }
+    pub fn r#where(mut self, r#where: Where) -> Self {
+        self.filter.where_clause = Some(r#where);
+        self
+    }
 }
 
 #[cfg(feature = "utoipa")]
