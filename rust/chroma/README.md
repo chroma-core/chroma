@@ -17,7 +17,7 @@ Specifically, there are multiple modes of search supported by Chroma.
 - Metadata search allows for a variety of queries against the metadata for a record.
 
 Chroma natively supports hybrid search of all search modes via its `search` endpoint, which can do a
-weighted hybrid search across both modes of search, enabling applications to mix and match search
+weighted hybrid search across all modes of search, enabling applications to mix and match search
 strategies.
 
 ## Quick-Start
