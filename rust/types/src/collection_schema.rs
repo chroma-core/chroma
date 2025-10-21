@@ -49,21 +49,21 @@ pub enum SchemaError {
 
 #[derive(Debug, Error)]
 pub enum SchemaBuilderError {
-    #[error("Vector index must be configured globally. Use create_index(None, config) instead.")]
-    VectorIndexMustBeGlobal,
-    #[error("FTS index must be configured globally. Use create_index(None, config) instead.")]
-    FtsIndexMustBeGlobal,
-    #[error("Cannot modify index on special key '{key}'. Special keys (#document, #embedding) are managed automatically.")]
+    #[error("Vector index must be configured globally using create_index(None, config), not on specific key '{key}'")]
+    VectorIndexMustBeGlobal { key: String },
+    #[error("FTS index must be configured globally using create_index(None, config), not on specific key '{key}'")]
+    FtsIndexMustBeGlobal { key: String },
+    #[error("Cannot modify special key '{key}' - it is managed automatically by the system. To customize vector search, modify the global vector config instead.")]
     SpecialKeyModificationNotAllowed { key: String },
-    #[error("Sparse vector index requires a specific key. Cannot be created on defaults.")]
+    #[error("Sparse vector index requires a specific key. Use create_index(Some(\"key_name\"), config) instead of create_index(None, config)")]
     SparseVectorRequiresKey,
-    #[error("Only one sparse vector index is allowed per collection")]
-    MultipleSparseVectorIndexes,
-    #[error("Deleting vector index is not currently supported")]
+    #[error("Only one sparse vector index allowed per collection. Key '{existing_key}' already has a sparse vector index. Remove it first or use that key.")]
+    MultipleSparseVectorIndexes { existing_key: String },
+    #[error("Vector index deletion not supported. The vector index is always enabled on #embedding. To disable vector search, disable the collection instead.")]
     VectorIndexDeletionNotSupported,
-    #[error("Deleting FTS index is not currently supported")]
+    #[error("FTS index deletion not supported. The FTS index is always enabled on #document. To disable full-text search, use a different collection without FTS.")]
     FtsIndexDeletionNotSupported,
-    #[error("Deleting sparse vector index is not currently supported")]
+    #[error("Sparse vector index deletion not supported yet. Sparse vector indexes cannot be removed once created.")]
     SparseVectorIndexDeletionNotSupported,
 }
 
@@ -1635,11 +1635,11 @@ impl Schema {
                 self._set_fts_index_config_builder(cfg.clone());
                 return Ok(self);
             }
-            (Some(_), IndexConfig::Vector(_)) => {
-                return Err(SchemaBuilderError::VectorIndexMustBeGlobal);
+            (Some(k), IndexConfig::Vector(_)) => {
+                return Err(SchemaBuilderError::VectorIndexMustBeGlobal { key: k.to_string() });
             }
-            (Some(_), IndexConfig::Fts(_)) => {
-                return Err(SchemaBuilderError::FtsIndexMustBeGlobal);
+            (Some(k), IndexConfig::Fts(_)) => {
+                return Err(SchemaBuilderError::FtsIndexMustBeGlobal { key: k.to_string() });
             }
             _ => {}
         }
@@ -1781,11 +1781,11 @@ impl Schema {
     ) -> Result<(), SchemaBuilderError> {
         // Check for multiple sparse vector indexes BEFORE getting mutable reference
         if enabled && matches!(config, IndexConfig::SparseVector(_)) {
-            // Count existing sparse vector indexes
-            let sparse_count = self
+            // Find existing sparse vector index
+            let existing_key = self
                 .keys
                 .iter()
-                .filter(|(k, v)| {
+                .find(|(k, v)| {
                     k.as_str() != key
                         && v.sparse_vector
                             .as_ref()
@@ -1793,10 +1793,10 @@ impl Schema {
                             .map(|idx| idx.enabled)
                             .unwrap_or(false)
                 })
-                .count();
+                .map(|(k, _)| k.clone());
 
-            if sparse_count > 0 {
-                return Err(SchemaBuilderError::MultipleSparseVectorIndexes);
+            if let Some(existing_key) = existing_key {
+                return Err(SchemaBuilderError::MultipleSparseVectorIndexes { existing_key });
             }
         }
 
@@ -1806,10 +1806,14 @@ impl Schema {
         // Set the appropriate index based on config type
         match config {
             IndexConfig::Vector(_) => {
-                return Err(SchemaBuilderError::VectorIndexMustBeGlobal);
+                return Err(SchemaBuilderError::VectorIndexMustBeGlobal {
+                    key: key.to_string(),
+                });
             }
             IndexConfig::Fts(_) => {
-                return Err(SchemaBuilderError::FtsIndexMustBeGlobal);
+                return Err(SchemaBuilderError::FtsIndexMustBeGlobal {
+                    key: key.to_string(),
+                });
             }
             IndexConfig::SparseVector(cfg) => {
                 value_types.sparse_vector = Some(SparseVectorValueType {
@@ -1870,10 +1874,14 @@ impl Schema {
     ) -> Result<(), SchemaBuilderError> {
         match config {
             IndexConfig::Vector(_) => {
-                return Err(SchemaBuilderError::VectorIndexMustBeGlobal);
+                return Err(SchemaBuilderError::VectorIndexMustBeGlobal {
+                    key: "defaults".to_string(),
+                });
             }
             IndexConfig::Fts(_) => {
-                return Err(SchemaBuilderError::FtsIndexMustBeGlobal);
+                return Err(SchemaBuilderError::FtsIndexMustBeGlobal {
+                    key: "defaults".to_string(),
+                });
             }
             IndexConfig::SparseVector(cfg) => {
                 self.defaults.sparse_vector = Some(SparseVectorValueType {
@@ -4001,7 +4009,7 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            SchemaBuilderError::VectorIndexMustBeGlobal
+            SchemaBuilderError::VectorIndexMustBeGlobal { key } if key == "my_vectors"
         ));
 
         // Error: FTS index on specific key (must be global)
@@ -4010,7 +4018,7 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            SchemaBuilderError::FtsIndexMustBeGlobal
+            SchemaBuilderError::FtsIndexMustBeGlobal { key } if key == "my_text"
         ));
 
         // Error: Cannot create index on special key #document
@@ -4072,7 +4080,7 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            SchemaBuilderError::MultipleSparseVectorIndexes
+            SchemaBuilderError::MultipleSparseVectorIndexes { existing_key } if existing_key == "sparse1"
         ));
     }
 
