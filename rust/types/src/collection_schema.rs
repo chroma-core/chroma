@@ -2,6 +2,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
+use validator::Validate;
 
 use crate::collection_configuration::{
     EmbeddingFunctionConfiguration, InternalCollectionConfiguration, VectorIndexConfiguration,
@@ -727,15 +728,21 @@ impl Schema {
     /// Merge two ValueTypes with field-level merging
     /// User values take precedence over default values
     fn merge_value_types(default: &ValueTypes, user: &ValueTypes) -> Result<ValueTypes, String> {
+        // Merge float_list first
+        let float_list =
+            Self::merge_float_list_type(default.float_list.as_ref(), user.float_list.as_ref());
+
+        // Validate the merged float_list (covers all merge cases)
+        if let Some(ref fl) = float_list {
+            Self::validate_float_list_value_type(fl)?;
+        }
+
         Ok(ValueTypes {
             string: Self::merge_string_type(default.string.as_ref(), user.string.as_ref())?,
             float: Self::merge_float_type(default.float.as_ref(), user.float.as_ref())?,
             int: Self::merge_int_type(default.int.as_ref(), user.int.as_ref())?,
             boolean: Self::merge_bool_type(default.boolean.as_ref(), user.boolean.as_ref())?,
-            float_list: Self::merge_float_list_type(
-                default.float_list.as_ref(),
-                user.float_list.as_ref(),
-            )?,
+            float_list,
             sparse_vector: Self::merge_sparse_vector_type(
                 default.sparse_vector.as_ref(),
                 user.sparse_vector.as_ref(),
@@ -823,17 +830,17 @@ impl Schema {
     fn merge_float_list_type(
         default: Option<&FloatListValueType>,
         user: Option<&FloatListValueType>,
-    ) -> Result<Option<FloatListValueType>, String> {
+    ) -> Option<FloatListValueType> {
         match (default, user) {
-            (Some(default), Some(user)) => Ok(Some(FloatListValueType {
+            (Some(default), Some(user)) => Some(FloatListValueType {
                 vector_index: Self::merge_vector_index_type(
                     default.vector_index.as_ref(),
                     user.vector_index.as_ref(),
-                )?,
-            })),
-            (Some(default), None) => Ok(Some(default.clone())),
-            (None, Some(user)) => Ok(Some(user.clone())),
-            (None, None) => Ok(None),
+                ),
+            }),
+            (Some(default), None) => Some(default.clone()),
+            (None, Some(user)) => Some(user.clone()),
+            (None, None) => None,
         }
     }
 
@@ -936,17 +943,15 @@ impl Schema {
     fn merge_vector_index_type(
         default: Option<&VectorIndexType>,
         user: Option<&VectorIndexType>,
-    ) -> Result<Option<VectorIndexType>, String> {
+    ) -> Option<VectorIndexType> {
         match (default, user) {
-            (Some(default), Some(user)) => {
-                Ok(Some(VectorIndexType {
-                    enabled: user.enabled, // User enabled state takes precedence
-                    config: Self::merge_vector_index_config(&default.config, &user.config)?,
-                }))
-            }
-            (Some(default), None) => Ok(Some(default.clone())),
-            (None, Some(user)) => Ok(Some(user.clone())),
-            (None, None) => Ok(None),
+            (Some(default), Some(user)) => Some(VectorIndexType {
+                enabled: user.enabled,
+                config: Self::merge_vector_index_config(&default.config, &user.config),
+            }),
+            (Some(default), None) => Some(default.clone()),
+            (None, Some(user)) => Some(user.clone()),
+            (None, None) => None,
         }
     }
 
@@ -965,12 +970,29 @@ impl Schema {
         }
     }
 
+    /// Validate FloatListValueType vector index configurations
+    /// This validates HNSW and SPANN configs within the merged float_list
+    fn validate_float_list_value_type(float_list: &FloatListValueType) -> Result<(), String> {
+        if let Some(vector_index) = &float_list.vector_index {
+            if let Some(hnsw) = &vector_index.config.hnsw {
+                hnsw.validate()
+                    .map_err(|e| format!("Invalid HNSW configuration: {}", e))?;
+            }
+            if let Some(spann) = &vector_index.config.spann {
+                spann
+                    .validate()
+                    .map_err(|e| format!("Invalid SPANN configuration: {}", e))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Merge VectorIndexConfig with field-level merging
     fn merge_vector_index_config(
         default: &VectorIndexConfig,
         user: &VectorIndexConfig,
-    ) -> Result<VectorIndexConfig, String> {
-        Ok(VectorIndexConfig {
+    ) -> VectorIndexConfig {
+        VectorIndexConfig {
             space: user.space.clone().or(default.space.clone()),
             embedding_function: user
                 .embedding_function
@@ -979,7 +1001,7 @@ impl Schema {
             source_key: user.source_key.clone().or(default.source_key.clone()),
             hnsw: Self::merge_hnsw_configs(default.hnsw.as_ref(), user.hnsw.as_ref()),
             spann: Self::merge_spann_configs(default.spann.as_ref(), user.spann.as_ref()),
-        })
+        }
     }
 
     /// Merge SparseVectorIndexConfig with field-level merging
@@ -1415,7 +1437,7 @@ pub struct VectorIndexConfig {
 }
 
 /// Configuration for HNSW vector index algorithm parameters
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, Default)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct HnswIndexConfig {
@@ -1428,49 +1450,67 @@ pub struct HnswIndexConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub num_threads: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 2))]
     pub batch_size: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 2))]
     pub sync_threshold: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resize_factor: Option<f64>,
 }
 
 /// Configuration for SPANN vector index algorithm parameters
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, Default)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct SpannIndexConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(max = 128))]
     pub search_nprobe: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1.0, max = 1.0))]
     pub search_rng_factor: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 5.0, max = 10.0))]
     pub search_rng_epsilon: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(max = 8))]
     pub nreplica_count: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1.0, max = 1.0))]
     pub write_rng_factor: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 5.0, max = 10.0))]
     pub write_rng_epsilon: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 50, max = 200))]
     pub split_threshold: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(max = 1000))]
     pub num_samples_kmeans: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 100.0, max = 100.0))]
     pub initial_lambda: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(max = 64))]
     pub reassign_neighbor_count: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 25, max = 100))]
     pub merge_threshold: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(max = 8))]
     pub num_centers_to_merge_to: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(max = 64))]
     pub write_nprobe: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(max = 200))]
     pub ef_construction: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(max = 200))]
     pub ef_search: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(max = 64))]
     pub max_neighbors: Option<usize>,
 }
 
@@ -2010,19 +2050,19 @@ mod tests {
         // Test field-level merging for SPANN configurations
         let default_spann = SpannIndexConfig {
             search_nprobe: Some(10),
-            search_rng_factor: Some(2.0),
-            search_rng_epsilon: Some(0.1),
+            search_rng_factor: Some(1.0),  // Must be exactly 1.0
+            search_rng_epsilon: Some(7.0), // Must be 5.0-10.0
             nreplica_count: Some(3),
-            write_rng_factor: Some(1.5),
-            write_rng_epsilon: Some(0.05),
-            split_threshold: Some(1000),
+            write_rng_factor: Some(1.0),  // Must be exactly 1.0
+            write_rng_epsilon: Some(6.0), // Must be 5.0-10.0
+            split_threshold: Some(100),   // Must be 50-200
             num_samples_kmeans: Some(100),
-            initial_lambda: Some(0.5),
+            initial_lambda: Some(100.0), // Must be exactly 100.0
             reassign_neighbor_count: Some(50),
-            merge_threshold: Some(500),
-            num_centers_to_merge_to: Some(10),
+            merge_threshold: Some(50),        // Must be 25-100
+            num_centers_to_merge_to: Some(4), // Max is 8
             write_nprobe: Some(5),
-            ef_construction: Some(200),
+            ef_construction: Some(100),
             ef_search: Some(10),
             max_neighbors: Some(16),
         };
@@ -2030,11 +2070,11 @@ mod tests {
         let user_spann = SpannIndexConfig {
             search_nprobe: Some(20),       // Override
             search_rng_factor: None,       // Will use default
-            search_rng_epsilon: Some(0.2), // Override
+            search_rng_epsilon: Some(8.0), // Override (valid: 5.0-10.0)
             nreplica_count: None,          // Will use default
             write_rng_factor: None,
             write_rng_epsilon: None,
-            split_threshold: Some(2000), // Override
+            split_threshold: Some(150), // Override (valid: 50-200)
             num_samples_kmeans: None,
             initial_lambda: None,
             reassign_neighbor_count: None,
@@ -2050,13 +2090,13 @@ mod tests {
 
         // Check user overrides
         assert_eq!(result.search_nprobe, Some(20));
-        assert_eq!(result.search_rng_epsilon, Some(0.2));
-        assert_eq!(result.split_threshold, Some(2000));
+        assert_eq!(result.search_rng_epsilon, Some(8.0));
+        assert_eq!(result.split_threshold, Some(150));
 
         // Check defaults preserved
-        assert_eq!(result.search_rng_factor, Some(2.0));
+        assert_eq!(result.search_rng_factor, Some(1.0));
         assert_eq!(result.nreplica_count, Some(3));
-        assert_eq!(result.initial_lambda, Some(0.5));
+        assert_eq!(result.initial_lambda, Some(100.0));
     }
 
     #[test]
@@ -2195,7 +2235,7 @@ mod tests {
             }), // Add SPANN config
         };
 
-        let result = Schema::merge_vector_index_config(&default_config, &user_config).unwrap();
+        let result = Schema::merge_vector_index_config(&default_config, &user_config);
 
         // Check field-level merging
         assert_eq!(result.space, Some(Space::L2)); // User override
@@ -2942,5 +2982,286 @@ mod tests {
         assert!(!serialized.contains(r###""$fts_index":"###));
         assert!(!serialized.contains(r###""$int_inverted_index":"###));
         assert!(!serialized.contains(r###""$vector_index":"###));
+    }
+
+    #[test]
+    fn test_hnsw_index_config_validation() {
+        use validator::Validate;
+
+        // Valid configuration - should pass
+        let valid_config = HnswIndexConfig {
+            batch_size: Some(10),
+            sync_threshold: Some(100),
+            ef_construction: Some(100),
+            max_neighbors: Some(16),
+            ..Default::default()
+        };
+        assert!(valid_config.validate().is_ok());
+
+        // Invalid: batch_size too small (min 2)
+        let invalid_batch_size = HnswIndexConfig {
+            batch_size: Some(1),
+            ..Default::default()
+        };
+        assert!(invalid_batch_size.validate().is_err());
+
+        // Invalid: sync_threshold too small (min 2)
+        let invalid_sync_threshold = HnswIndexConfig {
+            sync_threshold: Some(1),
+            ..Default::default()
+        };
+        assert!(invalid_sync_threshold.validate().is_err());
+
+        // Valid: boundary values (exactly 2) should pass
+        let boundary_config = HnswIndexConfig {
+            batch_size: Some(2),
+            sync_threshold: Some(2),
+            ..Default::default()
+        };
+        assert!(boundary_config.validate().is_ok());
+
+        // Valid: None values should pass validation
+        let all_none_config = HnswIndexConfig {
+            ..Default::default()
+        };
+        assert!(all_none_config.validate().is_ok());
+
+        // Valid: fields without validation can be any value
+        let other_fields_config = HnswIndexConfig {
+            ef_construction: Some(1),
+            max_neighbors: Some(1),
+            ef_search: Some(1),
+            num_threads: Some(1),
+            resize_factor: Some(0.1),
+            ..Default::default()
+        };
+        assert!(other_fields_config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_spann_index_config_validation() {
+        use validator::Validate;
+
+        // Valid configuration - should pass
+        let valid_config = SpannIndexConfig {
+            write_nprobe: Some(32),
+            nreplica_count: Some(4),
+            split_threshold: Some(100),
+            merge_threshold: Some(50),
+            reassign_neighbor_count: Some(32),
+            num_centers_to_merge_to: Some(4),
+            ef_construction: Some(100),
+            ef_search: Some(100),
+            max_neighbors: Some(32),
+            search_rng_factor: Some(1.0),
+            write_rng_factor: Some(1.0),
+            search_rng_epsilon: Some(7.5),
+            write_rng_epsilon: Some(7.5),
+            ..Default::default()
+        };
+        assert!(valid_config.validate().is_ok());
+
+        // Invalid: write_nprobe too large (max 64)
+        let invalid_write_nprobe = SpannIndexConfig {
+            write_nprobe: Some(200),
+            ..Default::default()
+        };
+        assert!(invalid_write_nprobe.validate().is_err());
+
+        // Invalid: split_threshold too small (min 50)
+        let invalid_split_threshold = SpannIndexConfig {
+            split_threshold: Some(10),
+            ..Default::default()
+        };
+        assert!(invalid_split_threshold.validate().is_err());
+
+        // Invalid: split_threshold too large (max 200)
+        let invalid_split_threshold_high = SpannIndexConfig {
+            split_threshold: Some(250),
+            ..Default::default()
+        };
+        assert!(invalid_split_threshold_high.validate().is_err());
+
+        // Invalid: nreplica_count too large (max 8)
+        let invalid_nreplica = SpannIndexConfig {
+            nreplica_count: Some(10),
+            ..Default::default()
+        };
+        assert!(invalid_nreplica.validate().is_err());
+
+        // Invalid: reassign_neighbor_count too large (max 64)
+        let invalid_reassign = SpannIndexConfig {
+            reassign_neighbor_count: Some(100),
+            ..Default::default()
+        };
+        assert!(invalid_reassign.validate().is_err());
+
+        // Invalid: merge_threshold out of range (min 25, max 100)
+        let invalid_merge_threshold_low = SpannIndexConfig {
+            merge_threshold: Some(5),
+            ..Default::default()
+        };
+        assert!(invalid_merge_threshold_low.validate().is_err());
+
+        let invalid_merge_threshold_high = SpannIndexConfig {
+            merge_threshold: Some(150),
+            ..Default::default()
+        };
+        assert!(invalid_merge_threshold_high.validate().is_err());
+
+        // Invalid: num_centers_to_merge_to too large (max 8)
+        let invalid_num_centers = SpannIndexConfig {
+            num_centers_to_merge_to: Some(10),
+            ..Default::default()
+        };
+        assert!(invalid_num_centers.validate().is_err());
+
+        // Invalid: ef_construction too large (max 200)
+        let invalid_ef_construction = SpannIndexConfig {
+            ef_construction: Some(300),
+            ..Default::default()
+        };
+        assert!(invalid_ef_construction.validate().is_err());
+
+        // Invalid: ef_search too large (max 200)
+        let invalid_ef_search = SpannIndexConfig {
+            ef_search: Some(300),
+            ..Default::default()
+        };
+        assert!(invalid_ef_search.validate().is_err());
+
+        // Invalid: max_neighbors too large (max 64)
+        let invalid_max_neighbors = SpannIndexConfig {
+            max_neighbors: Some(100),
+            ..Default::default()
+        };
+        assert!(invalid_max_neighbors.validate().is_err());
+
+        // Invalid: search_nprobe too large (max 128)
+        let invalid_search_nprobe = SpannIndexConfig {
+            search_nprobe: Some(200),
+            ..Default::default()
+        };
+        assert!(invalid_search_nprobe.validate().is_err());
+
+        // Invalid: search_rng_factor not exactly 1.0 (min 1.0, max 1.0)
+        let invalid_search_rng_factor_low = SpannIndexConfig {
+            search_rng_factor: Some(0.9),
+            ..Default::default()
+        };
+        assert!(invalid_search_rng_factor_low.validate().is_err());
+
+        let invalid_search_rng_factor_high = SpannIndexConfig {
+            search_rng_factor: Some(1.1),
+            ..Default::default()
+        };
+        assert!(invalid_search_rng_factor_high.validate().is_err());
+
+        // Valid: search_rng_factor exactly 1.0
+        let valid_search_rng_factor = SpannIndexConfig {
+            search_rng_factor: Some(1.0),
+            ..Default::default()
+        };
+        assert!(valid_search_rng_factor.validate().is_ok());
+
+        // Invalid: search_rng_epsilon out of range (min 5.0, max 10.0)
+        let invalid_search_rng_epsilon_low = SpannIndexConfig {
+            search_rng_epsilon: Some(4.0),
+            ..Default::default()
+        };
+        assert!(invalid_search_rng_epsilon_low.validate().is_err());
+
+        let invalid_search_rng_epsilon_high = SpannIndexConfig {
+            search_rng_epsilon: Some(11.0),
+            ..Default::default()
+        };
+        assert!(invalid_search_rng_epsilon_high.validate().is_err());
+
+        // Valid: search_rng_epsilon within range
+        let valid_search_rng_epsilon = SpannIndexConfig {
+            search_rng_epsilon: Some(7.5),
+            ..Default::default()
+        };
+        assert!(valid_search_rng_epsilon.validate().is_ok());
+
+        // Invalid: write_rng_factor not exactly 1.0 (min 1.0, max 1.0)
+        let invalid_write_rng_factor_low = SpannIndexConfig {
+            write_rng_factor: Some(0.9),
+            ..Default::default()
+        };
+        assert!(invalid_write_rng_factor_low.validate().is_err());
+
+        let invalid_write_rng_factor_high = SpannIndexConfig {
+            write_rng_factor: Some(1.1),
+            ..Default::default()
+        };
+        assert!(invalid_write_rng_factor_high.validate().is_err());
+
+        // Valid: write_rng_factor exactly 1.0
+        let valid_write_rng_factor = SpannIndexConfig {
+            write_rng_factor: Some(1.0),
+            ..Default::default()
+        };
+        assert!(valid_write_rng_factor.validate().is_ok());
+
+        // Invalid: write_rng_epsilon out of range (min 5.0, max 10.0)
+        let invalid_write_rng_epsilon_low = SpannIndexConfig {
+            write_rng_epsilon: Some(4.0),
+            ..Default::default()
+        };
+        assert!(invalid_write_rng_epsilon_low.validate().is_err());
+
+        let invalid_write_rng_epsilon_high = SpannIndexConfig {
+            write_rng_epsilon: Some(11.0),
+            ..Default::default()
+        };
+        assert!(invalid_write_rng_epsilon_high.validate().is_err());
+
+        // Valid: write_rng_epsilon within range
+        let valid_write_rng_epsilon = SpannIndexConfig {
+            write_rng_epsilon: Some(7.5),
+            ..Default::default()
+        };
+        assert!(valid_write_rng_epsilon.validate().is_ok());
+
+        // Invalid: num_samples_kmeans too large (max 1000)
+        let invalid_num_samples_kmeans = SpannIndexConfig {
+            num_samples_kmeans: Some(1500),
+            ..Default::default()
+        };
+        assert!(invalid_num_samples_kmeans.validate().is_err());
+
+        // Valid: num_samples_kmeans within range
+        let valid_num_samples_kmeans = SpannIndexConfig {
+            num_samples_kmeans: Some(500),
+            ..Default::default()
+        };
+        assert!(valid_num_samples_kmeans.validate().is_ok());
+
+        // Invalid: initial_lambda not exactly 100.0 (min 100.0, max 100.0)
+        let invalid_initial_lambda_high = SpannIndexConfig {
+            initial_lambda: Some(150.0),
+            ..Default::default()
+        };
+        assert!(invalid_initial_lambda_high.validate().is_err());
+
+        let invalid_initial_lambda_low = SpannIndexConfig {
+            initial_lambda: Some(50.0),
+            ..Default::default()
+        };
+        assert!(invalid_initial_lambda_low.validate().is_err());
+
+        // Valid: initial_lambda exactly 100.0
+        let valid_initial_lambda = SpannIndexConfig {
+            initial_lambda: Some(100.0),
+            ..Default::default()
+        };
+        assert!(valid_initial_lambda.validate().is_ok());
+
+        // Valid: None values should pass validation
+        let all_none_config = SpannIndexConfig {
+            ..Default::default()
+        };
+        assert!(all_none_config.validate().is_ok());
     }
 }
