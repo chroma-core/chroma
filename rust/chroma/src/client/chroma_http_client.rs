@@ -52,6 +52,10 @@ impl From<WhereError> for ChromaHttpClientError {
     }
 }
 
+#[cfg(feature = "opentelemetry")]
+static METRICS: std::sync::LazyLock<crate::client::metrics::Metrics> =
+    std::sync::LazyLock::new(crate::client::metrics::Metrics::new);
+
 #[derive(Debug)]
 pub struct ChromaHttpClient {
     base_url: reqwest::Url,
@@ -60,8 +64,6 @@ pub struct ChromaHttpClient {
     tenant_id: Arc<Mutex<Option<String>>>,
     database_name: Arc<Mutex<Option<String>>>,
     resolve_tenant_or_database_lock: Arc<tokio::sync::Mutex<()>>,
-    #[cfg(feature = "opentelemetry")]
-    metrics: crate::client::metrics::Metrics,
 }
 
 impl Default for ChromaHttpClient {
@@ -79,8 +81,6 @@ impl Clone for ChromaHttpClient {
             tenant_id: Arc::new(Mutex::new(self.tenant_id.lock().clone())),
             database_name: Arc::new(Mutex::new(self.database_name.lock().clone())),
             resolve_tenant_or_database_lock: Arc::new(tokio::sync::Mutex::new(())),
-            #[cfg(feature = "opentelemetry")]
-            metrics: self.metrics.clone(),
         }
     }
 }
@@ -110,8 +110,6 @@ impl ChromaHttpClient {
             tenant_id: Arc::new(Mutex::new(options.tenant_id)),
             database_name: Arc::new(Mutex::new(options.database_name)),
             resolve_tenant_or_database_lock: Arc::new(tokio::sync::Mutex::new(())),
-            #[cfg(feature = "opentelemetry")]
-            metrics: crate::client::metrics::Metrics::new(),
         }
     }
 
@@ -446,7 +444,7 @@ impl ChromaHttpClient {
 
             #[cfg(feature = "opentelemetry")]
             {
-                self.metrics.record_request(
+                METRICS.record_request(
                     operation_name,
                     response.status().as_u16(),
                     started_at.elapsed().as_secs_f64() * 1000.0,
@@ -475,7 +473,7 @@ impl ChromaHttpClient {
                 );
 
                 #[cfg(feature = "opentelemetry")]
-                self.metrics.increment_retry(operation_name);
+                METRICS.increment_retry(operation_name);
             })
             .when(|(err, _)| {
                 err.status()
