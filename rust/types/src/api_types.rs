@@ -29,6 +29,7 @@ use crate::SegmentScopeConversionError;
 use crate::UpdateEmbeddingsPayload;
 use crate::UpdateMetadata;
 use crate::Where;
+use crate::WhereValidationError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
@@ -724,7 +725,7 @@ pub enum CreateCollectionError {
     #[error("Could not deserialize configuration: {0}")]
     Configuration(serde_json::Error),
     #[error("Could not serialize schema: {0}")]
-    Schema(#[from] SchemaError),
+    Schema(#[source] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("The operation was aborted, {0}")]
@@ -736,7 +737,7 @@ pub enum CreateCollectionError {
     #[error("Failed to parse db id")]
     DatabaseIdParseError,
     #[error("Failed to reconcile schema: {0}")]
-    InvalidSchema(String),
+    InvalidSchema(#[source] SchemaError),
 }
 
 impl ChromaError for CreateCollectionError {
@@ -754,7 +755,7 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
             CreateCollectionError::DatabaseIdParseError => ErrorCodes::Internal,
-            CreateCollectionError::InvalidSchema(_) => ErrorCodes::InvalidArgument,
+            CreateCollectionError::InvalidSchema(e) => e.code(),
             CreateCollectionError::Schema(e) => e.code(),
         }
     }
@@ -846,6 +847,8 @@ pub type GetCollectionByCrnResponse = Collection;
 
 #[derive(Debug, Error)]
 pub enum GetCollectionByCrnError {
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Collection [{0}] does not exist")]
@@ -855,6 +858,7 @@ pub enum GetCollectionByCrnError {
 impl ChromaError for GetCollectionByCrnError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GetCollectionByCrnError::InvalidSchema(e) => e.code(),
             GetCollectionByCrnError::Internal(err) => err.code(),
             GetCollectionByCrnError::NotFound(_) => ErrorCodes::NotFound,
         }
@@ -1451,12 +1455,9 @@ impl DeleteCollectionRecordsRequest {
         Ok(request)
     }
 
-    pub fn into_payload(self) -> Result<DeleteCollectionRecordsPayload, serde_json::Error> {
-        let where_fields = if let Some(r#where) = self.r#where {
-            RawWhereFields {
-                r#where: serde_json::to_value(&r#where)?,
-                where_document: serde_json::json! {{}},
-            }
+    pub fn into_payload(self) -> Result<DeleteCollectionRecordsPayload, WhereError> {
+        let where_fields = if let Some(r#where) = self.r#where.as_ref() {
+            RawWhereFields::from_json_str(Some(&serde_json::to_string(r#where)?), None)?
         } else {
             RawWhereFields::default()
         };
@@ -1610,6 +1611,16 @@ impl CountRequest {
 
 pub type CountResponse = u32;
 
+//////////////////////// Payload Err ////////////////////
+
+#[derive(Debug, thiserror::Error)]
+pub enum WhereError {
+    #[error("serialization: {0}")]
+    Serialization(#[from] serde_json::Error),
+    #[error("validation: {0}")]
+    Validation(#[from] WhereValidationError),
+}
+
 ////////////////////////// Get //////////////////////////
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1664,12 +1675,9 @@ impl GetRequest {
         Ok(request)
     }
 
-    pub fn into_payload(self) -> Result<GetRequestPayload, serde_json::Error> {
-        let where_fields = if let Some(r#where) = self.r#where {
-            RawWhereFields {
-                r#where: serde_json::to_value(&r#where)?,
-                where_document: serde_json::json! {{}},
-            }
+    pub fn into_payload(self) -> Result<GetRequestPayload, WhereError> {
+        let where_fields = if let Some(r#where) = self.r#where.as_ref() {
+            RawWhereFields::from_json_str(Some(&serde_json::to_string(r#where)?), None)?
         } else {
             RawWhereFields::default()
         };
@@ -1865,12 +1873,9 @@ impl QueryRequest {
         Ok(request)
     }
 
-    pub fn into_payload(self) -> Result<QueryRequestPayload, serde_json::Error> {
-        let where_fields = if let Some(r#where) = self.r#where {
-            RawWhereFields {
-                r#where: serde_json::to_value(&r#where)?,
-                where_document: serde_json::json! {{}},
-            }
+    pub fn into_payload(self) -> Result<QueryRequestPayload, WhereError> {
+        let where_fields = if let Some(r#where) = self.r#where.as_ref() {
+            RawWhereFields::from_json_str(Some(&serde_json::to_string(r#where)?), None)?
         } else {
             RawWhereFields::default()
         };
