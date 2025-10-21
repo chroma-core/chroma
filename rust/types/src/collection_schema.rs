@@ -467,7 +467,7 @@ impl InternalSchema {
                 .config
                 .spann
                 .clone()
-                .map(|config| config.into_internal_configuration(space))
+                .map(|config| (space.as_ref(), &config).into())
         };
 
         self.keys
@@ -1457,47 +1457,6 @@ pub struct SpannIndexConfig {
     pub max_neighbors: Option<usize>,
 }
 
-impl SpannIndexConfig {
-    pub fn into_internal_configuration(
-        self,
-        vector_space: Option<Space>,
-    ) -> InternalSpannConfiguration {
-        InternalSpannConfiguration {
-            search_nprobe: self.search_nprobe.unwrap_or(default_search_nprobe()),
-            search_rng_factor: self
-                .search_rng_factor
-                .unwrap_or(default_search_rng_factor()),
-            search_rng_epsilon: self
-                .search_rng_epsilon
-                .unwrap_or(default_search_rng_epsilon()),
-            nreplica_count: self.nreplica_count.unwrap_or(default_nreplica_count()),
-            write_rng_factor: self.write_rng_factor.unwrap_or(default_write_rng_factor()),
-            write_rng_epsilon: self
-                .write_rng_epsilon
-                .unwrap_or(default_write_rng_epsilon()),
-            split_threshold: self.split_threshold.unwrap_or(default_split_threshold()),
-            num_samples_kmeans: self
-                .num_samples_kmeans
-                .unwrap_or(default_num_samples_kmeans()),
-            initial_lambda: self.initial_lambda.unwrap_or(default_initial_lambda()),
-            reassign_neighbor_count: self
-                .reassign_neighbor_count
-                .unwrap_or(default_reassign_neighbor_count()),
-            merge_threshold: self.merge_threshold.unwrap_or(default_merge_threshold()),
-            num_centers_to_merge_to: self
-                .num_centers_to_merge_to
-                .unwrap_or(default_num_centers_to_merge_to()),
-            write_nprobe: self.write_nprobe.unwrap_or(default_write_nprobe()),
-            ef_construction: self
-                .ef_construction
-                .unwrap_or(default_construction_ef_spann()),
-            ef_search: self.ef_search.unwrap_or(default_search_ef_spann()),
-            max_neighbors: self.max_neighbors.unwrap_or(default_m_spann()),
-            space: vector_space.unwrap_or(default_space()),
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SparseVectorIndexConfig {
@@ -1547,7 +1506,10 @@ mod tests {
     use super::*;
     use crate::hnsw_configuration::Space;
     use crate::metadata::SparseVector;
-    use crate::{InternalHnswConfiguration, InternalSpannConfiguration};
+    use crate::{
+        EmbeddingFunctionNewConfiguration, InternalHnswConfiguration, InternalSpannConfiguration,
+    };
+    use serde_json::json;
 
     #[test]
     fn test_reconcile_with_defaults_none_user_schema() {
@@ -1783,6 +1745,99 @@ mod tests {
     }
 
     #[test]
+    fn test_convert_schema_to_collection_config_hnsw_roundtrip() {
+        let collection_config = InternalCollectionConfiguration {
+            vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
+                space: Space::Cosine,
+                ef_construction: 128,
+                ef_search: 96,
+                max_neighbors: 42,
+                num_threads: 8,
+                resize_factor: 1.5,
+                sync_threshold: 2_000,
+                batch_size: 256,
+            }),
+            embedding_function: Some(EmbeddingFunctionConfiguration::Known(
+                EmbeddingFunctionNewConfiguration {
+                    name: "custom".to_string(),
+                    config: json!({"alpha": 1}),
+                },
+            )),
+        };
+
+        let schema =
+            InternalSchema::convert_collection_config_to_schema(collection_config.clone()).unwrap();
+        let reconstructed = InternalCollectionConfiguration::try_from(&schema).unwrap();
+
+        assert_eq!(reconstructed, collection_config);
+    }
+
+    #[test]
+    fn test_convert_schema_to_collection_config_spann_roundtrip() {
+        let spann_config = InternalSpannConfiguration {
+            space: Space::Cosine,
+            search_nprobe: 11,
+            search_rng_factor: 1.7,
+            write_nprobe: 5,
+            nreplica_count: 3,
+            split_threshold: 150,
+            merge_threshold: 80,
+            ef_construction: 120,
+            ef_search: 90,
+            max_neighbors: 40,
+            ..Default::default()
+        };
+
+        let collection_config = InternalCollectionConfiguration {
+            vector_index: VectorIndexConfiguration::Spann(spann_config.clone()),
+            embedding_function: Some(EmbeddingFunctionConfiguration::Known(
+                EmbeddingFunctionNewConfiguration {
+                    name: "custom".to_string(),
+                    config: json!({"beta": true}),
+                },
+            )),
+        };
+
+        let schema =
+            InternalSchema::convert_collection_config_to_schema(collection_config.clone()).unwrap();
+        let reconstructed = InternalCollectionConfiguration::try_from(&schema).unwrap();
+
+        assert_eq!(reconstructed, collection_config);
+    }
+
+    #[test]
+    fn test_convert_schema_to_collection_config_rejects_mixed_index() {
+        let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
+        if let Some(embedding) = schema.keys.get_mut(EMBEDDING_KEY) {
+            if let Some(float_list) = &mut embedding.float_list {
+                if let Some(vector_index) = &mut float_list.vector_index {
+                    vector_index.config.spann = Some(SpannIndexConfig {
+                        search_nprobe: Some(1),
+                        search_rng_factor: Some(1.0),
+                        search_rng_epsilon: Some(0.1),
+                        nreplica_count: Some(1),
+                        write_rng_factor: Some(1.0),
+                        write_rng_epsilon: Some(0.1),
+                        split_threshold: Some(100),
+                        num_samples_kmeans: Some(10),
+                        initial_lambda: Some(0.5),
+                        reassign_neighbor_count: Some(10),
+                        merge_threshold: Some(50),
+                        num_centers_to_merge_to: Some(3),
+                        write_nprobe: Some(1),
+                        ef_construction: Some(50),
+                        ef_search: Some(40),
+                        max_neighbors: Some(20),
+                    });
+                }
+            }
+        }
+
+        let result = InternalCollectionConfiguration::try_from(&schema);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_ensure_key_from_metadata_no_changes_for_existing_key() {
         let mut schema = InternalSchema::new_default(KnnIndex::Hnsw);
         let before = schema.clone();
@@ -2006,9 +2061,7 @@ mod tests {
             max_neighbors: Some(32),
         };
 
-        let with_space = config
-            .clone()
-            .into_internal_configuration(Some(Space::Cosine));
+        let with_space: InternalSpannConfiguration = (Some(&Space::Cosine), &config).into();
         assert_eq!(with_space.space, Space::Cosine);
         assert_eq!(with_space.search_nprobe, 33);
         assert_eq!(with_space.search_rng_factor, 1.2);
@@ -2020,7 +2073,7 @@ mod tests {
         assert_eq!(with_space.max_neighbors, 32);
         assert_eq!(with_space.merge_threshold, default_merge_threshold());
 
-        let default_space_config = config.into_internal_configuration(None);
+        let default_space_config: InternalSpannConfiguration = (None, &config).into();
         assert_eq!(default_space_config.space, default_space());
     }
 
