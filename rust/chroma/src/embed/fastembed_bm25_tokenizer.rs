@@ -4,6 +4,192 @@ use rust_stemmers::{Algorithm, Stemmer};
 
 use crate::embed::Tokenizer;
 
+/// Default English stopwords matching fastembed.
+///
+/// This list is derived from NLTK's English stopwords, which is what
+/// fastembed uses internally. Total: 179 stopwords.
+const DEFAULT_ENGLISH_STOPWORDS: &[&str] = &[
+    "a",
+    "about",
+    "above",
+    "after",
+    "again",
+    "against",
+    "ain",
+    "all",
+    "am",
+    "an",
+    "and",
+    "any",
+    "are",
+    "aren",
+    "aren't",
+    "as",
+    "at",
+    "be",
+    "because",
+    "been",
+    "before",
+    "being",
+    "below",
+    "between",
+    "both",
+    "but",
+    "by",
+    "can",
+    "couldn",
+    "couldn't",
+    "d",
+    "did",
+    "didn",
+    "didn't",
+    "do",
+    "does",
+    "doesn",
+    "doesn't",
+    "doing",
+    "don",
+    "don't",
+    "down",
+    "during",
+    "each",
+    "few",
+    "for",
+    "from",
+    "further",
+    "had",
+    "hadn",
+    "hadn't",
+    "has",
+    "hasn",
+    "hasn't",
+    "have",
+    "haven",
+    "haven't",
+    "having",
+    "he",
+    "her",
+    "here",
+    "hers",
+    "herself",
+    "him",
+    "himself",
+    "his",
+    "how",
+    "i",
+    "if",
+    "in",
+    "into",
+    "is",
+    "isn",
+    "isn't",
+    "it",
+    "it's",
+    "its",
+    "itself",
+    "just",
+    "ll",
+    "m",
+    "ma",
+    "me",
+    "mightn",
+    "mightn't",
+    "more",
+    "most",
+    "mustn",
+    "mustn't",
+    "my",
+    "myself",
+    "needn",
+    "needn't",
+    "no",
+    "nor",
+    "not",
+    "now",
+    "o",
+    "of",
+    "off",
+    "on",
+    "once",
+    "only",
+    "or",
+    "other",
+    "our",
+    "ours",
+    "ourselves",
+    "out",
+    "over",
+    "own",
+    "re",
+    "s",
+    "same",
+    "shan",
+    "shan't",
+    "she",
+    "she's",
+    "should",
+    "should've",
+    "shouldn",
+    "shouldn't",
+    "so",
+    "some",
+    "such",
+    "t",
+    "than",
+    "that",
+    "that'll",
+    "the",
+    "their",
+    "theirs",
+    "them",
+    "themselves",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "through",
+    "to",
+    "too",
+    "under",
+    "until",
+    "up",
+    "ve",
+    "very",
+    "was",
+    "wasn",
+    "wasn't",
+    "we",
+    "were",
+    "weren",
+    "weren't",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "who",
+    "whom",
+    "why",
+    "will",
+    "with",
+    "won",
+    "won't",
+    "wouldn",
+    "wouldn't",
+    "y",
+    "you",
+    "you'd",
+    "you'll",
+    "you're",
+    "you've",
+    "your",
+    "yours",
+    "yourself",
+    "yourselves",
+];
+
 /// Tokenizer that mirrors Python fastembed's BM25 behavior.
 ///
 /// Processing pipeline:
@@ -33,7 +219,7 @@ impl FastembedBM25Tokenizer {
     pub fn with_language(language: Algorithm) -> Self {
         let stemmer = Stemmer::create(language);
         let stopwords = Self::default_english_stopwords();
-        
+
         Self {
             stemmer,
             stopwords,
@@ -44,7 +230,7 @@ impl FastembedBM25Tokenizer {
     /// Create a tokenizer with custom stopwords.
     pub fn with_stopwords(language: Algorithm, stopwords: HashSet<String>) -> Self {
         let stemmer = Stemmer::create(language);
-        
+
         Self {
             stemmer,
             stopwords,
@@ -58,31 +244,12 @@ impl FastembedBM25Tokenizer {
         self
     }
 
-    /// Default English stopwords matching fastembed.
-    ///
-    /// This list is derived from NLTK's English stopwords, which is what
-    /// fastembed uses internally.
+    /// Get default English stopwords as a HashSet.
     fn default_english_stopwords() -> HashSet<String> {
-        let stopwords = [
-            "i", "me", "my", "myself", "we", "our", "ours", "ourselves", "you", "your",
-            "yours", "yourself", "yourselves", "he", "him", "his", "himself", "she", "her",
-            "hers", "herself", "it", "its", "itself", "they", "them", "their", "theirs",
-            "themselves", "what", "which", "who", "whom", "this", "that", "these", "those",
-            "am", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
-            "having", "do", "does", "did", "doing", "a", "an", "the", "and", "but", "if",
-            "or", "because", "as", "until", "while", "of", "at", "by", "for", "with",
-            "about", "against", "between", "into", "through", "during", "before", "after",
-            "above", "below", "to", "from", "up", "down", "in", "out", "on", "off", "over",
-            "under", "again", "further", "then", "once", "here", "there", "when", "where",
-            "why", "how", "all", "both", "each", "few", "more", "most", "other", "some",
-            "such", "no", "nor", "not", "only", "own", "same", "so", "than", "too", "very",
-            "s", "t", "can", "will", "just", "don", "should", "now", "d", "ll", "m", "o",
-            "re", "ve", "y", "ain", "aren", "couldn", "didn", "doesn", "hadn", "hasn",
-            "haven", "isn", "ma", "mightn", "mustn", "needn", "shan", "shouldn", "wasn",
-            "weren", "won", "wouldn",
-        ];
-        
-        stopwords.iter().map(|s| s.to_string()).collect()
+        DEFAULT_ENGLISH_STOPWORDS
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
     }
 
     /// Remove non-alphanumeric characters, replacing with spaces.
@@ -121,10 +288,10 @@ impl Tokenizer for FastembedBM25Tokenizer {
     fn tokenize(&self, text: &str) -> Vec<String> {
         // Step 1: Remove non-alphanumeric characters
         let cleaned = self.remove_non_alphanumeric(text);
-        
+
         // Step 2: Lowercase and split on whitespace
         let tokens = self.simple_tokenize(&cleaned);
-        
+
         // Step 3-5: Filter and stem
         let mut result = Vec::new();
         for token in tokens {
@@ -132,21 +299,21 @@ impl Tokenizer for FastembedBM25Tokenizer {
             if self.stopwords.contains(&token) {
                 continue;
             }
-            
+
             // Skip tokens that are too long
             if token.len() > self.token_max_length {
                 continue;
             }
-            
+
             // Apply stemming
             let stemmed = self.stemmer.stem(&token).to_string();
-            
+
             // Only include non-empty stemmed tokens
             if !stemmed.is_empty() {
                 result.push(stemmed);
             }
         }
-        
+
         result
     }
 }

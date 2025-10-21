@@ -36,7 +36,7 @@ impl TokenHasher for Murmur3AbsHasher {
         // Hash the token bytes with murmur3
         let hash_result = murmur3_32(&mut Cursor::new(token.as_bytes()), self.seed)
             .expect("murmur3_32 should not fail on in-memory data");
-        
+
         // Convert to signed i32, then take absolute value
         // This matches Python's: abs(mmh3.hash(token, seed=0))
         let hash_signed = hash_result as i32;

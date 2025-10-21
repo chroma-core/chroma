@@ -6,7 +6,7 @@ use crate::embed::murmur3_abs_hasher::Murmur3AbsHasher;
 use crate::embed::{EmbeddingFunction, TokenHasher, Tokenizer};
 
 /// Error type for BM25 sparse embedding.
-/// 
+///
 /// This is an empty enum (uninhabited type), meaning it can never be constructed.
 /// BM25 encoding with infallible tokenizers and hashers cannot fail.
 #[derive(Debug, Error)]
@@ -84,8 +84,8 @@ where
             let tf = chunk.len() as f32;
 
             // BM25 formula
-            let score =
-                tf * (self.k + 1.0) / (tf + self.k * (1.0 - self.b + self.b * doc_len / self.avg_len));
+            let score = tf * (self.k + 1.0)
+                / (tf + self.k * (1.0 - self.b + self.b * doc_len / self.avg_len));
 
             (id, score)
         });
