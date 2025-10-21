@@ -192,12 +192,10 @@ const DEFAULT_ENGLISH_STOPWORDS_ARRAY: &[&str] = &[
 
 /// Default English stopwords as a HashSet, lazily initialized.
 ///
-/// This is computed once and reused across all default tokenizer instances.
-static DEFAULT_ENGLISH_STOPWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-    DEFAULT_ENGLISH_STOPWORDS_ARRAY
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+/// Uses `&'static str` for memory efficiency - cloning only copies pointers,
+/// not the underlying string data.
+static DEFAULT_ENGLISH_STOPWORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    DEFAULT_ENGLISH_STOPWORDS_ARRAY.iter().copied().collect()
 });
 
 /// Standard BM25 tokenizer with stemming and stopword filtering.
@@ -212,7 +210,7 @@ static DEFAULT_ENGLISH_STOPWORDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
 /// All fields are public for direct construction and customization.
 pub struct Bm25Tokenizer {
     pub stemmer: Stemmer,
-    pub stopwords: HashSet<String>,
+    pub stopwords: HashSet<&'static str>,
     pub token_max_length: usize,
 }
 
@@ -233,7 +231,7 @@ impl Bm25Tokenizer {
     fn remove_non_alphanumeric(&self, text: &str) -> String {
         text.chars()
             .map(|c| {
-                if c.is_alphanumeric() || c.is_whitespace() {
+                if c.is_alphanumeric() || c.is_whitespace() || c == '_' {
                     c
                 } else {
                     ' '
@@ -255,29 +253,22 @@ impl Bm25Tokenizer {
 
 impl Tokenizer for Bm25Tokenizer {
     fn tokenize(&self, text: &str) -> Vec<String> {
-        // Step 1: Remove non-alphanumeric characters
         let cleaned = self.remove_non_alphanumeric(text);
 
-        // Step 2: Lowercase and split on whitespace
         let tokens = self.simple_tokenize(&cleaned);
 
-        // Step 3-5: Filter and stem
         let mut result = Vec::new();
         for token in tokens {
-            // Skip stopwords
-            if self.stopwords.contains(&token) {
+            if self.stopwords.contains(token.as_str()) {
                 continue;
             }
 
-            // Skip tokens that are too long
             if token.len() > self.token_max_length {
                 continue;
             }
 
-            // Apply stemming
             let stemmed = self.stemmer.stem(&token).to_string();
 
-            // Only include non-empty stemmed tokens
             if !stemmed.is_empty() {
                 result.push(stemmed);
             }
