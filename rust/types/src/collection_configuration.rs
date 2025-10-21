@@ -9,7 +9,9 @@ use crate::{
     default_write_rng_factor,
 };
 use crate::{
-    HnswConfiguration, HnswParametersFromSegmentError, InternalHnswConfiguration, InternalSpannConfiguration, Metadata, Schema, Segment, SpannConfiguration, UpdateHnswConfiguration, UpdateSpannConfiguration, VectorIndexConfig, EMBEDDING_KEY
+    HnswConfiguration, HnswParametersFromSegmentError, InternalHnswConfiguration,
+    InternalSpannConfiguration, Metadata, Schema, Segment, SpannConfiguration,
+    UpdateHnswConfiguration, UpdateSpannConfiguration, VectorIndexConfig, EMBEDDING_KEY,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
