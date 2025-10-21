@@ -725,7 +725,7 @@ pub enum CreateCollectionError {
     #[error("Could not deserialize configuration: {0}")]
     Configuration(serde_json::Error),
     #[error("Could not serialize schema: {0}")]
-    Schema(#[from] SchemaError),
+    Schema(#[source] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("The operation was aborted, {0}")]
@@ -737,7 +737,7 @@ pub enum CreateCollectionError {
     #[error("Failed to parse db id")]
     DatabaseIdParseError,
     #[error("Failed to reconcile schema: {0}")]
-    InvalidSchema(String),
+    InvalidSchema(#[source] SchemaError),
 }
 
 impl ChromaError for CreateCollectionError {
@@ -755,7 +755,7 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
             CreateCollectionError::DatabaseIdParseError => ErrorCodes::Internal,
-            CreateCollectionError::InvalidSchema(_) => ErrorCodes::InvalidArgument,
+            CreateCollectionError::InvalidSchema(e) => e.code(),
             CreateCollectionError::Schema(e) => e.code(),
         }
     }
@@ -847,6 +847,8 @@ pub type GetCollectionByCrnResponse = Collection;
 
 #[derive(Debug, Error)]
 pub enum GetCollectionByCrnError {
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Collection [{0}] does not exist")]
@@ -856,6 +858,7 @@ pub enum GetCollectionByCrnError {
 impl ChromaError for GetCollectionByCrnError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GetCollectionByCrnError::InvalidSchema(e) => e.code(),
             GetCollectionByCrnError::Internal(err) => err.code(),
             GetCollectionByCrnError::NotFound(_) => ErrorCodes::NotFound,
         }
