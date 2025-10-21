@@ -28,7 +28,6 @@ sysdb:
     requests:
       cpu: '1000m'
       memory: '512Mi'
-  flags:
 rustLogService:
   image:
     repository: 'rust-log-service'
@@ -37,7 +36,7 @@ rustLogService:
     hostPath: '/local/cache/chroma-log-service'
     mountPath: '/cache/'
 heapTenderService:
-  enabled: false
+  enabled: true
   image:
     repository: 'heap-tender-service'
     tag: 'latest'

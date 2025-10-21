@@ -126,3 +126,16 @@ func (s *Server) PeekScheduleByCollectionId(ctx context.Context, req *coordinato
 
 	return res, nil
 }
+
+func (s *Server) CleanupExpiredPartialTasks(ctx context.Context, req *coordinatorpb.CleanupExpiredPartialTasksRequest) (*coordinatorpb.CleanupExpiredPartialTasksResponse, error) {
+	log.Info("CleanupExpiredPartialTasks", zap.Uint64("max_age_seconds", req.MaxAgeSeconds))
+
+	res, err := s.coordinator.CleanupExpiredPartialTasks(ctx, req)
+	if err != nil {
+		log.Error("CleanupExpiredPartialTasks failed", zap.Error(err))
+		return nil, err
+	}
+
+	log.Info("CleanupExpiredPartialTasks succeeded", zap.Uint64("cleaned_up_count", res.CleanedUpCount))
+	return res, nil
+}

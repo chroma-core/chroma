@@ -254,6 +254,24 @@ func (_m *ITaskDb) UpdateCompletionOffset(taskID uuid.UUID, taskRunNonce uuid.UU
 	return r0
 }
 
+// UpdateLowestLiveNonce provides a mock function with given fields: taskID, lowestLiveNonce
+func (_m *ITaskDb) UpdateLowestLiveNonce(taskID uuid.UUID, lowestLiveNonce uuid.UUID) error {
+	ret := _m.Called(taskID, lowestLiveNonce)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateLowestLiveNonce")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(uuid.UUID, uuid.UUID) error); ok {
+		r0 = rf(taskID, lowestLiveNonce)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // UpdateOutputCollectionID provides a mock function with given fields: taskID, outputCollectionID
 func (_m *ITaskDb) UpdateOutputCollectionID(taskID uuid.UUID, outputCollectionID *string) error {
 	ret := _m.Called(taskID, outputCollectionID)

@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"errors"
 	"math"
 	"strings"
 	"time"
@@ -18,141 +19,322 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// minimalUUIDv7 represents the smallest possible UUIDv7.
+// UUIDv7 format: [timestamp (48 bits)][version (4 bits)][random (12 bits)][variant (2 bits)][random (62 bits)]
+// This UUID has all zeros for timestamp and random bits, making it the minimal valid UUIDv7.
+// It is used as the initial value for lowest_live_nonce, guaranteed to be less than any UUIDv7 generated with current time.
+var minimalUUIDv7 = uuid.UUID{
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // timestamp = 0 (bytes 0-5)
+	0x70, 0x00, // version 7 (0x7) in high nibble, low nibble = 0 (bytes 6-7)
+	0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // variant bits + rest = 0 (bytes 8-15)
+}
+
+// validateTaskMatchesRequest validates that an existing task's parameters match the request parameters.
+// Returns an error if any parameters don't match. This is used for idempotency and race condition handling.
+func (s *Coordinator) validateTaskMatchesRequest(ctx context.Context, task *dbmodel.Task, req *coordinatorpb.CreateTaskRequest) error {
+	// Look up the operator for the existing task
+	existingOperator, err := s.catalog.metaDomain.OperatorDb(ctx).GetByID(task.OperatorID)
+	if err != nil {
+		log.Error("validateTaskMatchesRequest: failed to get task's operator", zap.Error(err))
+		return err
+	}
+	if existingOperator == nil {
+		log.Error("validateTaskMatchesRequest: task's operator not found")
+		return common.ErrOperatorNotFound
+	}
+
+	// Look up database for comparison
+	databases, err := s.catalog.metaDomain.DatabaseDb(ctx).GetDatabases(req.TenantId, req.Database)
+	if err != nil {
+		log.Error("validateTaskMatchesRequest: failed to get database for validation", zap.Error(err))
+		return err
+	}
+	if len(databases) == 0 {
+		log.Error("validateTaskMatchesRequest: database not found")
+		return common.ErrDatabaseNotFound
+	}
+
+	// Validate attributes match
+	if existingOperator.OperatorName != req.OperatorName {
+		log.Error("validateTaskMatchesRequest: task has different operator",
+			zap.String("existing", existingOperator.OperatorName),
+			zap.String("requested", req.OperatorName))
+		return status.Errorf(codes.AlreadyExists, "task already exists with different operator: existing=%s, requested=%s", existingOperator.OperatorName, req.OperatorName)
+	}
+	if task.TenantID != req.TenantId {
+		log.Error("validateTaskMatchesRequest: task has different tenant")
+		return status.Errorf(codes.AlreadyExists, "task already exists with different tenant")
+	}
+	if task.DatabaseID != databases[0].ID {
+		log.Error("validateTaskMatchesRequest: task has different database")
+		return status.Errorf(codes.AlreadyExists, "task already exists with different database")
+	}
+	if task.OutputCollectionName != req.OutputCollectionName {
+		log.Error("validateTaskMatchesRequest: task has different output collection name",
+			zap.String("existing", task.OutputCollectionName),
+			zap.String("requested", req.OutputCollectionName))
+		return status.Errorf(codes.AlreadyExists, "task already exists with different output collection: existing=%s, requested=%s", task.OutputCollectionName, req.OutputCollectionName)
+	}
+	if task.MinRecordsForTask != int64(req.MinRecordsForTask) {
+		log.Error("validateTaskMatchesRequest: task has different min_records_for_task",
+			zap.Int64("existing", task.MinRecordsForTask),
+			zap.Uint64("requested", req.MinRecordsForTask))
+		return status.Errorf(codes.AlreadyExists, "task already exists with different min_records_for_task: existing=%d, requested=%d", task.MinRecordsForTask, req.MinRecordsForTask)
+	}
+
+	return nil
+}
 
 // CreateTask creates a new task in the database
 func (s *Coordinator) CreateTask(ctx context.Context, req *coordinatorpb.CreateTaskRequest) (*coordinatorpb.CreateTaskResponse, error) {
-	// Validate task name doesn't start with soft-deletion reserved prefix
+	log := log.With(zap.String("method", "CreateTask"))
+
+	// Validate task name doesn't use reserved prefix
 	if strings.HasPrefix(req.Name, "_deleted_") {
 		log.Error("CreateTask: task name cannot start with _deleted_")
 		return nil, common.ErrInvalidTaskName
 	}
 
 	var taskID uuid.UUID
+	var needsInitialization bool
+	var nextNonce uuid.UUID       // Store next_nonce to avoid re-fetching from DB
+	var lowestLiveNonce uuid.UUID // Store lowest_live_nonce to set in Phase 3
+	var nextRun time.Time
 
-	// Execute all database operations in a transaction
-	err := s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		// Check if task already exists
-		existingTask, err := s.catalog.metaDomain.TaskDb(txCtx).GetByName(req.InputCollectionId, req.Name)
-		if err != nil {
-			log.Error("CreateTask: failed to check task", zap.Error(err))
-			return err
-		}
-		if existingTask != nil {
-			log.Error("CreateTask: task already exists", zap.String("task_name", req.Name))
-			return common.ErrTaskAlreadyExists
-		}
-
-		// Generate new task UUID
-		taskID = uuid.New()
-		outputCollectionName := req.OutputCollectionName
-
-		// Look up database_id from databases table using database name and tenant
-		databases, err := s.catalog.metaDomain.DatabaseDb(txCtx).GetDatabases(req.TenantId, req.Database)
-		if err != nil {
-			log.Error("CreateTask: failed to get database", zap.Error(err))
-			return err
-		}
-		if len(databases) == 0 {
-			log.Error("CreateTask: database not found")
-			return common.ErrDatabaseNotFound
-		}
-
-		// Look up operator by name from the operators table
-		operator, err := s.catalog.metaDomain.OperatorDb(txCtx).GetByName(req.OperatorName)
-		if err != nil {
-			log.Error("CreateTask: failed to get operator", zap.Error(err))
-			return err
-		}
-		if operator == nil {
-			log.Error("CreateTask: operator not found", zap.String("operator_name", req.OperatorName))
-			return common.ErrOperatorNotFound
-		}
-		operatorID := operator.OperatorID
-
-		// Generate UUIDv7 for time-ordered nonce
-		nextNonce, err := uuid.NewV7()
-		if err != nil {
-			return err
-		}
-
-		// TODO(tanujnay112): Can combine the two collection checks into one
-		// Check if input collection exists
-		collections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections([]string{req.InputCollectionId}, nil, req.TenantId, req.Database, nil, nil, false)
-		if err != nil {
-			log.Error("CreateTask: failed to get input collection", zap.Error(err))
-			return err
-		}
-		if len(collections) == 0 {
-			log.Error("CreateTask: input collection not found")
-			return common.ErrCollectionNotFound
-		}
-
-		// Check if output collection already exists
-		existingOutputCollections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections(nil, &outputCollectionName, req.TenantId, req.Database, nil, nil, false)
-		if err != nil {
-			log.Error("CreateTask: failed to check output collection", zap.Error(err))
-			return err
-		}
-		if len(existingOutputCollections) > 0 {
-			log.Error("CreateTask: output collection already exists")
-			return common.ErrCollectionUniqueConstraintViolation
-		}
-
-		// Serialize params from protobuf Struct to JSON string for database storage
-		var paramsJSON string
-		if req.Params != nil {
-			paramsBytes, err := req.Params.MarshalJSON()
-			if err != nil {
-				log.Error("CreateTask: failed to marshal params", zap.Error(err))
-				return err
-			}
-			paramsJSON = string(paramsBytes)
-		} else {
-			paramsJSON = "{}"
-		}
-
-		now := time.Now()
-		task := &dbmodel.Task{
-			ID:                   taskID,
-			Name:                 req.Name,
-			TenantID:             req.TenantId,
-			DatabaseID:           databases[0].ID,
-			InputCollectionID:    req.InputCollectionId,
-			OutputCollectionName: req.OutputCollectionName,
-			OperatorID:           operatorID,
-			OperatorParams:       paramsJSON,
-			CompletionOffset:     0,
-			LastRun:              nil,
-			NextRun:              now, // Initialize to current time, will be scheduled by task scheduler
-			MinRecordsForTask:    int64(req.MinRecordsForTask),
-			CurrentAttempts:      0,
-			CreatedAt:            now,
-			UpdatedAt:            now,
-			NextNonce:            nextNonce,
-			LowestLiveNonce:      &nextNonce, // Initialize to same value as NextNonce
-			OldestWrittenNonce:   nil,
-		}
-
-		// Try to insert task into database
-		err = s.catalog.metaDomain.TaskDb(txCtx).Insert(task)
-		if err != nil {
-			// Check if it's a unique constraint violation (concurrent creation)
-			if err == common.ErrTaskAlreadyExists {
-				log.Error("CreateTask: task already exists")
-				return common.ErrTaskAlreadyExists
-			}
-			log.Error("CreateTask: failed to insert task", zap.Error(err))
-			return err
-		}
-
-		log.Info("Task created successfully", zap.String("task_id", taskID.String()), zap.String("name", req.Name), zap.String("output_collection_name", outputCollectionName))
-		return nil
-	})
-
-	if err != nil {
+	// ===== Phase 0: Check if task exists (idempotency) =====
+	existingTask, err := s.catalog.metaDomain.TaskDb(ctx).GetByName(req.InputCollectionId, req.Name)
+	if err != nil && !errors.Is(err, common.ErrTaskNotReady) {
+		log.Error("CreateTask: failed to check existing task", zap.Error(err))
 		return nil, err
 	}
+
+	if existingTask != nil {
+		// Validate that existing task attributes match request parameters
+		if err := s.validateTaskMatchesRequest(ctx, existingTask, req); err != nil {
+			return nil, err
+		}
+
+		// Task exists - check if it's fully initialized
+		if existingTask.LowestLiveNonce != nil {
+			// Task is complete, return it (idempotent)
+			log.Info("CreateTask: task already exists and is initialized, returning existing task",
+				zap.String("task_id", existingTask.ID.String()),
+				zap.String("name", req.Name))
+			return &coordinatorpb.CreateTaskResponse{
+				TaskId: existingTask.ID.String(),
+			}, nil
+		}
+
+		// Task exists but not initialized (lowest_live_nonce == NULL)
+		// Continue from Phase 2, reuse the existing next_nonce
+		log.Info("CreateTask: task exists but not initialized, resuming initialization",
+			zap.String("task_id", existingTask.ID.String()),
+			zap.String("name", req.Name))
+		taskID = existingTask.ID
+		nextNonce = existingTask.NextNonce
+
+		// Generate lowestLiveNonce as minimum UUIDv7 (guaranteed < nextNonce)
+		lowestLiveNonce = minimalUUIDv7
+		nextRun = existingTask.NextRun
+
+		needsInitialization = false
+	} else {
+		// Task doesn't exist, need to create it
+		needsInitialization = true
+		taskID = uuid.New()
+	}
+
+	// ===== Phase 1: Create task with lowest_live_nonce = NULL (if needed) =====
+	if needsInitialization {
+		err = s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+			// Double-check task doesn't exist (race condition protection)
+			concurrentTask, err := s.catalog.metaDomain.TaskDb(txCtx).GetByName(req.InputCollectionId, req.Name)
+			if err != nil {
+				log.Error("CreateTask: failed to double-check task", zap.Error(err))
+				return err
+			}
+			if concurrentTask != nil {
+				// Task was created concurrently, validate it matches our request
+				log.Info("CreateTask: task created concurrently, validating parameters",
+					zap.String("task_id", concurrentTask.ID.String()))
+
+				// Validate that concurrent task matches our request
+				if err := s.validateTaskMatchesRequest(txCtx, concurrentTask, req); err != nil {
+					return err
+				}
+
+				// Validation passed, reuse the concurrent task's data
+				taskID = concurrentTask.ID
+				nextNonce = concurrentTask.NextNonce
+				nextRun = concurrentTask.NextRun
+
+				// Set lowestLiveNonce for the concurrent case
+				if concurrentTask.LowestLiveNonce != nil {
+					// Already initialized, we're done
+					lowestLiveNonce = *concurrentTask.LowestLiveNonce
+				} else {
+					// Not initialized yet, generate minimal UUIDv7
+					lowestLiveNonce = minimalUUIDv7
+				}
+				needsInitialization = false
+				return nil
+			}
+
+			// Look up database_id
+			databases, err := s.catalog.metaDomain.DatabaseDb(txCtx).GetDatabases(req.TenantId, req.Database)
+			if err != nil {
+				log.Error("CreateTask: failed to get database", zap.Error(err))
+				return err
+			}
+			if len(databases) == 0 {
+				log.Error("CreateTask: database not found")
+				return common.ErrDatabaseNotFound
+			}
+
+			// Look up operator by name
+			operator, err := s.catalog.metaDomain.OperatorDb(txCtx).GetByName(req.OperatorName)
+			if err != nil {
+				log.Error("CreateTask: failed to get operator", zap.Error(err))
+				return err
+			}
+			if operator == nil {
+				log.Error("CreateTask: operator not found", zap.String("operator_name", req.OperatorName))
+				return common.ErrOperatorNotFound
+			}
+
+			// Generate next_nonce as UUIDv7 with current time
+			nextNonce, err = uuid.NewV7()
+			if err != nil {
+				return err
+			}
+
+			// Set lowest_live_nonce to minimal UUIDv7 (guaranteed < nextNonce)
+			lowestLiveNonce = minimalUUIDv7
+
+			// Check if input collection exists
+			collections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections([]string{req.InputCollectionId}, nil, req.TenantId, req.Database, nil, nil, false)
+			if err != nil {
+				log.Error("CreateTask: failed to get input collection", zap.Error(err))
+				return err
+			}
+			if len(collections) == 0 {
+				log.Error("CreateTask: input collection not found")
+				return common.ErrCollectionNotFound
+			}
+
+			// Check if output collection already exists
+			outputCollectionName := req.OutputCollectionName
+			existingOutputCollections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections(nil, &outputCollectionName, req.TenantId, req.Database, nil, nil, false)
+			if err != nil {
+				log.Error("CreateTask: failed to check output collection", zap.Error(err))
+				return err
+			}
+			if len(existingOutputCollections) > 0 {
+				log.Error("CreateTask: output collection already exists")
+				return common.ErrCollectionUniqueConstraintViolation
+			}
+
+			// Serialize params
+			var paramsJSON string
+			if req.Params != nil {
+				paramsBytes, err := req.Params.MarshalJSON()
+				if err != nil {
+					log.Error("CreateTask: failed to marshal params", zap.Error(err))
+					return err
+				}
+				paramsJSON = string(paramsBytes)
+			} else {
+				paramsJSON = "{}"
+			}
+
+			now := time.Now()
+			task := &dbmodel.Task{
+				ID:                   taskID,
+				Name:                 req.Name,
+				TenantID:             req.TenantId,
+				DatabaseID:           databases[0].ID,
+				InputCollectionID:    req.InputCollectionId,
+				OutputCollectionName: req.OutputCollectionName,
+				OperatorID:           operator.OperatorID,
+				OperatorParams:       paramsJSON,
+				CompletionOffset:     0,
+				LastRun:              nil,
+				NextRun:              now,
+				MinRecordsForTask:    int64(req.MinRecordsForTask),
+				CurrentAttempts:      0,
+				CreatedAt:            now,
+				UpdatedAt:            now,
+				NextNonce:            nextNonce,
+				LowestLiveNonce:      nil, // **KEY: Set to NULL for 2PC**
+				OldestWrittenNonce:   nil,
+			}
+
+			nextRun = task.NextRun
+
+			err = s.catalog.metaDomain.TaskDb(txCtx).Insert(task)
+			if err != nil {
+				log.Error("CreateTask: failed to insert task", zap.Error(err))
+				return err
+			}
+
+			log.Info("CreateTask Phase 1: task created with lowest_live_nonce=NULL",
+				zap.String("task_id", taskID.String()),
+				zap.String("name", req.Name))
+			return nil
+		})
+
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Phase 2
+	// This phase runs for both new tasks and recovered incomplete tasks
+	log.Info("CreateTask Phase 2: doing initialization work",
+		zap.String("task_id", taskID.String()))
+
+	// Push initial schedule to heap service if enabled
+	if s.heapClient == nil {
+		return nil, common.ErrHeapServiceNotEnabled
+	}
+	// Create schedule for the task
+	schedule := &coordinatorpb.Schedule{
+		Triggerable: &coordinatorpb.Triggerable{
+			PartitioningUuid: req.InputCollectionId,
+			SchedulingUuid:   taskID.String(),
+		},
+		NextScheduled: timestamppb.New(nextRun),
+		Nonce:         lowestLiveNonce.String(),
+	}
+
+	err = s.heapClient.Push(ctx, req.InputCollectionId, []*coordinatorpb.Schedule{schedule})
+	if err != nil {
+		log.Error("CreateTask Phase 2: failed to push schedule to heap service",
+			zap.Error(err),
+			zap.String("task_id", taskID.String()),
+			zap.String("collection_id", req.InputCollectionId))
+		// If heap service is enabled, this is a critical failure
+		return nil, err
+	}
+
+	log.Info("CreateTask Phase 2: pushed schedule to heap service",
+		zap.String("task_id", taskID.String()),
+		zap.String("collection_id", req.InputCollectionId))
+
+	// ===== Phase 3: Update lowest_live_nonce to complete initialization =====
+	// No database fetch needed - we already have lowestLiveNonce and nextNonce from Phase 1/Recovery
+	err = s.catalog.metaDomain.TaskDb(ctx).UpdateLowestLiveNonce(taskID, lowestLiveNonce)
+	if err != nil {
+		log.Error("CreateTask Phase 3: failed to update lowest_live_nonce", zap.Error(err))
+		return nil, err
+	}
+
+	log.Info("CreateTask Phase 3: task initialization completed",
+		zap.String("task_id", taskID.String()),
+		zap.String("lowest_live_nonce", lowestLiveNonce.String()),
+		zap.String("next_nonce", nextNonce.String()))
 
 	return &coordinatorpb.CreateTaskResponse{
 		TaskId: taskID.String(),
@@ -249,12 +431,16 @@ func (s *Coordinator) GetTaskByUuid(ctx context.Context, req *coordinatorpb.GetT
 	// Fetch task by ID
 	task, err := s.catalog.metaDomain.TaskDb(ctx).GetByID(taskID)
 	if err != nil {
+		// Map ErrTaskNotReady to NotFound so it appears non-existent to clients
+		if errors.Is(err, common.ErrTaskNotReady) {
+			return nil, status.Error(codes.NotFound, "task not ready")
+		}
 		return nil, err
 	}
 
 	// If task not found, return error
 	if task == nil {
-		return nil, common.ErrTaskNotFound
+		return nil, status.Error(codes.NotFound, "task not found")
 	}
 
 	// Look up operator name from operators table
@@ -433,6 +619,11 @@ func (s *Coordinator) DeleteTask(ctx context.Context, req *coordinatorpb.DeleteT
 	// First get the task to check if we need to delete the output collection
 	task, err := s.catalog.metaDomain.TaskDb(ctx).GetByName(req.InputCollectionId, req.TaskName)
 	if err != nil {
+		// If task is not ready (lowest_live_nonce == NULL), treat it as not found
+		if errors.Is(err, common.ErrTaskNotReady) {
+			log.Error("DeleteTask: task not ready (not initialized)")
+			return nil, status.Error(codes.NotFound, "task not found")
+		}
 		log.Error("DeleteTask: failed to get task", zap.Error(err))
 		return nil, err
 	}
@@ -441,34 +632,50 @@ func (s *Coordinator) DeleteTask(ctx context.Context, req *coordinatorpb.DeleteT
 		return nil, status.Errorf(codes.NotFound, "task not found")
 	}
 
-	// If delete_output is true and output_collection_id is set, soft-delete the output collection
-	if req.DeleteOutput && task.OutputCollectionID != nil && *task.OutputCollectionID != "" {
-		collectionUUID, err := types.ToUniqueID(task.OutputCollectionID)
+	// Execute collection and task deletion in a single transaction
+	err = s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// If delete_output is true and output_collection_id is set, soft-delete the output collection
+		if req.DeleteOutput && task.OutputCollectionID != nil && *task.OutputCollectionID != "" {
+			collectionUUID, err := types.ToUniqueID(task.OutputCollectionID)
+			if err != nil {
+				log.Error("DeleteTask: invalid output_collection_id", zap.Error(err))
+				return status.Errorf(codes.InvalidArgument, "invalid output_collection_id: %v", err)
+			}
+
+			deleteCollection := &model.DeleteCollection{
+				ID:       collectionUUID,
+				TenantID: task.TenantID,
+				// Database name isn't available but also isn't needed since we supplied a collection id
+				DatabaseName: "",
+			}
+
+			err = s.SoftDeleteCollection(txCtx, deleteCollection)
+			if err != nil {
+				// If collection doesn't exist, that's fine - still delete the task
+				if errors.Is(err, common.ErrCollectionDeleteNonExistingCollection) {
+					log.Info("DeleteTask: output collection already deleted", zap.String("collection_id", *task.OutputCollectionID))
+				} else {
+					// Other errors should fail the transaction
+					log.Error("DeleteTask: failed to delete output collection", zap.Error(err), zap.String("collection_id", *task.OutputCollectionID))
+					return err
+				}
+			} else {
+				log.Info("DeleteTask: deleted output collection", zap.String("collection_id", *task.OutputCollectionID))
+			}
+		}
+
+		// Now soft-delete the task
+		err := s.catalog.metaDomain.TaskDb(txCtx).SoftDelete(req.InputCollectionId, req.TaskName)
 		if err != nil {
-			log.Error("DeleteTask: invalid output_collection_id", zap.Error(err))
-			return nil, status.Errorf(codes.InvalidArgument, "invalid output_collection_id: %v", err)
+			log.Error("DeleteTask: failed to delete task", zap.Error(err))
+			return err
 		}
 
-		deleteCollection := &model.DeleteCollection{
-			ID:       collectionUUID,
-			TenantID: task.TenantID,
-			// Database name isn't available but also isn't needed since we supplied a collection id
-			DatabaseName: "",
-		}
+		log.Info("DeleteTask: successfully deleted task", zap.String("task_name", req.TaskName))
+		return nil
+	})
 
-		err = s.SoftDeleteCollection(ctx, deleteCollection)
-		if err != nil {
-			// Log but don't fail - we still want to delete the task
-			log.Warn("DeleteTask: failed to delete output collection", zap.Error(err), zap.String("collection_id", *task.OutputCollectionID))
-		} else {
-			log.Info("DeleteTask: deleted output collection", zap.String("collection_id", *task.OutputCollectionID))
-		}
-	}
-
-	// Now soft-delete the task
-	err = s.catalog.metaDomain.TaskDb(ctx).SoftDelete(req.InputCollectionId, req.TaskName)
 	if err != nil {
-		log.Error("DeleteTask failed", zap.Error(err))
 		return nil, err
 	}
 
@@ -606,4 +813,39 @@ func (s *Coordinator) FinishTask(ctx context.Context, req *coordinatorpb.FinishT
 	}
 
 	return &coordinatorpb.FinishTaskResponse{}, nil
+}
+
+// CleanupExpiredPartialTasks finds and soft deletes tasks that were partially created
+// (lowest_live_nonce IS NULL) and are older than the specified max age.
+// This is used to clean up tasks that got stuck during the 2-phase creation process.
+func (s *Coordinator) CleanupExpiredPartialTasks(ctx context.Context, req *coordinatorpb.CleanupExpiredPartialTasksRequest) (*coordinatorpb.CleanupExpiredPartialTasksResponse, error) {
+	log := log.With(zap.String("method", "CleanupExpiredPartialTasks"))
+
+	if req.MaxAgeSeconds == 0 {
+		log.Error("CleanupExpiredPartialTasks: max_age_seconds must be greater than 0")
+		return nil, status.Errorf(codes.InvalidArgument, "max_age_seconds must be greater than 0")
+	}
+
+	log.Info("CleanupExpiredPartialTasks: starting cleanup",
+		zap.Uint64("max_age_seconds", req.MaxAgeSeconds))
+
+	cleanedTaskIDs, err := s.catalog.metaDomain.TaskDb(ctx).CleanupExpiredPartialTasks(req.MaxAgeSeconds)
+	if err != nil {
+		log.Error("CleanupExpiredPartialTasks: failed to cleanup tasks", zap.Error(err))
+		return nil, err
+	}
+
+	// Convert UUIDs to strings for response
+	cleanedTaskIDStrings := make([]string, len(cleanedTaskIDs))
+	for i, taskID := range cleanedTaskIDs {
+		cleanedTaskIDStrings[i] = taskID.String()
+	}
+
+	log.Info("CleanupExpiredPartialTasks: completed successfully",
+		zap.Uint64("cleaned_up_count", uint64(len(cleanedTaskIDs))))
+
+	return &coordinatorpb.CleanupExpiredPartialTasksResponse{
+		CleanedUpCount:   uint64(len(cleanedTaskIDs)),
+		CleanedUpTaskIds: cleanedTaskIDStrings,
+	}, nil
 }

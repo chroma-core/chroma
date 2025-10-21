@@ -285,12 +285,26 @@ mod tests {
             .await
             .unwrap();
 
+        let heap_service = get_test_heap_service().await;
         let task_initial = sysdb.get_task_by_uuid(task_id).await.unwrap();
-        let initial_nonce = task_initial.next_nonce;
+
+        let operator1 = FinishTaskOperator::new(log.clone(), sysdb.clone(), heap_service.clone());
+        let res1 = operator1
+            .run(&FinishTaskInput::new(task_initial.clone()))
+            .await;
+        assert!(res1.is_ok());
+
+        let task_finished = sysdb.get_task_by_uuid(task_id).await.unwrap();
+        assert_eq!(
+            task_finished.lowest_live_nonce.unwrap(),
+            task_finished.next_nonce
+        );
+
+        let initial_nonce = task_finished.next_nonce;
 
         // Advance the task once to set lowest_live_nonce
         sysdb
-            .advance_task(task_id, initial_nonce.0, 0, 60)
+            .advance_task(task_id, task_finished.next_nonce.0, 0, 60)
             .await
             .unwrap();
 
@@ -301,8 +315,7 @@ mod tests {
         assert_ne!(task_advanced.next_nonce, initial_nonce);
 
         let input = FinishTaskInput::new(task_advanced.clone());
-        let heap_service = get_test_heap_service().await;
-        let operator = FinishTaskOperator::new(log.clone(), sysdb.clone(), heap_service);
+        let operator = FinishTaskOperator::new(log.clone(), sysdb.clone(), heap_service.clone());
 
         // Run finish_task - should move lowest_live_nonce up to match next_nonce
         let result = operator.run(&input).await;
@@ -314,59 +327,6 @@ mod tests {
         let task_after = sysdb.get_task_by_uuid(task_id).await.unwrap();
         assert_eq!(task_after.lowest_live_nonce, Some(task_advanced.next_nonce));
         assert_eq!(task_after.next_nonce, task_advanced.next_nonce);
-    }
-
-    #[tokio::test]
-    async fn test_k8s_integration_finish_task_updates_lowest_live_nonce_from_old_value() {
-        // Setup: Task with lowest_live_nonce = A and next_nonce = B
-        let mut sysdb = get_grpc_sysdb().await;
-        let log = Log::InMemory(InMemoryLog::new());
-
-        let collection_id = setup_tenant_and_database(&mut sysdb, "test_tenant", "test_db").await;
-
-        // Create a task
-        let task_id = sysdb
-            .create_task(
-                format!("test_task_{}", Uuid::new_v4()),
-                "record_counter".to_string(),
-                collection_id,
-                format!("test_output_{}", Uuid::new_v4()),
-                serde_json::Value::Null,
-                "test_tenant".to_string(),
-                "test_db".to_string(),
-                10,
-            )
-            .await
-            .unwrap();
-
-        // Advance task once: lowest_live_nonce = A, next_nonce = B
-        let task_initial = sysdb.get_task_by_uuid(task_id).await.unwrap();
-        let nonce_a = task_initial.next_nonce;
-
-        sysdb.advance_task(task_id, nonce_a.0, 0, 60).await.unwrap();
-
-        let task_after_advance = sysdb.get_task_by_uuid(task_id).await.unwrap();
-        let nonce_b = task_after_advance.next_nonce;
-
-        // Verify initial state: lowest_live_nonce is at A, next_nonce is at B
-        assert_eq!(task_after_advance.lowest_live_nonce, Some(nonce_a));
-        assert_eq!(task_after_advance.next_nonce, nonce_b);
-        assert_ne!(nonce_a, nonce_b);
-
-        let input = FinishTaskInput::new(task_after_advance.clone());
-        let heap_service = get_test_heap_service().await;
-        let operator = FinishTaskOperator::new(log.clone(), sysdb.clone(), heap_service);
-
-        // Run finish_task
-        let result = operator.run(&input).await;
-
-        // Assert: Operation succeeded
-        assert!(result.is_ok());
-
-        // Assert: lowest_live_nonce was moved from A to B (now equals next_nonce)
-        let task_after = sysdb.get_task_by_uuid(task_id).await.unwrap();
-        assert_eq!(task_after.lowest_live_nonce, Some(nonce_b));
-        assert_eq!(task_after.next_nonce, nonce_b);
     }
 
     #[tokio::test]
