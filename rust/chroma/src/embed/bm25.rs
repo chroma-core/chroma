@@ -37,14 +37,18 @@ where
     pub avg_len: f32,
 }
 
-impl Default for BM25SparseEmbeddingFunction<Bm25Tokenizer, Murmur3AbsHasher> {
-    /// Create a default BM25 implementation using Bm25Tokenizer and Murmur3AbsHasher.
+impl BM25SparseEmbeddingFunction<Bm25Tokenizer, Murmur3AbsHasher> {
+    /// Create BM25 with default Bm25Tokenizer and Murmur3AbsHasher.
+    ///
+    /// This is the standard configuration matching Python's fastembed BM25.
     ///
     /// Default parameters:
     /// - k: 1.2 (BM25 saturation parameter)
     /// - b: 0.75 (length normalization parameter)
     /// - avg_len: 256.0 (average document length in tokens)
-    fn default() -> Self {
+    /// - tokenizer: English stemmer with 179 stopwords, 40 char token limit
+    /// - hasher: Murmur3 with seed 0, abs() behavior
+    pub fn default_murmur3_abs() -> Self {
         Self {
             tokenizer: Bm25Tokenizer::default(),
             hasher: Murmur3AbsHasher::default(),
@@ -121,7 +125,7 @@ mod tests {
     /// - Maximum token variety (12 unique tokens after processing)
     #[test]
     fn test_bm25_comprehensive_tokenization() {
-        let bm25 = BM25SparseEmbeddingFunction::default();
+        let bm25 = BM25SparseEmbeddingFunction::default_murmur3_abs();
         let text = "Usain Bolt's top speed reached ~27.8 mph (44.72 km/h)";
 
         let result = bm25.encode(text).unwrap();
@@ -149,7 +153,7 @@ mod tests {
     /// - Stemming (objects -> object)
     #[test]
     fn test_bm25_stopwords_and_punctuation() {
-        let bm25 = BM25SparseEmbeddingFunction::default();
+        let bm25 = BM25SparseEmbeddingFunction::default_murmur3_abs();
         let text = "The   space-time   continuum   WARPS   near   massive   objects...";
 
         let result = bm25.encode(text).unwrap();
