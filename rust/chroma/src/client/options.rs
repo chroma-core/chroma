@@ -56,9 +56,22 @@ impl ChromaAuthMethod {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum ChromaClientOptionsError {
+    #[error("Invalid header value: {0}")]
+    InvalidHeaderValue(#[from] InvalidHeaderValue),
+    #[error("Invalid endpoint URL: {0}")]
+    InvalidEndpoint(String),
+    #[error("Missing required configuration: {0}")]
+    MissingConfiguration(String),
+}
+
+const DEFAULT_LOCAL_ENDPOINT: &str = "http://localhost:8000";
+const DEFAULT_CLOUD_ENDPOINT: &str = "https://api.trychroma.com";
+
 #[derive(Debug, Clone)]
 pub struct ChromaClientOptions {
-    pub base_url: reqwest::Url,
+    pub endpoint: reqwest::Url,
     pub auth_method: ChromaAuthMethod,
     pub retry_options: ChromaRetryOptions,
     /// Will be automatically resolved at request time if not provided
@@ -70,7 +83,7 @@ pub struct ChromaClientOptions {
 impl Default for ChromaClientOptions {
     fn default() -> Self {
         ChromaClientOptions {
-            base_url: "https://api.trychroma.com".parse().unwrap(),
+            endpoint: DEFAULT_LOCAL_ENDPOINT.parse().expect("valid URL"),
             auth_method: ChromaAuthMethod::None,
             retry_options: ChromaRetryOptions::default(),
             tenant_id: None,
@@ -80,15 +93,56 @@ impl Default for ChromaClientOptions {
 }
 
 impl ChromaClientOptions {
-    pub fn chroma_cloud(
+    pub fn from_env() -> Result<Self, ChromaClientOptionsError> {
+        let endpoint = std::env::var("CHROMA_ENDPOINT")
+            .map(|s| s.parse())
+            .unwrap_or(Ok(ChromaClientOptions::default().endpoint))
+            .map_err(|err| ChromaClientOptionsError::InvalidEndpoint(err.to_string()))?;
+
+        let tenant_id = std::env::var("CHROMA_TENANT").unwrap_or("default_tenant".to_string());
+        let database_name =
+            std::env::var("CHROMA_DATABASE").unwrap_or("default_database".to_string());
+
+        Ok(ChromaClientOptions {
+            database_name: Some(database_name),
+            tenant_id: Some(tenant_id),
+            endpoint,
+            ..Default::default()
+        })
+    }
+
+    pub fn from_cloud_env() -> Result<Self, ChromaClientOptionsError> {
+        let endpoint = std::env::var("CHROMA_ENDPOINT")
+            .map(|s| s.parse::<reqwest::Url>())
+            .unwrap_or(Ok(DEFAULT_CLOUD_ENDPOINT.parse().expect("valid URL")))
+            .map_err(|err| ChromaClientOptionsError::InvalidEndpoint(err.to_string()))?;
+
+        let api_key = std::env::var("CHROMA_API_KEY").map_err(|_| {
+            ChromaClientOptionsError::MissingConfiguration("CHROMA_API_KEY".to_string())
+        })?;
+
+        let tenant_id = std::env::var("CHROMA_TENANT").ok();
+        let database_name = std::env::var("CHROMA_DATABASE").ok();
+
+        Ok(ChromaClientOptions {
+            database_name,
+            tenant_id,
+            endpoint,
+            auth_method: ChromaAuthMethod::cloud_api_key(&api_key)?,
+            ..Default::default()
+        })
+    }
+
+    pub fn cloud(
         api_key: impl Into<String>,
         database_name: impl Into<String>,
-    ) -> Result<Self, InvalidHeaderValue> {
+    ) -> Result<Self, ChromaClientOptionsError> {
         let api_key = api_key.into();
         let database_name = database_name.into();
         Ok(ChromaClientOptions {
             database_name: Some(database_name),
             auth_method: ChromaAuthMethod::cloud_api_key(&api_key)?,
+            endpoint: DEFAULT_CLOUD_ENDPOINT.parse().expect("valid URL"),
             ..Default::default()
         })
     }
