@@ -1065,25 +1065,20 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_create_collection() {
-        with_client(|client| async move {
+        with_client(|mut client| async move {
             let schema = Schema::default_with_embedding_function(
                 EmbeddingFunctionConfiguration::Known(EmbeddingFunctionNewConfiguration {
                     name: "bar".to_string(),
                     config: serde_json::json!({}),
                 }),
             );
-            let name = unique_collection_name("foo");
-            let collection = client
-                .create_collection(name.clone(), Some(schema.clone()), None)
+            let collection1 = client.new_collection("foo").await;
+            let collection2 = client
+                .get_or_create_collection(collection1.name(), Some(schema), None)
                 .await
                 .unwrap();
-            assert_eq!(collection.collection.name, name);
-
-            let collection = client
-                .get_or_create_collection(name.clone(), None, None)
-                .await
-                .unwrap();
-            assert_eq!(collection.schema().clone().unwrap(), schema);
+            assert_eq!(collection1.name(), collection2.name());
+            assert_eq!(collection1.schema(), collection2.schema());
         })
         .await;
     }
@@ -1091,16 +1086,10 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_get_collection() {
-        with_client(|client| async move {
-            let name = unique_collection_name("my_collection");
-
-            client
-                .create_collection(name.clone(), None, None)
-                .await
-                .unwrap();
-
-            let collection = client.get_collection(name.clone()).await.unwrap();
-
+        with_client(|mut client| async move {
+            let collection = client.new_collection("my_collection").await;
+            let name = collection.name().to_string();
+            let collection = client.get_collection(collection.name()).await.unwrap();
             assert_eq!(collection.collection.name, name);
         })
         .await;
