@@ -620,11 +620,7 @@ impl AdmissionControlledS3Storage {
                         vec![output_tx],
                     );
                     _guard = RollbackPriorityOnDrop {
-                        request: InflightRequestContext {
-                            priority_holder: priority_holder.clone(),
-                            priority_upgrade_channel: None,
-                            finished: Arc::new(AtomicBool::new(false)),
-                        },
+                        request: request.context.clone(),
                         entry_priority: options.priority,
                     };
                     requests.insert(composite_key.clone(), request);
