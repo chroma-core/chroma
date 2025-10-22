@@ -468,10 +468,10 @@ compare_category_relevance(collection, query_text, categories)
 
 {% Tab label="typescript" %}
 ```typescript
-import { Search, K, Knn } from 'chromadb';
+import { Search, K, Knn, type Collection } from 'chromadb';
 
 async function compareCategoryRelevance(
-  collection: any,
+  collection: Collection,
   queryText: string,
   categories: string[]
 ) {

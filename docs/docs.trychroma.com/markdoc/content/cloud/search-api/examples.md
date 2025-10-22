@@ -101,7 +101,7 @@ for i, product in enumerate(products, 1):
 
 {% Tab label="typescript" %}
 ```typescript
-import { Search, K, Knn } from 'chromadb';
+import { Search, K, Knn, type Collection } from 'chromadb';
 
 interface ProductSearchOptions {
   userQuery: string;
@@ -114,7 +114,7 @@ interface ProductSearchOptions {
 }
 
 async function searchProducts(
-  collection: any,
+  collection: Collection,
   options: ProductSearchOptions
 ) {
   const {
@@ -327,7 +327,7 @@ for i, rec in enumerate(recommendations, 1):
 
 {% Tab label="typescript" %}
 ```typescript
-import { Search, K, Knn, Rrf } from 'chromadb';
+import { Search, K, Knn, Rrf, type Collection } from 'chromadb';
 
 interface UserPreferences {
   interests?: string[];
@@ -338,7 +338,7 @@ interface UserPreferences {
 }
 
 async function getRecommendations(
-  collection: any,
+  collection: Collection,
   userId: string,
   userPreferences: UserPreferences,
   seenContentIds: string[],
@@ -536,10 +536,10 @@ for category, results in results_by_category.items():
 
 {% Tab label="typescript" %}
 ```typescript
-import { Search, K, Knn } from 'chromadb';
+import { Search, K, Knn, type Collection } from 'chromadb';
 
 async function searchAcrossCategories(
-  collection: any,
+  collection: Collection,
   userQuery: string,
   categories: string[],
   resultsPerCategory: number = 5

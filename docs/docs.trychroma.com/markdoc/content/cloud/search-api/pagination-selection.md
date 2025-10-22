@@ -319,12 +319,12 @@ def search_with_pagination(collection, query_text, page_size=20):
 
 {% Tab label="typescript" %}
 ```typescript
-import { Search, K, Knn } from 'chromadb';
+import { Search, K, Knn, type Collection } from 'chromadb';
 import * as readline from 'readline';
 
 // Paginated search with field selection
 async function searchWithPagination(
-  collection: any, 
+  collection: Collection, 
   queryText: string, 
   pageSize = 20
 ) {
