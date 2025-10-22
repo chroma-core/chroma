@@ -1063,7 +1063,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            let collections = client.list_collections(1024, None).await.unwrap();
+            let collections = client.list_collections(1000, None).await.unwrap();
             let names: std::collections::HashSet<_> = collections
                 .iter()
                 .map(|collection| collection.name().to_string())
