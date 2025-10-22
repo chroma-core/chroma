@@ -1428,3 +1428,47 @@ def test_sparse_auto_embedding_with_empty_documents(
     metadata = result["metadatas"][0]
     assert metadata is not None
     assert "empty_sparse" in metadata
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_default_embedding_function_when_no_schema_provided(
+    client_factories: "ClientFactories",
+) -> None:
+    """Verify that when no schema is provided, the collection uses DefaultEmbeddingFunction (not legacy)."""
+    # Create collection without providing any schema
+    collection, client = _create_isolated_collection(client_factories)
+
+    # Get the schema from the collection
+    schema = collection.schema
+    assert schema is not None
+
+    # Check the embedding key configuration
+    assert "#embedding" in schema.keys
+    embedding_override = schema.keys["#embedding"].float_list
+    assert embedding_override is not None
+    vector_index = embedding_override.vector_index
+    assert vector_index is not None
+    assert vector_index.enabled is True
+    assert vector_index.config is not None
+
+    # Get the embedding function
+    ef = vector_index.config.embedding_function
+    assert ef is not None
+
+    # Verify it's the DefaultEmbeddingFunction, not legacy
+    assert ef.name() == "default"
+
+    # Serialize the schema to JSON and verify the embedding function type
+    json_data = schema.serialize_to_json()
+    embedding_vector = json_data["keys"]["#embedding"]["float_list"]["vector_index"]
+    ef_config = embedding_vector["config"]["embedding_function"]
+
+    # Should be "known" type with name "default", NOT "legacy"
+    assert ef_config["type"] == "known"
+    assert ef_config["name"] == "default"
+
+    # Also verify the defaults have the same embedding function
+    defaults_vector = json_data["defaults"]["float_list"]["vector_index"]
+    defaults_ef_config = defaults_vector["config"]["embedding_function"]
+    assert defaults_ef_config["type"] == "known"
+    assert defaults_ef_config["name"] == "default"

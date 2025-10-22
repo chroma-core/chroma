@@ -1337,12 +1337,243 @@ impl Schema {
     }
 
     /// Check if schema is default by comparing it word-by-word with new_default
+    /// Check if schema is default by checking each field individually
     fn is_schema_default(schema: &Schema) -> bool {
-        // Compare with both possible default schemas (HNSW and SPANN)
-        let default_hnsw = Schema::new_default(KnnIndex::Hnsw);
-        let default_spann = Schema::new_default(KnnIndex::Spann);
+        // Check if defaults are default (field by field)
+        if !Self::is_value_types_default(&schema.defaults) {
+            return false;
+        }
 
-        schema == &default_hnsw || schema == &default_spann
+        // Check if keys have the expected default keys (#embedding and #document)
+        if schema.keys.len() != 2 {
+            return false;
+        }
+
+        // Check #embedding key
+        if let Some(embedding_value) = schema.keys.get(EMBEDDING_KEY) {
+            if !Self::is_embedding_value_types_default(embedding_value) {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        // Check #document key
+        if let Some(document_value) = schema.keys.get(DOCUMENT_KEY) {
+            if !Self::is_document_value_types_default(document_value) {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        true
+    }
+
+    /// Check if ValueTypes (defaults) are in default state
+    fn is_value_types_default(value_types: &ValueTypes) -> bool {
+        // Check string field
+        if let Some(string) = &value_types.string {
+            if let Some(string_inverted) = &string.string_inverted_index {
+                if !string_inverted.enabled {
+                    return false;
+                }
+                // Config is an empty struct, so no need to check it
+            } else {
+                return false;
+            }
+            if let Some(fts) = &string.fts_index {
+                if fts.enabled {
+                    return false;
+                }
+                // Config is an empty struct, so no need to check it
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        // Check float field
+        if let Some(float) = &value_types.float {
+            if let Some(float_inverted) = &float.float_inverted_index {
+                if !float_inverted.enabled {
+                    return false;
+                }
+                // Config is an empty struct, so no need to check it
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        // Check int field
+        if let Some(int) = &value_types.int {
+            if let Some(int_inverted) = &int.int_inverted_index {
+                if !int_inverted.enabled {
+                    return false;
+                }
+                // Config is an empty struct, so no need to check it
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        // Check boolean field
+        if let Some(boolean) = &value_types.boolean {
+            if let Some(bool_inverted) = &boolean.bool_inverted_index {
+                if !bool_inverted.enabled {
+                    return false;
+                }
+                // Config is an empty struct, so no need to check it
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        // Check float_list field (vector index should be disabled)
+        if let Some(float_list) = &value_types.float_list {
+            if let Some(vector_index) = &float_list.vector_index {
+                if vector_index.enabled {
+                    return false;
+                }
+                // Check that the config has default structure
+                // We allow space and embedding_function to vary, but check structure
+                if vector_index.config.source_key.is_some() {
+                    return false;
+                }
+                // Check that either hnsw or spann config is present (not both, not neither)
+                // and that the config values are default
+                match (&vector_index.config.hnsw, &vector_index.config.spann) {
+                    (Some(hnsw_config), None) => {
+                        if !hnsw_config.is_default() {
+                            return false;
+                        }
+                    }
+                    (None, Some(spann_config)) => {
+                        if !spann_config.is_default() {
+                            return false;
+                        }
+                    }
+                    _ => return false, // Both present or neither present
+                }
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        // Check sparse_vector field (should be disabled)
+        if let Some(sparse_vector) = &value_types.sparse_vector {
+            if let Some(sparse_index) = &sparse_vector.sparse_vector_index {
+                if sparse_index.enabled {
+                    return false;
+                }
+                // Check config structure (allow embedding_function to vary)
+                if sparse_index.config.source_key.is_some() {
+                    return false;
+                }
+                if sparse_index.config.bm25 != Some(false) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        true
+    }
+
+    /// Check if ValueTypes for #embedding key are in default state
+    fn is_embedding_value_types_default(value_types: &ValueTypes) -> bool {
+        // For #embedding, only float_list should be set
+        if value_types.string.is_some()
+            || value_types.float.is_some()
+            || value_types.int.is_some()
+            || value_types.boolean.is_some()
+            || value_types.sparse_vector.is_some()
+        {
+            return false;
+        }
+
+        // Check float_list field (vector index should be enabled)
+        if let Some(float_list) = &value_types.float_list {
+            if let Some(vector_index) = &float_list.vector_index {
+                if !vector_index.enabled {
+                    return false;
+                }
+                // Check that source_key is #document
+                if vector_index.config.source_key.as_deref() != Some(DOCUMENT_KEY) {
+                    return false;
+                }
+                // Check that either hnsw or spann config is present (not both, not neither)
+                // and that the config values are default
+                match (&vector_index.config.hnsw, &vector_index.config.spann) {
+                    (Some(hnsw_config), None) => {
+                        if !hnsw_config.is_default() {
+                            return false;
+                        }
+                    }
+                    (None, Some(spann_config)) => {
+                        if !spann_config.is_default() {
+                            return false;
+                        }
+                    }
+                    _ => return false, // Both present or neither present
+                }
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        true
+    }
+
+    /// Check if ValueTypes for #document key are in default state
+    fn is_document_value_types_default(value_types: &ValueTypes) -> bool {
+        // For #document, only string should be set
+        if value_types.float_list.is_some()
+            || value_types.float.is_some()
+            || value_types.int.is_some()
+            || value_types.boolean.is_some()
+            || value_types.sparse_vector.is_some()
+        {
+            return false;
+        }
+
+        // Check string field
+        if let Some(string) = &value_types.string {
+            if let Some(fts) = &string.fts_index {
+                if !fts.enabled {
+                    return false;
+                }
+                // Config is an empty struct, so no need to check it
+            } else {
+                return false;
+            }
+            if let Some(string_inverted) = &string.string_inverted_index {
+                if string_inverted.enabled {
+                    return false;
+                }
+                // Config is an empty struct, so no need to check it
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        true
     }
 
     /// Convert InternalCollectionConfiguration to Schema
@@ -2034,6 +2265,33 @@ pub struct HnswIndexConfig {
     pub resize_factor: Option<f64>,
 }
 
+impl HnswIndexConfig {
+    /// Check if this config has default values
+    /// Note: We skip num_threads as it's variable based on available_parallelism
+    pub fn is_default(&self) -> bool {
+        if self.ef_construction != Some(default_construction_ef()) {
+            return false;
+        }
+        if self.max_neighbors != Some(default_m()) {
+            return false;
+        }
+        if self.ef_search != Some(default_search_ef()) {
+            return false;
+        }
+        if self.batch_size != Some(default_batch_size()) {
+            return false;
+        }
+        if self.sync_threshold != Some(default_sync_threshold()) {
+            return false;
+        }
+        if self.resize_factor != Some(default_resize_factor()) {
+            return false;
+        }
+        // Skip num_threads check as it's system-dependent
+        true
+    }
+}
+
 /// Configuration for SPANN vector index algorithm parameters
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, Default)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -2087,6 +2345,61 @@ pub struct SpannIndexConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(max = 64))]
     pub max_neighbors: Option<usize>,
+}
+
+impl SpannIndexConfig {
+    /// Check if this config has default values
+    pub fn is_default(&self) -> bool {
+        if self.search_nprobe != Some(default_search_nprobe()) {
+            return false;
+        }
+        if self.search_rng_factor != Some(default_search_rng_factor()) {
+            return false;
+        }
+        if self.search_rng_epsilon != Some(default_search_rng_epsilon()) {
+            return false;
+        }
+        if self.nreplica_count != Some(default_nreplica_count()) {
+            return false;
+        }
+        if self.write_rng_factor != Some(default_write_rng_factor()) {
+            return false;
+        }
+        if self.write_rng_epsilon != Some(default_write_rng_epsilon()) {
+            return false;
+        }
+        if self.split_threshold != Some(default_split_threshold()) {
+            return false;
+        }
+        if self.num_samples_kmeans != Some(default_num_samples_kmeans()) {
+            return false;
+        }
+        if self.initial_lambda != Some(default_initial_lambda()) {
+            return false;
+        }
+        if self.reassign_neighbor_count != Some(default_reassign_neighbor_count()) {
+            return false;
+        }
+        if self.merge_threshold != Some(default_merge_threshold()) {
+            return false;
+        }
+        if self.num_centers_to_merge_to != Some(default_num_centers_to_merge_to()) {
+            return false;
+        }
+        if self.write_nprobe != Some(default_write_nprobe()) {
+            return false;
+        }
+        if self.ef_construction != Some(default_construction_ef_spann()) {
+            return false;
+        }
+        if self.ef_search != Some(default_search_ef_spann()) {
+            return false;
+        }
+        if self.max_neighbors != Some(default_m_spann()) {
+            return false;
+        }
+        true
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

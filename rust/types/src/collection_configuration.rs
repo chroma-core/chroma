@@ -10,7 +10,7 @@ use crate::{
 };
 use crate::{
     HnswConfiguration, HnswParametersFromSegmentError, InternalHnswConfiguration,
-    InternalSpannConfiguration, Metadata, Schema, Segment, Space, SpannConfiguration,
+    InternalSpannConfiguration, Metadata, Schema, Segment, SpannConfiguration,
     UpdateHnswConfiguration, UpdateSpannConfiguration, VectorIndexConfig, EMBEDDING_KEY,
 };
 use chroma_error::{ChromaError, ErrorCodes};
