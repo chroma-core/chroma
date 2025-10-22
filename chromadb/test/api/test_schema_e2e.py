@@ -1472,3 +1472,193 @@ def test_default_embedding_function_when_no_schema_provided(
     defaults_ef_config = defaults_vector["config"]["embedding_function"]
     assert defaults_ef_config["type"] == "known"
     assert defaults_ef_config["name"] == "default"
+
+    # Verify sparse vector has unknown embedding function when not specified
+    defaults_sparse = json_data["defaults"]["sparse_vector"]["sparse_vector_index"]
+    assert defaults_sparse is not None
+    sparse_ef_config = defaults_sparse["config"]["embedding_function"]
+    assert sparse_ef_config["type"] == "unknown"
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_custom_embedding_function_without_schema(
+    client_factories: "ClientFactories",
+) -> None:
+    """Verify that custom embedding function is reflected in schema when no schema is provided."""
+    client = client_factories.create_client_from_system()
+    client.reset()
+
+    collection_name = f"custom_ef_no_schema_{uuid4().hex}"
+
+    # Create custom embedding function
+    custom_ef = SimpleEmbeddingFunction(dim=8)
+
+    # Create collection with embedding function but no schema
+    client.create_collection(
+        name=collection_name,
+        embedding_function=custom_ef,  # type: ignore[arg-type]
+    )
+
+    # Get the collection back
+    collection = client.get_collection(
+        name=collection_name,
+        embedding_function=custom_ef,  # type: ignore[arg-type]
+    )
+
+    # Get the schema from the collection
+    schema = collection.schema
+    assert schema is not None
+
+    # Check the embedding key configuration
+    assert "#embedding" in schema.keys
+    embedding_override = schema.keys["#embedding"].float_list
+    assert embedding_override is not None
+    vector_index = embedding_override.vector_index
+    assert vector_index is not None
+    assert vector_index.enabled is True
+    assert vector_index.config is not None
+
+    # Get the embedding function from schema
+    ef = vector_index.config.embedding_function
+    assert ef is not None
+
+    # Verify it's our custom embedding function
+    assert ef.name() == "simple_ef"
+    assert ef.get_config() == {"dim": 8}
+
+    # Serialize the schema to JSON and verify
+    json_data = schema.serialize_to_json()
+    embedding_vector = json_data["keys"]["#embedding"]["float_list"]["vector_index"]
+    ef_config = embedding_vector["config"]["embedding_function"]
+
+    # Should be "known" type with name "simple_ef"
+    assert ef_config["type"] == "known"
+    assert ef_config["name"] == "simple_ef"
+    assert ef_config["config"] == {"dim": 8}
+
+    # Also verify the defaults have the same embedding function
+    defaults_vector = json_data["defaults"]["float_list"]["vector_index"]
+    defaults_ef_config = defaults_vector["config"]["embedding_function"]
+    assert defaults_ef_config["type"] == "known"
+    assert defaults_ef_config["name"] == "simple_ef"
+    assert defaults_ef_config["config"] == {"dim": 8}
+
+    # Verify the collection actually works with the custom embedding function
+    collection.add(
+        ids=["test1"],
+        documents=["test document"],
+    )
+
+    result = collection.get(ids=["test1"], include=["embeddings"])
+    assert result["embeddings"] is not None
+    # Custom EF with dim=8 should produce 8-dimensional vectors
+    assert len(result["embeddings"][0]) == 8
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_custom_embedding_function_with_default_schema(
+    client_factories: "ClientFactories",
+) -> None:
+    """Verify that custom embedding function is reflected in schema when default Schema() is provided."""
+    client = client_factories.create_client_from_system()
+    client.reset()
+
+    collection_name = f"custom_ef_default_schema_{uuid4().hex}"
+
+    # Create custom embedding function
+    custom_ef = SimpleEmbeddingFunction(dim=8)
+
+    # Create collection with embedding function and explicit default Schema()
+    client.create_collection(
+        name=collection_name,
+        embedding_function=custom_ef,  # type: ignore[arg-type]
+        schema=Schema(),  # Explicit default schema
+    )
+
+    # Get the collection back
+    collection = client.get_collection(
+        name=collection_name,
+        embedding_function=custom_ef,  # type: ignore[arg-type]
+    )
+
+    # Get the schema from the collection
+    schema = collection.schema
+    assert schema is not None
+
+    # Check the embedding key configuration
+    assert "#embedding" in schema.keys
+    embedding_override = schema.keys["#embedding"].float_list
+    assert embedding_override is not None
+    vector_index = embedding_override.vector_index
+    assert vector_index is not None
+    assert vector_index.enabled is True
+    assert vector_index.config is not None
+
+    # Get the embedding function from schema
+    ef = vector_index.config.embedding_function
+    assert ef is not None
+
+    # Verify it's our custom embedding function
+    assert ef.name() == "simple_ef"
+    assert ef.get_config() == {"dim": 8}
+
+    # Serialize the schema to JSON and verify
+    json_data = schema.serialize_to_json()
+    embedding_vector = json_data["keys"]["#embedding"]["float_list"]["vector_index"]
+    ef_config = embedding_vector["config"]["embedding_function"]
+
+    # Should be "known" type with name "simple_ef"
+    assert ef_config["type"] == "known"
+    assert ef_config["name"] == "simple_ef"
+    assert ef_config["config"] == {"dim": 8}
+
+    # Also verify the defaults have the same embedding function
+    defaults_vector = json_data["defaults"]["float_list"]["vector_index"]
+    defaults_ef_config = defaults_vector["config"]["embedding_function"]
+    assert defaults_ef_config["type"] == "known"
+    assert defaults_ef_config["name"] == "simple_ef"
+    assert defaults_ef_config["config"] == {"dim": 8}
+
+    # Verify the collection actually works with the custom embedding function
+    collection.add(
+        ids=["test1"],
+        documents=["test document"],
+    )
+
+    result = collection.get(ids=["test1"], include=["embeddings"])
+    assert result["embeddings"] is not None
+    # Custom EF with dim=8 should produce 8-dimensional vectors
+    assert len(result["embeddings"][0]) == 8
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_conflicting_embedding_functions_in_schema_and_config_fails(
+    client_factories: "ClientFactories",
+) -> None:
+    """Verify that setting different custom embedding functions in schema and config fails."""
+    client = client_factories.create_client_from_system()
+    client.reset()
+
+    collection_name = f"conflict_ef_{uuid4().hex}"
+
+    # Create two different custom embedding functions
+    config_ef = SimpleEmbeddingFunction(dim=4)
+    schema_ef = SimpleEmbeddingFunction(dim=6)
+
+    # Create a schema with its own custom embedding function
+    schema = Schema().create_index(
+        config=VectorIndexConfig(embedding_function=schema_ef)
+    )
+
+    # Attempting to create collection with different embedding functions in both
+    # schema and config should fail
+    with pytest.raises(Exception) as exc_info:
+        client.create_collection(
+            name=collection_name,
+            embedding_function=config_ef,  # type: ignore[arg-type]
+            schema=schema,
+        )
+
+    # Verify the error message indicates the conflict
+    error_msg = str(exc_info.value)
+    assert "schema" in error_msg.lower() or "conflict" in error_msg.lower()

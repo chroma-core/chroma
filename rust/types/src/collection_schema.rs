@@ -552,7 +552,7 @@ impl Schema {
                 sparse_vector_index: Some(SparseVectorIndexType {
                     enabled: false,
                     config: SparseVectorIndexConfig {
-                        embedding_function: None,
+                        embedding_function: Some(EmbeddingFunctionConfiguration::Unknown),
                         source_key: None,
                         bm25: Some(false),
                     },
