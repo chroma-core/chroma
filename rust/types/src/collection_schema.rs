@@ -1064,6 +1064,14 @@ impl InternalSchema {
         schema: Option<&InternalSchema>,
         configuration: Option<&InternalCollectionConfiguration>,
     ) -> Result<InternalSchema, String> {
+        // Early validation: check if both user-provided schema and config are non-default
+        if let (Some(user_schema), Some(config)) = (schema, configuration) {
+            if !user_schema.is_default() && !config.is_default() {
+                let error_message =
+                    "Schema and configuration are both provided but conflict".to_string();
+                return Err(error_message);
+            }
+        }
         let reconciled_schema = Self::reconcile_with_defaults(schema)?;
         if let Some(config) = configuration {
             Self::reconcile_with_collection_config(&reconciled_schema, config)
