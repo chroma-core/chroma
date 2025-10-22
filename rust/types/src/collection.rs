@@ -232,11 +232,9 @@ impl Collection {
 impl Collection {
     /// Reconcile the collection schema and configuration, ensuring both are consistent.
     pub fn reconcile_schema_with_config(&mut self) -> Result<(), SchemaError> {
-        let reconciled_schema = InternalSchema::reconcile_schema_and_config(
-            self.schema.clone(),
-            Some(self.config.clone()),
-        )
-        .map_err(|reason| SchemaError::InvalidSchema { reason })?;
+        let reconciled_schema =
+            InternalSchema::reconcile_schema_and_config(self.schema.as_ref(), Some(&self.config))
+                .map_err(|reason| SchemaError::InvalidSchema { reason })?;
 
         self.config = InternalCollectionConfiguration::try_from(&reconciled_schema)
             .map_err(|reason| SchemaError::InvalidSchema { reason })?;

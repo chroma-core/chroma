@@ -112,8 +112,8 @@ impl SpannSegmentWriter {
         }
 
         let reconciled_schema = InternalSchema::reconcile_schema_and_config(
-            collection.schema.clone(),
-            Some(collection.config.clone()),
+            collection.schema.as_ref(),
+            Some(&collection.config),
         )
         .map_err(|e| {
             SpannSegmentWriterError::InvalidSchema(SchemaError::InvalidSchema { reason: e })
@@ -690,7 +690,7 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+            InternalSchema::reconcile_schema_and_config(None, Some(&collection.config))
                 .expect("Error reconciling schema for test collection"),
         );
 
@@ -927,7 +927,7 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+            InternalSchema::reconcile_schema_and_config(None, Some(&collection.config))
                 .expect("Error reconciling schema for test collection"),
         );
 
@@ -1089,7 +1089,7 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+            InternalSchema::reconcile_schema_and_config(None, Some(&collection.config))
                 .expect("Error reconciling schema for test collection"),
         );
 
@@ -1220,7 +1220,7 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+            InternalSchema::reconcile_schema_and_config(None, Some(&collection.config))
                 .expect("Error reconciling schema for test collection"),
         );
 

@@ -186,8 +186,8 @@ impl CollectionsWithSegmentsProvider {
 
         // reconcile schema and config
         let reconciled_schema = InternalSchema::reconcile_schema_and_config(
-            collection_and_segments_sysdb.collection.schema.clone(),
-            Some(collection_and_segments_sysdb.collection.config.clone()),
+            collection_and_segments_sysdb.collection.schema.as_ref(),
+            Some(&collection_and_segments_sysdb.collection.config),
         )
         .map_err(|reason| {
             CollectionsWithSegmentsProviderError::InvalidSchema(SchemaError::InvalidSchema {
