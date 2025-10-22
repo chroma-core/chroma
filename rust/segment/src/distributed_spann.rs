@@ -111,9 +111,15 @@ impl SpannSegmentWriter {
             return Err(SpannSegmentWriterError::InvalidArgument);
         }
 
+<<<<<<< HEAD
         let reconciled_schema = InternalSchema::reconcile_schema_and_config(
             collection.schema.clone(),
             Some(collection.config.clone()),
+=======
+        let reconciled_schema = Schema::reconcile_schema_and_config(
+            collection.schema.as_ref(),
+            Some(&collection.config),
+>>>>>>> c9e365295 ([BUG]: Populate ef and space from config if schema is none (#5704))
         )
         .map_err(|e| {
             SpannSegmentWriterError::InvalidSchema(SchemaError::InvalidSchema { reason: e })
@@ -690,7 +696,11 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
+<<<<<<< HEAD
             InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+=======
+            Schema::reconcile_schema_and_config(None, Some(&collection.config))
+>>>>>>> c9e365295 ([BUG]: Populate ef and space from config if schema is none (#5704))
                 .expect("Error reconciling schema for test collection"),
         );
 
@@ -927,7 +937,11 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
+<<<<<<< HEAD
             InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+=======
+            Schema::reconcile_schema_and_config(None, Some(&collection.config))
+>>>>>>> c9e365295 ([BUG]: Populate ef and space from config if schema is none (#5704))
                 .expect("Error reconciling schema for test collection"),
         );
 
@@ -1089,7 +1103,11 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
+<<<<<<< HEAD
             InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+=======
+            Schema::reconcile_schema_and_config(None, Some(&collection.config))
+>>>>>>> c9e365295 ([BUG]: Populate ef and space from config if schema is none (#5704))
                 .expect("Error reconciling schema for test collection"),
         );
 
@@ -1220,7 +1238,11 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
+<<<<<<< HEAD
             InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+=======
+            Schema::reconcile_schema_and_config(None, Some(&collection.config))
+>>>>>>> c9e365295 ([BUG]: Populate ef and space from config if schema is none (#5704))
                 .expect("Error reconciling schema for test collection"),
         );
 

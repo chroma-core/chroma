@@ -872,3 +872,793 @@ def test_schema_precedence_for_overrides_discoverables_and_defaults(
 
     with pytest.raises(Exception):
         collection.get(where={"discover_key": "discover_5"})
+<<<<<<< HEAD
+=======
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_sparse_auto_embedding_with_document_source_no_metadata(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test sparse embedding auto-generation using #document as source with no metadata."""
+    sparse_ef = DeterministicSparseEmbeddingFunction(label="doc_no_meta")
+
+    schema = Schema().create_index(
+        key="auto_sparse",
+        config=SparseVectorIndexConfig(
+            source_key="#document",
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    # Add documents without metadata
+    collection.add(
+        ids=["doc1", "doc2", "doc3"],
+        documents=["hello world", "test document", "short"],
+    )
+
+    # Verify sparse embeddings were auto-generated in metadata
+    result = collection.get(ids=["doc1", "doc2", "doc3"], include=["metadatas"])
+    assert result["metadatas"] is not None
+
+    # Expected embeddings from batched call (indices will be [0, 1, 2])
+    expected_batch = sparse_ef(["hello world", "test document", "short"])
+
+    for i, doc_id in enumerate(["doc1", "doc2", "doc3"]):
+        metadata = result["metadatas"][i]
+        assert metadata is not None
+        assert "auto_sparse" in metadata
+
+        # Verify the sparse embedding matches expected output from batch
+        actual = cast(SparseVector, metadata["auto_sparse"])
+        assert actual.indices == expected_batch[i].indices
+        assert actual.values == expected_batch[i].values
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_sparse_auto_embedding_with_document_source_and_metadata(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test sparse embedding with #document source when metadata is also provided."""
+    sparse_ef = DeterministicSparseEmbeddingFunction(label="doc_with_meta")
+
+    schema = Schema().create_index(
+        key="doc_sparse",
+        config=SparseVectorIndexConfig(
+            source_key="#document",
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    # Add documents with metadata
+    collection.add(
+        ids=["m1", "m2"],
+        documents=["alpha", "beta"],
+        metadatas=[
+            {"category": "test", "value": 42},
+            {"category": "prod", "value": 99},
+        ],
+    )
+
+    result = collection.get(ids=["m1", "m2"], include=["metadatas"])
+    assert result["metadatas"] is not None
+
+    # Verify original metadata is preserved
+    assert result["metadatas"][0]["category"] == "test"
+    assert result["metadatas"][0]["value"] == 42
+    assert result["metadatas"][1]["category"] == "prod"
+    assert result["metadatas"][1]["value"] == 99
+
+    # Verify sparse embeddings were added
+    assert "doc_sparse" in result["metadatas"][0]
+    assert "doc_sparse" in result["metadatas"][1]
+
+    # Expected from batch call
+    expected_batch = sparse_ef(["alpha", "beta"])
+    actual_m1 = cast(SparseVector, result["metadatas"][0]["doc_sparse"])
+    assert actual_m1.indices == expected_batch[0].indices
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_sparse_auto_embedding_with_metadata_source_key(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test sparse embedding using a metadata field as source."""
+    sparse_ef = DeterministicSparseEmbeddingFunction(label="meta_source")
+
+    schema = Schema().create_index(
+        key="content_sparse",
+        config=SparseVectorIndexConfig(
+            source_key="content",
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    # Add with source field in metadata
+    collection.add(
+        ids=["s1", "s2", "s3"],
+        documents=["doc1", "doc2", "doc3"],
+        metadatas=[
+            {"content": "sparse content one"},
+            {"content": "sparse content two"},
+            {"content": "sparse content three"},
+        ],
+    )
+
+    result = collection.get(ids=["s1", "s2", "s3"], include=["metadatas"])
+    assert result["metadatas"] is not None
+
+    # Expected from batch call
+    expected_batch = sparse_ef(
+        ["sparse content one", "sparse content two", "sparse content three"]
+    )
+
+    for i in range(3):
+        metadata = result["metadatas"][i]
+        assert metadata is not None
+        assert "content_sparse" in metadata
+
+        # Original content field should still exist
+        assert "content" in metadata
+
+        # Verify sparse embedding was generated from content field
+        actual = cast(SparseVector, metadata["content_sparse"])
+        assert actual.indices == expected_batch[i].indices
+        assert actual.values == expected_batch[i].values
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_sparse_auto_embedding_with_mixed_metadata_none_and_filled(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test sparse embedding with mixed metadata (None, empty, filled)."""
+    sparse_ef = DeterministicSparseEmbeddingFunction(label="mixed_meta")
+
+    schema = Schema().create_index(
+        key="mixed_sparse",
+        config=SparseVectorIndexConfig(
+            source_key="#document",
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    # Add with None metadata items mixed in
+    collection.add(
+        ids=["n1", "n2", "n3", "n4"],
+        documents=["doc one", "doc two", "doc three", "doc four"],
+        metadatas=[
+            None,  # type: ignore
+            None,  # type: ignore
+            {"existing": "data"},  # Filled metadata
+            None,  # type: ignore
+        ],
+    )
+
+    result = collection.get(ids=["n1", "n2", "n3", "n4"], include=["metadatas"])
+    assert result["metadatas"] is not None
+
+    # Expected from batch call
+    expected_batch = sparse_ef(["doc one", "doc two", "doc three", "doc four"])
+
+    # All should have sparse embeddings added
+    for i, metadata in enumerate(result["metadatas"]):
+        assert metadata is not None
+        assert "mixed_sparse" in metadata
+
+        # Verify correct embedding for each document
+        actual = cast(SparseVector, metadata["mixed_sparse"])
+        assert actual.indices == expected_batch[i].indices
+
+    # Third one should still have existing data
+    assert result["metadatas"][2]["existing"] == "data"
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_sparse_auto_embedding_skips_existing_values(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test that sparse auto-embedding doesn't overwrite existing values."""
+    sparse_ef = DeterministicSparseEmbeddingFunction(label="preserve")
+
+    schema = Schema().create_index(
+        key="preserve_sparse",
+        config=SparseVectorIndexConfig(
+            source_key="#document",
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    # Pre-create a sparse vector
+    existing_sparse = SparseVector(indices=[999], values=[123.456])
+
+    collection.add(
+        ids=["preserve1", "preserve2"],
+        documents=["auto document", "manual document"],
+        metadatas=[
+            None,  # type: ignore
+            {"preserve_sparse": existing_sparse},  # Should be preserved
+        ],
+    )
+
+    result = collection.get(ids=["preserve1", "preserve2"], include=["metadatas"])
+    assert result["metadatas"] is not None
+
+    # First should have auto-generated embedding (only one doc was auto-embedded)
+    auto_meta = result["metadatas"][0]
+    assert auto_meta is not None
+    assert "preserve_sparse" in auto_meta
+    expected_auto = sparse_ef(["auto document"])[0]  # Single item batch
+    actual_auto = cast(SparseVector, auto_meta["preserve_sparse"])
+    assert actual_auto.indices == expected_auto.indices
+
+    # Second should preserve the manually provided one
+    manual_meta = result["metadatas"][1]
+    assert manual_meta is not None
+    actual_manual = cast(SparseVector, manual_meta["preserve_sparse"])
+    assert actual_manual.indices == [999]
+    assert actual_manual.values == [123.456]
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_sparse_auto_embedding_with_missing_source_field(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test sparse embedding when source metadata field is missing or wrong type."""
+    sparse_ef = DeterministicSparseEmbeddingFunction(label="missing_field")
+
+    schema = Schema().create_index(
+        key="field_sparse",
+        config=SparseVectorIndexConfig(
+            source_key="text_field",
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    collection.add(
+        ids=["f1", "f2", "f3", "f4"],
+        documents=["doc1", "doc2", "doc3", "doc4"],
+        metadatas=[
+            {"text_field": "valid text"},  # Valid string
+            {"text_field": 123},  # Wrong type (int)
+            {"other_field": "value"},  # Missing source field
+            None,  # type: ignore
+        ],
+    )
+
+    result = collection.get(ids=["f1", "f2", "f3", "f4"], include=["metadatas"])
+    assert result["metadatas"] is not None
+
+    # Only first one should have sparse embedding (single item batch)
+    assert "field_sparse" in result["metadatas"][0]
+    expected = sparse_ef(["valid text"])[0]  # Single item batch
+    actual = cast(SparseVector, result["metadatas"][0]["field_sparse"])
+    assert actual.indices == expected.indices
+
+    # Others should NOT have sparse embedding
+    assert "field_sparse" not in result["metadatas"][1]
+    assert "field_sparse" not in result["metadatas"][2]
+    assert result["metadatas"][3] is None  # No metadata provided, stays None
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_sparse_auto_embedding_with_string_inverted_index(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test sparse auto-embedding works alongside string inverted indexes."""
+    sparse_ef = DeterministicSparseEmbeddingFunction(label="with_string_index")
+
+    schema = Schema()
+    schema.create_index(
+        key="category",
+        config=StringInvertedIndexConfig(),
+    )
+    schema.create_index(
+        key="sparse_field",
+        config=SparseVectorIndexConfig(
+            source_key="custom_text",
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    collection.add(
+        ids=["multi1", "multi2"],
+        documents=["main document", "another document"],
+        metadatas=[
+            {"custom_text": "field content", "category": "cat1"},
+            {"custom_text": "different content", "category": "cat2"},
+        ],
+    )
+
+    result = collection.get(ids=["multi1", "multi2"], include=["metadatas"])
+    assert result["metadatas"] is not None
+
+    # Expected from batch call
+    expected_batch = sparse_ef(["field content", "different content"])
+
+    for i, metadata in enumerate(result["metadatas"]):
+        assert metadata is not None
+
+        # Sparse embedding should be present
+        assert "sparse_field" in metadata
+
+        # Verify sparse embedding uses custom_text field
+        actual_field = cast(SparseVector, metadata["sparse_field"])
+        assert actual_field.indices == expected_batch[i].indices
+
+        # Category should be searchable
+        assert "category" in metadata
+
+    # Test filtering with string inverted index
+    filtered = collection.get(where={"category": "cat1"})
+    assert set(filtered["ids"]) == {"multi1"}
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_dense_and_sparse_auto_embeddings_together(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test that dense and sparse auto-embeddings work together."""
+    dense_ef = SimpleEmbeddingFunction(dim=4)
+    sparse_ef = DeterministicSparseEmbeddingFunction(label="with_dense")
+
+    schema = Schema()
+    schema.create_index(config=VectorIndexConfig(embedding_function=dense_ef))
+    schema.create_index(
+        key="sparse_key",
+        config=SparseVectorIndexConfig(
+            source_key="#document",
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        schema=schema,
+        embedding_function=dense_ef,
+    )
+
+    collection.add(
+        ids=["both1", "both2"],
+        documents=["combined document", "another doc"],
+    )
+
+    result = collection.get(
+        ids=["both1", "both2"],
+        include=["embeddings", "metadatas"],
+    )
+
+    # Verify dense embeddings
+    assert result["embeddings"] is not None
+    assert len(result["embeddings"]) == 2
+    assert len(result["embeddings"][0]) == 4
+
+    # Verify sparse embeddings in metadata
+    assert result["metadatas"] is not None
+    for metadata in result["metadatas"]:
+        assert metadata is not None
+        assert "sparse_key" in metadata
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_sparse_auto_embedding_with_update_and_upsert(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test sparse auto-embedding with update and upsert operations."""
+    sparse_ef = DeterministicSparseEmbeddingFunction(label="update_upsert")
+
+    schema = Schema().create_index(
+        key="update_sparse",
+        config=SparseVectorIndexConfig(
+            source_key="#document",
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    # Initial add
+    collection.add(
+        ids=["up1"],
+        documents=["original doc"],
+    )
+
+    # Update with new document
+    collection.update(
+        ids=["up1"],
+        documents=["updated doc"],
+    )
+
+    result_update = collection.get(ids=["up1"], include=["metadatas", "documents"])
+    assert result_update["metadatas"] is not None
+    assert result_update["documents"] is not None
+    assert result_update["documents"][0] == "updated doc"
+    assert "update_sparse" in result_update["metadatas"][0]
+
+    # Verify sparse embedding matches updated document (single item batch)
+    expected = sparse_ef(["updated doc"])[0]
+    actual = cast(SparseVector, result_update["metadatas"][0]["update_sparse"])
+    assert actual.indices == expected.indices
+
+    # Upsert new document
+    collection.upsert(
+        ids=["up2"],
+        documents=["upserted doc"],
+    )
+
+    result_upsert = collection.get(ids=["up2"], include=["metadatas"])
+    assert result_upsert["metadatas"] is not None
+    assert "update_sparse" in result_upsert["metadatas"][0]
+
+    # Single item batch
+    expected_upsert = sparse_ef(["upserted doc"])[0]
+    actual_upsert = cast(SparseVector, result_upsert["metadatas"][0]["update_sparse"])
+    assert actual_upsert.indices == expected_upsert.indices
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_sparse_auto_embedding_persistence_across_client_reload(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test that sparse auto-embedding config persists across client reloads."""
+    sparse_ef = DeterministicSparseEmbeddingFunction(label="persist_test")
+
+    schema = Schema().create_index(
+        key="persist_sparse",
+        config=SparseVectorIndexConfig(
+            source_key="#document",
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection, client = _create_isolated_collection(client_factories, schema=schema)
+    collection_name = collection.name
+
+    collection.add(
+        ids=["persist1"],
+        documents=["persistent document"],
+    )
+
+    # Reload client
+    reloaded_client = client_factories.create_client_from_system()
+    reloaded_collection = reloaded_client.get_collection(
+        name=collection_name,
+    )
+
+    # Verify schema persisted
+    assert reloaded_collection.schema is not None
+    assert "persist_sparse" in reloaded_collection.schema.keys
+
+    # Add new document with reloaded collection
+    reloaded_collection.add(
+        ids=["persist2"],
+        documents=["new document after reload"],
+    )
+
+    # Verify both documents have sparse embeddings
+    result = reloaded_collection.get(
+        ids=["persist1", "persist2"],
+        include=["metadatas"],
+    )
+    assert result["metadatas"] is not None
+    assert "persist_sparse" in result["metadatas"][0]
+    assert "persist_sparse" in result["metadatas"][1]
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_sparse_auto_embedding_with_batch_operations(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test sparse auto-embedding with large batch of documents."""
+    sparse_ef = DeterministicSparseEmbeddingFunction(label="batch_test")
+
+    schema = Schema().create_index(
+        key="batch_sparse",
+        config=SparseVectorIndexConfig(
+            source_key="#document",
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    # Add large batch
+    batch_size = 100
+    ids = [f"batch-{i}" for i in range(batch_size)]
+    documents = [f"document number {i}" for i in range(batch_size)]
+
+    collection.add(ids=ids, documents=documents)
+
+    # Verify all have sparse embeddings
+    result = collection.get(ids=ids[:10], include=["metadatas"])
+    assert result["metadatas"] is not None
+
+    # Expected from batch call (batch of 100, we check first 10)
+    expected_batch = sparse_ef(documents)
+
+    for i, metadata in enumerate(result["metadatas"]):
+        assert metadata is not None
+        assert "batch_sparse" in metadata
+
+        actual = cast(SparseVector, metadata["batch_sparse"])
+        assert actual.indices == expected_batch[i].indices
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_sparse_auto_embedding_with_empty_documents(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test sparse auto-embedding handles empty/None documents gracefully."""
+    sparse_ef = DeterministicSparseEmbeddingFunction(label="empty_test")
+
+    schema = Schema().create_index(
+        key="empty_sparse",
+        config=SparseVectorIndexConfig(
+            source_key="#document",
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    # Add with empty string document
+    collection.add(
+        ids=["empty1"],
+        documents=[""],
+    )
+
+    result = collection.get(ids=["empty1"], include=["metadatas"])
+    assert result["metadatas"] is not None
+
+    # Should still generate sparse embedding (empty vector)
+    metadata = result["metadatas"][0]
+    assert metadata is not None
+    assert "empty_sparse" in metadata
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_default_embedding_function_when_no_schema_provided(
+    client_factories: "ClientFactories",
+) -> None:
+    """Verify that when no schema is provided, the collection uses DefaultEmbeddingFunction (not legacy)."""
+    # Create collection without providing any schema
+    collection, client = _create_isolated_collection(client_factories)
+
+    # Get the schema from the collection
+    schema = collection.schema
+    assert schema is not None
+
+    # Check the embedding key configuration
+    assert "#embedding" in schema.keys
+    embedding_override = schema.keys["#embedding"].float_list
+    assert embedding_override is not None
+    vector_index = embedding_override.vector_index
+    assert vector_index is not None
+    assert vector_index.enabled is True
+    assert vector_index.config is not None
+
+    # Get the embedding function
+    ef = vector_index.config.embedding_function
+    assert ef is not None
+
+    # Verify it's the DefaultEmbeddingFunction, not legacy
+    assert ef.name() == "default"
+
+    # Serialize the schema to JSON and verify the embedding function type
+    json_data = schema.serialize_to_json()
+    embedding_vector = json_data["keys"]["#embedding"]["float_list"]["vector_index"]
+    ef_config = embedding_vector["config"]["embedding_function"]
+
+    # Should be "known" type with name "default", NOT "legacy"
+    assert ef_config["type"] == "known"
+    assert ef_config["name"] == "default"
+
+    # Also verify the defaults have the same embedding function
+    defaults_vector = json_data["defaults"]["float_list"]["vector_index"]
+    defaults_ef_config = defaults_vector["config"]["embedding_function"]
+    assert defaults_ef_config["type"] == "known"
+    assert defaults_ef_config["name"] == "default"
+
+    # Verify sparse vector has unknown embedding function when not specified
+    defaults_sparse = json_data["defaults"]["sparse_vector"]["sparse_vector_index"]
+    assert defaults_sparse is not None
+    sparse_ef_config = defaults_sparse["config"]["embedding_function"]
+    assert sparse_ef_config["type"] == "unknown"
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_custom_embedding_function_without_schema(
+    client_factories: "ClientFactories",
+) -> None:
+    """Verify that custom embedding function is reflected in schema when no schema is provided."""
+    client = client_factories.create_client_from_system()
+    client.reset()
+
+    collection_name = f"custom_ef_no_schema_{uuid4().hex}"
+
+    # Create custom embedding function
+    custom_ef = SimpleEmbeddingFunction(dim=8)
+
+    # Create collection with embedding function but no schema
+    client.create_collection(
+        name=collection_name,
+        embedding_function=custom_ef,  # type: ignore[arg-type]
+    )
+
+    # Get the collection back
+    collection = client.get_collection(
+        name=collection_name,
+        embedding_function=custom_ef,  # type: ignore[arg-type]
+    )
+
+    # Get the schema from the collection
+    schema = collection.schema
+    assert schema is not None
+
+    # Check the embedding key configuration
+    assert "#embedding" in schema.keys
+    embedding_override = schema.keys["#embedding"].float_list
+    assert embedding_override is not None
+    vector_index = embedding_override.vector_index
+    assert vector_index is not None
+    assert vector_index.enabled is True
+    assert vector_index.config is not None
+
+    # Get the embedding function from schema
+    ef = vector_index.config.embedding_function
+    assert ef is not None
+
+    # Verify it's our custom embedding function
+    assert ef.name() == "simple_ef"
+    assert ef.get_config() == {"dim": 8}
+
+    # Serialize the schema to JSON and verify
+    json_data = schema.serialize_to_json()
+    embedding_vector = json_data["keys"]["#embedding"]["float_list"]["vector_index"]
+    ef_config = embedding_vector["config"]["embedding_function"]
+
+    # Should be "known" type with name "simple_ef"
+    assert ef_config["type"] == "known"
+    assert ef_config["name"] == "simple_ef"
+    assert ef_config["config"] == {"dim": 8}
+
+    # Also verify the defaults have the same embedding function
+    defaults_vector = json_data["defaults"]["float_list"]["vector_index"]
+    defaults_ef_config = defaults_vector["config"]["embedding_function"]
+    assert defaults_ef_config["type"] == "known"
+    assert defaults_ef_config["name"] == "simple_ef"
+    assert defaults_ef_config["config"] == {"dim": 8}
+
+    # Verify the collection actually works with the custom embedding function
+    collection.add(
+        ids=["test1"],
+        documents=["test document"],
+    )
+
+    result = collection.get(ids=["test1"], include=["embeddings"])
+    assert result["embeddings"] is not None
+    # Custom EF with dim=8 should produce 8-dimensional vectors
+    assert len(result["embeddings"][0]) == 8
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_custom_embedding_function_with_default_schema(
+    client_factories: "ClientFactories",
+) -> None:
+    """Verify that custom embedding function is reflected in schema when default Schema() is provided."""
+    client = client_factories.create_client_from_system()
+    client.reset()
+
+    collection_name = f"custom_ef_default_schema_{uuid4().hex}"
+
+    # Create custom embedding function
+    custom_ef = SimpleEmbeddingFunction(dim=8)
+
+    # Create collection with embedding function and explicit default Schema()
+    client.create_collection(
+        name=collection_name,
+        embedding_function=custom_ef,  # type: ignore[arg-type]
+        schema=Schema(),  # Explicit default schema
+    )
+
+    # Get the collection back
+    collection = client.get_collection(
+        name=collection_name,
+        embedding_function=custom_ef,  # type: ignore[arg-type]
+    )
+
+    # Get the schema from the collection
+    schema = collection.schema
+    assert schema is not None
+
+    # Check the embedding key configuration
+    assert "#embedding" in schema.keys
+    embedding_override = schema.keys["#embedding"].float_list
+    assert embedding_override is not None
+    vector_index = embedding_override.vector_index
+    assert vector_index is not None
+    assert vector_index.enabled is True
+    assert vector_index.config is not None
+
+    # Get the embedding function from schema
+    ef = vector_index.config.embedding_function
+    assert ef is not None
+
+    # Verify it's our custom embedding function
+    assert ef.name() == "simple_ef"
+    assert ef.get_config() == {"dim": 8}
+
+    # Serialize the schema to JSON and verify
+    json_data = schema.serialize_to_json()
+    embedding_vector = json_data["keys"]["#embedding"]["float_list"]["vector_index"]
+    ef_config = embedding_vector["config"]["embedding_function"]
+
+    # Should be "known" type with name "simple_ef"
+    assert ef_config["type"] == "known"
+    assert ef_config["name"] == "simple_ef"
+    assert ef_config["config"] == {"dim": 8}
+
+    # Also verify the defaults have the same embedding function
+    defaults_vector = json_data["defaults"]["float_list"]["vector_index"]
+    defaults_ef_config = defaults_vector["config"]["embedding_function"]
+    assert defaults_ef_config["type"] == "known"
+    assert defaults_ef_config["name"] == "simple_ef"
+    assert defaults_ef_config["config"] == {"dim": 8}
+
+    # Verify the collection actually works with the custom embedding function
+    collection.add(
+        ids=["test1"],
+        documents=["test document"],
+    )
+
+    result = collection.get(ids=["test1"], include=["embeddings"])
+    assert result["embeddings"] is not None
+    # Custom EF with dim=8 should produce 8-dimensional vectors
+    assert len(result["embeddings"][0]) == 8
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_conflicting_embedding_functions_in_schema_and_config_fails(
+    client_factories: "ClientFactories",
+) -> None:
+    """Verify that setting different custom embedding functions in schema and config fails."""
+    client = client_factories.create_client_from_system()
+    client.reset()
+
+    collection_name = f"conflict_ef_{uuid4().hex}"
+
+    # Create two different custom embedding functions
+    config_ef = SimpleEmbeddingFunction(dim=4)
+    schema_ef = SimpleEmbeddingFunction(dim=6)
+
+    # Create a schema with its own custom embedding function
+    schema = Schema().create_index(
+        config=VectorIndexConfig(embedding_function=schema_ef)
+    )
+
+    # Attempting to create collection with different embedding functions in both
+    # schema and config should fail
+    with pytest.raises(Exception) as exc_info:
+        client.create_collection(
+            name=collection_name,
+            embedding_function=config_ef,  # type: ignore[arg-type]
+            schema=schema,
+        )
+
+    # Verify the error message indicates the conflict
+    error_msg = str(exc_info.value)
+    assert "schema" in error_msg.lower() or "conflict" in error_msg.lower()
+>>>>>>> c9e365295 ([BUG]: Populate ef and space from config if schema is none (#5704))

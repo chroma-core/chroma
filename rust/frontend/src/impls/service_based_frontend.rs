@@ -514,8 +514,15 @@ impl ServiceBasedFrontend {
             // when configuration is None, we then populate in sysdb with empty config {}
             // this allows for easier migration paths in the future
             let config_for_reconcile = configuration.take();
+<<<<<<< HEAD
             match InternalSchema::reconcile_schema_and_config(schema.clone(), config_for_reconcile)
             {
+=======
+            match Schema::reconcile_schema_and_config(
+                schema.as_ref(),
+                config_for_reconcile.as_ref(),
+            ) {
+>>>>>>> c9e365295 ([BUG]: Populate ef and space from config if schema is none (#5704))
                 Ok(schema) => Some(schema),
                 Err(e) => {
                     return Err(CreateCollectionError::InvalidSchema(

@@ -185,9 +185,15 @@ impl CollectionsWithSegmentsProvider {
         };
 
         // reconcile schema and config
+<<<<<<< HEAD
         let reconciled_schema = InternalSchema::reconcile_schema_and_config(
             collection_and_segments_sysdb.collection.schema.clone(),
             Some(collection_and_segments_sysdb.collection.config.clone()),
+=======
+        let reconciled_schema = Schema::reconcile_schema_and_config(
+            collection_and_segments_sysdb.collection.schema.as_ref(),
+            Some(&collection_and_segments_sysdb.collection.config),
+>>>>>>> c9e365295 ([BUG]: Populate ef and space from config if schema is none (#5704))
         )
         .map_err(|reason| {
             CollectionsWithSegmentsProviderError::InvalidSchema(SchemaError::InvalidSchema {

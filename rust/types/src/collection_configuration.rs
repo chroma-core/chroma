@@ -45,7 +45,7 @@ impl EmbeddingFunctionConfiguration {
     pub fn is_default(&self) -> bool {
         match self {
             EmbeddingFunctionConfiguration::Legacy => false,
-            EmbeddingFunctionConfiguration::Unknown => false,
+            EmbeddingFunctionConfiguration::Unknown => true,
             EmbeddingFunctionConfiguration::Known(config) => config.name == "default",
         }
     }
