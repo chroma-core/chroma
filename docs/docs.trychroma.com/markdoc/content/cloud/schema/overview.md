@@ -5,33 +5,89 @@ name: Overview
 
 # Schema Overview
 
+Schema enables fine-grained control over index configuration on collections. Control which indexes are created, optimize for your workload, and enable advanced capabilities like hybrid search.
+
 ## What is Schema?
 
-[Brief explanation that Schema enables index configuration on collections]
+Schema allows you to configure which indexes are created for different data types in your Chroma collections. You can enable or disable indexes globally or per-field, configure vector index parameters, and set up sparse vector indexes for keyword-based search.
 
 ## Why Use Schema?
 
-[Key benefits]
+- **Optimize Performance**: Disable unused indexes to speed up writes and reduce index build time
+- **Enable Hybrid Search**: Combine dense and sparse embeddings for better retrieval quality
+- **Reduce Storage Costs**: Only index the fields you query
+- **Fine-Tune Configuration**: Adjust vector index parameters for your workload
 
 ## Quick Start
 
-[Immediate working example showing:
-- Creating a Schema
-- Configuring an index
-- Using it with a collection
-- Both Python and TypeScript examples]
+Here's a simple example creating a collection with a custom schema:
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
-# Quick start example
+import chromadb
+from chromadb import Schema, StringInvertedIndexConfig
+
+# Connect to Chroma Cloud
+client = chromadb.CloudClient(
+    tenant="your-tenant",
+    database="your-database",
+    api_key="your-api-key"
+)
+
+# Create a schema and disable string indexing globally
+schema = Schema()
+schema.delete_index(config=StringInvertedIndexConfig())
+
+# Create collection with the schema
+collection = client.create_collection(
+    name="my_collection",
+    schema=schema
+)
+
+# Add data - string metadata won't be indexed
+collection.add(
+    ids=["id1", "id2"],
+    documents=["Document 1", "Document 2"],
+    metadatas=[
+        {"category": "science", "year": 2024},
+        {"category": "tech", "year": 2023}
+    ]
+)
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-// Quick start example
+import { ChromaClient, Schema, StringInvertedIndexConfig } from 'chromadb';
+
+// Connect to Chroma Cloud
+const client = new ChromaClient({
+  tenant: "your-tenant",
+  database: "your-database",
+  auth: { provider: "token", credentials: "your-api-key" }
+});
+
+// Create a schema and disable string indexing globally
+const schema = new Schema();
+schema.deleteIndex(new StringInvertedIndexConfig());
+
+// Create collection with the schema
+const collection = await client.createCollection({
+  name: "my_collection",
+  schema: schema
+});
+
+// Add data - string metadata won't be indexed
+await collection.add({
+  ids: ["id1", "id2"],
+  documents: ["Document 1", "Document 2"],
+  metadatas: [
+    { category: "science", year: 2024 },
+    { category: "tech", year: 2023 }
+  ]
+});
 ```
 {% /Tab %}
 
@@ -39,17 +95,32 @@ name: Overview
 
 ## Feature Highlights
 
-[Bullet points of key capabilities]
+- **Default Indexes**: Collections start with sensible defaults - inverted indexes for scalar types, vector index for embeddings, FTS for documents
+- **Global Configuration**: Set index defaults that apply to all metadata keys of a given type
+- **Per-Key Configuration**: Override defaults for specific metadata fields
+- **Sparse Vector Support**: Enable sparse embeddings for hybrid search with BM25-style retrieval
+- **Index Deletion**: Disable indexes you don't need to improve write performance
+- **Vector Index Tuning**: Configure HNSW parameters like `ef_construction` and `max_neighbors`
+- **Method Chaining**: Build schemas fluently with chainable `.create_index()` and `.delete_index()` calls
+- **Schema Persistence**: Schema configuration is saved with the collection and retrieved automatically
 
 ## Availability
 
 {% Banner type="tip" %}
-[Platform/version support information]
+**Schema is available in Chroma Cloud.** Support for single-node Chroma is planned for a future release.
 {% /Banner %}
 
 ## When to Use Schema
 
-[Decision guide - with Schema vs without Schema]
+**Use Schema if:**
+- You have large collections where performance and storage matter
+- You need hybrid search capabilities
+- Your query patterns are specific (not all metadata fields need indexing)
+
+**Use defaults if:**
+- You're prototyping or experimenting
+- You need quick setup with no configuration
+- Collection size and performance are not concerns
 
 ## Next Steps
 
