@@ -37,6 +37,8 @@ use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::StreamExt;
 use opentelemetry::trace::TraceContextExt;
+use s3heap_service::client::GrpcHeapService;
+use s3heap_service::client::HeapServiceConfig;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
@@ -82,6 +84,8 @@ pub(crate) struct CompactionManagerContext {
     log: Log,
     sysdb: SysDb,
     #[allow(dead_code)]
+    heap_service: Option<s3heap_service::client::GrpcHeapService>,
+    #[allow(dead_code)]
     storage: Storage,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
@@ -116,6 +120,8 @@ pub(crate) enum CompactionError {
     FailedToCompact,
     #[error("Failed to execute task")]
     FailedToExecuteTask,
+    #[error("Heap service is not initialized for task based compaction")]
+    HeapServiceNotInitialized,
 }
 
 impl ChromaError for CompactionError {
@@ -123,6 +129,7 @@ impl ChromaError for CompactionError {
         match self {
             CompactionError::FailedToCompact => ErrorCodes::Internal,
             CompactionError::FailedToExecuteTask => ErrorCodes::Internal,
+            CompactionError::HeapServiceNotInitialized => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -147,7 +154,8 @@ impl CompactionManager {
         fetch_log_batch_size: u32,
         purge_dirty_log_timeout_seconds: u64,
         repair_log_offsets_timeout_seconds: u64,
-    ) -> Self {
+        heap_service: Option<GrpcHeapService>,
+    ) -> Result<Self, Box<dyn ChromaError>> {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
 
@@ -158,7 +166,17 @@ impl CompactionManager {
         let compact_awaiter = tokio::spawn(async {
             compact_awaiter_loop(compact_awaiter_rx, completion_tx).await;
         });
-        CompactionManager {
+
+        if mode == ExecutionMode::Task {
+            // Check to see if heap_service is Some
+            if heap_service.is_none() {
+                tracing::error!(
+                    "Heap service is required for task based compaction but was not initialized"
+                );
+                return Err(Box::new(CompactionError::HeapServiceNotInitialized));
+            }
+        }
+        Ok(CompactionManager {
             mode,
             scheduler,
             context: CompactionManagerContext {
@@ -178,12 +196,13 @@ impl CompactionManager {
                 fetch_log_batch_size,
                 purge_dirty_log_timeout_seconds,
                 repair_log_offsets_timeout_seconds,
+                heap_service,
             },
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
             compact_awaiter_completion_channel: completion_rx,
             compact_awaiter,
-        }
+        })
     }
 
     #[instrument(name = "CompactionManager::start_compaction_batch", skip(self))]
@@ -349,6 +368,12 @@ impl CompactionManager {
         self.context.dispatcher = Some(dispatcher);
     }
 
+    /// Get a mutable reference to the heap service client if available.
+    #[allow(dead_code)]
+    pub(crate) fn heap_service(&mut self) -> Option<&mut s3heap_service::client::GrpcHeapService> {
+        self.context.heap_service.as_mut()
+    }
+
     fn process_completions(&mut self) -> Vec<CompactionTaskCompletion> {
         let compact_awaiter_completion_channel = &mut self.compact_awaiter_completion_channel;
         let mut completed_collections = Vec::new();
@@ -456,6 +481,9 @@ impl CompactionManagerContext {
             self.max_partition_size,
             self.log.clone(),
             self.sysdb.clone(),
+            self.heap_service.ok_or_else(|| {
+                Box::new(CompactionError::HeapServiceNotInitialized) as Box<dyn ChromaError>
+            })?,
             self.blockfile_provider.clone(),
             self.hnsw_index_provider.clone(),
             self.spann_provider.clone(),
@@ -570,7 +598,32 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         )
         .await?;
 
-        Ok(CompactionManager::new(
+        // Initialize heap service if enabled
+        let heap_service = match &config.heap_service {
+            HeapServiceConfig::Grpc(heap_config) if heap_config.enabled => {
+                match GrpcHeapService::try_from_config(
+                    &(heap_config.clone(), system.clone()),
+                    registry,
+                )
+                .await
+                {
+                    Ok(service) => {
+                        tracing::info!("Heap service client initialized");
+                        Some(service)
+                    }
+                    Err(err) => {
+                        tracing::warn!("Failed to initialize heap service: {:?}", err);
+                        None
+                    }
+                }
+            }
+            _ => {
+                tracing::info!("Heap service is disabled");
+                None
+            }
+        };
+
+        CompactionManager::new(
             ExecutionMode::Compaction, // Default to Compaction mode
             system.clone(),
             scheduler,
@@ -588,7 +641,8 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             fetch_log_batch_size,
             purge_dirty_log_timeout_seconds,
             repair_log_offsets_timeout_seconds,
-        ))
+            heap_service,
+        )
     }
 }
 pub(crate) async fn create_taskrunner_manager(
@@ -611,6 +665,13 @@ pub(crate) async fn create_taskrunner_manager(
     let assignment_policy_config = &config.assignment_policy;
     let assignment_policy =
         Box::<dyn AssignmentPolicy>::try_from_config(assignment_policy_config, registry).await?;
+
+    let heap_service_config = config.heap_service.clone();
+    let heap_service = match heap_service_config {
+        HeapServiceConfig::Grpc(grpc_config) => {
+            GrpcHeapService::try_from_config(&(grpc_config, system.clone()), registry).await?
+        }
+    };
 
     let scheduler = Scheduler::new(
         ExecutionMode::Task, // Taskrunner mode
@@ -649,7 +710,7 @@ pub(crate) async fn create_taskrunner_manager(
     )
     .await?;
 
-    Ok(CompactionManager::new(
+    CompactionManager::new(
         ExecutionMode::Task, // Taskrunner mode
         system.clone(),
         scheduler,
@@ -667,7 +728,8 @@ pub(crate) async fn create_taskrunner_manager(
         task_config.fetch_log_batch_size,
         0, // purge_dirty_log_timeout_seconds not used for tasks
         0, // repair_log_offsets_timeout_seconds not used for tasks
-    ))
+        Some(heap_service),
+    )
 }
 
 async fn compact_awaiter_loop(
@@ -1154,7 +1216,9 @@ mod tests {
             fetch_log_batch_size,
             purge_dirty_log_timeout_seconds,
             repair_log_offsets_timeout_seconds,
-        );
+            None, // heap_service not needed in tests
+        )
+        .expect("Failed to create compaction manager in test");
 
         let dispatcher = Dispatcher::new(DispatcherConfig {
             num_worker_threads: 10,
