@@ -1949,11 +1949,12 @@ def test_server_validates_invalid_source_key_in_sparse_vector_config(
     from chromadb.api.types import ValueTypes, SparseVectorValueType, SparseVectorIndexType
 
     schema = Schema()
-    # Manually construct config with invalid source_key
-    invalid_config = SparseVectorIndexConfig.__new__(SparseVectorIndexConfig)
-    invalid_config.embedding_function = None
-    invalid_config.source_key = "#embedding"  # Invalid - should be rejected
-    invalid_config.bm25 = None
+    # Manually construct config with invalid source_key using model_construct to bypass validation
+    invalid_config = SparseVectorIndexConfig.model_construct(
+        embedding_function=None,
+        source_key="#embedding",  # Invalid - should be rejected
+        bm25=None
+    )
 
     schema.keys["test_sparse"] = ValueTypes(
         sparse_vector=SparseVectorValueType(
