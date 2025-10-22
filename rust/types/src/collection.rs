@@ -3,7 +3,7 @@ use std::str::FromStr;
 use super::{Metadata, MetadataValueConversionError};
 use crate::{
     chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration,
-    InternalSchema, Segment, SegmentScope,
+    InternalSchema, SchemaError, Segment, SegmentScope,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
@@ -230,6 +230,21 @@ impl Collection {
 }
 
 impl Collection {
+    /// Reconcile the collection schema and configuration, ensuring both are consistent.
+    pub fn reconcile_schema_with_config(&mut self) -> Result<(), SchemaError> {
+        let reconciled_schema = InternalSchema::reconcile_schema_and_config(
+            self.schema.clone(),
+            Some(self.config.clone()),
+        )
+        .map_err(|reason| SchemaError::InvalidSchema { reason })?;
+
+        self.config = InternalCollectionConfiguration::try_from(&reconciled_schema)
+            .map_err(|reason| SchemaError::InvalidSchema { reason })?;
+        self.schema = Some(reconciled_schema);
+
+        Ok(())
+    }
+
     pub fn test_collection(dim: i32) -> Self {
         Collection {
             name: "test_collection".to_string(),
