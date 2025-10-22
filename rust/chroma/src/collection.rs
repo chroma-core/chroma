@@ -155,7 +155,8 @@ impl ChromaCollection {
     /// # }
     /// ```
     pub async fn count(&self) -> Result<u32, ChromaHttpClientError> {
-        self.send::<(), u32>("count", Method::GET, None).await
+        self.send::<(), u32>("count", "count", Method::GET, None)
+            .await
     }
 
     /// Modifies the collection's name or metadata.
@@ -197,8 +198,10 @@ impl ChromaCollection {
         new_name: Option<impl AsRef<str>>,
         new_metadata: Option<Metadata>,
     ) -> Result<(), ChromaHttpClientError> {
-        self.send::<_, ()>(
+        // Returns empty map ({})
+        self.send::<_, serde_json::Value>(
             "modify",
+            "",
             Method::PUT,
             Some(serde_json::json!({
                 "new_name": new_name.as_ref().map(|s| s.as_ref()),
@@ -267,7 +270,7 @@ impl ChromaCollection {
             include.unwrap_or_else(IncludeList::default_get),
         )?;
         let request = request.into_payload()?;
-        self.send("get", Method::POST, Some(request)).await
+        self.send("get", "get", Method::POST, Some(request)).await
     }
 
     /// Performs vector similarity search against the collection.
@@ -322,7 +325,8 @@ impl ChromaCollection {
             include.unwrap_or_else(IncludeList::default_query),
         )?;
         let request = request.into_payload()?;
-        self.send("query", Method::POST, Some(request)).await
+        self.send("query", "query", Method::POST, Some(request))
+            .await
     }
 
     /// Performs hybrid search on the collection using the Search API.
@@ -477,7 +481,8 @@ impl ChromaCollection {
             searches,
         )?;
         let request = request.into_payload();
-        self.send("search", Method::POST, Some(request)).await
+        self.send("search", "search", Method::POST, Some(request))
+            .await
     }
 
     /// Inserts new records into the collection.
@@ -527,7 +532,7 @@ impl ChromaCollection {
             metadatas,
         )?;
         let request = request.into_payload();
-        self.send("add", Method::POST, Some(request)).await
+        self.send("add", "add", Method::POST, Some(request)).await
     }
 
     /// Modifies existing records in the collection.
@@ -577,7 +582,8 @@ impl ChromaCollection {
             metadatas,
         )?;
         let request = request.into_payload();
-        self.send("update", Method::POST, Some(request)).await
+        self.send("update", "update", Method::POST, Some(request))
+            .await
     }
 
     /// Inserts new records or updates existing ones based on ID.
@@ -627,7 +633,8 @@ impl ChromaCollection {
             metadatas,
         )?;
         let request = request.into_payload();
-        self.send("upsert", Method::POST, Some(request)).await
+        self.send("upsert", "upsert", Method::POST, Some(request))
+            .await
     }
 
     /// Removes records from the collection by ID or metadata filter.
@@ -667,7 +674,8 @@ impl ChromaCollection {
             r#where,
         )?;
         let request = request.into_payload()?;
-        self.send("delete", Method::POST, Some(request)).await
+        self.send("delete", "delete", Method::POST, Some(request))
+            .await
     }
 
     /// Creates a shallow copy of this collection under a new name.
@@ -701,7 +709,9 @@ impl ChromaCollection {
         let request = ForkCollectionPayload {
             new_name: new_name.into(),
         };
-        let collection: Collection = self.send("fork", Method::POST, Some(request)).await?;
+        let collection: Collection = self
+            .send("fork", "fork", Method::POST, Some(request))
+            .await?;
         Ok(ChromaCollection {
             client: self.client.clone(),
             collection: Arc::new(collection),
@@ -712,17 +722,17 @@ impl ChromaCollection {
     async fn send<Body: Serialize, Response: DeserializeOwned>(
         &self,
         operation: &str,
+        path: &str,
         method: Method,
         body: Option<Body>,
     ) -> Result<Response, ChromaHttpClientError> {
         let operation_name = format!("collection_{operation}");
         let path = format!(
             "/api/v2/tenants/{}/databases/{}/collections/{}/{}",
-            self.collection.tenant,
-            self.collection.database,
-            self.collection.collection_id,
-            operation
+            self.collection.tenant, self.collection.database, self.collection.collection_id, path
         );
+        let path = path.trim_end_matches("/");
+
         self.client
             .send(&operation_name, method, path, body, None::<()>)
             .await
@@ -1656,6 +1666,33 @@ mod tests {
             );
             assert_eq!(original_count, 1);
             assert_eq!(forked_count, 2);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_live_cloud_modify() {
+        with_client(|mut client| async move {
+            let mut collection = client.new_collection("test_modify").await;
+
+            let mut new_metadata = Metadata::new();
+            new_metadata.insert("foo".into(), "bar".into());
+
+            collection
+                .modify(None::<String>, Some(new_metadata))
+                .await
+                .unwrap();
+            assert_eq!(
+                collection.metadata().as_ref().unwrap().get("foo"),
+                Some(&"bar".into())
+            );
+
+            let collection = client.get_collection(collection.name()).await.unwrap();
+            assert_eq!(
+                collection.metadata().as_ref().unwrap().get("foo"),
+                Some(&"bar".into())
+            );
         })
         .await;
     }

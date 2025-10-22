@@ -749,11 +749,11 @@ impl ChromaHttpClient {
         &self,
         operation_name: &str,
         method: Method,
-        path: String,
+        path: impl AsRef<str>,
         body: Option<Body>,
         query_params: Option<QueryParams>,
     ) -> Result<Response, ChromaHttpClientError> {
-        let url = self.base_url.join(&path).expect(
+        let url = self.base_url.join(path.as_ref()).expect(
             "The base URL is valid and we control all path construction, so this should never fail",
         );
 
@@ -946,13 +946,7 @@ mod tests {
         });
 
         let response: serde_json::Value = client
-            .send::<(), (), serde_json::Value>(
-                "retry_get",
-                Method::GET,
-                "/retry-get".into(),
-                None,
-                None,
-            )
+            .send::<(), (), serde_json::Value>("retry_get", Method::GET, "/retry-get", None, None)
             .await
             .unwrap();
 
@@ -1003,7 +997,7 @@ mod tests {
             .send::<serde_json::Value, (), serde_json::Value>(
                 "retry_post",
                 Method::POST,
-                "/retry-post".into(),
+                "/retry-post",
                 Some(serde_json::json!({"request": "body"})),
                 None::<()>,
             )
