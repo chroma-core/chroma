@@ -37,7 +37,7 @@ use chroma_types::{
     ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
     ListDatabasesResponse, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse,
     RemoveTaskError, RemoveTaskRequest, RemoveTaskResponse, ResetError, ResetResponse, Schema,
-    SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
+    SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
     UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
     UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
     UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
@@ -176,7 +176,7 @@ impl ServiceBasedFrontend {
     ) -> Result<Collection, GetCollectionError> {
         Ok(self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(collection_id, self.default_knn_index)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?
             .collection)
@@ -188,7 +188,7 @@ impl ServiceBasedFrontend {
     ) -> Result<Option<u32>, GetCollectionError> {
         Ok(self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(collection_id, self.default_knn_index)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?
             .collection
@@ -381,7 +381,7 @@ impl ServiceBasedFrontend {
         if self.enable_schema {
             for collection in collections.iter_mut() {
                 collection
-                    .reconcile_schema_with_config()
+                    .reconcile_schema_with_config(self.default_knn_index)
                     .map_err(GetCollectionsError::InvalidSchema)?;
             }
         }
@@ -425,7 +425,7 @@ impl ServiceBasedFrontend {
         if self.enable_schema {
             for collection in &mut collections {
                 collection
-                    .reconcile_schema_with_config()
+                    .reconcile_schema_with_config(self.default_knn_index)
                     .map_err(GetCollectionError::InvalidSchema)?;
             }
         }
@@ -450,7 +450,7 @@ impl ServiceBasedFrontend {
 
         if self.enable_schema {
             collection
-                .reconcile_schema_with_config()
+                .reconcile_schema_with_config(self.default_knn_index)
                 .map_err(GetCollectionByCrnError::InvalidSchema)?;
         }
         Ok(collection)
@@ -517,6 +517,7 @@ impl ServiceBasedFrontend {
             match Schema::reconcile_schema_and_config(
                 schema.as_ref(),
                 config_for_reconcile.as_ref(),
+                self.default_knn_index,
             ) {
                 Ok(schema) => Some(schema),
                 Err(e) => {
@@ -571,6 +572,19 @@ impl ServiceBasedFrontend {
                 ]
             }
             Executor::Local(_) => {
+                if self.enable_schema {
+                    if let Some(schema) = reconciled_schema.as_ref() {
+                        if schema.is_sparse_index_enabled() {
+                            return Err(CreateCollectionError::InvalidSchema(
+                                SchemaError::InvalidSchema {
+                                    reason: "Sparse vector indexing is not enabled in local"
+                                        .to_string(),
+                                },
+                            ));
+                        }
+                    }
+                }
+
                 vec![
                     Segment {
                         id: SegmentUuid::new(),
@@ -616,7 +630,7 @@ impl ServiceBasedFrontend {
         // that was retrieved from sysdb, rather than the one that was passed in
         if self.enable_schema {
             collection
-                .reconcile_schema_with_config()
+                .reconcile_schema_with_config(self.default_knn_index)
                 .map_err(CreateCollectionError::InvalidSchema)?;
         }
         Ok(collection)
@@ -721,7 +735,7 @@ impl ServiceBasedFrontend {
             .await?;
         collection_and_segments
             .collection
-            .reconcile_schema_with_config()
+            .reconcile_schema_with_config(self.default_knn_index)
             .map_err(ForkCollectionError::InvalidSchema)?;
         let collection = collection_and_segments.collection.clone();
         let latest_collection_logical_size_bytes = collection_and_segments
@@ -1085,7 +1099,7 @@ impl ServiceBasedFrontend {
         let read_event = if let Some(where_clause) = r#where {
             let collection_and_segments = self
                 .collections_with_segments_provider
-                .get_collection_with_segments(collection_id)
+                .get_collection_with_segments(collection_id, self.default_knn_index)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
             if self.enable_schema {
@@ -1295,7 +1309,7 @@ impl ServiceBasedFrontend {
     ) -> Result<CountResponse, QueryError> {
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(collection_id, self.default_knn_index)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         let latest_collection_logical_size_bytes = collection_and_segments
@@ -1410,7 +1424,7 @@ impl ServiceBasedFrontend {
     ) -> Result<GetResponse, QueryError> {
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(collection_id, self.default_knn_index)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
@@ -1555,7 +1569,7 @@ impl ServiceBasedFrontend {
     ) -> Result<QueryResponse, QueryError> {
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(collection_id, self.default_knn_index)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
@@ -1712,7 +1726,7 @@ impl ServiceBasedFrontend {
         // Get collection and segments once for all queries
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(request.collection_id)
+            .get_collection_with_segments(request.collection_id, self.default_knn_index)
             .await
             .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
         if self.enable_schema {

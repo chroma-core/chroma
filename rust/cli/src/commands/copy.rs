@@ -239,6 +239,7 @@ async fn copy_collections(
                 collection.name.clone(),
                 collection.metadata.clone(),
                 Some(CollectionConfiguration::from(collection.config.clone())),
+                collection.schema.clone(),
             )
             .await
             .map_err(|_| ChromaClientError::CreateCollection(collection.name.clone()))?;

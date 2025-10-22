@@ -312,10 +312,15 @@ impl InternalCollectionConfiguration {
                     },
                     KnnIndex::Hnsw => {
                         let hnsw: InternalHnswConfiguration = hnsw.into();
-                        Ok(InternalCollectionConfiguration {
-                            vector_index: hnsw.into(),
+                        let mut internal_config = InternalCollectionConfiguration {
+                            vector_index: VectorIndexConfiguration::Hnsw(hnsw),
                             embedding_function: value.embedding_function,
-                        })
+                        };
+                        let hnsw_params = internal_config.get_hnsw_config_from_legacy_metadata(&metadata)?;
+                        if let Some(hnsw_params) = hnsw_params {
+                            internal_config.vector_index = VectorIndexConfiguration::Hnsw(hnsw_params);
+                        }
+                        Ok(internal_config)
                     }
                 }
             }
@@ -578,8 +583,10 @@ impl TryFrom<UpdateCollectionConfiguration> for InternalUpdateCollectionConfigur
 #[cfg(test)]
 mod tests {
 
+    use crate::collection_schema::Schema;
     use crate::hnsw_configuration::HnswConfiguration;
     use crate::hnsw_configuration::Space;
+    use crate::metadata::MetadataValue;
     use crate::spann_configuration::SpannConfiguration;
     use crate::{test_segment, CollectionUuid, Metadata};
 
@@ -631,6 +638,59 @@ mod tests {
 
         // Setting from metadata is ignored since the config is not default
         assert_eq!(overridden_config.ef_construction, 2);
+    }
+
+    #[test]
+    fn metadata_populates_config_when_not_set() {
+        let mut metadata = Metadata::new();
+        metadata.insert("hnsw:sync_threshold".to_string(), MetadataValue::Int(10));
+        metadata.insert("hnsw:batch_size".to_string(), MetadataValue::Int(7));
+
+        let config = InternalCollectionConfiguration::try_from_config(
+            CollectionConfiguration {
+                hnsw: None,
+                spann: None,
+                embedding_function: None,
+            },
+            KnnIndex::Hnsw,
+            Some(metadata),
+        )
+        .expect("config from metadata should succeed");
+
+        match config.vector_index {
+            VectorIndexConfiguration::Hnsw(hnsw) => {
+                assert_eq!(hnsw.sync_threshold, 10);
+                assert_eq!(hnsw.batch_size, 7);
+            }
+            _ => panic!("expected HNSW configuration"),
+        }
+    }
+
+    #[test]
+    fn schema_reconcile_preserves_metadata_overrides() {
+        let mut metadata = Metadata::new();
+        metadata.insert("hnsw:sync_threshold".to_string(), MetadataValue::Int(10));
+        metadata.insert("hnsw:batch_size".to_string(), MetadataValue::Int(7));
+
+        let config = InternalCollectionConfiguration::try_from_config(
+            CollectionConfiguration {
+                hnsw: None,
+                spann: None,
+                embedding_function: None,
+            },
+            KnnIndex::Hnsw,
+            Some(metadata),
+        )
+        .expect("config from metadata should succeed");
+
+        let schema = Schema::reconcile_schema_and_config(None, Some(&config), KnnIndex::Hnsw)
+            .expect("schema reconcile should succeed");
+
+        let hnsw_config = schema
+            .get_internal_hnsw_config()
+            .expect("schema should contain hnsw config");
+        assert_eq!(hnsw_config.sync_threshold, 10);
+        assert_eq!(hnsw_config.batch_size, 7);
     }
 
     #[test]

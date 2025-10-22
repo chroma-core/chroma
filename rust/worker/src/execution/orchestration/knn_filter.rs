@@ -375,10 +375,18 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                 .ok_or_terminate(
                     self.collection_and_segments
                         .collection
-                        .config
-                        .get_hnsw_config_with_legacy_fallback(
-                            &self.collection_and_segments.vector_segment,
-                        ),
+                        .schema
+                        .as_ref()
+                        .ok_or(KnnError::InvalidSchema(SchemaError::InvalidSchema {
+                            reason: "Schema is None".to_string(),
+                        }))
+                        .and_then(|schema| {
+                            schema
+                                .get_internal_hnsw_config_with_legacy_fallback(
+                                    &self.collection_and_segments.vector_segment,
+                                )
+                                .map_err(KnnError::from)
+                        }),
                     ctx,
                 )
                 .await

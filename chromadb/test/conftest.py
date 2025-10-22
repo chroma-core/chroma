@@ -91,7 +91,9 @@ is_spann_disabled_mode = (
 skip_reason_spann_disabled = (
     "SPANN creation/modification disallowed in Rust bindings or integration test mode"
 )
-
+skip_reason_spann_enabled = (
+    "SPANN creation/modification allowed in Rust bindings or integration test mode"
+)
 
 
 def reset(api: BaseAPI) -> None:
