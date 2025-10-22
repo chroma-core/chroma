@@ -37,7 +37,7 @@ use chroma_types::{
     ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
     ListDatabasesResponse, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse,
     RemoveTaskError, RemoveTaskRequest, RemoveTaskResponse, ResetError, ResetResponse, Schema,
-    SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
+    SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
     UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
     UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
     UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
@@ -517,9 +517,7 @@ impl ServiceBasedFrontend {
             match Schema::reconcile_schema_and_config(schema.clone(), config_for_reconcile) {
                 Ok(schema) => Some(schema),
                 Err(e) => {
-                    return Err(CreateCollectionError::InvalidSchema(
-                        SchemaError::InvalidSchema { reason: e },
-                    ));
+                    return Err(CreateCollectionError::InvalidSchema(e));
                 }
             }
         } else {

@@ -213,8 +213,7 @@ impl Collection {
     /// Reconcile the collection schema and configuration, ensuring both are consistent.
     pub fn reconcile_schema_with_config(&mut self) -> Result<(), SchemaError> {
         let reconciled_schema =
-            Schema::reconcile_schema_and_config(self.schema.clone(), Some(self.config.clone()))
-                .map_err(|reason| SchemaError::InvalidSchema { reason })?;
+            Schema::reconcile_schema_and_config(self.schema.clone(), Some(self.config.clone()))?;
 
         self.config = InternalCollectionConfiguration::try_from(&reconciled_schema)
             .map_err(|reason| SchemaError::InvalidSchema { reason })?;
