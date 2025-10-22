@@ -33,6 +33,7 @@ use chroma_types::{
     SegmentFlushInfo, SegmentType, SegmentUuid, Task, TaskUuid,
 };
 use opentelemetry::trace::TraceContextExt;
+use s3heap_service::client::GrpcHeapService;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
@@ -199,6 +200,7 @@ pub struct CompactOrchestrator {
     // === Task Context (optional) ===
     /// Available if this orchestrator is for a task
     task_context: Option<TaskContext>,
+    heap_service: Option<GrpcHeapService>,
 }
 
 #[derive(Error, Debug)]
@@ -371,6 +373,7 @@ impl CompactOrchestrator {
             metrics: CompactOrchestratorMetrics::default(),
             schema: None,
             task_context: None,
+            heap_service: None,
         }
     }
 
@@ -383,6 +386,7 @@ impl CompactOrchestrator {
         max_partition_size: usize,
         log: Log,
         sysdb: SysDb,
+        heap_service: GrpcHeapService,
         blockfile_provider: BlockfileProvider,
         hnsw_provider: HnswIndexProvider,
         spann_provider: SpannProvider,
@@ -410,6 +414,7 @@ impl CompactOrchestrator {
             task: None,
             execution_nonce,
         });
+        orchestrator.heap_service = Some(heap_service);
         orchestrator
     }
 
@@ -1000,7 +1005,14 @@ impl Handler<TaskResult<PrepareTaskOutput, PrepareTaskError>> for CompactOrchest
         if output.should_skip_execution {
             // Proceed to FinishTask
             let task = wrap(
-                FinishTaskOperator::new(self.log.clone(), self.sysdb.clone()),
+                FinishTaskOperator::new(
+                    self.log.clone(),
+                    self.sysdb.clone(),
+                    self.heap_service
+                        .as_ref()
+                        .expect("Heap service required for task execution")
+                        .clone(),
+                ),
                 FinishTaskInput::new(output.task),
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
@@ -1748,7 +1760,14 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator 
                 updated_task.id.0
             );
 
-            let finish_task_op = FinishTaskOperator::new(self.log.clone(), self.sysdb.clone());
+            let finish_task_op = FinishTaskOperator::new(
+                self.log.clone(),
+                self.sysdb.clone(),
+                self.heap_service
+                    .as_ref()
+                    .expect("Heap service required for task execution")
+                    .clone(),
+            );
             let finish_task_input = FinishTaskInput::new(updated_task);
 
             let task = wrap(
@@ -1796,6 +1815,7 @@ mod tests {
         PrimitiveOperator, Where,
     };
     use regex::Regex;
+    use s3heap_service::client::{GrpcHeapService, GrpcHeapServiceConfig};
 
     use crate::{
         config::RootConfig,
@@ -2058,6 +2078,14 @@ mod tests {
         .expect("Should connect to grpc sysdb");
         let mut sysdb = SysDb::Grpc(grpc_sysdb);
 
+        // Connect to Grpc Heap Service (requires Tilt running)
+        let heap_service = GrpcHeapService::try_from_config(
+            &(GrpcHeapServiceConfig::default(), system.clone()),
+            &registry,
+        )
+        .await
+        .expect("Should connect to grpc heap service");
+
         let test_segments = TestDistributedSegment::new().await;
         let mut in_memory_log = InMemoryLog::new();
 
@@ -2175,6 +2203,7 @@ mod tests {
             50,
             log.clone(),
             sysdb.clone(),
+            heap_service.clone(),
             test_segments.blockfile_provider.clone(),
             test_segments.hnsw_provider.clone(),
             test_segments.spann_provider.clone(),
@@ -2285,6 +2314,7 @@ mod tests {
             50,
             log_2.clone(),
             sysdb.clone(),
+            heap_service.clone(),
             test_segments.blockfile_provider.clone(),
             test_segments.hnsw_provider.clone(),
             test_segments.spann_provider.clone(),
