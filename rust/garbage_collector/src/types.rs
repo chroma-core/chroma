@@ -8,21 +8,13 @@ pub(crate) const RENAMED_FILE_PREFIX: &str = "gc/renamed/";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum CleanupMode {
+    /// Move files to a deletion directory instead of removing them
+    Rename, // todo: remove:?
     /// Only list files that would be affected without making changes
     #[default]
-    DryRun,
-    /// Move files to a deletion directory instead of removing them
-    Rename,
-    /// Permanently delete files
-    Delete,
     DryRunV2,
+    /// Permanently delete files
     DeleteV2,
-}
-
-impl CleanupMode {
-    pub fn is_v2(&self) -> bool {
-        matches!(self, CleanupMode::DryRunV2 | CleanupMode::DeleteV2)
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
