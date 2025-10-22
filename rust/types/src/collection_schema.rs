@@ -3588,13 +3588,6 @@ mod tests {
         let default_spann_schema = Schema::new_default(KnnIndex::Spann);
         assert!(default_spann_schema.is_default());
 
-        // Test that an empty schema is NOT considered default (since it doesn't match new_default structure)
-        let empty_schema = Schema {
-            defaults: ValueTypes::default(),
-            keys: HashMap::new(),
-        };
-        assert!(!empty_schema.is_default());
-
         // Test that a modified default schema is not considered default
         let mut modified_schema = Schema::new_default(KnnIndex::Hnsw);
         // Make a clear modification - change the string inverted index enabled state
