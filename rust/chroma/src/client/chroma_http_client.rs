@@ -880,7 +880,7 @@ impl ChromaHttpClient {
 mod tests {
     use super::*;
     use crate::client::ChromaRetryOptions;
-    use crate::tests::with_client;
+    use crate::tests::{unique_collection_name, with_client};
     use chroma_types::{EmbeddingFunctionConfiguration, EmbeddingFunctionNewConfiguration};
     use httpmock::{HttpMockResponse, MockServer};
     use std::sync::atomic::AtomicBool;
@@ -1017,11 +1017,10 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_parses_error() {
-        with_client(|client| async move {
-            client.create_collection("foo", None, None).await.unwrap();
-
+        with_client(|mut client| async move {
+            let collection = client.new_collection("foo").await;
             let err = client
-                .create_collection("foo", None, None)
+                .create_collection(collection.name(), None, None)
                 .await
                 .unwrap_err();
 
@@ -1039,23 +1038,26 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_list_collections() {
-        with_client(|client| async move {
-            let collections = client.list_collections(100, None).await.unwrap();
-            assert!(collections.is_empty());
+        with_client(|mut client| async move {
+            let first = client.new_collection("first").await;
+            let second = client.new_collection("second").await;
+            let first = first.name();
+            let second = second.name();
 
-            client.create_collection("first", None, None).await.unwrap();
+            let collections = client.list_collections(1000, None).await.unwrap();
+            let names: std::collections::HashSet<_> = collections
+                .iter()
+                .map(|collection| collection.name().to_string())
+                .collect();
 
-            client
-                .create_collection("second", None, None)
-                .await
-                .unwrap();
-
-            let collections = client.list_collections(100, None).await.unwrap();
-            assert_eq!(collections.len(), 2);
-
-            let collections = client.list_collections(1, Some(1)).await.unwrap();
-            assert_eq!(collections.len(), 1);
-            assert_eq!(collections[0].collection.name, "second");
+            assert!(names.contains(first));
+            assert!(names.contains(second));
+            let positions = collections
+                .iter()
+                .enumerate()
+                .filter(|(_, collection)| collection.name() == first || collection.name() == second)
+                .collect::<Vec<_>>();
+            assert_eq!(positions.len(), 2);
         })
         .await;
     }
@@ -1063,24 +1065,20 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_create_collection() {
-        with_client(|client| async move {
+        with_client(|mut client| async move {
             let schema = Schema::default_with_embedding_function(
                 EmbeddingFunctionConfiguration::Known(EmbeddingFunctionNewConfiguration {
                     name: "bar".to_string(),
                     config: serde_json::json!({}),
                 }),
             );
-            let collection = client
-                .create_collection("foo", Some(schema.clone()), None)
+            let collection1 = client.new_collection("foo").await;
+            let collection2 = client
+                .get_or_create_collection(collection1.name(), Some(schema), None)
                 .await
                 .unwrap();
-            assert_eq!(collection.collection.name, "foo");
-
-            let collection = client
-                .get_or_create_collection("foo", None, None)
-                .await
-                .unwrap();
-            assert_eq!(collection.schema().clone().unwrap(), schema);
+            assert_eq!(collection1.name(), collection2.name());
+            assert_eq!(collection1.schema(), collection2.schema());
         })
         .await;
     }
@@ -1088,18 +1086,11 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_get_collection() {
-        with_client(|client| async move {
-            client
-                .create_collection("my_collection".to_string(), None, None)
-                .await
-                .unwrap();
-
-            let collection = client
-                .get_collection("my_collection".to_string())
-                .await
-                .unwrap();
-
-            assert_eq!(collection.collection.name, "my_collection");
+        with_client(|mut client| async move {
+            let collection = client.new_collection("my_collection").await;
+            let name = collection.name().to_string();
+            let collection = client.get_collection(collection.name()).await.unwrap();
+            assert_eq!(collection.collection.name, name);
         })
         .await;
     }
@@ -1108,20 +1099,16 @@ mod tests {
     #[test_log::test]
     async fn test_live_cloud_delete_collection() {
         with_client(|client| async move {
+            let name = unique_collection_name("to_be_deleted");
+
             client
-                .create_collection("to_be_deleted".to_string(), None, None)
+                .create_collection(name.clone(), None, None)
                 .await
                 .unwrap();
 
-            client
-                .delete_collection("to_be_deleted".to_string())
-                .await
-                .unwrap();
+            client.delete_collection(name.clone()).await.unwrap();
 
-            let err = client
-                .get_collection("to_be_deleted".to_string())
-                .await
-                .unwrap_err();
+            let err = client.get_collection(name.clone()).await.unwrap_err();
 
             match err {
                 ChromaHttpClientError::ApiError(msg, status) => {

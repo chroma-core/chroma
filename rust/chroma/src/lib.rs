@@ -113,8 +113,9 @@ pub use collection::ChromaCollection;
 mod tests {
     use super::*;
     use crate::client::{ChromaAuthMethod, ChromaHttpClientOptions};
-    use futures_util::FutureExt;
-    use std::sync::LazyLock;
+    use std::collections::HashSet;
+    use std::sync::{Arc, LazyLock, Mutex};
+    use uuid::Uuid;
 
     static CHROMA_CLIENT_OPTIONS: LazyLock<ChromaHttpClientOptions> = LazyLock::new(|| {
         match dotenvy::dotenv() {
@@ -141,27 +142,55 @@ mod tests {
         }
     });
 
+    pub struct TestClient {
+        client: ChromaHttpClient,
+        collections: Arc<Mutex<HashSet<String>>>,
+    }
+
+    pub fn unique_collection_name(base: &str) -> String {
+        format!("{}_{}", base, Uuid::new_v4())
+    }
+
+    impl TestClient {
+        pub async fn new_collection(&mut self, name: &str) -> ChromaCollection {
+            let name = unique_collection_name(name);
+            {
+                let mut collections = self.collections.lock().unwrap();
+                collections.insert(name.clone());
+            }
+            self.client
+                .get_or_create_collection(name, None, None)
+                .await
+                .unwrap()
+        }
+    }
+
+    impl std::ops::Deref for TestClient {
+        type Target = ChromaHttpClient;
+
+        fn deref(&self) -> &Self::Target {
+            &self.client
+        }
+    }
+
     pub async fn with_client<F, Fut>(callback: F)
     where
-        F: FnOnce(ChromaHttpClient) -> Fut,
+        F: FnOnce(TestClient) -> Fut,
         Fut: std::future::Future<Output = ()>,
     {
         let client = ChromaHttpClient::new(CHROMA_CLIENT_OPTIONS.clone());
-
-        // Create isolated database for test
-        let database_name = format!("test_db_{}", uuid::Uuid::new_v4());
-        client.create_database(database_name.clone()).await.unwrap();
-        client.set_database_name(database_name.clone());
-
-        let result = std::panic::AssertUnwindSafe(callback(client.clone()))
-            .catch_unwind()
-            .await;
-
-        // Delete test database
-        if let Err(err) = client.delete_database(database_name.clone()).await {
-            tracing::error!("Failed to delete test database {}: {}", database_name, err);
+        let collections = Arc::new(Mutex::new(HashSet::default()));
+        let client = TestClient {
+            client,
+            collections: Arc::clone(&collections),
+        };
+        callback(client).await;
+        let client = ChromaHttpClient::new(CHROMA_CLIENT_OPTIONS.clone());
+        let collections = { collections.lock().unwrap().clone() };
+        for collection in collections.iter() {
+            if let Err(err) = client.delete_collection(collection.clone()).await {
+                tracing::error!("failed to cleanup {collection}: {err}");
+            }
         }
-
-        result.unwrap();
     }
 }

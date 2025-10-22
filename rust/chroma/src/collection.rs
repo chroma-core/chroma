@@ -731,28 +731,17 @@ impl ChromaCollection {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::tests::with_client;
+    use crate::tests::{unique_collection_name, with_client};
     use chroma_types::{
         Include, IncludeList, Metadata, MetadataComparison, MetadataExpression, MetadataValue,
         PrimitiveOperator, UpdateMetadata, UpdateMetadataValue, Where,
     };
 
-    async fn create_test_collection(
-        client: &ChromaHttpClient,
-        name: &str,
-    ) -> Result<ChromaCollection, ChromaHttpClientError> {
-        client.create_collection(name, None, None).await
-    }
-
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_accessor_methods() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_accessors")
-                .await
-                .unwrap();
-
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_accessors").await;
             assert!(!collection.database().is_empty());
             assert_eq!(collection.metadata(), &None);
             assert!(collection.schema().is_some());
@@ -764,10 +753,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_count_empty_collection() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_count_empty")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_count_empty").await;
 
             let count = collection.count().await.unwrap();
             println!("Empty collection count: {}", count);
@@ -779,10 +766,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_add_single_record() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_add_single")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_add_single").await;
 
             collection
                 .add(
@@ -805,10 +790,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_add_multiple_records() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_add_multiple")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_add_multiple").await;
 
             collection
                 .add(
@@ -839,10 +822,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_add_with_metadata() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_add_metadata")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_add_metadata").await;
 
             let mut metadata = Metadata::new();
             metadata.insert("category".to_string(), "test".into());
@@ -868,10 +849,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_add_with_uris() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_add_uris")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_add_uris").await;
 
             collection
                 .add(
@@ -893,10 +872,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_get_all_records() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_get_all")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_get_all").await;
 
             collection
                 .add(
@@ -921,10 +898,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_get_by_ids() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_get_by_ids")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_get_by_ids").await;
 
             collection
                 .add(
@@ -962,10 +937,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_get_with_limit_and_offset() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_get_limit_offset")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_get_limit_offset").await;
 
             collection
                 .add(
@@ -1002,10 +975,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_get_with_where_clause() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_get_where")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_get_where").await;
 
             let mut metadata1 = Metadata::new();
             metadata1.insert("category".to_string(), "a".into());
@@ -1045,10 +1016,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_get_with_include_list() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_get_include")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_get_include").await;
 
             collection
                 .add(
@@ -1090,10 +1059,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_query_basic() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_query_basic")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_query_basic").await;
 
             collection
                 .add(
@@ -1130,10 +1097,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_query_with_n_results() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_query_n_results")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_query_n_results").await;
 
             collection
                 .add(
@@ -1173,10 +1138,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_query_with_where_clause() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_query_where")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_query_where").await;
 
             let mut metadata1 = Metadata::new();
             metadata1.insert("category".to_string(), "a".into());
@@ -1223,10 +1186,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_query_multiple_embeddings() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_query_multiple")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_query_multiple").await;
 
             collection
                 .add(
@@ -1264,10 +1225,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_update_embeddings() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_update_embeddings")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_update_embeddings").await;
 
             collection
                 .add(
@@ -1314,10 +1273,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_update_documents() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_update_documents")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_update_documents").await;
 
             collection
                 .add(
@@ -1364,10 +1321,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_update_metadata() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_update_metadata")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_update_metadata").await;
 
             let mut original_metadata = Metadata::new();
             original_metadata.insert("version".to_string(), 1.into());
@@ -1428,10 +1383,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_upsert_insert_new() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_upsert_insert")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_upsert_insert").await;
 
             collection
                 .upsert(
@@ -1454,10 +1407,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_upsert_update_existing() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_upsert_update")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_upsert_update").await;
 
             collection
                 .add(
@@ -1491,10 +1442,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_upsert_mixed() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_upsert_mixed")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_upsert_mixed").await;
 
             collection
                 .add(
@@ -1528,10 +1477,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_delete_by_ids() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_delete_by_ids")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_delete_by_ids").await;
 
             collection
                 .add(
@@ -1563,10 +1510,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_delete_by_where() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_delete_by_where")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_delete_by_where").await;
 
             let mut metadata1 = Metadata::new();
             metadata1.insert("category".to_string(), "a".into());
@@ -1604,10 +1549,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_fork_basic() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_fork_source")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_fork_source").await;
 
             collection
                 .add(
@@ -1620,10 +1563,11 @@ mod tests {
                 .await
                 .unwrap();
 
-            let forked = collection.fork("test_fork_target").await.unwrap();
+            let target_name = unique_collection_name("test_fork_target");
+            let forked = collection.fork(target_name.clone()).await.unwrap();
             println!("Forked collection: {:?}", forked);
 
-            assert_eq!(forked.collection.name, "test_fork_target");
+            assert_eq!(forked.collection.name, target_name);
             assert_ne!(
                 forked.collection.collection_id,
                 collection.collection.collection_id
@@ -1639,10 +1583,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_fork_preserves_data() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_fork_preserves_source")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_fork_preserves_source").await;
 
             collection
                 .add(
@@ -1655,7 +1597,8 @@ mod tests {
                 .await
                 .unwrap();
 
-            let forked = collection.fork("test_fork_preserves_target").await.unwrap();
+            let target_name = unique_collection_name("test_fork_preserves_target");
+            let forked = collection.fork(target_name).await.unwrap();
 
             let forked_get_response = forked
                 .get(
@@ -1677,10 +1620,8 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_fork_independence() {
-        with_client(|client| async move {
-            let collection = create_test_collection(&client, "test_fork_independence_source")
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_fork_independence_source").await;
 
             collection
                 .add(
@@ -1693,10 +1634,8 @@ mod tests {
                 .await
                 .unwrap();
 
-            let forked = collection
-                .fork("test_fork_independence_target")
-                .await
-                .unwrap();
+            let target_name = unique_collection_name("test_fork_independence_target");
+            let forked = collection.fork(target_name).await.unwrap();
 
             forked
                 .add(
