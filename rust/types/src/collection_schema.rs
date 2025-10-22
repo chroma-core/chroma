@@ -1295,9 +1295,10 @@ impl Schema {
             return false;
         }
 
-        // Check if keys have the expected default keys (#embedding and #document)
-        if self.keys.len() != 2 {
-            return false;
+        for key in self.keys.keys() {
+            if key != EMBEDDING_KEY && key != DOCUMENT_KEY {
+                return false;
+            }
         }
 
         // Check #embedding key
@@ -1305,8 +1306,6 @@ impl Schema {
             if !Self::is_embedding_value_types_default(embedding_value) {
                 return false;
             }
-        } else {
-            return false;
         }
 
         // Check #document key
@@ -1314,8 +1313,6 @@ impl Schema {
             if !Self::is_document_value_types_default(document_value) {
                 return false;
             }
-        } else {
-            return false;
         }
 
         true
@@ -1462,13 +1459,10 @@ impl Schema {
                             return false;
                         }
                     }
-                    _ => return false, // Both present or neither present
+                    (Some(_), Some(_)) => return false, // Both present
+                    (None, None) => {}
                 }
-            } else {
-                return false;
             }
-        } else {
-            return false;
         }
 
         true
@@ -1493,19 +1487,13 @@ impl Schema {
                     return false;
                 }
                 // Config is an empty struct, so no need to check it
-            } else {
-                return false;
             }
             if let Some(string_inverted) = &string.string_inverted_index {
                 if string_inverted.enabled {
                     return false;
                 }
                 // Config is an empty struct, so no need to check it
-            } else {
-                return false;
             }
-        } else {
-            return false;
         }
 
         true
@@ -2202,25 +2190,38 @@ pub struct HnswIndexConfig {
 
 impl HnswIndexConfig {
     /// Check if this config has default values
+    /// None values are considered default (not set by user)
     /// Note: We skip num_threads as it's variable based on available_parallelism
     pub fn is_default(&self) -> bool {
-        if self.ef_construction != Some(default_construction_ef()) {
-            return false;
+        if let Some(ef_construction) = self.ef_construction {
+            if ef_construction != default_construction_ef() {
+                return false;
+            }
         }
-        if self.max_neighbors != Some(default_m()) {
-            return false;
+        if let Some(max_neighbors) = self.max_neighbors {
+            if max_neighbors != default_m() {
+                return false;
+            }
         }
-        if self.ef_search != Some(default_search_ef()) {
-            return false;
+        if let Some(ef_search) = self.ef_search {
+            if ef_search != default_search_ef() {
+                return false;
+            }
         }
-        if self.batch_size != Some(default_batch_size()) {
-            return false;
+        if let Some(batch_size) = self.batch_size {
+            if batch_size != default_batch_size() {
+                return false;
+            }
         }
-        if self.sync_threshold != Some(default_sync_threshold()) {
-            return false;
+        if let Some(sync_threshold) = self.sync_threshold {
+            if sync_threshold != default_sync_threshold() {
+                return false;
+            }
         }
-        if self.resize_factor != Some(default_resize_factor()) {
-            return false;
+        if let Some(resize_factor) = self.resize_factor {
+            if resize_factor != default_resize_factor() {
+                return false;
+            }
         }
         // Skip num_threads check as it's system-dependent
         true
@@ -2284,54 +2285,87 @@ pub struct SpannIndexConfig {
 
 impl SpannIndexConfig {
     /// Check if this config has default values
+    /// None values are considered default (not set by user)
     pub fn is_default(&self) -> bool {
-        if self.search_nprobe != Some(default_search_nprobe()) {
-            return false;
+        if let Some(search_nprobe) = self.search_nprobe {
+            if search_nprobe != default_search_nprobe() {
+                return false;
+            }
         }
-        if self.search_rng_factor != Some(default_search_rng_factor()) {
-            return false;
+        if let Some(search_rng_factor) = self.search_rng_factor {
+            if search_rng_factor != default_search_rng_factor() {
+                return false;
+            }
         }
-        if self.search_rng_epsilon != Some(default_search_rng_epsilon()) {
-            return false;
+        if let Some(search_rng_epsilon) = self.search_rng_epsilon {
+            if search_rng_epsilon != default_search_rng_epsilon() {
+                return false;
+            }
         }
-        if self.nreplica_count != Some(default_nreplica_count()) {
-            return false;
+        if let Some(nreplica_count) = self.nreplica_count {
+            if nreplica_count != default_nreplica_count() {
+                return false;
+            }
         }
-        if self.write_rng_factor != Some(default_write_rng_factor()) {
-            return false;
+        if let Some(write_rng_factor) = self.write_rng_factor {
+            if write_rng_factor != default_write_rng_factor() {
+                return false;
+            }
         }
-        if self.write_rng_epsilon != Some(default_write_rng_epsilon()) {
-            return false;
+        if let Some(write_rng_epsilon) = self.write_rng_epsilon {
+            if write_rng_epsilon != default_write_rng_epsilon() {
+                return false;
+            }
         }
-        if self.split_threshold != Some(default_split_threshold()) {
-            return false;
+        if let Some(split_threshold) = self.split_threshold {
+            if split_threshold != default_split_threshold() {
+                return false;
+            }
         }
-        if self.num_samples_kmeans != Some(default_num_samples_kmeans()) {
-            return false;
+        if let Some(num_samples_kmeans) = self.num_samples_kmeans {
+            if num_samples_kmeans != default_num_samples_kmeans() {
+                return false;
+            }
         }
-        if self.initial_lambda != Some(default_initial_lambda()) {
-            return false;
+        if let Some(initial_lambda) = self.initial_lambda {
+            if initial_lambda != default_initial_lambda() {
+                return false;
+            }
         }
-        if self.reassign_neighbor_count != Some(default_reassign_neighbor_count()) {
-            return false;
+        if let Some(reassign_neighbor_count) = self.reassign_neighbor_count {
+            if reassign_neighbor_count != default_reassign_neighbor_count() {
+                return false;
+            }
         }
-        if self.merge_threshold != Some(default_merge_threshold()) {
-            return false;
+        if let Some(merge_threshold) = self.merge_threshold {
+            if merge_threshold != default_merge_threshold() {
+                return false;
+            }
         }
-        if self.num_centers_to_merge_to != Some(default_num_centers_to_merge_to()) {
-            return false;
+        if let Some(num_centers_to_merge_to) = self.num_centers_to_merge_to {
+            if num_centers_to_merge_to != default_num_centers_to_merge_to() {
+                return false;
+            }
         }
-        if self.write_nprobe != Some(default_write_nprobe()) {
-            return false;
+        if let Some(write_nprobe) = self.write_nprobe {
+            if write_nprobe != default_write_nprobe() {
+                return false;
+            }
         }
-        if self.ef_construction != Some(default_construction_ef_spann()) {
-            return false;
+        if let Some(ef_construction) = self.ef_construction {
+            if ef_construction != default_construction_ef_spann() {
+                return false;
+            }
         }
-        if self.ef_search != Some(default_search_ef_spann()) {
-            return false;
+        if let Some(ef_search) = self.ef_search {
+            if ef_search != default_search_ef_spann() {
+                return false;
+            }
         }
-        if self.max_neighbors != Some(default_m_spann()) {
-            return false;
+        if let Some(max_neighbors) = self.max_neighbors {
+            if max_neighbors != default_m_spann() {
+                return false;
+            }
         }
         true
     }
