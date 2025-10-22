@@ -9,62 +9,93 @@ Learn how to create and use Schema to configure indexes on your Chroma collectio
 
 ## Schema Structure
 
-[Explanation of defaults vs keys]
+A Schema has two main components that work together to control indexing behavior:
 
 ### Defaults
 
-[What defaults are and how they work]
+Defaults define index configuration for **all keys** of a given data type. When you add metadata to your collection, Chroma looks at the value type (string, int, float, etc.) and applies the default index configuration for that type.
+
+For example, if you disable string inverted indexes globally, no string metadata fields will be indexed unless you create a key-specific override.
 
 ### Keys
 
-[What key-specific overrides are and how they work]
+Keys define index configuration for **specific metadata fields**. These override the defaults for individual fields, giving you fine-grained control.
+
+For example, you might disable string indexing globally but enable it specifically for a "category" field that you frequently filter on.
 
 ### How They Work Together
 
-[Precedence and interaction between defaults and keys]
+When determining whether to index a field, Chroma follows this precedence:
 
-## Value Types Overview
+1. **Key-specific configuration** (if exists) - highest priority
+2. **Default configuration** (for that value type) - fallback
+3. **Built-in defaults** (if no Schema provided) - final fallback
 
-[Table showing 6 value types, their index types, and default enabled status]
+This means you can set broad defaults and then override them for specific fields as needed.
 
-| Value Type | Index Types | Default Enabled |
-|-----------|-------------|-----------------|
-| `string` | FTS Index, String Inverted Index | ... |
-| `float_list` | Vector Index | ... |
-| `sparse_vector` | Sparse Vector Index | ... |
-| `int_value` | Int Inverted Index | ... |
-| `float_value` | Float Inverted Index | ... |
-| `boolean` | Bool Inverted Index | ... |
+## Value Types and Default Behavior
 
-## Special Keys
+Schema recognizes six value types, each with associated index types. Without providing a Schema, collections use these built-in defaults:
 
-### #document
+| Value Type | Index Types | Default Enabled | Use Case |
+|-----------|-------------|-----------------|----------|
+| `string` | String Inverted Index | ✓ (all metadata) | Filter on string values |
+| `string` | FTS Index | ✓ (`#document` only) | Full-text search on documents |
+| `float_list` | Vector Index | ✓ (`#embedding` only) | Similarity search on embeddings |
+| `sparse_vector` | Sparse Vector Index | ✗ (requires config) | Keyword-based search |
+| `int_value` | Int Inverted Index | ✓ (all metadata) | Filter on integer values |
+| `float_value` | Float Inverted Index | ✓ (all metadata) | Filter on float values |
+| `boolean` | Bool Inverted Index | ✓ (all metadata) | Filter on boolean values |
 
-[Explanation of #document key and its default configuration]
+### Special Keys
 
-### #embedding
+Chroma uses two reserved key names:
 
-[Explanation of #embedding key and its default configuration]
+**`#document`** stores document text content with FTS enabled and String Inverted Index disabled. This allows full-text search while avoiding redundant indexing.
 
-### Why These Keys Exist
+**`#embedding`** stores dense vector embeddings with Vector Index enabled, sourcing from `#document`. This enables semantic similarity search.
 
-[Purpose and usage of special keys]
+{% Note type="info" %}
+Currently, you cannot manually configure these special keys - their configuration is managed automatically. This restriction may be relaxed in future versions.
+{% /Note %}
 
-## Default Behavior
-
-[What you get without any Schema configuration]
+### Example: Using Defaults
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
-# Default behavior example
+# Without Schema - uses defaults from table above
+collection = client.create_collection(name="my_collection")
+
+collection.add(
+    ids=["id1"],
+    documents=["Some text"],
+    metadatas=[{
+        "category": "science",  # String inverted index
+        "year": 2024,           # Int inverted index
+        "score": 0.95,          # Float inverted index
+        "published": True       # Bool inverted index
+    }]
+)
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-// Default behavior example
+// Without Schema - uses defaults from table above
+const collection = await client.createCollection({ name: "my_collection" });
+
+await collection.add({
+  ids: ["id1"],
+  documents: ["Some text"],
+  metadatas: [{
+    category: "science",  // String inverted index
+    year: 2024,           // Int inverted index
+    score: 0.95,          // Float inverted index
+    published: true       // Bool inverted index
+  }]
+});
 ```
 {% /Tab %}
 
@@ -74,19 +105,29 @@ Learn how to create and use Schema to configure indexes on your Chroma collectio
 
 ### Basic Schema Creation
 
-[How to create a Schema object]
+Create a Schema object to customize index configuration:
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
-# Basic creation
+from chromadb import Schema
+
+# Create an empty schema (starts with defaults)
+schema = Schema()
+
+# The schema is now ready to be configured
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-// Basic creation
+import { Schema } from 'chromadb';
+
+// Create an empty schema (starts with defaults)
+const schema = new Schema();
+
+// The schema is now ready to be configured
 ```
 {% /Tab %}
 
@@ -94,19 +135,49 @@ Learn how to create and use Schema to configure indexes on your Chroma collectio
 
 ### Using Schema with Collections
 
-[How to pass Schema to create_collection and get_or_create_collection]
+Pass the schema to `create_collection()` or `get_or_create_collection()`:
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
-# Using with create_collection
+from chromadb import Schema
+
+schema = Schema()
+# Configure schema here (see Creating Indexes below)
+
+# Create collection with schema
+collection = client.create_collection(
+    name="my_collection",
+    schema=schema
+)
+
+# Or use get_or_create_collection
+collection = client.get_or_create_collection(
+    name="my_collection",
+    schema=schema
+)
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-// Using with create_collection
+import { Schema } from 'chromadb';
+
+const schema = new Schema();
+// Configure schema here (see Creating Indexes below)
+
+// Create collection with schema
+const collection = await client.createCollection({
+  name: "my_collection",
+  schema: schema
+});
+
+// Or use getOrCreateCollection
+const collection = await client.getOrCreateCollection({
+  name: "my_collection",
+  schema: schema
+});
 ```
 {% /Tab %}
 
@@ -114,29 +185,49 @@ Learn how to create and use Schema to configure indexes on your Chroma collectio
 
 ### Schema Persistence
 
-[How Schema is persisted and retrieved]
+Schema configuration is automatically saved with the collection. When you retrieve a collection with `get_collection()` or `get_or_create_collection()`, the schema is loaded automatically. You don't need to provide the schema again.
 
 ## Creating Indexes
 
 ### The create_index() Method
 
-[Syntax and parameters]
+Use `create_index()` to enable or configure indexes. The method takes:
+- `config`: An index configuration object (or `None` to enable all indexes for a key)
+- `key`: Optional - specify a metadata field name for key-specific configuration
+
+The method returns the Schema object, enabling method chaining.
 
 ### Creating Global Indexes
 
-[Examples of creating indexes that apply to all keys]
+Create indexes that apply to all keys of a given type:
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
-# Global index creation
+from chromadb import Schema, IntInvertedIndexConfig, FloatInvertedIndexConfig
+
+schema = Schema()
+
+# Enable int inverted index globally (already enabled by default)
+schema.create_index(config=IntInvertedIndexConfig())
+
+# Enable float inverted index globally (already enabled by default)
+schema.create_index(config=FloatInvertedIndexConfig())
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-// Global index creation
+import { Schema, IntInvertedIndexConfig, FloatInvertedIndexConfig } from 'chromadb';
+
+const schema = new Schema();
+
+// Enable int inverted index globally (already enabled by default)
+schema.createIndex(new IntInvertedIndexConfig());
+
+// Enable float inverted index globally (already enabled by default)
+schema.createIndex(new FloatInvertedIndexConfig());
 ```
 {% /Tab %}
 
@@ -144,39 +235,31 @@ Learn how to create and use Schema to configure indexes on your Chroma collectio
 
 ### Creating Key-Specific Indexes
 
-[Examples of creating indexes for specific metadata fields]
+Override defaults for specific metadata fields:
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
-# Key-specific index creation
+from chromadb import Schema, StringInvertedIndexConfig
+
+schema = Schema()
+
+# Enable string indexing only for specific fields
+schema.create_index(config=StringInvertedIndexConfig(), key="category")
+schema.create_index(config=StringInvertedIndexConfig(), key="author")
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-// Key-specific index creation
-```
-{% /Tab %}
+import { Schema, StringInvertedIndexConfig } from 'chromadb';
 
-{% /TabbedCodeBlock %}
+const schema = new Schema();
 
-### Method Chaining
-
-[Examples of chaining multiple create_index calls]
-
-{% TabbedCodeBlock %}
-
-{% Tab label="python" %}
-```python
-# Method chaining
-```
-{% /Tab %}
-
-{% Tab label="typescript" %}
-```typescript
-// Method chaining
+// Enable string indexing only for specific fields
+schema.createIndex(new StringInvertedIndexConfig(), "category");
+schema.createIndex(new StringInvertedIndexConfig(), "author");
 ```
 {% /Tab %}
 
@@ -186,7 +269,15 @@ Learn how to create and use Schema to configure indexes on your Chroma collectio
 
 ### The delete_index() Method
 
-[Syntax and what can be disabled]
+Use `delete_index()` to disable indexes. Like `create_index()`, it takes:
+- `config`: An index configuration object (or `None` to disable all indexes for a key)
+- `key`: Optional - specify a metadata field name for key-specific configuration
+
+Returns the Schema object for method chaining.
+
+{% Note type="info" %}
+Not all indexes can be deleted. Vector, FTS, and Sparse Vector indexes currently cannot be disabled. See [Rules & Constraints](./rules-constraints) for details.
+{% /Note %}
 
 ### Examples
 
@@ -194,13 +285,75 @@ Learn how to create and use Schema to configure indexes on your Chroma collectio
 
 {% Tab label="python" %}
 ```python
-# Disabling indexes
+from chromadb import Schema, StringInvertedIndexConfig, IntInvertedIndexConfig
+
+schema = Schema()
+
+# Disable string inverted index globally
+schema.delete_index(config=StringInvertedIndexConfig())
+
+# Disable int inverted index for a specific key
+schema.delete_index(config=IntInvertedIndexConfig(), key="unimportant_count")
+
+# Disable all indexes for a specific key
+schema.delete_index(key="temporary_field")
+
+collection = client.create_collection(name="optimized", schema=schema)
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-// Disabling indexes
+import { Schema, StringInvertedIndexConfig, IntInvertedIndexConfig } from 'chromadb';
+
+const schema = new Schema();
+
+// Disable string inverted index globally
+schema.deleteIndex(new StringInvertedIndexConfig());
+
+// Disable int inverted index for a specific key
+schema.deleteIndex(new IntInvertedIndexConfig(), "unimportant_count");
+
+// Disable all indexes for a specific key
+schema.deleteIndex(undefined, "temporary_field");
+
+const collection = await client.createCollection({ name: "optimized", schema });
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+## Method Chaining
+
+Both `create_index()` and `delete_index()` return the Schema object, enabling fluent method chaining:
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+```python
+from chromadb import Schema, StringInvertedIndexConfig, IntInvertedIndexConfig
+
+schema = (Schema()
+    .delete_index(config=StringInvertedIndexConfig())  # Disable globally
+    .create_index(config=StringInvertedIndexConfig(), key="category")  # Enable for category
+    .create_index(config=StringInvertedIndexConfig(), key="tags")  # Enable for tags
+    .delete_index(config=IntInvertedIndexConfig()))  # Disable int indexing
+
+collection = client.create_collection(name="optimized", schema=schema)
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+import { Schema, StringInvertedIndexConfig, IntInvertedIndexConfig } from 'chromadb';
+
+const schema = new Schema()
+  .deleteIndex(new StringInvertedIndexConfig())  // Disable globally
+  .createIndex(new StringInvertedIndexConfig(), "category")  // Enable for category
+  .createIndex(new StringInvertedIndexConfig(), "tags")  // Enable for tags
+  .deleteIndex(new IntInvertedIndexConfig());  // Disable int indexing
+
+const collection = await client.createCollection({ name: "optimized", schema });
 ```
 {% /Tab %}
 
