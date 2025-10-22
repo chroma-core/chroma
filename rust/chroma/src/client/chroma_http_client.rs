@@ -880,16 +880,11 @@ impl ChromaHttpClient {
 mod tests {
     use super::*;
     use crate::client::ChromaRetryOptions;
-    use crate::tests::with_client;
+    use crate::tests::{unique_collection_name, with_client};
     use chroma_types::{EmbeddingFunctionConfiguration, EmbeddingFunctionNewConfiguration};
     use httpmock::{HttpMockResponse, MockServer};
     use std::sync::atomic::AtomicBool;
     use std::time::Duration;
-    use uuid::Uuid;
-
-    fn unique_collection_name(base: &str) -> String {
-        format!("{}_{}", base, Uuid::new_v4())
-    }
 
     #[tokio::test]
     #[test_log::test]
@@ -1022,16 +1017,10 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_parses_error() {
-        with_client(|client| async move {
-            let name = unique_collection_name("foo");
-
-            client
-                .create_collection(name.clone(), None, None)
-                .await
-                .unwrap();
-
+        with_client(|mut client| async move {
+            let collection = client.new_collection("foo").await;
             let err = client
-                .create_collection(name.clone(), None, None)
+                .create_collection(collection.name(), None, None)
                 .await
                 .unwrap_err();
 
@@ -1049,19 +1038,11 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_live_cloud_list_collections() {
-        with_client(|client| async move {
-            let first = unique_collection_name("first");
-            let second = unique_collection_name("second");
-
-            client
-                .create_collection(first.clone(), None, None)
-                .await
-                .unwrap();
-
-            client
-                .create_collection(second.clone(), None, None)
-                .await
-                .unwrap();
+        with_client(|mut client| async move {
+            let first = client.new_collection("first").await;
+            let second = client.new_collection("second").await;
+            let first = first.name();
+            let second = second.name();
 
             let collections = client.list_collections(1000, None).await.unwrap();
             let names: std::collections::HashSet<_> = collections
@@ -1069,8 +1050,8 @@ mod tests {
                 .map(|collection| collection.name().to_string())
                 .collect();
 
-            assert!(names.contains(&first));
-            assert!(names.contains(&second));
+            assert!(names.contains(first));
+            assert!(names.contains(second));
             let positions = collections
                 .iter()
                 .enumerate()

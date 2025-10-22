@@ -112,9 +112,10 @@ pub use collection::ChromaCollection;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::{ChromaAuthMethod, ChromaHttpClientError, ChromaHttpClientOptions};
-    use futures_util::FutureExt;
-    use std::sync::LazyLock;
+    use crate::client::{ChromaAuthMethod, ChromaHttpClientOptions};
+    use std::collections::HashSet;
+    use std::sync::{Arc, LazyLock, Mutex};
+    use uuid::Uuid;
 
     static CHROMA_CLIENT_OPTIONS: LazyLock<ChromaHttpClientOptions> = LazyLock::new(|| {
         match dotenvy::dotenv() {
@@ -141,69 +142,55 @@ mod tests {
         }
     });
 
+    pub struct TestClient {
+        client: ChromaHttpClient,
+        collections: Arc<Mutex<HashSet<String>>>,
+    }
+
+    pub fn unique_collection_name(base: &str) -> String {
+        format!("{}_{}", base, Uuid::new_v4())
+    }
+
+    impl TestClient {
+        pub async fn new_collection(&mut self, name: &str) -> ChromaCollection {
+            let name = unique_collection_name(name);
+            {
+                let mut collections = self.collections.lock().unwrap();
+                collections.insert(name.clone());
+            }
+            self.client
+                .get_or_create_collection(name, None, None)
+                .await
+                .unwrap()
+        }
+    }
+
+    impl std::ops::Deref for TestClient {
+        type Target = ChromaHttpClient;
+
+        fn deref(&self) -> &Self::Target {
+            &self.client
+        }
+    }
+
     pub async fn with_client<F, Fut>(callback: F)
     where
-        F: FnOnce(ChromaHttpClient) -> Fut,
+        F: FnOnce(TestClient) -> Fut,
         Fut: std::future::Future<Output = ()>,
     {
         let client = ChromaHttpClient::new(CHROMA_CLIENT_OPTIONS.clone());
-
-        let initial_collections = list_collection_names(&client)
-            .await
-            .expect("Failed to enumerate initial collections");
-
-        let result = std::panic::AssertUnwindSafe(callback(client.clone()))
-            .catch_unwind()
-            .await;
-
-        if let Err(err) = cleanup_new_collections(&client, &initial_collections).await {
-            tracing::error!("Failed to clean up test collections: {}", err);
-        }
-
-        result.unwrap();
-    }
-
-    async fn list_collection_names(
-        client: &ChromaHttpClient,
-    ) -> Result<std::collections::HashSet<String>, ChromaHttpClientError> {
-        const PAGE_SIZE: usize = 128;
-        let mut names = std::collections::HashSet::new();
-        let mut offset = 0_usize;
-
-        loop {
-            let batch = client.list_collections(PAGE_SIZE, Some(offset)).await?;
-            let batch_len = batch.len();
-
-            if batch_len == 0 {
-                break;
-            }
-
-            offset += batch_len;
-
-            for collection in batch {
-                names.insert(collection.name().to_string());
-            }
-
-            if batch_len < PAGE_SIZE {
-                break;
+        let collections = Arc::new(Mutex::new(HashSet::default()));
+        let client = TestClient {
+            client,
+            collections: Arc::clone(&collections),
+        };
+        callback(client).await;
+        let client = ChromaHttpClient::new(CHROMA_CLIENT_OPTIONS.clone());
+        let collections = { collections.lock().unwrap().clone() };
+        for collection in collections.iter() {
+            if let Err(err) = client.delete_collection(collection.clone()).await {
+                tracing::error!("failed to cleanup {collection}: {err}");
             }
         }
-
-        Ok(names)
-    }
-
-    async fn cleanup_new_collections(
-        client: &ChromaHttpClient,
-        initial_collections: &std::collections::HashSet<String>,
-    ) -> Result<(), ChromaHttpClientError> {
-        let current_collections = list_collection_names(client).await?;
-
-        for name in current_collections.difference(initial_collections) {
-            if let Err(err) = client.delete_collection(name.as_str()).await {
-                tracing::error!("Failed to delete test collection {}: {}", name, err);
-            }
-        }
-
-        Ok(())
     }
 }
