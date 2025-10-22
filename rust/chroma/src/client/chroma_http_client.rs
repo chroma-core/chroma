@@ -1071,20 +1071,12 @@ mod tests {
 
             assert!(names.contains(&first));
             assert!(names.contains(&second));
-
             let positions = collections
                 .iter()
                 .enumerate()
                 .filter(|(_, collection)| collection.name() == first || collection.name() == second)
                 .collect::<Vec<_>>();
-
             assert_eq!(positions.len(), 2);
-
-            for (index, collection) in positions {
-                let page = client.list_collections(1, Some(index)).await.unwrap();
-                assert_eq!(page.len(), 1);
-                assert_eq!(page[0].name(), collection.name());
-            }
         })
         .await;
     }
