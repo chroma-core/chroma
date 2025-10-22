@@ -285,4 +285,3 @@ For complete hybrid search setup and usage, see [Hybrid Search Setup](./hybrid-s
 
 - Apply these configurations in [Schema Basics](./schema-basics)
 - Set up [hybrid search](./hybrid-search) with sparse vectors
-- Review [rules and constraints](./rules-constraints) before configuring
