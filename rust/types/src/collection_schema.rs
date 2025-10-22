@@ -477,7 +477,7 @@ impl Schema {
             enabled: false,
             config: VectorIndexConfig {
                 space: Some(default_space()),
-                embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+                embedding_function: None,
                 source_key: None,
                 hnsw: match default_knn_index {
                     KnnIndex::Hnsw => Some(HnswIndexConfig {
@@ -552,7 +552,7 @@ impl Schema {
                 sparse_vector_index: Some(SparseVectorIndexType {
                     enabled: false,
                     config: SparseVectorIndexConfig {
-                        embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+                        embedding_function: Some(EmbeddingFunctionConfiguration::Unknown),
                         source_key: None,
                         bm25: Some(false),
                     },
@@ -570,7 +570,7 @@ impl Schema {
                     enabled: true,
                     config: VectorIndexConfig {
                         space: Some(default_space()),
-                        embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+                        embedding_function: None,
                         source_key: Some(DOCUMENT_KEY.to_string()),
                         hnsw: match default_knn_index {
                             KnnIndex::Hnsw => Some(HnswIndexConfig {
@@ -661,7 +661,7 @@ impl Schema {
     /// - User overrides take precedence over defaults
     /// - Missing user configurations fall back to system defaults
     /// - Field-level merging for complex configurations (Vector, HNSW, SPANN, etc.)
-    pub fn reconcile_with_defaults(user_schema: Option<Schema>) -> Result<Self, SchemaError> {
+    pub fn reconcile_with_defaults(user_schema: Option<&Schema>) -> Result<Self, SchemaError> {
         let default_schema = Schema::new_default(KnnIndex::Spann);
 
         match user_schema {
@@ -672,15 +672,15 @@ impl Schema {
 
                 // Merge key overrides
                 let mut merged_keys = default_schema.keys.clone();
-                for (key, user_value_types) in user.keys {
-                    if let Some(default_value_types) = merged_keys.get(&key) {
+                for (key, user_value_types) in &user.keys {
+                    if let Some(default_value_types) = merged_keys.get(key) {
                         // Merge with existing default key override
                         let merged_value_types =
-                            Self::merge_value_types(default_value_types, &user_value_types)?;
-                        merged_keys.insert(key, merged_value_types);
+                            Self::merge_value_types(default_value_types, user_value_types)?;
+                        merged_keys.insert(key.clone(), merged_value_types);
                     } else {
                         // New key override from user
-                        merged_keys.insert(key, user_value_types);
+                        merged_keys.insert(key.clone(), user_value_types.clone());
                     }
                 }
 
@@ -1232,35 +1232,38 @@ impl Schema {
     ///
     /// Simple reconciliation logic:
     /// 1. If collection config is default → return schema (schema is source of truth)
-    /// 2. If collection config is non-default and schema is non-default → error (both set)
-    /// 3. If collection config is non-default and schema is default → override schema with collection config
+    /// 2. If collection config is non-default and schema is default → override schema with collection config
+    ///
+    /// Note: The case where both are non-default is validated earlier in reconcile_schema_and_config
     pub fn reconcile_with_collection_config(
-        schema: Schema,
-        collection_config: InternalCollectionConfiguration,
+        schema: &Schema,
+        collection_config: &InternalCollectionConfiguration,
     ) -> Result<Schema, SchemaError> {
         // 1. Check if collection config is default
         if collection_config.is_default() {
             // Collection config is default → schema is source of truth
-            return Ok(schema);
+            return Ok(schema.clone());
         }
 
-        // 2. Collection config is non-default, check if schema is also non-default
-        if !Self::is_schema_default(&schema) {
-            // Both are non-default → error
-            return Err(SchemaError::ConfigAndSchemaConflict);
-        }
-
-        // 3. Collection config is non-default, schema is default → override schema with collection config
+        // 2. Collection config is non-default, schema must be default (already validated earlier)
+        // Convert collection config to schema
         Self::convert_collection_config_to_schema(collection_config)
     }
 
     pub fn reconcile_schema_and_config(
-        schema: Option<Schema>,
-        configuration: Option<InternalCollectionConfiguration>,
+        schema: Option<&Schema>,
+        configuration: Option<&InternalCollectionConfiguration>,
     ) -> Result<Schema, SchemaError> {
+        // Early validation: check if both user-provided schema and config are non-default
+        if let (Some(user_schema), Some(config)) = (schema, configuration) {
+            if !user_schema.is_default() && !config.is_default() {
+                return Err(SchemaError::ConfigAndSchemaConflict);
+            }
+        }
+
         let reconciled_schema = Self::reconcile_with_defaults(schema)?;
         if let Some(config) = configuration {
-            Self::reconcile_with_collection_config(reconciled_schema, config)
+            Self::reconcile_with_collection_config(&reconciled_schema, config)
         } else {
             Ok(reconciled_schema)
         }
@@ -1285,27 +1288,229 @@ impl Schema {
         schema
     }
 
-    /// Check if schema is default by comparing it word-by-word with new_default
-    fn is_schema_default(schema: &Schema) -> bool {
-        // Compare with both possible default schemas (HNSW and SPANN)
-        let default_hnsw = Schema::new_default(KnnIndex::Hnsw);
-        let default_spann = Schema::new_default(KnnIndex::Spann);
+    /// Check if schema is default by checking each field individually
+    pub fn is_default(&self) -> bool {
+        // Check if defaults are default (field by field)
+        if !Self::is_value_types_default(&self.defaults) {
+            return false;
+        }
 
-        schema == &default_hnsw || schema == &default_spann
+        for key in self.keys.keys() {
+            if key != EMBEDDING_KEY && key != DOCUMENT_KEY {
+                return false;
+            }
+        }
+
+        // Check #embedding key
+        if let Some(embedding_value) = self.keys.get(EMBEDDING_KEY) {
+            if !Self::is_embedding_value_types_default(embedding_value) {
+                return false;
+            }
+        }
+
+        // Check #document key
+        if let Some(document_value) = self.keys.get(DOCUMENT_KEY) {
+            if !Self::is_document_value_types_default(document_value) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check if ValueTypes (defaults) are in default state
+    fn is_value_types_default(value_types: &ValueTypes) -> bool {
+        // Check string field
+        if let Some(string) = &value_types.string {
+            if let Some(string_inverted) = &string.string_inverted_index {
+                if !string_inverted.enabled {
+                    return false;
+                }
+                // Config is an empty struct, so no need to check it
+            }
+            if let Some(fts) = &string.fts_index {
+                if fts.enabled {
+                    return false;
+                }
+                // Config is an empty struct, so no need to check it
+            }
+        }
+
+        // Check float field
+        if let Some(float) = &value_types.float {
+            if let Some(float_inverted) = &float.float_inverted_index {
+                if !float_inverted.enabled {
+                    return false;
+                }
+                // Config is an empty struct, so no need to check it
+            }
+        }
+
+        // Check int field
+        if let Some(int) = &value_types.int {
+            if let Some(int_inverted) = &int.int_inverted_index {
+                if !int_inverted.enabled {
+                    return false;
+                }
+                // Config is an empty struct, so no need to check it
+            }
+        }
+
+        // Check boolean field
+        if let Some(boolean) = &value_types.boolean {
+            if let Some(bool_inverted) = &boolean.bool_inverted_index {
+                if !bool_inverted.enabled {
+                    return false;
+                }
+                // Config is an empty struct, so no need to check it
+            }
+        }
+
+        // Check float_list field (vector index should be disabled)
+        if let Some(float_list) = &value_types.float_list {
+            if let Some(vector_index) = &float_list.vector_index {
+                if vector_index.enabled {
+                    return false;
+                }
+                // Check that the config has default structure
+                // We allow space and embedding_function to vary, but check structure
+                if vector_index.config.source_key.is_some() {
+                    return false;
+                }
+                // Check that either hnsw or spann config is present (not both, not neither)
+                // and that the config values are default
+                match (&vector_index.config.hnsw, &vector_index.config.spann) {
+                    (Some(hnsw_config), None) => {
+                        if !hnsw_config.is_default() {
+                            return false;
+                        }
+                    }
+                    (None, Some(spann_config)) => {
+                        if !spann_config.is_default() {
+                            return false;
+                        }
+                    }
+                    (Some(_), Some(_)) => return false, // Both present
+                    (None, None) => {}
+                }
+            }
+        }
+
+        // Check sparse_vector field (should be disabled)
+        if let Some(sparse_vector) = &value_types.sparse_vector {
+            if let Some(sparse_index) = &sparse_vector.sparse_vector_index {
+                if sparse_index.enabled {
+                    return false;
+                }
+                // Check config structure
+                if !is_embedding_function_default(&sparse_index.config.embedding_function) {
+                    return false;
+                }
+                if sparse_index.config.source_key.is_some() {
+                    return false;
+                }
+                if let Some(bm25) = &sparse_index.config.bm25 {
+                    if bm25 != &false {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Check if ValueTypes for #embedding key are in default state
+    fn is_embedding_value_types_default(value_types: &ValueTypes) -> bool {
+        // For #embedding, only float_list should be set
+        if value_types.string.is_some()
+            || value_types.float.is_some()
+            || value_types.int.is_some()
+            || value_types.boolean.is_some()
+            || value_types.sparse_vector.is_some()
+        {
+            return false;
+        }
+
+        // Check float_list field (vector index should be enabled)
+        if let Some(float_list) = &value_types.float_list {
+            if let Some(vector_index) = &float_list.vector_index {
+                if !vector_index.enabled {
+                    return false;
+                }
+                // Check that embedding_function is default
+                if !is_embedding_function_default(&vector_index.config.embedding_function) {
+                    return false;
+                }
+                // Check that source_key is #document
+                if vector_index.config.source_key.as_deref() != Some(DOCUMENT_KEY) {
+                    return false;
+                }
+                // Check that either hnsw or spann config is present (not both, not neither)
+                // and that the config values are default
+                match (&vector_index.config.hnsw, &vector_index.config.spann) {
+                    (Some(hnsw_config), None) => {
+                        if !hnsw_config.is_default() {
+                            return false;
+                        }
+                    }
+                    (None, Some(spann_config)) => {
+                        if !spann_config.is_default() {
+                            return false;
+                        }
+                    }
+                    (Some(_), Some(_)) => return false, // Both present
+                    (None, None) => {}
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Check if ValueTypes for #document key are in default state
+    fn is_document_value_types_default(value_types: &ValueTypes) -> bool {
+        // For #document, only string should be set
+        if value_types.float_list.is_some()
+            || value_types.float.is_some()
+            || value_types.int.is_some()
+            || value_types.boolean.is_some()
+            || value_types.sparse_vector.is_some()
+        {
+            return false;
+        }
+
+        // Check string field
+        if let Some(string) = &value_types.string {
+            if let Some(fts) = &string.fts_index {
+                if !fts.enabled {
+                    return false;
+                }
+                // Config is an empty struct, so no need to check it
+            }
+            if let Some(string_inverted) = &string.string_inverted_index {
+                if string_inverted.enabled {
+                    return false;
+                }
+                // Config is an empty struct, so no need to check it
+            }
+        }
+
+        true
     }
 
     /// Convert InternalCollectionConfiguration to Schema
     fn convert_collection_config_to_schema(
-        collection_config: InternalCollectionConfiguration,
+        collection_config: &InternalCollectionConfiguration,
     ) -> Result<Schema, SchemaError> {
         // Start with a default schema structure
         let mut schema = Schema::new_default(KnnIndex::Spann); // Default to HNSW, will be overridden
 
         // Convert vector index configuration
-        let vector_config = match collection_config.vector_index {
+        let vector_config = match &collection_config.vector_index {
             VectorIndexConfiguration::Hnsw(hnsw_config) => VectorIndexConfig {
-                space: Some(hnsw_config.space),
-                embedding_function: collection_config.embedding_function,
+                space: Some(hnsw_config.space.clone()),
+                embedding_function: collection_config.embedding_function.clone(),
                 source_key: Some(DOCUMENT_KEY.to_string()), // Default source key
                 hnsw: Some(HnswIndexConfig {
                     ef_construction: Some(hnsw_config.ef_construction),
@@ -1319,8 +1524,8 @@ impl Schema {
                 spann: None,
             },
             VectorIndexConfiguration::Spann(spann_config) => VectorIndexConfig {
-                space: Some(spann_config.space),
-                embedding_function: collection_config.embedding_function,
+                space: Some(spann_config.space.clone()),
+                embedding_function: collection_config.embedding_function.clone(),
                 source_key: Some(DOCUMENT_KEY.to_string()), // Default source key
                 hnsw: None,
                 spann: Some(SpannIndexConfig {
@@ -1983,6 +2188,46 @@ pub struct HnswIndexConfig {
     pub resize_factor: Option<f64>,
 }
 
+impl HnswIndexConfig {
+    /// Check if this config has default values
+    /// None values are considered default (not set by user)
+    /// Note: We skip num_threads as it's variable based on available_parallelism
+    pub fn is_default(&self) -> bool {
+        if let Some(ef_construction) = self.ef_construction {
+            if ef_construction != default_construction_ef() {
+                return false;
+            }
+        }
+        if let Some(max_neighbors) = self.max_neighbors {
+            if max_neighbors != default_m() {
+                return false;
+            }
+        }
+        if let Some(ef_search) = self.ef_search {
+            if ef_search != default_search_ef() {
+                return false;
+            }
+        }
+        if let Some(batch_size) = self.batch_size {
+            if batch_size != default_batch_size() {
+                return false;
+            }
+        }
+        if let Some(sync_threshold) = self.sync_threshold {
+            if sync_threshold != default_sync_threshold() {
+                return false;
+            }
+        }
+        if let Some(resize_factor) = self.resize_factor {
+            if resize_factor != default_resize_factor() {
+                return false;
+            }
+        }
+        // Skip num_threads check as it's system-dependent
+        true
+    }
+}
+
 /// Configuration for SPANN vector index algorithm parameters
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, Default)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -2036,6 +2281,94 @@ pub struct SpannIndexConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(max = 64))]
     pub max_neighbors: Option<usize>,
+}
+
+impl SpannIndexConfig {
+    /// Check if this config has default values
+    /// None values are considered default (not set by user)
+    pub fn is_default(&self) -> bool {
+        if let Some(search_nprobe) = self.search_nprobe {
+            if search_nprobe != default_search_nprobe() {
+                return false;
+            }
+        }
+        if let Some(search_rng_factor) = self.search_rng_factor {
+            if search_rng_factor != default_search_rng_factor() {
+                return false;
+            }
+        }
+        if let Some(search_rng_epsilon) = self.search_rng_epsilon {
+            if search_rng_epsilon != default_search_rng_epsilon() {
+                return false;
+            }
+        }
+        if let Some(nreplica_count) = self.nreplica_count {
+            if nreplica_count != default_nreplica_count() {
+                return false;
+            }
+        }
+        if let Some(write_rng_factor) = self.write_rng_factor {
+            if write_rng_factor != default_write_rng_factor() {
+                return false;
+            }
+        }
+        if let Some(write_rng_epsilon) = self.write_rng_epsilon {
+            if write_rng_epsilon != default_write_rng_epsilon() {
+                return false;
+            }
+        }
+        if let Some(split_threshold) = self.split_threshold {
+            if split_threshold != default_split_threshold() {
+                return false;
+            }
+        }
+        if let Some(num_samples_kmeans) = self.num_samples_kmeans {
+            if num_samples_kmeans != default_num_samples_kmeans() {
+                return false;
+            }
+        }
+        if let Some(initial_lambda) = self.initial_lambda {
+            if initial_lambda != default_initial_lambda() {
+                return false;
+            }
+        }
+        if let Some(reassign_neighbor_count) = self.reassign_neighbor_count {
+            if reassign_neighbor_count != default_reassign_neighbor_count() {
+                return false;
+            }
+        }
+        if let Some(merge_threshold) = self.merge_threshold {
+            if merge_threshold != default_merge_threshold() {
+                return false;
+            }
+        }
+        if let Some(num_centers_to_merge_to) = self.num_centers_to_merge_to {
+            if num_centers_to_merge_to != default_num_centers_to_merge_to() {
+                return false;
+            }
+        }
+        if let Some(write_nprobe) = self.write_nprobe {
+            if write_nprobe != default_write_nprobe() {
+                return false;
+            }
+        }
+        if let Some(ef_construction) = self.ef_construction {
+            if ef_construction != default_construction_ef_spann() {
+                return false;
+            }
+        }
+        if let Some(ef_search) = self.ef_search {
+            if ef_search != default_search_ef_spann() {
+                return false;
+            }
+        }
+        if let Some(max_neighbors) = self.max_neighbors {
+            if max_neighbors != default_m_spann() {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2173,7 +2506,7 @@ mod tests {
             keys: HashMap::new(),
         };
 
-        let result = Schema::reconcile_with_defaults(Some(user_schema)).unwrap();
+        let result = Schema::reconcile_with_defaults(Some(&user_schema)).unwrap();
         let expected = Schema::new_default(KnnIndex::Spann);
         assert_eq!(result, expected);
     }
@@ -2194,7 +2527,7 @@ mod tests {
             fts_index: None,
         });
 
-        let result = Schema::reconcile_with_defaults(Some(user_schema)).unwrap();
+        let result = Schema::reconcile_with_defaults(Some(&user_schema)).unwrap();
 
         // Check that the user override took precedence
         assert!(
@@ -2282,10 +2615,7 @@ mod tests {
         );
 
         // Check defaults were preserved for unspecified fields
-        assert_eq!(
-            vector_config.embedding_function,
-            Some(EmbeddingFunctionConfiguration::Legacy)
-        );
+        assert_eq!(vector_config.embedding_function, None);
         // Since user provided HNSW config, the default max_neighbors should be merged in
         assert_eq!(
             vector_config.hnsw.as_ref().unwrap().max_neighbors,
@@ -2319,7 +2649,7 @@ mod tests {
             .keys
             .insert("custom_key".to_string(), custom_key_types);
 
-        let result = Schema::reconcile_with_defaults(Some(user_schema)).unwrap();
+        let result = Schema::reconcile_with_defaults(Some(&user_schema)).unwrap();
 
         // Check that default key overrides are preserved
         assert!(result.keys.contains_key(EMBEDDING_KEY));
@@ -2368,7 +2698,7 @@ mod tests {
             .keys
             .insert(EMBEDDING_KEY.to_string(), embedding_override);
 
-        let result = Schema::reconcile_with_defaults(Some(user_schema)).unwrap();
+        let result = Schema::reconcile_with_defaults(Some(&user_schema)).unwrap();
 
         let embedding_config = result.keys.get(EMBEDDING_KEY).unwrap();
         let vector_config = &embedding_config
@@ -2409,8 +2739,7 @@ mod tests {
             )),
         };
 
-        let schema =
-            Schema::convert_collection_config_to_schema(collection_config.clone()).unwrap();
+        let schema = Schema::convert_collection_config_to_schema(&collection_config).unwrap();
         let reconstructed = InternalCollectionConfiguration::try_from(&schema).unwrap();
 
         assert_eq!(reconstructed, collection_config);
@@ -2442,8 +2771,7 @@ mod tests {
             )),
         };
 
-        let schema =
-            Schema::convert_collection_config_to_schema(collection_config.clone()).unwrap();
+        let schema = Schema::convert_collection_config_to_schema(&collection_config).unwrap();
         let reconstructed = InternalCollectionConfiguration::try_from(&schema).unwrap();
 
         assert_eq!(reconstructed, collection_config);
@@ -2976,10 +3304,7 @@ mod tests {
             .unwrap()
             .config;
         assert_eq!(vector_config.space, Some(Space::Ip));
-        assert_eq!(
-            vector_config.embedding_function,
-            Some(EmbeddingFunctionConfiguration::Legacy)
-        ); // Default preserved
+        assert_eq!(vector_config.embedding_function, None); // Default preserved
         assert_eq!(
             vector_config.source_key,
             Some("custom_vector_key".to_string())
@@ -3024,8 +3349,7 @@ mod tests {
         let schema = Schema::new_default(KnnIndex::Hnsw);
         let collection_config = InternalCollectionConfiguration::default_hnsw();
 
-        let result =
-            Schema::reconcile_with_collection_config(schema.clone(), collection_config).unwrap();
+        let result = Schema::reconcile_with_collection_config(&schema, &collection_config).unwrap();
         assert_eq!(result, schema);
     }
 
@@ -3048,7 +3372,8 @@ mod tests {
             hnsw_config.ef_construction = 500; // Non-default value
         }
 
-        let result = Schema::reconcile_with_collection_config(schema, collection_config);
+        // Use reconcile_schema_and_config which has the early validation
+        let result = Schema::reconcile_schema_and_config(Some(&schema), Some(&collection_config));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -3075,7 +3400,7 @@ mod tests {
             embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
         };
 
-        let result = Schema::reconcile_with_collection_config(schema, collection_config).unwrap();
+        let result = Schema::reconcile_with_collection_config(&schema, &collection_config).unwrap();
 
         // Check that #embedding key override was created with the collection config settings
         let embedding_override = result.keys.get(EMBEDDING_KEY).unwrap();
@@ -3138,7 +3463,7 @@ mod tests {
             embedding_function: None,
         };
 
-        let result = Schema::reconcile_with_collection_config(schema, collection_config).unwrap();
+        let result = Schema::reconcile_with_collection_config(&schema, &collection_config).unwrap();
 
         // Check that #embedding key override was created with the collection config settings
         let embedding_override = result.keys.get(EMBEDDING_KEY).unwrap();
@@ -3199,7 +3524,7 @@ mod tests {
             embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
         };
 
-        let result = Schema::reconcile_with_collection_config(schema, collection_config).unwrap();
+        let result = Schema::reconcile_with_collection_config(&schema, &collection_config).unwrap();
 
         // Check that defaults.float_list.vector_index was updated
         let defaults_vector_index = result
@@ -3258,17 +3583,10 @@ mod tests {
     fn test_is_schema_default() {
         // Test that actual default schemas are correctly identified
         let default_hnsw_schema = Schema::new_default(KnnIndex::Hnsw);
-        assert!(Schema::is_schema_default(&default_hnsw_schema));
+        assert!(default_hnsw_schema.is_default());
 
         let default_spann_schema = Schema::new_default(KnnIndex::Spann);
-        assert!(Schema::is_schema_default(&default_spann_schema));
-
-        // Test that an empty schema is NOT considered default (since it doesn't match new_default structure)
-        let empty_schema = Schema {
-            defaults: ValueTypes::default(),
-            keys: HashMap::new(),
-        };
-        assert!(!Schema::is_schema_default(&empty_schema));
+        assert!(default_spann_schema.is_default());
 
         // Test that a modified default schema is not considered default
         let mut modified_schema = Schema::new_default(KnnIndex::Hnsw);
@@ -3278,14 +3596,14 @@ mod tests {
                 string_inverted.enabled = false; // Default is true, so this should make it non-default
             }
         }
-        assert!(!Schema::is_schema_default(&modified_schema));
+        assert!(!modified_schema.is_default());
 
         // Test that schema with additional key overrides is not default
         let mut schema_with_extra_overrides = Schema::new_default(KnnIndex::Hnsw);
         schema_with_extra_overrides
             .keys
             .insert("custom_key".to_string(), ValueTypes::default());
-        assert!(!Schema::is_schema_default(&schema_with_extra_overrides));
+        assert!(!schema_with_extra_overrides.is_default());
     }
 
     #[test]

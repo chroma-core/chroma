@@ -1751,7 +1751,7 @@ class Schema:
         # Disallow using special internal keys (#embedding, #document)
         if key is not None and key in (EMBEDDING_KEY, DOCUMENT_KEY):
             raise ValueError(
-                f"Cannot create index on special key '{key}'. These keys are managed automatically by the system."
+                f"Cannot create index on special key '{key}'. These keys are managed automatically by the system. Invoke create_index(VectorIndexConfig(...)) without specifying a key to configure the vector index globally."
             )
 
         # Special handling for vector index

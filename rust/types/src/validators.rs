@@ -190,6 +190,15 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
     {
         return Err(ValidationError::new("schema").with_message("Vector index cannot be enabled by default. It can only be enabled on #embedding field.".into()));
     }
+    if schema.defaults.float_list.as_ref().is_some_and(|vt| {
+        vt.vector_index
+            .as_ref()
+            .is_some_and(|it| it.config.hnsw.is_some() && it.config.spann.is_some())
+    }) {
+        return Err(ValidationError::new("schema").with_message(
+            "Both spann and hnsw config cannot be present at the same time.".into(),
+        ));
+    }
     if schema
         .defaults
         .sparse_vector
@@ -207,6 +216,30 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
         return Err(ValidationError::new("schema").with_message("Full text search / regular expression index cannot be enabled by default. It can only be enabled on #document field.".into()));
     }
     for (key, config) in &schema.keys {
+        if key == DOCUMENT_KEY
+            && (config.boolean.is_some()
+                || config.float.is_some()
+                || config.int.is_some()
+                || config.float_list.is_some()
+                || config.sparse_vector.is_some())
+        {
+            return Err(ValidationError::new("schema").with_message(
+                format!("Document field cannot have any value types other than string: {key}")
+                    .into(),
+            ));
+        }
+        if key == EMBEDDING_KEY
+            && (config.boolean.is_some()
+                || config.float.is_some()
+                || config.int.is_some()
+                || config.string.is_some()
+                || config.sparse_vector.is_some())
+        {
+            return Err(ValidationError::new("schema").with_message(
+                format!("Embedding field cannot have any value types other than float_list: {key}")
+                    .into(),
+            ));
+        }
         if let Some(vit) = config
             .float_list
             .as_ref()
@@ -247,6 +280,16 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
             && key != DOCUMENT_KEY
         {
             return Err(ValidationError::new("schema").with_message(format!("Full text search / regular expression index can only be enabled on #document field: {key}").into()));
+        }
+        if config.string.as_ref().is_some_and(|vt| {
+            vt.string_inverted_index
+                .as_ref()
+                .is_some_and(|it| it.enabled)
+        }) && key == DOCUMENT_KEY
+        {
+            return Err(ValidationError::new("schema").with_message(
+                format!("String inverted index can not be enabled on #document key: {key}").into(),
+            ));
         }
     }
     Ok(())
