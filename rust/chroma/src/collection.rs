@@ -731,13 +731,11 @@ impl ChromaCollection {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::tests::with_client;
+    use crate::tests::{unique_collection_name, with_client};
     use chroma_types::{
         Include, IncludeList, Metadata, MetadataComparison, MetadataExpression, MetadataValue,
         PrimitiveOperator, UpdateMetadata, UpdateMetadataValue, Where,
     };
-    use uuid::Uuid;
 
     #[tokio::test]
     #[test_log::test]
