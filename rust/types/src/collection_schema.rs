@@ -1443,7 +1443,9 @@ impl Schema {
                     return false;
                 }
                 // Check that the config has default structure
-                // We allow space and embedding_function to vary, but check structure
+                if !is_embedding_function_default(&vector_index.config.embedding_function) {
+                    return false;
+                }
                 if vector_index.config.source_key.is_some() {
                     return false;
                 }
@@ -1475,7 +1477,10 @@ impl Schema {
                 if sparse_index.enabled {
                     return false;
                 }
-                // Check config structure (allow embedding_function to vary)
+                // Check config structure
+                if !is_embedding_function_default(&sparse_index.config.embedding_function) {
+                    return false;
+                }
                 if sparse_index.config.source_key.is_some() {
                     return false;
                 }
@@ -1508,6 +1513,10 @@ impl Schema {
         if let Some(float_list) = &value_types.float_list {
             if let Some(vector_index) = &float_list.vector_index {
                 if !vector_index.enabled {
+                    return false;
+                }
+                // Check that embedding_function is default
+                if !is_embedding_function_default(&vector_index.config.embedding_function) {
                     return false;
                 }
                 // Check that source_key is #document
