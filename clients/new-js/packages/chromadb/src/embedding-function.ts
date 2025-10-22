@@ -131,6 +131,11 @@ export const knownSparseEmbeddingFunctions = new Map<
 >();
 
 /**
+ * Union type covering both dense and sparse embedding functions.
+ */
+export type AnyEmbeddingFunction = EmbeddingFunction | SparseEmbeddingFunction;
+
+/**
  * Registers an embedding function in the global registry.
  * @param name - Unique name for the embedding function
  * @param fn - Embedding function class to register
@@ -170,9 +175,9 @@ export const registerSparseEmbeddingFunction = (
  * Retrieves and instantiates an embedding function from configuration.
  * @param collectionName - Name of the collection (for error messages)
  * @param efConfig - Configuration for the embedding function
- * @returns Promise resolving to an EmbeddingFunction instance
+ * @returns EmbeddingFunction instance or undefined if it cannot be constructed
  */
-export const getEmbeddingFunction = async (
+export const getEmbeddingFunction = (
   collectionName: string,
   efConfig?: EmbeddingFunctionConfiguration,
 ) => {
@@ -235,23 +240,17 @@ export const getEmbeddingFunction = async (
  * Retrieves and instantiates a sparse embedding function from configuration.
  * @param collectionName - Name of the collection (for error messages)
  * @param efConfig - Configuration for the sparse embedding function
- * @returns Promise resolving to a SparseEmbeddingFunction instance
+ * @returns SparseEmbeddingFunction instance or undefined if it cannot be constructed
  */
-export const getSparseEmbeddingFunction = async (
+export const getSparseEmbeddingFunction = (
   collectionName: string,
   efConfig?: EmbeddingFunctionConfiguration,
 ) => {
   if (!efConfig) {
-    console.warn(
-      `No sparse embedding function configuration found for collection ${collectionName}.`,
-    );
     return undefined;
   }
 
   if (efConfig.type === "legacy") {
-    console.warn(
-      `No sparse embedding function configuration found for collection ${collectionName}.`,
-    );
     return undefined;
   }
 
