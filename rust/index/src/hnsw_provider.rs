@@ -590,6 +590,12 @@ impl HnswIndexProvider {
     }
 
     pub fn commit(&self, index: HnswIndexRef) -> Result<(), Box<dyn ChromaError>> {
+        if self.use_direct_hnsw {
+            // If we are using direct HNSW, we don't need to commit since we're going off the in-memory index.
+            // Each preceding write will have already made changes to the in-memory index.
+            return Ok(());
+        }
+
         match index.inner.write().hnsw_index.save() {
             Ok(_) => {}
             Err(e) => {
