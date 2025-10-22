@@ -18,14 +18,18 @@ use crate::CollectionConfigurationToInternalConfigurationError;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
 use crate::DistributedSpannParametersFromSegmentError;
+use crate::EmbeddingsPayload;
 use crate::HnswParametersFromSegmentError;
-use crate::InternalSchema;
 use crate::Metadata;
+use crate::RawWhereFields;
+use crate::Schema;
 use crate::SchemaError;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
+use crate::UpdateEmbeddingsPayload;
 use crate::UpdateMetadata;
 use crate::Where;
+use crate::WhereValidationError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
@@ -33,7 +37,6 @@ use serde::Serialize;
 use std::time::SystemTimeError;
 use thiserror::Error;
 use tonic::Status;
-use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::Validate;
 use validator::ValidationError;
@@ -144,7 +147,8 @@ impl ChromaError for BatchGetCollectionSoftDeleteStatusError {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ResetResponse {}
 
 #[derive(Debug, Error)]
@@ -167,13 +171,15 @@ impl ChromaError for ResetError {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ChecklistResponse {
     pub max_batch_size: u32,
     pub supports_base64_encoding: bool,
 }
 
-#[derive(Debug, Error, ToSchema)]
+#[derive(Debug, Error)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum HeartbeatError {
     #[error("system time error: {0}")]
     CouldNotGetTime(String),
@@ -192,7 +198,8 @@ impl ChromaError for HeartbeatError {
 }
 
 #[non_exhaustive]
-#[derive(Serialize, Validate, Deserialize, ToSchema)]
+#[derive(Serialize, Validate, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateTenantRequest {
     #[validate(length(min = 3))]
     pub name: String,
@@ -206,7 +213,8 @@ impl CreateTenantRequest {
     }
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateTenantResponse {}
 
 #[derive(Debug, Error)]
@@ -227,7 +235,8 @@ impl ChromaError for CreateTenantError {
 }
 
 #[non_exhaustive]
-#[derive(Validate, Serialize, ToSchema)]
+#[derive(Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetTenantRequest {
     pub name: String,
 }
@@ -240,7 +249,8 @@ impl GetTenantRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetTenantResponse {
     pub name: String,
@@ -279,7 +289,8 @@ impl ChromaError for GetTenantError {
 }
 
 #[non_exhaustive]
-#[derive(Validate, Serialize, ToSchema)]
+#[derive(Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateTenantRequest {
     pub tenant_id: String,
     pub resource_name: String,
@@ -299,7 +310,8 @@ impl UpdateTenantRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct UpdateTenantResponse {}
 
@@ -328,7 +340,8 @@ impl ChromaError for UpdateTenantError {
 }
 
 #[non_exhaustive]
-#[derive(Validate, Serialize, ToSchema)]
+#[derive(Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateDatabaseRequest {
     pub database_id: Uuid,
     pub tenant_id: String,
@@ -352,7 +365,8 @@ impl CreateDatabaseRequest {
     }
 }
 
-#[derive(ToSchema, Serialize)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateDatabaseResponse {}
 
 #[derive(Error, Debug)]
@@ -372,7 +386,8 @@ impl ChromaError for CreateDatabaseError {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, ToSchema, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Database {
     pub id: Uuid,
@@ -403,7 +418,8 @@ impl Database {
 }
 
 #[non_exhaustive]
-#[derive(Validate, Serialize, ToSchema)]
+#[derive(Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ListDatabasesRequest {
     pub tenant_id: String,
     pub limit: Option<u32>,
@@ -446,7 +462,8 @@ impl ChromaError for ListDatabasesError {
 }
 
 #[non_exhaustive]
-#[derive(Validate, ToSchema, Serialize)]
+#[derive(Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -489,7 +506,8 @@ impl ChromaError for GetDatabaseError {
 }
 
 #[non_exhaustive]
-#[derive(Validate, Serialize, ToSchema)]
+#[derive(Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -509,7 +527,8 @@ impl DeleteDatabaseRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteDatabaseResponse {}
 
 #[derive(Debug, Error)]
@@ -547,7 +566,8 @@ impl ChromaError for FinishDatabaseDeletionError {
 }
 
 #[non_exhaustive]
-#[derive(Validate, Debug, Serialize, ToSchema)]
+#[derive(Validate, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ListCollectionsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -576,7 +596,8 @@ impl ListCollectionsRequest {
 pub type ListCollectionsResponse = Vec<Collection>;
 
 #[non_exhaustive]
-#[derive(Validate, Serialize, ToSchema)]
+#[derive(Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CountCollectionsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -599,7 +620,8 @@ impl CountCollectionsRequest {
 pub type CountCollectionsResponse = u32;
 
 #[non_exhaustive]
-#[derive(Validate, Clone, Serialize, ToSchema)]
+#[derive(Validate, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -645,7 +667,8 @@ impl ChromaError for GetCollectionError {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Debug, Validate, Serialize, ToSchema)]
+#[derive(Clone, Debug, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -655,7 +678,7 @@ pub struct CreateCollectionRequest {
     pub metadata: Option<Metadata>,
     pub configuration: Option<InternalCollectionConfiguration>,
     #[validate(custom(function = "validate_schema"))]
-    pub schema: Option<InternalSchema>,
+    pub schema: Option<Schema>,
     pub get_or_create: bool,
 }
 
@@ -666,7 +689,7 @@ impl CreateCollectionRequest {
         name: String,
         metadata: Option<Metadata>,
         configuration: Option<InternalCollectionConfiguration>,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
         get_or_create: bool,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
@@ -702,7 +725,7 @@ pub enum CreateCollectionError {
     #[error("Could not deserialize configuration: {0}")]
     Configuration(serde_json::Error),
     #[error("Could not serialize schema: {0}")]
-    Schema(#[from] SchemaError),
+    Schema(#[source] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("The operation was aborted, {0}")]
@@ -714,7 +737,7 @@ pub enum CreateCollectionError {
     #[error("Failed to parse db id")]
     DatabaseIdParseError,
     #[error("Failed to reconcile schema: {0}")]
-    InvalidSchema(String),
+    InvalidSchema(#[source] SchemaError),
 }
 
 impl ChromaError for CreateCollectionError {
@@ -732,7 +755,7 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
             CreateCollectionError::DatabaseIdParseError => ErrorCodes::Internal,
-            CreateCollectionError::InvalidSchema(_) => ErrorCodes::InvalidArgument,
+            CreateCollectionError::InvalidSchema(e) => e.code(),
             CreateCollectionError::Schema(e) => e.code(),
         }
     }
@@ -754,6 +777,8 @@ impl ChromaError for CountCollectionsError {
 
 #[derive(Debug, Error)]
 pub enum GetCollectionsError {
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Could not deserialize configuration")]
@@ -767,6 +792,7 @@ pub enum GetCollectionsError {
 impl ChromaError for GetCollectionsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GetCollectionsError::InvalidSchema(e) => e.code(),
             GetCollectionsError::Internal(err) => err.code(),
             GetCollectionsError::Configuration(_) => ErrorCodes::Internal,
             GetCollectionsError::CollectionId(_) => ErrorCodes::Internal,
@@ -775,14 +801,16 @@ impl ChromaError for GetCollectionsError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ChromaResourceName {
     pub tenant_resource_name: String,
     pub database_name: String,
     pub collection_name: String,
 }
 #[non_exhaustive]
-#[derive(Clone, Serialize, ToSchema)]
+#[derive(Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetCollectionByCrnRequest {
     pub parsed_crn: ChromaResourceName,
 }
@@ -819,6 +847,8 @@ pub type GetCollectionByCrnResponse = Collection;
 
 #[derive(Debug, Error)]
 pub enum GetCollectionByCrnError {
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Collection [{0}] does not exist")]
@@ -828,20 +858,23 @@ pub enum GetCollectionByCrnError {
 impl ChromaError for GetCollectionByCrnError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GetCollectionByCrnError::InvalidSchema(e) => e.code(),
             GetCollectionByCrnError::Internal(err) => err.code(),
             GetCollectionByCrnError::NotFound(_) => ErrorCodes::NotFound,
         }
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum CollectionMetadataUpdate {
     ResetMetadata,
     UpdateMetadata(UpdateMetadata),
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate, Debug, Serialize, ToSchema)]
+#[derive(Clone, Validate, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateCollectionRequest {
     pub collection_id: CollectionUuid,
     #[validate(custom(function = "validate_name"))]
@@ -869,7 +902,8 @@ impl UpdateCollectionRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateCollectionResponse {}
 
 #[derive(Error, Debug)]
@@ -902,7 +936,8 @@ impl ChromaError for UpdateCollectionError {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate, Serialize, ToSchema)]
+#[derive(Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -925,7 +960,8 @@ impl DeleteCollectionRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionResponse {}
 
 #[derive(Error, Debug)]
@@ -952,7 +988,8 @@ impl ChromaError for DeleteCollectionError {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate, Serialize, ToSchema)]
+#[derive(Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ForkCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1086,8 +1123,37 @@ pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
 ////////////////////////// AddCollectionRecords //////////////////////////
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AddCollectionRecordsPayload {
+    pub ids: Vec<String>,
+    pub embeddings: EmbeddingsPayload,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<Metadata>>>,
+}
+
+impl AddCollectionRecordsPayload {
+    pub fn new(
+        ids: Vec<String>,
+        embeddings: Vec<Vec<f32>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        metadatas: Option<Vec<Option<Metadata>>>,
+    ) -> Self {
+        Self {
+            ids,
+            embeddings: EmbeddingsPayload::JsonArrays(embeddings),
+            documents,
+            uris,
+            metadatas,
+        }
+    }
+}
+
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize, ToSchema)]
+#[derive(Debug, Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AddCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1126,6 +1192,16 @@ impl AddCollectionRecordsRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> AddCollectionRecordsPayload {
+        AddCollectionRecordsPayload {
+            ids: self.ids,
+            embeddings: EmbeddingsPayload::JsonArrays(self.embeddings),
+            documents: self.documents,
+            uris: self.uris,
+            metadatas: self.metadatas,
+        }
+    }
 }
 
 fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
@@ -1136,7 +1212,8 @@ fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
     Ok(())
 }
 
-#[derive(Serialize, ToSchema, Default, Deserialize)]
+#[derive(Serialize, Default, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AddCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -1161,8 +1238,19 @@ impl ChromaError for AddCollectionRecordsError {
 
 ////////////////////////// UpdateCollectionRecords //////////////////////////
 
+#[derive(Deserialize, Debug, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct UpdateCollectionRecordsPayload {
+    pub ids: Vec<String>,
+    pub embeddings: Option<UpdateEmbeddingsPayload>,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
+}
+
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize, ToSchema)]
+#[derive(Debug, Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1200,9 +1288,20 @@ impl UpdateCollectionRecordsRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> UpdateCollectionRecordsPayload {
+        UpdateCollectionRecordsPayload {
+            ids: self.ids,
+            embeddings: self.embeddings.map(UpdateEmbeddingsPayload::JsonArrays),
+            documents: self.documents,
+            uris: self.uris,
+            metadatas: self.metadatas,
+        }
+    }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -1224,8 +1323,19 @@ impl ChromaError for UpdateCollectionRecordsError {
 
 ////////////////////////// UpsertCollectionRecords //////////////////////////
 
+#[derive(Deserialize, Debug, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct UpsertCollectionRecordsPayload {
+    pub ids: Vec<String>,
+    pub embeddings: EmbeddingsPayload,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
+}
+
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize, ToSchema)]
+#[derive(Debug, Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpsertCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1264,9 +1374,20 @@ impl UpsertCollectionRecordsRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> UpsertCollectionRecordsPayload {
+        UpsertCollectionRecordsPayload {
+            ids: self.ids.clone(),
+            embeddings: EmbeddingsPayload::JsonArrays(self.embeddings.clone()),
+            documents: self.documents.clone(),
+            uris: self.uris.clone(),
+            metadatas: self.metadatas.clone(),
+        }
+    }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpsertCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -1288,8 +1409,17 @@ impl ChromaError for UpsertCollectionRecordsError {
 
 ////////////////////////// DeleteCollectionRecords //////////////////////////
 
+#[derive(Deserialize, Debug, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct DeleteCollectionRecordsPayload {
+    pub ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub where_fields: RawWhereFields,
+}
+
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize, ToSchema)]
+#[derive(Debug, Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1324,9 +1454,22 @@ impl DeleteCollectionRecordsRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> Result<DeleteCollectionRecordsPayload, WhereError> {
+        let where_fields = if let Some(r#where) = self.r#where.as_ref() {
+            RawWhereFields::from_json_str(Some(&serde_json::to_string(r#where)?), None)?
+        } else {
+            RawWhereFields::default()
+        };
+        Ok(DeleteCollectionRecordsPayload {
+            ids: self.ids.clone(),
+            where_fields,
+        })
+    }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -1361,7 +1504,8 @@ impl ChromaError for IncludeParsingError {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum Include {
     #[serde(rename = "distances")]
     Distance,
@@ -1390,7 +1534,8 @@ impl TryFrom<&str> for Include {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct IncludeList(pub Vec<Include>);
 
@@ -1466,10 +1611,33 @@ impl CountRequest {
 
 pub type CountResponse = u32;
 
+//////////////////////// Payload Err ////////////////////
+
+#[derive(Debug, thiserror::Error)]
+pub enum WhereError {
+    #[error("serialization: {0}")]
+    Serialization(#[from] serde_json::Error),
+    #[error("validation: {0}")]
+    Validation(#[from] WhereValidationError),
+}
+
 ////////////////////////// Get //////////////////////////
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetRequestPayload {
+    pub ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub where_fields: RawWhereFields,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    #[serde(default = "IncludeList::default_get")]
+    pub include: IncludeList,
+}
+
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize, ToSchema)]
+#[derive(Debug, Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1506,9 +1674,25 @@ impl GetRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> Result<GetRequestPayload, WhereError> {
+        let where_fields = if let Some(r#where) = self.r#where.as_ref() {
+            RawWhereFields::from_json_str(Some(&serde_json::to_string(r#where)?), None)?
+        } else {
+            RawWhereFields::default()
+        };
+        Ok(GetRequestPayload {
+            ids: self.ids,
+            where_fields,
+            limit: self.limit,
+            offset: Some(self.offset),
+            include: self.include,
+        })
+    }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, ToSchema, Default)]
+#[derive(Clone, Deserialize, Serialize, Debug, Default)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetResponse {
     pub ids: Vec<String>,
@@ -1637,8 +1821,21 @@ impl From<(GetResult, IncludeList)> for GetResponse {
 
 ////////////////////////// Query //////////////////////////
 
+#[derive(Deserialize, Debug, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct QueryRequestPayload {
+    pub ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub where_fields: RawWhereFields,
+    pub query_embeddings: Vec<Vec<f32>>,
+    pub n_results: Option<u32>,
+    #[serde(default = "IncludeList::default_query")]
+    pub include: IncludeList,
+}
+
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize, ToSchema)]
+#[derive(Debug, Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct QueryRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1675,9 +1872,25 @@ impl QueryRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> Result<QueryRequestPayload, WhereError> {
+        let where_fields = if let Some(r#where) = self.r#where.as_ref() {
+            RawWhereFields::from_json_str(Some(&serde_json::to_string(r#where)?), None)?
+        } else {
+            RawWhereFields::default()
+        };
+        Ok(QueryRequestPayload {
+            ids: self.ids,
+            where_fields,
+            query_embeddings: self.embeddings,
+            n_results: Some(self.n_results),
+            include: self.include,
+        })
+    }
 }
 
-#[derive(Clone, Deserialize, Serialize, ToSchema, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct QueryResponse {
     pub ids: Vec<Vec<String>>,
@@ -1845,8 +2058,15 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SearchRequestPayload {
+    pub searches: Vec<SearchPayload>,
+}
+
 #[non_exhaustive]
-#[derive(Clone, Debug, Serialize, ToSchema, Validate)]
+#[derive(Clone, Debug, Serialize, Validate)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SearchRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1870,9 +2090,16 @@ impl SearchRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> SearchRequestPayload {
+        SearchRequestPayload {
+            searches: self.searches,
+        }
+    }
 }
 
-#[derive(Clone, Deserialize, Serialize, ToSchema, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SearchResponse {
     pub ids: Vec<Vec<String>>,
     pub documents: Vec<Option<Vec<Option<String>>>>,
@@ -1971,7 +2198,8 @@ impl ChromaError for QueryError {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct HealthCheckResponse {
     pub is_executor_ready: bool,
     pub is_log_client_ready: bool,
@@ -2025,7 +2253,8 @@ impl ChromaError for ExecutorError {
 ////////////////////////// Task Operations //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Debug, Deserialize, Serialize, Validate, ToSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, Validate)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateTaskRequest {
     #[validate(length(min = 1))]
     pub task_name: String,
@@ -2057,7 +2286,8 @@ impl CreateTaskRequest {
     }
 }
 
-#[derive(Clone, Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateTaskResponse {
     pub success: bool,
     pub task_id: String,
@@ -2090,7 +2320,8 @@ impl ChromaError for AddTaskError {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Debug, Deserialize, Validate, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RemoveTaskRequest {
     #[validate(length(min = 1))]
     pub task_name: String,
@@ -2110,7 +2341,8 @@ impl RemoveTaskRequest {
     }
 }
 
-#[derive(Clone, Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RemoveTaskResponse {
     pub success: bool,
 }

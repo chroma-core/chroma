@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/metering-macros", "rust/metering", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server", "rust/s3heap", "rust/s3heap-service"]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/metering-macros", "rust/metering", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server", "rust/s3heap", "rust/s3heap-service", "rust/api-types"]
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -11,7 +11,6 @@ axum = { version = "0.8", features = ["macros"] }
 bytes = "1.10"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-criterion = { version = "0.5", features = ["async_tokio"] }
 figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
 flatbuffers = "25.2.10"
 futures = "0.3"
@@ -19,6 +18,7 @@ futures-core = "0.3"
 http-body-util = "0.1.3"
 lazy_static = { version = "1.4" }
 lexical-core = "1.0"
+murmur3 = "0.5.2"
 num_cpus = "1.16.0"
 once_cell = "1.21.3"
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
@@ -52,7 +52,7 @@ tracing-bunyan-formatter = "0.3"
 tracing-opentelemetry = "0.28.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.11.0", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
-utoipa = { version = "5.0.0", features = ["macros", "axum_extras", "debug", "uuid"] }
+utoipa = { version = "5", features = ["macros", "axum_extras", "debug", "uuid"] }
 sqlx = { version = "0.8.3", features = ["runtime-tokio", "sqlite", "postgres", "chrono"] }
 sha2 = "0.10.8"
 md5 = "0.7.0"
@@ -72,13 +72,14 @@ petgraph = { version = "0.8.1" }
 base64 = "0.22"
 tikv-jemallocator = { version = "0.6.0", features = ["profiling"] }
 
-chroma = { path = "rust/chroma" }
+chroma = { path = "rust/chroma", version = "0.6.0" }
+chroma-api-types = { path = "rust/api-types", version = "0.5.0" }
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
 chroma-cache = { path = "rust/cache" }
 chroma-config = { path = "rust/config" }
 chroma-distance = { path = "rust/distance" }
-chroma-error = { path = "rust/error" }
+chroma-error = { path = "rust/error", version = "0.5.0" }
 chroma-frontend = { path = "rust/frontend" }
 chroma-index = { path = "rust/index" }
 chroma-log = { path = "rust/log" }
@@ -90,7 +91,7 @@ chroma-storage = { path = "rust/storage" }
 chroma-system = { path = "rust/system" }
 chroma-sysdb = { path = "rust/sysdb" }
 chroma-tracing = { path = "rust/tracing" }
-chroma-types = { path = "rust/types" }
+chroma-types = { path = "rust/types", version = "0.5.0" }
 chroma-sqlite = { path = "rust/sqlite" }
 chroma-cli = { path = "rust/cli" }
 chroma-jemalloc-pprof-server = { path = "rust/jemalloc-pprof-server" }
@@ -102,6 +103,7 @@ worker = { path = "rust/worker" }
 
 # Dev dependencies
 bincode = "1.3.3"
+criterion = { version = "0.7", features = ["async_tokio"] }
 indicatif = { version = "0.17.9", features = ["rayon"] }
 proptest = "1.6.0"
 proptest-state-machine = "0.3.1"

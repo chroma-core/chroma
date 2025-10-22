@@ -1,14 +1,13 @@
 from chromadb.api.types import (
     SparseEmbeddingFunction,
-    SparseEmbeddings,
+    SparseVectors,
     Documents,
 )
-from chromadb.base_types import SparseVector
 from typing import Dict, Any, TypedDict, Optional
 import numpy as np
 from typing import cast, Literal
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
-from chromadb.utils.sparse_embedding_utils import _sort_sparse_vectors
+from chromadb.utils.sparse_embedding_utils import normalize_sparse_vector
 
 TaskType = Literal["document", "query"]
 
@@ -59,7 +58,7 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
             )
         self._model = self.models[model_name]
 
-    def __call__(self, input: Documents) -> SparseEmbeddings:
+    def __call__(self, input: Documents) -> SparseVectors:
         """Generate embeddings for the given documents.
 
         Args:
@@ -86,7 +85,7 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         else:
             raise ValueError(f"Invalid task: {self.task}")
 
-        sparse_embeddings: SparseEmbeddings = []
+        sparse_vectors: SparseVectors = []
 
         for vec in embeddings:
             # Convert sparse tensor to dense array if needed
@@ -96,14 +95,15 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
                 vec_dense = vec.numpy() if hasattr(vec, "numpy") else np.array(vec)
 
             nz = np.where(vec_dense != 0)[0]
-            sparse_embeddings.append(
-                SparseVector(indices=nz.tolist(), values=vec_dense[nz].tolist())
+            sparse_vectors.append(
+                normalize_sparse_vector(
+                    indices=nz.tolist(), values=vec_dense[nz].tolist()
+                )
             )
 
-        _sort_sparse_vectors(sparse_embeddings)
-        return sparse_embeddings
+        return sparse_vectors
 
-    def embed_query(self, input: Documents) -> SparseEmbeddings:
+    def embed_query(self, input: Documents) -> SparseVectors:
         try:
             from sentence_transformers import SparseEncoder
         except ImportError:
@@ -123,7 +123,7 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
             else:
                 raise ValueError(f"Invalid task: {self.query_config.get('task')}")
 
-            sparse_embeddings: SparseEmbeddings = []
+            sparse_vectors: SparseVectors = []
 
             for vec in embeddings:
                 # Convert sparse tensor to dense array if needed
@@ -133,12 +133,13 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
                     vec_dense = vec.numpy() if hasattr(vec, "numpy") else np.array(vec)
 
                 nz = np.where(vec_dense != 0)[0]
-                sparse_embeddings.append(
-                    SparseVector(indices=nz.tolist(), values=vec_dense[nz].tolist())
+                sparse_vectors.append(
+                    normalize_sparse_vector(
+                        indices=nz.tolist(), values=vec_dense[nz].tolist()
+                    )
                 )
 
-            _sort_sparse_vectors(sparse_embeddings)
-            return sparse_embeddings
+            return sparse_vectors
 
         else:
             return self.__call__(input)

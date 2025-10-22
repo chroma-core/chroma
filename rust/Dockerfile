@@ -47,7 +47,6 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   # Move garbage collector binary
   if [ "$RELEASE_MODE" = "1" ]; then mv target/release/garbage_collector_service ./garbage_collector_service; else mv target/debug/garbage_collector_service ./garbage_collector_service; fi && \
   # Move load service binaries
-  if [ "$RELEASE_MODE" = "1" ]; then mv target/release/chroma-load-start ./chroma-load-start; else mv target/debug/chroma-load-start ./chroma-load-start; fi && \
   if [ "$RELEASE_MODE" = "1" ]; then mv target/release/chroma-load ./chroma-load; else mv target/debug/chroma-load ./chroma-load; fi && \
   # Move log service binary
   if [ "$RELEASE_MODE" = "1" ]; then mv target/release/log_service ./log_service; else mv target/debug/log_service ./log_service; fi && \
@@ -80,7 +79,6 @@ ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./garbage_collector_service" ]
 
 FROM runner AS load_service
 COPY --from=builder /chroma/chroma-load .
-COPY --from=builder /chroma/chroma-load-start .
 ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./chroma-load" ]
 
 FROM runner AS log_service

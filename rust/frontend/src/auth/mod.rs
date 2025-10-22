@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use std::future::{ready, Future};
 use std::pin::Pin;
@@ -5,7 +6,7 @@ use std::pin::Pin;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 
-use chroma::types::GetUserIdentityResponse;
+use chroma_api_types::GetUserIdentityResponse;
 use chroma_types::Collection;
 use serde::Serialize;
 
@@ -122,7 +123,7 @@ fn default_identity() -> GetUserIdentityResponse {
     GetUserIdentityResponse {
         user_id: String::new(),
         tenant: "default_tenant".to_string(),
-        databases: vec!["default_database".to_string()],
+        databases: HashSet::from(["default_database".to_string()]),
     }
 }
 
