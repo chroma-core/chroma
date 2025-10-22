@@ -7,13 +7,15 @@ name: GitHub Sync
 
 ## Direct Sync
 
+Direct Sync is the default syncing method, which uses the Chroma Cloud GitHub app. To use your own custom GitHub app, use [Platform Sync](/cloud/sync/overview#platform-sync).
+
 1. **Prerequisites**
 
     This walkthrough assumes that you have a GitHub account with at least one repository.
 
 2. **Setup**
 
-    If you do not already have a Chroma Cloud account, you will need to create one at https://trychroma.com. After creating an account, you can create a database by specifying a name:
+    If you do not already have a Chroma Cloud account, you will need to create one at [trychroma.com](https://www.trychroma.com). After creating an account, you can create a database by specifying a name:
 
     [INSERT SCREENSHOT]
 
@@ -45,7 +47,7 @@ name: GitHub Sync
 
 2. **Setup**
 
-    If you do not already have a Chroma Cloud account, you will need to create one at https://trychroma.com. After creating an account, you can create a database by specifying a name:
+    If you do not already have a Chroma Cloud account, you will need to create one at [trychroma.com](https://www.trychroma.com). After creating an account, you can create a database by specifying a name:
 
     [INSERT SCREENSHOT]
 

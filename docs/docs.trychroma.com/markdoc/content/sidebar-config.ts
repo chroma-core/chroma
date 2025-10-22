@@ -135,6 +135,14 @@ const sidebarConfig: AppSection[] = [
         pages: [{ id: "collection-forking", name: "Collection Forking" }],
       },
       {
+        id: "sync",
+        name: "Sync",
+        pages: [
+          { id: "overview", name: "Sync Overview" },
+          { id: "github-sync", name: "GitHub Sync" },
+        ],
+      },
+      {
         id: "package-search",
         name: "Package Search",
         pages: [

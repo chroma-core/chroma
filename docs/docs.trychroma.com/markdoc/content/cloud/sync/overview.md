@@ -3,6 +3,8 @@ id: sync-overview
 name: Sync Overview
 ---
 
+# Sync Overview
+
 The Chroma Sync Function exposes endpoints for developers to chunk, embed, and index various data sources. The API is intended for Chroma Cloud users and can be accessed for free (up to $5 in credits) by creating a Chroma Cloud account.
 
 # Key Concepts
