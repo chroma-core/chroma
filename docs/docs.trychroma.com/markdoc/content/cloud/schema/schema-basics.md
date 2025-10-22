@@ -276,7 +276,7 @@ Use `delete_index()` to disable indexes. Like `create_index()`, it takes:
 Returns the Schema object for method chaining.
 
 {% Note type="info" %}
-Not all indexes can be deleted. Vector, FTS, and Sparse Vector indexes currently cannot be disabled. See [Rules & Constraints](./rules-constraints) for details.
+Not all indexes can be deleted. Vector, FTS, and Sparse Vector indexes currently cannot be disabled.
 {% /Note %}
 
 ### Examples
@@ -361,6 +361,5 @@ const collection = await client.createCollection({ name: "optimized", schema });
 
 ## Next Steps
 
-- Learn about [rules and constraints](./rules-constraints) for Schema configuration
 - Set up [hybrid search](./hybrid-search) with sparse vectors
 - Browse the complete [index configuration reference](./index-reference)

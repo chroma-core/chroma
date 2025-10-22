@@ -125,6 +125,5 @@ await collection.add({
 ## Next Steps
 
 - [Schema Basics](./schema-basics) - Learn the structure and how to use Schema
-- [Rules & Constraints](./rules-constraints) - Understand important limitations
 - [Hybrid Search Setup](./hybrid-search) - Configure dense + sparse embeddings
 - [Index Configuration Reference](./index-reference) - Complete index type reference
