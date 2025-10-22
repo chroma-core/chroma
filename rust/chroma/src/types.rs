@@ -2,16 +2,105 @@
 
 pub use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse};
 
-pub use chroma_types::{
-    plan::SearchPayload, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    BooleanOperator, Collection, CompositeExpression, DeleteCollectionRecordsRequest,
-    DeleteCollectionRecordsResponse, DocumentExpression, DocumentOperator,
-    EmbeddingFunctionConfiguration, EmbeddingFunctionNewConfiguration, ForkCollectionRequest,
-    GetRequest, GetResponse, Include, IncludeList, Metadata, MetadataComparison,
-    MetadataExpression, MetadataSetValue, MetadataValue, PrimitiveOperator, QueryRequest,
-    QueryResponse, Schema, SearchRequest, SearchResponse, SetOperator,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateMetadata,
-    UpdateMetadataValue, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
-};
-
+pub use chroma_types::operator::rrf;
+pub use chroma_types::operator::Filter;
 pub use chroma_types::operator::Key;
+pub use chroma_types::operator::Limit;
+pub use chroma_types::operator::Rank;
+pub use chroma_types::operator::RankExpr;
+pub use chroma_types::operator::Select;
+pub use chroma_types::plan::SearchPayload;
+pub use chroma_types::regex::hir::ChromaHir;
+pub use chroma_types::regex::ChromaRegex;
+pub use chroma_types::AddCollectionRecordsPayload;
+pub use chroma_types::AddCollectionRecordsRequest;
+pub use chroma_types::AddCollectionRecordsResponse;
+pub use chroma_types::Base64DecodeError;
+pub use chroma_types::BoolInvertedIndexConfig;
+pub use chroma_types::BoolInvertedIndexType;
+pub use chroma_types::BoolValueType;
+pub use chroma_types::BooleanOperator;
+pub use chroma_types::Collection;
+pub use chroma_types::CollectionConfiguration;
+pub use chroma_types::CollectionConversionError;
+pub use chroma_types::CollectionToProtoError;
+pub use chroma_types::CompositeExpression;
+pub use chroma_types::CountCollectionsRequest;
+pub use chroma_types::CreateCollectionRequest;
+pub use chroma_types::DataChunkIteraror;
+pub use chroma_types::DeleteCollectionRecordsPayload;
+pub use chroma_types::DeleteCollectionRecordsRequest;
+pub use chroma_types::DeleteCollectionRecordsResponse;
+pub use chroma_types::DeleteCollectionRequest;
+pub use chroma_types::DistributedSpannParametersFromSegmentError;
+pub use chroma_types::DocumentExpression;
+pub use chroma_types::DocumentOperator;
+pub use chroma_types::EmbeddingFunctionConfiguration;
+pub use chroma_types::EmbeddingFunctionNewConfiguration;
+pub use chroma_types::ExecutorError;
+pub use chroma_types::FilterValidationError;
+pub use chroma_types::FloatInvertedIndexConfig;
+pub use chroma_types::FloatInvertedIndexType;
+pub use chroma_types::FloatListValueType;
+pub use chroma_types::FloatValueType;
+pub use chroma_types::ForkCollectionRequest;
+pub use chroma_types::FtsIndexConfig;
+pub use chroma_types::FtsIndexType;
+pub use chroma_types::GetCollectionWithSegmentsError;
+pub use chroma_types::GetRequest;
+pub use chroma_types::GetResponse;
+pub use chroma_types::HeartbeatError;
+pub use chroma_types::HnswConfiguration;
+pub use chroma_types::HnswIndexConfig;
+pub use chroma_types::HnswParametersFromSegmentError;
+pub use chroma_types::Include;
+pub use chroma_types::IncludeList;
+pub use chroma_types::IntInvertedIndexConfig;
+pub use chroma_types::IntInvertedIndexType;
+pub use chroma_types::IntValueType;
+pub use chroma_types::Metadata;
+pub use chroma_types::MetadataComparison;
+pub use chroma_types::MetadataExpression;
+pub use chroma_types::MetadataSetValue;
+pub use chroma_types::MetadataValue;
+pub use chroma_types::PrimitiveOperator;
+pub use chroma_types::QueryError;
+pub use chroma_types::QueryRequest;
+pub use chroma_types::QueryResponse;
+pub use chroma_types::ScalarEncoding;
+pub use chroma_types::Schema;
+pub use chroma_types::SchemaBuilderError;
+pub use chroma_types::SchemaError;
+pub use chroma_types::SearchRequest;
+pub use chroma_types::SearchResponse;
+pub use chroma_types::Segment;
+pub use chroma_types::SegmentScopeConversionError;
+pub use chroma_types::SetOperator;
+pub use chroma_types::SpannConfiguration;
+pub use chroma_types::SpannIndexConfig;
+pub use chroma_types::SparseVector;
+pub use chroma_types::SparseVectorIndexConfig;
+pub use chroma_types::SparseVectorIndexType;
+pub use chroma_types::SparseVectorValueType;
+pub use chroma_types::StringInvertedIndexConfig;
+pub use chroma_types::StringInvertedIndexType;
+pub use chroma_types::StringValueType;
+pub use chroma_types::UpdateCollectionConfiguration;
+pub use chroma_types::UpdateCollectionRecordsPayload;
+pub use chroma_types::UpdateCollectionRecordsRequest;
+pub use chroma_types::UpdateCollectionRecordsResponse;
+pub use chroma_types::UpdateCollectionRequest;
+pub use chroma_types::UpdateEmbeddingsPayload;
+pub use chroma_types::UpdateHnswConfiguration;
+pub use chroma_types::UpdateMetadata;
+pub use chroma_types::UpdateMetadataValue;
+pub use chroma_types::UpdateSpannConfiguration;
+pub use chroma_types::UpdateTenantError;
+pub use chroma_types::UpsertCollectionRecordsPayload;
+pub use chroma_types::UpsertCollectionRecordsRequest;
+pub use chroma_types::UpsertCollectionRecordsResponse;
+pub use chroma_types::ValueTypes;
+pub use chroma_types::VectorIndexConfiguration;
+pub use chroma_types::VectorIndexType;
+pub use chroma_types::Where;
+pub use chroma_types::WhereError;
