@@ -2,8 +2,8 @@ use std::str::FromStr;
 
 use super::{Metadata, MetadataValueConversionError};
 use crate::{
-    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Schema,
-    SchemaError, Segment, SegmentScope, UpdateCollectionConfiguration, UpdateMetadata,
+    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, KnnIndex,
+    Schema, SchemaError, Segment, SegmentScope, UpdateCollectionConfiguration, UpdateMetadata,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 #[cfg(feature = "pyo3")]
-use pyo3::types::PyAnyMethods;
+use pyo3::{exceptions::PyValueError, types::PyAnyMethods};
 
 /// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
 #[derive(
@@ -184,6 +184,24 @@ impl Collection {
     }
 
     #[getter]
+    fn schema<'py>(
+        &self,
+        py: pyo3::Python<'py>,
+    ) -> pyo3::PyResult<Option<pyo3::Bound<'py, pyo3::PyAny>>> {
+        match self.schema.as_ref() {
+            Some(schema) => {
+                let schema_json = serde_json::to_string(schema)
+                    .map_err(|err| PyValueError::new_err(err.to_string()))?;
+                let res = pyo3::prelude::PyModule::import(py, "json")?
+                    .getattr("loads")?
+                    .call1((schema_json,))?;
+                Ok(Some(res))
+            }
+            None => Ok(None),
+        }
+    }
+
+    #[getter]
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -211,9 +229,12 @@ impl Collection {
 
 impl Collection {
     /// Reconcile the collection schema and configuration, ensuring both are consistent.
-    pub fn reconcile_schema_with_config(&mut self) -> Result<(), SchemaError> {
-        let reconciled_schema =
-            Schema::reconcile_schema_and_config(self.schema.as_ref(), Some(&self.config))?;
+    pub fn reconcile_schema_with_config(&mut self, knn_index: KnnIndex) -> Result<(), SchemaError> {
+        let reconciled_schema = Schema::reconcile_schema_and_config(
+            self.schema.as_ref(),
+            Some(&self.config),
+            knn_index,
+        )?;
 
         self.config = InternalCollectionConfiguration::try_from(&reconciled_schema)
             .map_err(|reason| SchemaError::InvalidSchema { reason })?;

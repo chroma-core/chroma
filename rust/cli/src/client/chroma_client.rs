@@ -4,7 +4,7 @@ use crate::client::prelude::CollectionModel;
 use crate::client::utils::send_request;
 use crate::utils::Profile;
 use axum::http::Method;
-use chroma_types::{CollectionConfiguration, CreateCollectionPayload, Metadata};
+use chroma_types::{CollectionConfiguration, CreateCollectionPayload, Metadata, Schema};
 use std::error::Error;
 use std::ops::Deref;
 use thiserror::Error;
@@ -104,6 +104,7 @@ impl ChromaClient {
         name: String,
         metadata: Option<Metadata>,
         configuration: Option<CollectionConfiguration>,
+        schema: Option<Schema>,
     ) -> Result<Collection, Box<dyn Error>> {
         let route = format!(
             "/api/v2/tenants/{}/databases/{}/collections",
@@ -115,7 +116,7 @@ impl ChromaClient {
             configuration,
             metadata,
             get_or_create: false,
-            schema: None,
+            schema,
         };
         let response = send_request::<CreateCollectionPayload, CollectionModel>(
             &self.host,

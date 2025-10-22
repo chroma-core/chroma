@@ -812,12 +812,12 @@ def update_schema_from_collection_configuration(
     Returns:
         Updated Schema object
     """
-    # TODO: Remove this check once schema is enabled in local.
-    if schema.defaults.float_list is None:
-        return schema
 
     # Get the vector index from defaults and #embedding key
-    if schema.defaults.float_list is None or schema.defaults.float_list.vector_index is None:
+    if (
+        schema.defaults.float_list is None
+        or schema.defaults.float_list.vector_index is None
+    ):
         raise ValueError("Schema is missing defaults.float_list.vector_index")
 
     embedding_key = "#embedding"
@@ -825,8 +825,13 @@ def update_schema_from_collection_configuration(
         raise ValueError(f"Schema is missing keys[{embedding_key}]")
 
     embedding_value_types = schema.keys[embedding_key]
-    if embedding_value_types.float_list is None or embedding_value_types.float_list.vector_index is None:
-        raise ValueError(f"Schema is missing keys[{embedding_key}].float_list.vector_index")
+    if (
+        embedding_value_types.float_list is None
+        or embedding_value_types.float_list.vector_index is None
+    ):
+        raise ValueError(
+            f"Schema is missing keys[{embedding_key}].float_list.vector_index"
+        )
 
     # Update vector index config in both locations
     for vector_index in [
@@ -868,7 +873,10 @@ def update_schema_from_collection_configuration(
                 spann_config.ef_search = update_spann["ef_search"]
 
         # Update embedding function if present
-        if "embedding_function" in configuration and configuration["embedding_function"] is not None:
+        if (
+            "embedding_function" in configuration
+            and configuration["embedding_function"] is not None
+        ):
             vector_index.config.embedding_function = configuration["embedding_function"]
 
     return schema
