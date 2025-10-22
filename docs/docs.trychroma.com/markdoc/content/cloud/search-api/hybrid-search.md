@@ -27,7 +27,7 @@ Where:
 The score is negative because Chroma uses ascending order (lower scores = better matches).
 
 {% Banner type="tip" %}
-**Important:** The legacy `query` API outputs *distances*, where **lower values are closer matches**. In contrast, RRF produces *scores*, where **higher values indicate better matches** (since RRF scores are negative and sorted ascending for ranking).
+**Important:** The legacy `query` API outputs *distances*, whereas RRF uses *scores*
 {% /Banner %}
 
 
