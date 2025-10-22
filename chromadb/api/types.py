@@ -39,7 +39,7 @@ from chromadb.base_types import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from chromadb.execution.expression.operator import Key
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -1530,9 +1530,33 @@ class VectorIndexConfig(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
     space: Optional[Space] = None
     embedding_function: Optional[Any] = DefaultEmbeddingFunction()
-    source_key: Optional[str] = None  # key to source the vector from
+    source_key: Optional[str] = None  # key to source the vector from (accepts str or Key)
     hnsw: Optional[HnswIndexConfig] = None
     spann: Optional[SpannIndexConfig] = None
+
+    @field_validator("source_key", mode="before")
+    @classmethod
+    def validate_source_key_field(cls, v: Any) -> Optional[str]:
+        """Convert Key objects to strings automatically. Accepts both str and Key types."""
+        if v is None:
+            return None
+        # Import Key at runtime to avoid circular import
+        from chromadb.execution.expression.operator import Key as KeyType
+        if isinstance(v, KeyType):
+            v = v.name  # Extract string from Key
+        elif isinstance(v, str):
+            pass  # Already a string
+        else:
+            raise ValueError(f"source_key must be str or Key, got {type(v).__name__}")
+
+        # Validate: only #document is allowed if key starts with #
+        if v.startswith("#") and v != "#document":
+            raise ValueError(
+                "source_key cannot begin with '#'. "
+                "The only valid key starting with '#' is Key.DOCUMENT or '#document'."
+            )
+
+        return v  # type: ignore[no-any-return]
 
     @field_validator("embedding_function", mode="before")
     @classmethod
@@ -1553,8 +1577,32 @@ class SparseVectorIndexConfig(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
     # TODO(Sanket): Change this to the appropriate sparse ef and use a default here.
     embedding_function: Optional[Any] = None
-    source_key: Optional[str] = None  # key to source the sparse vector from
+    source_key: Optional[str] = None  # key to source the sparse vector from (accepts str or Key)
     bm25: Optional[bool] = None
+
+    @field_validator("source_key", mode="before")
+    @classmethod
+    def validate_source_key_field(cls, v: Any) -> Optional[str]:
+        """Convert Key objects to strings automatically. Accepts both str and Key types."""
+        if v is None:
+            return None
+        # Import Key at runtime to avoid circular import
+        from chromadb.execution.expression.operator import Key as KeyType
+        if isinstance(v, KeyType):
+            v = v.name  # Extract string from Key
+        elif isinstance(v, str):
+            pass  # Already a string
+        else:
+            raise ValueError(f"source_key must be str or Key, got {type(v).__name__}")
+
+        # Validate: only #document is allowed if key starts with #
+        if v.startswith("#") and v != "#document":
+            raise ValueError(
+                "source_key cannot begin with '#'. "
+                "The only valid key starting with '#' is Key.DOCUMENT or '#document'."
+            )
+
+        return v  # type: ignore[no-any-return]
 
     @field_validator("embedding_function", mode="before")
     @classmethod
@@ -1739,9 +1787,14 @@ class Schema:
         self._initialize_keys()
 
     def create_index(
-        self, config: Optional[IndexConfig] = None, key: Optional[str] = None
+        self, config: Optional[IndexConfig] = None, key: Optional[Union[str, "Key"]] = None
     ) -> "Schema":
         """Create an index configuration."""
+        # Convert Key to string if provided
+        from chromadb.execution.expression.operator import Key as KeyType
+        if key is not None and isinstance(key, KeyType):
+            key = key.name
+
         # Disallow config=None and key=None - too dangerous
         if config is None and key is None:
             raise ValueError(
@@ -1752,6 +1805,13 @@ class Schema:
         if key is not None and key in (EMBEDDING_KEY, DOCUMENT_KEY):
             raise ValueError(
                 f"Cannot create index on special key '{key}'. These keys are managed automatically by the system. Invoke create_index(VectorIndexConfig(...)) without specifying a key to configure the vector index globally."
+            )
+
+        # Disallow any key starting with #
+        if key is not None and key.startswith("#"):
+            raise ValueError(
+                "key cannot begin with '#'. "
+                "Keys starting with '#' are reserved for system use."
             )
 
         # Special handling for vector index
@@ -1809,9 +1869,14 @@ class Schema:
         return self
 
     def delete_index(
-        self, config: Optional[IndexConfig] = None, key: Optional[str] = None
+        self, config: Optional[IndexConfig] = None, key: Optional[Union[str, "Key"]] = None
     ) -> "Schema":
         """Disable an index configuration (set enabled=False)."""
+        # Convert Key to string if provided
+        from chromadb.execution.expression.operator import Key as KeyType
+        if key is not None and isinstance(key, KeyType):
+            key = key.name
+
         # Case 1: Both config and key are None - fail the request
         if config is None and key is None:
             raise ValueError(
@@ -1822,6 +1887,13 @@ class Schema:
         if key is not None and key in (EMBEDDING_KEY, DOCUMENT_KEY):
             raise ValueError(
                 f"Cannot delete index on special key '{key}'. These keys are managed automatically by the system."
+            )
+
+        # Disallow any key starting with #
+        if key is not None and key.startswith("#"):
+            raise ValueError(
+                "key cannot begin with '#'. "
+                "Keys starting with '#' are reserved for system use."
             )
 
         # TODO: Consider removing these checks in the future to allow disabling vector, FTS, and sparse vector indexes

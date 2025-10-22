@@ -14,6 +14,7 @@ from chromadb.api.types import (
     EmbeddingFunction,
     Embeddings,
 )
+from chromadb.execution.expression.operator import Key
 from typing import List, Dict, Any
 import pytest
 
@@ -2058,3 +2059,281 @@ def test_sparse_vector_cannot_be_deleted() -> None:
     # Try to delete it - should fail
     with pytest.raises(ValueError, match="Deleting sparse vector index is not currently supported"):
         schema.delete_index(config=sparse_config, key="my_key")
+
+
+def test_create_index_accepts_key_type() -> None:
+    """Test that create_index accepts both str and Key types for the key parameter."""
+    schema = Schema()
+
+    # Test with string key
+    string_config = StringInvertedIndexConfig()
+    schema.create_index(config=string_config, key="test_field_str")
+
+    # Verify the index was created with string key
+    assert "test_field_str" in schema.keys
+    assert schema.keys["test_field_str"].string is not None
+    assert schema.keys["test_field_str"].string.string_inverted_index is not None
+    assert schema.keys["test_field_str"].string.string_inverted_index.enabled is True
+
+    # Test with Key type
+    int_config = IntInvertedIndexConfig()
+    schema.create_index(config=int_config, key=Key("test_field_key"))
+
+    # Verify the index was created with Key type (should be stored as string internally)
+    assert "test_field_key" in schema.keys
+    assert schema.keys["test_field_key"].int_value is not None
+    assert schema.keys["test_field_key"].int_value.int_inverted_index is not None
+    assert schema.keys["test_field_key"].int_value.int_inverted_index.enabled is True
+
+    # Test that both approaches produce equivalent results
+    schema2 = Schema()
+    schema2.create_index(config=string_config, key="same_field")
+
+    schema3 = Schema()
+    schema3.create_index(config=string_config, key=Key("same_field"))
+
+    # Both should have the same configuration
+    assert schema2.keys["same_field"].string is not None
+    assert schema2.keys["same_field"].string.string_inverted_index is not None
+    assert schema3.keys["same_field"].string is not None
+    assert schema3.keys["same_field"].string.string_inverted_index is not None
+    assert schema2.keys["same_field"].string.string_inverted_index.enabled == \
+           schema3.keys["same_field"].string.string_inverted_index.enabled
+
+
+def test_delete_index_accepts_key_type() -> None:
+    """Test that delete_index accepts both str and Key types for the key parameter."""
+    schema = Schema()
+
+    # First, create some indexes to delete
+    string_config = StringInvertedIndexConfig()
+    int_config = IntInvertedIndexConfig()
+
+    # Test delete with string key
+    schema.delete_index(config=string_config, key="test_field_str")
+
+    # Verify the index was disabled with string key
+    assert "test_field_str" in schema.keys
+    assert schema.keys["test_field_str"].string is not None
+    assert schema.keys["test_field_str"].string.string_inverted_index is not None
+    assert schema.keys["test_field_str"].string.string_inverted_index.enabled is False
+
+    # Test delete with Key type
+    schema.delete_index(config=int_config, key=Key("test_field_key"))
+
+    # Verify the index was disabled with Key type (should be stored as string internally)
+    assert "test_field_key" in schema.keys
+    assert schema.keys["test_field_key"].int_value is not None
+    assert schema.keys["test_field_key"].int_value.int_inverted_index is not None
+    assert schema.keys["test_field_key"].int_value.int_inverted_index.enabled is False
+
+    # Test that both approaches produce equivalent results
+    schema2 = Schema()
+    schema2.delete_index(config=string_config, key="same_field")
+
+    schema3 = Schema()
+    schema3.delete_index(config=string_config, key=Key("same_field"))
+
+    # Both should have the same configuration
+    assert schema2.keys["same_field"].string is not None
+    assert schema2.keys["same_field"].string.string_inverted_index is not None
+    assert schema3.keys["same_field"].string is not None
+    assert schema3.keys["same_field"].string.string_inverted_index is not None
+    assert schema2.keys["same_field"].string.string_inverted_index.enabled == \
+           schema3.keys["same_field"].string.string_inverted_index.enabled
+
+
+def test_create_index_rejects_special_keys() -> None:
+    """Test that create_index rejects special keys like Key.DOCUMENT and Key.EMBEDDING."""
+    schema = Schema()
+    string_config = StringInvertedIndexConfig()
+
+    # Test that Key.DOCUMENT is rejected (first check catches it)
+    with pytest.raises(ValueError, match="Cannot create index on special key '#document'"):
+        schema.create_index(config=string_config, key=Key.DOCUMENT)
+
+    # Test that Key.EMBEDDING is rejected (first check catches it)
+    with pytest.raises(ValueError, match="Cannot create index on special key '#embedding'"):
+        schema.create_index(config=string_config, key=Key.EMBEDDING)
+
+    # Test that string "#document" is also rejected (for consistency)
+    with pytest.raises(ValueError, match="Cannot create index on special key '#document'"):
+        schema.create_index(config=string_config, key="#document")
+
+    # Test that any other key starting with # is rejected (second check)
+    with pytest.raises(ValueError, match="key cannot begin with '#'"):
+        schema.create_index(config=string_config, key="#custom_key")
+
+    # Test with Key object for custom special key
+    with pytest.raises(ValueError, match="key cannot begin with '#'"):
+        schema.create_index(config=string_config, key=Key("#custom"))
+
+
+def test_delete_index_rejects_special_keys() -> None:
+    """Test that delete_index rejects special keys like Key.DOCUMENT and Key.EMBEDDING."""
+    schema = Schema()
+    string_config = StringInvertedIndexConfig()
+
+    # Test that Key.DOCUMENT is rejected (first check catches it)
+    with pytest.raises(ValueError, match="Cannot delete index on special key '#document'"):
+        schema.delete_index(config=string_config, key=Key.DOCUMENT)
+
+    # Test that Key.EMBEDDING is rejected (first check catches it)
+    with pytest.raises(ValueError, match="Cannot delete index on special key '#embedding'"):
+        schema.delete_index(config=string_config, key=Key.EMBEDDING)
+
+    # Test that string "#embedding" is also rejected (for consistency)
+    with pytest.raises(ValueError, match="Cannot delete index on special key '#embedding'"):
+        schema.delete_index(config=string_config, key="#embedding")
+
+    # Test that any other key starting with # is rejected (second check)
+    with pytest.raises(ValueError, match="key cannot begin with '#'"):
+        schema.delete_index(config=string_config, key="#custom_key")
+
+    # Test with Key object for custom special key
+    with pytest.raises(ValueError, match="key cannot begin with '#'"):
+        schema.delete_index(config=string_config, key=Key("#custom"))
+
+
+def test_vector_index_config_source_key_accepts_key_type() -> None:
+    """Test that VectorIndexConfig.source_key accepts both str and Key types."""
+    # Test with string
+    config1 = VectorIndexConfig(source_key="my_field")
+    assert config1.source_key == "my_field"
+    assert isinstance(config1.source_key, str)
+
+    # Test with Key object
+    config2 = VectorIndexConfig(source_key=Key("my_field"))  # type: ignore[arg-type]
+    assert config2.source_key == "my_field"
+    assert isinstance(config2.source_key, str)
+
+    # Test with Key.DOCUMENT
+    config3 = VectorIndexConfig(source_key=Key.DOCUMENT)  # type: ignore[arg-type]
+    assert config3.source_key == "#document"
+    assert isinstance(config3.source_key, str)
+
+    # Test that both approaches produce the same result
+    config4 = VectorIndexConfig(source_key="test")
+    config5 = VectorIndexConfig(source_key=Key("test"))  # type: ignore[arg-type]
+    assert config4.source_key == config5.source_key
+
+    # Test with None
+    config6 = VectorIndexConfig(source_key=None)
+    assert config6.source_key is None
+
+    # Test serialization works correctly
+    config7 = VectorIndexConfig(source_key=Key("serialize_test"))  # type: ignore[arg-type]
+    config_dict = config7.model_dump()
+    assert config_dict["source_key"] == "serialize_test"
+    assert isinstance(config_dict["source_key"], str)
+
+
+def test_sparse_vector_index_config_source_key_accepts_key_type() -> None:
+    """Test that SparseVectorIndexConfig.source_key accepts both str and Key types."""
+    # Test with string
+    config1 = SparseVectorIndexConfig(source_key="my_field")
+    assert config1.source_key == "my_field"
+    assert isinstance(config1.source_key, str)
+
+    # Test with Key object
+    config2 = SparseVectorIndexConfig(source_key=Key("my_field"))  # type: ignore[arg-type]
+    assert config2.source_key == "my_field"
+    assert isinstance(config2.source_key, str)
+
+    # Test with Key.DOCUMENT
+    config3 = SparseVectorIndexConfig(source_key=Key.DOCUMENT)  # type: ignore[arg-type]
+    assert config3.source_key == "#document"
+    assert isinstance(config3.source_key, str)
+
+    # Test that both approaches produce the same result
+    config4 = SparseVectorIndexConfig(source_key="test")
+    config5 = SparseVectorIndexConfig(source_key=Key("test"))  # type: ignore[arg-type]
+    assert config4.source_key == config5.source_key
+
+    # Test with None
+    config6 = SparseVectorIndexConfig(source_key=None)
+    assert config6.source_key is None
+
+    # Test serialization works correctly
+    config7 = SparseVectorIndexConfig(source_key=Key("serialize_test"))  # type: ignore[arg-type]
+    config_dict = config7.model_dump()
+    assert config_dict["source_key"] == "serialize_test"
+    assert isinstance(config_dict["source_key"], str)
+
+
+def test_config_source_key_rejects_invalid_types() -> None:
+    """Test that config validators reject invalid types for source_key."""
+    # Test VectorIndexConfig rejects invalid types
+    with pytest.raises(ValueError, match="source_key must be str or Key"):
+        VectorIndexConfig(source_key=123)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="source_key must be str or Key"):
+        VectorIndexConfig(source_key=["not", "valid"])  # type: ignore[arg-type]
+
+    # Test SparseVectorIndexConfig rejects invalid types
+    with pytest.raises(ValueError, match="source_key must be str or Key"):
+        SparseVectorIndexConfig(source_key=123)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="source_key must be str or Key"):
+        SparseVectorIndexConfig(source_key={"not": "valid"})  # type: ignore[arg-type]
+
+
+def test_config_source_key_validates_special_keys() -> None:
+    """Test that source_key only allows #document, rejects other special keys."""
+    # Test VectorIndexConfig
+    # #document is allowed (string)
+    config1 = VectorIndexConfig(source_key="#document")
+    assert config1.source_key == "#document"
+
+    # #document is allowed (Key)
+    config2 = VectorIndexConfig(source_key=Key.DOCUMENT)  # type: ignore[arg-type]
+    assert config2.source_key == "#document"
+
+    # #embedding is rejected (string)
+    with pytest.raises(ValueError, match="source_key cannot begin with '#'"):
+        VectorIndexConfig(source_key="#embedding")
+
+    # #embedding is rejected (Key)
+    with pytest.raises(ValueError, match="source_key cannot begin with '#'"):
+        VectorIndexConfig(source_key=Key.EMBEDDING)  # type: ignore[arg-type]
+
+    # #metadata is rejected
+    with pytest.raises(ValueError, match="source_key cannot begin with '#'"):
+        VectorIndexConfig(source_key="#metadata")
+
+    # #score is rejected
+    with pytest.raises(ValueError, match="source_key cannot begin with '#'"):
+        VectorIndexConfig(source_key="#score")
+
+    # Any other key starting with # is rejected
+    with pytest.raises(ValueError, match="source_key cannot begin with '#'"):
+        VectorIndexConfig(source_key="#custom")
+
+    # Regular keys (no #) are allowed
+    config3 = VectorIndexConfig(source_key="my_field")
+    assert config3.source_key == "my_field"
+
+    # Test SparseVectorIndexConfig
+    # #document is allowed (string)
+    config4 = SparseVectorIndexConfig(source_key="#document")
+    assert config4.source_key == "#document"
+
+    # #document is allowed (Key)
+    config5 = SparseVectorIndexConfig(source_key=Key.DOCUMENT)  # type: ignore[arg-type]
+    assert config5.source_key == "#document"
+
+    # #embedding is rejected (string)
+    with pytest.raises(ValueError, match="source_key cannot begin with '#'"):
+        SparseVectorIndexConfig(source_key="#embedding")
+
+    # #embedding is rejected (Key)
+    with pytest.raises(ValueError, match="source_key cannot begin with '#'"):
+        SparseVectorIndexConfig(source_key=Key.EMBEDDING)  # type: ignore[arg-type]
+
+    # #metadata is rejected
+    with pytest.raises(ValueError, match="source_key cannot begin with '#'"):
+        SparseVectorIndexConfig(source_key="#metadata")
+
+    # Regular keys (no #) are allowed
+    config6 = SparseVectorIndexConfig(source_key="my_field")
+    assert config6.source_key == "my_field"
