@@ -2743,7 +2743,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
-            "Cannot set both collection config and schema at the same time"
+            "Schema and configuration are both provided but conflict"
         );
     }
 
