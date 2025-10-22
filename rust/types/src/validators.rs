@@ -193,7 +193,7 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
     if schema.defaults.float_list.as_ref().is_some_and(|vt| {
         vt.vector_index
             .as_ref()
-            .is_some_and(|it| it.config.hnsw.is_some() && it.config.hnsw.is_some())
+            .is_some_and(|it| it.config.hnsw.is_some() && it.config.spann.is_some())
     }) {
         return Err(ValidationError::new("schema").with_message(
             "Both spann and hnsw config cannot be present at the same time.".into(),
