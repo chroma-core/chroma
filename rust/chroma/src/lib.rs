@@ -112,7 +112,7 @@ pub use collection::ChromaCollection;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::{ChromaAuthMethod, ChromaHttpClientOptions};
+    use crate::client::{ChromaAuthMethod, ChromaHttpClientError, ChromaHttpClientOptions};
     use futures_util::FutureExt;
     use std::sync::LazyLock;
 
@@ -148,20 +148,62 @@ mod tests {
     {
         let client = ChromaHttpClient::new(CHROMA_CLIENT_OPTIONS.clone());
 
-        // Create isolated database for test
-        let database_name = format!("test_db_{}", uuid::Uuid::new_v4());
-        client.create_database(database_name.clone()).await.unwrap();
-        client.set_database_name(database_name.clone());
+        let initial_collections = list_collection_names(&client)
+            .await
+            .expect("Failed to enumerate initial collections");
 
         let result = std::panic::AssertUnwindSafe(callback(client.clone()))
             .catch_unwind()
             .await;
 
-        // Delete test database
-        if let Err(err) = client.delete_database(database_name.clone()).await {
-            tracing::error!("Failed to delete test database {}: {}", database_name, err);
+        if let Err(err) = cleanup_new_collections(&client, &initial_collections).await {
+            tracing::error!("Failed to clean up test collections: {}", err);
         }
 
         result.unwrap();
+    }
+
+    async fn list_collection_names(
+        client: &ChromaHttpClient,
+    ) -> Result<std::collections::HashSet<String>, ChromaHttpClientError> {
+        const PAGE_SIZE: usize = 128;
+        let mut names = std::collections::HashSet::new();
+        let mut offset = 0_usize;
+
+        loop {
+            let batch = client.list_collections(PAGE_SIZE, Some(offset)).await?;
+            let batch_len = batch.len();
+
+            if batch_len == 0 {
+                break;
+            }
+
+            offset += batch_len;
+
+            for collection in batch {
+                names.insert(collection.name().to_string());
+            }
+
+            if batch_len < PAGE_SIZE {
+                break;
+            }
+        }
+
+        Ok(names)
+    }
+
+    async fn cleanup_new_collections(
+        client: &ChromaHttpClient,
+        initial_collections: &std::collections::HashSet<String>,
+    ) -> Result<(), ChromaHttpClientError> {
+        let current_collections = list_collection_names(client).await?;
+
+        for name in current_collections.difference(initial_collections) {
+            if let Err(err) = client.delete_collection(name.as_str()).await {
+                tracing::error!("Failed to delete test collection {}: {}", name, err);
+            }
+        }
+
+        Ok(())
     }
 }

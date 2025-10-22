@@ -737,12 +737,19 @@ mod tests {
         Include, IncludeList, Metadata, MetadataComparison, MetadataExpression, MetadataValue,
         PrimitiveOperator, UpdateMetadata, UpdateMetadataValue, Where,
     };
+    use uuid::Uuid;
+
+    fn unique_collection_name(base: &str) -> String {
+        format!("{}_{}", base, Uuid::new_v4())
+    }
 
     async fn create_test_collection(
         client: &ChromaHttpClient,
         name: &str,
     ) -> Result<ChromaCollection, ChromaHttpClientError> {
-        client.create_collection(name, None, None).await
+        client
+            .create_collection(unique_collection_name(name), None, None)
+            .await
     }
 
     #[tokio::test]
@@ -1620,10 +1627,11 @@ mod tests {
                 .await
                 .unwrap();
 
-            let forked = collection.fork("test_fork_target").await.unwrap();
+            let target_name = unique_collection_name("test_fork_target");
+            let forked = collection.fork(target_name.clone()).await.unwrap();
             println!("Forked collection: {:?}", forked);
 
-            assert_eq!(forked.collection.name, "test_fork_target");
+            assert_eq!(forked.collection.name, target_name);
             assert_ne!(
                 forked.collection.collection_id,
                 collection.collection.collection_id
@@ -1655,7 +1663,8 @@ mod tests {
                 .await
                 .unwrap();
 
-            let forked = collection.fork("test_fork_preserves_target").await.unwrap();
+            let target_name = unique_collection_name("test_fork_preserves_target");
+            let forked = collection.fork(target_name).await.unwrap();
 
             let forked_get_response = forked
                 .get(
@@ -1693,10 +1702,8 @@ mod tests {
                 .await
                 .unwrap();
 
-            let forked = collection
-                .fork("test_fork_independence_target")
-                .await
-                .unwrap();
+            let target_name = unique_collection_name("test_fork_independence_target");
+            let forked = collection.fork(target_name).await.unwrap();
 
             forked
                 .add(
