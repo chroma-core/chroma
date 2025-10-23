@@ -1458,6 +1458,12 @@ def test_default_embedding_function_when_no_schema_provided(
     # Verify it's the DefaultEmbeddingFunction, not legacy
     assert ef.name() == "default"
 
+    config = collection.configuration
+    assert config is not None
+    config_ef = config.get("embedding_function")
+    assert config_ef is not None
+    assert config_ef.name() == "default"
+
     # Serialize the schema to JSON and verify the embedding function type
     json_data = schema.serialize_to_json()
     embedding_vector = json_data["keys"]["#embedding"]["float_list"]["vector_index"]

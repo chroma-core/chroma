@@ -1241,8 +1241,17 @@ impl Schema {
     ) -> Result<Schema, SchemaError> {
         // 1. Check if collection config is default
         if collection_config.is_default() {
-            // Collection config is default → schema is source of truth
-            return Ok(schema.clone());
+            if schema.is_default() {
+                // if both are default, use collection config to create schema
+                // this handles the case where user did not provide schema or config.
+                // since default schema doesnt have an ef, we need to use the coll config to create
+                // a schema with the ef.
+                let new_schema = Self::convert_collection_config_to_schema(collection_config)?;
+                return Ok(new_schema);
+            } else {
+                // Collection config is default and schema is non-default → schema is source of truth
+                return Ok(schema.clone());
+            }
         }
 
         // 2. Collection config is non-default, schema must be default (already validated earlier)
@@ -3346,8 +3355,8 @@ mod tests {
     #[test]
     fn test_reconcile_with_collection_config_default_config() {
         // Test that when collection config is default, schema is returned as-is
-        let schema = Schema::new_default(KnnIndex::Hnsw);
         let collection_config = InternalCollectionConfiguration::default_hnsw();
+        let schema = Schema::convert_collection_config_to_schema(&collection_config).unwrap();
 
         let result = Schema::reconcile_with_collection_config(&schema, &collection_config).unwrap();
         assert_eq!(result, schema);
