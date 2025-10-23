@@ -138,8 +138,8 @@ const sidebarConfig: AppSection[] = [
         id: "sync",
         name: "Sync",
         pages: [
-          { id: "overview", name: "Sync Overview" },
-          { id: "github-sync", name: "GitHub Sync" },
+          { id: "overview", name: "Overview" },
+          { id: "github", name: "GitHub" },
         ],
       },
       {

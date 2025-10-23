@@ -1,19 +1,19 @@
 ---
-id: sync-overview
-name: Sync Overview
+id: overview
+name: Overview
 ---
 
-# Sync Overview
+# Overview
 
-The Chroma Sync Function exposes endpoints for developers to chunk, embed, and index various data sources. The API is intended for Chroma Cloud users and can be accessed for free (up to $5 in credits) by creating a Chroma Cloud account.
+Chroma Sync exposes endpoints for developers to chunk, embed, and index various data sources. The API is intended for Chroma Cloud users and can be accessed for free (up to $5 in credits) by creating a Chroma Cloud account.
 
 # Key Concepts
 
-Chroma’s Sync Function has three primary concepts: **source types**, **sources** and **invocations**.
+Chroma Sync has three primary concepts: **source types**, **sources** and **invocations**.
 
 # Source Types
 
-A source type defines a kind of entity that contains data that can be chunked, embedded, and indexed (hereafter referred to as “synced”). An example of a source type—and notably the only currently supported one—is a GitHub repository. Each source type defines its own schema for configuring sources of its type. For example, the sources of the GitHub repository type allow developers to define a parameter `include_globs`, which is an array of glob patterns for which matching files will be synced.
+A source type defines a kind of entity that contains data that can be chunked, embedded, and indexed. An example of a source type—and notably the only currently supported one—is a GitHub repository. Each source type defines its own schema for configuring sources of its type. For example, the sources of the GitHub repository type allow developers to define a parameter `include_globs`, which is an array of glob patterns for which matching files will be synced.
 
 Other examples of (future) source types may be S3 buckets, web pages, Notion workspaces, or any other corpus of continually updated content. If there is a specific source type for which you would like support, please reach out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
 
@@ -33,7 +33,7 @@ The platform tier requires you to grant Chroma access to a GitHub App that you o
 
 {% MarkdocImage lightSrc="/sync/gh-metadata.png" darkSrc="/sync/gh-metadata.png" alt="GitHub App metadata" /%}
 
-The platform tier grants access to the Chromas Sync API and is ideal for companies and organizations that offer services which access their users’ codebases. The platform tier is available on Chroma’s Team plan. If you are interested in using it, please reach out to us at [engineering@trychroma.com](mailto:engineering@trychroma.com).
+The platform tier grants access to the Chroma Sync API and is ideal for companies and organizations that offer services which access their users’ codebases. The platform tier is available on Chroma’s Team plan. If you are interested in using it, please reach out to us at [engineering@trychroma.com](mailto:engineering@trychroma.com).
 
 # Sources
 
@@ -111,7 +111,7 @@ Creates a new source of the specified type with the provided configuration.
 
 **Endpoint**
 
-    https://sync.trychroma/com/api/v1/sources
+    https://sync.trychroma.com/api/v1/sources
 
 **Required Headers**
 - `x-chroma-token` must carry the caller’s Chroma Cloud API key.
@@ -156,7 +156,7 @@ Retrieve a specific source by its ID.
 
 **Endpoint**
 
-    https://sync.trychroma/com/api/v1/sources/{source_id}
+    https://sync.trychroma.com/api/v1/sources/{source_id}
 
 **Required Headers**
 - `x-chroma-token` must carry the caller’s Chroma Cloud API key.
@@ -199,7 +199,7 @@ List sources with optional filtering.
 
 **Endpoint**
 
-    https://sync.trychroma/com/api/v1/sources
+    https://sync.trychroma.com/api/v1/sources
 
 **Required Headers**
 - `x-chroma-token` must carry the caller’s Chroma Cloud API key.
@@ -250,7 +250,7 @@ Delete a source. Does not cancel in-flight invocations on this source.
 
 **Endpoint**
 
-    https://sync.trychroma/com/api/v1/sources/{source_id}
+    https://sync.trychroma.com/api/v1/sources/{source_id}
 
 **Required Headers**
 - `x-chroma-token` must carry the caller’s Chroma Cloud API key.
@@ -278,7 +278,7 @@ Creates a new invocation on the specified source with the provided configuration
 
 **Endpoint**
 
-    https://sync.trychroma/com/api/v1/sources/{source_id}/invocations
+    https://sync.trychroma.com/api/v1/sources/{source_id}/invocations
 
 **Required Headers**
     - `x-chroma-token` must carry the caller’s Chroma Cloud API key.
@@ -326,7 +326,7 @@ Retrieve a specific invocation by its ID.
 
 **Endpoint**
 
-    https://sync.trychroma/com/api/v1/invocations/{invocation_id}
+    https://sync.trychroma.com/api/v1/invocations/{invocation_id}
 
 **Required Headers**
 - `x-chroma-token` must carry the caller’s Chroma Cloud API key.
@@ -386,7 +386,7 @@ List invocations with optional filtering.
 
 **Endpoint**
 
-    https://sync.trychroma/com/api/v1/invocations
+    https://sync.trychroma.com/api/v1/invocations
 
 **Required Headers**
 - `x-chroma-token` must carry the caller’s Chroma Cloud API key.
@@ -455,7 +455,7 @@ Cancel an invocation that is in the `pending` state. Invocations not in this sta
 
 **Endpoint**
 
-    https://sync.trychroma/com/api/v1/invocations/{invocation_id}
+    https://sync.trychroma.com/api/v1/invocations/{invocation_id}
 
 **Required Headers**
 - `x-chroma-token` must carry the caller’s Chroma Cloud API key.

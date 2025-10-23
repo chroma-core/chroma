@@ -1,6 +1,6 @@
 ---
-id: gh-sync
-name: GitHub Sync
+id: github
+name: GitHub
 ---
 
 # Walkthrough
@@ -77,13 +77,13 @@ Direct Sync is the default syncing method, which uses the Chroma Cloud GitHub ap
 
     {% MarkdocImage lightSrc="/sync/github_secret_key.png" darkSrc="/sync/github_secret_key.png" alt="GitHub Secret Key" /%}
 
-    With these credentials, you can use the Chroma dashboard to register your GitHub App with Chroma. **Contact [support@trychhroma.com](mailto:support@trychroma.com) for access to this feature.**
+    With these credentials, you can use the Chroma dashboard to register your GitHub App with Chroma. **Contact [support@trychroma.com](mailto:support@trychroma.com) for access to this feature.**
 
     {% MarkdocImage lightSrc="/sync/custom-github-app-screen.png" darkSrc="/sync/custom-github-app-screen.png" alt="Creating a custom github app" /%}
 
 3. **Creating a source**
 
-    To create a source, must send an API request to the Sync Function’s API:
+    To create a source, you must send an API request to the Sync Function’s API:
 
     ```bash
     curl -X POST https://sync.trychroma.com/api/v1/sources \
