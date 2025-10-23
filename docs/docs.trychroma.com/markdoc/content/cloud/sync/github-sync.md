@@ -17,7 +17,7 @@ Direct Sync is the default syncing method, which uses the Chroma Cloud GitHub ap
 
     If you do not already have a Chroma Cloud account, you will need to create one at [trychroma.com](https://www.trychroma.com). After creating an account, you can create a database by specifying a name:
 
-  {% MarkdocImage lightSrc="/sync/sync_create_database.png" darkSrc="sync/sync_create_database.png" alt="Create database screen" /%}
+    {% MarkdocImage lightSrc="/sync/sync_create_database.png" darkSrc="sync/sync_create_database.png" alt="Create database screen" /%}
 
     On the setup screen, select "Sync a GitHub repo":
 
@@ -65,31 +65,25 @@ Direct Sync is the default syncing method, which uses the Chroma Cloud GitHub ap
 
     If you do not already have a Chroma Cloud account, you will need to create one at [trychroma.com](https://www.trychroma.com). After creating an account, you can create a database by specifying a name:
 
-    [INSERT SCREENSHOT]
+    {% MarkdocImage lightSrc="/sync/sync_create_database.png" darkSrc="sync/sync_create_database.png" alt="Create database screen" /%}
 
     Once you have a database, you should create an API key to be able to access the Sync Function’s API. You can choose to make this API key scoped to all databases on your account or only the one you just created:
 
-    [INSERT SCREENSHOT]
+    {% MarkdocImage lightSrc="/sync/api_keys.png" darkSrc="sync/api_keys.png" alt="API key issuance for Chroma Cloud" /%}
 
     The final setup step is to grant Chroma access to the repositories to which your GitHub App has access. You will need to retrieve the app’s ID and private key from GitHub:
 
-    [INSERT SCREENSHOT]
+    {% MarkdocImage lightSrc="/sync/github_app_id.png" darkSrc="sync/github_app_id.png" alt="GitHub App ID" /%}
 
-    With these credentials, you can use the Chroma dashboard to register your GitHub App with Chroma:
+    {% MarkdocImage lightSrc="/sync/github_secret_key.png" darkSrc="sync/github_secret_key.png" alt="GitHub Secret Key" /%}
 
-    [INSERT SCREENSHOT]
+    With these credentials, you can use the Chroma dashboard to register your GitHub App with Chroma. **Contact [support@trychhroma.com](mailto:support@trychroma.com) for access to this feature.**
+
+    {% MarkdocImage lightSrc="/sync/custom-github-app-screen.png" darkSrc="sync/custom-github-app-screen.png" alt="Creating a custom github app" /%}
 
 3. **Creating a source**
 
-    To create a source, you should select the GitHub App you registered with Chroma in the previous step:
-
-    [INSERT SCREENSHOT]
-
-    The dashboard will display the repositories available to this GitHub App, and from this list you can select the repository for which you would like to create a source:
-
-    [INSERT SCREENSHOT]
-
-    Alternatively, you can create a source by sending an API request to the Sync Function’s API:
+    To create a source, must send an API request to the Sync Function’s API:
 
     ```bash
     curl -X POST https://sync.trychroma.com/api/v1/sources \
@@ -107,9 +101,9 @@ Direct Sync is the default syncing method, which uses the Chroma Cloud GitHub ap
 
 4. **Invoking the Sync Function**
 
-    To invoke the Sync Function, you must select a source on which to create the invocation. See the previous step for details on how to create a source. Once you select the source, you can invoke the Sync Function by clicking “[INSERT COPY]”:
+    To invoke the Sync Function, you must select a source on which to create the invocation. See the previous step for details on how to create a source. Once you select the source in the UI, you can invoke the Sync Function by clicking “Create invocation”:
 
-    [INSERT SCREENSHOT]
+    {% MarkdocImage lightSrc="/sync/custom_source_invocation.png" darkSrc="sync/custom_source_invocation.png" alt="Creating a custom sync invocation" /%}
 
     Alternatively, you can invoke the Sync Function by sending an API request to the Sync Function’s API:
 
