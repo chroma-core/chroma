@@ -344,7 +344,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
             # Single search
             result = await collection.search(search)
-            
+
             # Multiple searches at once
             searches = [
                 Search().where(K("type") == "article").rank(Knn(query=[0.1, 0.2])),
@@ -357,9 +357,14 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         if searches_list is None:
             searches_list = []
 
+        # Embed any string queries in Knn objects
+        embedded_searches = [
+            self._embed_search_string_queries(search) for search in searches_list
+        ]
+
         return await self._client._search(
             collection_id=self.id,
-            searches=cast(List[Search], searches_list),
+            searches=cast(List[Search], embedded_searches),
             tenant=self.tenant,
             database=self.database,
         )

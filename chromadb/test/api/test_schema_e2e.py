@@ -62,6 +62,37 @@ class SimpleEmbeddingFunction(EmbeddingFunction[List[str]]):
         return "cosine"
 
 
+@register_embedding_function
+class RecordingSearchEmbeddingFunction(EmbeddingFunction[List[str]]):
+    """Embedding function that records inputs for search embedding tests."""
+
+    def __init__(self, label: str = "default") -> None:
+        self._label = label
+        self.call_inputs: List[List[str]] = []
+        self.query_inputs: List[List[str]] = []
+
+    def __call__(self, input: List[str]) -> Embeddings:
+        self.call_inputs.append(list(input))
+        vectors = [[float(len(text)), float(len(text)) + 0.5] for text in input]
+        return cast(Embeddings, vectors)
+
+    def embed_query(self, input: List[str]) -> Embeddings:
+        self.query_inputs.append(list(input))
+        vectors = [[float(len(text)), float(len(text)) + 1.5] for text in input]
+        return cast(Embeddings, vectors)
+
+    @staticmethod
+    def name() -> str:
+        return "recording_search_ef"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {"label": self._label}
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "RecordingSearchEmbeddingFunction":
+        return RecordingSearchEmbeddingFunction(config.get("label", "default"))
+
+
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
 def test_schema_spann_vector_config_persistence(
     client_factories: "ClientFactories",
@@ -195,6 +226,35 @@ def _create_isolated_collection(
             )
 
     return collection, client
+
+
+def _collect_knn_queries(rank: Any) -> List[Any]:
+    if rank is None:
+        return []
+
+    if isinstance(rank, Knn):
+        return [rank.query]
+
+    queries: List[Any] = []
+
+    child_rank = getattr(rank, "rank", None)
+    if child_rank is not None:
+        queries.extend(_collect_knn_queries(child_rank))
+
+    left_rank = getattr(rank, "left", None)
+    if left_rank is not None:
+        queries.extend(_collect_knn_queries(left_rank))
+
+    right_rank = getattr(rank, "right", None)
+    if right_rank is not None:
+        queries.extend(_collect_knn_queries(right_rank))
+
+    ranks = getattr(rank, "ranks", None)
+    if ranks:
+        for child in ranks:
+            queries.extend(_collect_knn_queries(child))
+
+    return queries
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
@@ -474,6 +534,63 @@ def test_collection_embed_uses_schema_or_collection_embedding_function(
     direct_embeddings = direct_collection._embed(["direct document"])
     assert direct_embeddings is not None
     assert np.allclose(direct_embeddings[0], [0.0, 1.0, 2.0])
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_search_embeds_string_knn_queries(
+    client_factories: "ClientFactories",
+) -> None:
+    """_embed_search_string_queries should embed string KNN queries using collection EF."""
+
+    embedding_fn = RecordingSearchEmbeddingFunction(label="primary")
+    collection, _ = _create_isolated_collection(
+        client_factories, embedding_function=embedding_fn
+    )
+
+    search = Search().rank(Knn(query="hello world"))
+
+    print(collection.schema)
+
+    embedded_search = collection._embed_search_string_queries(search)
+
+    assert embedding_fn.query_inputs == [["hello world"]]
+    assert not embedding_fn.call_inputs
+
+    assert isinstance(search._rank, Knn)
+    assert search._rank.query == "hello world"
+
+    embedded_rank = embedded_search._rank
+    assert isinstance(embedded_rank, Knn)
+    assert embedded_rank.query == [11.0, 12.5]
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_search_embeds_string_queries_in_nested_ranks(
+    client_factories: "ClientFactories",
+) -> None:
+    """String queries in composite rank trees should all be embedded."""
+
+    embedding_fn = RecordingSearchEmbeddingFunction(label="nested")
+    collection, _ = _create_isolated_collection(
+        client_factories, embedding_function=embedding_fn
+    )
+
+    rank_one = (Knn(query="alpha") + Knn(query="beta")).max(Knn(query="gamma"))
+    rank_two = (Knn(query="delta") / 2).abs()
+
+    searches = [Search().rank(rank_one), Search().rank(rank_two)]
+    embedded_searches = [collection._embed_search_string_queries(s) for s in searches]
+
+    expected_queries = [["alpha"], ["beta"], ["gamma"], ["delta"]]
+    assert embedding_fn.query_inputs == expected_queries
+
+    all_queries = []
+    for embedded_search in embedded_searches:
+        all_queries.extend(_collect_knn_queries(embedded_search._rank))
+
+    assert all_queries
+    assert all(not isinstance(query, str) for query in all_queries)
+    assert all(isinstance(query, list) for query in all_queries)
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
