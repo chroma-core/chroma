@@ -1422,7 +1422,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chroma"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "backon",
@@ -1449,7 +1449,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-api-types"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "utoipa",
@@ -1607,7 +1607,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-error"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "http 1.1.0",
  "sqlx",
@@ -2003,7 +2003,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-types"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
