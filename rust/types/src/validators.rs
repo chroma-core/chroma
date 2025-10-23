@@ -216,6 +216,14 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
         return Err(ValidationError::new("schema").with_message("Full text search / regular expression index cannot be enabled by default. It can only be enabled on #document field.".into()));
     }
     for (key, config) in &schema.keys {
+        // Validate that keys cannot start with # (except system keys)
+        if key.starts_with('#') && key != DOCUMENT_KEY && key != EMBEDDING_KEY {
+            return Err(ValidationError::new("schema").with_message(
+                format!("key cannot begin with '#'. Keys starting with '#' are reserved for system use: {key}")
+                    .into(),
+            ));
+        }
+
         if key == DOCUMENT_KEY
             && (config.boolean.is_some()
                 || config.float.is_some()
@@ -260,17 +268,27 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
                     .with_message("Vector index can only source from #document".into()));
             }
         }
-        if config
+        if let Some(svit) = config
             .sparse_vector
             .as_ref()
-            .is_some_and(|vt| vt.sparse_vector_index.as_ref().is_some_and(|it| it.enabled))
+            .and_then(|vt| vt.sparse_vector_index.as_ref())
         {
-            sparse_index_keys.push(key);
-            if sparse_index_keys.len() > 1 {
-                return Err(ValidationError::new("schema").with_message(
-                    format!("At most one sparse vector index is allowed for the collection: {sparse_index_keys:?}")
-                        .into(),
-                ));
+            if svit.enabled {
+                sparse_index_keys.push(key);
+                if sparse_index_keys.len() > 1 {
+                    return Err(ValidationError::new("schema").with_message(
+                        format!("At most one sparse vector index is allowed for the collection: {sparse_index_keys:?}")
+                            .into(),
+                    ));
+                }
+            }
+            // Validate source_key for sparse vector index
+            if let Some(source_key) = &svit.config.source_key {
+                if source_key.starts_with('#') && source_key != DOCUMENT_KEY {
+                    return Err(ValidationError::new("schema").with_message(
+                        "source_key cannot begin with '#'. The only valid key starting with '#' is Key.DOCUMENT or '#document'.".into(),
+                    ));
+                }
             }
         }
         if config

@@ -174,6 +174,13 @@ class Collection(
         except AttributeError:
             return self.__fields__  # pydantic 1.x
 
+    def pretty_schema(self) -> str:
+        """Returns a pretty-printed version of the serialized schema."""
+        if self.serialized_schema is None:
+            return "No schema"
+        import json
+        return json.dumps(self.serialized_schema, indent=2)
+
     @classmethod
     @override
     def from_json(cls, json_map: Dict[str, Any]) -> Self:

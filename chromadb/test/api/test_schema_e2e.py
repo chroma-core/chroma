@@ -13,6 +13,7 @@ from chromadb.api.types import (
     EmbeddingFunction,
     Embeddings,
 )
+from chromadb.execution.expression.operator import Key
 from chromadb.test.conftest import (
     ClientFactories,
     is_spann_disabled_mode,
@@ -1785,3 +1786,312 @@ def test_conflicting_embedding_functions_in_schema_and_config_fails(
     # Verify the error message indicates the conflict
     error_msg = str(exc_info.value)
     assert "schema" in error_msg.lower() or "conflict" in error_msg.lower()
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_create_index_with_key_type(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test that create_index accepts both str and Key types."""
+    # Create schema using both str and Key types
+    schema = Schema()
+    schema.create_index(config=StringInvertedIndexConfig(), key="field_str")
+    schema.create_index(config=IntInvertedIndexConfig(), key=Key("field_key"))
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    # Verify both fields are in the schema
+    assert collection.schema is not None
+    assert "field_str" in collection.schema.keys
+    assert "field_key" in collection.schema.keys
+
+    # Verify both indexes work
+    collection.add(
+        ids=["key-test-1"],
+        documents=["test doc"],
+        metadatas=[{"field_str": "value1", "field_key": 42}],
+    )
+
+    # Test string field filter
+    str_result = collection.get(where={"field_str": "value1"})
+    assert set(str_result["ids"]) == {"key-test-1"}
+
+    # Test int field filter
+    int_result = collection.get(where={"field_key": 42})
+    assert set(int_result["ids"]) == {"key-test-1"}
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_delete_index_with_key_type(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test that delete_index accepts both str and Key types."""
+    # Disable indexes using both str and Key types
+    schema = Schema()
+    schema.delete_index(config=StringInvertedIndexConfig(), key="disabled_str")
+    schema.delete_index(config=IntInvertedIndexConfig(), key=Key("disabled_key"))
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    # Verify both fields have disabled indexes
+    assert collection.schema is not None
+    assert "disabled_str" in collection.schema.keys
+    assert "disabled_key" in collection.schema.keys
+
+    # Add data
+    collection.add(
+        ids=["disable-test-1"],
+        documents=["test doc"],
+        metadatas=[{"disabled_str": "value", "disabled_key": 100}],
+    )
+
+    # Verify filtering on disabled fields raises errors
+    with pytest.raises(Exception):
+        collection.get(where={"disabled_str": "value"})
+
+    with pytest.raises(Exception):
+        collection.get(where={"disabled_key": 100})
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_vector_index_config_with_key_document_source(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test that VectorIndexConfig source_key accepts Key.DOCUMENT."""
+    schema = Schema()
+    schema.create_index(
+        config=VectorIndexConfig(
+            source_key=Key.DOCUMENT,  # type: ignore[arg-type]
+            embedding_function=SimpleEmbeddingFunction(dim=5),
+        )
+    )
+
+    collection, _ = _create_isolated_collection(
+        client_factories,
+        schema=schema,
+        embedding_function=SimpleEmbeddingFunction(dim=5),
+    )
+
+    # Verify source_key was properly converted to "#document"
+    assert collection.schema is not None
+    embedding_config = collection.schema.keys["#embedding"].float_list
+    assert embedding_config is not None
+    assert embedding_config.vector_index is not None
+    assert embedding_config.vector_index.config.source_key == "#document"
+
+    # Add test data
+    collection.add(
+        ids=["vec-1", "vec-2", "vec-3"],
+        documents=["apple fruit", "banana fruit", "car vehicle"],
+    )
+
+    # Verify embeddings were generated
+    result = collection.get(ids=["vec-1"], include=["embeddings"])
+    assert result["embeddings"] is not None
+    assert len(result["embeddings"][0]) == 5  # dim=5
+
+    # Perform vector search
+    search_result = collection.search(
+        Search().rank(Knn(query=[0.0, 1.0, 2.0, 3.0, 4.0], limit=2))
+    )
+    assert len(search_result["ids"]) > 0
+    assert len(search_result["ids"][0]) <= 2  # limit=2
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_sparse_vector_index_config_with_key_types(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test that SparseVectorIndexConfig source_key accepts both str and Key types."""
+    sparse_ef = DeterministicSparseEmbeddingFunction(label="key_types")
+
+    # Test with Key.DOCUMENT
+    schema1 = Schema().create_index(
+        key="sparse1",
+        config=SparseVectorIndexConfig(
+            source_key=Key.DOCUMENT,  # type: ignore[arg-type]
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection1, _ = _create_isolated_collection(client_factories, schema=schema1)
+    assert collection1.schema is not None
+    sparse1_config = collection1.schema.keys["sparse1"].sparse_vector
+    assert sparse1_config is not None
+    assert sparse1_config.sparse_vector_index is not None
+    assert sparse1_config.sparse_vector_index.config.source_key == "#document"
+
+    # Add data and verify sparse embeddings were generated from documents
+    collection1.add(
+        ids=["s1", "s2", "s3"],
+        documents=["apple", "banana", "orange"],
+    )
+
+    # Verify sparse embeddings in metadata
+    result1 = collection1.get(ids=["s1"], include=["metadatas"])
+    assert result1["metadatas"] is not None
+    assert "sparse1" in result1["metadatas"][0]
+    sparse_vec = cast(SparseVector, result1["metadatas"][0]["sparse1"])
+
+    # Perform sparse vector search
+    search_result1 = collection1.search(
+        Search().rank(Knn(key="sparse1", query=cast(Any, sparse_vec), limit=2))
+    )
+    assert len(search_result1["ids"]) > 0
+    assert "s1" in search_result1["ids"][0]  # Should find itself
+
+    # Test with Key("field_name")
+    schema2 = Schema().create_index(
+        key="sparse2",
+        config=SparseVectorIndexConfig(
+            source_key=Key("text_field"),  # type: ignore[arg-type]
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection2, _ = _create_isolated_collection(client_factories, schema=schema2)
+    assert collection2.schema is not None
+    sparse2_config = collection2.schema.keys["sparse2"].sparse_vector
+    assert sparse2_config is not None
+    assert sparse2_config.sparse_vector_index is not None
+    assert sparse2_config.sparse_vector_index.config.source_key == "text_field"
+
+    # Add data with metadata source field
+    collection2.add(
+        ids=["sparse-key-1", "sparse-key-2"],
+        documents=["doc1", "doc2"],
+        metadatas=[{"text_field": "content one"}, {"text_field": "content two"}],
+    )
+
+    # Verify sparse embeddings were generated from text_field
+    result2 = collection2.get(ids=["sparse-key-1", "sparse-key-2"], include=["metadatas"])
+    assert result2["metadatas"] is not None
+    assert "sparse2" in result2["metadatas"][0]
+    assert "sparse2" in result2["metadatas"][1]
+
+    # Get the sparse vector for search
+    sparse_query = cast(SparseVector, result2["metadatas"][0]["sparse2"])
+
+    # Perform sparse vector search
+    search_result2 = collection2.search(
+        Search().rank(Knn(key="sparse2", query=cast(Any, sparse_query), limit=1))
+    )
+    assert len(search_result2["ids"]) > 0
+    assert "sparse-key-1" in search_result2["ids"][0]  # Should find itself
+
+
+def test_schema_rejects_special_key_in_create_index() -> None:
+    """Test that create_index rejects keys starting with # (except system keys)."""
+    # Test with string starting with #
+    schema = Schema()
+    with pytest.raises(ValueError, match="key cannot begin with '#'"):
+        schema.create_index(config=StringInvertedIndexConfig(), key="#custom_field")
+
+    # Test with Key object starting with #
+    with pytest.raises(ValueError, match="Cannot create index on special key '#embedding'"):
+        schema.create_index(config=StringInvertedIndexConfig(), key=Key.EMBEDDING)
+
+
+def test_schema_rejects_special_key_in_delete_index() -> None:
+    """Test that delete_index rejects keys starting with # (except system keys)."""
+    # Test with string starting with #
+    schema = Schema()
+    with pytest.raises(ValueError, match="key cannot begin with '#'"):
+        schema.delete_index(config=StringInvertedIndexConfig(), key="#custom_field")
+
+    # Test with Key object starting with #
+    with pytest.raises(ValueError, match="Cannot delete index on special key '#document'"):
+        schema.delete_index(config=StringInvertedIndexConfig(), key=Key.DOCUMENT)
+
+
+def test_schema_rejects_invalid_source_key_in_configs() -> None:
+    """Test that config validators reject invalid source_key values."""
+    # Test VectorIndexConfig rejects non-#document special keys
+    with pytest.raises(ValueError, match="source_key cannot begin with '#'"):
+        VectorIndexConfig(source_key="#embedding")
+
+    with pytest.raises(ValueError, match="source_key cannot begin with '#'"):
+        VectorIndexConfig(source_key=Key.EMBEDDING)  # type: ignore[arg-type]
+
+    # Test SparseVectorIndexConfig rejects non-#document special keys
+    with pytest.raises(ValueError, match="source_key cannot begin with '#'"):
+        SparseVectorIndexConfig(source_key="#embedding")
+
+    with pytest.raises(ValueError, match="source_key cannot begin with '#'"):
+        SparseVectorIndexConfig(source_key=Key.EMBEDDING)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="source_key cannot begin with '#'"):
+        SparseVectorIndexConfig(source_key="#metadata")
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_server_validates_schema_with_special_keys(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test that server-side validation rejects schemas with invalid special keys."""
+    client = client_factories.create_client_from_system()
+    client.reset()
+
+    collection_name = f"server_validate_{uuid4().hex}"
+
+    # Try to create collection with invalid key in schema
+    # This should be caught server-side by validate_schema()
+    schema = Schema()
+    # Bypass client-side validation by directly manipulating schema.keys
+    from chromadb.api.types import ValueTypes, StringValueType, StringInvertedIndexType, StringInvertedIndexConfig
+    schema.keys["#invalid_key"] = ValueTypes(
+        string=StringValueType(
+            string_inverted_index=StringInvertedIndexType(
+                enabled=True,
+                config=StringInvertedIndexConfig(),
+            )
+        )
+    )
+
+    # Server should reject this
+    with pytest.raises(Exception) as exc_info:
+        client.create_collection(name=collection_name, schema=schema)
+
+    # Verify server caught the invalid key
+    error_msg = str(exc_info.value)
+    assert "#" in error_msg or "key" in error_msg.lower() or "invalid" in error_msg.lower()
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_server_validates_invalid_source_key_in_sparse_vector_config(
+    client_factories: "ClientFactories",
+) -> None:
+    """Test that server-side validation rejects invalid source_key in SparseVectorIndexConfig."""
+    client = client_factories.create_client_from_system()
+    client.reset()
+
+    collection_name = f"server_source_key_{uuid4().hex}"
+
+    # Create schema with invalid source_key
+    # Bypass client-side validation by directly creating the config
+    from chromadb.api.types import ValueTypes, SparseVectorValueType, SparseVectorIndexType
+
+    schema = Schema()
+    # Manually construct config with invalid source_key using model_construct to bypass validation
+    invalid_config = SparseVectorIndexConfig.model_construct(
+        embedding_function=None,
+        source_key="#embedding",  # Invalid - should be rejected
+        bm25=None
+    )
+
+    schema.keys["test_sparse"] = ValueTypes(
+        sparse_vector=SparseVectorValueType(
+            sparse_vector_index=SparseVectorIndexType(
+                enabled=True,
+                config=invalid_config,
+            )
+        )
+    )
+
+    # Server should reject this
+    with pytest.raises(Exception) as exc_info:
+        client.create_collection(name=collection_name, schema=schema)
+
+    # Verify server caught the invalid source_key
+    error_msg = str(exc_info.value)
+    assert "source_key" in error_msg.lower() or "#" in error_msg or "document" in error_msg.lower()
