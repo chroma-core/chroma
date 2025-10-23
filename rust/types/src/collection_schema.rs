@@ -20,7 +20,7 @@ use crate::{
     default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
     default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor,
     HnswParametersFromSegmentError, InternalHnswConfiguration, InternalSpannConfiguration,
-    InternalUpdateCollectionConfiguration, KnnIndex, Segment,
+    InternalUpdateCollectionConfiguration, KnnIndex, Segment, CHROMA_KEY,
 };
 
 impl ChromaError for SchemaError {
@@ -1925,6 +1925,9 @@ impl Schema {
     }
 
     pub fn ensure_key_from_metadata(&mut self, key: &str, value_type: MetadataValueType) -> bool {
+        if key.starts_with(CHROMA_KEY) {
+            return false;
+        }
         let value_types = self.keys.entry(key.to_string()).or_default();
         match value_type {
             MetadataValueType::Bool => {
