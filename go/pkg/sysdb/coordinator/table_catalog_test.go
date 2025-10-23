@@ -1633,8 +1633,9 @@ func TestUpdateCollection_WithSchema(t *testing.T) {
 	}`
 
 	collectionName := "test_collection"
-	databaseID := "db-id-123"
+	databaseID := "00000000-0000-0000-0000-000000000002"
 	emptyConfig := "{}"
+	now := time.Now()
 	existingCollection := &dbmodel.CollectionAndMetadata{
 		Collection: &dbmodel.Collection{
 			ID:                   collectionID.String(),
@@ -1643,6 +1644,8 @@ func TestUpdateCollection_WithSchema(t *testing.T) {
 			SchemaStr:            &initialSchema,
 			Ts:                   types.Timestamp(1234567890),
 			DatabaseID:           databaseID,
+			CreatedAt:            now,
+			UpdatedAt:            now,
 		},
 		CollectionMetadata: []*dbmodel.CollectionMetadata{},
 		TenantID:           tenantID,
@@ -1697,6 +1700,8 @@ func TestUpdateCollection_WithSchema(t *testing.T) {
 				SchemaStr:            &initialSchema, // Will be updated in the assertion phase
 				Ts:                   types.Timestamp(1234567900),
 				DatabaseID:           databaseID,
+				CreatedAt:            now,
+				UpdatedAt:            now,
 			},
 			CollectionMetadata: []*dbmodel.CollectionMetadata{},
 			TenantID:           tenantID,
@@ -1717,7 +1722,7 @@ func TestUpdateCollection_WithSchema(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 
-	// Verify the captured collection
+	// Verify the captured collection was written to DB
 	require.NotNil(t, capturedCollection)
 
 	// Should have nil config (schema is source of truth)
@@ -1725,6 +1730,9 @@ func TestUpdateCollection_WithSchema(t *testing.T) {
 
 	// Should have updated schema
 	require.NotNil(t, capturedCollection.SchemaStr)
+
+	// Verify the returned result has the proper config (DB returns {} for nil config)
+	assert.Equal(t, "{}", result.ConfigurationJsonStr)
 
 	// Parse and verify the schema was updated
 	var updatedSchema model.Schema
