@@ -1523,7 +1523,6 @@ func TestUpdateCollection_WithSchema(t *testing.T) {
 	mockTxImpl := &mocks.ITransaction{}
 	mockMetaDomain := &mocks.IMetaDomain{}
 	mockCollectionDb := &mocks.ICollectionDb{}
-	mockCollectionMetadataDb := &mocks.ICollectionMetadataDb{}
 
 	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, nil, false)
 
