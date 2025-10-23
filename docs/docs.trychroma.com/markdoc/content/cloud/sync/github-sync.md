@@ -13,31 +13,47 @@ Direct Sync is the default syncing method, which uses the Chroma Cloud GitHub ap
 
     This walkthrough assumes that you have a GitHub account with at least one repository.
 
-2. **Setup**
+2. **New database setup**
 
     If you do not already have a Chroma Cloud account, you will need to create one at [trychroma.com](https://www.trychroma.com). After creating an account, you can create a database by specifying a name:
 
-    [INSERT SCREENSHOT]
+  {% MarkdocImage lightSrc="/sync/sync_create_database.png" darkSrc="sync/sync_create_database.png" alt="Create database screen" /%}
 
-    Once you have a database, you should create an API key to be able to access the Sync Function’s API. You can choose to make this API key scoped to all databases on your account or only the one you just created:
+    On the setup screen, select "Sync a GitHub repo":
 
-    [INSERT SCREENSHOT]
+    {% MarkdocImage lightSrc="/sync/sync_new_db_onboarding.png" darkSrc="sync/sync_create_database.png" alt="Onboarding screen for syncing a GitHub repo" /%}
 
-    The final setup step is to install the Chroma GitHub App into your GitHub account or organization. You can do this via the Chroma dashboard:
+    Install the Chroma GitHub App into your GitHub account or organization:
 
-    [INSERT SCREENSHOT]
+    {% MarkdocImage lightSrc="/sync/sync_new_db_github_install.png" darkSrc="sync/sync_new_db_github_install.png" alt="GitHub app installation screen" /%}
 
-3. **Creating a source**
+    And follow the prompts to initiate sync. Choose the **repo** to sync code from, the **branch or commit hash** version of the code to index, and new **collection name** for the synced code. (The collection will be created by the syncing process, and must not exist yet.)
 
-    To create a source, you can select a GitHub repository from the list of repositories that you made available to the Chroma GitHub App in the previous step.
+    {% MarkdocImage lightSrc="/sync/sync_install.png" darkSrc="sync/sync_install.png" alt="Sync repo to Chroma Collection UI" /%}
 
-    [INSERT SCREENSHOT]
 
-4. **Invoking the Sync Function**
+3. **Existing database setup**
 
-    To invoke the Sync Function, you must select a source on which to create the invocation. See the previous step for details on how to create a source. Once you select the source, you can invoke the Sync Function by clicking “[INSERT COPY]”:
+    Open an existing database in Chroma Cloud, and select "Sync" from the menu:
 
-    [INSERT SCREENSHOT]
+    {% MarkdocImage lightSrc="/sync/sync_existing_db.png" darkSrc="/sync/sync_existing_db.png" alt="Sync tab in Chroma Cloud UI" /%}
+
+
+    On the Sync page, select "Create" to begin syncing code. If you have not already connected GitHub, you may be prompted to install the Chroma Cloud GitHub app again.
+
+    {% MarkdocImage lightSrc="/sync/sync_existing_db_add.png" darkSrc="/sync/sync_existing_db_add.png" alt="Create path for a new Sync" /%}
+
+    Then, follow the prompts to initiate sync. Choose the **repo** to sync code from, the **branch or commit hash** version of the code to index, and new **collection name** for the synced code. (The collection will be created by the syncing process, and must not exist yet.)
+
+    {% MarkdocImage lightSrc="/sync/sync_existing_db_sync.png" darkSrc="/sync/sync_existing_db_sync.png" alt="Create flow for a new Sync" /%}
+
+
+4. **Viewing an Invocation**
+
+    Each Sync create a new Invocation. When completed, select "View Collection" to see the new Chroma collection containing the synced code:
+
+    {% MarkdocImage lightSrc="/sync/db_invocation.png" darkSrc="/sync/db_invocation.png" alt="Invocation screen for a Sync" /%}
+
 
 ## Platform Sync
 
