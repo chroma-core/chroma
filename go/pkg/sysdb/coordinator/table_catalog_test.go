@@ -1662,7 +1662,6 @@ func TestUpdateCollection_WithSchema(t *testing.T) {
 
 	// Setup mocks
 	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
-	mockMetaDomain.On("CollectionMetadataDb", mock.Anything).Return(mockCollectionMetadataDb)
 
 	// Mock getting existing collection
 	mockCollectionDb.On("GetCollections",
