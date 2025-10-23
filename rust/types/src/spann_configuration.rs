@@ -250,7 +250,9 @@ impl Default for SpannConfiguration {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct UpdateSpannConfiguration {
+    #[validate(range(max = 128))]
     pub search_nprobe: Option<u32>,
+    #[validate(range(max = 200))]
     pub ef_search: Option<usize>,
 }
 
