@@ -1633,13 +1633,16 @@ func TestUpdateCollection_WithSchema(t *testing.T) {
 	}`
 
 	collectionName := "test_collection"
+	databaseID := "db-id-123"
+	emptyConfig := "{}"
 	existingCollection := &dbmodel.CollectionAndMetadata{
 		Collection: &dbmodel.Collection{
 			ID:                   collectionID.String(),
 			Name:                 &collectionName,
-			ConfigurationJsonStr: nil,
+			ConfigurationJsonStr: &emptyConfig,
 			SchemaStr:            &initialSchema,
 			Ts:                   types.Timestamp(1234567890),
+			DatabaseID:           databaseID,
 		},
 		CollectionMetadata: []*dbmodel.CollectionMetadata{},
 		TenantID:           tenantID,
@@ -1690,9 +1693,10 @@ func TestUpdateCollection_WithSchema(t *testing.T) {
 			Collection: &dbmodel.Collection{
 				ID:                   collectionID.String(),
 				Name:                 &collectionName,
-				ConfigurationJsonStr: nil,
+				ConfigurationJsonStr: &emptyConfig,
 				SchemaStr:            &initialSchema, // Will be updated in the assertion phase
 				Ts:                   types.Timestamp(1234567900),
+				DatabaseID:           databaseID,
 			},
 			CollectionMetadata: []*dbmodel.CollectionMetadata{},
 			TenantID:           tenantID,
