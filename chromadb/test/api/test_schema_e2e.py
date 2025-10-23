@@ -2095,3 +2095,196 @@ def test_server_validates_invalid_source_key_in_sparse_vector_config(
     # Verify server caught the invalid source_key
     error_msg = str(exc_info.value)
     assert "source_key" in error_msg.lower() or "#" in error_msg or "document" in error_msg.lower()
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_modify_collection_no_initial_config_creates_default_schema(client: ClientAPI) -> None:
+    """Test that modifying a collection without initial config/schema creates and updates default schema."""
+    collection_name = f"test_modify_no_init_{uuid4()}"
+
+    # Create collection WITHOUT any configuration (uses defaults)
+    collection = client.create_collection(name=collection_name)
+
+    # Verify default schema was created (SPANN by default in SPANN mode)
+    schema = collection.schema
+    assert schema is not None
+    assert schema.defaults.float_list is not None
+    assert schema.defaults.float_list.vector_index is not None
+    # Should have SPANN config by default
+    assert schema.defaults.float_list.vector_index.config.spann is not None
+
+    # Modify configuration
+    collection.modify(configuration={"spann": {"search_nprobe": 32}})
+
+    # Verify schema was updated
+    updated_schema = collection.schema
+    assert updated_schema is not None
+    assert updated_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 32  # type: ignore
+    assert updated_schema.keys["#embedding"].float_list.vector_index.config.spann.search_nprobe == 32  # type: ignore
+
+    # Re-fetch from server
+    collection_refreshed = client.get_collection(collection_name)
+    refreshed_schema = collection_refreshed.schema
+    assert refreshed_schema is not None
+    assert refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 32  # type: ignore
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_modify_collection_with_initial_spann_schema(client: ClientAPI) -> None:
+    """Test creating collection with SPANN schema within server limits and modifying it."""
+    collection_name = f"test_modify_with_schema_{uuid4()}"
+
+    # Create collection with explicit SPANN configuration within limits
+    collection = client.create_collection(
+        name=collection_name,
+        configuration={
+            "spann": {
+                "search_nprobe": 10,  # Within limit (max 128)
+                "ef_search": 50,  # Within limit (max 200)
+            }
+        },
+    )
+
+    # Verify initial schema has the specified config
+    schema = collection.schema
+    assert schema is not None
+    assert schema.defaults.float_list.vector_index.config.spann is not None  # type: ignore
+    assert schema.defaults.float_list.vector_index.config.spann.search_nprobe == 10  # type: ignore
+    assert schema.defaults.float_list.vector_index.config.spann.ef_search == 50  # type: ignore
+
+    # Modify to update search_nprobe to a different value within limits
+    collection.modify(configuration={"spann": {"search_nprobe": 20}})
+
+    # Verify update
+    updated_schema = collection.schema
+    assert updated_schema is not None
+    assert updated_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 20  # type: ignore
+    # ef_search should remain unchanged
+    assert updated_schema.defaults.float_list.vector_index.config.spann.ef_search == 50  # type: ignore
+
+    # Verify both locations updated
+    assert updated_schema.keys["#embedding"].float_list.vector_index.config.spann.search_nprobe == 20  # type: ignore
+    assert updated_schema.keys["#embedding"].float_list.vector_index.config.spann.ef_search == 50  # type: ignore
+
+    # Re-fetch and verify
+    collection_refreshed = client.get_collection(collection_name)
+    refreshed_schema = collection_refreshed.schema
+    assert refreshed_schema is not None
+    assert refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 20  # type: ignore
+    assert refreshed_schema.defaults.float_list.vector_index.config.spann.ef_search == 50  # type: ignore
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_modify_collection_updates_schema_spann_multiple_fields(client: ClientAPI) -> None:
+    """Test that modifying multiple SPANN fields updates schema correctly."""
+    collection_name = f"test_modify_schema_multi_{uuid4()}"
+
+    # Create collection with SPANN schema
+    collection = client.create_collection(
+        name=collection_name,
+        configuration={"spann": {"search_nprobe": 64, "ef_search": 100}},
+    )
+
+    # Modify multiple fields
+    collection.modify(
+        configuration={
+            "spann": {
+                "search_nprobe": 128,
+                "ef_search": 200,
+            }
+        }
+    )
+
+    # Verify all updated fields
+    schema = collection.schema
+    assert schema is not None
+    assert schema.defaults.float_list.vector_index.config.spann.search_nprobe == 128  # type: ignore
+    assert schema.defaults.float_list.vector_index.config.spann.ef_search == 200  # type: ignore
+
+    # Verify other fields were preserved
+    assert schema.defaults.float_list.vector_index.config.spann.write_nprobe == 32  # type: ignore
+
+    # Verify in both locations
+    assert schema.keys["#embedding"].float_list.vector_index.config.spann.search_nprobe == 128  # type: ignore
+    assert schema.keys["#embedding"].float_list.vector_index.config.spann.ef_search == 200  # type: ignore
+
+    # Re-fetch from server
+    collection_refreshed = client.get_collection(collection_name)
+    refreshed_schema = collection_refreshed.schema
+    assert refreshed_schema is not None
+    assert refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 128  # type: ignore
+    assert refreshed_schema.defaults.float_list.vector_index.config.spann.ef_search == 200  # type: ignore
+    assert refreshed_schema.defaults.float_list.vector_index.config.spann.write_nprobe == 32  # type: ignore
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_modify_collection_preserves_other_schema_fields(client: ClientAPI) -> None:
+    """Test that modifying configuration doesn't affect other schema value types."""
+    collection_name = f"test_modify_schema_preserve_{uuid4()}"
+
+    # Create collection with SPANN schema
+    collection = client.create_collection(
+        name=collection_name,
+        configuration={"spann": {"search_nprobe": 64}},
+    )
+
+    # Get initial schema to verify all value types exist
+    initial_schema = collection.schema
+    assert initial_schema is not None
+    assert initial_schema.defaults.string is not None
+    assert initial_schema.defaults.int_value is not None
+    assert initial_schema.defaults.float_value is not None
+    assert initial_schema.defaults.boolean is not None
+    assert initial_schema.defaults.sparse_vector is not None
+    assert initial_schema.keys["#document"] is not None
+
+    # Modify SPANN config
+    collection.modify(configuration={"spann": {"search_nprobe": 128}})
+
+    # Verify other value types were not affected
+    updated_schema = collection.schema
+    assert updated_schema is not None
+
+    # Check that non-vector-index value types are unchanged
+    assert updated_schema.defaults.string is not None
+    assert updated_schema.defaults.string.string_inverted_index is not None
+    assert updated_schema.defaults.string.fts_index is not None
+
+    assert updated_schema.defaults.int_value is not None
+    assert updated_schema.defaults.int_value.int_inverted_index is not None
+
+    assert updated_schema.defaults.float_value is not None
+    assert updated_schema.defaults.float_value.float_inverted_index is not None
+
+    assert updated_schema.defaults.boolean is not None
+    assert updated_schema.defaults.boolean.bool_inverted_index is not None
+
+    assert updated_schema.defaults.sparse_vector is not None
+    assert updated_schema.defaults.sparse_vector.sparse_vector_index is not None
+
+    # Check #document key is preserved
+    assert updated_schema.keys["#document"] is not None
+    assert updated_schema.keys["#document"].string is not None
+    assert updated_schema.keys["#document"].string.fts_index is not None
+    assert updated_schema.keys["#document"].string.fts_index.enabled is True
+
+    # Verify vector index WAS updated
+    assert updated_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 128  # type: ignore
+
+    # Re-fetch from server to verify persistence
+    collection_refreshed = client.get_collection(collection_name)
+    refreshed_schema = collection_refreshed.schema
+    assert refreshed_schema is not None
+    
+    # Verify vector index was updated on server
+    assert refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 128  # type: ignore
+    
+    # Verify other value types are still intact on server
+    assert refreshed_schema.defaults.string is not None
+    assert refreshed_schema.defaults.string.string_inverted_index is not None
+    assert refreshed_schema.defaults.string.fts_index is not None
+    assert refreshed_schema.defaults.int_value is not None
+    assert refreshed_schema.defaults.float_value is not None
+    assert refreshed_schema.defaults.boolean is not None
+    assert refreshed_schema.defaults.sparse_vector is not None
+    assert refreshed_schema.keys["#document"] is not None

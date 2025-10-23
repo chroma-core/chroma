@@ -561,6 +561,17 @@ class CollectionCommon(Generic[ClientT]):
                 )
             )
 
+            # If schema exists, also update it with the configuration changes
+            if self.schema:
+                from chromadb.api.collection_configuration import (
+                    update_schema_from_collection_configuration,
+                )
+
+                updated_schema = update_schema_from_collection_configuration(
+                    self.schema, configuration
+                )
+                self._model["serialized_schema"] = updated_schema.serialize_to_json()
+
     def _get_sparse_embedding_targets(self) -> Dict[str, "SparseVectorIndexConfig"]:
         schema = self.schema
         if schema is None:
