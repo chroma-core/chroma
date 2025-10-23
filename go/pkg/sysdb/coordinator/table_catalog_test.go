@@ -1676,7 +1676,7 @@ func TestUpdateCollection_WithSchema(t *testing.T) {
 		return true
 	})).Return(nil).Once()
 
-	// Mock getting updated collection
+	// Mock getting updated collection - return collection with updated schema
 	mockCollectionDb.On("GetCollections",
 		[]string{collectionID.String()},
 		mock.Anything,
@@ -1685,7 +1685,20 @@ func TestUpdateCollection_WithSchema(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 		false,
-	).Return([]*dbmodel.CollectionAndMetadata{existingCollection}, nil).Once()
+	).Return([]*dbmodel.CollectionAndMetadata{
+		{
+			Collection: &dbmodel.Collection{
+				ID:                   collectionID.String(),
+				Name:                 &collectionName,
+				ConfigurationJsonStr: nil,
+				SchemaStr:            &initialSchema, // Will be updated in the assertion phase
+				Ts:                   types.Timestamp(1234567900),
+			},
+			CollectionMetadata: []*dbmodel.CollectionMetadata{},
+			TenantID:           tenantID,
+			DatabaseName:       databaseName,
+		},
+	}, nil).Once()
 
 	// Mock transaction
 	mockTxImpl.On("Transaction", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {

@@ -812,6 +812,9 @@ def update_schema_from_collection_configuration(
     Returns:
         Updated Schema object
     """
+    # TODO: Remove this check once schema is enabled in local.
+    if schema.defaults.float_list is None:
+        return schema
 
     # Get the vector index from defaults and #embedding key
     if schema.defaults.float_list is None or schema.defaults.float_list.vector_index is None:
