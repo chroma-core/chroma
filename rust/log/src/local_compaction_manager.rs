@@ -206,10 +206,11 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             .begin()
             .await
             .map_err(|_| CompactionManagerError::MetadataApplyLogsFailed)?;
-        metadata_writer
+        let apply_outcome = metadata_writer
             .apply_logs(
                 mt_data_chunk,
                 collection_and_segments.metadata_segment.id,
+                collection_and_segments.collection.schema.clone(),
                 &mut *tx,
             )
             .await
@@ -217,6 +218,15 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
         tx.commit()
             .await
             .map_err(|_| CompactionManagerError::MetadataApplyLogsFailed)?;
+        if let Some(updated_schema) = apply_outcome.schema_update {
+            metadata_writer
+                .update_collection_schema(
+                    collection_and_segments.collection.collection_id,
+                    &updated_schema,
+                )
+                .await
+                .map_err(|_| CompactionManagerError::MetadataApplyLogsFailed)?;
+        }
         // Next apply it to the hnsw writer.
         let mut hnsw_writer = self
             .hnsw_segment_manager

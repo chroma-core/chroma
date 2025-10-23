@@ -7,17 +7,17 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sqlite::{
     db::SqliteDb,
     helpers::{delete_metadata, update_metadata},
-    table::{EmbeddingFulltextSearch, EmbeddingMetadata, Embeddings, MaxSeqId},
+    table::{Collections, EmbeddingFulltextSearch, EmbeddingMetadata, Embeddings, MaxSeqId},
 };
 use chroma_types::{
     operator::{
         CountResult, Filter, GetResult, Limit, Projection, ProjectionOutput, ProjectionRecord, Scan,
     },
     plan::{Count, Get},
-    BooleanOperator, Chunk, CompositeExpression, DocumentExpression, DocumentOperator, LogRecord,
-    MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue,
-    MetadataValueConversionError, Operation, OperationRecord, PrimitiveOperator, SegmentUuid,
-    SetOperator, UpdateMetadataValue, Where, CHROMA_DOCUMENT_KEY,
+    BooleanOperator, Chunk, CollectionUuid, CompositeExpression, DocumentExpression,
+    DocumentOperator, LogRecord, MetadataComparison, MetadataExpression, MetadataSetValue,
+    MetadataValue, MetadataValueConversionError, Operation, OperationRecord, PrimitiveOperator,
+    Schema, SegmentUuid, SetOperator, UpdateMetadataValue, Where, CHROMA_DOCUMENT_KEY,
 };
 use sea_query::{
     Alias, DeleteStatement, Expr, ExprTrait, Func, InsertStatement, LikeExpr, OnConflict, Query,
@@ -41,6 +41,8 @@ pub enum SqliteMetadataError {
     SeaQuery(#[from] sea_query::error::Error),
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
+    #[error("Could not serialize schema: {0}")]
+    SerializeSchema(#[from] serde_json::Error),
 }
 
 impl ChromaError for SqliteMetadataError {
@@ -51,6 +53,11 @@ impl ChromaError for SqliteMetadataError {
 
 pub struct SqliteMetadataWriter {
     pub db: SqliteDb,
+}
+
+pub struct ApplyLogsOutcome {
+    pub schema_update: Option<Schema>,
+    pub max_seq_id: Option<u64>,
 }
 
 impl SqliteMetadataWriter {
@@ -278,19 +285,67 @@ impl SqliteMetadataWriter {
         Ok(self.db.get_conn().begin().await?)
     }
 
+    pub async fn update_collection_schema(
+        &self,
+        collection_id: CollectionUuid,
+        schema: &Schema,
+    ) -> Result<(), SqliteMetadataError> {
+        let schema_str = serde_json::to_string(schema)?;
+        let (sql, values) = Query::update()
+            .table(Collections::Table)
+            .value(Collections::SchemaStr, schema_str)
+            .and_where(
+                Expr::col((Collections::Table, Collections::Id)).eq(collection_id.to_string()),
+            )
+            .build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&sql, values)
+            .execute(self.db.get_conn())
+            .await?;
+        Ok(())
+    }
+
+    fn ensure_schema_for_update_value(
+        schema: &mut Option<Schema>,
+        key: &str,
+        value: &UpdateMetadataValue,
+    ) -> bool {
+        if key == CHROMA_DOCUMENT_KEY {
+            return false;
+        }
+        match value {
+            UpdateMetadataValue::None => false,
+            _ => {
+                if let Some(schema_mut) = schema.as_mut() {
+                    if let Ok(metadata_value) = MetadataValue::try_from(value) {
+                        return schema_mut
+                            .ensure_key_from_metadata(key, metadata_value.value_type());
+                    }
+                }
+                false
+            }
+        }
+    }
+
     pub async fn apply_logs<C>(
         &self,
         logs: Chunk<LogRecord>,
         segment_id: SegmentUuid,
+        schema: Option<Schema>,
         tx: &mut C,
-    ) -> Result<(), SqliteMetadataError>
+    ) -> Result<ApplyLogsOutcome, SqliteMetadataError>
     where
         for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
     {
         if logs.is_empty() {
-            return Ok(());
+            return Ok(ApplyLogsOutcome {
+                schema_update: None,
+                max_seq_id: None,
+            });
         }
+        let mut schema = schema;
+        let mut schema_modified = false;
         let mut max_seq_id = u64::MIN;
+        let mut saw_log = false;
         for (
             LogRecord {
                 log_offset,
@@ -307,6 +362,7 @@ impl SqliteMetadataWriter {
         ) in logs.iter()
         {
             let log_offset_unsigned = (*log_offset).try_into()?;
+            saw_log = true;
             max_seq_id = max_seq_id.max(log_offset_unsigned);
             let mut metadata_owned = metadata.clone();
             if let Some(doc) = document {
@@ -323,6 +379,11 @@ impl SqliteMetadataWriter {
                         Self::add_record(tx, segment_id, log_offset_unsigned, id.clone()).await?
                     {
                         if let Some(meta) = metadata_owned {
+                            for (key, value) in meta.iter() {
+                                if Self::ensure_schema_for_update_value(&mut schema, key, value) {
+                                    schema_modified = true;
+                                }
+                            }
                             update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta).await?;
                         }
 
@@ -336,6 +397,11 @@ impl SqliteMetadataWriter {
                         Self::update_record(tx, segment_id, log_offset_unsigned, id.clone()).await?
                     {
                         if let Some(meta) = metadata_owned {
+                            for (key, value) in meta.iter() {
+                                if Self::ensure_schema_for_update_value(&mut schema, key, value) {
+                                    schema_modified = true;
+                                }
+                            }
                             update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta).await?;
                         }
 
@@ -351,6 +417,11 @@ impl SqliteMetadataWriter {
                             .await?;
 
                     if let Some(meta) = metadata_owned {
+                        for (key, value) in meta.iter() {
+                            if Self::ensure_schema_for_update_value(&mut schema, key, value) {
+                                schema_modified = true;
+                            }
+                        }
                         update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta).await?;
                     }
 
@@ -371,7 +442,12 @@ impl SqliteMetadataWriter {
 
         Self::upsert_max_seq_id(tx, segment_id, max_seq_id).await?;
 
-        Ok(())
+        let max_seq_id = if saw_log { Some(max_seq_id) } else { None };
+
+        Ok(ApplyLogsOutcome {
+            schema_update: if schema_modified { schema } else { None },
+            max_seq_id,
+        })
     }
 }
 
@@ -910,7 +986,17 @@ mod tests {
             ref_seg.apply_logs(test_data.logs.clone(), metadata_seg_id);
             let mut tx = runtime.block_on(sqlite_seg_writer.begin()).expect("Should be able to start transaction");
             let data: Chunk<LogRecord> = Chunk::new(test_data.logs.clone().into());
-            runtime.block_on(sqlite_seg_writer.apply_logs(data, metadata_seg_id, &mut *tx)).expect("Should be able to apply logs");
+            runtime.block_on(sqlite_seg_writer.apply_logs(
+                data,
+                metadata_seg_id,
+                test_data
+                    .collection_and_segments
+                    .collection
+                    .schema
+                    .clone(),
+                &mut *tx,
+            ))
+            .expect("Should be able to apply logs");
             runtime.block_on(tx.commit()).expect("Should be able to commit log");
 
             let sqlite_seg_reader = SqliteMetadataReader {
@@ -938,7 +1024,17 @@ mod tests {
             ref_seg.apply_logs(test_data.logs.clone(), metadata_seg_id);
             let mut tx = runtime.block_on(sqlite_seg_writer.begin()).expect("Should be able to start transaction");
             let data: Chunk<LogRecord> = Chunk::new(test_data.logs.clone().into());
-            runtime.block_on(sqlite_seg_writer.apply_logs(data, metadata_seg_id, &mut *tx)).expect("Should be able to apply logs");
+            runtime.block_on(sqlite_seg_writer.apply_logs(
+                data,
+                metadata_seg_id,
+                test_data
+                    .collection_and_segments
+                    .collection
+                    .schema
+                    .clone(),
+                &mut *tx,
+            ))
+            .expect("Should be able to apply logs");
             runtime.block_on(tx.commit()).expect("Should be able to commit log");
 
             let sqlite_seg_reader = SqliteMetadataReader {
@@ -1020,7 +1116,12 @@ mod tests {
             .expect("Should be able to start transaction");
         let data: Chunk<LogRecord> = Chunk::new(logs.into());
         sqlite_seg_writer
-            .apply_logs(data, metadata_seg_id, &mut *tx)
+            .apply_logs(
+                data,
+                metadata_seg_id,
+                collection_and_segments.collection.schema.clone(),
+                &mut *tx,
+            )
             .await
             .expect("Should be able to apply logs");
         tx.commit().await.expect("Should be able to commit log");
@@ -1140,7 +1241,12 @@ mod tests {
             .expect("Should be able to start transaction");
         let data: Chunk<LogRecord> = Chunk::new(logs.into());
         sqlite_seg_writer
-            .apply_logs(data, metadata_seg_id, &mut *tx)
+            .apply_logs(
+                data,
+                metadata_seg_id,
+                collection_and_segments.collection.schema.clone(),
+                &mut *tx,
+            )
             .await
             .expect("Should be able to apply logs");
         tx.commit().await.expect("Should be able to commit log");
