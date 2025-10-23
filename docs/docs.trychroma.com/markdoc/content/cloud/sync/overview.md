@@ -79,7 +79,7 @@ The global invocation configuration parameters are:
 }
 ```
 
-- `target_collection_name` defines the name of the Chroma collection in which synced data should be stored. This must be a collection that does not already exist with synced data. Chroma Sync uses the metadata key finished_ingest to indicate whether a collection contains synced data. If an invocation creation request is received for a collection with metadata in which this key is present and set to true, the API will return a 409 Conflict.
+- `target_collection_name` defines the name of the Chroma collection in which synced data should be stored. This must be a collection that does not already exist with synced data. Chroma Sync uses the metadata key `finished_ingest` to indicate whether a collection contains synced data. If an invocation creation request is received for a collection with metadata in which this key is present and set to true, the API will return a 409 Conflict.
 
 ## GitHub Repositories
 

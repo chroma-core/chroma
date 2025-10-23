@@ -43,7 +43,7 @@ Direct Sync is the default syncing method, which uses the Chroma Cloud GitHub ap
 
     {% MarkdocImage lightSrc="/sync/sync_existing_db_add.png" darkSrc="/sync/sync_existing_db_add.png" alt="Create path for a new Sync" /%}
 
-    Then, follow the prompts to initiate sync. Choose the **repo** to sync code from, the **branch or commit hash** version of the code to index, and new **collection name** for the synced code. (The collection will be created by the syncing process, and must not exist yet.)
+    Then, follow the prompts to initiate sync. Choose the **repo** to sync code from, the **branch or commit hash** version of the code to index, and a new **collection name** for the synced code. (The collection will be created by the syncing process, and must not exist yet.)
 
     {% MarkdocImage lightSrc="/sync/sync_existing_db_sync.png" darkSrc="/sync/sync_existing_db_sync.png" alt="Create flow for a new Sync" /%}
 
