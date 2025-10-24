@@ -43,13 +43,10 @@ python -m venv .venv
 2. Install dependencies and set up pre-commit hooks:
 
 ```powershell
-pip install -r .\\requirements.txt
-pip install -r .\\requirements_dev.txt
+pip install -r .\requirements.txt
+pip install -r .\requirements_dev.txt
 pip install -e .
 pre-commit install
-
-This minimal flow keeps Python-only development fast on Windows. If you want to run the distributed system or use Tilt/Docker, follow the "Local dev setup for distributed chroma" section below.
-
 ## Local dev setup for distributed chroma
 
 We use tilt for providing local dev setup. Tilt is an open source project
