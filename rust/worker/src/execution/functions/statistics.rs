@@ -52,9 +52,7 @@ impl StatisticsValue {
             Self::Int(i) => {
                 format!("{i}")
             }
-            Self::Str(s) => {
-                format!("{s}")
-            }
+            Self::Str(s) => s.clone(),
             Self::Float(f) => {
                 // Kinda error-prone, but supported.
                 // A footgun.
