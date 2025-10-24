@@ -138,7 +138,7 @@ func (s *taskDb) AdvanceTask(taskID uuid.UUID, taskRunNonce uuid.UUID, completio
 	// Bump next_nonce to mark a new run, but don't touch lowest_live_nonce yet
 	// lowest_live_nonce will be updated later by finish_task when verification completes
 	next_run := now.Add(time.Duration(nextRunDelaySecs) * time.Second)
-	result := s.db.Model(&dbmodel.Task{}).Where("task_id = ?", taskID).Where("is_deleted = false").Where("next_nonce = ?", taskRunNonce).Where("completion_offset < ?", completionOffset).UpdateColumns(map[string]interface{}{
+	result := s.db.Model(&dbmodel.Task{}).Where("task_id = ?", taskID).Where("is_deleted = false").Where("next_nonce = ?", taskRunNonce).Where("completion_offset <= ?", completionOffset).UpdateColumns(map[string]interface{}{
 		"completion_offset": completionOffset,
 		"next_run":          next_run,
 		"last_run":          now,

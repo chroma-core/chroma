@@ -30,13 +30,14 @@ use chroma_system::{
 };
 use chroma_types::{
     Chunk, Collection, CollectionUuid, LogRecord, Schema, SchemaError, SegmentFlushInfo,
-    SegmentType, SegmentUuid,
+    SegmentType, SegmentUuid, Task, TaskUuid,
 };
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use uuid::Uuid;
 
 use crate::execution::operators::{
     apply_log_to_segment_writer::{
@@ -115,6 +116,14 @@ enum ExecutionState {
     Partition,
     MaterializeApplyCommitFlush,
     Register,
+}
+
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub(crate) struct TaskContext {
+    pub(crate) task_id: TaskUuid,
+    pub(crate) task: Option<Task>,
+    pub(crate) execution_nonce: Uuid,
 }
 
 #[derive(Clone, Debug)]
@@ -579,6 +588,7 @@ impl CompactOrchestrator {
             self.sysdb.clone(),
             self.log.clone(),
             self.schema.clone(),
+            None,
         );
 
         let task = wrap(

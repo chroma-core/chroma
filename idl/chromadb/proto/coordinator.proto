@@ -325,7 +325,7 @@ message FlushCollectionCompactionResponse {
 message TaskUpdateInfo {
   string task_id = 1;
   string task_run_nonce = 2;
-  int64 completion_offset = 3;
+  uint64 completion_offset = 3;
 }
 
 // Combined request to flush collection compaction and update task atomically in a single transaction
@@ -341,7 +341,7 @@ message FlushCollectionCompactionAndTaskResponse {
   // Updated task fields from database (authoritative)
   string next_nonce = 4;
   google.protobuf.Timestamp next_run = 5;
-  int64 completion_offset = 6;
+  uint64 completion_offset = 6;
 }
 
 // Used for serializing contents in collection version history file.
@@ -588,13 +588,15 @@ message Task {
   string output_collection_name = 5;
   optional string output_collection_id = 6;
   optional google.protobuf.Struct params = 7;
-  int64 completion_offset = 8;
+  uint64 completion_offset = 8;
   uint64 min_records_for_task = 9;
   string tenant_id = 10;
   string database_id = 11;
   uint64 next_run_at = 12;
   string lowest_live_nonce = 13;
   string next_nonce = 14;
+  uint64 created_at = 15;
+  uint64 updated_at = 16;
 }
 
 message GetTaskByNameResponse {
@@ -623,14 +625,14 @@ message AdvanceTaskRequest {
   optional string collection_id = 1;
   optional string task_id = 2;
   optional string task_run_nonce = 3;
-  optional int64 completion_offset = 4;
+  optional uint64 completion_offset = 4;
   optional uint64 next_run_delay_secs = 5;
 }
 
 message AdvanceTaskResponse {
   string next_run_nonce = 1;
   uint64 next_run_at = 2;
-  int64 completion_offset = 3;
+  uint64 completion_offset = 3;
 }
 
 message FinishTaskRequest {

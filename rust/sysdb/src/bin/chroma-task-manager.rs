@@ -169,6 +169,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Operator: {:?}", task.operator_name);
             println!("Input Collection: {:?}", task.input_collection_id);
             println!("Output Collection Name: {:?}", task.output_collection_name);
+            println!("Output Collection ID: {:?}", task.output_collection_id);
             println!("Params: {:?}", task.params);
             println!("Completion Offset: {:?}", task.completion_offset);
             println!("Min Records: {:?}", task.min_records_for_task);
@@ -198,7 +199,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 collection_id: Some(collection_id),
                 task_id: Some(task_id),
                 task_run_nonce: Some(task_run_nonce),
-                completion_offset: Some(completion_offset.try_into().unwrap()),
+                completion_offset: Some(completion_offset),
                 next_run_delay_secs: Some(next_run_delay_secs),
             };
 

@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"math"
 	"strings"
 	"time"
 
@@ -195,6 +196,15 @@ func (s *Coordinator) GetTaskByName(ctx context.Context, req *coordinatorpb.GetT
 		}
 	}
 
+	// Validate completion_offset is non-negative before converting to uint64
+	if task.CompletionOffset < 0 {
+		log.Error("GetTaskByName: invalid completion_offset",
+			zap.String("task_id", task.ID.String()),
+			zap.Int64("completion_offset", task.CompletionOffset))
+		return nil, status.Errorf(codes.Internal,
+			"task has invalid completion_offset: %d", task.CompletionOffset)
+	}
+
 	// Convert task to response with nested Task message
 	taskProto := &coordinatorpb.Task{
 		TaskId:               task.ID.String(),
@@ -203,13 +213,15 @@ func (s *Coordinator) GetTaskByName(ctx context.Context, req *coordinatorpb.GetT
 		InputCollectionId:    task.InputCollectionID,
 		OutputCollectionName: task.OutputCollectionName,
 		Params:               paramsStruct,
-		CompletionOffset:     task.CompletionOffset,
+		CompletionOffset:     uint64(task.CompletionOffset),
 		MinRecordsForTask:    uint64(task.MinRecordsForTask),
 		TenantId:             task.TenantID,
 		DatabaseId:           task.DatabaseID,
 		NextRunAt:            uint64(task.NextRun.UnixMicro()),
 		LowestLiveNonce:      "",
 		NextNonce:            task.NextNonce.String(),
+		CreatedAt:            uint64(task.CreatedAt.UnixMicro()),
+		UpdatedAt:            uint64(task.UpdatedAt.UnixMicro()),
 	}
 	// Add lowest_live_nonce if it's set
 	if task.LowestLiveNonce != nil {
@@ -269,6 +281,15 @@ func (s *Coordinator) GetTaskByUuid(ctx context.Context, req *coordinatorpb.GetT
 		}
 	}
 
+	// Validate completion_offset is non-negative before converting to uint64
+	if task.CompletionOffset < 0 {
+		log.Error("GetTaskByUuid: invalid completion_offset",
+			zap.String("task_id", task.ID.String()),
+			zap.Int64("completion_offset", task.CompletionOffset))
+		return nil, status.Errorf(codes.Internal,
+			"task has invalid completion_offset: %d", task.CompletionOffset)
+	}
+
 	// Convert task to response with nested Task message
 	taskProto := &coordinatorpb.Task{
 		TaskId:               task.ID.String(),
@@ -277,13 +298,15 @@ func (s *Coordinator) GetTaskByUuid(ctx context.Context, req *coordinatorpb.GetT
 		InputCollectionId:    task.InputCollectionID,
 		OutputCollectionName: task.OutputCollectionName,
 		Params:               paramsStruct,
-		CompletionOffset:     task.CompletionOffset,
+		CompletionOffset:     uint64(task.CompletionOffset),
 		MinRecordsForTask:    uint64(task.MinRecordsForTask),
 		TenantId:             task.TenantID,
 		DatabaseId:           task.DatabaseID,
 		NextRunAt:            uint64(task.NextRun.UnixMicro()),
 		LowestLiveNonce:      "",
 		NextNonce:            task.NextNonce.String(),
+		CreatedAt:            uint64(task.CreatedAt.UnixMicro()),
+		UpdatedAt:            uint64(task.UpdatedAt.UnixMicro()),
 	}
 	// Add lowest_live_nonce if it's set
 	if task.LowestLiveNonce != nil {
@@ -480,16 +503,34 @@ func (s *Coordinator) AdvanceTask(ctx context.Context, req *coordinatorpb.Advanc
 		return nil, status.Errorf(codes.InvalidArgument, "invalid task_run_nonce: %v", err)
 	}
 
-	advanceTask, err := s.catalog.metaDomain.TaskDb(ctx).AdvanceTask(taskID, taskRunNonce, *req.CompletionOffset, *req.NextRunDelaySecs)
+	// Validate completion_offset fits in int64 before storing in database
+	if *req.CompletionOffset > uint64(math.MaxInt64) { // math.MaxInt64
+		log.Error("AdvanceTask: completion_offset too large",
+			zap.Uint64("completion_offset", *req.CompletionOffset))
+		return nil, status.Errorf(codes.InvalidArgument,
+			"completion_offset too large: %d", *req.CompletionOffset)
+	}
+	completionOffsetInt64 := int64(*req.CompletionOffset)
+
+	advanceTask, err := s.catalog.metaDomain.TaskDb(ctx).AdvanceTask(taskID, taskRunNonce, completionOffsetInt64, *req.NextRunDelaySecs)
 	if err != nil {
 		log.Error("AdvanceTask failed", zap.Error(err), zap.String("task_id", taskID.String()))
 		return nil, err
 	}
 
+	// Validate completion_offset from database is non-negative before converting to uint64
+	if advanceTask.CompletionOffset < 0 {
+		log.Error("AdvanceTask: invalid completion_offset from database",
+			zap.String("task_id", taskID.String()),
+			zap.Int64("completion_offset", advanceTask.CompletionOffset))
+		return nil, status.Errorf(codes.Internal,
+			"task has invalid completion_offset: %d", advanceTask.CompletionOffset)
+	}
+
 	return &coordinatorpb.AdvanceTaskResponse{
 		NextRunNonce:     advanceTask.NextNonce.String(),
 		NextRunAt:        uint64(advanceTask.NextRun.UnixMilli()),
-		CompletionOffset: advanceTask.CompletionOffset,
+		CompletionOffset: uint64(advanceTask.CompletionOffset),
 	}, nil
 }
 

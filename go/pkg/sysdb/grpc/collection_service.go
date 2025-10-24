@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"encoding/json"
+	"math"
 
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 
@@ -607,6 +608,14 @@ func (s *Server) FlushCollectionCompactionAndTask(ctx context.Context, req *coor
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
+	// Validate completion_offset fits in int64 before storing in database
+	if taskUpdate.CompletionOffset > uint64(math.MaxInt64) {
+		log.Error("FlushCollectionCompactionAndTask: completion_offset too large",
+			zap.Uint64("completion_offset", taskUpdate.CompletionOffset))
+		return nil, grpcutils.BuildInternalGrpcError("completion_offset too large")
+	}
+	completionOffsetSigned := int64(taskUpdate.CompletionOffset)
+
 	segmentCompactionInfo := make([]*model.FlushSegmentCompaction, 0, len(flushReq.SegmentCompactionInfo))
 	for _, flushSegmentCompaction := range flushReq.SegmentCompactionInfo {
 		segmentID, err := types.ToUniqueID(&flushSegmentCompaction.SegmentId)
@@ -640,7 +649,7 @@ func (s *Server) FlushCollectionCompactionAndTask(ctx context.Context, req *coor
 		flushCollectionCompaction,
 		taskID,
 		taskRunNonce,
-		taskUpdate.CompletionOffset,
+		completionOffsetSigned,
 	)
 	if err != nil {
 		log.Error("FlushCollectionCompactionAndTask failed", zap.Error(err), zap.String("collection_id", flushReq.CollectionId), zap.String("task_id", taskUpdate.TaskId))
@@ -667,7 +676,13 @@ func (s *Server) FlushCollectionCompactionAndTask(ctx context.Context, req *coor
 		res.NextRun = timestamppb.New(*flushCollectionInfo.TaskNextRun)
 	}
 	if flushCollectionInfo.TaskCompletionOffset != nil {
-		res.CompletionOffset = *flushCollectionInfo.TaskCompletionOffset
+		// Validate completion_offset is non-negative before converting to uint64
+		if *flushCollectionInfo.TaskCompletionOffset < 0 {
+			log.Error("FlushCollectionCompactionAndTask: invalid completion_offset",
+				zap.Int64("completion_offset", *flushCollectionInfo.TaskCompletionOffset))
+			return nil, grpcutils.BuildInternalGrpcError("task has invalid completion_offset")
+		}
+		res.CompletionOffset = uint64(*flushCollectionInfo.TaskCompletionOffset)
 	}
 
 	return res, nil

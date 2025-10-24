@@ -269,7 +269,7 @@ impl HeapTender {
                         let schedule = Schedule {
                             triggerable,
                             next_scheduled,
-                            nonce: s.task_run_nonce,
+                            nonce: s.task_run_nonce.0,
                         };
                         Ok(Some(schedule))
                     } else {
