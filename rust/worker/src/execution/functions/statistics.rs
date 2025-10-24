@@ -31,9 +31,45 @@ pub enum StatisticsValue {
 }
 
 impl StatisticsValue {
-    // A stable string representation of a statistics value.
-    // Separate so display repr can change.
+    /// A stable type string for the statistics's type.
+    fn stable_type(&self) -> &'static str {
+        match self {
+            Self::Bool(_) => "bool",
+            Self::Int(_) => "int",
+            Self::Float(_) => "float",
+            Self::Str(_) => "str",
+            Self::SparseVector(_) => "sparse",
+        }
+    }
+
+    /// A stable representation of the statistics's value.
+    fn stable_value(&self) -> String {
+        // NOTE(rescrv):  Keep in sync with stable_string.  Done separately to avoid clone.
+        match self {
+            Self::Bool(b) => {
+                format!("{b}")
+            }
+            Self::Int(i) => {
+                format!("{i}")
+            }
+            Self::Str(s) => {
+                format!("{s}")
+            }
+            Self::Float(f) => {
+                // Kinda error-prone, but supported.
+                // A footgun.
+                format!("{f}")
+            }
+            Self::SparseVector(index) => {
+                format!("{index}")
+            }
+        }
+    }
+
+    /// A stable string representation of a statistics value with type tag.
+    /// Separate so display repr can change.
     fn stable_string(&self) -> String {
+        // NOTE(rescrv):  Keep in sync with stable_value.  Done separately to avoid clone.
         match self {
             Self::Bool(b) => {
                 format!("b:{b}")
@@ -131,8 +167,12 @@ impl TaskExecutor for StatisticsFunctionExecutor {
         let mut keys = HashSet::with_capacity(counts.len());
         let mut records = Vec::with_capacity(counts.len());
         for ((key, stats_value), count) in counts.into_iter() {
-            let metadata =
-                HashMap::from_iter([("count".to_string(), UpdateMetadataValue::Int(count))]);
+            let metadata = HashMap::from_iter([
+                ("count".to_string(), UpdateMetadataValue::Int(count)),
+                ("term".to_string(), key.clone().into()),
+                ("type".to_string(), stats_value.stable_type().into()),
+                ("value".to_string(), stats_value.stable_value().into()),
+            ]);
             let record = LogRecord {
                 log_offset: 0,
                 record: OperationRecord {
