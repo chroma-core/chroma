@@ -187,8 +187,9 @@ impl TaskExecutor for StatisticsFunctionExecutor {
         }
         // Delete records we didn't recreate.
         if let Some(output_reader) = output_reader {
+            let max_offset_id = output_reader.get_max_offset_id();
             let mut stream = output_reader
-                .get_data_stream(0..output_reader.get_max_offset_id())
+                .get_data_stream(0..=max_offset_id)
                 .await;
 
             while let Some(record) = stream.next().await {
@@ -537,5 +538,65 @@ mod tests {
         assert_eq!(term, "fresh_key");
         assert_eq!(value_type, "int");
         assert_eq!(value, "1");
+    }
+
+    #[tokio::test]
+    async fn statistics_executor_zeroes_output_when_input_empty() {
+        let executor = StatisticsFunctionExecutor;
+
+        let mut test_segment = TestDistributedSegment::new().await;
+
+        let metadata: UpdateMetadata = HashMap::from([
+            ("count".to_string(), UpdateMetadataValue::Int(2)),
+            ("term".to_string(), UpdateMetadataValue::Str("empty_key".to_string())),
+            ("type".to_string(), UpdateMetadataValue::Str("str".to_string())),
+            ("value".to_string(), UpdateMetadataValue::Str("initial".to_string())),
+        ]);
+
+        let record = LogRecord {
+            log_offset: 0,
+            record: OperationRecord {
+                id: "empty_key::s:initial".to_string(),
+                embedding: Some(vec![0.0]),
+                encoding: None,
+                metadata: Some(metadata),
+                document: Some("statistics about empty_key for s:initial".to_string()),
+                operation: Operation::Upsert,
+            },
+        };
+
+        let existing_chunk = Chunk::new(vec![record].into());
+        test_segment.compact_log(existing_chunk, 1).await;
+
+        let record_reader = RecordSegmentReader::from_segment(
+            &test_segment.record_segment,
+            &test_segment.blockfile_provider,
+        )
+        .await
+        .expect("record segment reader creation succeeds");
+
+        let empty_input: Chunk<LogRecord> = Chunk::new(Vec::<LogRecord>::new().into());
+
+        let output = executor
+            .execute(empty_input, Some(&record_reader))
+            .await
+            .expect("execution succeeds");
+
+        let mut deletes = Vec::new();
+        for (log_record, _) in output.iter() {
+            match log_record.record.operation {
+                Operation::Delete => {
+                    deletes.push(log_record.record.id.clone());
+                    assert!(log_record.record.metadata.is_none());
+                    assert!(log_record.record.embedding.is_none());
+                }
+                Operation::Upsert => {
+                    panic!("unexpected upsert in empty-input statistics output");
+                }
+                other => panic!("unexpected operation in statistics output: {:?}", other),
+            }
+        }
+
+        assert_eq!(deletes, vec!["empty_key::s:initial".to_string()]);
     }
 }
