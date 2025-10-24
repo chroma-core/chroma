@@ -142,7 +142,7 @@ fn default_enable_span_indexing() -> bool {
 }
 
 fn default_enable_schema() -> bool {
-    false
+    true
 }
 
 pub fn default_min_records_for_task() -> u64 {

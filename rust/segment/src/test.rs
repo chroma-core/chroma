@@ -20,10 +20,10 @@ use chroma_types::{
     },
     plan::{Count, Get, Knn},
     test_segment, BooleanOperator, Chunk, Collection, CollectionAndSegments, CompositeExpression,
-    DocumentExpression, DocumentOperator, LogRecord, Metadata, MetadataComparison,
+    DocumentExpression, DocumentOperator, KnnIndex, LogRecord, Metadata, MetadataComparison,
     MetadataExpression, MetadataSetValue, MetadataValue, Operation, OperationRecord,
-    PrimitiveOperator, Segment, SegmentScope, SegmentUuid, SetOperator, UpdateMetadata, Where,
-    CHROMA_KEY,
+    PrimitiveOperator, Schema, Segment, SegmentScope, SegmentUuid, SetOperator, UpdateMetadata,
+    Where, CHROMA_KEY,
 };
 use regex::Regex;
 use std::collections::BinaryHeap;
@@ -48,7 +48,8 @@ pub struct TestDistributedSegment {
 
 impl TestDistributedSegment {
     pub async fn new_with_dimension(dimension: usize) -> Self {
-        let collection = Collection::test_collection(dimension as i32);
+        let mut collection = Collection::test_collection(dimension as i32);
+        collection.schema = Some(Schema::new_default(KnnIndex::Hnsw));
         let collection_uuid = collection.collection_id;
         let (blockfile_dir, blockfile_provider) = test_arrow_blockfile_provider(2 << 22);
         let (hnsw_dir, hnsw_provider) = test_hnsw_index_provider();
