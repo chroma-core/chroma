@@ -266,13 +266,13 @@ impl HeapTender {
                 .map(|s: ScheduleEntry| -> Result<_, Error> {
                     let triggerable = Triggerable {
                         partitioning: s3heap::UnitOfPartitioningUuid::new(s.collection_id.0),
-                        scheduling: s3heap::UnitOfSchedulingUuid::new(s.task_id),
+                        scheduling: s3heap::UnitOfSchedulingUuid::new(s.attached_function_id),
                     };
                     if let Some(next_scheduled) = s.when_to_run {
                         let schedule = Schedule {
                             triggerable,
                             next_scheduled,
-                            nonce: s.task_run_nonce.0,
+                            nonce: s.attached_function_run_nonce.0,
                         };
                         Ok(Some(schedule))
                     } else {

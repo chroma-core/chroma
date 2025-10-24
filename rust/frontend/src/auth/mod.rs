@@ -38,8 +38,8 @@ pub enum AuthzAction {
     Update,
     Upsert,
     Search,
-    CreateTask,
-    RemoveTask,
+    CreateAttachedFunction,
+    RemoveAttachedFunction,
 }
 
 impl Display for AuthzAction {
@@ -70,8 +70,8 @@ impl Display for AuthzAction {
             AuthzAction::Update => write!(f, "collection:update"),
             AuthzAction::Upsert => write!(f, "collection:upsert"),
             AuthzAction::Search => write!(f, "collection:search"),
-            AuthzAction::CreateTask => write!(f, "collection:create_task"),
-            AuthzAction::RemoveTask => write!(f, "collection:remove_task"),
+            AuthzAction::CreateAttachedFunction => write!(f, "collection:create_attached_function"),
+            AuthzAction::RemoveAttachedFunction => write!(f, "collection:remove_attached_function"),
         }
     }
 }

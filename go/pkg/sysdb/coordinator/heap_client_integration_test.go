@@ -106,8 +106,8 @@ func (suite *HeapClientIntegrationTestSuite) TearDownTest() {
 	// Resources are uniquely named with timestamps so repeated runs won't conflict
 }
 
-// TestCreateTaskPushesScheduleToHeap verifies that creating a task pushes a schedule to the heap
-func (suite *HeapClientIntegrationTestSuite) TestCreateTaskPushesScheduleToHeap() {
+// TestAttachFunctionPushesScheduleToHeap verifies that attaching a function pushes a schedule to the heap
+func (suite *HeapClientIntegrationTestSuite) TestAttachFunctionPushesScheduleToHeap() {
 	ctx := context.Background()
 
 	// Get initial heap summary
@@ -144,20 +144,19 @@ func (suite *HeapClientIntegrationTestSuite) TestCreateTaskPushesScheduleToHeap(
 	})
 	suite.NoError(err, "Should create collection")
 
-	// Create task (this should push to heap service)
-	taskResp, err := suite.sysdbClient.CreateTask(ctx, &coordinatorpb.CreateTaskRequest{
-		InputCollectionId:    collectionID,
+	// Attach function using record_counter function
+	response, err := suite.coordinator.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
+		InputCollectionId:    collectionID.String(),
 		TenantId:             suite.tenantName,
 		Database:             suite.databaseName,
-		Name:                 "test_record_counter_task",
-		OperatorName:         "record_counter",
+		Name:                 "test_record_counter_function",
+		FunctionName:         "record_counter",
 		OutputCollectionName: "output_collection_" + collectionID,
-		MinRecordsForTask:    10,
+		MinRecordsForRun:     10,
 	})
-	suite.NoError(err, "Should create task successfully")
-	suite.NotNil(taskResp)
-	suite.NotEmpty(taskResp.TaskId)
-	suite.T().Logf("Created task: %s", taskResp.TaskId)
+	suite.NoError(err, "Should attached function successfully")
+	suite.NotNil(response)
+	suite.NotEmpty(response.AttachedFunctionId, "Attached function ID should be returned")
 
 	// Get updated heap summary
 	updatedSummary, err := suite.heapClient.Summary(ctx, &coordinatorpb.HeapSummaryRequest{})

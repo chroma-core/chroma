@@ -399,7 +399,7 @@ mod tests {
         match rx.recv().await.unwrap().into_inner() {
             Ok(_) => {}
             Err(err) => panic!(
-                "Task should have finished - workers should be cancelled {:?}",
+                " Attached Function should have finished - workers should be cancelled {:?}",
                 err
             ),
         }
