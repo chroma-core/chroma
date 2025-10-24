@@ -121,7 +121,7 @@ Common method signatures call into API internals like:
 | `uris` | `Optional[URIs]` (`List[str]`) | No | `None` | `['/path/1', '/path/2']` | Optional URI references. |
 
 Important validation rules:
-- At least one of `embeddings`, `documents`, `images`, or `uris` must be provided for insert-like calls.
+- At least one of `embeddings`, `documents`, or `uris` must be provided for insert-like calls.
 - List lengths of `ids`, `embeddings`, `documents`, and `metadatas` must match; empty lists are invalid.
 - `normalize_insert_record_set` and `validate_insert_record_set` are used internally to normalize and validate these inputs.
 
