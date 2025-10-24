@@ -263,6 +263,7 @@ impl Configurable<(GrpcLogConfig, System)> for GrpcLog {
             1,
             my_config.connect_timeout_ms,
             my_config.request_timeout_ms,
+            my_config.port,
             ClientOptions::new(Some(my_config.max_decoding_message_size)),
         );
         let client_manager_handle = system.start_component(client_manager);
@@ -640,13 +641,14 @@ impl GrpcLog {
         ordinal: u64,
     ) -> Result<(), GarbageCollectError> {
         // NOTE(rescrv): Use a raw LogServiceClient so we can open by stateful set ordinal.
+        let port = self.config.port;
         let endpoint_res = match Endpoint::from_shared(format!(
-            "grpc://rust-log-service-{ordinal}.rust-log-service:50051"
+            "grpc://rust-log-service-{ordinal}.rust-log-service:{port}"
         )) {
             Ok(endpoint) => endpoint,
             Err(e) => {
                 return Err(GarbageCollectError::Resolution(format!(
-                    "could not connect to rust-log-service-{ordinal}:50051: {}",
+                    "could not connect to rust-log-service-{ordinal}:{port}: {}",
                     e
                 )));
             }
@@ -656,7 +658,7 @@ impl GrpcLog {
             .timeout(Duration::from_millis(self.config.request_timeout_ms));
         let channel = endpoint_res.connect().await.map_err(|err| {
             GarbageCollectError::Resolution(format!(
-                "could not connect to rust-log-service-{ordinal}:50051: {}",
+                "could not connect to rust-log-service-{ordinal}:{port}: {}",
                 err
             ))
         })?;
