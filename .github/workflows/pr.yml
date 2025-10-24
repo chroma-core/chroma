@@ -202,6 +202,13 @@ jobs:
     uses: ./.github/workflows/_rust-tests.yml
     secrets: inherit
 
+  rust-feature-tests:
+    name: Rust feature tests
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
+    uses: ./.github/workflows/_check_rust_release.yml
+    secrets: inherit
+
   go-tests:
     name: Go tests
     needs: change-detection
@@ -257,6 +264,7 @@ jobs:
     - python-vulnerability-scan
     - javascript-client-tests
     - rust-tests
+    - rust-feature-tests
     - go-tests
     - lint
     - check-helm-version-bump
@@ -267,7 +275,7 @@ jobs:
       uses: re-actors/alls-green@release/v1
       with:
         jobs: ${{ toJSON(needs) }}
-        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests,check-helm-version-bump,delete-helm-comment
+        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,rust-feature-tests,go-tests,check-helm-version-bump,delete-helm-comment
 
   notify-slack-on-failure:
     name: Notify Slack on Test Failure
@@ -277,6 +285,7 @@ jobs:
     - python-vulnerability-scan
     - javascript-client-tests
     - rust-tests
+    - rust-feature-tests
     - go-tests
     - lint
     - check-helm-version-bump

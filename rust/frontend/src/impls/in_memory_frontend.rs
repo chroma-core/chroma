@@ -43,8 +43,8 @@ impl InMemoryFrontend {
 
     pub fn heartbeat(
         &self,
-    ) -> Result<chroma_types::HeartbeatResponse, chroma_types::HeartbeatError> {
-        Ok(chroma_types::HeartbeatResponse {
+    ) -> Result<chroma_api_types::HeartbeatResponse, chroma_types::HeartbeatError> {
+        Ok(chroma_api_types::HeartbeatResponse {
             nanosecond_heartbeat: 0,
         })
     }

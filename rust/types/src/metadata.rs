@@ -1,14 +1,14 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Number, Value};
 use sprs::CsVec;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     mem::size_of_val,
+    ops::{BitAnd, BitOr},
 };
 use thiserror::Error;
-use utoipa::ToSchema;
 
 use crate::chroma_proto;
 
@@ -18,13 +18,67 @@ use pyo3::types::PyAnyMethods;
 #[cfg(feature = "testing")]
 use proptest::prelude::*;
 
+#[derive(Serialize, Deserialize)]
+struct SparseVectorSerdeHelper {
+    #[serde(rename = "#type")]
+    type_tag: Option<String>,
+    indices: Vec<u32>,
+    values: Vec<f32>,
+}
+
 /// Represents a sparse vector using parallel arrays for indices and values.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, ToSchema)]
+///
+/// On deserialization: accepts both old format `{"indices": [...], "values": [...]}`
+/// and new format `{"#type": "sparse_vector", "indices": [...], "values": [...]}`.
+///
+/// On serialization: always includes `#type` field with value `"sparse_vector"`.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SparseVector {
     /// Dimension indices
     pub indices: Vec<u32>,
     /// Values corresponding to each index
     pub values: Vec<f32>,
+}
+
+// Custom deserializer: accept both old and new formats
+impl<'de> Deserialize<'de> for SparseVector {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let helper = SparseVectorSerdeHelper::deserialize(deserializer)?;
+
+        // If #type is present, validate it
+        if let Some(type_tag) = &helper.type_tag {
+            if type_tag != "sparse_vector" {
+                return Err(serde::de::Error::custom(format!(
+                    "Expected #type='sparse_vector', got '{}'",
+                    type_tag
+                )));
+            }
+        }
+
+        Ok(SparseVector {
+            indices: helper.indices,
+            values: helper.values,
+        })
+    }
+}
+
+// Custom serializer: always include #type field
+impl Serialize for SparseVector {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let helper = SparseVectorSerdeHelper {
+            type_tag: Some("sparse_vector".to_string()),
+            indices: self.indices.clone(),
+            values: self.values.clone(),
+        };
+        helper.serialize(serializer)
+    }
 }
 
 impl SparseVector {
@@ -150,7 +204,8 @@ impl<'py> pyo3::FromPyObject<'py> for SparseVector {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 #[serde(untagged)]
 pub enum UpdateMetadataValue {
@@ -189,6 +244,54 @@ impl<'py> pyo3::FromPyObject<'py> for UpdateMetadataValue {
                 "Cannot convert Python object to UpdateMetadataValue",
             ))
         }
+    }
+}
+
+impl From<bool> for UpdateMetadataValue {
+    fn from(b: bool) -> Self {
+        Self::Bool(b)
+    }
+}
+
+impl From<i64> for UpdateMetadataValue {
+    fn from(v: i64) -> Self {
+        Self::Int(v)
+    }
+}
+
+impl From<i32> for UpdateMetadataValue {
+    fn from(v: i32) -> Self {
+        Self::Int(v as i64)
+    }
+}
+
+impl From<f64> for UpdateMetadataValue {
+    fn from(v: f64) -> Self {
+        Self::Float(v)
+    }
+}
+
+impl From<f32> for UpdateMetadataValue {
+    fn from(v: f32) -> Self {
+        Self::Float(v as f64)
+    }
+}
+
+impl From<String> for UpdateMetadataValue {
+    fn from(v: String) -> Self {
+        Self::Str(v)
+    }
+}
+
+impl From<&str> for UpdateMetadataValue {
+    fn from(v: &str) -> Self {
+        Self::Str(v.to_string())
+    }
+}
+
+impl From<SparseVector> for UpdateMetadataValue {
+    fn from(v: SparseVector) -> Self {
+        Self::SparseVector(v)
     }
 }
 
@@ -286,7 +389,8 @@ MetadataValue
 ===========================================
 */
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 #[cfg_attr(feature = "pyo3", derive(pyo3::FromPyObject, pyo3::IntoPyObject))]
 #[serde(untagged)]
@@ -331,6 +435,54 @@ impl MetadataValue {
 impl From<&MetadataValue> for MetadataValueType {
     fn from(value: &MetadataValue) -> Self {
         value.value_type()
+    }
+}
+
+impl From<bool> for MetadataValue {
+    fn from(v: bool) -> Self {
+        MetadataValue::Bool(v)
+    }
+}
+
+impl From<i64> for MetadataValue {
+    fn from(v: i64) -> Self {
+        MetadataValue::Int(v)
+    }
+}
+
+impl From<i32> for MetadataValue {
+    fn from(v: i32) -> Self {
+        MetadataValue::Int(v as i64)
+    }
+}
+
+impl From<f64> for MetadataValue {
+    fn from(v: f64) -> Self {
+        MetadataValue::Float(v)
+    }
+}
+
+impl From<f32> for MetadataValue {
+    fn from(v: f32) -> Self {
+        MetadataValue::Float(v as f64)
+    }
+}
+
+impl From<String> for MetadataValue {
+    fn from(v: String) -> Self {
+        MetadataValue::Str(v)
+    }
+}
+
+impl From<&str> for MetadataValue {
+    fn from(v: &str) -> Self {
+        MetadataValue::Str(v.to_string())
+    }
+}
+
+impl From<SparseVector> for MetadataValue {
+    fn from(v: SparseVector) -> Self {
+        MetadataValue::SparseVector(v)
     }
 }
 
@@ -763,7 +915,8 @@ impl WhereConversionError {
 /// present we simply create a conjunction of both clauses as the actual filter. This is consistent with
 /// the semantics we used to have when the `where` and `where_document` clauses are treated seperately.
 // TODO: Remove this note once the `where` clause and `where_document` clause is unified in the API level.
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum Where {
     Composite(CompositeExpression),
     Document(DocumentExpression),
@@ -771,11 +924,74 @@ pub enum Where {
 }
 
 impl serde::Serialize for Where {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer,
+        S: Serializer,
     {
-        todo!()
+        match self {
+            Where::Composite(composite) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                let op_key = match composite.operator {
+                    BooleanOperator::And => "$and",
+                    BooleanOperator::Or => "$or",
+                };
+                map.serialize_entry(op_key, &composite.children)?;
+                map.end()
+            }
+            Where::Document(doc) => {
+                let mut outer_map = serializer.serialize_map(Some(1))?;
+                let mut inner_map = serde_json::Map::new();
+                let op_key = match doc.operator {
+                    DocumentOperator::Contains => "$contains",
+                    DocumentOperator::NotContains => "$not_contains",
+                    DocumentOperator::Regex => "$regex",
+                    DocumentOperator::NotRegex => "$not_regex",
+                };
+                inner_map.insert(
+                    op_key.to_string(),
+                    serde_json::Value::String(doc.pattern.clone()),
+                );
+                outer_map.serialize_entry("#document", &inner_map)?;
+                outer_map.end()
+            }
+            Where::Metadata(meta) => {
+                let mut outer_map = serializer.serialize_map(Some(1))?;
+                let mut inner_map = serde_json::Map::new();
+
+                match &meta.comparison {
+                    MetadataComparison::Primitive(op, value) => {
+                        let op_key = match op {
+                            PrimitiveOperator::Equal => "$eq",
+                            PrimitiveOperator::NotEqual => "$ne",
+                            PrimitiveOperator::GreaterThan => "$gt",
+                            PrimitiveOperator::GreaterThanOrEqual => "$gte",
+                            PrimitiveOperator::LessThan => "$lt",
+                            PrimitiveOperator::LessThanOrEqual => "$lte",
+                        };
+                        let value_json =
+                            serde_json::to_value(value).map_err(serde::ser::Error::custom)?;
+                        inner_map.insert(op_key.to_string(), value_json);
+                    }
+                    MetadataComparison::Set(op, set_value) => {
+                        let op_key = match op {
+                            SetOperator::In => "$in",
+                            SetOperator::NotIn => "$nin",
+                        };
+                        let values_json = match set_value {
+                            MetadataSetValue::Bool(v) => serde_json::to_value(v),
+                            MetadataSetValue::Int(v) => serde_json::to_value(v),
+                            MetadataSetValue::Float(v) => serde_json::to_value(v),
+                            MetadataSetValue::Str(v) => serde_json::to_value(v),
+                        }
+                        .map_err(serde::ser::Error::custom)?;
+                        inner_map.insert(op_key.to_string(), values_json);
+                    }
+                }
+
+                outer_map.serialize_entry(&meta.key, &inner_map)?;
+                outer_map.end()
+            }
+        }
     }
 }
 
@@ -829,6 +1045,94 @@ impl Where {
     }
 }
 
+impl BitAnd for Where {
+    type Output = Where;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        match self {
+            Where::Composite(CompositeExpression {
+                operator: BooleanOperator::And,
+                mut children,
+            }) => match rhs {
+                Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::And,
+                    children: rhs_children,
+                }) => {
+                    children.extend(rhs_children);
+                    Where::Composite(CompositeExpression {
+                        operator: BooleanOperator::And,
+                        children,
+                    })
+                }
+                _ => {
+                    children.push(rhs);
+                    Where::Composite(CompositeExpression {
+                        operator: BooleanOperator::And,
+                        children,
+                    })
+                }
+            },
+            _ => match rhs {
+                Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::And,
+                    mut children,
+                }) => {
+                    children.insert(0, self);
+                    Where::Composite(CompositeExpression {
+                        operator: BooleanOperator::And,
+                        children,
+                    })
+                }
+                _ => Where::conjunction(vec![self, rhs]),
+            },
+        }
+    }
+}
+
+impl BitOr for Where {
+    type Output = Where;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        match self {
+            Where::Composite(CompositeExpression {
+                operator: BooleanOperator::Or,
+                mut children,
+            }) => match rhs {
+                Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::Or,
+                    children: rhs_children,
+                }) => {
+                    children.extend(rhs_children);
+                    Where::Composite(CompositeExpression {
+                        operator: BooleanOperator::Or,
+                        children,
+                    })
+                }
+                _ => {
+                    children.push(rhs);
+                    Where::Composite(CompositeExpression {
+                        operator: BooleanOperator::Or,
+                        children,
+                    })
+                }
+            },
+            _ => match rhs {
+                Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::Or,
+                    mut children,
+                }) => {
+                    children.insert(0, self);
+                    Where::Composite(CompositeExpression {
+                        operator: BooleanOperator::Or,
+                        children,
+                    })
+                }
+                _ => Where::disjunction(vec![self, rhs]),
+            },
+        }
+    }
+}
+
 impl TryFrom<chroma_proto::Where> for Where {
     type Error = WhereConversionError;
 
@@ -872,7 +1176,8 @@ impl TryFrom<Where> for chroma_proto::Where {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CompositeExpression {
     pub operator: BooleanOperator,
     pub children: Vec<Where>,
@@ -908,7 +1213,8 @@ impl TryFrom<CompositeExpression> for chroma_proto::WhereChildren {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum BooleanOperator {
     And,
     Or,
@@ -932,7 +1238,8 @@ impl From<BooleanOperator> for chroma_proto::BooleanOperator {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DocumentExpression {
     pub operator: DocumentOperator,
     pub pattern: String,
@@ -956,7 +1263,8 @@ impl From<DocumentExpression> for chroma_proto::DirectWhereDocument {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum DocumentOperator {
     Contains,
     NotContains,
@@ -985,7 +1293,8 @@ impl From<DocumentOperator> for chroma_proto::WhereDocumentOperator {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct MetadataExpression {
     pub key: String,
     pub comparison: MetadataComparison,
@@ -1116,7 +1425,8 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, ToSchema)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum MetadataComparison {
     Primitive(PrimitiveOperator, MetadataValue),
     Set(SetOperator, MetadataSetValue),
@@ -1223,6 +1533,48 @@ impl MetadataSetValue {
             MetadataSetValue::Float(_) => MetadataValueType::Float,
             MetadataSetValue::Str(_) => MetadataValueType::Str,
         }
+    }
+}
+
+impl From<Vec<bool>> for MetadataSetValue {
+    fn from(values: Vec<bool>) -> Self {
+        MetadataSetValue::Bool(values)
+    }
+}
+
+impl From<Vec<i64>> for MetadataSetValue {
+    fn from(values: Vec<i64>) -> Self {
+        MetadataSetValue::Int(values)
+    }
+}
+
+impl From<Vec<i32>> for MetadataSetValue {
+    fn from(values: Vec<i32>) -> Self {
+        MetadataSetValue::Int(values.into_iter().map(|v| v as i64).collect())
+    }
+}
+
+impl From<Vec<f64>> for MetadataSetValue {
+    fn from(values: Vec<f64>) -> Self {
+        MetadataSetValue::Float(values)
+    }
+}
+
+impl From<Vec<f32>> for MetadataSetValue {
+    fn from(values: Vec<f32>) -> Self {
+        MetadataSetValue::Float(values.into_iter().map(|v| v as f64).collect())
+    }
+}
+
+impl From<Vec<String>> for MetadataSetValue {
+    fn from(values: Vec<String>) -> Self {
+        MetadataSetValue::Str(values)
+    }
+}
+
+impl From<Vec<&str>> for MetadataSetValue {
+    fn from(values: Vec<&str>) -> Self {
+        MetadataSetValue::Str(values.into_iter().map(|s| s.to_string()).collect())
     }
 }
 
@@ -1650,5 +2002,91 @@ mod tests {
             result.unwrap_err(),
             MetadataValueConversionError::SparseVectorIndicesNotSorted
         ));
+    }
+
+    #[test]
+    fn test_sparse_vector_deserialize_old_format() {
+        // Old format without #type field (backward compatibility)
+        let json = r#"{"indices": [0, 1, 2], "values": [1.0, 2.0, 3.0]}"#;
+        let sv: SparseVector = serde_json::from_str(json).unwrap();
+        assert_eq!(sv.indices, vec![0, 1, 2]);
+        assert_eq!(sv.values, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_sparse_vector_deserialize_new_format() {
+        // New format with #type field
+        let json =
+            "{\"#type\": \"sparse_vector\", \"indices\": [0, 1, 2], \"values\": [1.0, 2.0, 3.0]}";
+        let sv: SparseVector = serde_json::from_str(json).unwrap();
+        assert_eq!(sv.indices, vec![0, 1, 2]);
+        assert_eq!(sv.values, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_sparse_vector_deserialize_new_format_field_order() {
+        // New format with different field order (should still work)
+        let json = "{\"indices\": [5, 10], \"#type\": \"sparse_vector\", \"values\": [0.5, 1.0]}";
+        let sv: SparseVector = serde_json::from_str(json).unwrap();
+        assert_eq!(sv.indices, vec![5, 10]);
+        assert_eq!(sv.values, vec![0.5, 1.0]);
+    }
+
+    #[test]
+    fn test_sparse_vector_deserialize_wrong_type_tag() {
+        // Wrong #type field value should fail
+        let json = "{\"#type\": \"dense_vector\", \"indices\": [0, 1], \"values\": [1.0, 2.0]}";
+        let result: Result<SparseVector, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("sparse_vector"));
+    }
+
+    #[test]
+    fn test_sparse_vector_serialize_always_has_type() {
+        // Serialization should always include #type field
+        let sv = SparseVector::new(vec![0, 1, 2], vec![1.0, 2.0, 3.0]);
+        let json = serde_json::to_value(&sv).unwrap();
+
+        assert_eq!(json["#type"], "sparse_vector");
+        assert_eq!(json["indices"], serde_json::json!([0, 1, 2]));
+        assert_eq!(json["values"], serde_json::json!([1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn test_sparse_vector_roundtrip_with_type() {
+        // Test that serialize -> deserialize preserves the data
+        let original = SparseVector::new(vec![0, 5, 10, 15], vec![0.1, 0.5, 1.0, 1.5]);
+        let json = serde_json::to_string(&original).unwrap();
+
+        // Verify the serialized JSON contains #type
+        assert!(json.contains("\"#type\":\"sparse_vector\""));
+
+        let deserialized: SparseVector = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_sparse_vector_in_metadata_old_format() {
+        // Test that old format works when sparse vector is in metadata
+        let json = r#"{"key": "value", "sparse": {"indices": [0, 1], "values": [1.0, 2.0]}}"#;
+        let map: HashMap<String, serde_json::Value> = serde_json::from_str(json).unwrap();
+
+        let sparse_value = &map["sparse"];
+        let sv: SparseVector = serde_json::from_value(sparse_value.clone()).unwrap();
+        assert_eq!(sv.indices, vec![0, 1]);
+        assert_eq!(sv.values, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn test_sparse_vector_in_metadata_new_format() {
+        // Test that new format works when sparse vector is in metadata
+        let json = "{\"key\": \"value\", \"sparse\": {\"#type\": \"sparse_vector\", \"indices\": [0, 1], \"values\": [1.0, 2.0]}}";
+        let map: HashMap<String, serde_json::Value> = serde_json::from_str(json).unwrap();
+
+        let sparse_value = &map["sparse"];
+        let sv: SparseVector = serde_json::from_value(sparse_value.clone()).unwrap();
+        assert_eq!(sv.indices, vec![0, 1]);
+        assert_eq!(sv.values, vec![1.0, 2.0]);
     }
 }

@@ -4,9 +4,15 @@ use super::{
         Filter, KnnBatch, KnnProjection, Limit, Projection, Rank, Scan, ScanToProtoError, Select,
     },
 };
-use crate::{chroma_proto, validators::validate_rank};
+use crate::{
+    chroma_proto,
+    operator::{Key, RankExpr},
+    validators::validate_rank,
+    Where,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+#[cfg(feature = "utoipa")]
 use utoipa::{
     openapi::{
         schema::{Schema, SchemaType},
@@ -145,7 +151,81 @@ impl TryFrom<Knn> for chroma_proto::KnnPlan {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, Validate)]
+/// A search payload for the hybrid search API.
+///
+/// Combines filtering, ranking, pagination, and field selection into a single query.
+/// Use the builder methods to construct complex searches with a fluent interface.
+///
+/// # Examples
+///
+/// ## Basic vector search
+///
+/// ```
+/// use chroma_types::plan::SearchPayload;
+/// use chroma_types::operator::{RankExpr, QueryVector, Key};
+///
+/// let search = SearchPayload::default()
+///     .rank(RankExpr::Knn {
+///         query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///         key: Key::Embedding,
+///         limit: 100,
+///         default: None,
+///         return_rank: false,
+///     })
+///     .limit(Some(10), 0)
+///     .select([Key::Document, Key::Score]);
+/// ```
+///
+/// ## Filtered search
+///
+/// ```
+/// use chroma_types::plan::SearchPayload;
+/// use chroma_types::operator::{RankExpr, QueryVector, Key};
+///
+/// let search = SearchPayload::default()
+///     .r#where(
+///         Key::field("status").eq("published")
+///             & Key::field("year").gte(2020)
+///     )
+///     .rank(RankExpr::Knn {
+///         query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///         key: Key::Embedding,
+///         limit: 200,
+///         default: None,
+///         return_rank: false,
+///     })
+///     .limit(Some(5), 0)
+///     .select([Key::Document, Key::Score, Key::field("title")]);
+/// ```
+///
+/// ## Hybrid search with custom ranking
+///
+/// ```
+/// use chroma_types::plan::SearchPayload;
+/// use chroma_types::operator::{RankExpr, QueryVector, Key};
+///
+/// let dense = RankExpr::Knn {
+///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///     key: Key::Embedding,
+///     limit: 200,
+///     default: None,
+///     return_rank: false,
+/// };
+///
+/// let sparse = RankExpr::Knn {
+///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///     key: Key::field("sparse_embedding"),
+///     limit: 200,
+///     default: None,
+///     return_rank: false,
+/// };
+///
+/// let search = SearchPayload::default()
+///     .rank(dense * 0.7 + sparse * 0.3)
+///     .limit(Some(10), 0)
+///     .select([Key::Document, Key::Score]);
+/// ```
+#[derive(Clone, Debug, Default, Deserialize, Serialize, Validate)]
 pub struct SearchPayload {
     #[serde(default)]
     pub filter: Filter,
@@ -158,6 +238,176 @@ pub struct SearchPayload {
     pub select: Select,
 }
 
+impl SearchPayload {
+    /// Sets pagination parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `limit` - Maximum number of results to return (None = no limit)
+    /// * `offset` - Number of results to skip
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::plan::SearchPayload;
+    ///
+    /// // First page: results 0-9
+    /// let search = SearchPayload::default().limit(Some(10), 0);
+    ///
+    /// // Second page: results 10-19
+    /// let search = SearchPayload::default().limit(Some(10), 10);
+    /// ```
+    pub fn limit(mut self, limit: Option<u32>, offset: u32) -> Self {
+        self.limit.limit = limit;
+        self.limit.offset = offset;
+        self
+    }
+
+    /// Sets the ranking expression for scoring and ordering results.
+    ///
+    /// # Arguments
+    ///
+    /// * `expr` - A ranking expression (typically Knn or a combination of expressions)
+    ///
+    /// # Examples
+    ///
+    /// ## Simple KNN ranking
+    ///
+    /// ```
+    /// use chroma_types::plan::SearchPayload;
+    /// use chroma_types::operator::{RankExpr, QueryVector, Key};
+    ///
+    /// let search = SearchPayload::default()
+    ///     .rank(RankExpr::Knn {
+    ///         query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    ///         key: Key::Embedding,
+    ///         limit: 100,
+    ///         default: None,
+    ///         return_rank: false,
+    ///     });
+    /// ```
+    ///
+    /// ## Weighted combination
+    ///
+    /// ```
+    /// use chroma_types::plan::SearchPayload;
+    /// use chroma_types::operator::{RankExpr, QueryVector, Key};
+    ///
+    /// let knn1 = RankExpr::Knn {
+    ///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    ///     key: Key::Embedding,
+    ///     limit: 100,
+    ///     default: None,
+    ///     return_rank: false,
+    /// };
+    ///
+    /// let knn2 = RankExpr::Knn {
+    ///     query: QueryVector::Dense(vec![0.2, 0.3, 0.4]),
+    ///     key: Key::field("other_embedding"),
+    ///     limit: 100,
+    ///     default: None,
+    ///     return_rank: false,
+    /// };
+    ///
+    /// let search = SearchPayload::default()
+    ///     .rank(knn1 * 0.8 + knn2 * 0.2);
+    /// ```
+    pub fn rank(mut self, expr: RankExpr) -> Self {
+        self.rank.expr = Some(expr);
+        self
+    }
+
+    /// Selects which fields to include in the results.
+    ///
+    /// # Arguments
+    ///
+    /// * `keys` - Fields to include (e.g., Document, Score, Metadata, or custom fields)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::plan::SearchPayload;
+    /// use chroma_types::operator::Key;
+    ///
+    /// // Select predefined fields
+    /// let search = SearchPayload::default()
+    ///     .select([Key::Document, Key::Score]);
+    ///
+    /// // Select metadata fields
+    /// let search = SearchPayload::default()
+    ///     .select([Key::field("title"), Key::field("author")]);
+    ///
+    /// // Mix predefined and custom fields
+    /// let search = SearchPayload::default()
+    ///     .select([Key::Document, Key::Score, Key::field("title")]);
+    /// ```
+    pub fn select<I, T>(mut self, keys: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<Key>,
+    {
+        self.select.keys = keys.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the filter expression for narrowing results.
+    ///
+    /// # Arguments
+    ///
+    /// * `where` - A Where expression for filtering
+    ///
+    /// # Examples
+    ///
+    /// ## Simple equality filter
+    ///
+    /// ```
+    /// use chroma_types::plan::SearchPayload;
+    /// use chroma_types::operator::Key;
+    ///
+    /// let search = SearchPayload::default()
+    ///     .r#where(Key::field("status").eq("published"));
+    /// ```
+    ///
+    /// ## Numeric comparisons
+    ///
+    /// ```
+    /// use chroma_types::plan::SearchPayload;
+    /// use chroma_types::operator::Key;
+    ///
+    /// let search = SearchPayload::default()
+    ///     .r#where(Key::field("year").gte(2020));
+    /// ```
+    ///
+    /// ## Combining filters
+    ///
+    /// ```
+    /// use chroma_types::plan::SearchPayload;
+    /// use chroma_types::operator::Key;
+    ///
+    /// let search = SearchPayload::default()
+    ///     .r#where(
+    ///         Key::field("status").eq("published")
+    ///             & Key::field("year").gte(2020)
+    ///             & Key::field("category").is_in(vec!["tech", "science"])
+    ///     );
+    /// ```
+    ///
+    /// ## Document content filtering
+    ///
+    /// ```
+    /// use chroma_types::plan::SearchPayload;
+    /// use chroma_types::operator::Key;
+    ///
+    /// let search = SearchPayload::default()
+    ///     .r#where(Key::Document.contains("machine learning"));
+    /// ```
+    pub fn r#where(mut self, r#where: Where) -> Self {
+        self.filter.where_clause = Some(r#where);
+        self
+    }
+}
+
+#[cfg(feature = "utoipa")]
 impl PartialSchema for SearchPayload {
     fn schema() -> RefOr<Schema> {
         RefOr::T(Schema::Object(
@@ -200,6 +450,7 @@ impl PartialSchema for SearchPayload {
     }
 }
 
+#[cfg(feature = "utoipa")]
 impl utoipa::ToSchema for SearchPayload {}
 
 impl TryFrom<chroma_proto::SearchPayload> for SearchPayload {

@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"math"
 	"strings"
 	"time"
 
@@ -123,12 +124,13 @@ func (s *Coordinator) CreateTask(ctx context.Context, req *coordinatorpb.CreateT
 			OperatorParams:       paramsJSON,
 			CompletionOffset:     0,
 			LastRun:              nil,
-			NextRun:              &now,
+			NextRun:              now, // Initialize to current time, will be scheduled by task scheduler
 			MinRecordsForTask:    int64(req.MinRecordsForTask),
 			CurrentAttempts:      0,
 			CreatedAt:            now,
 			UpdatedAt:            now,
 			NextNonce:            nextNonce,
+			LowestLiveNonce:      &nextNonce, // Initialize to same value as NextNonce
 			OldestWrittenNonce:   nil,
 		}
 
@@ -194,24 +196,236 @@ func (s *Coordinator) GetTaskByName(ctx context.Context, req *coordinatorpb.GetT
 		}
 	}
 
-	// Convert task to response
-	response := &coordinatorpb.GetTaskByNameResponse{
-		TaskId:               proto.String(task.ID.String()),
-		Name:                 proto.String(task.Name),
-		OperatorName:         proto.String(operator.OperatorName),
-		InputCollectionId:    proto.String(task.InputCollectionID),
-		OutputCollectionName: proto.String(task.OutputCollectionName),
+	// Validate completion_offset is non-negative before converting to uint64
+	if task.CompletionOffset < 0 {
+		log.Error("GetTaskByName: invalid completion_offset",
+			zap.String("task_id", task.ID.String()),
+			zap.Int64("completion_offset", task.CompletionOffset))
+		return nil, status.Errorf(codes.Internal,
+			"task has invalid completion_offset: %d", task.CompletionOffset)
+	}
+
+	// Convert task to response with nested Task message
+	taskProto := &coordinatorpb.Task{
+		TaskId:               task.ID.String(),
+		Name:                 task.Name,
+		OperatorName:         operator.OperatorName,
+		InputCollectionId:    task.InputCollectionID,
+		OutputCollectionName: task.OutputCollectionName,
 		Params:               paramsStruct,
-		CompletionOffset:     proto.Int64(task.CompletionOffset),
-		MinRecordsForTask:    proto.Uint64(uint64(task.MinRecordsForTask)),
-		TenantId:             proto.String(task.TenantID),
-		DatabaseId:           proto.String(task.DatabaseID),
+		CompletionOffset:     uint64(task.CompletionOffset),
+		MinRecordsForTask:    uint64(task.MinRecordsForTask),
+		TenantId:             task.TenantID,
+		DatabaseId:           task.DatabaseID,
+		NextRunAt:            uint64(task.NextRun.UnixMicro()),
+		LowestLiveNonce:      "",
+		NextNonce:            task.NextNonce.String(),
+		CreatedAt:            uint64(task.CreatedAt.UnixMicro()),
+		UpdatedAt:            uint64(task.UpdatedAt.UnixMicro()),
+	}
+	// Add lowest_live_nonce if it's set
+	if task.LowestLiveNonce != nil {
+		taskProto.LowestLiveNonce = task.LowestLiveNonce.String()
 	}
 	// Add output_collection_id if it's set
 	if task.OutputCollectionID != nil {
-		response.OutputCollectionId = task.OutputCollectionID
+		taskProto.OutputCollectionId = task.OutputCollectionID
 	}
-	return response, nil
+
+	return &coordinatorpb.GetTaskByNameResponse{
+		Task: taskProto,
+	}, nil
+}
+
+// GetTaskByUuid retrieves a task by UUID from the database
+func (s *Coordinator) GetTaskByUuid(ctx context.Context, req *coordinatorpb.GetTaskByUuidRequest) (*coordinatorpb.GetTaskByUuidResponse, error) {
+	// Parse the task UUID
+	taskID, err := uuid.Parse(req.TaskId)
+	if err != nil {
+		log.Error("GetTaskByUuid: invalid task_id", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid task_id: %v", err)
+	}
+
+	// Fetch task by ID
+	task, err := s.catalog.metaDomain.TaskDb(ctx).GetByID(taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	// If task not found, return error
+	if task == nil {
+		return nil, common.ErrTaskNotFound
+	}
+
+	// Look up operator name from operators table
+	operator, err := s.catalog.metaDomain.OperatorDb(ctx).GetByID(task.OperatorID)
+	if err != nil {
+		log.Error("GetTaskByUuid: failed to get operator", zap.Error(err))
+		return nil, err
+	}
+	if operator == nil {
+		log.Error("GetTaskByUuid: operator not found", zap.String("operator_id", task.OperatorID.String()))
+		return nil, common.ErrOperatorNotFound
+	}
+
+	// Debug logging
+	log.Info("Found task by UUID", zap.String("task_id", task.ID.String()), zap.String("name", task.Name), zap.String("input_collection_id", task.InputCollectionID), zap.String("output_collection_name", task.OutputCollectionName))
+
+	// Deserialize params from JSON string to protobuf Struct
+	var paramsStruct *structpb.Struct
+	if task.OperatorParams != "" {
+		paramsStruct = &structpb.Struct{}
+		if err := paramsStruct.UnmarshalJSON([]byte(task.OperatorParams)); err != nil {
+			log.Error("GetTaskByUuid: failed to unmarshal params", zap.Error(err))
+			return nil, err
+		}
+	}
+
+	// Validate completion_offset is non-negative before converting to uint64
+	if task.CompletionOffset < 0 {
+		log.Error("GetTaskByUuid: invalid completion_offset",
+			zap.String("task_id", task.ID.String()),
+			zap.Int64("completion_offset", task.CompletionOffset))
+		return nil, status.Errorf(codes.Internal,
+			"task has invalid completion_offset: %d", task.CompletionOffset)
+	}
+
+	// Convert task to response with nested Task message
+	taskProto := &coordinatorpb.Task{
+		TaskId:               task.ID.String(),
+		Name:                 task.Name,
+		OperatorName:         operator.OperatorName,
+		InputCollectionId:    task.InputCollectionID,
+		OutputCollectionName: task.OutputCollectionName,
+		Params:               paramsStruct,
+		CompletionOffset:     uint64(task.CompletionOffset),
+		MinRecordsForTask:    uint64(task.MinRecordsForTask),
+		TenantId:             task.TenantID,
+		DatabaseId:           task.DatabaseID,
+		NextRunAt:            uint64(task.NextRun.UnixMicro()),
+		LowestLiveNonce:      "",
+		NextNonce:            task.NextNonce.String(),
+		CreatedAt:            uint64(task.CreatedAt.UnixMicro()),
+		UpdatedAt:            uint64(task.UpdatedAt.UnixMicro()),
+	}
+	// Add lowest_live_nonce if it's set
+	if task.LowestLiveNonce != nil {
+		taskProto.LowestLiveNonce = task.LowestLiveNonce.String()
+	}
+	// Add output_collection_id if it's set
+	if task.OutputCollectionID != nil {
+		taskProto.OutputCollectionId = task.OutputCollectionID
+	}
+
+	return &coordinatorpb.GetTaskByUuidResponse{
+		Task: taskProto,
+	}, nil
+}
+
+// CreateOutputCollectionForTask atomically creates an output collection and updates the task's output_collection_id
+func (s *Coordinator) CreateOutputCollectionForTask(ctx context.Context, req *coordinatorpb.CreateOutputCollectionForTaskRequest) (*coordinatorpb.CreateOutputCollectionForTaskResponse, error) {
+	var collectionID types.UniqueID
+
+	// Execute all operations in a transaction for atomicity
+	err := s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// 1. Parse task ID
+		taskID, err := uuid.Parse(req.TaskId)
+		if err != nil {
+			log.Error("CreateOutputCollectionForTask: invalid task_id", zap.Error(err))
+			return status.Errorf(codes.InvalidArgument, "invalid task_id: %v", err)
+		}
+
+		// 2. Get the task to verify it exists and doesn't already have an output collection
+		task, err := s.catalog.metaDomain.TaskDb(txCtx).GetByID(taskID)
+		if err != nil {
+			log.Error("CreateOutputCollectionForTask: failed to get task", zap.Error(err))
+			return err
+		}
+		if task == nil {
+			log.Error("CreateOutputCollectionForTask: task not found")
+			return status.Errorf(codes.NotFound, "task not found")
+		}
+
+		// Check if output collection already exists
+		if task.OutputCollectionID != nil && *task.OutputCollectionID != "" {
+			log.Error("CreateOutputCollectionForTask: output collection already exists",
+				zap.String("existing_collection_id", *task.OutputCollectionID))
+			return status.Errorf(codes.AlreadyExists, "output collection already exists")
+		}
+
+		// 3. Generate new collection UUID
+		collectionID = types.NewUniqueID()
+
+		// 4. Look up database by ID to get its name
+		database, err := s.catalog.metaDomain.DatabaseDb(txCtx).GetByID(req.DatabaseId)
+		if err != nil {
+			log.Error("CreateOutputCollectionForTask: failed to get database", zap.Error(err))
+			return err
+		}
+		if database == nil {
+			log.Error("CreateOutputCollectionForTask: database not found", zap.String("database_id", req.DatabaseId), zap.String("tenant_id", req.TenantId))
+			return common.ErrDatabaseNotFound
+		}
+
+		// 5. Create the collection with segments
+		// Set a default dimension to ensure segment writers can be initialized
+		dimension := int32(1) // Default dimension for task output collections
+		collection := &model.CreateCollection{
+			ID:                   collectionID,
+			Name:                 req.CollectionName,
+			ConfigurationJsonStr: "{}", // Empty JSON object for default config
+			TenantID:             req.TenantId,
+			DatabaseName:         database.Name,
+			Dimension:            &dimension,
+			Metadata:             nil,
+		}
+
+		// Create segments for the collection (distributed setup)
+		segments := []*model.Segment{
+			{
+				ID:           types.NewUniqueID(),
+				Type:         "urn:chroma:segment/vector/hnsw-distributed",
+				Scope:        "VECTOR",
+				CollectionID: collectionID,
+			},
+			{
+				ID:           types.NewUniqueID(),
+				Type:         "urn:chroma:segment/metadata/blockfile",
+				Scope:        "METADATA",
+				CollectionID: collectionID,
+			},
+			{
+				ID:           types.NewUniqueID(),
+				Type:         "urn:chroma:segment/record/blockfile",
+				Scope:        "RECORD",
+				CollectionID: collectionID,
+			},
+		}
+
+		_, _, err = s.catalog.CreateCollectionAndSegments(txCtx, collection, segments, 0)
+		if err != nil {
+			log.Error("CreateOutputCollectionForTask: failed to create collection", zap.Error(err))
+			return err
+		}
+
+		// 6. Update task with output_collection_id
+		collectionIDStr := collectionID.String()
+		err = s.catalog.metaDomain.TaskDb(txCtx).UpdateOutputCollectionID(taskID, &collectionIDStr)
+		if err != nil {
+			log.Error("CreateOutputCollectionForTask: failed to update task", zap.Error(err))
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &coordinatorpb.CreateOutputCollectionForTaskResponse{
+		CollectionId: collectionID.String(),
+	}, nil
 }
 
 // DeleteTask soft deletes a task by name
@@ -289,13 +503,35 @@ func (s *Coordinator) AdvanceTask(ctx context.Context, req *coordinatorpb.Advanc
 		return nil, status.Errorf(codes.InvalidArgument, "invalid task_run_nonce: %v", err)
 	}
 
-	err = s.catalog.metaDomain.TaskDb(ctx).AdvanceTask(taskID, taskRunNonce)
+	// Validate completion_offset fits in int64 before storing in database
+	if *req.CompletionOffset > uint64(math.MaxInt64) { // math.MaxInt64
+		log.Error("AdvanceTask: completion_offset too large",
+			zap.Uint64("completion_offset", *req.CompletionOffset))
+		return nil, status.Errorf(codes.InvalidArgument,
+			"completion_offset too large: %d", *req.CompletionOffset)
+	}
+	completionOffsetInt64 := int64(*req.CompletionOffset)
+
+	advanceTask, err := s.catalog.metaDomain.TaskDb(ctx).AdvanceTask(taskID, taskRunNonce, completionOffsetInt64, *req.NextRunDelaySecs)
 	if err != nil {
 		log.Error("AdvanceTask failed", zap.Error(err), zap.String("task_id", taskID.String()))
 		return nil, err
 	}
 
-	return &coordinatorpb.AdvanceTaskResponse{}, nil
+	// Validate completion_offset from database is non-negative before converting to uint64
+	if advanceTask.CompletionOffset < 0 {
+		log.Error("AdvanceTask: invalid completion_offset from database",
+			zap.String("task_id", taskID.String()),
+			zap.Int64("completion_offset", advanceTask.CompletionOffset))
+		return nil, status.Errorf(codes.Internal,
+			"task has invalid completion_offset: %d", advanceTask.CompletionOffset)
+	}
+
+	return &coordinatorpb.AdvanceTaskResponse{
+		NextRunNonce:     advanceTask.NextNonce.String(),
+		NextRunAt:        uint64(advanceTask.NextRun.UnixMilli()),
+		CompletionOffset: uint64(advanceTask.CompletionOffset),
+	}, nil
 }
 
 // GetOperators retrieves all operators from the database
@@ -335,14 +571,18 @@ func (s *Coordinator) PeekScheduleByCollectionId(ctx context.Context, req *coord
 	for _, task := range tasks {
 		task_id := task.ID.String()
 		entry := &coordinatorpb.ScheduleEntry{
-			CollectionId: &task.InputCollectionID,
-			TaskId:       &task_id,
-			TaskRunNonce: proto.String(task.NextNonce.String()),
-			WhenToRun:    nil,
+			CollectionId:    &task.InputCollectionID,
+			TaskId:          &task_id,
+			TaskRunNonce:    proto.String(task.NextNonce.String()),
+			WhenToRun:       nil,
+			LowestLiveNonce: nil,
 		}
-		if task.NextRun != nil {
+		if !task.NextRun.IsZero() {
 			whenToRun := uint64(task.NextRun.UnixMilli())
 			entry.WhenToRun = &whenToRun
+		}
+		if task.LowestLiveNonce != nil {
+			entry.LowestLiveNonce = proto.String(task.LowestLiveNonce.String())
 		}
 		scheduleEntries = append(scheduleEntries, entry)
 	}
@@ -350,4 +590,20 @@ func (s *Coordinator) PeekScheduleByCollectionId(ctx context.Context, req *coord
 	return &coordinatorpb.PeekScheduleByCollectionIdResponse{
 		Schedule: scheduleEntries,
 	}, nil
+}
+
+func (s *Coordinator) FinishTask(ctx context.Context, req *coordinatorpb.FinishTaskRequest) (*coordinatorpb.FinishTaskResponse, error) {
+	taskID, err := uuid.Parse(req.TaskId)
+	if err != nil {
+		log.Error("FinishTask: invalid task_id", zap.Error(err))
+		return nil, err
+	}
+
+	err = s.catalog.metaDomain.TaskDb(ctx).FinishTask(taskID)
+	if err != nil {
+		log.Error("FinishTask: failed to fin task", zap.Error(err))
+		return nil, err
+	}
+
+	return &coordinatorpb.FinishTaskResponse{}, nil
 }

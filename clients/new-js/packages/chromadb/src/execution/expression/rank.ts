@@ -335,7 +335,7 @@ class KnnRankExpression extends RankExpression {
 }
 
 interface KnnOptionsNormalized {
-  query: number[] | SparseVector;
+  query: number[] | SparseVector | string;
   key: string;
   limit: number;
   defaultValue?: number;
@@ -343,7 +343,7 @@ interface KnnOptionsNormalized {
 }
 
 export interface KnnOptions {
-  query: IterableInput<number> | SparseVector;
+  query: IterableInput<number> | SparseVector | string;
   key?: string | Key;
   limit?: number;
   default?: number | null;
@@ -368,18 +368,24 @@ const normalizeKnnOptions = (options: KnnOptions): KnnOptionsNormalized => {
     throw new TypeError("Knn limit must be a positive integer");
   }
 
-  const maybeSparse = options.query as SparseVector;
-  const isSparse =
-    isPlainObject(maybeSparse) &&
-    Array.isArray(maybeSparse.indices) &&
-    Array.isArray(maybeSparse.values);
+  const queryInput = options.query;
 
-  const query: number[] | SparseVector = isSparse
-    ? {
-      indices: maybeSparse.indices.slice(),
-      values: maybeSparse.values.slice(),
-    }
-    : normalizeDenseVector(options.query as IterableInput<number>);
+  let query: number[] | SparseVector | string;
+  if (typeof queryInput === "string") {
+    query = queryInput;
+  } else if (
+    isPlainObject(queryInput) &&
+    Array.isArray((queryInput as SparseVector).indices) &&
+    Array.isArray((queryInput as SparseVector).values)
+  ) {
+    const sparse = queryInput as SparseVector;
+    query = {
+      indices: sparse.indices.slice(),
+      values: sparse.values.slice(),
+    };
+  } else {
+    query = normalizeDenseVector(queryInput as IterableInput<number>);
+  }
 
   const key = options.key instanceof Key ? options.key.name : options.key ?? "#embedding";
   if (typeof key !== "string") {
@@ -396,7 +402,7 @@ const normalizeKnnOptions = (options: KnnOptions): KnnOptionsNormalized => {
   }
 
   return {
-    query: Array.isArray(query) ? query : deepClone(query),
+    query: Array.isArray(query) || typeof query === "string" ? query : deepClone(query),
     key,
     limit,
     defaultValue,

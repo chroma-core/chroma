@@ -571,7 +571,7 @@ impl WorkerServer {
                             self.bm25_tenant.contains(&tenant),
                             knn_filter_output_clone,
                             query,
-                            knn_query.key.clone(),
+                            knn_query.key.to_string(),
                             knn_query.limit,
                         );
 

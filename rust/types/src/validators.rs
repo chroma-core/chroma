@@ -1,7 +1,7 @@
 use crate::{
     operator::{Rank, RankExpr},
-    CollectionMetadataUpdate, InternalSchema, Metadata, MetadataValue, UpdateMetadata,
-    UpdateMetadataValue, DOCUMENT_KEY, EMBEDDING_KEY,
+    CollectionMetadataUpdate, Metadata, MetadataValue, Schema, UpdateMetadata, UpdateMetadataValue,
+    DOCUMENT_KEY, EMBEDDING_KEY,
 };
 use regex::Regex;
 use std::collections::HashMap;
@@ -180,7 +180,7 @@ fn validate_rank_expr(expr: &RankExpr) -> Result<(), ValidationError> {
 }
 
 /// Validate schema
-pub fn validate_schema(schema: &InternalSchema) -> Result<(), ValidationError> {
+pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
     let mut sparse_index_keys = Vec::new();
     if schema
         .defaults
@@ -189,6 +189,15 @@ pub fn validate_schema(schema: &InternalSchema) -> Result<(), ValidationError> {
         .is_some_and(|vt| vt.vector_index.as_ref().is_some_and(|it| it.enabled))
     {
         return Err(ValidationError::new("schema").with_message("Vector index cannot be enabled by default. It can only be enabled on #embedding field.".into()));
+    }
+    if schema.defaults.float_list.as_ref().is_some_and(|vt| {
+        vt.vector_index
+            .as_ref()
+            .is_some_and(|it| it.config.hnsw.is_some() && it.config.spann.is_some())
+    }) {
+        return Err(ValidationError::new("schema").with_message(
+            "Both spann and hnsw config cannot be present at the same time.".into(),
+        ));
     }
     if schema
         .defaults
@@ -207,6 +216,38 @@ pub fn validate_schema(schema: &InternalSchema) -> Result<(), ValidationError> {
         return Err(ValidationError::new("schema").with_message("Full text search / regular expression index cannot be enabled by default. It can only be enabled on #document field.".into()));
     }
     for (key, config) in &schema.keys {
+        // Validate that keys cannot start with # (except system keys)
+        if key.starts_with('#') && key != DOCUMENT_KEY && key != EMBEDDING_KEY {
+            return Err(ValidationError::new("schema").with_message(
+                format!("key cannot begin with '#'. Keys starting with '#' are reserved for system use: {key}")
+                    .into(),
+            ));
+        }
+
+        if key == DOCUMENT_KEY
+            && (config.boolean.is_some()
+                || config.float.is_some()
+                || config.int.is_some()
+                || config.float_list.is_some()
+                || config.sparse_vector.is_some())
+        {
+            return Err(ValidationError::new("schema").with_message(
+                format!("Document field cannot have any value types other than string: {key}")
+                    .into(),
+            ));
+        }
+        if key == EMBEDDING_KEY
+            && (config.boolean.is_some()
+                || config.float.is_some()
+                || config.int.is_some()
+                || config.string.is_some()
+                || config.sparse_vector.is_some())
+        {
+            return Err(ValidationError::new("schema").with_message(
+                format!("Embedding field cannot have any value types other than float_list: {key}")
+                    .into(),
+            ));
+        }
         if let Some(vit) = config
             .float_list
             .as_ref()
@@ -227,17 +268,27 @@ pub fn validate_schema(schema: &InternalSchema) -> Result<(), ValidationError> {
                     .with_message("Vector index can only source from #document".into()));
             }
         }
-        if config
+        if let Some(svit) = config
             .sparse_vector
             .as_ref()
-            .is_some_and(|vt| vt.sparse_vector_index.as_ref().is_some_and(|it| it.enabled))
+            .and_then(|vt| vt.sparse_vector_index.as_ref())
         {
-            sparse_index_keys.push(key);
-            if sparse_index_keys.len() > 1 {
-                return Err(ValidationError::new("schema").with_message(
-                    format!("At most one sparse vector index is allowed for the collection: {sparse_index_keys:?}")
-                        .into(),
-                ));
+            if svit.enabled {
+                sparse_index_keys.push(key);
+                if sparse_index_keys.len() > 1 {
+                    return Err(ValidationError::new("schema").with_message(
+                        format!("At most one sparse vector index is allowed for the collection: {sparse_index_keys:?}")
+                            .into(),
+                    ));
+                }
+            }
+            // Validate source_key for sparse vector index
+            if let Some(source_key) = &svit.config.source_key {
+                if source_key.starts_with('#') && source_key != DOCUMENT_KEY {
+                    return Err(ValidationError::new("schema").with_message(
+                        "source_key cannot begin with '#'. The only valid key starting with '#' is Key.DOCUMENT or '#document'.".into(),
+                    ));
+                }
             }
         }
         if config
@@ -247,6 +298,16 @@ pub fn validate_schema(schema: &InternalSchema) -> Result<(), ValidationError> {
             && key != DOCUMENT_KEY
         {
             return Err(ValidationError::new("schema").with_message(format!("Full text search / regular expression index can only be enabled on #document field: {key}").into()));
+        }
+        if config.string.as_ref().is_some_and(|vt| {
+            vt.string_inverted_index
+                .as_ref()
+                .is_some_and(|it| it.enabled)
+        }) && key == DOCUMENT_KEY
+        {
+            return Err(ValidationError::new("schema").with_message(
+                format!("String inverted index can not be enabled on #document key: {key}").into(),
+            ));
         }
     }
     Ok(())

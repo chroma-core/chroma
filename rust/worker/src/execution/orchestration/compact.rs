@@ -29,14 +29,15 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    Chunk, Collection, CollectionUuid, InternalSchema, LogRecord, SchemaError, SegmentFlushInfo,
-    SegmentType, SegmentUuid,
+    Chunk, Collection, CollectionUuid, LogRecord, Schema, SchemaError, SegmentFlushInfo,
+    SegmentType, SegmentUuid, Task, TaskUuid,
 };
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use uuid::Uuid;
 
 use crate::execution::operators::{
     apply_log_to_segment_writer::{
@@ -118,6 +119,14 @@ enum ExecutionState {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub(crate) struct TaskContext {
+    pub(crate) task_id: TaskUuid,
+    pub(crate) task: Option<Task>,
+    pub(crate) execution_nonce: Uuid,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct CompactWriters {
     pub(crate) record_reader: Option<RecordSegmentReader<'static>>,
     pub(crate) metadata_writer: MetadataSegmentWriter<'static>,
@@ -165,7 +174,7 @@ pub struct CompactOrchestrator {
     metrics: CompactOrchestratorMetrics,
 
     // schema after applying deltas
-    schema: Option<InternalSchema>,
+    schema: Option<Schema>,
 }
 
 #[derive(Error, Debug)]
@@ -579,6 +588,7 @@ impl CompactOrchestrator {
             self.sysdb.clone(),
             self.log.clone(),
             self.schema.clone(),
+            None,
         );
 
         let task = wrap(

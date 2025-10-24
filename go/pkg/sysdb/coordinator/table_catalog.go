@@ -280,7 +280,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		return nil, false, err
 	}
 	if len(databases) == 0 {
-		log.Error("database not found", zap.Error(err))
+		log.Error("database not found for database", zap.String("database_name", databaseName), zap.String("tenant_id", tenantID))
 		return nil, false, common.ErrDatabaseNotFound
 	}
 
@@ -1343,7 +1343,7 @@ func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollec
 			return nil, false, err
 		}
 		if len(databases) == 0 {
-			log.Error("database not found", zap.Error(err))
+			log.Error("database not found for database", zap.String("database_name", createCollection.DatabaseName), zap.String("tenant_id", createCollection.TenantID))
 			return nil, false, common.ErrDatabaseNotFound
 		}
 
@@ -1716,6 +1716,57 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 	if err != nil {
 		return nil, err
 	}
+	return flushCollectionInfo, nil
+}
+
+// FlushCollectionCompactionAndTask atomically updates collection compaction data and task completion offset.
+// NOTE: This does NOT advance next_nonce - that is done separately by AdvanceTask in PrepareTask.
+// This only updates the completion_offset to record how far we've processed.
+// This is only supported for versioned collections (the modern/default path).
+func (tc *Catalog) FlushCollectionCompactionAndTask(
+	ctx context.Context,
+	flushCollectionCompaction *model.FlushCollectionCompaction,
+	taskID uuid.UUID,
+	taskRunNonce uuid.UUID,
+	completionOffset int64,
+) (*model.FlushCollectionInfo, error) {
+	if !tc.versionFileEnabled {
+		// Task-based compactions are only supported with versioned collections
+		log.Error("FlushCollectionCompactionAndTask is only supported for versioned collections")
+		return nil, errors.New("task-based compaction requires versioned collections")
+	}
+
+	var flushCollectionInfo *model.FlushCollectionInfo
+
+	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		var err error
+		flushCollectionInfo, err = tc.FlushCollectionCompactionForVersionedCollection(txCtx, flushCollectionCompaction)
+		if err != nil {
+			return err
+		}
+
+		// Update ONLY completion_offset - next_nonce was already advanced in PrepareTask
+		// We still validate taskRunNonce to ensure we're updating the correct nonce
+		err = tc.metaDomain.TaskDb(txCtx).UpdateCompletionOffset(taskID, taskRunNonce, completionOffset)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Populate task fields with authoritative values from database
+	flushCollectionInfo.TaskCompletionOffset = &completionOffset
+
+	log.Info("FlushCollectionCompactionAndTask",
+		zap.String("collection_id", flushCollectionCompaction.ID.String()),
+		zap.String("task_id", taskID.String()),
+		zap.Int64("completion_offset", completionOffset))
+
 	return flushCollectionInfo, nil
 }
 

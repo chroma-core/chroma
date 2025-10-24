@@ -1,12 +1,13 @@
 from chromadb.api.types import (
     SparseEmbeddingFunction,
-    SparseEmbeddings,
+    SparseVectors,
     Documents,
 )
 from typing import Dict, Any
 from enum import Enum
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
-from chromadb.utils.sparse_embedding_utils import _sort_sparse_vectors
+from chromadb.utils.sparse_embedding_utils import normalize_sparse_vector
+from chromadb.base_types import SparseVector
 import os
 from typing import Union
 
@@ -65,7 +66,7 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         if hasattr(self, "_session"):
             self._session.close()
 
-    def __call__(self, input: Documents) -> SparseEmbeddings:
+    def __call__(self, input: Documents) -> SparseVectors:
         """
         Generate embeddings for the given documents.
 
@@ -99,16 +100,29 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         except Exception as e:
             raise RuntimeError(f"Unexpected error calling Chroma Cloud API: {e}")
 
-    def _parse_response(self, response: Any) -> SparseEmbeddings:
+    def _parse_response(self, response: Any) -> SparseVectors:
         """
         Parse the response from the Chroma Cloud Sparse Embedding API.
         """
-        embeddings: SparseEmbeddings = response["embeddings"]
+        raw_embeddings = response["embeddings"]
 
-        # Ensure indices are sorted in ascending order
-        _sort_sparse_vectors(embeddings)
+        # Normalize each sparse vector (sort indices and validate)
+        normalized_vectors: SparseVectors = []
+        for emb in raw_embeddings:
+            # Handle both dict format and SparseVector format
+            if isinstance(emb, dict):
+                indices = emb.get("indices", [])
+                values = emb.get("values", [])
+            else:
+                # Already a SparseVector, extract its data
+                indices = emb.indices
+                values = emb.values
 
-        return embeddings
+            normalized_vectors.append(
+                normalize_sparse_vector(indices=indices, values=values)
+            )
+
+        return normalized_vectors
 
     @staticmethod
     def name() -> str:
