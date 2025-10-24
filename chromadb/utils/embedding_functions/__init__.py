@@ -80,6 +80,9 @@ from chromadb.utils.embedding_functions.bm25_embedding_function import (
 from chromadb.utils.embedding_functions.chroma_cloud_qwen_embedding_function import (
     ChromaCloudQwenEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.simple_hash_embedding_function import (
+    SimpleHashEmbeddingFunction,
+)
 
 
 # Get all the class names for backward compatibility
@@ -112,6 +115,7 @@ _all_classes: Set[str] = {
     "FastembedSparseEmbeddingFunction",
     "Bm25EmbeddingFunction",
     "ChromaCloudQwenEmbeddingFunction",
+    "SimpleHashEmbeddingFunction",
 }
 
 
@@ -146,6 +150,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "cloudflare_workers_ai": CloudflareWorkersAIEmbeddingFunction,
     "together_ai": TogetherAIEmbeddingFunction,
     "chroma-cloud-qwen": ChromaCloudQwenEmbeddingFunction,
+    "local_simple_hash": SimpleHashEmbeddingFunction,
 }
 
 sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {  # type: ignore
@@ -270,4 +275,5 @@ __all__ = [
     "register_embedding_function",
     "config_to_embedding_function",
     "known_embedding_functions",
+    "SimpleHashEmbeddingFunction",
 ]

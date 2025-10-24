@@ -26,20 +26,20 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 
 For TypeScript users, Chroma provides packages for a number of embedding model providers. The Chromadb python package ships will all embedding functions included.
 
-| Provider                    | Embedding Function Package                    
-| ----------                  | ------------------------- 
-| All (installs all packages) | [@chroma-core/all](https://www.npmjs.com/package/@chroma-core/all)     
-| Cloudflare Workers AI       | [@chroma-core/cloudflare-worker-ai](https://www.npmjs.com/package/@chroma-core/cloudflare-worker-ai)     
-| Cohere                      | [@chroma-core/cohere](https://www.npmjs.com/package/@chroma-core/cohere) 
-| Google Gemini               | [@chroma-core/google-gemini](https://www.npmjs.com/package/@chroma-core/google-gemini)     
-| Hugging Face Server         | [@chroma-core/huggingface-server](https://www.npmjs.com/package/@chroma-core/huggingface-server)     
-| Jina                        | [@chroma-core/jina](https://www.npmjs.com/package/@chroma-core/jina)     
-| Mistral                     | [@chroma-core/mistral](https://www.npmjs.com/package/@chroma-core/mistral)     
-| Morph                       | [@chroma-core/morph](https://www.npmjs.com/package/@chroma-core/morph)     
-| Ollama                      | [@chroma-core/ollama](https://www.npmjs.com/package/@chroma-core/ollama)     
-| OpenAI                      | [@chroma-core/openai](https://www.npmjs.com/package/@chroma-core/openai)     
-| Together AI                 | [@chroma-core/together-ai](https://www.npmjs.com/package/@chroma-core/together-ai)     
-| Voyage AI                   | [@chroma-core/voyageai](https://www.npmjs.com/package/@chroma-core/voyageai)     
+| Provider                    | Embedding Function Package
+| ----------                  | -------------------------
+| All (installs all packages) | [@chroma-core/all](https://www.npmjs.com/package/@chroma-core/all)
+| Cloudflare Workers AI       | [@chroma-core/cloudflare-worker-ai](https://www.npmjs.com/package/@chroma-core/cloudflare-worker-ai)
+| Cohere                      | [@chroma-core/cohere](https://www.npmjs.com/package/@chroma-core/cohere)
+| Google Gemini               | [@chroma-core/google-gemini](https://www.npmjs.com/package/@chroma-core/google-gemini)
+| Hugging Face Server         | [@chroma-core/huggingface-server](https://www.npmjs.com/package/@chroma-core/huggingface-server)
+| Jina                        | [@chroma-core/jina](https://www.npmjs.com/package/@chroma-core/jina)
+| Mistral                     | [@chroma-core/mistral](https://www.npmjs.com/package/@chroma-core/mistral)
+| Morph                       | [@chroma-core/morph](https://www.npmjs.com/package/@chroma-core/morph)
+| Ollama                      | [@chroma-core/ollama](https://www.npmjs.com/package/@chroma-core/ollama)
+| OpenAI                      | [@chroma-core/openai](https://www.npmjs.com/package/@chroma-core/openai)
+| Together AI                 | [@chroma-core/together-ai](https://www.npmjs.com/package/@chroma-core/together-ai)
+| Voyage AI                   | [@chroma-core/voyageai](https://www.npmjs.com/package/@chroma-core/voyageai)
 
 We welcome pull requests to add new Embedding Functions to the community.
 
@@ -236,6 +236,38 @@ await collection.query({ queryEmbeddings: embeddings });
 {% /TabbedCodeBlock %}
 
 ## Custom Embedding Functions
+
+## Lightweight local embeddings (quick & dependency-free)
+
+For quick smoke tests, CI, or environments without model downloads or API keys, Chroma includes or supports several lightweight/local embedding options. These are useful for running examples or unit tests that must be deterministic and fast.
+
+- `local_simple_hash` (recommended for CI and examples): a tiny, dependency-free deterministic embedding included in the Python package. It's implemented as a small hash-based function that converts text into a fixed-size float32 vector without external packages.
+- `sentence_transformer` (local, requires `sentence_transformers`): a higher-quality local embedding using the SentenceTransformers library (requires model download or offline model).
+
+Python — use `local_simple_hash` directly:
+
+```python
+from chromadb.utils.embedding_functions import config_to_embedding_function
+
+# Option A: construct directly
+from chromadb.utils.embedding_functions.simple_hash_embedding_function import SimpleHashEmbeddingFunction
+ef = SimpleHashEmbeddingFunction(dim=16)
+embs = ef(["hello world"])
+
+# Option B: load by config (useful for reading configs)
+cfg = {"name": "local_simple_hash", "config": {"dim": 16}}
+ef2 = config_to_embedding_function(cfg)
+embs2 = ef2(["hello world"])
+
+print(embs)
+```
+
+Notes
+
+- `local_simple_hash` is deterministic and dependency-free. It's intended for tests and examples, not high-quality semantic embeddings.
+- If you need higher-quality local embeddings, use `SentenceTransformerEmbeddingFunction` (requires `pip install sentence_transformers`). For CI or quick validation prefer `local_simple_hash`.
+- You can register custom embedding functions using `register_embedding_function` or add them to configs and call `config_to_embedding_function`.
+
 
 You can create your own embedding function to use with Chroma; it just needs to implement `EmbeddingFunction`.
 
