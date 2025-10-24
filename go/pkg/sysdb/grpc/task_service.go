@@ -10,13 +10,13 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *Server) CreateTask(ctx context.Context, req *coordinatorpb.CreateTaskRequest) (*coordinatorpb.CreateTaskResponse, error) {
-	log.Info("CreateTask", zap.String("name", req.Name), zap.String("operator_name", req.OperatorName))
+func (s *Server) AttachFunction(ctx context.Context, req *coordinatorpb.AttachFunctionRequest) (*coordinatorpb.AttachFunctionResponse, error) {
+	log.Info("AttachFunction", zap.String("name", req.Name), zap.String("function_name", req.FunctionName))
 
-	res, err := s.coordinator.CreateTask(ctx, req)
+	res, err := s.coordinator.AttachFunction(ctx, req)
 	if err != nil {
-		log.Error("CreateTask failed", zap.Error(err))
-		if err == common.ErrTaskAlreadyExists {
+		log.Error("AttachFunction failed", zap.Error(err))
+		if err == common.ErrAttachedFunctionAlreadyExists {
 			return nil, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
 		}
 		return nil, err
@@ -25,13 +25,13 @@ func (s *Server) CreateTask(ctx context.Context, req *coordinatorpb.CreateTaskRe
 	return res, nil
 }
 
-func (s *Server) GetTaskByName(ctx context.Context, req *coordinatorpb.GetTaskByNameRequest) (*coordinatorpb.GetTaskByNameResponse, error) {
-	log.Info("GetTaskByName", zap.String("input_collection_id", req.InputCollectionId), zap.String("task_name", req.TaskName))
+func (s *Server) GetAttachedFunctionByName(ctx context.Context, req *coordinatorpb.GetAttachedFunctionByNameRequest) (*coordinatorpb.GetAttachedFunctionByNameResponse, error) {
+	log.Info("GetAttachedFunctionByName", zap.String("input_collection_id", req.InputCollectionId), zap.String("name", req.Name))
 
-	res, err := s.coordinator.GetTaskByName(ctx, req)
+	res, err := s.coordinator.GetAttachedFunctionByName(ctx, req)
 	if err != nil {
-		log.Error("GetTaskByName failed", zap.Error(err))
-		if err == common.ErrTaskNotFound {
+		log.Error("GetAttachedFunctionByName failed", zap.Error(err))
+		if err == common.ErrAttachedFunctionNotFound {
 			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
 		return nil, err
@@ -40,13 +40,13 @@ func (s *Server) GetTaskByName(ctx context.Context, req *coordinatorpb.GetTaskBy
 	return res, nil
 }
 
-func (s *Server) GetTaskByUuid(ctx context.Context, req *coordinatorpb.GetTaskByUuidRequest) (*coordinatorpb.GetTaskByUuidResponse, error) {
-	log.Info("GetTaskByUuid", zap.String("task_id", req.TaskId))
+func (s *Server) GetAttachedFunctionByUuid(ctx context.Context, req *coordinatorpb.GetAttachedFunctionByUuidRequest) (*coordinatorpb.GetAttachedFunctionByUuidResponse, error) {
+	log.Info("GetAttachedFunctionByUuid", zap.String("id", req.Id))
 
-	res, err := s.coordinator.GetTaskByUuid(ctx, req)
+	res, err := s.coordinator.GetAttachedFunctionByUuid(ctx, req)
 	if err != nil {
-		log.Error("GetTaskByUuid failed", zap.Error(err))
-		if err == common.ErrTaskNotFound {
+		log.Error("GetAttachedFunctionByUuid failed", zap.Error(err))
+		if err == common.ErrAttachedFunctionNotFound {
 			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
 		return nil, err
@@ -55,60 +55,60 @@ func (s *Server) GetTaskByUuid(ctx context.Context, req *coordinatorpb.GetTaskBy
 	return res, nil
 }
 
-func (s *Server) CreateOutputCollectionForTask(ctx context.Context, req *coordinatorpb.CreateOutputCollectionForTaskRequest) (*coordinatorpb.CreateOutputCollectionForTaskResponse, error) {
-	log.Info("CreateOutputCollectionForTask", zap.String("task_id", req.TaskId), zap.String("collection_name", req.CollectionName))
+func (s *Server) CreateOutputCollectionForAttachedFunction(ctx context.Context, req *coordinatorpb.CreateOutputCollectionForAttachedFunctionRequest) (*coordinatorpb.CreateOutputCollectionForAttachedFunctionResponse, error) {
+	log.Info("CreateOutputCollectionForAttachedFunction", zap.String("attached_function_id", req.AttachedFunctionId), zap.String("collection_name", req.CollectionName))
 
-	res, err := s.coordinator.CreateOutputCollectionForTask(ctx, req)
+	res, err := s.coordinator.CreateOutputCollectionForAttachedFunction(ctx, req)
 	if err != nil {
-		log.Error("CreateOutputCollectionForTask failed", zap.Error(err))
+		log.Error("CreateOutputCollectionForAttachedFunction failed", zap.Error(err))
 		return nil, err
 	}
 
 	return res, nil
 }
 
-func (s *Server) DeleteTask(ctx context.Context, req *coordinatorpb.DeleteTaskRequest) (*coordinatorpb.DeleteTaskResponse, error) {
-	log.Info("DeleteTask", zap.String("input_collection_id", req.InputCollectionId), zap.String("task_name", req.TaskName))
+func (s *Server) DetachFunction(ctx context.Context, req *coordinatorpb.DetachFunctionRequest) (*coordinatorpb.DetachFunctionResponse, error) {
+	log.Info("DetachFunction", zap.String("attached_function_id", req.AttachedFunctionId))
 
-	res, err := s.coordinator.DeleteTask(ctx, req)
+	res, err := s.coordinator.DetachFunction(ctx, req)
 	if err != nil {
-		log.Error("DeleteTask failed", zap.Error(err))
+		log.Error("DetachFunction failed", zap.Error(err))
 		return nil, err
 	}
 
 	return res, nil
 }
 
-func (s *Server) AdvanceTask(ctx context.Context, req *coordinatorpb.AdvanceTaskRequest) (*coordinatorpb.AdvanceTaskResponse, error) {
-	log.Info("AdvanceTask", zap.String("collection_id", req.GetCollectionId()), zap.String("task_id", req.GetTaskId()))
+func (s *Server) AdvanceAttachedFunction(ctx context.Context, req *coordinatorpb.AdvanceAttachedFunctionRequest) (*coordinatorpb.AdvanceAttachedFunctionResponse, error) {
+	log.Info("AdvanceAttachedFunction", zap.String("collection_id", req.GetCollectionId()), zap.String("id", req.GetId()))
 
-	res, err := s.coordinator.AdvanceTask(ctx, req)
+	res, err := s.coordinator.AdvanceAttachedFunction(ctx, req)
 	if err != nil {
-		log.Error("AdvanceTask failed", zap.Error(err))
+		log.Error("AdvanceAttachedFunction failed", zap.Error(err))
 		return nil, err
 	}
 
 	return res, nil
 }
 
-func (s *Server) FinishTask(ctx context.Context, req *coordinatorpb.FinishTaskRequest) (*coordinatorpb.FinishTaskResponse, error) {
-	log.Info("FinishTask", zap.String("task_id", req.TaskId))
+func (s *Server) FinishAttachedFunction(ctx context.Context, req *coordinatorpb.FinishAttachedFunctionRequest) (*coordinatorpb.FinishAttachedFunctionResponse, error) {
+	log.Info("FinishAttachedFunction", zap.String("id", req.Id))
 
-	res, err := s.coordinator.FinishTask(ctx, req)
+	res, err := s.coordinator.FinishAttachedFunction(ctx, req)
 	if err != nil {
-		log.Error("FinishTask failed", zap.Error(err))
+		log.Error("FinishAttachedFunction failed", zap.Error(err))
 		return nil, err
 	}
 
 	return res, nil
 }
 
-func (s *Server) GetOperators(ctx context.Context, req *coordinatorpb.GetOperatorsRequest) (*coordinatorpb.GetOperatorsResponse, error) {
-	log.Info("GetOperators")
+func (s *Server) GetFunctions(ctx context.Context, req *coordinatorpb.GetFunctionsRequest) (*coordinatorpb.GetFunctionsResponse, error) {
+	log.Info("GetFunctions")
 
-	res, err := s.coordinator.GetOperators(ctx, req)
+	res, err := s.coordinator.GetFunctions(ctx, req)
 	if err != nil {
-		log.Error("GetOperators failed", zap.Error(err))
+		log.Error("GetFunctions failed", zap.Error(err))
 		return nil, err
 	}
 
@@ -127,15 +127,15 @@ func (s *Server) PeekScheduleByCollectionId(ctx context.Context, req *coordinato
 	return res, nil
 }
 
-func (s *Server) CleanupExpiredPartialTasks(ctx context.Context, req *coordinatorpb.CleanupExpiredPartialTasksRequest) (*coordinatorpb.CleanupExpiredPartialTasksResponse, error) {
-	log.Info("CleanupExpiredPartialTasks", zap.Uint64("max_age_seconds", req.MaxAgeSeconds))
+func (s *Server) CleanupExpiredPartialAttachedFunctions(ctx context.Context, req *coordinatorpb.CleanupExpiredPartialAttachedFunctionsRequest) (*coordinatorpb.CleanupExpiredPartialAttachedFunctionsResponse, error) {
+	log.Info("CleanupExpiredPartialAttachedFunctions", zap.Uint64("max_age_seconds", req.MaxAgeSeconds))
 
-	res, err := s.coordinator.CleanupExpiredPartialTasks(ctx, req)
+	res, err := s.coordinator.CleanupExpiredPartialAttachedFunctions(ctx, req)
 	if err != nil {
-		log.Error("CleanupExpiredPartialTasks failed", zap.Error(err))
+		log.Error("CleanupExpiredPartialAttachedFunctions failed", zap.Error(err))
 		return nil, err
 	}
 
-	log.Info("CleanupExpiredPartialTasks succeeded", zap.Uint64("cleaned_up_count", res.CleanedUpCount))
+	log.Info("CleanupExpiredPartialAttachedFunctions succeeded", zap.Uint64("cleaned_up_count", res.CleanedUpCount))
 	return res, nil
 }

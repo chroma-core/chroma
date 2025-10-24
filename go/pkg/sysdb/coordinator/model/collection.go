@@ -99,10 +99,10 @@ type FlushCollectionInfo struct {
 	ID                       string
 	CollectionVersion        int32
 	TenantLastCompactionTime int64
-	// Optional task fields (only populated for task-based compactions)
-	TaskNextNonce         *uuid.UUID
-	TaskNextRun           *time.Time
-	TaskCompletionOffset  *int64
+	// Optional attached function fields (only populated for attached-function-based compactions)
+	AttachedFunctionNextNonce        *uuid.UUID
+	AttachedFunctionNextRun          *time.Time
+	AttachedFunctionCompletionOffset *int64
 }
 
 func FilterCollection(collection *Collection, collectionID types.UniqueID, collectionName *string) bool {

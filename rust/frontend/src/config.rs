@@ -72,7 +72,7 @@ pub struct FrontendConfig {
     #[serde(default = "default_enable_schema")]
     pub enable_schema: bool,
     #[serde(default = "default_min_records_for_task")]
-    pub min_records_for_task: u64,
+    pub min_records_for_run: u64,
 }
 
 impl FrontendConfig {
@@ -92,7 +92,7 @@ impl FrontendConfig {
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
             enable_schema: default_enable_schema(),
-            min_records_for_task: default_min_records_for_task(),
+            min_records_for_run: default_min_records_for_task(),
         }
     }
 }

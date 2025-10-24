@@ -127,7 +127,7 @@ impl Bindings {
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
             enable_schema,
-            min_records_for_task: default_min_records_for_task(),
+            min_records_for_run: default_min_records_for_task(),
         };
 
         let frontend = runtime.block_on(async {

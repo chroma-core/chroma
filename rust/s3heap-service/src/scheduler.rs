@@ -34,7 +34,7 @@ impl HeapScheduler for SysDbScheduler {
             by_triggerable.insert(
                 Triggerable {
                     partitioning: schedule.collection_id.0.into(),
-                    scheduling: schedule.task_id.into(),
+                    scheduling: schedule.attached_function_id.into(),
                 },
                 schedule,
             );
@@ -73,9 +73,9 @@ impl HeapScheduler for SysDbScheduler {
                 results.push(Schedule {
                     triggerable: Triggerable {
                         partitioning: schedule.collection_id.0.into(),
-                        scheduling: schedule.task_id.into(),
+                        scheduling: schedule.attached_function_id.into(),
                     },
-                    nonce: schedule.task_run_nonce.0,
+                    nonce: schedule.attached_function_run_nonce.0,
                     next_scheduled: when_to_run,
                 });
             }

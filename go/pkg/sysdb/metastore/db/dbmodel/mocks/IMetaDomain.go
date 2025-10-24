@@ -74,20 +74,20 @@ func (_m *IMetaDomain) DatabaseDb(ctx context.Context) dbmodel.IDatabaseDb {
 	return r0
 }
 
-// OperatorDb provides a mock function with given fields: ctx
-func (_m *IMetaDomain) OperatorDb(ctx context.Context) dbmodel.IOperatorDb {
+// FunctionDb provides a mock function with given fields: ctx
+func (_m *IMetaDomain) FunctionDb(ctx context.Context) dbmodel.IFunctionDb {
 	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
-		panic("no return value specified for OperatorDb")
+		panic("no return value specified for FunctionDb")
 	}
 
-	var r0 dbmodel.IOperatorDb
-	if rf, ok := ret.Get(0).(func(context.Context) dbmodel.IOperatorDb); ok {
+	var r0 dbmodel.IFunctionDb
+	if rf, ok := ret.Get(0).(func(context.Context) dbmodel.IFunctionDb); ok {
 		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(dbmodel.IOperatorDb)
+			r0 = ret.Get(0).(dbmodel.IFunctionDb)
 		}
 	}
 
@@ -134,20 +134,20 @@ func (_m *IMetaDomain) SegmentMetadataDb(ctx context.Context) dbmodel.ISegmentMe
 	return r0
 }
 
-// TaskDb provides a mock function with given fields: ctx
-func (_m *IMetaDomain) TaskDb(ctx context.Context) dbmodel.ITaskDb {
+// AttachedFunctionDb provides a mock function with given fields: ctx
+func (_m *IMetaDomain) AttachedFunctionDb(ctx context.Context) dbmodel.IAttachedFunctionDb {
 	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
-		panic("no return value specified for TaskDb")
+		panic("no return value specified for AttachedFunctionDb")
 	}
 
-	var r0 dbmodel.ITaskDb
-	if rf, ok := ret.Get(0).(func(context.Context) dbmodel.ITaskDb); ok {
+	var r0 dbmodel.IAttachedFunctionDb
+	if rf, ok := ret.Get(0).(func(context.Context) dbmodel.IAttachedFunctionDb); ok {
 		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(dbmodel.ITaskDb)
+			r0 = ret.Get(0).(dbmodel.IAttachedFunctionDb)
 		}
 	}
 
