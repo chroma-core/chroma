@@ -1,1 +1,3 @@
-pub mod statistics;
+mod statistics;
+
+pub use statistics::StatisticsFunctionExecutor;

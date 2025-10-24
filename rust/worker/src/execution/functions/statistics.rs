@@ -11,22 +11,25 @@ use std::hash::{Hash, Hasher};
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_segment::blockfile_record::RecordSegmentReader;
-use chroma_types::Chunk;
-use chroma_types::LogRecord;
-use chroma_types::MetadataValue;
-use chroma_types::Operation;
-use chroma_types::OperationRecord;
-use chroma_types::UpdateMetadataValue;
+use chroma_types::{
+    Chunk, LogRecord, MetadataValue, Operation, OperationRecord, UpdateMetadataValue,
+};
 use futures::StreamExt;
 
 use crate::execution::operators::execute_task::TaskExecutor;
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum StatisticsValue {
+/// Canonical representation of metadata values tracked by the statistics executor.
+#[derive(Clone, Debug)]
+enum StatisticsValue {
+    /// Boolean metadata value associated with a record.
     Bool(bool),
+    /// Integer metadata value associated with a record.
     Int(i64),
+    /// Floating point metadata value associated with a record.
     Float(f64),
+    /// String metadata value associated with a record.
     Str(String),
+    /// Sparse vector index observed in metadata.
     SparseVector(u32),
 }
 
@@ -53,11 +56,7 @@ impl StatisticsValue {
                 format!("{i}")
             }
             Self::Str(s) => s.clone(),
-            Self::Float(f) => {
-                // Kinda error-prone, but supported.
-                // A footgun.
-                format!("{f}")
-            }
+            Self::Float(f) => format!("{f:.16e}"),
             Self::SparseVector(index) => {
                 format!("{index}")
             }
@@ -78,11 +77,7 @@ impl StatisticsValue {
             Self::Str(s) => {
                 format!("s:{s}")
             }
-            Self::Float(f) => {
-                // Kinda error-prone, but supported.
-                // A footgun.
-                format!("f:{f}")
-            }
+            Self::Float(f) => format!("f:{f:.16e}"),
             Self::SparseVector(index) => {
                 format!("sv:{index}")
             }
@@ -93,6 +88,19 @@ impl StatisticsValue {
 impl std::fmt::Display for StatisticsValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.stable_string())
+    }
+}
+
+impl PartialEq for StatisticsValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Bool(lhs), Self::Bool(rhs)) => lhs == rhs,
+            (Self::Int(lhs), Self::Int(rhs)) => lhs == rhs,
+            (Self::Float(lhs), Self::Float(rhs)) => lhs.to_bits() == rhs.to_bits(),
+            (Self::Str(lhs), Self::Str(rhs)) => lhs == rhs,
+            (Self::SparseVector(lhs), Self::SparseVector(rhs)) => lhs == rhs,
+            _ => false,
+        }
     }
 }
 
@@ -111,6 +119,7 @@ impl Hash for StatisticsValue {
     }
 }
 
+/// Task executor that aggregates metadata value frequencies for the statistics task.
 #[derive(Debug)]
 pub struct StatisticsFunctionExecutor;
 
@@ -121,9 +130,12 @@ impl TaskExecutor for StatisticsFunctionExecutor {
         input_records: Chunk<LogRecord>,
         output_reader: Option<&RecordSegmentReader<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
-        // Consume the whole input segment.
         let mut counts: HashMap<(String, StatisticsValue), i64> = HashMap::default();
         for (log_record, _) in input_records.iter() {
+            if matches!(log_record.record.operation, Operation::Delete) {
+                continue;
+            }
+
             if let Some(update_metadata) = log_record.record.metadata.as_ref() {
                 for (key, update_value) in update_metadata.iter() {
                     let value: Option<MetadataValue> = update_value.try_into().ok();
@@ -161,36 +173,41 @@ impl TaskExecutor for StatisticsFunctionExecutor {
                 }
             }
         }
-        // Prepare the records for insertion.
         let mut keys = HashSet::with_capacity(counts.len());
         let mut records = Vec::with_capacity(counts.len());
         for ((key, stats_value), count) in counts.into_iter() {
-            let metadata = HashMap::from_iter([
-                ("count".to_string(), UpdateMetadataValue::Int(count)),
-                ("term".to_string(), key.clone().into()),
-                ("type".to_string(), stats_value.stable_type().into()),
-                ("value".to_string(), stats_value.stable_value().into()),
-            ]);
-            let record = LogRecord {
+            let stable_value = stats_value.stable_value();
+            let stable_string = stats_value.stable_string();
+            let record_id = format!("{key}::{stable_string}");
+            let document = format!("statistics about {key} for {stable_string}");
+
+            let mut metadata = HashMap::with_capacity(4);
+            metadata.insert("count".to_string(), UpdateMetadataValue::Int(count));
+            metadata.insert("term".to_string(), UpdateMetadataValue::Str(key));
+            metadata.insert(
+                "type".to_string(),
+                UpdateMetadataValue::Str(stats_value.stable_type().to_string()),
+            );
+            metadata.insert("value".to_string(), UpdateMetadataValue::Str(stable_value));
+
+            keys.insert(record_id.clone());
+            records.push(LogRecord {
                 log_offset: 0,
                 record: OperationRecord {
-                    id: format!("{}::{}", key, stats_value.stable_string()),
+                    id: record_id,
+                    // NOTE(rescrv): We need to provide some embedding, so give a zero.
                     embedding: Some(vec![0.0]),
                     encoding: None,
                     metadata: Some(metadata),
-                    document: Some(format!("statistics about {key} for {stats_value}")),
+                    document: Some(document),
                     operation: Operation::Upsert,
                 },
-            };
-            keys.insert(record.record.id.clone());
-            records.push(record);
+            });
         }
         // Delete records we didn't recreate.
         if let Some(output_reader) = output_reader {
             let max_offset_id = output_reader.get_max_offset_id();
-            let mut stream = output_reader
-                .get_data_stream(0..=max_offset_id)
-                .await;
+            let mut stream = output_reader.get_data_stream(0..=max_offset_id).await;
 
             while let Some(record) = stream.next().await {
                 let (_, record) = record?;
@@ -198,7 +215,7 @@ impl TaskExecutor for StatisticsFunctionExecutor {
                     records.push(LogRecord {
                         log_offset: 0,
                         record: OperationRecord {
-                            id: record.id.to_string(),
+                            id: record.id.to_owned(),
                             embedding: None,
                             encoding: None,
                             metadata: None,
@@ -215,19 +232,25 @@ impl TaskExecutor for StatisticsFunctionExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashMap;
 
-    use chroma_segment::{
-        blockfile_record::RecordSegmentReader,
-        test::TestDistributedSegment,
-    };
+    use chroma_segment::{blockfile_record::RecordSegmentReader, test::TestDistributedSegment};
     use chroma_types::{
         Chunk, LogRecord, Operation, OperationRecord, SparseVector, UpdateMetadata,
         UpdateMetadataValue,
     };
 
+    use super::*;
+
     fn build_record(id: &str, metadata: HashMap<String, UpdateMetadataValue>) -> LogRecord {
+        build_record_with_operation(id, Operation::Upsert, metadata)
+    }
+
+    fn build_record_with_operation(
+        id: &str,
+        operation: Operation,
+        metadata: HashMap<String, UpdateMetadataValue>,
+    ) -> LogRecord {
         LogRecord {
             log_offset: 0,
             record: OperationRecord {
@@ -236,9 +259,45 @@ mod tests {
                 encoding: None,
                 metadata: Some(metadata),
                 document: None,
-                operation: Operation::Upsert,
+                operation,
             },
         }
+    }
+
+    fn collect_statistics_map(
+        output: &Chunk<LogRecord>,
+    ) -> HashMap<String, (i64, String, String, String)> {
+        let mut actual: HashMap<String, (i64, String, String, String)> = HashMap::new();
+        for (log_record, _) in output.iter() {
+            let record = &log_record.record;
+            assert_eq!(record.operation, Operation::Upsert);
+            assert_eq!(record.embedding.as_deref(), Some(&[0.0][..]));
+
+            let metadata = record
+                .metadata
+                .as_ref()
+                .expect("statistics executor always sets metadata");
+
+            let count = match metadata.get("count") {
+                Some(UpdateMetadataValue::Int(value)) => *value,
+                other => panic!("unexpected count metadata: {other:?}"),
+            };
+            let term = match metadata.get("term") {
+                Some(UpdateMetadataValue::Str(value)) => value.clone(),
+                other => panic!("unexpected term metadata: {other:?}"),
+            };
+            let value_type = match metadata.get("type") {
+                Some(UpdateMetadataValue::Str(value)) => value.clone(),
+                other => panic!("unexpected type metadata: {other:?}"),
+            };
+            let value = match metadata.get("value") {
+                Some(UpdateMetadataValue::Str(value)) => value.clone(),
+                other => panic!("unexpected value metadata: {other:?}"),
+            };
+
+            actual.insert(record.id.clone(), (count, term, value_type, value));
+        }
+        actual
     }
 
     #[tokio::test]
@@ -319,7 +378,7 @@ mod tests {
             actual.insert(record.id.clone(), (count, term, value_type, value));
         }
 
-        let float_value = format!("{}", 2.5_f64);
+        let float_value = format!("{:.16e}", 2.5_f64);
         let expected: HashMap<String, (i64, String, String, String)> = HashMap::from([
             (
                 format!("bool_key::b:{}", true),
@@ -390,6 +449,116 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn statistics_executor_groups_nan_float_values() {
+        let executor = StatisticsFunctionExecutor;
+
+        let record_one = build_record(
+            "nan-1",
+            HashMap::from([(
+                "float_key".to_string(),
+                UpdateMetadataValue::Float(f64::NAN),
+            )]),
+        );
+        let record_two = build_record(
+            "nan-2",
+            HashMap::from([(
+                "float_key".to_string(),
+                UpdateMetadataValue::Float(f64::NAN),
+            )]),
+        );
+
+        let input = Chunk::new(vec![record_one, record_two].into());
+        let output = executor
+            .execute(input, None)
+            .await
+            .expect("execution succeeds");
+
+        let actual = collect_statistics_map(&output);
+        assert_eq!(actual.len(), 1);
+
+        let float_string = format!("{:.16e}", f64::NAN);
+        let expected_id = format!("float_key::f:{float_string}");
+        let expected_entry = (
+            2,
+            "float_key".to_string(),
+            "float".to_string(),
+            float_string.clone(),
+        );
+        assert_eq!(
+            actual
+                .get(&expected_id)
+                .expect("NaN metadata should be grouped under a single entry"),
+            &expected_entry
+        );
+    }
+
+    #[tokio::test]
+    async fn statistics_executor_ignores_delete_operations() {
+        let executor = StatisticsFunctionExecutor;
+
+        let upsert_record = build_record(
+            "record-upsert",
+            HashMap::from([(
+                "bool_key".to_string(),
+                UpdateMetadataValue::Bool(true),
+            )]),
+        );
+        let delete_record = build_record_with_operation(
+            "record-delete",
+            Operation::Delete,
+            HashMap::from([(
+                "bool_key".to_string(),
+                UpdateMetadataValue::Bool(false),
+            )]),
+        );
+
+        let input = Chunk::new(vec![upsert_record, delete_record].into());
+        let output = executor
+            .execute(input, None)
+            .await
+            .expect("execution succeeds");
+
+        let actual = collect_statistics_map(&output);
+        assert_eq!(actual.len(), 1);
+
+        let true_id = format!("bool_key::b:{}", true);
+        assert!(
+            actual.contains_key(&true_id),
+            "upserted metadata should still be counted"
+        );
+
+        let false_id = format!("bool_key::b:{}", false);
+        assert!(
+            !actual.contains_key(&false_id),
+            "delete metadata should be ignored by the statistics executor"
+        );
+    }
+
+    #[tokio::test]
+    async fn statistics_executor_handles_empty_sparse_vectors() {
+        let executor = StatisticsFunctionExecutor;
+
+        let record = build_record(
+            "sparse-empty",
+            HashMap::from([(
+                "sparse_key".to_string(),
+                UpdateMetadataValue::SparseVector(SparseVector::new(
+                    Vec::<u32>::new(),
+                    Vec::<f32>::new(),
+                )),
+            )]),
+        );
+
+        let input = Chunk::new(vec![record].into());
+        let output = executor
+            .execute(input, None)
+            .await
+            .expect("execution succeeds");
+
+        assert!(output.is_empty());
+    }
+
+    #[tokio::test]
     async fn statistics_executor_skips_unconvertible_metadata_values() {
         let executor = StatisticsFunctionExecutor;
 
@@ -446,9 +615,18 @@ mod tests {
 
         let fresh_metadata: UpdateMetadata = HashMap::from([
             ("count".to_string(), UpdateMetadataValue::Int(3)),
-            ("term".to_string(), UpdateMetadataValue::Str("fresh_key".to_string())),
-            ("type".to_string(), UpdateMetadataValue::Str("int".to_string())),
-            ("value".to_string(), UpdateMetadataValue::Str("1".to_string())),
+            (
+                "term".to_string(),
+                UpdateMetadataValue::Str("fresh_key".to_string()),
+            ),
+            (
+                "type".to_string(),
+                UpdateMetadataValue::Str("int".to_string()),
+            ),
+            (
+                "value".to_string(),
+                UpdateMetadataValue::Str("1".to_string()),
+            ),
         ]);
 
         let fresh_record = LogRecord {
@@ -477,10 +655,7 @@ mod tests {
         let input = Chunk::new(
             vec![build_record(
                 "input-1",
-                HashMap::from([(
-                    "fresh_key".to_string(),
-                    UpdateMetadataValue::Int(1),
-                )]),
+                HashMap::from([("fresh_key".to_string(), UpdateMetadataValue::Int(1))]),
             )]
             .into(),
         );
@@ -548,9 +723,18 @@ mod tests {
 
         let metadata: UpdateMetadata = HashMap::from([
             ("count".to_string(), UpdateMetadataValue::Int(2)),
-            ("term".to_string(), UpdateMetadataValue::Str("empty_key".to_string())),
-            ("type".to_string(), UpdateMetadataValue::Str("str".to_string())),
-            ("value".to_string(), UpdateMetadataValue::Str("initial".to_string())),
+            (
+                "term".to_string(),
+                UpdateMetadataValue::Str("empty_key".to_string()),
+            ),
+            (
+                "type".to_string(),
+                UpdateMetadataValue::Str("str".to_string()),
+            ),
+            (
+                "value".to_string(),
+                UpdateMetadataValue::Str("initial".to_string()),
+            ),
         ]);
 
         let record = LogRecord {
