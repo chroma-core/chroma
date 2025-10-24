@@ -40,34 +40,13 @@ python -m venv .venv
 .\\.venv\\Scripts\\Activate.ps1
 ```
 
-2. Install runtime and dev dependencies and the package in editable mode:
+2. Install dependencies and set up pre-commit hooks:
 
 ```powershell
 pip install -r .\\requirements.txt
 pip install -r .\\requirements_dev.txt
 pip install -e .
-```
-
-3. (Optional) If you plan to build or develop the Rust bindings later, install `maturin` and build:
-
-```powershell
-pip install maturin
-maturin develop
-```
-
-Notes
-
-- If you don't want to build the native Rust bindings, install the PyPI wheel instead:
-
-```powershell
-pip install chromadb
-```
-
-- Install the repository's pre-commit hooks to get consistent styling and checks:
-
-```powershell
 pre-commit install
-```
 
 This minimal flow keeps Python-only development fast on Windows. If you want to run the distributed system or use Tilt/Docker, follow the "Local dev setup for distributed chroma" section below.
 
