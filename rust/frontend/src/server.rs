@@ -1553,7 +1553,7 @@ async fn collection_upsert(
     server
         .authenticate_and_authorize_collection(
             &headers,
-            AuthzAction::Update,
+            AuthzAction::Upsert,
             AuthzResource {
                 tenant: Some(tenant.clone()),
                 database: Some(database.clone()),
