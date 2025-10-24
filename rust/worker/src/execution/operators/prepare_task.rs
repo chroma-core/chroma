@@ -137,57 +137,49 @@ impl Operator<PrepareTaskInput, PrepareTaskOutput> for PrepareTaskOperator {
 
         // 3. Determine state transition and whether to skip execution
         let execution_nonce = input.nonce;
-        let mut should_skip_execution = false;
+
+        // Scout logs to see if we should skip execution (task may have already executed)
+        let next_log_offset = log
+            .scout_logs(
+                &task.tenant_id,
+                task.input_collection_id,
+                task.completion_offset,
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    "[{}]: Failed to scout logs for task {}: {}",
+                    self.get_name(),
+                    task.name,
+                    e
+                );
+                PrepareTaskError::ScoutLogs(format!("Failed to scout logs: {}", e))
+            })?;
+
+        let new_records_count = next_log_offset.saturating_sub(task.completion_offset);
+        let should_skip_execution = new_records_count < task.min_records_for_task;
+
+        if should_skip_execution {
+            tracing::info!(
+                "[{}]: Skipping execution for task {} - not enough new records (new={}, min={})",
+                self.get_name(),
+                task.name,
+                new_records_count,
+                task.min_records_for_task
+            );
+        } else {
+            tracing::info!(
+                "[{}]: Task {} will proceed with execution ({} new records available)",
+                self.get_name(),
+                task.name,
+                new_records_count
+            );
+        }
 
         if task
             .lowest_live_nonce
-            .is_some_and(|lln| task.next_nonce != lln)
+            .is_some_and(|lln| task.next_nonce == lln)
         {
-            // Incomplete nonce exists - we are already **scheduled**
-            tracing::info!(
-                "[{}]: Task {} already in scheduled state (incomplete nonce exists)",
-                self.get_name(),
-                task.name
-            );
-
-            // Scout logs to see if we should skip execution (task may have already executed)
-            let next_log_offset = log
-                .scout_logs(
-                    &task.tenant_id,
-                    task.input_collection_id,
-                    task.completion_offset,
-                )
-                .await
-                .map_err(|e| {
-                    tracing::error!(
-                        "[{}]: Failed to scout logs for task {}: {}",
-                        self.get_name(),
-                        task.name,
-                        e
-                    );
-                    PrepareTaskError::ScoutLogs(format!("Failed to scout logs: {}", e))
-                })?;
-
-            let new_records_count = next_log_offset.saturating_sub(task.completion_offset);
-            should_skip_execution = new_records_count < task.min_records_for_task;
-
-            if should_skip_execution {
-                tracing::info!(
-                    "[{}]: Skipping execution for task {} - not enough new records (new={}, min={})",
-                    self.get_name(),
-                    task.name,
-                    new_records_count,
-                    task.min_records_for_task
-                );
-            } else {
-                tracing::info!(
-                    "[{}]: Task {} will proceed with execution ({} new records available)",
-                    self.get_name(),
-                    task.name,
-                    new_records_count
-                );
-            }
-        } else {
             // Currently **waiting**, transition to **scheduled**
             tracing::info!(
                 "[{}]: Task {} transitioning from waiting to scheduled",
@@ -419,6 +411,8 @@ mod tests {
         // Get the task's next_nonce
         let task_before = sysdb.get_task_by_uuid(task_id).await.unwrap();
         let next_nonce = task_before.next_nonce;
+        // update lowest_live_nonce to next_nonce
+        sysdb.finish_task(task_id).await.unwrap();
 
         // Create operator
         let operator = PrepareTaskOperator {
@@ -437,9 +431,6 @@ mod tests {
 
         // Assert: execution_nonce matches input
         assert_eq!(output.execution_nonce, next_nonce);
-
-        // Assert: should_skip_execution is false (we're transitioning, not skipping)
-        assert!(!output.should_skip_execution);
 
         // Assert: Task was advanced - next_nonce should have changed
         let task_after = sysdb.get_task_by_uuid(task_id).await.unwrap();
@@ -472,15 +463,11 @@ mod tests {
             )
             .await
             .unwrap();
+        sysdb.finish_task(task_id).await.unwrap();
 
         // Advance the task once to set lowest_live_nonce
         let task_initial = sysdb.get_task_by_uuid(task_id).await.unwrap();
         let first_nonce = task_initial.next_nonce;
-
-        sysdb
-            .advance_task(task_id, first_nonce.0, 0, 60)
-            .await
-            .unwrap();
 
         // Now lowest_live_nonce = first_nonce, next_nonce = new value
         // No new log records, so should skip execution
@@ -541,6 +528,7 @@ mod tests {
             )
             .await
             .unwrap();
+        sysdb.finish_task(task_id).await.unwrap();
 
         // Advance the task to create lowest_live_nonce
         let task_initial = sysdb.get_task_by_uuid(task_id).await.unwrap();

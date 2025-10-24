@@ -83,7 +83,10 @@ func (suite *APIsTestSuite) SetupTest() {
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
 	}
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, suite.s3MetaStore, true)
+	c, err := NewCoordinator(ctx, CoordinatorConfig{
+		ObjectStore:        suite.s3MetaStore,
+		VersionFileEnabled: true,
+	})
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
@@ -114,9 +117,16 @@ func (suite *APIsTestSuite) TearDownTest() {
 func testCollection(t *rapid.T) {
 	dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, nil, false)
+	c, err := NewCoordinator(ctx, CoordinatorConfig{
+		ObjectStore:        nil,
+		VersionFileEnabled: false,
+	})
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
+	}
+	err = c.ResetState(ctx)
+	if err != nil {
+		t.Fatalf("error resetting coordinator state: %v", err)
 	}
 	t.Repeat(map[string]func(*rapid.T){
 		"create_collection": func(t *rapid.T) {
@@ -167,7 +177,10 @@ func testCollection(t *rapid.T) {
 func testSegment(t *rapid.T) {
 	dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, nil, false)
+	c, err := NewCoordinator(ctx, CoordinatorConfig{
+		ObjectStore:        nil,
+		VersionFileEnabled: false,
+	})
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}

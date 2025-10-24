@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
+	"github.com/chroma-core/chroma/go/pkg/memberlist_manager"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
@@ -24,18 +25,60 @@ type Coordinator struct {
 	ctx         context.Context
 	catalog     Catalog
 	objectStore *s3metastore.S3MetaStore
+	heapClient  HeapClient // Optional, can be nil if heap service is disabled
 }
 
-func NewCoordinator(ctx context.Context, objectStore *s3metastore.S3MetaStore, versionFileEnabled bool) (*Coordinator, error) {
+// CoordinatorConfig holds configuration for creating a Coordinator
+type CoordinatorConfig struct {
+	// Object store for metadata persistence
+	ObjectStore *s3metastore.S3MetaStore
+
+	// Enable version file functionality
+	VersionFileEnabled bool
+
+	// Heap service configuration (optional)
+	HeapServiceEnabled          bool
+	HeapServicePort             int
+	HeapServiceAssignmentHasher string // Assignment policy hasher: "murmur3" (default)
+	KubernetesNamespace         string
+	LogServiceMemberlistName    string
+}
+
+func NewCoordinator(ctx context.Context, config CoordinatorConfig) (*Coordinator, error) {
 	s := &Coordinator{
 		ctx:         ctx,
-		objectStore: objectStore,
+		objectStore: config.ObjectStore,
 	}
 
 	// catalog
 	txnImpl := dbcore.NewTxImpl()
 	metaDomain := dao.NewMetaDomain()
-	s.catalog = *NewTableCatalog(txnImpl, metaDomain, s.objectStore, versionFileEnabled)
+	s.catalog = *NewTableCatalog(txnImpl, metaDomain, s.objectStore, config.VersionFileEnabled)
+
+	// Initialize heap client if enabled
+	if config.HeapServiceEnabled {
+		memberlistStore, err := memberlist_manager.NewCRMemberlistStoreFromK8s(
+			config.KubernetesNamespace,
+			config.LogServiceMemberlistName,
+		)
+		if err != nil {
+			log.Error("Failed to create memberlist store", zap.Error(err))
+			return nil, err
+		}
+
+		hasher, err := GetHasherFromString(config.HeapServiceAssignmentHasher)
+		if err != nil {
+			log.Error("Failed to get hasher from config", zap.Error(err))
+			return nil, err
+		}
+
+		s.heapClient = NewGrpcHeapClient(memberlistStore, config.HeapServicePort, hasher)
+		log.Info("Heap service client initialized",
+			zap.String("memberlist", config.LogServiceMemberlistName),
+			zap.Int("port", config.HeapServicePort),
+			zap.String("hasher", config.HeapServiceAssignmentHasher))
+	}
+
 	return s, nil
 }
 

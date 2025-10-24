@@ -641,6 +641,19 @@ message FinishTaskRequest {
 
 message FinishTaskResponse {}
 
+message CleanupExpiredPartialTasksRequest {
+  // Maximum age in seconds for partial tasks (with lowest_live_nonce = NULL)
+  // Tasks older than this will be deleted
+  uint64 max_age_seconds = 1;
+}
+
+message CleanupExpiredPartialTasksResponse {
+  // Number of tasks that were cleaned up
+  uint64 cleaned_up_count = 1;
+  // List of task IDs that were cleaned up
+  repeated string cleaned_up_task_ids = 2;
+}
+
 message Operator {
   string id = 1;
   string name = 2;
@@ -715,6 +728,7 @@ service SysDB {
   rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse) {}
   rpc AdvanceTask(AdvanceTaskRequest) returns (AdvanceTaskResponse) {}
   rpc FinishTask(FinishTaskRequest) returns (FinishTaskResponse) {}
+  rpc CleanupExpiredPartialTasks(CleanupExpiredPartialTasksRequest) returns (CleanupExpiredPartialTasksResponse) {}
   rpc GetOperators(GetOperatorsRequest) returns (GetOperatorsResponse) {}
   rpc PeekScheduleByCollectionId(PeekScheduleByCollectionIdRequest) returns (PeekScheduleByCollectionIdResponse) {}
 }

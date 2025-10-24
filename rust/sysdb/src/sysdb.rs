@@ -2446,6 +2446,8 @@ impl ChromaError for CreateTaskError {
 pub enum GetTaskError {
     #[error("Task not found")]
     NotFound,
+    #[error("Task not ready - still initializing")]
+    NotReady,
     #[error("Failed to get task: {0}")]
     FailedToGetTask(tonic::Status),
     #[error("Server returned invalid data")]
@@ -2456,6 +2458,7 @@ impl ChromaError for GetTaskError {
     fn code(&self) -> ErrorCodes {
         match self {
             GetTaskError::NotFound => ErrorCodes::NotFound,
+            GetTaskError::NotReady => ErrorCodes::FailedPrecondition,
             GetTaskError::FailedToGetTask(e) => e.code().into(),
             GetTaskError::ServerReturnedInvalidData => ErrorCodes::Internal,
         }
