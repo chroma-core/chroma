@@ -38,7 +38,9 @@ class SimpleHashEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def __call__(self, input: Documents) -> Embeddings:
         if not input:
-            return []
+            raise ValueError("Input documents list cannot be empty")
+
+        return [self._embed_one(str(d)) for d in list(input)]
 
         return [self._embed_one(str(d)) for d in list(input)]
 
