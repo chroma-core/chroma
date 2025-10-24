@@ -45,6 +45,8 @@ from chromadb.execution.expression.plan import (
     Search,
 )
 
+SearchWhere = Where
+
 __all__ = [
     # Main search class
     "Search",
@@ -52,6 +54,7 @@ __all__ = [
     "Key",
     "K",
     # Where expressions
+    "SearchWhere",
     "Where",
     "And",
     "Or",
