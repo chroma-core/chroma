@@ -11,7 +11,7 @@ else
     echo "Using normal client"
 fi
 
-cargo build --bin chroma
+cargo build --bin chroma --verbose
 cargo run --bin chroma -- run bin/rust_single_node_integration_test_config.yaml &
 
 echo "Waiting for Chroma server to be available..."
