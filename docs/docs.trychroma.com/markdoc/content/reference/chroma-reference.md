@@ -21,6 +21,10 @@ Chroma currently maintains 1st party clients for Python and Javascript. For othe
 | Python     | [Client](./python/client) | [Collection](./python/collection) |
 | Javascript | [Client](./js/client)     | [Collection](./js/collection)     |
 
+### Python SDK reference
+
+- [Client & parameter reference](./python/client-params) — quick tables for `ChromaClientParams`, collection configuration, insert/upsert parameters, and query parameters.
+
 ---
 
 ## Backend API
