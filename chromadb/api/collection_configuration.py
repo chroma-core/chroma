@@ -13,6 +13,8 @@ from chromadb.utils.embedding_functions import (
 from multiprocessing import cpu_count
 import warnings
 
+from chromadb.api.types import Schema
+
 
 class HNSWConfiguration(TypedDict, total=False):
     space: Space
@@ -794,3 +796,79 @@ def validate_embedding_function_conflict_on_get(
                 f"An embedding function already exists in the collection configuration, and a new one is provided. If this is intentional, please embed documents separately. Embedding function conflict: new: {embedding_function.name()} vs persisted: {persisted_ef_config.get('name')}"
             )
     return None
+
+
+def update_schema_from_collection_configuration(
+    schema: "Schema", configuration: "UpdateCollectionConfiguration"
+) -> "Schema":
+    """
+    Updates a schema with configuration changes.
+    Only updates fields that are present in the configuration update.
+
+    Args:
+        schema: The existing Schema object
+        configuration: The configuration updates to apply
+
+    Returns:
+        Updated Schema object
+    """
+    # TODO: Remove this check once schema is enabled in local.
+    if schema.defaults.float_list is None:
+        return schema
+
+    # Get the vector index from defaults and #embedding key
+    if schema.defaults.float_list is None or schema.defaults.float_list.vector_index is None:
+        raise ValueError("Schema is missing defaults.float_list.vector_index")
+
+    embedding_key = "#embedding"
+    if embedding_key not in schema.keys:
+        raise ValueError(f"Schema is missing keys[{embedding_key}]")
+
+    embedding_value_types = schema.keys[embedding_key]
+    if embedding_value_types.float_list is None or embedding_value_types.float_list.vector_index is None:
+        raise ValueError(f"Schema is missing keys[{embedding_key}].float_list.vector_index")
+
+    # Update vector index config in both locations
+    for vector_index in [
+        schema.defaults.float_list.vector_index,
+        embedding_value_types.float_list.vector_index,
+    ]:
+        if "hnsw" in configuration and configuration["hnsw"] is not None:
+            # Update HNSW config
+            if vector_index.config.hnsw is None:
+                raise ValueError("Trying to update HNSW config but schema has SPANN")
+
+            hnsw_config = vector_index.config.hnsw
+            update_hnsw = configuration["hnsw"]
+
+            # Only update fields that are present in the update
+            if "ef_search" in update_hnsw:
+                hnsw_config.ef_search = update_hnsw["ef_search"]
+            if "num_threads" in update_hnsw:
+                hnsw_config.num_threads = update_hnsw["num_threads"]
+            if "batch_size" in update_hnsw:
+                hnsw_config.batch_size = update_hnsw["batch_size"]
+            if "sync_threshold" in update_hnsw:
+                hnsw_config.sync_threshold = update_hnsw["sync_threshold"]
+            if "resize_factor" in update_hnsw:
+                hnsw_config.resize_factor = update_hnsw["resize_factor"]
+
+        elif "spann" in configuration and configuration["spann"] is not None:
+            # Update SPANN config
+            if vector_index.config.spann is None:
+                raise ValueError("Trying to update SPANN config but schema has HNSW")
+
+            spann_config = vector_index.config.spann
+            update_spann = configuration["spann"]
+
+            # Only update fields that are present in the update
+            if "search_nprobe" in update_spann:
+                spann_config.search_nprobe = update_spann["search_nprobe"]
+            if "ef_search" in update_spann:
+                spann_config.ef_search = update_spann["ef_search"]
+
+        # Update embedding function if present
+        if "embedding_function" in configuration and configuration["embedding_function"] is not None:
+            vector_index.config.embedding_function = configuration["embedding_function"]
+
+    return schema

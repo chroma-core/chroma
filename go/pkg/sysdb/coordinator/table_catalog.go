@@ -752,14 +752,31 @@ func (tc *Catalog) GetSoftDeletedCollections(ctx context.Context, collectionID *
 	return collectionList, nil
 }
 
-// updateCollectionConfiguration handles parsing and updating collection configuration
-func (tc *Catalog) updateCollectionConfiguration(
+// updateCollectionConfigurationAndSchema handles parsing and updating collection configuration and schema
+func (tc *Catalog) updateCollectionConfigurationAndSchema(
 	existingConfigJsonStr *string,
+	existingSchemaStr *string,
 	updateConfigJsonStr *string,
 	collectionMetadata []*dbmodel.CollectionMetadata,
-) (*string, error) {
-	if updateConfigJsonStr == nil {
-		return nil, nil
+) (*string, *string, error) {
+	if updateConfigJsonStr == nil || *updateConfigJsonStr == "{}" || *updateConfigJsonStr == "" {
+		return nil, nil, nil
+	}
+
+	// Parse update configuration
+	var updateConfig model.InternalUpdateCollectionConfiguration
+	if err := json.Unmarshal([]byte(*updateConfigJsonStr), &updateConfig); err != nil {
+		return nil, nil, fmt.Errorf("failed to parse update configuration: %w", err)
+	}
+
+	// Check if schema exists and merge config into it
+	if existingSchemaStr != nil && *existingSchemaStr != "" && *existingSchemaStr != "{}" {
+		// Schema is the source of truth - merge the updated config into schema
+		newSchemaStr, err := model.UpdateSchemaFromConfig(updateConfig, *existingSchemaStr)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to merge config into schema: %w", err)
+		}
+		return nil, &newSchemaStr, nil
 	}
 
 	// Parse existing configuration
@@ -808,17 +825,11 @@ func (tc *Catalog) updateCollectionConfiguration(
 		}
 	}
 
-	// Parse update configuration
-	var updateConfig model.InternalUpdateCollectionConfiguration
-	if err := json.Unmarshal([]byte(*updateConfigJsonStr), &updateConfig); err != nil {
-		return nil, fmt.Errorf("failed to parse update configuration: %w", err)
-	}
-
 	// Update existing configuration with new values
 	if updateConfig.VectorIndex != nil {
 		if updateConfig.VectorIndex.Hnsw != nil {
 			if existingConfig.VectorIndex == nil || existingConfig.VectorIndex.Hnsw == nil {
-				return existingConfigJsonStr, nil
+				return existingConfigJsonStr, nil, nil
 			}
 			if updateConfig.VectorIndex.Hnsw.EfSearch != nil {
 				existingConfig.VectorIndex.Hnsw.EfSearch = *updateConfig.VectorIndex.Hnsw.EfSearch
@@ -840,7 +851,7 @@ func (tc *Catalog) updateCollectionConfiguration(
 			}
 		} else if updateConfig.VectorIndex.Spann != nil {
 			if existingConfig.VectorIndex == nil || existingConfig.VectorIndex.Spann == nil {
-				return existingConfigJsonStr, nil
+				return existingConfigJsonStr, nil, nil
 			}
 			if updateConfig.VectorIndex.Spann.EfSearch != nil {
 				existingConfig.VectorIndex.Spann.EfSearch = *updateConfig.VectorIndex.Spann.EfSearch
@@ -858,10 +869,10 @@ func (tc *Catalog) updateCollectionConfiguration(
 	// Serialize updated config back to JSON
 	updatedConfigBytes, err := json.Marshal(existingConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize updated configuration: %w", err)
+		return nil, nil, fmt.Errorf("failed to serialize updated configuration: %w", err)
 	}
 	updatedConfigStr := string(updatedConfigBytes)
-	return &updatedConfigStr, nil
+	return &updatedConfigStr, nil, nil
 }
 
 func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection, ts types.Timestamp) (*model.Collection, error) {
@@ -887,9 +898,10 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 		}
 		collection := collections[0]
 
-		// Update configuration
-		newConfigJsonStr, err := tc.updateCollectionConfiguration(
+		// Update configuration and/or schema
+		newConfigJsonStr, newSchemaStr, err := tc.updateCollectionConfigurationAndSchema(
 			collection.Collection.ConfigurationJsonStr,
+			collection.Collection.SchemaStr,
 			updateCollection.NewConfigurationJsonStr,
 			collection.CollectionMetadata,
 		)
@@ -902,6 +914,7 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 			Name:                 updateCollection.Name,
 			Dimension:            updateCollection.Dimension,
 			ConfigurationJsonStr: newConfigJsonStr,
+			SchemaStr:            newSchemaStr,
 			Ts:                   ts,
 		}
 		err = tc.metaDomain.CollectionDb(txCtx).Update(dbCollection)
