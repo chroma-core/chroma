@@ -36,8 +36,6 @@ pub struct PrepareTaskInput {
 }
 
 #[derive(Clone, Debug)]
-// Fields are used in tests and will be used in orchestration code in a follow-up change
-#[allow(dead_code)]
 pub struct PrepareTaskOutput {
     /// The task object fetched from SysDB
     pub task: Task,
