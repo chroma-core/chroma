@@ -1,7 +1,10 @@
 [package]
 name = "chroma-error"
-version = "0.1.0"
+version = "0.5.0"
 edition = "2021"
+description = "Chroma-provided crate for errors returned from Chroma."
+license = "Apache-2.0"
+repository = "https://github.com/chroma-core/chroma"
 
 [lib]
 path = "src/lib.rs"

@@ -1,12 +1,12 @@
 from chromadb.api.types import (
     SparseEmbeddingFunction,
-    SparseEmbeddings,
+    SparseVectors,
     Documents,
 )
 from typing import Dict, Any, TypedDict, Optional
 from typing import cast, Literal
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
-from chromadb.utils.sparse_embedding_utils import _sort_sparse_vectors
+from chromadb.utils.sparse_embedding_utils import normalize_sparse_vector
 
 TaskType = Literal["document", "query"]
 
@@ -65,7 +65,7 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
             model_name, cache_dir, threads, cuda, device_ids, lazy_load, **kwargs
         )
 
-    def __call__(self, input: Documents) -> SparseEmbeddings:
+    def __call__(self, input: Documents) -> SparseVectors:
         """Generate embeddings for the given documents.
 
         Args:
@@ -92,17 +92,18 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         else:
             raise ValueError(f"Invalid task: {self.task}")
 
-        sparse_embeddings: SparseEmbeddings = []
+        sparse_vectors: SparseVectors = []
 
         for vec in embeddings:
-            sparse_embeddings.append(
-                {"indices": vec.indices.tolist(), "values": vec.values.tolist()}
+            sparse_vectors.append(
+                normalize_sparse_vector(
+                    indices=vec.indices.tolist(), values=vec.values.tolist()
+                )
             )
 
-        _sort_sparse_vectors(sparse_embeddings)
-        return sparse_embeddings
+        return sparse_vectors
 
-    def embed_query(self, input: Documents) -> SparseEmbeddings:
+    def embed_query(self, input: Documents) -> SparseVectors:
         try:
             from fastembed import SparseTextEmbedding
         except ImportError:
@@ -123,15 +124,16 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
             else:
                 raise ValueError(f"Invalid task: {task}")
 
-            sparse_embeddings: SparseEmbeddings = []
+            sparse_vectors: SparseVectors = []
 
             for vec in embeddings:
-                sparse_embeddings.append(
-                    {"indices": vec.indices.tolist(), "values": vec.values.tolist()}
+                sparse_vectors.append(
+                    normalize_sparse_vector(
+                        indices=vec.indices.tolist(), values=vec.values.tolist()
+                    )
                 )
 
-            _sort_sparse_vectors(sparse_embeddings)
-            return sparse_embeddings
+            return sparse_vectors
 
         else:
             return self.__call__(input)

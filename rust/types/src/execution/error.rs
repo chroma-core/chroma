@@ -22,11 +22,17 @@ pub enum QueryConversionError {
     Where(#[from] WhereConversionError),
     #[error("Error parsing scan: {0}")]
     Scan(#[from] ScanToProtoError),
+    #[error("Validation error: {0}")]
+    Validation(String),
 }
 
 impl QueryConversionError {
     pub fn field(name: impl ToString) -> Self {
         Self::Field(name.to_string())
+    }
+
+    pub fn validation(msg: impl ToString) -> Self {
+        Self::Validation(msg.to_string())
     }
 }
 

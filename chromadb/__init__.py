@@ -27,6 +27,19 @@ from chromadb.api.types import (
     GetResult,
     WhereDocument,
     UpdateCollectionMetadata,
+    SparseVector,
+    SparseVectors,
+    SparseEmbeddingFunction,
+    Schema,
+    VectorIndexConfig,
+    HnswIndexConfig,
+    SpannIndexConfig,
+    FtsIndexConfig,
+    SparseVectorIndexConfig,
+    StringInvertedIndexConfig,
+    IntInvertedIndexConfig,
+    FloatInvertedIndexConfig,
+    BoolInvertedIndexConfig,
 )
 
 # Import Search API components
@@ -69,6 +82,21 @@ __all__ = [
     "K",
     "Knn",
     "Rrf",
+    # Sparse Vector Types
+    "SparseVector",
+    "SparseVectors",
+    "SparseEmbeddingFunction",
+    # Schema and Index Configuration
+    "Schema",
+    "VectorIndexConfig",
+    "HnswIndexConfig",
+    "SpannIndexConfig",
+    "FtsIndexConfig",
+    "SparseVectorIndexConfig",
+    "StringInvertedIndexConfig",
+    "IntInvertedIndexConfig",
+    "FloatInvertedIndexConfig",
+    "BoolInvertedIndexConfig",
 ]
 
 from chromadb.types import CloudClientArg
@@ -77,7 +105,7 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "1.1.1"
+__version__ = "1.2.1"
 
 
 # Workaround to deal with Colab's old sqlite3 version

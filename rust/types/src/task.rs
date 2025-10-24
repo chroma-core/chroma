@@ -2,26 +2,15 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::time::SystemTime;
-use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::CollectionUuid;
 
 /// TaskUuid is a wrapper around Uuid to provide a type for task identifiers.
 #[derive(
-    Copy,
-    Clone,
-    Debug,
-    Default,
-    Deserialize,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Hash,
-    Serialize,
-    ToSchema,
+    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
 )]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct TaskUuid(pub Uuid);
 
 impl TaskUuid {
@@ -95,6 +84,9 @@ pub struct ScheduleEntry {
     pub task_id: Uuid,
     pub task_run_nonce: Uuid,
     pub when_to_run: Option<DateTime<Utc>>,
+    /// Lowest live nonce - marks the earliest nonce that still needs verification.
+    /// Nonces less than this value are considered complete.
+    pub lowest_live_nonce: Option<Uuid>,
 }
 
 impl TryFrom<crate::chroma_proto::ScheduleEntry> for ScheduleEntry {
@@ -137,11 +129,17 @@ impl TryFrom<crate::chroma_proto::ScheduleEntry> for ScheduleEntry {
             .when_to_run
             .and_then(|ms| DateTime::from_timestamp_millis(ms as i64));
 
+        let lowest_live_nonce = proto
+            .lowest_live_nonce
+            .as_ref()
+            .and_then(|nonce_str| Uuid::parse_str(nonce_str).ok());
+
         Ok(ScheduleEntry {
             collection_id,
             task_id,
             task_run_nonce,
             when_to_run,
+            lowest_live_nonce,
         })
     }
 }

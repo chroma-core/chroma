@@ -24,8 +24,8 @@ use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
     FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
-    ForkCollectionError, InternalSchema, SchemaError, Segment, SegmentConversionError,
-    SegmentScope, Tenant,
+    ForkCollectionError, Schema, SchemaError, Segment, SegmentConversionError, SegmentScope,
+    Tenant,
 };
 use prost_types;
 use std::collections::HashMap;
@@ -287,7 +287,7 @@ impl SysDb {
         name: String,
         segments: Vec<Segment>,
         configuration: Option<InternalCollectionConfiguration>,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -594,7 +594,7 @@ impl SysDb {
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -1090,7 +1090,7 @@ impl GrpcSysDb {
         name: String,
         segments: Vec<Segment>,
         configuration: Option<InternalCollectionConfiguration>,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -1554,7 +1554,7 @@ impl GrpcSysDb {
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let segment_compaction_info =
             segment_flush_info
@@ -1729,12 +1729,12 @@ impl GrpcSysDb {
         let response = response.into_inner();
 
         // If response has no task_id, task was not found
-        if response.task_id.is_none() {
+        if response.task.is_none() {
             return Err(GetTaskError::NotFound);
         }
 
         // Parse the response and construct Task
-        let task_id_str = response.task_id.unwrap();
+        let task_id_str = response.task.as_ref().unwrap().task_id.clone();
         let task_id = chroma_types::TaskUuid(uuid::Uuid::parse_str(&task_id_str).map_err(|e| {
             tracing::error!(
                 task_id = %task_id_str,
@@ -1744,15 +1744,9 @@ impl GrpcSysDb {
             GetTaskError::ServerReturnedInvalidData
         })?);
 
-        let operator_id = response.operator_name.ok_or_else(|| {
-            GetTaskError::FailedToGetTask(tonic::Status::internal(
-                "Missing operator_name in response",
-            ))
-        })?;
+        let operator_id = response.task.as_ref().unwrap().operator_name.clone();
 
-        let input_collection_id_str = response
-            .input_collection_id
-            .unwrap_or_else(|| input_collection_id.to_string());
+        let input_collection_id_str = response.task.as_ref().unwrap().input_collection_id.clone();
         let parsed_input_collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&input_collection_id_str).map_err(|e| {
                 tracing::error!(
@@ -1765,25 +1759,27 @@ impl GrpcSysDb {
         );
 
         // Convert params from Struct to JSON string
-        let params_str = response.params.map(|s| {
+        let params_str = response.task.as_ref().unwrap().params.clone().map(|s| {
             let json_value = prost_struct_to_json(s);
             serde_json::to_string(&json_value).unwrap_or_else(|_| "{}".to_string())
         });
 
+        let task = response.task.as_ref().unwrap();
+
         Ok(chroma_types::Task {
             id: task_id,
-            name: response.name.unwrap_or(task_name),
+            name: task.name.clone(),
             operator_id,
             input_collection_id: parsed_input_collection_id,
-            output_collection_name: response.output_collection_name.unwrap_or_default(),
-            output_collection_id: Some(response.output_collection_id.unwrap_or_default()),
+            output_collection_name: task.output_collection_name.clone(),
+            output_collection_id: task.output_collection_id.clone(),
             params: params_str,
-            tenant_id: response.tenant_id.unwrap_or_default(),
-            database_id: response.database_id.unwrap_or_default(),
+            tenant_id: task.tenant_id.clone(),
+            database_id: task.database_id.clone(),
             last_run: None,
             next_run: None,
-            completion_offset: response.completion_offset.unwrap_or(0) as u64,
-            min_records_for_task: response.min_records_for_task.unwrap_or(100),
+            completion_offset: task.completion_offset as u64,
+            min_records_for_task: task.min_records_for_task,
             is_deleted: false,
             created_at: std::time::SystemTime::now(),
             updated_at: std::time::SystemTime::now(),

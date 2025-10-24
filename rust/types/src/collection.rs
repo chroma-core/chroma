@@ -2,14 +2,13 @@ use std::str::FromStr;
 
 use super::{Metadata, MetadataValueConversionError};
 use crate::{
-    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration,
-    InternalSchema, Segment, SegmentScope,
+    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Schema,
+    SchemaError, Segment, SegmentScope, UpdateCollectionConfiguration, UpdateMetadata,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
 use thiserror::Error;
-use utoipa::ToSchema;
 use uuid::Uuid;
 
 #[cfg(feature = "pyo3")]
@@ -17,36 +16,16 @@ use pyo3::types::PyAnyMethods;
 
 /// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
 #[derive(
-    Copy,
-    Clone,
-    Debug,
-    Default,
-    Deserialize,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Hash,
-    Serialize,
-    ToSchema,
+    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
 )]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CollectionUuid(pub Uuid);
 
 /// DatabaseUuid is a wrapper around Uuid to provide a type for the database id.
 #[derive(
-    Copy,
-    Clone,
-    Debug,
-    Default,
-    Deserialize,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Hash,
-    Serialize,
-    ToSchema,
+    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
 )]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DatabaseUuid(pub Uuid);
 
 impl DatabaseUuid {
@@ -116,7 +95,8 @@ fn deserialize_internal_collection_configuration<'de, D: serde::Deserializer<'de
         .map_err(serde::de::Error::custom)
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Collection {
     #[serde(rename = "id")]
@@ -127,9 +107,9 @@ pub struct Collection {
         deserialize_with = "deserialize_internal_collection_configuration",
         rename = "configuration_json"
     )]
-    #[schema(value_type = CollectionConfiguration)]
+    #[cfg_attr(feature = "utoipa", schema(value_type = CollectionConfiguration))]
     pub config: InternalCollectionConfiguration,
-    pub schema: Option<InternalSchema>,
+    pub schema: Option<Schema>,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
     pub tenant: String,
@@ -230,6 +210,18 @@ impl Collection {
 }
 
 impl Collection {
+    /// Reconcile the collection schema and configuration, ensuring both are consistent.
+    pub fn reconcile_schema_with_config(&mut self) -> Result<(), SchemaError> {
+        let reconciled_schema =
+            Schema::reconcile_schema_and_config(self.schema.as_ref(), Some(&self.config))?;
+
+        self.config = InternalCollectionConfiguration::try_from(&reconciled_schema)
+            .map_err(|reason| SchemaError::InvalidSchema { reason })?;
+        self.schema = Some(reconciled_schema);
+
+        Ok(())
+    }
+
     pub fn test_collection(dim: i32) -> Self {
         Collection {
             name: "test_collection".to_string(),
@@ -394,14 +386,33 @@ impl CollectionAndSegments {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct CreateCollectionPayload {
+    pub name: String,
+    pub schema: Option<Schema>,
+    pub configuration: Option<CollectionConfiguration>,
+    pub metadata: Option<Metadata>,
+    #[serde(default)]
+    pub get_or_create: bool,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct UpdateCollectionPayload {
+    pub new_name: Option<String>,
+    pub new_metadata: Option<UpdateMetadata>,
+    pub new_configuration: Option<UpdateCollectionConfiguration>,
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[test]
     fn test_collection_try_from() {
-        // Create a valid InternalSchema and serialize it
-        let schema = InternalSchema::new_default(crate::KnnIndex::Spann);
+        // Create a valid Schema and serialize it
+        let schema = Schema::new_default(crate::KnnIndex::Spann);
         let schema_str = serde_json::to_string(&schema).unwrap();
 
         let proto_collection = chroma_proto::Collection {

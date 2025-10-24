@@ -1,8 +1,8 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    logical_size_of_metadata, Chunk, DataRecord, DeletedMetadata, InternalSchema, LogRecord,
+    logical_size_of_metadata, Chunk, DataRecord, DeletedMetadata, LogRecord,
     MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue, MetadataValueConversionError,
-    Operation, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
+    Operation, Schema, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
@@ -1008,8 +1008,8 @@ impl ChromaSegmentWriter<'_> {
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized: &MaterializeLogsResult,
-        schema: Option<InternalSchema>,
-    ) -> Result<Option<InternalSchema>, ApplyMaterializedLogError> {
+        schema: Option<Schema>,
+    ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
         match self {
             ChromaSegmentWriter::RecordSegment(writer) => writer
                 .apply_materialized_log_chunk(record_segment_reader, materialized)

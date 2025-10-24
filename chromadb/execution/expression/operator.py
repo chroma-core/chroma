@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Optional, List, Dict, Set, Any, Union
 
 import numpy as np
@@ -9,9 +8,10 @@ from chromadb.api.types import (
     IDs,
     Include,
     SparseVector,
+    TYPE_KEY,
+    SPARSE_VECTOR_TYPE_VALUE,
     normalize_embeddings,
     validate_embeddings,
-    validate_sparse_vector,
 )
 from chromadb.types import (
     Collection,
@@ -672,8 +672,14 @@ class Rank:
             query = knn_data["query"]
 
             if isinstance(query, dict):
-                # SparseVector case
-                validate_sparse_vector(query)
+                # SparseVector case - deserialize from transport format
+                if query.get(TYPE_KEY) == SPARSE_VECTOR_TYPE_VALUE:
+                    query = SparseVector.from_dict(query)
+                else:
+                    # Old format or invalid - try to construct directly
+                    raise ValueError(
+                        f"Expected dict with {TYPE_KEY}='{SPARSE_VECTOR_TYPE_VALUE}', got {query}"
+                    )
 
             elif isinstance(query, (list, tuple, np.ndarray)):
                 # Dense vector case - normalize then validate
@@ -897,6 +903,10 @@ class Rank:
         """Absolute value: abs(rank)"""
         return Abs(self)
 
+    def abs(self) -> "Abs":
+        """Absolute value builder: rank.abs()"""
+        return Abs(self)
+
     # Builder methods for functions
     def exp(self) -> "Exp":
         """Exponential: e^rank"""
@@ -1009,7 +1019,10 @@ class Knn(Rank):
     """KNN-based ranking
 
     Args:
-        query: The query vector for KNN search (dense, sparse, or numpy array)
+        query: The query for KNN search. Can be:
+               - A string (will be automatically embedded using the collection's embedding function)
+               - A dense vector (list or numpy array)
+               - A sparse vector (SparseVector dict)
         key: The embedding key to search against. Can be:
              - "#embedding" (default) - searches the main embedding field
              - A metadata field name (e.g., "my_custom_field") - searches that metadata field
@@ -1018,16 +1031,23 @@ class Knn(Rank):
         return_rank: If True, return the rank position (0, 1, 2, ...) instead of distance (default: False)
 
     Examples:
-        # Search main embeddings (equivalent forms)
+        # Search with string query (automatically embedded)
+        Knn(query="hello world")  # Will use collection's embedding function
+
+        # Search main embeddings with vectors (equivalent forms)
         Knn(query=[0.1, 0.2])  # Uses default key="#embedding"
         Knn(query=[0.1, 0.2], key=K.EMBEDDING)
         Knn(query=[0.1, 0.2], key="#embedding")
 
-        # Search sparse embeddings stored in metadata
+        # Search sparse embeddings stored in metadata with string
+        Knn(query="hello world", key="custom_embedding")  # Will use schema's embedding function
+
+        # Search sparse embeddings stored in metadata with vector
         Knn(query=my_vector, key="custom_embedding")  # Example: searches a metadata field
     """
 
     query: Union[
+        str,
         List[float],
         SparseVector,
         "NDArray[np.float32]",
@@ -1040,9 +1060,13 @@ class Knn(Rank):
     return_rank: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
-        # Convert numpy array to list if needed
+        # Convert to transport format
         query_value = self.query
-        if isinstance(query_value, np.ndarray):
+        if isinstance(query_value, SparseVector):
+            # Convert SparseVector dataclass to transport dict
+            query_value = query_value.to_dict()
+        elif isinstance(query_value, np.ndarray):
+            # Convert numpy array to list
             query_value = query_value.tolist()
 
         # Build result dict - only include non-default values to keep JSON clean

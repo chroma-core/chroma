@@ -5,29 +5,31 @@ use axum::{
     routing::{get, patch, post},
     Json, Router, ServiceExt,
 };
+use chroma_api_types::{ForkCollectionPayload, GetUserIdentityResponse, HeartbeatResponse};
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
     ExternalCollectionReadContext, MeteredFutureExt, ReadAction, StartRequest, WriteAction,
 };
 use chroma_system::System;
 use chroma_tracing::add_tracing_middleware;
-use chroma_types::{plan::SearchPayload, InternalSchema};
+use chroma_types::ForkCollectionResponse;
 use chroma_types::{
+    decode_embeddings, maybe_decode_update_embeddings, AddCollectionRecordsPayload,
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
     CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
-    CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTaskRequest, CreateTaskResponse, CreateTenantRequest,
-    CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, GetCollectionByCrnRequest, GetCollectionRequest, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
-    GetUserIdentityResponse, HeartbeatResponse, IncludeList, InternalCollectionConfiguration,
-    InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    RemoveTaskRequest, RemoveTaskResponse, SearchRequest, SearchResponse,
-    UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
-    UpdateMetadata, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsResponse,
+    CountRequest, CountResponse, CreateCollectionPayload, CreateCollectionRequest,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTaskRequest, CreateTaskResponse,
+    CreateTenantRequest, CreateTenantResponse, DeleteCollectionRecordsPayload,
+    DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    GetCollectionByCrnRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
+    GetRequest, GetRequestPayload, GetResponse, GetTenantRequest, GetTenantResponse,
+    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, QueryRequest,
+    QueryRequestPayload, QueryResponse, RemoveTaskRequest, RemoveTaskResponse, SearchRequest,
+    SearchRequestPayload, SearchResponse, UpdateCollectionPayload, UpdateCollectionRecordsPayload,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
 };
-use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -52,10 +54,6 @@ use uuid::Uuid;
 use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
-    base64_decode::{
-        decode_embeddings, maybe_decode_update_embeddings, EmbeddingsPayload,
-        UpdateEmbeddingsPayload,
-    },
     config::FrontendServerConfig,
     quota::{Action, QuotaEnforcer, QuotaPayload},
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
@@ -975,16 +973,6 @@ async fn count_collections(
     Ok(Json(server.frontend.count_collections(request).await?))
 }
 
-#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
-pub struct CreateCollectionPayload {
-    pub name: String,
-    pub schema: Option<InternalSchema>,
-    pub configuration: Option<CollectionConfiguration>,
-    pub metadata: Option<Metadata>,
-    #[serde(default)]
-    pub get_or_create: bool,
-}
-
 /// Creates a new collection under the specified database.
 #[utoipa::path(
     post,
@@ -1141,13 +1129,6 @@ async fn get_collection_by_crn(
     Ok(Json(collection))
 }
 
-#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
-pub struct UpdateCollectionPayload {
-    pub new_name: Option<String>,
-    pub new_metadata: Option<UpdateMetadata>,
-    pub new_configuration: Option<UpdateCollectionConfiguration>,
-}
-
 /// Updates an existing collection's name or metadata.
 #[utoipa::path(
     put,
@@ -1268,11 +1249,6 @@ async fn delete_collection(
     Ok(Json(UpdateCollectionResponse {}))
 }
 
-#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
-pub struct ForkCollectionPayload {
-    pub new_name: String,
-}
-
 /// Forks an existing collection.
 #[utoipa::path(
     post,
@@ -1349,33 +1325,6 @@ async fn fork_collection(
             .meter(metering_context_container)
             .await?,
     ))
-}
-
-#[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
-pub struct AddCollectionRecordsPayload {
-    ids: Vec<String>,
-    embeddings: EmbeddingsPayload,
-    documents: Option<Vec<Option<String>>>,
-    uris: Option<Vec<Option<String>>>,
-    metadatas: Option<Vec<Option<Metadata>>>,
-}
-
-impl AddCollectionRecordsPayload {
-    pub fn new(
-        ids: Vec<String>,
-        embeddings: Vec<Vec<f32>>,
-        documents: Option<Vec<Option<String>>>,
-        uris: Option<Vec<Option<String>>>,
-        metadatas: Option<Vec<Option<Metadata>>>,
-    ) -> Self {
-        Self {
-            ids,
-            embeddings: EmbeddingsPayload::JsonArrays(embeddings),
-            documents,
-            uris,
-            metadatas,
-        }
-    }
 }
 
 /// Adds records to a collection.
@@ -1475,15 +1424,6 @@ async fn collection_add(
     Ok((StatusCode::CREATED, Json(res)))
 }
 
-#[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
-pub struct UpdateCollectionRecordsPayload {
-    ids: Vec<String>,
-    embeddings: Option<UpdateEmbeddingsPayload>,
-    documents: Option<Vec<Option<String>>>,
-    uris: Option<Vec<Option<String>>>,
-    metadatas: Option<Vec<Option<UpdateMetadata>>>,
-}
-
 /// Updates records in a collection by ID.
 #[utoipa::path(
     post,
@@ -1580,15 +1520,6 @@ async fn collection_update(
             .meter(metering_context_container)
             .await?,
     ))
-}
-
-#[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
-pub struct UpsertCollectionRecordsPayload {
-    ids: Vec<String>,
-    embeddings: EmbeddingsPayload,
-    documents: Option<Vec<Option<String>>>,
-    uris: Option<Vec<Option<String>>>,
-    metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
 /// Upserts records in a collection (create if not exists, otherwise update).
@@ -1692,13 +1623,6 @@ async fn collection_upsert(
             .meter(metering_context_container)
             .await?,
     ))
-}
-
-#[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
-pub struct DeleteCollectionRecordsPayload {
-    ids: Option<Vec<String>>,
-    #[serde(flatten)]
-    where_fields: RawWhereFields,
 }
 
 /// Deletes records in a collection. Can filter by IDs or metadata.
@@ -1867,17 +1791,6 @@ async fn collection_count(
     ))
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
-pub struct GetRequestPayload {
-    ids: Option<Vec<String>>,
-    #[serde(flatten)]
-    where_fields: RawWhereFields,
-    limit: Option<u32>,
-    offset: Option<u32>,
-    #[serde(default = "IncludeList::default_get")]
-    include: IncludeList,
-}
-
 /// Retrieves records from a collection by ID or metadata filter.
 #[utoipa::path(
     post,
@@ -1997,17 +1910,6 @@ async fn collection_get(
     )
     .await?;
     Ok(Json(res))
-}
-
-#[derive(Deserialize, Debug, Clone, Serialize, ToSchema)]
-pub struct QueryRequestPayload {
-    ids: Option<Vec<String>>,
-    #[serde(flatten)]
-    where_fields: RawWhereFields,
-    query_embeddings: Vec<Vec<f32>>,
-    n_results: Option<u32>,
-    #[serde(default = "IncludeList::default_query")]
-    include: IncludeList,
 }
 
 /// Query a collection in a variety of ways, including vector search, metadata filtering, and full-text search
@@ -2132,11 +2034,6 @@ async fn collection_query(
     .await?;
 
     Ok(Json(res))
-}
-
-#[derive(Debug, Clone, Deserialize, ToSchema)]
-pub struct SearchRequestPayload {
-    searches: Vec<SearchPayload>,
 }
 
 /// Search records from a collection with hybrid criterias.

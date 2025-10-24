@@ -20,7 +20,7 @@ use chroma_index::sparse::types::DEFAULT_BLOCK_SIZE;
 use chroma_index::sparse::writer::SparseFlusher;
 use chroma_index::sparse::writer::SparseWriter;
 use chroma_types::DatabaseUuid;
-use chroma_types::InternalSchema;
+use chroma_types::Schema;
 use chroma_types::SegmentType;
 use chroma_types::BOOL_METADATA;
 use chroma_types::F32_METADATA;
@@ -576,8 +576,8 @@ impl<'me> MetadataSegmentWriter<'me> {
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized: &MaterializeLogsResult,
-        schema: Option<InternalSchema>,
-    ) -> Result<Option<InternalSchema>, ApplyMaterializedLogError> {
+        schema: Option<Schema>,
+    ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
         let mut count = 0u64;
         let mut schema = schema;
         let mut schema_modified = false;

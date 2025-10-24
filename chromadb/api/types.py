@@ -39,7 +39,7 @@ from chromadb.base_types import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from chromadb.execution.expression.operator import Key
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -63,8 +63,6 @@ __all__ = [
     "SearchResult",
     "SearchResultRow",
     "SparseVector",
-    "is_valid_sparse_vector",
-    "validate_sparse_vector",
     # Index Configuration Types
     "FtsIndexConfig",
     "HnswIndexConfig",
@@ -76,7 +74,7 @@ __all__ = [
     "FloatInvertedIndexConfig",
     "BoolInvertedIndexConfig",
     "IndexConfig",
-    # New Schema System (mirrors Rust InternalSchema)
+    # New Schema System (mirrors Rust Schema)
     "Schema",
     "ValueTypes",
     "StringValueType",
@@ -112,6 +110,8 @@ __all__ = [
     "SPANN_INDEX_NAME",
     "DOCUMENT_KEY",
     "EMBEDDING_KEY",
+    "TYPE_KEY",
+    "SPARSE_VECTOR_TYPE_VALUE",
     # Space type
     "Space",
     # Embedding Functions
@@ -119,6 +119,10 @@ __all__ = [
     "SparseEmbeddingFunction",
     "validate_embedding_function",
     "validate_sparse_embedding_function",
+    # Sparse vectors
+    "SparseVector",
+    "SparseVectors",
+    "validate_sparse_vectors",
 ]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
@@ -146,8 +150,7 @@ PyEmbedding = PyVector
 PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
 Embeddings = List[Embedding]
-SparseEmbedding = SparseVector
-SparseEmbeddings = List[SparseEmbedding]
+SparseVectors = List[SparseVector]
 
 
 @lru_cache
@@ -248,6 +251,55 @@ Metadatas = List[Metadata]
 CollectionMetadata = Dict[str, Any]
 UpdateCollectionMetadata = UpdateMetadata
 
+
+def normalize_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:
+    """
+    Normalize metadata by converting dict-format sparse vectors to SparseVector instances.
+
+    Accepts:
+    - SparseVector instances (pass through)
+    - Dict with #type='sparse_vector' (convert to SparseVector)
+    - Other primitive types (pass through)
+
+    Returns: Metadata with all sparse vectors as SparseVector instances
+
+    Note: This allows users to provide sparse vectors in dict format for convenience.
+    The dict format is automatically converted to SparseVector instances, which are
+    then validated by SparseVector.__post_init__.
+    """
+    if metadata is None:
+        return metadata
+
+    normalized = {}
+    for key, value in metadata.items():
+        if isinstance(value, dict) and value.get(TYPE_KEY) == SPARSE_VECTOR_TYPE_VALUE:
+            # Convert dict format to SparseVector (validates via __post_init__)
+            normalized[key] = SparseVector.from_dict(value)
+        else:
+            # Pass through (including existing SparseVector instances)
+            normalized[key] = value
+
+    return normalized
+
+
+def normalize_metadatas(
+    metadatas: Optional[OneOrMany[Metadata]],
+) -> Optional[List[Optional[Metadata]]]:
+    """
+    Normalize metadatas list, converting dict-format sparse vectors to instances.
+
+    Handles both single metadata dict and list of metadata dicts.
+    Converts any dict-format sparse vectors to SparseVector instances.
+
+    Note: Individual items can be None (e.g., when embeddings are provided without metadata).
+    """
+    unpacked = maybe_cast_one_to_many(metadatas)
+    if unpacked is None:
+        return None
+
+    return [normalize_metadata(m) for m in unpacked]
+
+
 # Documents
 Document = str
 Documents = List[Document]
@@ -335,6 +387,11 @@ def normalize_insert_record_set(
 ) -> InsertRecordSet:
     """
     Unpacks and normalizes the fields of an InsertRecordSet.
+
+    Normalization includes:
+    - Converting various embedding formats to List[np.ndarray]
+    - Converting dict-format sparse vectors to SparseVector instances
+    - Converting single values to lists where appropriate
     """
     base_record_set = normalize_base_record_set(
         embeddings=embeddings, documents=documents, images=images, uris=uris
@@ -342,7 +399,7 @@ def normalize_insert_record_set(
 
     return InsertRecordSet(
         ids=cast(IDs, maybe_cast_one_to_many(ids)),
-        metadatas=maybe_cast_one_to_many(metadatas),
+        metadatas=normalize_metadatas(metadatas),  # type: ignore[typeddict-item]
         embeddings=base_record_set["embeddings"],
         documents=base_record_set["documents"],
         images=base_record_set["images"],
@@ -724,7 +781,7 @@ class EmbeddingFunction(Protocol[D]):
     def embed_with_retries(
         self, input: D, **retry_kwargs: Dict[str, Any]
     ) -> Embeddings:
-        return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))
+        return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))  # type: ignore[call-overload]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         """
@@ -924,69 +981,6 @@ def validate_ids(ids: IDs) -> IDs:
     return ids
 
 
-def is_valid_sparse_vector(value: Any) -> bool:
-    """Check if a value looks like a SparseVector (has indices and values keys)."""
-    return isinstance(value, dict) and "indices" in value and "values" in value
-
-
-def validate_sparse_vector(value: Any) -> None:
-    """Validate that a value is a properly formed SparseVector.
-
-    Args:
-        value: The value to validate as a SparseVector
-
-    Raises:
-        ValueError: If the value is not a valid SparseVector
-    """
-    if not isinstance(value, dict):
-        raise ValueError(
-            f"Expected SparseVector to be a dict, got {type(value).__name__}"
-        )
-
-    if "indices" not in value or "values" not in value:
-        raise ValueError("SparseVector must have 'indices' and 'values' keys")
-
-    indices = value.get("indices")
-    values = value.get("values")
-
-    # Validate indices
-    if not isinstance(indices, list):
-        raise ValueError(
-            f"Expected SparseVector indices to be a list, got {type(indices).__name__}"
-        )
-
-    # Validate values
-    if not isinstance(values, list):
-        raise ValueError(
-            f"Expected SparseVector values to be a list, got {type(values).__name__}"
-        )
-
-    # Check lengths match
-    if len(indices) != len(values):
-        raise ValueError(
-            f"SparseVector indices and values must have the same length, "
-            f"got {len(indices)} indices and {len(values)} values"
-        )
-
-    # Validate each index
-    for i, idx in enumerate(indices):
-        if not isinstance(idx, int):
-            raise ValueError(
-                f"SparseVector indices must be integers, got {type(idx).__name__} at position {i}"
-            )
-        if idx < 0:
-            raise ValueError(
-                f"SparseVector indices must be non-negative, got {idx} at position {i}"
-            )
-
-    # Validate each value
-    for i, val in enumerate(values):
-        if not isinstance(val, (int, float)):
-            raise ValueError(
-                f"SparseVector values must be numbers, got {type(val).__name__} at position {i}"
-            )
-
-
 def validate_metadata(metadata: Metadata) -> Metadata:
     """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats, bools, or SparseVectors"""
     if not isinstance(metadata, dict) and metadata is not None:
@@ -1008,12 +1002,9 @@ def validate_metadata(metadata: Metadata) -> Metadata:
             raise TypeError(
                 f"Expected metadata key to be a str, got {key} which is a {type(key).__name__}"
             )
-        # Check if value is a SparseVector
-        if is_valid_sparse_vector(value):
-            try:
-                validate_sparse_vector(value)
-            except ValueError as e:
-                raise ValueError(f"Invalid SparseVector for key '{key}': {e}")
+        # Check if value is a SparseVector (validation happens in __post_init__)
+        if isinstance(value, SparseVector):
+            pass  # Already validated in SparseVector.__post_init__
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
         elif not isinstance(value, bool) and not isinstance(
             value, (str, int, float, type(None))
@@ -1037,12 +1028,9 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
     for key, value in metadata.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
-        # Check if value is a SparseVector
-        if is_valid_sparse_vector(value):
-            try:
-                validate_sparse_vector(value)
-            except ValueError as e:
-                raise ValueError(f"Invalid SparseVector for key '{key}': {e}")
+        # Check if value is a SparseVector (validation happens in __post_init__)
+        if isinstance(value, SparseVector):
+            pass  # Already validated in SparseVector.__post_init__
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
         elif not isinstance(value, bool) and not isinstance(
             value, (str, int, float, type(None))
@@ -1051,6 +1039,50 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
                 f"Expected metadata value to be a str, int, float, bool, SparseVector, or None, got {value}"
             )
     return metadata
+
+
+def serialize_metadata(metadata: Optional[Metadata]) -> Optional[Dict[str, Any]]:
+    """Serialize metadata for transport, converting SparseVector dataclass instances to dicts.
+
+    Args:
+        metadata: Metadata dictionary that may contain SparseVector instances
+
+    Returns:
+        Metadata dictionary with SparseVector instances converted to transport format
+    """
+    if metadata is None:
+        return None
+
+    result: Dict[str, Any] = {}
+    for key, value in metadata.items():
+        if isinstance(value, SparseVector):
+            result[key] = value.to_dict()
+        else:
+            result[key] = value
+    return result
+
+
+def deserialize_metadata(
+    metadata: Optional[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """Deserialize metadata from transport, converting dicts with #type=sparse_vector to dataclass instances.
+
+    Args:
+        metadata: Metadata dictionary from transport that may contain serialized SparseVectors
+
+    Returns:
+        Metadata dictionary with serialized SparseVectors converted to dataclass instances
+    """
+    if metadata is None:
+        return None
+
+    result: Dict[str, Any] = {}
+    for key, value in metadata.items():
+        if isinstance(value, dict) and value.get(TYPE_KEY) == SPARSE_VECTOR_TYPE_VALUE:
+            result[key] = SparseVector.from_dict(value)
+        else:
+            result[key] = value
+    return result
 
 
 def validate_metadatas(metadatas: Metadatas) -> Metadatas:
@@ -1267,19 +1299,33 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     return embeddings
 
 
-def validate_sparse_embeddings(embeddings: SparseEmbeddings) -> SparseEmbeddings:
-    """Validates sparse embeddings to ensure it is a list of sparse vectors"""
-    if not isinstance(embeddings, list):
+def validate_sparse_vectors(vectors: SparseVectors) -> SparseVectors:
+    """Validates sparse vectors to ensure it is a non-empty list of SparseVector instances.
+
+    This function validates the structure and types of sparse vectors returned by
+    SparseEmbeddingFunction implementations. It ensures:
+    - Vectors is a list
+    - List is non-empty
+    - All items are SparseVector instances
+
+    Note: Individual SparseVector validation (sorted indices, non-negative values, etc.)
+    happens automatically in SparseVector.__post_init__ when each instance is created.
+    This function only validates the list structure and instance types.
+    """
+    if not isinstance(vectors, list):
         raise ValueError(
-            f"Expected sparse embeddings to be a list, got {type(embeddings).__name__}"
+            f"Expected sparse vectors to be a list, got {type(vectors).__name__}"
         )
-    if len(embeddings) == 0:
+    if len(vectors) == 0:
         raise ValueError(
-            f"Expected sparse embeddings to be a non-empty list, got {len(embeddings)} sparse embeddings"
+            f"Expected sparse vectors to be a non-empty list, got {len(vectors)} sparse vectors"
         )
-    for embedding in embeddings:
-        validate_sparse_vector(embedding)
-    return embeddings
+    for i, vector in enumerate(vectors):
+        if not isinstance(vector, SparseVector):
+            raise ValueError(
+                f"Expected SparseVector instance at position {i}, got {type(vector).__name__}"
+            )
+    return vectors
 
 
 def validate_documents(documents: Documents, nullable: bool = False) -> None:
@@ -1341,7 +1387,7 @@ def convert_list_embeddings_to_np(embeddings: PyEmbeddings) -> Embeddings:
 @runtime_checkable
 class SparseEmbeddingFunction(Protocol[D]):
     """
-    A protocol for sparse embedding functions. To implement a new sparse embedding function,
+    A protocol for sparse vector functions. To implement a new sparse vector function,
     you need to implement the following methods at minimum:
     - __call__
 
@@ -1353,10 +1399,10 @@ class SparseEmbeddingFunction(Protocol[D]):
     """
 
     @abstractmethod
-    def __call__(self, input: D) -> SparseEmbeddings:
+    def __call__(self, input: D) -> SparseVectors:
         ...
 
-    def embed_query(self, input: D) -> SparseEmbeddings:
+    def embed_query(self, input: D) -> SparseVectors:
         """
         Get the embeddings for a query input.
         This method is optional, and if not implemented, the default behavior is to call __call__.
@@ -1368,17 +1414,17 @@ class SparseEmbeddingFunction(Protocol[D]):
         # Raise an exception if __call__ is not defined since it is expected to be defined
         call = getattr(cls, "__call__")
 
-        def __call__(self: SparseEmbeddingFunction[D], input: D) -> SparseEmbeddings:
+        def __call__(self: SparseEmbeddingFunction[D], input: D) -> SparseVectors:
             result = call(self, input)
             assert result is not None
-            return validate_sparse_embeddings(cast(SparseEmbeddings, result))
+            return validate_sparse_vectors(cast(SparseVectors, result))
 
         setattr(cls, "__call__", __call__)
 
     def embed_with_retries(
         self, input: D, **retry_kwargs: Dict[str, Any]
-    ) -> SparseEmbeddings:
-        return cast(SparseEmbeddings, retry(**retry_kwargs)(self.__call__)(input))
+    ) -> SparseVectors:
+        return cast(SparseVectors, retry(**retry_kwargs)(self.__call__)(input))  # type: ignore[call-overload]
 
     @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -1431,11 +1477,11 @@ class SparseEmbeddingFunction(Protocol[D]):
 
 
 def validate_sparse_embedding_function(
-    sparse_embedding_function: SparseEmbeddingFunction[Embeddable],
+    sparse_vector_function: SparseEmbeddingFunction[Embeddable],
 ) -> None:
-    """Validate that a sparse embedding function conforms to the SparseEmbeddingFunction protocol."""
+    """Validate that a sparse vector function conforms to the SparseEmbeddingFunction protocol."""
     function_signature = signature(
-        sparse_embedding_function.__class__.__call__
+        sparse_vector_function.__class__.__call__
     ).parameters.keys()
     protocol_signature = signature(SparseEmbeddingFunction.__call__).parameters.keys()
 
@@ -1484,9 +1530,33 @@ class VectorIndexConfig(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
     space: Optional[Space] = None
     embedding_function: Optional[Any] = DefaultEmbeddingFunction()
-    source_key: Optional[str] = None  # key to source the vector from
+    source_key: Optional[str] = None  # key to source the vector from (accepts str or Key)
     hnsw: Optional[HnswIndexConfig] = None
     spann: Optional[SpannIndexConfig] = None
+
+    @field_validator("source_key", mode="before")
+    @classmethod
+    def validate_source_key_field(cls, v: Any) -> Optional[str]:
+        """Convert Key objects to strings automatically. Accepts both str and Key types."""
+        if v is None:
+            return None
+        # Import Key at runtime to avoid circular import
+        from chromadb.execution.expression.operator import Key as KeyType
+        if isinstance(v, KeyType):
+            v = v.name  # Extract string from Key
+        elif isinstance(v, str):
+            pass  # Already a string
+        else:
+            raise ValueError(f"source_key must be str or Key, got {type(v).__name__}")
+
+        # Validate: only #document is allowed if key starts with #
+        if v.startswith("#") and v != "#document":
+            raise ValueError(
+                "source_key cannot begin with '#'. "
+                "The only valid key starting with '#' is Key.DOCUMENT or '#document'."
+            )
+
+        return v  # type: ignore[no-any-return]
 
     @field_validator("embedding_function", mode="before")
     @classmethod
@@ -1507,16 +1577,41 @@ class SparseVectorIndexConfig(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
     # TODO(Sanket): Change this to the appropriate sparse ef and use a default here.
     embedding_function: Optional[Any] = None
-    source_key: Optional[str] = None  # key to source the sparse vector from
+    source_key: Optional[str] = None  # key to source the sparse vector from (accepts str or Key)
+    bm25: Optional[bool] = None
+
+    @field_validator("source_key", mode="before")
+    @classmethod
+    def validate_source_key_field(cls, v: Any) -> Optional[str]:
+        """Convert Key objects to strings automatically. Accepts both str and Key types."""
+        if v is None:
+            return None
+        # Import Key at runtime to avoid circular import
+        from chromadb.execution.expression.operator import Key as KeyType
+        if isinstance(v, KeyType):
+            v = v.name  # Extract string from Key
+        elif isinstance(v, str):
+            pass  # Already a string
+        else:
+            raise ValueError(f"source_key must be str or Key, got {type(v).__name__}")
+
+        # Validate: only #document is allowed if key starts with #
+        if v.startswith("#") and v != "#document":
+            raise ValueError(
+                "source_key cannot begin with '#'. "
+                "The only valid key starting with '#' is Key.DOCUMENT or '#document'."
+            )
+
+        return v  # type: ignore[no-any-return]
 
     @field_validator("embedding_function", mode="before")
     @classmethod
     def validate_embedding_function_field(cls, v: Any) -> Any:
-        # Validate sparse embedding function for sparse vector index
+        # Validate sparse vector function for sparse vector index
         if v is None:
             return v
         if callable(v):
-            # Use the sparse embedding function validation
+            # Use the sparse vector function validation
             validate_sparse_embedding_function(v)
             return v
         raise ValueError(
@@ -1582,6 +1677,10 @@ SPANN_INDEX_NAME: Final[str] = "spann_index"
 # Special key constants
 DOCUMENT_KEY: Final[str] = "#document"
 EMBEDDING_KEY: Final[str] = "#embedding"
+TYPE_KEY: Final[str] = "#type"
+
+# Type value constants
+SPARSE_VECTOR_TYPE_VALUE: Final[str] = "sparse_vector"
 
 
 # Index Type Classes
@@ -1688,9 +1787,14 @@ class Schema:
         self._initialize_keys()
 
     def create_index(
-        self, config: Optional[IndexConfig] = None, key: Optional[str] = None
+        self, config: Optional[IndexConfig] = None, key: Optional[Union[str, "Key"]] = None
     ) -> "Schema":
         """Create an index configuration."""
+        # Convert Key to string if provided
+        from chromadb.execution.expression.operator import Key as KeyType
+        if key is not None and isinstance(key, KeyType):
+            key = key.name
+
         # Disallow config=None and key=None - too dangerous
         if config is None and key is None:
             raise ValueError(
@@ -1700,7 +1804,14 @@ class Schema:
         # Disallow using special internal keys (#embedding, #document)
         if key is not None and key in (EMBEDDING_KEY, DOCUMENT_KEY):
             raise ValueError(
-                f"Cannot create index on special key '{key}'. These keys are managed automatically by the system."
+                f"Cannot create index on special key '{key}'. These keys are managed automatically by the system. Invoke create_index(VectorIndexConfig(...)) without specifying a key to configure the vector index globally."
+            )
+
+        # Disallow any key starting with #
+        if key is not None and key.startswith("#"):
+            raise ValueError(
+                "key cannot begin with '#'. "
+                "Keys starting with '#' are reserved for system use."
             )
 
         # Special handling for vector index
@@ -1758,9 +1869,14 @@ class Schema:
         return self
 
     def delete_index(
-        self, config: Optional[IndexConfig] = None, key: Optional[str] = None
+        self, config: Optional[IndexConfig] = None, key: Optional[Union[str, "Key"]] = None
     ) -> "Schema":
         """Disable an index configuration (set enabled=False)."""
+        # Convert Key to string if provided
+        from chromadb.execution.expression.operator import Key as KeyType
+        if key is not None and isinstance(key, KeyType):
+            key = key.name
+
         # Case 1: Both config and key are None - fail the request
         if config is None and key is None:
             raise ValueError(
@@ -1771,6 +1887,13 @@ class Schema:
         if key is not None and key in (EMBEDDING_KEY, DOCUMENT_KEY):
             raise ValueError(
                 f"Cannot delete index on special key '{key}'. These keys are managed automatically by the system."
+            )
+
+        # Disallow any key starting with #
+        if key is not None and key.startswith("#"):
+            raise ValueError(
+                "key cannot begin with '#'. "
+                "Keys starting with '#' are reserved for system use."
             )
 
         # TODO: Consider removing these checks in the future to allow disabling vector, FTS, and sparse vector indexes
@@ -1784,9 +1907,7 @@ class Schema:
 
         # Temporarily disallow deleting sparse vector index (both globally and per-key)
         if isinstance(config, SparseVectorIndexConfig):
-            raise ValueError(
-                "Deleting sparse vector index is not currently supported."
-            )
+            raise ValueError("Deleting sparse vector index is not currently supported.")
 
         # TODO: Consider removing this check in the future to allow disabling all indexes for a key
         # Disallow disabling all index types for a key (config=None, key="some_key")
@@ -2136,7 +2257,9 @@ class Schema:
 
         # Serialize each value type if it exists
         if value_types.string is not None:
-            result[STRING_VALUE_NAME] = self._serialize_string_value_type(value_types.string)
+            result[STRING_VALUE_NAME] = self._serialize_string_value_type(
+                value_types.string
+            )
 
         if value_types.float_list is not None:
             result[FLOAT_LIST_VALUE_NAME] = self._serialize_float_list_value_type(
@@ -2149,13 +2272,19 @@ class Schema:
             )
 
         if value_types.int_value is not None:
-            result[INT_VALUE_NAME] = self._serialize_int_value_type(value_types.int_value)
+            result[INT_VALUE_NAME] = self._serialize_int_value_type(
+                value_types.int_value
+            )
 
         if value_types.float_value is not None:
-            result[FLOAT_VALUE_NAME] = self._serialize_float_value_type(value_types.float_value)
+            result[FLOAT_VALUE_NAME] = self._serialize_float_value_type(
+                value_types.float_value
+            )
 
         if value_types.boolean is not None:
-            result[BOOL_VALUE_NAME] = self._serialize_bool_value_type(value_types.boolean)
+            result[BOOL_VALUE_NAME] = self._serialize_bool_value_type(
+                value_types.boolean
+            )
 
         return result
 
@@ -2293,7 +2422,7 @@ class Schema:
             if hasattr(config, "embedding_function"):
                 embedding_func = getattr(config, "embedding_function", None)
                 if embedding_func is None:
-                    config_dict["embedding_function"] = {"type": "legacy"}
+                    config_dict["embedding_function"] = {"type": "unknown"}
                 else:
                     embedding_func = cast(SparseEmbeddingFunction, embedding_func)  # type: ignore
                     config_dict["embedding_function"] = {
@@ -2326,7 +2455,9 @@ class Schema:
             )
 
         if INT_VALUE_NAME in value_types_json:
-            result.int_value = cls._deserialize_int_value_type(value_types_json[INT_VALUE_NAME])
+            result.int_value = cls._deserialize_int_value_type(
+                value_types_json[INT_VALUE_NAME]
+            )
 
         if FLOAT_VALUE_NAME in value_types_json:
             result.float_value = cls._deserialize_float_value_type(
@@ -2334,7 +2465,9 @@ class Schema:
             )
 
         if BOOL_VALUE_NAME in value_types_json:
-            result.boolean = cls._deserialize_bool_value_type(value_types_json[BOOL_VALUE_NAME])
+            result.boolean = cls._deserialize_bool_value_type(
+                value_types_json[BOOL_VALUE_NAME]
+            )
 
         return result
 
@@ -2428,7 +2561,10 @@ class Schema:
             # Handle embedding function deserialization
             if "embedding_function" in config_data:
                 ef_config = config_data["embedding_function"]
-                if ef_config.get("type") == "legacy":
+                if (
+                    ef_config.get("type") == "unknown"
+                    or ef_config.get("type") == "legacy"
+                ):
                     config_data["embedding_function"] = None
                 else:
                     try:
