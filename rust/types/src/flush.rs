@@ -1,8 +1,7 @@
-use super::{CollectionUuid, ConversionError, TaskUuid};
+use super::{AttachedFunctionUuid, CollectionUuid, ConversionError};
 use crate::{
     chroma_proto::{
-        FilePaths, FlushCollectionCompactionAndTaskResponse, FlushCollectionCompactionResponse,
-        FlushSegmentCompactionInfo,
+        FilePaths, FlushCollectionCompactionAndAttachedFunctionResponse, FlushSegmentCompactionInfo,
     },
     SegmentUuid,
 };
@@ -18,25 +17,25 @@ pub struct SegmentFlushInfo {
 }
 
 #[derive(Debug, Clone)]
-pub struct TaskUpdateInfo {
-    pub task_id: TaskUuid,
-    pub task_run_nonce: uuid::Uuid,
+pub struct AttachedFunctionUpdateInfo {
+    pub attached_function_id: AttachedFunctionUuid,
+    pub attached_function_run_nonce: uuid::Uuid,
     pub completion_offset: u64,
 }
 
 #[derive(Error, Debug)]
-pub enum FinishTaskError {
-    #[error("Failed to finish task: {0}")]
-    FailedToFinishTask(#[from] tonic::Status),
-    #[error("Task not found")]
-    TaskNotFound,
+pub enum FinishAttachedFunctionError {
+    #[error("Failed to finish attached function: {0}")]
+    FailedToFinishAttachedFunction(#[from] tonic::Status),
+    #[error("Attached function not found")]
+    AttachedFunctionNotFound,
 }
 
-impl ChromaError for FinishTaskError {
+impl ChromaError for FinishAttachedFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            FinishTaskError::FailedToFinishTask(_) => ErrorCodes::Internal,
-            FinishTaskError::TaskNotFound => ErrorCodes::NotFound,
+            FinishAttachedFunctionError::FailedToFinishAttachedFunction(_) => ErrorCodes::Internal,
+            FinishAttachedFunctionError::AttachedFunctionNotFound => ErrorCodes::NotFound,
         }
     }
 }
@@ -54,24 +53,26 @@ impl ChromaError for GetMinCompletionOffsetError {
 }
 
 #[derive(Error, Debug)]
-pub enum AdvanceTaskError {
-    #[error("Failed to advance task: {0}")]
-    FailedToAdvanceTask(#[from] tonic::Status),
-    #[error("Task not found - nonce mismatch or task doesn't exist")]
-    TaskNotFound,
+pub enum AdvanceAttachedFunctionError {
+    #[error("Failed to advance attached function: {0}")]
+    FailedToAdvanceAttachedFunction(#[from] tonic::Status),
+    #[error("Attached function not found - nonce mismatch or attached function doesn't exist")]
+    AttachedFunctionNotFound,
 }
 
-impl ChromaError for AdvanceTaskError {
+impl ChromaError for AdvanceAttachedFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            AdvanceTaskError::FailedToAdvanceTask(_) => ErrorCodes::Internal,
-            AdvanceTaskError::TaskNotFound => ErrorCodes::NotFound,
+            AdvanceAttachedFunctionError::FailedToAdvanceAttachedFunction(_) => {
+                ErrorCodes::Internal
+            }
+            AdvanceAttachedFunctionError::AttachedFunctionNotFound => ErrorCodes::NotFound,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct AdvanceTaskResponse {
+pub struct AdvanceAttachedFunctionResponse {
     pub next_nonce: uuid::Uuid,
     pub next_run: std::time::SystemTime,
     pub completion_offset: u64,
@@ -109,14 +110,14 @@ pub struct FlushCompactionResponse {
 }
 
 #[derive(Debug)]
-pub struct FlushCompactionAndTaskResponse {
+pub struct FlushCompactionAndAttachedFunctionResponse {
     pub collection_id: CollectionUuid,
     pub collection_version: i32,
     pub last_compaction_time: i64,
     // Completion offset updated during register
     pub completion_offset: u64,
     // NOTE: next_nonce and next_run are no longer returned
-    // They were already set by PrepareTask via advance_task()
+    // They were already set by PrepareAttachedFunction via advance_attached_function()
 }
 
 impl FlushCompactionResponse {
@@ -133,10 +134,12 @@ impl FlushCompactionResponse {
     }
 }
 
-impl TryFrom<FlushCollectionCompactionResponse> for FlushCompactionResponse {
+impl TryFrom<FlushCollectionCompactionAndAttachedFunctionResponse> for FlushCompactionResponse {
     type Error = FlushCompactionResponseConversionError;
 
-    fn try_from(value: FlushCollectionCompactionResponse) -> Result<Self, Self::Error> {
+    fn try_from(
+        value: FlushCollectionCompactionAndAttachedFunctionResponse,
+    ) -> Result<Self, Self::Error> {
         let id = Uuid::parse_str(&value.collection_id)
             .map_err(|_| FlushCompactionResponseConversionError::InvalidUuid)?;
         Ok(FlushCompactionResponse {
@@ -147,18 +150,22 @@ impl TryFrom<FlushCollectionCompactionResponse> for FlushCompactionResponse {
     }
 }
 
-impl TryFrom<FlushCollectionCompactionAndTaskResponse> for FlushCompactionAndTaskResponse {
+impl TryFrom<FlushCollectionCompactionAndAttachedFunctionResponse>
+    for FlushCompactionAndAttachedFunctionResponse
+{
     type Error = FlushCompactionResponseConversionError;
 
-    fn try_from(value: FlushCollectionCompactionAndTaskResponse) -> Result<Self, Self::Error> {
+    fn try_from(
+        value: FlushCollectionCompactionAndAttachedFunctionResponse,
+    ) -> Result<Self, Self::Error> {
         let id = Uuid::parse_str(&value.collection_id)
             .map_err(|_| FlushCompactionResponseConversionError::InvalidUuid)?;
 
         // Note: next_nonce and next_run are no longer populated by the server
-        // They were already set by PrepareTask via advance_task()
+        // They were already set by PrepareAttachedFunction via advance_attached_function()
         // We only use completion_offset from the response
 
-        Ok(FlushCompactionAndTaskResponse {
+        Ok(FlushCompactionAndAttachedFunctionResponse {
             collection_id: CollectionUuid(id),
             collection_version: value.collection_version,
             last_compaction_time: value.last_compaction_time,
@@ -173,8 +180,8 @@ pub enum FlushCompactionResponseConversionError {
     DecodeError(#[from] ConversionError),
     #[error("Invalid collection id, valid UUID required")]
     InvalidUuid,
-    #[error("Invalid task nonce, valid UUID required")]
-    InvalidTaskNonce,
+    #[error("Invalid attached function nonce, valid UUID required")]
+    InvalidAttachedFunctionNonce,
     #[error("Missing next_run timestamp")]
     MissingNextRun,
     #[error("Invalid timestamp format")]
@@ -185,7 +192,9 @@ impl ChromaError for FlushCompactionResponseConversionError {
     fn code(&self) -> ErrorCodes {
         match self {
             FlushCompactionResponseConversionError::InvalidUuid => ErrorCodes::InvalidArgument,
-            FlushCompactionResponseConversionError::InvalidTaskNonce => ErrorCodes::InvalidArgument,
+            FlushCompactionResponseConversionError::InvalidAttachedFunctionNonce => {
+                ErrorCodes::InvalidArgument
+            }
             FlushCompactionResponseConversionError::MissingNextRun => ErrorCodes::InvalidArgument,
             FlushCompactionResponseConversionError::InvalidTimestamp => ErrorCodes::InvalidArgument,
             FlushCompactionResponseConversionError::DecodeError(e) => e.code(),

@@ -6,8 +6,8 @@ use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
-use chroma_types::chroma_proto::AdvanceTaskRequest;
-use chroma_types::chroma_proto::FinishTaskRequest;
+use chroma_types::chroma_proto::AdvanceAttachedFunctionRequest;
+use chroma_types::chroma_proto::FinishAttachedFunctionRequest;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
     chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments,
@@ -23,12 +23,13 @@ use chroma_types::{
     UpdateTenantResponse, VectorIndexConfiguration,
 };
 use chroma_types::{
-    AdvanceTaskError, AdvanceTaskResponse, BatchGetCollectionSoftDeleteStatusError,
+    AdvanceAttachedFunctionError, AdvanceAttachedFunctionResponse, AttachedFunctionUpdateInfo,
+    AttachedFunctionUuid, BatchGetCollectionSoftDeleteStatusError,
     BatchGetCollectionVersionFilePathsError, Collection, CollectionConversionError, CollectionUuid,
-    CountForksError, DatabaseUuid, FinishDatabaseDeletionError, FinishTaskError,
-    FlushCompactionAndTaskResponse, FlushCompactionResponse,
+    CountForksError, DatabaseUuid, FinishAttachedFunctionError, FinishDatabaseDeletionError,
+    FlushCompactionAndAttachedFunctionResponse, FlushCompactionResponse,
     FlushCompactionResponseConversionError, ForkCollectionError, Schema, SchemaError, Segment,
-    SegmentConversionError, SegmentScope, TaskUpdateInfo, TaskUuid, Tenant,
+    SegmentConversionError, SegmentScope, Tenant,
 };
 use prost_types;
 use std::collections::HashMap;
@@ -631,7 +632,7 @@ impl SysDb {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn flush_compaction_and_task(
+    pub async fn flush_compaction_and_attached_function(
         &mut self,
         tenant_id: String,
         collection_id: CollectionUuid,
@@ -641,11 +642,11 @@ impl SysDb {
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
         schema: Option<Schema>,
-        task_update: TaskUpdateInfo,
-    ) -> Result<FlushCompactionAndTaskResponse, FlushCompactionError> {
+        attached_function_update: AttachedFunctionUpdateInfo,
+    ) -> Result<FlushCompactionAndAttachedFunctionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.flush_compaction_and_task(
+                grpc.flush_compaction_and_attached_function(
                     tenant_id,
                     collection_id,
                     log_position,
@@ -654,7 +655,7 @@ impl SysDb {
                     total_records_post_compaction,
                     size_bytes_post_compaction,
                     schema,
-                    task_update,
+                    attached_function_update,
                 )
                 .await
             }
@@ -733,26 +734,29 @@ impl SysDb {
         }
     }
 
-    pub async fn finish_task(&mut self, task_id: TaskUuid) -> Result<(), FinishTaskError> {
+    pub async fn finish_attached_function(
+        &mut self,
+        attached_function_id: AttachedFunctionUuid,
+    ) -> Result<(), FinishAttachedFunctionError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.finish_task(task_id).await,
+            SysDb::Grpc(grpc) => grpc.finish_attached_function(attached_function_id).await,
             SysDb::Sqlite(_) => unimplemented!(),
-            SysDb::Test(test) => test.finish_task(task_id).await,
+            SysDb::Test(test) => test.finish_attached_function(attached_function_id).await,
         }
     }
 
-    pub async fn advance_task(
+    pub async fn advance_attached_function(
         &mut self,
-        task_id: TaskUuid,
-        task_run_nonce: uuid::Uuid,
+        attached_function_id: AttachedFunctionUuid,
+        attached_function_run_nonce: uuid::Uuid,
         completion_offset: u64,
         next_run_delay_secs: u64,
-    ) -> Result<AdvanceTaskResponse, AdvanceTaskError> {
+    ) -> Result<AdvanceAttachedFunctionResponse, AdvanceAttachedFunctionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.advance_task(
-                    task_id,
-                    task_run_nonce,
+                grpc.advance_attached_function(
+                    attached_function_id,
+                    attached_function_run_nonce,
                     completion_offset,
                     next_run_delay_secs,
                 )
@@ -1520,10 +1524,10 @@ impl GrpcSysDb {
     ) -> Result<Vec<(String, uuid::Uuid)>, Box<dyn std::error::Error>> {
         let res = self
             .client
-            .get_operators(chroma_proto::GetOperatorsRequest {})
+            .get_functions(chroma_proto::GetFunctionsRequest {})
             .await?;
 
-        let operators = res.into_inner().operators;
+        let operators = res.into_inner().functions;
         let mut result = Vec::new();
         for op in operators {
             let id = uuid::Uuid::parse_str(&op.id)?;
@@ -1662,22 +1666,25 @@ impl GrpcSysDb {
         match res {
             Ok(res) => {
                 let res = res.into_inner();
-                let res = match res.try_into() {
-                    Ok(res) => res,
-                    Err(e) => {
-                        return Err(
-                            FlushCompactionError::FlushCompactionResponseConversionError(e),
-                        );
-                    }
-                };
-                Ok(res)
+                // Convert proto response to our type
+                let collection_id =
+                    CollectionUuid(uuid::Uuid::parse_str(&res.collection_id).map_err(|_| {
+                        FlushCompactionError::FlushCompactionResponseConversionError(
+                            FlushCompactionResponseConversionError::InvalidUuid,
+                        )
+                    })?);
+                Ok(FlushCompactionResponse {
+                    collection_id,
+                    collection_version: res.collection_version,
+                    last_compaction_time: res.last_compaction_time,
+                })
             }
             Err(e) => Err(FlushCompactionError::FailedToFlushCompaction(e)),
         }
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn flush_compaction_and_task(
+    async fn flush_compaction_and_attached_function(
         &mut self,
         tenant_id: String,
         collection_id: CollectionUuid,
@@ -1687,8 +1694,8 @@ impl GrpcSysDb {
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
         schema: Option<Schema>,
-        task_update: TaskUpdateInfo,
-    ) -> Result<FlushCompactionAndTaskResponse, FlushCompactionError> {
+        attached_function_update: AttachedFunctionUpdateInfo,
+    ) -> Result<FlushCompactionAndAttachedFunctionResponse, FlushCompactionError> {
         let segment_compaction_info =
             segment_flush_info
                 .iter()
@@ -1707,7 +1714,9 @@ impl GrpcSysDb {
 
         let schema_str = schema.and_then(|s| {
             serde_json::to_string(&s).ok().or_else(|| {
-                tracing::error!("Failed to serialize schema for flush_compaction_and_task");
+                tracing::error!(
+                    "Failed to serialize schema for flush_compaction_and_attached_function"
+                );
                 None
             })
         });
@@ -1723,18 +1732,23 @@ impl GrpcSysDb {
             schema_str,
         });
 
-        let task_update_proto = Some(chroma_proto::TaskUpdateInfo {
-            task_id: task_update.task_id.0.to_string(),
-            task_run_nonce: task_update.task_run_nonce.to_string(),
-            completion_offset: task_update.completion_offset,
+        let attached_function_update_proto = Some(chroma_proto::AttachedFunctionUpdateInfo {
+            id: attached_function_update.attached_function_id.0.to_string(),
+            run_nonce: attached_function_update
+                .attached_function_run_nonce
+                .to_string(),
+            completion_offset: attached_function_update.completion_offset,
         });
 
-        let req = chroma_proto::FlushCollectionCompactionAndTaskRequest {
+        let req = chroma_proto::FlushCollectionCompactionAndAttachedFunctionRequest {
             flush_compaction,
-            task_update: task_update_proto,
+            attached_function_update: attached_function_update_proto,
         };
 
-        let res = self.client.flush_collection_compaction_and_task(req).await;
+        let res = self
+            .client
+            .flush_collection_compaction_and_attached_function(req)
+            .await;
         match res {
             Ok(res) => {
                 let res = res.into_inner();
@@ -1803,42 +1817,52 @@ impl GrpcSysDb {
         Ok(ResetResponse {})
     }
 
-    async fn finish_task(&mut self, task_id: TaskUuid) -> Result<(), FinishTaskError> {
-        let req = FinishTaskRequest {
-            task_id: task_id.0.to_string(),
+    async fn finish_attached_function(
+        &mut self,
+        attached_function_id: AttachedFunctionUuid,
+    ) -> Result<(), FinishAttachedFunctionError> {
+        let req = FinishAttachedFunctionRequest {
+            id: attached_function_id.0.to_string(),
         };
-        self.client.finish_task(req).await.map_err(|e| {
-            if e.code() == Code::NotFound {
-                FinishTaskError::TaskNotFound
-            } else {
-                FinishTaskError::FailedToFinishTask(e)
-            }
-        })?;
+        self.client
+            .finish_attached_function(req)
+            .await
+            .map_err(|e| {
+                if e.code() == Code::NotFound {
+                    FinishAttachedFunctionError::AttachedFunctionNotFound
+                } else {
+                    FinishAttachedFunctionError::FailedToFinishAttachedFunction(e)
+                }
+            })?;
         Ok(())
     }
 
-    async fn advance_task(
+    async fn advance_attached_function(
         &mut self,
-        task_id: TaskUuid,
-        task_run_nonce: uuid::Uuid,
+        attached_function_id: AttachedFunctionUuid,
+        attached_function_run_nonce: uuid::Uuid,
         completion_offset: u64,
         next_run_delay_secs: u64,
-    ) -> Result<AdvanceTaskResponse, AdvanceTaskError> {
-        let req = AdvanceTaskRequest {
+    ) -> Result<AdvanceAttachedFunctionResponse, AdvanceAttachedFunctionError> {
+        let req = AdvanceAttachedFunctionRequest {
             collection_id: None, // Not used by coordinator
-            task_id: Some(task_id.0.to_string()),
-            task_run_nonce: Some(task_run_nonce.to_string()),
+            id: Some(attached_function_id.0.to_string()),
+            run_nonce: Some(attached_function_run_nonce.to_string()),
             completion_offset: Some(completion_offset),
             next_run_delay_secs: Some(next_run_delay_secs),
         };
 
-        let response = self.client.advance_task(req).await.map_err(|e| {
-            if e.code() == Code::NotFound {
-                AdvanceTaskError::TaskNotFound
-            } else {
-                AdvanceTaskError::FailedToAdvanceTask(e)
-            }
-        })?;
+        let response = self
+            .client
+            .advance_attached_function(req)
+            .await
+            .map_err(|e| {
+                if e.code() == Code::NotFound {
+                    AdvanceAttachedFunctionError::AttachedFunctionNotFound
+                } else {
+                    AdvanceAttachedFunctionError::FailedToAdvanceAttachedFunction(e)
+                }
+            })?;
 
         let response = response.into_inner();
 
@@ -1849,7 +1873,7 @@ impl GrpcSysDb {
                 error = %e,
                 "Server returned invalid next_nonce UUID"
             );
-            AdvanceTaskError::FailedToAdvanceTask(tonic::Status::internal(
+            AdvanceAttachedFunctionError::FailedToAdvanceAttachedFunction(tonic::Status::internal(
                 "Invalid next_nonce in response",
             ))
         })?;
@@ -1858,7 +1882,7 @@ impl GrpcSysDb {
         let next_run =
             std::time::UNIX_EPOCH + std::time::Duration::from_millis(response.next_run_at);
 
-        Ok(AdvanceTaskResponse {
+        Ok(AdvanceAttachedFunctionResponse {
             next_nonce,
             next_run,
             completion_offset: response.completion_offset,
@@ -1866,7 +1890,7 @@ impl GrpcSysDb {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn create_task(
+    pub async fn create_attached_function(
         &mut self,
         name: String,
         operator_name: String,
@@ -1875,8 +1899,8 @@ impl GrpcSysDb {
         params: serde_json::Value,
         tenant_name: String,
         database_name: String,
-        min_records_for_task: u64,
-    ) -> Result<chroma_types::TaskUuid, CreateTaskError> {
+        min_records_for_invocation: u64,
+    ) -> Result<chroma_types::AttachedFunctionUuid, AttachFunctionError> {
         // Convert serde_json::Value to prost_types::Struct for gRPC
         let params_struct = match params {
             serde_json::Value::Object(map) => Some(prost_types::Struct {
@@ -1887,205 +1911,217 @@ impl GrpcSysDb {
             }),
             _ => None, // Non-object params omitted from proto
         };
-        let req = chroma_proto::CreateTaskRequest {
+        let req = chroma_proto::AttachFunctionRequest {
             name: name.clone(),
-            operator_name: operator_name.clone(),
+            function_name: operator_name.clone(),
             input_collection_id: input_collection_id.to_string(),
             output_collection_name: output_collection_name.clone(),
             params: params_struct,
             tenant_id: tenant_name.clone(),
             database: database_name.clone(),
-            min_records_for_task,
+            min_records_for_invocation,
         };
-        let response = self.client.create_task(req).await?.into_inner();
-        // Parse the returned task_id - this should always succeed since the server generated it
+        let response = self.client.attach_function(req).await?.into_inner();
+        // Parse the returned attached_function_id - this should always succeed since the server generated it
         // If this fails, it indicates a serious server bug or protocol corruption
-        let task_id = chroma_types::TaskUuid(
-            uuid::Uuid::parse_str(&response.task_id).map_err(|e| {
+        let attached_function_id = chroma_types::AttachedFunctionUuid(
+            uuid::Uuid::parse_str(&response.id).map_err(|e| {
                 tracing::error!(
-                    task_id = %response.task_id,
+                    attached_function_id = %response.id,
                     error = %e,
-                    "Server returned invalid task_id UUID - task was created but response is corrupt"
+                    "Server returned invalid attached_function_id UUID - attached function was created but response is corrupt"
                 );
-                CreateTaskError::ServerReturnedInvalidData
+                AttachFunctionError::ServerReturnedInvalidData
             })?,
         );
-        Ok(task_id)
+        Ok(attached_function_id)
     }
 
-    /// Helper function to convert a proto Task to a chroma_types::Task
-    fn task_from_proto(task: chroma_proto::Task) -> Result<chroma_types::Task, GetTaskError> {
-        // Parse task_id
-        let task_id =
-            chroma_types::TaskUuid(uuid::Uuid::parse_str(&task.task_id).map_err(|e| {
+    /// Helper function to convert a proto AttachedFunction to a chroma_types::AttachedFunction
+    fn attached_function_from_proto(
+        attached_function: chroma_proto::AttachedFunction,
+    ) -> Result<chroma_types::AttachedFunction, GetAttachedFunctionError> {
+        // Parse attached_function_id
+        let attached_function_id = chroma_types::AttachedFunctionUuid(
+            uuid::Uuid::parse_str(&attached_function.id).map_err(|e| {
                 tracing::error!(
-                    task_id = %task.task_id,
+                    attached_function_id = %attached_function.id,
                     error = %e,
-                    "Server returned invalid task_id UUID"
+                    "Server returned invalid attached_function_id UUID"
                 );
-                GetTaskError::ServerReturnedInvalidData
-            })?);
+                GetAttachedFunctionError::ServerReturnedInvalidData
+            })?,
+        );
 
         // Parse input_collection_id
         let parsed_input_collection_id = chroma_types::CollectionUuid(
-            uuid::Uuid::parse_str(&task.input_collection_id).map_err(|e| {
+            uuid::Uuid::parse_str(&attached_function.input_collection_id).map_err(|e| {
                 tracing::error!(
-                    input_collection_id = %task.input_collection_id,
+                    input_collection_id = %attached_function.input_collection_id,
                     error = %e,
                     "Server returned invalid input_collection_id UUID"
                 );
-                GetTaskError::ServerReturnedInvalidData
+                GetAttachedFunctionError::ServerReturnedInvalidData
             })?,
         );
 
         // Parse next_run timestamp from microseconds
-        let next_run =
-            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(task.next_run_at);
+        let next_run = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_micros(attached_function.next_run_at);
 
         // Parse nonces
-        let lowest_live_nonce = if task.lowest_live_nonce.is_empty() {
+        let lowest_live_nonce = if attached_function.lowest_live_nonce.is_empty() {
             None
         } else {
             Some(
-                uuid::Uuid::parse_str(&task.lowest_live_nonce)
+                uuid::Uuid::parse_str(&attached_function.lowest_live_nonce)
                     .map(chroma_types::NonceUuid)
                     .map_err(|e| {
                         tracing::error!(
-                            lowest_live_nonce = %task.lowest_live_nonce,
+                            lowest_live_nonce = %attached_function.lowest_live_nonce,
                             error = %e,
                             "Server returned invalid lowest_live_nonce UUID"
                         );
-                        GetTaskError::ServerReturnedInvalidData
+                        GetAttachedFunctionError::ServerReturnedInvalidData
                     })?,
             )
         };
 
-        let next_nonce = uuid::Uuid::parse_str(&task.next_nonce)
+        let next_nonce = uuid::Uuid::parse_str(&attached_function.next_nonce)
             .map(chroma_types::NonceUuid)
             .map_err(|e| {
                 tracing::error!(
-                    next_nonce = %task.next_nonce,
+                    next_nonce = %attached_function.next_nonce,
                     error = %e,
                     "Server returned invalid next_nonce UUID"
                 );
-                GetTaskError::ServerReturnedInvalidData
+                GetAttachedFunctionError::ServerReturnedInvalidData
             })?;
 
         // Convert params from Struct to JSON string
-        let params_str = task.params.map(|s| {
+        let params_str = attached_function.params.map(|s| {
             let json_value = prost_struct_to_json(s);
             serde_json::to_string(&json_value).unwrap_or_else(|_| "{}".to_string())
         });
 
         // Parse output_collection_id if present
-        let parsed_output_collection_id = if let Some(id_str) = task.output_collection_id.as_ref() {
-            if id_str.is_empty() {
-                None
+        let parsed_output_collection_id =
+            if let Some(id_str) = attached_function.output_collection_id.as_ref() {
+                if id_str.is_empty() {
+                    None
+                } else {
+                    Some(chroma_types::CollectionUuid(
+                        uuid::Uuid::parse_str(id_str).map_err(|e| {
+                            tracing::error!(
+                                output_collection_id = %id_str,
+                                error = %e,
+                                "Server returned invalid output_collection_id UUID"
+                            );
+                            GetAttachedFunctionError::ServerReturnedInvalidData
+                        })?,
+                    ))
+                }
             } else {
-                Some(chroma_types::CollectionUuid(
-                    uuid::Uuid::parse_str(id_str).map_err(|e| {
-                        tracing::error!(
-                            output_collection_id = %id_str,
-                            error = %e,
-                            "Server returned invalid output_collection_id UUID"
-                        );
-                        GetTaskError::ServerReturnedInvalidData
-                    })?,
-                ))
-            }
-        } else {
-            None
-        };
+                None
+            };
 
-        Ok(chroma_types::Task {
-            id: task_id,
-            name: task.name,
-            operator_id: task.operator_name,
+        Ok(chroma_types::AttachedFunction {
+            id: attached_function_id,
+            name: attached_function.name,
+            function_id: attached_function.function_name,
             input_collection_id: parsed_input_collection_id,
-            output_collection_name: task.output_collection_name,
+            output_collection_name: attached_function.output_collection_name,
             output_collection_id: parsed_output_collection_id,
             params: params_str,
-            tenant_id: task.tenant_id,
-            database_id: task.database_id,
+            tenant_id: attached_function.tenant_id,
+            database_id: attached_function.database_id,
             last_run: None,
             next_run,
             lowest_live_nonce,
             next_nonce,
-            completion_offset: task.completion_offset,
-            min_records_for_task: task.min_records_for_task,
+            completion_offset: attached_function.completion_offset,
+            min_records_for_invocation: attached_function.min_records_for_invocation,
             is_deleted: false,
             created_at: std::time::SystemTime::UNIX_EPOCH
-                + std::time::Duration::from_micros(task.created_at),
+                + std::time::Duration::from_micros(attached_function.created_at),
             updated_at: std::time::SystemTime::UNIX_EPOCH
-                + std::time::Duration::from_micros(task.updated_at),
+                + std::time::Duration::from_micros(attached_function.updated_at),
         })
     }
 
-    pub async fn get_task_by_name(
+    pub async fn get_attached_function_by_name(
         &mut self,
         input_collection_id: chroma_types::CollectionUuid,
-        task_name: String,
-    ) -> Result<chroma_types::Task, GetTaskError> {
-        let req = chroma_proto::GetTaskByNameRequest {
+        attached_function_name: String,
+    ) -> Result<chroma_types::AttachedFunction, GetAttachedFunctionError> {
+        let req = chroma_proto::GetAttachedFunctionByNameRequest {
             input_collection_id: input_collection_id.to_string(),
-            task_name: task_name.clone(),
+            name: attached_function_name.clone(),
         };
 
-        let response = match self.client.get_task_by_name(req).await {
+        let response = match self.client.get_attached_function_by_name(req).await {
             Ok(resp) => resp,
             Err(status) => {
                 if status.code() == tonic::Code::NotFound {
-                    return Err(GetTaskError::NotFound);
+                    return Err(GetAttachedFunctionError::NotFound);
                 }
-                return Err(GetTaskError::FailedToGetTask(status));
+                return Err(GetAttachedFunctionError::FailedToGetAttachedFunction(
+                    status,
+                ));
             }
         };
         let response = response.into_inner();
 
-        // Extract the nested task from response
-        let task = response.task.ok_or_else(|| {
-            GetTaskError::FailedToGetTask(tonic::Status::internal("Missing task in response"))
+        // Extract the nested attached function from response
+        let attached_function = response.attached_function.ok_or_else(|| {
+            GetAttachedFunctionError::FailedToGetAttachedFunction(tonic::Status::internal(
+                "Missing attached function in response",
+            ))
         })?;
 
-        Self::task_from_proto(task)
+        Self::attached_function_from_proto(attached_function)
     }
 
-    pub async fn get_task_by_uuid(
+    pub async fn get_attached_function_by_uuid(
         &mut self,
-        task_uuid: chroma_types::TaskUuid,
-    ) -> Result<chroma_types::Task, GetTaskError> {
-        let req = chroma_proto::GetTaskByUuidRequest {
-            task_id: task_uuid.0.to_string(),
+        attached_function_uuid: chroma_types::AttachedFunctionUuid,
+    ) -> Result<chroma_types::AttachedFunction, GetAttachedFunctionError> {
+        let req = chroma_proto::GetAttachedFunctionByUuidRequest {
+            id: attached_function_uuid.0.to_string(),
         };
 
-        let response = match self.client.get_task_by_uuid(req).await {
+        let response = match self.client.get_attached_function_by_uuid(req).await {
             Ok(resp) => resp,
             Err(status) => {
                 if status.code() == tonic::Code::NotFound {
-                    return Err(GetTaskError::NotFound);
+                    return Err(GetAttachedFunctionError::NotFound);
                 }
-                return Err(GetTaskError::FailedToGetTask(status));
+                return Err(GetAttachedFunctionError::FailedToGetAttachedFunction(
+                    status,
+                ));
             }
         };
         let response = response.into_inner();
 
-        // Extract the nested task from response
-        let task = response.task.ok_or_else(|| {
-            GetTaskError::FailedToGetTask(tonic::Status::internal("Missing task in response"))
+        // Extract the nested attached function from response
+        let attached_function = response.attached_function.ok_or_else(|| {
+            GetAttachedFunctionError::FailedToGetAttachedFunction(tonic::Status::internal(
+                "Missing attached function in response",
+            ))
         })?;
 
-        Self::task_from_proto(task)
+        Self::attached_function_from_proto(attached_function)
     }
 
-    pub async fn create_output_collection_for_task(
+    pub async fn create_output_collection_for_attached_function(
         &mut self,
-        task_id: chroma_types::TaskUuid,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
         collection_name: String,
         tenant_id: String,
         database_id: String,
-    ) -> Result<CollectionUuid, CreateOutputCollectionForTaskError> {
-        let req = chroma_proto::CreateOutputCollectionForTaskRequest {
-            task_id: task_id.0.to_string(),
+    ) -> Result<CollectionUuid, CreateOutputCollectionForAttachedFunctionError> {
+        let req = chroma_proto::CreateOutputCollectionForAttachedFunctionRequest {
+            attached_function_id: attached_function_id.0.to_string(),
             collection_name,
             tenant_id,
             database_id,
@@ -2093,16 +2129,16 @@ impl GrpcSysDb {
 
         let response = self
             .client
-            .create_output_collection_for_task(req)
+            .create_output_collection_for_attached_function(req)
             .await
             .map_err(|e| {
                 if e.code() == tonic::Code::NotFound {
-                    return CreateOutputCollectionForTaskError::TaskNotFound;
+                    return CreateOutputCollectionForAttachedFunctionError::AttachedFunctionNotFound;
                 }
                 if e.code() == tonic::Code::AlreadyExists {
-                    return CreateOutputCollectionForTaskError::OutputCollectionAlreadyExists;
+                    return CreateOutputCollectionForAttachedFunctionError::OutputCollectionAlreadyExists;
                 }
-                CreateOutputCollectionForTaskError::FailedToCreateOutputCollectionForTask(e)
+                CreateOutputCollectionForAttachedFunctionError::FailedToCreateOutputCollectionForAttachedFunction(e)
             })?;
 
         let response = response.into_inner();
@@ -2114,45 +2150,31 @@ impl GrpcSysDb {
                 error = %e,
                 "Server returned invalid collection_id UUID"
             );
-            CreateOutputCollectionForTaskError::ServerReturnedInvalidData
+            CreateOutputCollectionForAttachedFunctionError::ServerReturnedInvalidData
         })?;
 
         Ok(CollectionUuid(collection_id))
     }
 
-    pub async fn soft_delete_task(
+    pub async fn soft_delete_attached_function(
         &mut self,
-        _task_id: chroma_types::TaskUuid,
-    ) -> Result<(), DeleteTaskError> {
-        // Note: The gRPC DeleteTask API requires tenant_id, database_id, and task_name.
-        // We cannot implement this method with just a task_id.
-        // Callers should use delete_task_by_name() instead, which has all required parameters.
-        Err(DeleteTaskError::FailedToDeleteTask(
-            tonic::Status::unimplemented(
-                "soft_delete_task by ID not supported - use delete_task_by_name instead",
-            ),
-        ))
-    }
-
-    pub async fn delete_task_by_name(
-        &mut self,
-        input_collection_id: chroma_types::CollectionUuid,
-        task_name: String,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
         delete_output: bool,
-    ) -> Result<(), DeleteTaskError> {
-        let req = chroma_proto::DeleteTaskRequest {
-            input_collection_id: input_collection_id.to_string(),
-            task_name,
+    ) -> Result<(), DeleteAttachedFunctionError> {
+        let req = chroma_proto::DetachFunctionRequest {
+            attached_function_id: attached_function_id.to_string(),
             delete_output,
         };
 
-        match self.client.delete_task(req).await {
+        match self.client.detach_function(req).await {
             Ok(_) => Ok(()),
             Err(status) => {
                 if status.code() == tonic::Code::NotFound {
-                    Err(DeleteTaskError::NotFound)
+                    Err(DeleteAttachedFunctionError::NotFound)
                 } else {
-                    Err(DeleteTaskError::FailedToDeleteTask(status))
+                    Err(DeleteAttachedFunctionError::FailedToDeleteAttachedFunction(
+                        status,
+                    ))
                 }
             }
         }
@@ -2281,11 +2303,11 @@ impl ChromaError for DeleteCollectionVersionError {
     }
 }
 
-////////////////////////// Task Operations //////////////////////////
+//////////////////////////  Attached Function Operations //////////////////////////
 
 impl SysDb {
     #[allow(clippy::too_many_arguments)]
-    pub async fn create_task(
+    pub async fn create_attached_function(
         &mut self,
         name: String,
         operator_name: String,
@@ -2294,11 +2316,11 @@ impl SysDb {
         params: serde_json::Value,
         tenant_name: String,
         database_name: String,
-        min_records_for_task: u64,
-    ) -> Result<chroma_types::TaskUuid, CreateTaskError> {
+        min_records_for_invocation: u64,
+    ) -> Result<chroma_types::AttachedFunctionUuid, AttachFunctionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.create_task(
+                grpc.create_attached_function(
                     name,
                     operator_name,
                     input_collection_id,
@@ -2306,13 +2328,13 @@ impl SysDb {
                     params,
                     tenant_name,
                     database_name,
-                    min_records_for_task,
+                    min_records_for_invocation,
                 )
                 .await
             }
             SysDb::Sqlite(sqlite) => {
                 sqlite
-                    .create_task(
+                    .create_attached_function(
                         name,
                         operator_name,
                         input_collection_id,
@@ -2320,7 +2342,7 @@ impl SysDb {
                         params,
                         tenant_name,
                         database_name,
-                        min_records_for_task,
+                        min_records_for_invocation,
                     )
                     .await
             }
@@ -2330,16 +2352,19 @@ impl SysDb {
         }
     }
 
-    pub async fn get_task_by_name(
+    pub async fn get_attached_function_by_name(
         &mut self,
         input_collection_id: chroma_types::CollectionUuid,
-        task_name: String,
-    ) -> Result<chroma_types::Task, GetTaskError> {
+        attached_function_name: String,
+    ) -> Result<chroma_types::AttachedFunction, GetAttachedFunctionError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_task_by_name(input_collection_id, task_name).await,
+            SysDb::Grpc(grpc) => {
+                grpc.get_attached_function_by_name(input_collection_id, attached_function_name)
+                    .await
+            }
             SysDb::Sqlite(sqlite) => {
                 sqlite
-                    .get_task_by_name(input_collection_id, task_name)
+                    .get_attached_function_by_name(input_collection_id, attached_function_name)
                     .await
             }
             SysDb::Test(_) => {
@@ -2348,34 +2373,37 @@ impl SysDb {
         }
     }
 
-    pub async fn get_task_by_uuid(
+    pub async fn get_attached_function_by_uuid(
         &mut self,
-        task_uuid: chroma_types::TaskUuid,
-    ) -> Result<chroma_types::Task, GetTaskError> {
+        attached_function_uuid: chroma_types::AttachedFunctionUuid,
+    ) -> Result<chroma_types::AttachedFunction, GetAttachedFunctionError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_task_by_uuid(task_uuid).await,
+            SysDb::Grpc(grpc) => {
+                grpc.get_attached_function_by_uuid(attached_function_uuid)
+                    .await
+            }
             SysDb::Sqlite(_) => {
                 // TODO: Implement for Sqlite
-                Err(GetTaskError::NotFound)
+                Err(GetAttachedFunctionError::NotFound)
             }
             SysDb::Test(_) => {
                 // TODO: Implement for TestSysDb
-                Err(GetTaskError::NotFound)
+                Err(GetAttachedFunctionError::NotFound)
             }
         }
     }
 
-    pub async fn create_output_collection_for_task(
+    pub async fn create_output_collection_for_attached_function(
         &mut self,
-        task_id: chroma_types::TaskUuid,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
         collection_name: String,
         tenant_id: String,
         database_id: String,
-    ) -> Result<CollectionUuid, CreateOutputCollectionForTaskError> {
+    ) -> Result<CollectionUuid, CreateOutputCollectionForAttachedFunctionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.create_output_collection_for_task(
-                    task_id,
+                grpc.create_output_collection_for_attached_function(
+                    attached_function_id,
                     collection_name,
                     tenant_id,
                     database_id,
@@ -2387,34 +2415,19 @@ impl SysDb {
         }
     }
 
-    pub async fn soft_delete_task(
+    pub async fn soft_delete_attached_function(
         &mut self,
-        task_id: chroma_types::TaskUuid,
-    ) -> Result<(), DeleteTaskError> {
-        match self {
-            SysDb::Grpc(grpc) => grpc.soft_delete_task(task_id).await,
-            SysDb::Sqlite(sqlite) => sqlite.soft_delete_task(task_id).await,
-            SysDb::Test(_) => {
-                todo!()
-            }
-        }
-    }
-
-    pub async fn delete_task_by_name(
-        &mut self,
-        input_collection_id: chroma_types::CollectionUuid,
-        task_name: String,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
         delete_output: bool,
-    ) -> Result<(), DeleteTaskError> {
+    ) -> Result<(), DeleteAttachedFunctionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.delete_task_by_name(input_collection_id, task_name, delete_output)
+                grpc.soft_delete_attached_function(attached_function_id, delete_output)
                     .await
             }
-            SysDb::Sqlite(sqlite) => {
-                sqlite
-                    .delete_task_by_name(input_collection_id, task_name, delete_output)
-                    .await
+            SysDb::Sqlite(_) => {
+                // SQLite implementation doesn't support soft_delete_attached_function yet
+                todo!("soft_delete_attached_function not implemented for SQLite")
             }
             SysDb::Test(_) => {
                 todo!()
@@ -2424,88 +2437,90 @@ impl SysDb {
 }
 
 #[derive(Error, Debug)]
-pub enum CreateTaskError {
-    #[error("Task already exists")]
+pub enum AttachFunctionError {
+    #[error("Attached function already exists")]
     AlreadyExists,
-    #[error("Failed to create task: {0}")]
-    FailedToCreateTask(#[from] tonic::Status),
-    #[error("Server returned invalid data - task was created but response is corrupt")]
+    #[error("Failed to create attached function: {0}")]
+    FailedToCreateAttachedFunction(#[from] tonic::Status),
+    #[error(
+        "Server returned invalid data - attached function was created but response is corrupt"
+    )]
     ServerReturnedInvalidData,
 }
 
-impl ChromaError for CreateTaskError {
+impl ChromaError for AttachFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            CreateTaskError::AlreadyExists => ErrorCodes::AlreadyExists,
-            CreateTaskError::FailedToCreateTask(e) => e.code().into(),
-            CreateTaskError::ServerReturnedInvalidData => ErrorCodes::Internal,
+            AttachFunctionError::AlreadyExists => ErrorCodes::AlreadyExists,
+            AttachFunctionError::FailedToCreateAttachedFunction(e) => e.code().into(),
+            AttachFunctionError::ServerReturnedInvalidData => ErrorCodes::Internal,
         }
     }
 }
 
 #[derive(Error, Debug)]
-pub enum GetTaskError {
-    #[error("Task not found")]
+pub enum GetAttachedFunctionError {
+    #[error("Attached function not found")]
     NotFound,
-    #[error("Task not ready - still initializing")]
+    #[error("Attached function not ready - still initializing")]
     NotReady,
-    #[error("Failed to get task: {0}")]
-    FailedToGetTask(tonic::Status),
+    #[error("Failed to get attached function: {0}")]
+    FailedToGetAttachedFunction(tonic::Status),
     #[error("Server returned invalid data")]
     ServerReturnedInvalidData,
 }
 
-impl ChromaError for GetTaskError {
+impl ChromaError for GetAttachedFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GetTaskError::NotFound => ErrorCodes::NotFound,
-            GetTaskError::NotReady => ErrorCodes::FailedPrecondition,
-            GetTaskError::FailedToGetTask(e) => e.code().into(),
-            GetTaskError::ServerReturnedInvalidData => ErrorCodes::Internal,
+            GetAttachedFunctionError::NotFound => ErrorCodes::NotFound,
+            GetAttachedFunctionError::NotReady => ErrorCodes::FailedPrecondition,
+            GetAttachedFunctionError::FailedToGetAttachedFunction(e) => e.code().into(),
+            GetAttachedFunctionError::ServerReturnedInvalidData => ErrorCodes::Internal,
         }
     }
 }
 
 #[derive(Error, Debug)]
-pub enum CreateOutputCollectionForTaskError {
-    #[error("Task not found")]
-    TaskNotFound,
+pub enum CreateOutputCollectionForAttachedFunctionError {
+    #[error("Attached function not found")]
+    AttachedFunctionNotFound,
     #[error("Output collection already exists")]
     OutputCollectionAlreadyExists,
-    #[error("Failed to create output collection for task: {0}")]
-    FailedToCreateOutputCollectionForTask(#[from] tonic::Status),
+    #[error("Failed to create output collection for attached function: {0}")]
+    FailedToCreateOutputCollectionForAttachedFunction(#[from] tonic::Status),
     #[error("Server returned invalid data")]
     ServerReturnedInvalidData,
 }
 
-impl ChromaError for CreateOutputCollectionForTaskError {
+impl ChromaError for CreateOutputCollectionForAttachedFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            CreateOutputCollectionForTaskError::TaskNotFound => ErrorCodes::NotFound,
-            CreateOutputCollectionForTaskError::OutputCollectionAlreadyExists => {
+            CreateOutputCollectionForAttachedFunctionError::AttachedFunctionNotFound => ErrorCodes::NotFound,
+            CreateOutputCollectionForAttachedFunctionError::OutputCollectionAlreadyExists => {
                 ErrorCodes::AlreadyExists
             }
-            CreateOutputCollectionForTaskError::FailedToCreateOutputCollectionForTask(e) => {
+            CreateOutputCollectionForAttachedFunctionError::FailedToCreateOutputCollectionForAttachedFunction(e) => {
                 e.code().into()
             }
-            CreateOutputCollectionForTaskError::ServerReturnedInvalidData => ErrorCodes::Internal,
+            CreateOutputCollectionForAttachedFunctionError::ServerReturnedInvalidData => ErrorCodes::Internal,
         }
     }
 }
 
 #[derive(Error, Debug)]
-pub enum DeleteTaskError {
-    #[error("Task not found")]
+pub enum DeleteAttachedFunctionError {
+    #[error("Attached function not found")]
     NotFound,
-    #[error("Failed to delete task: {0}")]
-    FailedToDeleteTask(#[from] tonic::Status),
+    #[error("Failed to delete attached function: {0}")]
+    FailedToDeleteAttachedFunction(#[from] tonic::Status),
 }
 
-impl ChromaError for DeleteTaskError {
+impl ChromaError for DeleteAttachedFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            DeleteTaskError::NotFound => ErrorCodes::NotFound,
-            DeleteTaskError::FailedToDeleteTask(e) => e.code().into(),
+            DeleteAttachedFunctionError::NotFound => ErrorCodes::NotFound,
+            DeleteAttachedFunctionError::FailedToDeleteAttachedFunction(e) => e.code().into(),
         }
     }
 }

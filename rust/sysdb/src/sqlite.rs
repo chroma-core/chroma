@@ -663,7 +663,7 @@ impl SqliteSysDb {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn create_task(
+    pub(crate) async fn create_attached_function(
         &self,
         _name: String,
         _operator_id: String,
@@ -672,45 +672,29 @@ impl SqliteSysDb {
         _params: serde_json::Value,
         _tenant_id: String,
         _database_id: String,
-        _min_records_for_task: u64,
-    ) -> Result<chroma_types::TaskUuid, crate::CreateTaskError> {
-        // TODO: Implement this when task support is added to SqliteSysDb
-        Err(crate::CreateTaskError::FailedToCreateTask(
-            tonic::Status::unimplemented("Task operations not yet implemented in SqliteSysDb"),
+        _min_records_for_attached_function: u64,
+    ) -> Result<chroma_types::AttachedFunctionUuid, crate::AttachFunctionError> {
+        // TODO: Implement this when attached function support is added to SqliteSysDb
+        Err(crate::AttachFunctionError::FailedToCreateAttachedFunction(
+            tonic::Status::unimplemented(
+                " Attached Function operations not yet implemented in SqliteSysDb",
+            ),
         ))
     }
 
-    pub(crate) async fn get_task_by_name(
+    pub(crate) async fn get_attached_function_by_name(
         &self,
         _input_collection_id: chroma_types::CollectionUuid,
-        _task_name: String,
-    ) -> Result<chroma_types::Task, crate::GetTaskError> {
-        // TODO: Implement this when task support is added to SqliteSysDb
-        Err(crate::GetTaskError::FailedToGetTask(
-            tonic::Status::unimplemented("Task operations not yet implemented in SqliteSysDb"),
-        ))
-    }
-
-    pub(crate) async fn soft_delete_task(
-        &self,
-        _task_id: chroma_types::TaskUuid,
-    ) -> Result<(), crate::DeleteTaskError> {
-        // TODO: Implement this when task support is added to SqliteSysDb
-        Err(crate::DeleteTaskError::FailedToDeleteTask(
-            tonic::Status::unimplemented("Task operations not yet implemented in SqliteSysDb"),
-        ))
-    }
-
-    pub(crate) async fn delete_task_by_name(
-        &self,
-        _input_collection_id: chroma_types::CollectionUuid,
-        _task_name: String,
-        _delete_output: bool,
-    ) -> Result<(), crate::DeleteTaskError> {
-        // TODO: Implement this when task support is added to SqliteSysDb
-        Err(crate::DeleteTaskError::FailedToDeleteTask(
-            tonic::Status::unimplemented("Task operations not yet implemented in SqliteSysDb"),
-        ))
+        _attached_function_name: String,
+    ) -> Result<chroma_types::AttachedFunction, crate::GetAttachedFunctionError> {
+        // TODO: Implement this when attached function support is added to SqliteSysDb
+        Err(
+            crate::GetAttachedFunctionError::FailedToGetAttachedFunction(
+                tonic::Status::unimplemented(
+                    " Attached Function operations not yet implemented in SqliteSysDb",
+                ),
+            ),
+        )
     }
 
     #[allow(clippy::too_many_arguments)]

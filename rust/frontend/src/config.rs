@@ -71,8 +71,8 @@ pub struct FrontendConfig {
     pub tenants_to_migrate_immediately_threshold: Option<String>,
     #[serde(default = "default_enable_schema")]
     pub enable_schema: bool,
-    #[serde(default = "default_min_records_for_task")]
-    pub min_records_for_task: u64,
+    #[serde(default = "default_min_records_for_invocation")]
+    pub min_records_for_invocation: u64,
 }
 
 impl FrontendConfig {
@@ -92,7 +92,7 @@ impl FrontendConfig {
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
             enable_schema: default_enable_schema(),
-            min_records_for_task: default_min_records_for_task(),
+            min_records_for_invocation: default_min_records_for_invocation(),
         }
     }
 }
@@ -145,7 +145,7 @@ fn default_enable_schema() -> bool {
     true
 }
 
-pub fn default_min_records_for_task() -> u64 {
+pub fn default_min_records_for_invocation() -> u64 {
     100
 }
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Example: Using Chroma's Task API to process collections automatically
+Example: Using Chroma's Attached Functions API to process collections automatically
 
-This demonstrates how to register tasks that automatically process
+This demonstrates how to attach functions that automatically process
 collections as new records are added.
 """
 
@@ -34,53 +34,50 @@ collection.add(
 
 print(f"✅ Created collection '{collection.name}' with {collection.count()} documents")
 
-# Create a task that counts records in the collection
-# The 'record_counter' operator processes each record and outputs {"count": N}
-success, task_id = collection.create_task(
-    task_name="count_my_docs",
-    operator_name="record_counter",  # Built-in operator that counts records
-    output_collection_name="my_documents_counts",  # Auto-created
+# Attach a function that counts records in the collection
+# The 'record_counter' function processes each record and outputs {"count": N}
+attached_fn = collection.attach_function(
+    function_id="record_counter",  # Built-in function that counts records
+    name="count_my_docs",
+    output_collection="my_documents_counts",  # Auto-created
     params=None,  # No additional parameters needed
 )
-assert success
-if success:
-    print("✅ Task created successfully!")
-    print(f"   Task ID: {task_id}")
-    print("   Task name: count_my_docs")
-    print(f"   Input collection: {collection.name}")
-    print("   Output collection: my_documents_counts")
-    print("   Operator: record_counter")
-else:
-    print("❌ Failed to create task")
 
-# The task will now run automatically when:
+print("✅ Function attached successfully!")
+print(f"   Attached Function ID: {attached_fn.id}")
+print(f"   Name: {attached_fn.name}")
+print(f"   Function: {attached_fn.function_id}")
+print(f"   Input collection: {collection.name}")
+print(f"   Output collection: {attached_fn.output_collection}")
+
+# The function will now run automatically when:
 # 1. New documents are added to 'my_documents'
-# 2. The number of new records >= min_records_for_task (default: 100)
+# 2. The number of new records >= min_records_for_invocation (default: 100)
 
 print("\n" + "=" * 60)
-print("Task is now registered and will run on new data!")
+print("Function is now attached and will run on new data!")
 print("=" * 60)
 
 time.sleep(10)
 
-# Add more documents to trigger task execution
+# Add more documents to trigger function execution
 print("\nAdding more documents...")
 collection.add(
     ids=["doc4", "doc5"],
-    documents=["Chroma is a vector database", "Tasks automate data processing"],
+    documents=["Chroma is a vector database", "Functions automate data processing"],
 )
 
 print(f"Collection now has {collection.count()} documents")
 
-# Later, you can remove the task
+# Later, you can detach the function
 print("\n" + "=" * 60)
-input("Press Enter to remove the task...")
+input("Press Enter to detach the function...")
 
-success = collection.remove_task(
-    task_name="count_my_docs", delete_output=True  # Also delete the output collection
+success = attached_fn.detach(
+    delete_output_collection=True  # Also delete the output collection
 )
 
 if success:
-    print("✅ Task removed successfully!")
+    print("✅ Function detached successfully!")
 else:
-    print("❌ Failed to remove task")
+    print("❌ Failed to detach function")

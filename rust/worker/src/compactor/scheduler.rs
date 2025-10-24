@@ -505,7 +505,7 @@ impl Scheduler {
                 let collection_records = self.verify_and_enrich_collections(collections).await;
                 self.schedule_internal(collection_records).await;
             }
-            ExecutionMode::Task => {
+            ExecutionMode::AttachedFunction => {
                 let tasks = self
                     .tasks
                     .get_tasks_scheduled_for_execution(

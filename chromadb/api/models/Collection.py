@@ -25,6 +25,9 @@ from chromadb.execution.expression.plan import Search
 
 import logging
 
+if TYPE_CHECKING:
+    from chromadb.api.models.AttachedFunction import AttachedFunction
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -368,7 +371,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         return self._client._search(
             collection_id=self.id,
-            searches=cast(List[Search], embedded_searches),
+            searches=searches_list,
             tenant=self.tenant,
             database=self.database,
         )
@@ -495,63 +498,38 @@ class Collection(CollectionCommon["ServerAPI"]):
             database=self.database,
         )
 
-    def create_task(
+    def attach_function(
         self,
-        task_name: str,
-        operator_name: str,
-        output_collection_name: str,
+        function_id: str,
+        name: str,
+        output_collection: str,
         params: Optional[Dict[str, Any]] = None,
-    ) -> tuple[bool, str]:
-        """Create a recurring task that processes this collection.
+    ) -> "AttachedFunction":
+        """Attach a function to this collection.
 
         Args:
-            task_name: Unique name for this task instance
-            operator_name: Built-in operator name (e.g., "record_counter")
-            output_collection_name: Name of the collection where task output will be stored
-            params: Optional dictionary with operator-specific parameters
+            function_id: Built-in function identifier (e.g., "record_counter")
+            name: Unique name for this attached function
+            output_collection: Name of the collection where function output will be stored
+            params: Optional dictionary with function-specific parameters
 
         Returns:
-            tuple: (success: bool, task_id: str)
+            AttachedFunction: Object representing the attached function
 
         Example:
-            >>> success, task_id = collection.create_task(
-            ...     task_name="count_docs",
-            ...     operator_name="record_counter",
-            ...     output_collection_name="doc_counts",
+            >>> attached_fn = collection.attach_function(
+            ...     function_id="record_counter",
+            ...     name="mycoll_stats_fn",
+            ...     output_collection="mycoll_stats",
             ...     params={"threshold": 100}
             ... )
         """
-        return self._client.create_task(
-            task_name=task_name,
-            operator_name=operator_name,
+        return self._client.attach_function(
+            function_id=function_id,
+            name=name,
             input_collection_id=self.id,
-            output_collection_name=output_collection_name,
+            output_collection=output_collection,
             params=params,
-            tenant=self.tenant,
-            database=self.database,
-        )
-
-    def remove_task(
-        self,
-        task_name: str,
-        delete_output: bool = False,
-    ) -> bool:
-        """Delete a task and prevent any further runs.
-
-        Args:
-            task_name: Name of the task to remove
-            delete_output: Whether to also delete the output collection. Defaults to False.
-
-        Returns:
-            bool: True if successful
-
-        Example:
-            >>> success = collection.remove_task("count_docs", delete_output=True)
-        """
-        return self._client.remove_task(
-            task_name=task_name,
-            input_collection_id=self.id,
-            delete_output=delete_output,
             tenant=self.tenant,
             database=self.database,
         )

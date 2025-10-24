@@ -72,6 +72,7 @@ from chromadb.auth import UserIdentity
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api.models.Collection import Collection
+from chromadb.api.models.AttachedFunction import AttachedFunction
 
 # Re-export the async version
 from chromadb.api.async_api import (  # noqa: F401
@@ -814,46 +815,44 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         pass
 
     @abstractmethod
-    def create_task(
+    def attach_function(
         self,
-        task_name: str,
-        operator_name: str,
+        function_id: str,
+        name: str,
         input_collection_id: UUID,
-        output_collection_name: str,
+        output_collection: str,
         params: Optional[Dict[str, Any]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> tuple[bool, str]:
-        """Create a recurring task on a collection.
+    ) -> "AttachedFunction":
+        """Attach a function to a collection.
 
         Args:
-            task_name: Unique name for this task instance
-            operator_name: Built-in operator name (e.g., 'record_counter')
-            input_collection_id: Source collection that triggers the task
-            output_collection_name: Target collection where task output is stored
-            params: Optional dictionary with operator-specific parameters
+            function_id: Built-in function identifier
+            name: Unique name for this attached function
+            input_collection_id: Source collection that triggers the function
+            output_collection: Target collection where function output is stored
+            params: Optional dictionary with function-specific parameters
             tenant: The tenant name
             database: The database name
 
         Returns:
-            tuple: (success: bool, task_id: str)
+            AttachedFunction: Object representing the attached function
         """
         pass
 
     @abstractmethod
-    def remove_task(
+    def detach_function(
         self,
-        task_name: str,
-        input_collection_id: UUID,
+        attached_function_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        """Delete a task and prevent any further runs.
+        """Detach a function and prevent any further runs.
 
         Args:
-            task_name: Name of the task to remove
-            input_collection_id: Id of the input collection the task is registered on
+            attached_function_id: ID of the attached function to remove
             delete_output: Whether to also delete the output collection
             tenant: The tenant name
             database: The database name

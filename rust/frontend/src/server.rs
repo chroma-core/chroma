@@ -15,20 +15,21 @@ use chroma_tracing::add_tracing_middleware;
 use chroma_types::ForkCollectionResponse;
 use chroma_types::{
     decode_embeddings, maybe_decode_update_embeddings, AddCollectionRecordsPayload,
-    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
-    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
-    CountRequest, CountResponse, CreateCollectionPayload, CreateCollectionRequest,
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateTaskRequest, CreateTaskResponse,
-    CreateTenantRequest, CreateTenantResponse, DeleteCollectionRecordsPayload,
-    DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse, ChecklistResponse,
+    Collection, CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid,
+    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
+    DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse,
     GetCollectionByCrnRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
     GetRequest, GetRequestPayload, GetResponse, GetTenantRequest, GetTenantResponse,
     InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, ListCollectionsRequest,
     ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, QueryRequest,
-    QueryRequestPayload, QueryResponse, RemoveTaskRequest, RemoveTaskResponse, SearchRequest,
-    SearchRequestPayload, SearchResponse, UpdateCollectionPayload, UpdateCollectionRecordsPayload,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateTenantRequest,
-    UpdateTenantResponse, UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
+    QueryRequestPayload, QueryResponse, SearchRequest, SearchRequestPayload, SearchResponse,
+    UpdateCollectionPayload, UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
 };
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
@@ -148,8 +149,8 @@ pub struct Metrics {
     collection_get: Counter<u64>,
     collection_query: Counter<u64>,
     collection_search: Counter<u64>,
-    create_task: Counter<u64>,
-    remove_task: Counter<u64>,
+    attach_function: Counter<u64>,
+    detach_function: Counter<u64>,
 }
 
 impl Metrics {
@@ -184,8 +185,8 @@ impl Metrics {
             collection_get: meter.u64_counter("collection_get").build(),
             collection_query: meter.u64_counter("collection_query").build(),
             collection_search: meter.u64_counter("collection_search").build(),
-            create_task: meter.u64_counter("create_task").build(),
-            remove_task: meter.u64_counter("remove_task").build(),
+            attach_function: meter.u64_counter("attach_function").build(),
+            detach_function: meter.u64_counter("detach_function").build(),
         }
     }
 }
@@ -328,12 +329,12 @@ impl FrontendServer {
                 post(collection_search),
             )
             .route(
-                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/tasks/create",
-                post(create_task),
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/attach",
+                post(attach_function),
             )
             .route(
-                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/tasks/delete",
-                post(remove_task),
+                "/api/v2/tenants/{tenant}/databases/{database}/attached_functions/{attached_function_id}/detach",
+                post(detach_function),
             )
             .merge(docs_router)
             .with_state(self)
@@ -2143,13 +2144,13 @@ async fn collection_search(
     Ok(Json(res))
 }
 
-/// Register a new task for a collection
+/// Attach a function to a collection
 #[utoipa::path(
     post,
-    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/tasks/create",
-    request_body = CreateTaskRequest,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/attach",
+    request_body = AttachFunctionRequest,
     responses(
-        (status = 200, description = "Task created successfully", body = CreateTaskResponse),
+        (status = 200, description = " Function attached successfully", body = AttachFunctionResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
@@ -2159,17 +2160,17 @@ async fn collection_search(
         ("collection_id" = String, Path, description = "Collection ID")
     )
 )]
-async fn create_task(
+async fn attach_function(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    TracedJson(request): TracedJson<CreateTaskRequest>,
-) -> Result<Json<CreateTaskResponse>, ServerError> {
-    server.metrics.create_task.add(1, &[]);
+    TracedJson(request): TracedJson<AttachFunctionRequest>,
+) -> Result<Json<AttachFunctionResponse>, ServerError> {
+    server.metrics.attach_function.add(1, &[]);
     server
         .authenticate_and_authorize(
             &headers,
-            AuthzAction::CreateTask,
+            AuthzAction::CreateAttachedFunction,
             AuthzResource {
                 tenant: Some(tenant.clone()),
                 database: Some(database.clone()),
@@ -2179,45 +2180,45 @@ async fn create_task(
         .await?;
 
     let _guard = server.scorecard_request(&[
-        "op:create_task",
+        "op:attach_function",
         format!("tenant:{}", tenant).as_str(),
         format!("database:{}", database).as_str(),
     ])?;
 
     let res = server
         .frontend
-        .create_task(tenant, database, collection_id, request)
+        .attach_function(tenant, database, collection_id, request)
         .await?;
     Ok(Json(res))
 }
 
-/// Remove a task
+/// Detach a function
 #[utoipa::path(
     post,
-    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/tasks/delete",
-    request_body = RemoveTaskRequest,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/attached_functions/{attached_function_id}/detach",
+    request_body = DetachFunctionRequest,
     responses(
-        (status = 200, description = "Task removed successfully", body = RemoveTaskResponse),
+        (status = 200, description = "Function detached successfully", body = DetachFunctionResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
         ("tenant" = String, Path, description = "Tenant ID"),
         ("database" = String, Path, description = "Database name"),
-        ("collection_id" = String, Path, description = "Collection ID")
+        ("attached_function_id" = String, Path, description = "Attached Function ID")
     )
 )]
-async fn remove_task(
+async fn detach_function(
     headers: HeaderMap,
-    Path((tenant, database_name, collection_id)): Path<(String, String, String)>,
+    Path((tenant, database_name, attached_function_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    TracedJson(request): TracedJson<RemoveTaskRequest>,
-) -> Result<Json<RemoveTaskResponse>, ServerError> {
-    server.metrics.remove_task.add(1, &[]);
+    TracedJson(request): TracedJson<DetachFunctionRequest>,
+) -> Result<Json<DetachFunctionResponse>, ServerError> {
+    server.metrics.detach_function.add(1, &[]);
     server
         .authenticate_and_authorize(
             &headers,
-            AuthzAction::RemoveTask,
+            AuthzAction::RemoveAttachedFunction,
             AuthzResource {
                 tenant: Some(tenant.clone()),
                 database: Some(database_name.clone()),
@@ -2227,14 +2228,14 @@ async fn remove_task(
         .await?;
 
     let _guard = server.scorecard_request(&[
-        "op:remove_task",
+        "op:detach_function",
         format!("tenant:{}", tenant).as_str(),
         format!("database:{}", database_name).as_str(),
     ])?;
 
     let res = server
         .frontend
-        .remove_task(tenant, database_name, collection_id, request)
+        .detach_function(tenant, database_name, attached_function_id, request)
         .await?;
     Ok(Json(res))
 }
@@ -2297,8 +2298,8 @@ impl Modify for ChromaTokenSecurityAddon {
         collection_get,
         collection_query,
         collection_search,
-        create_task,
-        remove_task,
+        attach_function,
+        detach_function,
     ),
     // Apply our new security scheme here
     modifiers(&ChromaTokenSecurityAddon)
