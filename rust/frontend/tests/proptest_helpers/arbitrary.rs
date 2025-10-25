@@ -249,7 +249,7 @@ fn arbitrary_get_request(
                 None,
                 None,
                 0,
-                IncludeList(vec![Include::Metadata, Include::Document]),
+                Include::Metadata & Include::Document,
             )
             .unwrap(),
         )
@@ -344,7 +344,7 @@ fn arbitrary_query_request(
                 None,
                 None,
                 0,
-                IncludeList(vec![Include::Metadata, Include::Document]),
+                Include::Metadata & Include::Document,
             )
             .unwrap(),
         )
