@@ -4,34 +4,34 @@ on:
   workflow_dispatch:
     inputs:
       publish_to_test_pypi:
-        description: 'Publish to test PyPI'
+        description: "Publish to test PyPI"
         required: false
         default: false
         type: boolean
       publish_to_pypi:
-        description: 'Publish to PyPI'
+        description: "Publish to PyPI"
         required: false
         default: false
         type: boolean
       version:
-        description: 'Version to publish'
+        description: "Version to publish"
         required: false
         type: string
 
   workflow_call:
     inputs:
       publish_to_test_pypi:
-        description: 'Publish to test PyPI'
+        description: "Publish to test PyPI"
         required: false
         default: false
         type: boolean
       publish_to_pypi:
-        description: 'Publish to PyPI'
+        description: "Publish to PyPI"
         required: false
         default: false
         type: boolean
       version:
-        description: 'Version to publish'
+        description: "Version to publish"
         required: false
         type: string
 
@@ -66,8 +66,12 @@ jobs:
       matrix:
         platform:
           - { os: linux, runner: blacksmith-4vcpu-ubuntu-2404, target: x86_64 }
-          - { os: linux, runner: blacksmith-4vcpu-ubuntu-2404-arm, target: aarch64 }
-          - { os: windows, runner: 8core-32gb-windows-latest, target: x64 }
+          - {
+              os: linux,
+              runner: blacksmith-4vcpu-ubuntu-2404-arm,
+              target: aarch64,
+            }
+          - { os: windows, runner: blacksmith-8vcpu-windows-2025, target: x64 }
           - { os: macos, runner: macos-14, target: x86_64 }
           - { os: macos, runner: macos-14, target: aarch64 }
 
@@ -176,7 +180,7 @@ jobs:
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
         with:
-          subject-path: 'wheels-*/*'
+          subject-path: "wheels-*/*"
 
       - name: Publish to test PyPI
         if: ${{ inputs.publish_to_test_pypi }}
