@@ -150,6 +150,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "cloudflare_workers_ai": CloudflareWorkersAIEmbeddingFunction,
     "together_ai": TogetherAIEmbeddingFunction,
     "chroma-cloud-qwen": ChromaCloudQwenEmbeddingFunction,
+    "local_simple_hash": SimpleHashEmbeddingFunction,
 }
 
 sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {  # type: ignore
@@ -276,4 +277,5 @@ __all__ = [
     "register_embedding_function",
     "config_to_embedding_function",
     "known_embedding_functions",
+    "SimpleHashEmbeddingFunction",
 ]
