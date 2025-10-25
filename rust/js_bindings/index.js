@@ -310,6 +310,9 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { cli } = nativeBinding
+const { MigrationMode, MigrationHash, cli, Bindings } = nativeBinding
 
+module.exports.MigrationMode = MigrationMode
+module.exports.MigrationHash = MigrationHash
 module.exports.cli = cli
+module.exports.Bindings = Bindings
