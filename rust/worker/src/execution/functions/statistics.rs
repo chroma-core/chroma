@@ -176,7 +176,7 @@ impl TaskExecutor for StatisticsFunctionExecutor {
         input_records: Chunk<LogRecord>,
         output_reader: Option<&RecordSegmentReader<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
-        let mut counts: HashMap<(String, StatisticsValue), Box<dyn StatisticsFunction>> =
+        let mut counts: HashMap<String, HashMap<StatisticsValue, Box<dyn StatisticsFunction>>> =
             HashMap::default();
         for (log_record, _) in input_records.iter() {
             if matches!(log_record.record.operation, Operation::Delete) {
@@ -187,9 +187,10 @@ impl TaskExecutor for StatisticsFunctionExecutor {
                 for (key, update_value) in update_metadata.iter() {
                     let value: Option<MetadataValue> = update_value.try_into().ok();
                     if let Some(value) = value {
+                        let inner_map = counts.entry(key.clone()).or_default();
                         for stats_value in StatisticsValue::from_metadata_value(&value) {
-                            counts
-                                .entry((key.clone(), stats_value))
+                            inner_map
+                                .entry(stats_value)
                                 .or_insert_with(|| self.0.create())
                                 .observe(log_record);
                         }
@@ -199,34 +200,36 @@ impl TaskExecutor for StatisticsFunctionExecutor {
         }
         let mut keys = HashSet::with_capacity(counts.len());
         let mut records = Vec::with_capacity(counts.len());
-        for ((key, stats_value), count) in counts.into_iter() {
-            let stable_value = stats_value.stable_value();
-            let stable_string = stats_value.stable_string();
-            let record_id = format!("{key}::{stable_string}");
-            let document = format!("statistics about {key} for {stable_string}");
+        for (key, inner_map) in counts.into_iter() {
+            for (stats_value, count) in inner_map.into_iter() {
+                let stable_value = stats_value.stable_value();
+                let stable_string = stats_value.stable_string();
+                let record_id = format!("{key}::{stable_string}");
+                let document = format!("statistics about {key} for {stable_string}");
 
-            let mut metadata = HashMap::with_capacity(4);
-            metadata.insert("count".to_string(), count.output());
-            metadata.insert("term".to_string(), UpdateMetadataValue::Str(key));
-            metadata.insert(
-                "type".to_string(),
-                UpdateMetadataValue::Str(stats_value.stable_type().to_string()),
-            );
-            metadata.insert("value".to_string(), UpdateMetadataValue::Str(stable_value));
+                let mut metadata = HashMap::with_capacity(4);
+                metadata.insert("count".to_string(), count.output());
+                metadata.insert("term".to_string(), UpdateMetadataValue::Str(key.clone()));
+                metadata.insert(
+                    "type".to_string(),
+                    UpdateMetadataValue::Str(stats_value.stable_type().to_string()),
+                );
+                metadata.insert("value".to_string(), UpdateMetadataValue::Str(stable_value));
 
-            keys.insert(record_id.clone());
-            records.push(LogRecord {
-                log_offset: 0,
-                record: OperationRecord {
-                    id: record_id,
-                    // NOTE(rescrv): We need to provide some embedding, so give a zero.
-                    embedding: Some(vec![0.0]),
-                    encoding: None,
-                    metadata: Some(metadata),
-                    document: Some(document),
-                    operation: Operation::Upsert,
-                },
-            });
+                keys.insert(record_id.clone());
+                records.push(LogRecord {
+                    log_offset: 0,
+                    record: OperationRecord {
+                        id: record_id,
+                        // NOTE(rescrv): We need to provide some embedding, so give a zero.
+                        embedding: Some(vec![0.0]),
+                        encoding: None,
+                        metadata: Some(metadata),
+                        document: Some(document),
+                        operation: Operation::Upsert,
+                    },
+                });
+            }
         }
         // Delete records we didn't recreate.
         if let Some(output_reader) = output_reader {
