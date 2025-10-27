@@ -65,6 +65,7 @@ func (suite *TaskDbTestSuite) TestTaskDb_Insert() {
 		DatabaseID:           "db1",
 		MinRecordsForTask:    100,
 		NextNonce:            nextNonce,
+		LowestLiveNonce:      &nextNonce,
 	}
 
 	err := suite.Db.Insert(task)
@@ -98,6 +99,7 @@ func (suite *TaskDbTestSuite) TestTaskDb_Insert_DuplicateName() {
 		DatabaseID:           "db1",
 		MinRecordsForTask:    100,
 		NextNonce:            nextNonce1,
+		LowestLiveNonce:      &nextNonce1,
 	}
 
 	err := suite.Db.Insert(task1)
@@ -119,6 +121,7 @@ func (suite *TaskDbTestSuite) TestTaskDb_Insert_DuplicateName() {
 		DatabaseID:           "db1",
 		MinRecordsForTask:    100,
 		NextNonce:            nextNonce2,
+		LowestLiveNonce:      &nextNonce2,
 	}
 
 	err = suite.Db.Insert(task2)
@@ -146,6 +149,7 @@ func (suite *TaskDbTestSuite) TestTaskDb_GetByName() {
 		DatabaseID:           "db1",
 		MinRecordsForTask:    100,
 		NextNonce:            nextNonce,
+		LowestLiveNonce:      &nextNonce,
 	}
 
 	err := suite.Db.Insert(task)
@@ -187,6 +191,7 @@ func (suite *TaskDbTestSuite) TestTaskDb_GetByName_IgnoresDeleted() {
 		DatabaseID:           "db1",
 		MinRecordsForTask:    100,
 		NextNonce:            nextNonce,
+		LowestLiveNonce:      &nextNonce,
 	}
 
 	err := suite.Db.Insert(task)
@@ -222,6 +227,7 @@ func (suite *TaskDbTestSuite) TestTaskDb_SoftDelete() {
 		DatabaseID:           "db1",
 		MinRecordsForTask:    100,
 		NextNonce:            nextNonce,
+		LowestLiveNonce:      &nextNonce,
 	}
 
 	err := suite.Db.Insert(task)
@@ -251,6 +257,9 @@ func (suite *TaskDbTestSuite) TestTaskDb_DeleteAll() {
 	operatorID := dbmodel.OperatorRecordCounter
 
 	// Insert multiple tasks
+	nonce1 := uuid.Must(uuid.NewV7())
+	nonce2 := uuid.Must(uuid.NewV7())
+	nonce3 := uuid.Must(uuid.NewV7())
 	tasks := []*dbmodel.Task{
 		{
 			ID:                   uuid.New(),
@@ -262,7 +271,8 @@ func (suite *TaskDbTestSuite) TestTaskDb_DeleteAll() {
 			TenantID:             "tenant1",
 			DatabaseID:           "db-delete-all",
 			MinRecordsForTask:    100,
-			NextNonce:            uuid.Must(uuid.NewV7()),
+			NextNonce:            nonce1,
+			LowestLiveNonce:      &nonce1,
 		},
 		{
 			ID:                   uuid.New(),
@@ -274,7 +284,8 @@ func (suite *TaskDbTestSuite) TestTaskDb_DeleteAll() {
 			TenantID:             "tenant1",
 			DatabaseID:           "db-delete-all",
 			MinRecordsForTask:    100,
-			NextNonce:            uuid.Must(uuid.NewV7()),
+			NextNonce:            nonce2,
+			LowestLiveNonce:      &nonce2,
 		},
 		{
 			ID:                   uuid.New(),
@@ -286,7 +297,8 @@ func (suite *TaskDbTestSuite) TestTaskDb_DeleteAll() {
 			TenantID:             "tenant1",
 			DatabaseID:           "db-delete-all",
 			MinRecordsForTask:    100,
-			NextNonce:            uuid.Must(uuid.NewV7()),
+			NextNonce:            nonce3,
+			LowestLiveNonce:      &nonce3,
 		},
 	}
 
@@ -328,6 +340,7 @@ func (suite *TaskDbTestSuite) TestTaskDb_GetByID() {
 		DatabaseID:           "db1",
 		MinRecordsForTask:    100,
 		NextNonce:            nextNonce,
+		LowestLiveNonce:      &nextNonce,
 	}
 
 	err := suite.Db.Insert(task)
@@ -365,6 +378,7 @@ func (suite *TaskDbTestSuite) TestTaskDb_GetByID_IgnoresDeleted() {
 		DatabaseID:           "db1",
 		MinRecordsForTask:    100,
 		NextNonce:            nextNonce,
+		LowestLiveNonce:      &nextNonce,
 	}
 
 	err := suite.Db.Insert(task)
@@ -396,6 +410,7 @@ func (suite *TaskDbTestSuite) TestTaskDb_AdvanceTask() {
 		DatabaseID:           "db1",
 		MinRecordsForTask:    100,
 		NextNonce:            originalNonce,
+		LowestLiveNonce:      &originalNonce,
 		CurrentAttempts:      3,
 	}
 
@@ -433,6 +448,7 @@ func (suite *TaskDbTestSuite) TestTaskDb_AdvanceTask_InvalidNonce() {
 		DatabaseID:           "db1",
 		MinRecordsForTask:    100,
 		NextNonce:            correctNonce,
+		LowestLiveNonce:      &correctNonce,
 	}
 
 	err := suite.Db.Insert(task)

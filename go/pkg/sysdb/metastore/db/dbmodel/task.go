@@ -49,10 +49,12 @@ type ITaskDb interface {
 	GetByID(taskID uuid.UUID) (*Task, error)
 	AdvanceTask(taskID uuid.UUID, nextRunNonce uuid.UUID, completionOffset int64, nextRunDelaySecs uint64) (*AdvanceTask, error)
 	UpdateCompletionOffset(taskID uuid.UUID, taskRunNonce uuid.UUID, completionOffset int64) error
+	UpdateLowestLiveNonce(taskID uuid.UUID, lowestLiveNonce uuid.UUID) error
 	FinishTask(taskID uuid.UUID) error
 	UpdateOutputCollectionID(taskID uuid.UUID, outputCollectionID *string) error
 	SoftDelete(inputCollectionID string, taskName string) error
 	DeleteAll() error
 	PeekScheduleByCollectionId(collectionIDs []string) ([]*Task, error)
 	GetMinCompletionOffsetForCollection(inputCollectionID string) (*int64, error)
+	CleanupExpiredPartialTasks(maxAgeSeconds uint64) ([]uuid.UUID, error)
 }

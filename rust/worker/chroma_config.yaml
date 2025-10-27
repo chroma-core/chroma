@@ -141,6 +141,8 @@ compaction_service:
     max_partition_size: 5000
     disabled_collections: [] # uuids to disable compaction for
     fetch_log_batch_size: 1000
+  task_runner:
+    enabled: true
   blockfile_provider:
     arrow:
       block_manager_config:
