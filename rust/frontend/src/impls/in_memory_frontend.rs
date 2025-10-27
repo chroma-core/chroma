@@ -6,7 +6,7 @@ use chroma_types::operator::{Filter, KnnBatch, KnnProjection, Limit, Projection,
 use chroma_types::plan::{Count, Get, Knn};
 use chroma_types::{
     test_segment, Collection, CollectionAndSegments, CreateCollectionError, Database, Include,
-    IncludeList, InternalCollectionConfiguration, Segment, VectorIndexConfiguration,
+    IncludeList, InternalCollectionConfiguration, KnnIndex, Segment, VectorIndexConfiguration,
 };
 use std::collections::HashSet;
 
@@ -221,15 +221,21 @@ impl InMemoryFrontend {
             ));
         }
 
-        let collection = Collection {
-            name: request.name,
-            tenant: request.tenant_id,
-            database: request.database_name,
+        let mut collection = Collection {
+            name: request.name.clone(),
+            tenant: request.tenant_id.clone(),
+            database: request.database_name.clone(),
+            metadata: request.metadata,
             config: request
                 .configuration
                 .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
+            schema: request.schema,
             ..Default::default()
         };
+
+        collection
+            .reconcile_schema_with_config(KnnIndex::Hnsw)
+            .map_err(CreateCollectionError::InvalidSchema)?;
 
         // Prevent SPANN usage in InMemoryFrontend
         if matches!(
@@ -620,10 +626,15 @@ impl InMemoryFrontend {
 
         let params = collection
             .collection
-            .config
-            .get_hnsw_config_with_legacy_fallback(&collection.vector_segment)
+            .schema
+            .as_ref()
+            .map(|schema| {
+                schema.get_internal_hnsw_config_with_legacy_fallback(&collection.vector_segment)
+            })
+            .transpose()
             .map_err(|e| e.boxed())?
-            .unwrap();
+            .flatten()
+            .expect("HNSW configuration missing for collection schema");
         let distance_function: DistanceFunction = params.space.into();
 
         let query_response = collection

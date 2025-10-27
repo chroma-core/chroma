@@ -11,7 +11,7 @@ use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::SysDb;
 use chroma_system::System;
-use chroma_types::{CollectionUuid, ListCollectionsRequest};
+use chroma_types::{CollectionUuid, KnnIndex, ListCollectionsRequest};
 use clap::Parser;
 use colored::Colorize;
 use dialoguer::Confirm;
@@ -101,11 +101,17 @@ async fn trigger_vector_segments_max_seq_id_migration(
     sqlite: &SqliteDb,
     sysdb: &mut SysDb,
     segment_manager: &LocalSegmentManager,
+    default_knn_index: KnnIndex,
 ) -> Result<(), Box<dyn Error>> {
     let collection_ids = get_collection_ids_to_migrate(sqlite).await?;
 
     for collection_id in collection_ids {
-        let collection = sysdb.get_collection_with_segments(collection_id).await?;
+        let mut collection = sysdb.get_collection_with_segments(collection_id).await?;
+
+        collection
+            .collection
+            .reconcile_schema_with_config(default_knn_index)
+            .map_err(|e| Box::new(e) as Box<dyn Error>)?;
 
         // If collection is uninitialized, that means nothing has been written yet.
         let dim = match collection.collection.dimension {
@@ -138,7 +144,7 @@ async fn configure_sql_embedding_queue(log: &SqliteLog) -> Result<(), Box<dyn Er
 pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>> {
     let system = System::new();
     let registry = Registry::new();
-    let mut frontend = Frontend::try_from_config(&(config, system), &registry).await?;
+    let mut frontend = Frontend::try_from_config(&(config.clone(), system), &registry).await?;
 
     let sqlite = registry.get::<SqliteDb>()?;
     let segment_manager = registry.get::<LocalSegmentManager>()?;
@@ -147,7 +153,13 @@ pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>>
 
     println!("Purging the log...\n");
 
-    trigger_vector_segments_max_seq_id_migration(&sqlite, &mut sysdb, &segment_manager).await?;
+    trigger_vector_segments_max_seq_id_migration(
+        &sqlite,
+        &mut sysdb,
+        &segment_manager,
+        config.default_knn_index,
+    )
+    .await?;
 
     let tenant = String::from("default_tenant");
     let database = String::from("default_database");

@@ -5,7 +5,8 @@ use thiserror::Error;
 use validator::Validate;
 
 use crate::collection_configuration::{
-    EmbeddingFunctionConfiguration, InternalCollectionConfiguration, VectorIndexConfiguration,
+    EmbeddingFunctionConfiguration, InternalCollectionConfiguration,
+    UpdateVectorIndexConfiguration, VectorIndexConfiguration,
 };
 use crate::hnsw_configuration::Space;
 use crate::metadata::{MetadataComparison, MetadataValueType, Where};
@@ -18,7 +19,8 @@ use crate::{
     default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
     default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
     default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor,
-    InternalSpannConfiguration, KnnIndex,
+    HnswParametersFromSegmentError, InternalHnswConfiguration, InternalSpannConfiguration,
+    InternalUpdateCollectionConfiguration, KnnIndex, Segment,
 };
 
 impl ChromaError for SchemaError {
@@ -138,6 +140,101 @@ pub struct Schema {
     /// TODO(Sanket): Needed for backwards compatibility. Should remove after deploy.
     #[serde(rename = "keys", alias = "key_overrides")]
     pub keys: HashMap<String, ValueTypes>,
+}
+
+impl Schema {
+    pub fn update(&mut self, configuration: &InternalUpdateCollectionConfiguration) {
+        if let Some(vector_update) = &configuration.vector_index {
+            if let Some(default_vector_index) = self.defaults_vector_index_mut() {
+                Self::apply_vector_index_update(default_vector_index, vector_update);
+            }
+            if let Some(embedding_vector_index) = self.embedding_vector_index_mut() {
+                Self::apply_vector_index_update(embedding_vector_index, vector_update);
+            }
+        }
+
+        if let Some(embedding_function) = configuration.embedding_function.as_ref() {
+            if let Some(default_vector_index) = self.defaults_vector_index_mut() {
+                default_vector_index.config.embedding_function = Some(embedding_function.clone());
+            }
+            if let Some(embedding_vector_index) = self.embedding_vector_index_mut() {
+                embedding_vector_index.config.embedding_function = Some(embedding_function.clone());
+            }
+        }
+    }
+
+    fn defaults_vector_index_mut(&mut self) -> Option<&mut VectorIndexType> {
+        self.defaults
+            .float_list
+            .as_mut()
+            .and_then(|float_list| float_list.vector_index.as_mut())
+    }
+
+    fn embedding_vector_index_mut(&mut self) -> Option<&mut VectorIndexType> {
+        self.keys
+            .get_mut(EMBEDDING_KEY)
+            .and_then(|value_types| value_types.float_list.as_mut())
+            .and_then(|float_list| float_list.vector_index.as_mut())
+    }
+
+    fn apply_vector_index_update(
+        vector_index: &mut VectorIndexType,
+        update: &UpdateVectorIndexConfiguration,
+    ) {
+        match update {
+            UpdateVectorIndexConfiguration::Hnsw(Some(hnsw_update)) => {
+                if let Some(hnsw_config) = vector_index.config.hnsw.as_mut() {
+                    if let Some(ef_search) = hnsw_update.ef_search {
+                        hnsw_config.ef_search = Some(ef_search);
+                    }
+                    if let Some(max_neighbors) = hnsw_update.max_neighbors {
+                        hnsw_config.max_neighbors = Some(max_neighbors);
+                    }
+                    if let Some(num_threads) = hnsw_update.num_threads {
+                        hnsw_config.num_threads = Some(num_threads);
+                    }
+                    if let Some(resize_factor) = hnsw_update.resize_factor {
+                        hnsw_config.resize_factor = Some(resize_factor);
+                    }
+                    if let Some(sync_threshold) = hnsw_update.sync_threshold {
+                        hnsw_config.sync_threshold = Some(sync_threshold);
+                    }
+                    if let Some(batch_size) = hnsw_update.batch_size {
+                        hnsw_config.batch_size = Some(batch_size);
+                    }
+                }
+            }
+            UpdateVectorIndexConfiguration::Hnsw(None) => {}
+            UpdateVectorIndexConfiguration::Spann(Some(spann_update)) => {
+                if let Some(spann_config) = vector_index.config.spann.as_mut() {
+                    if let Some(search_nprobe) = spann_update.search_nprobe {
+                        spann_config.search_nprobe = Some(search_nprobe);
+                    }
+                    if let Some(ef_search) = spann_update.ef_search {
+                        spann_config.ef_search = Some(ef_search);
+                    }
+                }
+            }
+            UpdateVectorIndexConfiguration::Spann(None) => {}
+        }
+    }
+
+    pub fn is_sparse_index_enabled(&self) -> bool {
+        let defaults_enabled = self
+            .defaults
+            .sparse_vector
+            .as_ref()
+            .and_then(|sv| sv.sparse_vector_index.as_ref())
+            .is_some_and(|idx| idx.enabled);
+        let key_enabled = self.keys.values().any(|value_types| {
+            value_types
+                .sparse_vector
+                .as_ref()
+                .and_then(|sv| sv.sparse_vector_index.as_ref())
+                .is_some_and(|idx| idx.enabled)
+        });
+        defaults_enabled || key_enabled
+    }
 }
 
 impl Default for Schema {
@@ -655,28 +752,76 @@ impl Schema {
             })
     }
 
+    pub fn get_internal_hnsw_config(&self) -> Option<InternalHnswConfiguration> {
+        let to_internal = |vector_index: &VectorIndexType| {
+            if vector_index.config.spann.is_some() {
+                return None;
+            }
+            let space = vector_index.config.space.as_ref();
+            let hnsw_config = vector_index.config.hnsw.as_ref();
+            Some((space, hnsw_config).into())
+        };
+
+        self.keys
+            .get(EMBEDDING_KEY)
+            .and_then(|value_types| value_types.float_list.as_ref())
+            .and_then(|float_list| float_list.vector_index.as_ref())
+            .and_then(to_internal)
+            .or_else(|| {
+                self.defaults
+                    .float_list
+                    .as_ref()
+                    .and_then(|float_list| float_list.vector_index.as_ref())
+                    .and_then(to_internal)
+            })
+    }
+
+    pub fn get_internal_hnsw_config_with_legacy_fallback(
+        &self,
+        segment: &Segment,
+    ) -> Result<Option<InternalHnswConfiguration>, HnswParametersFromSegmentError> {
+        if let Some(config) = self.get_internal_hnsw_config() {
+            let config_from_metadata =
+                InternalHnswConfiguration::from_legacy_segment_metadata(&segment.metadata)?;
+
+            if config == InternalHnswConfiguration::default() && config != config_from_metadata {
+                return Ok(Some(config_from_metadata));
+            }
+
+            return Ok(Some(config));
+        }
+
+        Ok(None)
+    }
+
     /// Reconcile user-provided schema with system defaults
     ///
     /// This method merges user configurations with system defaults, ensuring that:
     /// - User overrides take precedence over defaults
     /// - Missing user configurations fall back to system defaults
     /// - Field-level merging for complex configurations (Vector, HNSW, SPANN, etc.)
-    pub fn reconcile_with_defaults(user_schema: Option<&Schema>) -> Result<Self, SchemaError> {
-        let default_schema = Schema::new_default(KnnIndex::Spann);
+    pub fn reconcile_with_defaults(
+        user_schema: Option<&Schema>,
+        knn_index: KnnIndex,
+    ) -> Result<Self, SchemaError> {
+        let default_schema = Schema::new_default(knn_index);
 
         match user_schema {
             Some(user) => {
                 // Merge defaults with user overrides
                 let merged_defaults =
-                    Self::merge_value_types(&default_schema.defaults, &user.defaults)?;
+                    Self::merge_value_types(&default_schema.defaults, &user.defaults, knn_index)?;
 
                 // Merge key overrides
                 let mut merged_keys = default_schema.keys.clone();
                 for (key, user_value_types) in &user.keys {
                     if let Some(default_value_types) = merged_keys.get(key) {
                         // Merge with existing default key override
-                        let merged_value_types =
-                            Self::merge_value_types(default_value_types, user_value_types)?;
+                        let merged_value_types = Self::merge_value_types(
+                            default_value_types,
+                            user_value_types,
+                            knn_index,
+                        )?;
                         merged_keys.insert(key.clone(), merged_value_types);
                     } else {
                         // New key override from user
@@ -884,10 +1029,14 @@ impl Schema {
     fn merge_value_types(
         default: &ValueTypes,
         user: &ValueTypes,
+        knn_index: KnnIndex,
     ) -> Result<ValueTypes, SchemaError> {
         // Merge float_list first
-        let float_list =
-            Self::merge_float_list_type(default.float_list.as_ref(), user.float_list.as_ref());
+        let float_list = Self::merge_float_list_type(
+            default.float_list.as_ref(),
+            user.float_list.as_ref(),
+            knn_index,
+        );
 
         // Validate the merged float_list (covers all merge cases)
         if let Some(ref fl) = float_list {
@@ -987,12 +1136,14 @@ impl Schema {
     fn merge_float_list_type(
         default: Option<&FloatListValueType>,
         user: Option<&FloatListValueType>,
+        knn_index: KnnIndex,
     ) -> Option<FloatListValueType> {
         match (default, user) {
             (Some(default), Some(user)) => Some(FloatListValueType {
                 vector_index: Self::merge_vector_index_type(
                     default.vector_index.as_ref(),
                     user.vector_index.as_ref(),
+                    knn_index,
                 ),
             }),
             (Some(default), None) => Some(default.clone()),
@@ -1100,11 +1251,12 @@ impl Schema {
     fn merge_vector_index_type(
         default: Option<&VectorIndexType>,
         user: Option<&VectorIndexType>,
+        knn_index: KnnIndex,
     ) -> Option<VectorIndexType> {
         match (default, user) {
             (Some(default), Some(user)) => Some(VectorIndexType {
                 enabled: user.enabled,
-                config: Self::merge_vector_index_config(&default.config, &user.config),
+                config: Self::merge_vector_index_config(&default.config, &user.config, knn_index),
             }),
             (Some(default), None) => Some(default.clone()),
             (None, Some(user)) => Some(user.clone()),
@@ -1145,16 +1297,29 @@ impl Schema {
     fn merge_vector_index_config(
         default: &VectorIndexConfig,
         user: &VectorIndexConfig,
+        knn_index: KnnIndex,
     ) -> VectorIndexConfig {
-        VectorIndexConfig {
-            space: user.space.clone().or(default.space.clone()),
-            embedding_function: user
-                .embedding_function
-                .clone()
-                .or(default.embedding_function.clone()),
-            source_key: user.source_key.clone().or(default.source_key.clone()),
-            hnsw: Self::merge_hnsw_configs(default.hnsw.as_ref(), user.hnsw.as_ref()),
-            spann: Self::merge_spann_configs(default.spann.as_ref(), user.spann.as_ref()),
+        match knn_index {
+            KnnIndex::Hnsw => VectorIndexConfig {
+                space: user.space.clone().or(default.space.clone()),
+                embedding_function: user
+                    .embedding_function
+                    .clone()
+                    .or(default.embedding_function.clone()),
+                source_key: user.source_key.clone().or(default.source_key.clone()),
+                hnsw: Self::merge_hnsw_configs(default.hnsw.as_ref(), user.hnsw.as_ref()),
+                spann: None,
+            },
+            KnnIndex::Spann => VectorIndexConfig {
+                space: user.space.clone().or(default.space.clone()),
+                embedding_function: user
+                    .embedding_function
+                    .clone()
+                    .or(default.embedding_function.clone()),
+                source_key: user.source_key.clone().or(default.source_key.clone()),
+                hnsw: None,
+                spann: Self::merge_spann_configs(default.spann.as_ref(), user.spann.as_ref()),
+            },
         }
     }
 
@@ -1262,6 +1427,7 @@ impl Schema {
     pub fn reconcile_schema_and_config(
         schema: Option<&Schema>,
         configuration: Option<&InternalCollectionConfiguration>,
+        knn_index: KnnIndex,
     ) -> Result<Schema, SchemaError> {
         // Early validation: check if both user-provided schema and config are non-default
         if let (Some(user_schema), Some(config)) = (schema, configuration) {
@@ -1270,7 +1436,7 @@ impl Schema {
             }
         }
 
-        let reconciled_schema = Self::reconcile_with_defaults(schema)?;
+        let reconciled_schema = Self::reconcile_with_defaults(schema, knn_index)?;
         if let Some(config) = configuration {
             Self::reconcile_with_collection_config(&reconciled_schema, config)
         } else {
@@ -2502,7 +2668,7 @@ mod tests {
     #[test]
     fn test_reconcile_with_defaults_none_user_schema() {
         // Test that when no user schema is provided, we get the default schema
-        let result = Schema::reconcile_with_defaults(None).unwrap();
+        let result = Schema::reconcile_with_defaults(None, KnnIndex::Spann).unwrap();
         let expected = Schema::new_default(KnnIndex::Spann);
         assert_eq!(result, expected);
     }
@@ -2515,7 +2681,7 @@ mod tests {
             keys: HashMap::new(),
         };
 
-        let result = Schema::reconcile_with_defaults(Some(&user_schema)).unwrap();
+        let result = Schema::reconcile_with_defaults(Some(&user_schema), KnnIndex::Spann).unwrap();
         let expected = Schema::new_default(KnnIndex::Spann);
         assert_eq!(result, expected);
     }
@@ -2536,7 +2702,7 @@ mod tests {
             fts_index: None,
         });
 
-        let result = Schema::reconcile_with_defaults(Some(&user_schema)).unwrap();
+        let result = Schema::reconcile_with_defaults(Some(&user_schema), KnnIndex::Spann).unwrap();
 
         // Check that the user override took precedence
         assert!(
@@ -2587,13 +2753,21 @@ mod tests {
         // Use HNSW defaults for this test so we have HNSW config to merge with
         let result = {
             let default_schema = Schema::new_default(KnnIndex::Hnsw);
-            let merged_defaults =
-                Schema::merge_value_types(&default_schema.defaults, &user_schema.defaults).unwrap();
+            let merged_defaults = Schema::merge_value_types(
+                &default_schema.defaults,
+                &user_schema.defaults,
+                KnnIndex::Hnsw,
+            )
+            .unwrap();
             let mut merged_keys = default_schema.keys.clone();
             for (key, user_value_types) in user_schema.keys {
                 if let Some(default_value_types) = merged_keys.get(&key) {
-                    let merged_value_types =
-                        Schema::merge_value_types(default_value_types, &user_value_types).unwrap();
+                    let merged_value_types = Schema::merge_value_types(
+                        default_value_types,
+                        &user_value_types,
+                        KnnIndex::Hnsw,
+                    )
+                    .unwrap();
                     merged_keys.insert(key, merged_value_types);
                 } else {
                     merged_keys.insert(key, user_value_types);
@@ -2658,7 +2832,7 @@ mod tests {
             .keys
             .insert("custom_key".to_string(), custom_key_types);
 
-        let result = Schema::reconcile_with_defaults(Some(&user_schema)).unwrap();
+        let result = Schema::reconcile_with_defaults(Some(&user_schema), KnnIndex::Spann).unwrap();
 
         // Check that default key overrides are preserved
         assert!(result.keys.contains_key(EMBEDDING_KEY));
@@ -2707,7 +2881,7 @@ mod tests {
             .keys
             .insert(EMBEDDING_KEY.to_string(), embedding_override);
 
-        let result = Schema::reconcile_with_defaults(Some(&user_schema)).unwrap();
+        let result = Schema::reconcile_with_defaults(Some(&user_schema), KnnIndex::Spann).unwrap();
 
         let embedding_config = result.keys.get(EMBEDDING_KEY).unwrap();
         let vector_config = &embedding_config
@@ -3155,7 +3329,8 @@ mod tests {
             }), // Add SPANN config
         };
 
-        let result = Schema::merge_vector_index_config(&default_config, &user_config);
+        let result =
+            Schema::merge_vector_index_config(&default_config, &user_config, KnnIndex::Hnsw);
 
         // Check field-level merging
         assert_eq!(result.space, Some(Space::L2)); // User override
@@ -3169,9 +3344,8 @@ mod tests {
         assert_eq!(result.hnsw.as_ref().unwrap().ef_construction, Some(300)); // User override
         assert_eq!(result.hnsw.as_ref().unwrap().max_neighbors, Some(16)); // Default preserved
 
-        // Check SPANN was added from user
-        assert!(result.spann.is_some());
-        assert_eq!(result.spann.as_ref().unwrap().search_nprobe, Some(15));
+        // Check SPANN is not present, since merging in the context of HNSW
+        assert!(result.spann.is_none());
     }
 
     #[test]
@@ -3259,13 +3433,21 @@ mod tests {
         // Use HNSW defaults for this test so we have HNSW config to merge with
         let result = {
             let default_schema = Schema::new_default(KnnIndex::Hnsw);
-            let merged_defaults =
-                Schema::merge_value_types(&default_schema.defaults, &user_schema.defaults).unwrap();
+            let merged_defaults = Schema::merge_value_types(
+                &default_schema.defaults,
+                &user_schema.defaults,
+                KnnIndex::Hnsw,
+            )
+            .unwrap();
             let mut merged_keys = default_schema.keys.clone();
             for (key, user_value_types) in user_schema.keys {
                 if let Some(default_value_types) = merged_keys.get(&key) {
-                    let merged_value_types =
-                        Schema::merge_value_types(default_value_types, &user_value_types).unwrap();
+                    let merged_value_types = Schema::merge_value_types(
+                        default_value_types,
+                        &user_value_types,
+                        KnnIndex::Hnsw,
+                    )
+                    .unwrap();
                     merged_keys.insert(key, merged_value_types);
                 } else {
                     merged_keys.insert(key, user_value_types);
@@ -3382,7 +3564,11 @@ mod tests {
         }
 
         // Use reconcile_schema_and_config which has the early validation
-        let result = Schema::reconcile_schema_and_config(Some(&schema), Some(&collection_config));
+        let result = Schema::reconcile_schema_and_config(
+            Some(&schema),
+            Some(&collection_config),
+            KnnIndex::Spann,
+        );
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
