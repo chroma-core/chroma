@@ -224,6 +224,8 @@ pub struct CompactionServiceConfig {
     #[serde(default)]
     pub log: chroma_log::config::LogConfig,
     #[serde(default)]
+    pub heap_service: s3heap_service::client::HeapServiceConfig,
+    #[serde(default)]
     pub dispatcher: chroma_system::DispatcherConfig,
     #[serde(default)]
     pub compactor: crate::compactor::config::CompactorConfig,

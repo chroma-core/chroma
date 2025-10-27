@@ -34,6 +34,9 @@ mod scheduler;
 
 pub use scheduler::SysDbScheduler;
 
+/// gRPC client for heap tender service
+pub mod client;
+
 //////////////////////////////////////////// conversions ///////////////////////////////////////////
 
 /// Error type for conversion failures.

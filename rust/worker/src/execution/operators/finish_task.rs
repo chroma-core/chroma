@@ -12,13 +12,27 @@ use thiserror::Error;
 pub struct FinishTaskOperator {
     log_client: Log,
     sysdb: SysDb,
+    heap_service: s3heap_service::client::GrpcHeapService,
 }
 
 impl FinishTaskOperator {
     /// Create a new finish task operator.
+    ///
+    /// # Parameters
+    /// * `log_client` - Log client for scouting log records
+    /// * `sysdb` - SysDB client for task state management
+    /// * `heap_service` - Heap service client for scheduling next task runs (required)
     #[allow(dead_code)]
-    pub fn new(log_client: Log, sysdb: SysDb) -> Box<Self> {
-        Box::new(FinishTaskOperator { log_client, sysdb })
+    pub fn new(
+        log_client: Log,
+        sysdb: SysDb,
+        heap_service: s3heap_service::client::GrpcHeapService,
+    ) -> Box<Self> {
+        Box::new(FinishTaskOperator {
+            log_client,
+            sysdb,
+            heap_service,
+        })
     }
 }
 
@@ -53,6 +67,8 @@ pub enum FinishTaskError {
     ScoutLogs(String),
     #[error("Failed to finish task in SysDB: {0}")]
     SysDb(#[from] SysDbFinishTaskError),
+    #[error("Failed to schedule task in heap service: {0}")]
+    HeapService(#[from] s3heap_service::client::GrpcHeapServiceError),
 }
 
 impl ChromaError for FinishTaskError {
@@ -60,6 +76,7 @@ impl ChromaError for FinishTaskError {
         match self {
             FinishTaskError::ScoutLogs(_) => ErrorCodes::Internal,
             FinishTaskError::SysDb(e) => e.code(),
+            FinishTaskError::HeapService(e) => e.code(),
         }
     }
 }
@@ -114,7 +131,30 @@ impl Operator<FinishTaskInput, FinishTaskOutput> for FinishTaskOperator {
                 "Detected new records written during task execution that exceed threshold"
             );
 
-            // TODO: Schedule a new task for next nonce by pushing to the heap
+            // Schedule a new task for next nonce by pushing to the heap
+            let mut heap_service = self.heap_service.clone();
+            let schedule = chroma_types::chroma_proto::Schedule {
+                triggerable: Some(chroma_types::chroma_proto::Triggerable {
+                    partitioning_uuid: input.updated_task.input_collection_id.to_string(),
+                    scheduling_uuid: input.updated_task.id.0.to_string(),
+                }),
+                next_scheduled: Some(prost_types::Timestamp::from(input.updated_task.next_run)),
+                nonce: input.updated_task.next_nonce.0.to_string(),
+            };
+
+            heap_service
+                .push(
+                    vec![schedule],
+                    &input.updated_task.input_collection_id.to_string(),
+                )
+                .await?;
+
+            tracing::info!(
+                task_id = %input.updated_task.id.0,
+                collection_id = %input.updated_task.input_collection_id,
+                next_nonce = %input.updated_task.next_nonce.0,
+                "Successfully scheduled next task run in heap"
+            );
         }
 
         // Step 2: Update lowest_live_nonce to equal next_nonce
@@ -158,6 +198,30 @@ mod tests {
                 .await
                 .unwrap(),
         )
+    }
+
+    async fn get_test_heap_service() -> s3heap_service::client::GrpcHeapService {
+        use chroma_system::System;
+
+        let system = System::new();
+        let registry = chroma_config::registry::Registry::default();
+        let config = s3heap_service::client::GrpcHeapServiceConfig {
+            enabled: true,
+            port: 50052,
+            connect_timeout_ms: 5000,
+            request_timeout_ms: 5000,
+            ..Default::default()
+        };
+
+        let port = config.port;
+        s3heap_service::client::GrpcHeapService::try_from_config(
+            &(config, system),
+            &registry,
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!("Failed to create test heap service client - ensure heap service is running on localhost:{}", port)
+        })
     }
 
     async fn setup_tenant_and_database(
@@ -237,7 +301,8 @@ mod tests {
         assert_ne!(task_advanced.next_nonce, initial_nonce);
 
         let input = FinishTaskInput::new(task_advanced.clone());
-        let operator = FinishTaskOperator::new(log.clone(), sysdb.clone());
+        let heap_service = get_test_heap_service().await;
+        let operator = FinishTaskOperator::new(log.clone(), sysdb.clone(), heap_service);
 
         // Run finish_task - should move lowest_live_nonce up to match next_nonce
         let result = operator.run(&input).await;
@@ -289,7 +354,8 @@ mod tests {
         assert_ne!(nonce_a, nonce_b);
 
         let input = FinishTaskInput::new(task_after_advance.clone());
-        let operator = FinishTaskOperator::new(log.clone(), sysdb.clone());
+        let heap_service = get_test_heap_service().await;
+        let operator = FinishTaskOperator::new(log.clone(), sysdb.clone(), heap_service);
 
         // Run finish_task
         let result = operator.run(&input).await;
@@ -337,7 +403,8 @@ mod tests {
         };
 
         let input = FinishTaskInput::new(fake_task.clone());
-        let operator = FinishTaskOperator::new(log.clone(), sysdb.clone());
+        let heap_service = get_test_heap_service().await;
+        let operator = FinishTaskOperator::new(log.clone(), sysdb.clone(), heap_service);
 
         // Run
         let result = operator.run(&input).await;
