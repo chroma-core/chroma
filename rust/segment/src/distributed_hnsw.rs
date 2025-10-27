@@ -97,9 +97,12 @@ impl DistributedHNSWSegmentWriter {
     ) -> Result<Box<DistributedHNSWSegmentWriter>, Box<DistributedHNSWSegmentFromSegmentError>>
     {
         let hnsw_configuration = collection
-            .config
-            .get_hnsw_config_with_legacy_fallback(segment)
+            .schema
+            .as_ref()
+            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(segment))
+            .transpose()
             .map_err(DistributedHNSWSegmentFromSegmentError::InvalidHnswConfiguration)?
+            .flatten()
             .ok_or(DistributedHNSWSegmentFromSegmentError::MissingHnswConfiguration)?;
 
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
@@ -314,9 +317,12 @@ impl DistributedHNSWSegmentReader {
     ) -> Result<Box<DistributedHNSWSegmentReader>, Box<DistributedHNSWSegmentFromSegmentError>>
     {
         let hnsw_configuration = collection
-            .config
-            .get_hnsw_config_with_legacy_fallback(segment)
+            .schema
+            .as_ref()
+            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(segment))
+            .transpose()
             .map_err(DistributedHNSWSegmentFromSegmentError::InvalidHnswConfiguration)?
+            .flatten()
             .ok_or(DistributedHNSWSegmentFromSegmentError::MissingHnswConfiguration)?;
 
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
