@@ -13,8 +13,8 @@ use chroma_types::{
     DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionWithSegmentsError,
     GetCollectionsError, GetDatabaseError, GetSegmentsError, GetTenantError, GetTenantResponse,
     InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, ListDatabasesError,
-    Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope, SegmentType,
-    SegmentUuid, UpdateCollectionError, UpdateTenantError, UpdateTenantResponse,
+    Metadata, MetadataValue, ResetError, ResetResponse, Schema, SchemaError, Segment, SegmentScope,
+    SegmentType, SegmentUuid, UpdateCollectionError, UpdateTenantError, UpdateTenantResponse,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -250,7 +250,8 @@ impl SqliteSysDb {
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
-        configuration: InternalCollectionConfiguration,
+        configuration: Option<InternalCollectionConfiguration>,
+        schema: Option<Schema>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -304,16 +305,34 @@ impl SqliteSysDb {
         let database_uuid = DatabaseUuid::from_str(database_id)
             .map_err(|_| CreateCollectionError::DatabaseIdParseError)?;
 
+        let configuration_json_str = match configuration {
+            Some(configuration) => serde_json::to_string(&configuration)
+                .map_err(CreateCollectionError::Configuration)?,
+            None => "{}".to_string(),
+        };
+
+        let schema_json = schema
+            .as_ref()
+            .map(|schema| {
+                serde_json::to_string(schema).map_err(|e| {
+                    CreateCollectionError::Schema(SchemaError::InvalidSchema {
+                        reason: e.to_string(),
+                    })
+                })
+            })
+            .transpose()?;
+
         sqlx::query(
             r#"
             INSERT INTO collections
-                (id, name, config_json_str, dimension, database_id)
-            VALUES ($1, $2, $3, $4, $5)
+                (id, name, config_json_str, schema_str, dimension, database_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
         "#,
         )
         .bind(collection_id.to_string())
         .bind(&name)
-        .bind(serde_json::to_string(&configuration).map_err(CreateCollectionError::Configuration)?)
+        .bind(configuration_json_str.clone())
+        .bind(schema_json)
         .bind(dimension)
         .bind(database_id)
         .execute(&mut *tx)
@@ -345,9 +364,10 @@ impl SqliteSysDb {
             name,
             tenant,
             database,
-            config: configuration,
+            config: serde_json::from_str(&configuration_json_str)
+                .map_err(CreateCollectionError::Configuration)?,
             metadata,
-            schema: None,
+            schema,
             dimension,
             log_position: 0,
             total_records_post_compaction: 0,
@@ -378,18 +398,29 @@ impl SqliteSysDb {
             .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
 
         let mut configuration_json_str = None;
+        let mut schema_str = None;
         if let Some(configuration) = configuration {
             let collections = self
                 .get_collections_with_conn(&mut *tx, Some(collection_id), None, None, None, None, 0)
                 .await;
             let collections = collections.unwrap();
             let collection = collections.into_iter().next().unwrap();
-            let mut existing_configuration = collection.config;
-            existing_configuration.update(&configuration);
-            configuration_json_str = Some(
-                serde_json::to_string(&existing_configuration)
-                    .map_err(UpdateCollectionError::Configuration)?,
-            );
+            // if schema exists, update schema instead of configuration
+            if collection.schema.is_some() {
+                let mut existing_schema = collection.schema.unwrap();
+                existing_schema.update(&configuration);
+                schema_str = Some(
+                    serde_json::to_string(&existing_schema)
+                        .map_err(UpdateCollectionError::Schema)?,
+                );
+            } else {
+                let mut existing_configuration = collection.config;
+                existing_configuration.update(&configuration);
+                configuration_json_str = Some(
+                    serde_json::to_string(&existing_configuration)
+                        .map_err(UpdateCollectionError::Configuration)?,
+                );
+            }
         }
 
         if name.is_some() || dimension.is_some() {
@@ -425,6 +456,25 @@ impl SqliteSysDb {
                     .eq(collection_id.to_string()),
             );
             query = query.value(table::Collections::ConfigJsonStr, configuration_json_str);
+
+            let (sql, values) = query.build_sqlx(sea_query::SqliteQueryBuilder);
+
+            let result = sqlx::query_with(&sql, values)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
+            if result.rows_affected() == 0 {
+                return Err(UpdateCollectionError::NotFound(collection_id.to_string()));
+            }
+        }
+
+        if let Some(schema_str) = schema_str {
+            let mut query = sea_query::Query::update();
+            let mut query = query.table(table::Collections::Table).cond_where(
+                sea_query::Expr::col((table::Collections::Table, table::Collections::Id))
+                    .eq(collection_id.to_string()),
+            );
+            query = query.value(table::Collections::SchemaStr, schema_str);
 
             let (sql, values) = query.build_sqlx(sea_query::SqliteQueryBuilder);
 
@@ -685,6 +735,7 @@ impl SqliteSysDb {
             .column((table::Collections::Table, table::Collections::ConfigJsonStr))
             .column((table::Collections::Table, table::Collections::Dimension))
             .column((table::Collections::Table, table::Collections::DatabaseId))
+            .column((table::Collections::Table, table::Collections::SchemaStr))
             .inner_join(
                 table::Databases::Table,
                 sea_query::Expr::col((table::Databases::Table, table::Databases::Id))
@@ -739,6 +790,7 @@ impl SqliteSysDb {
             .column((table::Databases::Table, table::Databases::TenantId))
             .column((table::Databases::Table, table::Databases::Name))
             .column((table::Collections::Table, table::Collections::DatabaseId))
+            .column((table::Collections::Table, table::Collections::SchemaStr))
             .columns([
                 table::CollectionMetadata::Key,
                 table::CollectionMetadata::StrValue,
@@ -788,6 +840,18 @@ impl SqliteSysDb {
                     }
                     None => InternalCollectionConfiguration::default_hnsw(),
                 };
+                let schema = match first_row.get::<Option<&str>, _>(7) {
+                    Some(json_str) if !json_str.trim().is_empty() && json_str.trim() != "null" => {
+                        match serde_json::from_str::<Schema>(json_str)
+                            .map_err(GetCollectionsError::Schema)
+                        {
+                            Ok(schema) => Some(schema),
+                            Err(e) => return Some(Err(e)),
+                        }
+                    }
+                    None => None,
+                    _ => None,
+                };
                 let database_id = match DatabaseUuid::from_str(first_row.get(6)) {
                     Ok(db_id) => db_id,
                     Err(_) => return Some(Err(GetCollectionsError::DatabaseId)),
@@ -796,7 +860,7 @@ impl SqliteSysDb {
                 Some(Ok(Collection {
                     collection_id,
                     config: configuration,
-                    schema: None,
+                    schema,
                     metadata,
                     total_records_post_compaction: 0,
                     version: 0,
@@ -1112,7 +1176,7 @@ mod tests {
     use super::*;
     use chroma_sqlite::db::test_utils::get_new_sqlite_db;
     use chroma_types::{
-        InternalUpdateCollectionConfiguration, SegmentScope, SegmentType, SegmentUuid,
+        InternalUpdateCollectionConfiguration, KnnIndex, SegmentScope, SegmentType, SegmentUuid,
         UpdateHnswConfiguration, UpdateMetadata, UpdateMetadataValue,
         UpdateVectorIndexConfiguration, VectorIndexConfiguration,
     };
@@ -1294,7 +1358,8 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                InternalCollectionConfiguration::default_hnsw(),
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                Some(Schema::new_default(KnnIndex::Hnsw)),
                 Some(collection_metadata.clone()),
                 None,
                 false,
@@ -1337,7 +1402,8 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                InternalCollectionConfiguration::default_hnsw(),
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                Some(Schema::new_default(KnnIndex::Hnsw)),
                 None,
                 None,
                 false,
@@ -1354,7 +1420,8 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments,
-                InternalCollectionConfiguration::default_hnsw(),
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                Some(Schema::new_default(KnnIndex::Hnsw)),
                 None,
                 None,
                 false,
@@ -1384,7 +1451,8 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                InternalCollectionConfiguration::default_hnsw(),
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                Some(Schema::new_default(KnnIndex::Hnsw)),
                 None,
                 None,
                 false,
@@ -1401,7 +1469,8 @@ mod tests {
                 CollectionUuid::new(),
                 "test_collection".to_string(),
                 vec![],
-                InternalCollectionConfiguration::default_hnsw(),
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                Some(Schema::new_default(KnnIndex::Hnsw)),
                 None,
                 None,
                 true,
@@ -1424,7 +1493,8 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 vec![],
-                InternalCollectionConfiguration::default_hnsw(),
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                None,
                 None,
                 None,
                 false,
@@ -1497,7 +1567,8 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 vec![],
-                InternalCollectionConfiguration::default_hnsw(),
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                Some(Schema::new_default(KnnIndex::Hnsw)),
                 None,
                 None,
                 false,
@@ -1578,7 +1649,8 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                InternalCollectionConfiguration::default_hnsw(),
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                Some(Schema::new_default(KnnIndex::Hnsw)),
                 Some(collection_metadata.clone()),
                 None,
                 false,
@@ -1628,7 +1700,8 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                InternalCollectionConfiguration::default_hnsw(),
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                Some(Schema::new_default(KnnIndex::Hnsw)),
                 Some(collection_metadata.clone()),
                 None,
                 false,
@@ -1658,7 +1731,8 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 vec![],
-                InternalCollectionConfiguration::default_hnsw(),
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                Some(Schema::new_default(KnnIndex::Hnsw)),
                 None,
                 None,
                 false,

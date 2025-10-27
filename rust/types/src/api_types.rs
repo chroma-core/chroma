@@ -782,11 +782,13 @@ pub enum GetCollectionsError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Could not deserialize configuration")]
-    Configuration(#[from] serde_json::Error),
+    Configuration(#[source] serde_json::Error),
     #[error("Could not deserialize collection ID")]
     CollectionId(#[from] uuid::Error),
     #[error("Could not deserialize database ID")]
     DatabaseId,
+    #[error("Could not deserialize schema")]
+    Schema(#[source] serde_json::Error),
 }
 
 impl ChromaError for GetCollectionsError {
@@ -797,6 +799,7 @@ impl ChromaError for GetCollectionsError {
             GetCollectionsError::Configuration(_) => ErrorCodes::Internal,
             GetCollectionsError::CollectionId(_) => ErrorCodes::Internal,
             GetCollectionsError::DatabaseId => ErrorCodes::Internal,
+            GetCollectionsError::Schema(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -913,13 +916,15 @@ pub enum UpdateCollectionError {
     #[error("Metadata reset unsupported")]
     MetadataResetUnsupported,
     #[error("Could not serialize configuration")]
-    Configuration(#[from] serde_json::Error),
+    Configuration(#[source] serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Could not parse config: {0}")]
     InvalidConfig(#[from] CollectionConfigurationToInternalConfigurationError),
     #[error("SPANN is still in development. Not allowed to created spann indexes")]
     SpannNotImplemented,
+    #[error("Could not serialize schema: {0}")]
+    Schema(#[source] serde_json::Error),
 }
 
 impl ChromaError for UpdateCollectionError {
@@ -931,6 +936,7 @@ impl ChromaError for UpdateCollectionError {
             UpdateCollectionError::Internal(err) => err.code(),
             UpdateCollectionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
             UpdateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
+            UpdateCollectionError::Schema(_) => ErrorCodes::Internal,
         }
     }
 }

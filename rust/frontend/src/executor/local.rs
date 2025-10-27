@@ -204,17 +204,21 @@ impl LocalExecutor {
             allowed_offset_ids.push(offset_id);
         }
 
-        let distance_function = match collection_and_segments
+        let hnsw_config = collection_and_segments
             .collection
-            .config
-            .get_hnsw_config_with_legacy_fallback(&plan.scan.collection_and_segments.vector_segment)
-        {
-            Ok(Some(config)) => config.space,
-            Ok(None) => return Err(ExecutorError::CollectionMissingHnswConfiguration),
-            Err(err) => {
-                return Err(ExecutorError::Internal(Box::new(err)));
-            }
-        };
+            .schema
+            .as_ref()
+            .map(|schema| {
+                schema.get_internal_hnsw_config_with_legacy_fallback(
+                    &plan.scan.collection_and_segments.vector_segment,
+                )
+            })
+            .transpose()
+            .map_err(|err| ExecutorError::Internal(Box::new(err)))?
+            .flatten()
+            .ok_or(ExecutorError::CollectionMissingHnswConfiguration)?;
+
+        let distance_function = hnsw_config.space;
 
         let mut results = Vec::new();
         let mut returned_user_ids = Vec::new();
