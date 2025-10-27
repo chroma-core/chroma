@@ -5,7 +5,7 @@ name: Contextual AI
 
 # Contextual AI
 
-[Contextual AI](https://contextual.ai/?utm_campaign=Standalone-api-integration&utm_source=chroma&utm_medium=github&utm_content=repo) provides enterprise-grade components for building production RAG systems. It offers state-of-the-art document parsing, reranking, generation, and evaluation capabilities that integrate seamlessly with Chroma as the vector database. Contextual AI's tools enable developers to build document intelligence applications with advanced parsing, instruction-following reranking, grounded generation with minimal hallucinations, and natural language testing for response quality.
+[Contextual AI](https://contextual.ai/?utm_campaign=Standalone-api-integration&utm_source=chroma&utm_medium=github&utm_content=repo) provides enterprise-grade components for building production RAG agents. It offers state-of-the-art document parsing, reranking, generation, and evaluation capabilities that integrate seamlessly with Chroma as the vector database. Contextual AI's tools enable developers to build document intelligence applications with advanced parsing, instruction-following reranking, grounded generation with minimal hallucinations, and natural language testing for response quality.
 
 ![](https://img.shields.io/badge/License-Commercial-blue.svg)
 
@@ -157,7 +157,7 @@ print(f"Quality Score: {lmunit_response.score}")
 
 For more advanced usage examples including table extraction, document hierarchy preservation, and multi-document RAG pipelines, please refer to the comprehensive examples in our Jupyter notebooks:
 
-- [Contextual AI + Chroma Examples](https://github.com/ContextualAI/examples/tree/main/17-contextualai-chroma?utm_campaign=Standalone-api-integration&utm_source=chroma&utm_medium=github&utm_content=repo)
+- [Contextual AI + Chroma Examples](https://github.com/ContextualAI/examples/tree/main/18-contextualai-chroma?utm_campaign=Standalone-api-integration&utm_source=chroma&utm_medium=github&utm_content=repo)
 
 ## Components
 
@@ -186,7 +186,8 @@ Models: `ctxl-rerank-v2-instruct-multilingual`, `ctxl-rerank-v2-instruct-multili
 ### Generate API (GLM)
 
 Grounded Language Model optimized for minimal hallucinations:
-- Industry-leading groundedness for RAG applications
+
+- Industry-leading groundedness for RAG applications, currently #1 on the [FACTS Grounding benchmark](https://www.kaggle.com/benchmarks/google/facts-grounding) from Google DeepMind
 - Knowledge attribution for source transparency
 - Conversational context support
 - Optimized for enterprise use cases
