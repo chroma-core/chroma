@@ -29,8 +29,8 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    Chunk, Collection, CollectionUuid, LogRecord, Schema, SchemaError, SegmentFlushInfo,
-    SegmentType, SegmentUuid, Task, TaskUuid,
+    Chunk, Collection, CollectionUuid, LogRecord, NonceUuid, Schema, SchemaError, Segment,
+    SegmentFlushInfo, SegmentType, SegmentUuid, Task, TaskUuid,
 };
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
@@ -48,7 +48,11 @@ use crate::execution::operators::{
         CommitSegmentWriterInput, CommitSegmentWriterOperator, CommitSegmentWriterOperatorError,
         CommitSegmentWriterOutput,
     },
+    execute_task::{
+        CountTask, ExecuteTaskError, ExecuteTaskInput, ExecuteTaskOperator, ExecuteTaskOutput,
+    },
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
+    finish_task::{FinishTaskError, FinishTaskInput, FinishTaskOperator, FinishTaskOutput},
     flush_segment_writer::{
         FlushSegmentWriterInput, FlushSegmentWriterOperator, FlushSegmentWriterOperatorError,
         FlushSegmentWriterOutput,
@@ -65,6 +69,7 @@ use crate::execution::operators::{
     prefetch_segment::{
         PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
     },
+    prepare_task::{PrepareTaskError, PrepareTaskInput, PrepareTaskOperator, PrepareTaskOutput},
     register::{RegisterError, RegisterInput, RegisterOperator, RegisterOutput},
     source_record_segment::{
         SourceRecordSegmentError, SourceRecordSegmentInput, SourceRecordSegmentOperator,
@@ -116,14 +121,14 @@ enum ExecutionState {
     Partition,
     MaterializeApplyCommitFlush,
     Register,
+    FinishTask,
 }
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct TaskContext {
     pub(crate) task_id: TaskUuid,
     pub(crate) task: Option<Task>,
-    pub(crate) execution_nonce: Uuid,
+    pub(crate) execution_nonce: NonceUuid,
 }
 
 #[derive(Clone, Debug)]
@@ -136,14 +141,14 @@ pub(crate) struct CompactWriters {
 
 #[derive(Debug)]
 pub struct CompactOrchestrator {
-    collection_id: CollectionUuid,
+    // === Compaction Configuration ===
     hnsw_index_uuid: Option<IndexUuid>,
     rebuild: bool,
     fetch_log_batch_size: u32,
     max_compaction_size: usize,
     max_partition_size: usize,
 
-    // Dependencies
+    // === Shared Services & Providers ===
     context: OrchestratorContext,
     blockfile_provider: BlockfileProvider,
     log: Log,
@@ -151,15 +156,31 @@ pub struct CompactOrchestrator {
     hnsw_provider: HnswIndexProvider,
     spann_provider: SpannProvider,
 
-    collection: OnceCell<Collection>,
+    // === Input Collection (read logs/segments from) ===
+    /// Collection to read logs and segments from
+    /// For regular compaction: input_collection_id == output_collection_id
+    /// For task compaction: input_collection_id != output_collection_id
+    input_collection_id: CollectionUuid,
+    input_collection: OnceCell<Collection>,
+    input_segments: OnceCell<Vec<Segment>>,
+    /// How much to pull from fetch_logs for INPUT collection
+    pulled_log_offset: i64,
+
+    // === Output Collection (write compacted data to) ===
+    /// Collection to write compacted segments to
+    output_collection_id: OnceCell<CollectionUuid>,
+    output_collection: OnceCell<Collection>,
+    output_segments: OnceCell<Vec<Segment>>,
+
+    // === Writers & Results ===
     writers: OnceCell<CompactWriters>,
     flush_results: Vec<SegmentFlushInfo>,
     result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
+
+    // === State Tracking ===
     num_uncompleted_materialization_tasks: usize,
     num_uncompleted_tasks_by_segment: HashMap<SegmentUuid, usize>,
     collection_logical_size_delta_bytes: i64,
-    // How much to pull from fetch_logs
-    pulled_log_offset: i64,
     state: ExecutionState,
 
     // Total number of records in the collection after the compaction
@@ -175,6 +196,9 @@ pub struct CompactOrchestrator {
 
     // schema after applying deltas
     schema: Option<Schema>,
+    // === Task Context (optional) ===
+    /// Available if this orchestrator is for a task
+    task_context: Option<TaskContext>,
 }
 
 #[derive(Error, Debug)]
@@ -187,8 +211,12 @@ pub enum CompactionError {
     Channel(#[from] ChannelError),
     #[error("Error commiting segment writers: {0}")]
     Commit(#[from] CommitSegmentWriterOperatorError),
+    #[error("Error executing task: {0}")]
+    ExecuteTask(#[from] ExecuteTaskError),
     #[error("Error fetching logs: {0}")]
     FetchLog(#[from] FetchLogError),
+    #[error("Error finishing task: {0}")]
+    FinishTask(#[from] FinishTaskError),
     #[error("Error flushing segment writers: {0}")]
     Flush(#[from] FlushSegmentWriterOperatorError),
     #[error("Error getting collection and segments: {0}")]
@@ -207,6 +235,8 @@ pub enum CompactionError {
     Partition(#[from] PartitionError),
     #[error("Error prefetching segment: {0}")]
     PrefetchSegment(#[from] PrefetchSegmentError),
+    #[error("Error preparing task: {0}")]
+    PrepareTask(#[from] PrepareTaskError),
     #[error("Error creating record segment reader: {0}")]
     RecordSegmentReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error creating record segment writer: {0}")]
@@ -253,7 +283,9 @@ impl ChromaError for CompactionError {
                 Self::ApplyLog(e) => e.should_trace_error(),
                 Self::Channel(e) => e.should_trace_error(),
                 Self::Commit(e) => e.should_trace_error(),
+                Self::ExecuteTask(e) => e.should_trace_error(),
                 Self::FetchLog(e) => e.should_trace_error(),
+                Self::FinishTask(e) => e.should_trace_error(),
                 Self::Flush(e) => e.should_trace_error(),
                 Self::GetCollectionAndSegments(e) => e.should_trace_error(),
                 Self::HnswSegment(e) => e.should_trace_error(),
@@ -263,6 +295,7 @@ impl ChromaError for CompactionError {
                 Self::Panic(e) => e.should_trace_error(),
                 Self::Partition(e) => e.should_trace_error(),
                 Self::PrefetchSegment(e) => e.should_trace_error(),
+                Self::PrepareTask(e) => e.should_trace_error(),
                 Self::RecordSegmentReader(e) => e.should_trace_error(),
                 Self::RecordSegmentWriter(e) => e.should_trace_error(),
                 Self::Register(e) => e.should_trace_error(),
@@ -278,7 +311,7 @@ impl ChromaError for CompactionError {
 #[derive(Debug)]
 pub enum CompactionResponse {
     Success {
-        collection_id: CollectionUuid,
+        job_id: Uuid,
     },
     RequireCompactionOffsetRepair {
         collection_id: CollectionUuid,
@@ -289,7 +322,7 @@ pub enum CompactionResponse {
 impl CompactOrchestrator {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        collection_id: CollectionUuid,
+        input_collection_id: CollectionUuid,
         rebuild: bool,
         fetch_log_batch_size: u32,
         max_compaction_size: usize,
@@ -303,8 +336,10 @@ impl CompactOrchestrator {
         result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
+        let output_collection_cell = OnceCell::new();
+        // SAFETY(tanujnay112): We just created the OnceCell, so this should never fail
+        output_collection_cell.set(input_collection_id).unwrap();
         CompactOrchestrator {
-            collection_id,
             hnsw_index_uuid: None,
             rebuild,
             fetch_log_batch_size,
@@ -316,27 +351,137 @@ impl CompactOrchestrator {
             sysdb,
             hnsw_provider,
             spann_provider,
-            collection: OnceCell::new(),
+            input_collection_id,
+            input_collection: OnceCell::new(),
+            input_segments: OnceCell::new(),
+            pulled_log_offset: 0,
+            output_collection_id: output_collection_cell,
+            output_collection: OnceCell::new(),
+            output_segments: OnceCell::new(),
             writers: OnceCell::new(),
             flush_results: Vec::new(),
             result_channel,
             num_uncompleted_materialization_tasks: 0,
             num_uncompleted_tasks_by_segment: HashMap::new(),
             collection_logical_size_delta_bytes: 0,
-            pulled_log_offset: 0,
             state: ExecutionState::Pending,
             total_records_post_compaction: 0,
             num_materialized_logs: 0,
             segment_spans: HashMap::new(),
             metrics: CompactOrchestratorMetrics::default(),
             schema: None,
+            task_context: None,
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_for_task(
+        input_collection_id: CollectionUuid,
+        rebuild: bool,
+        fetch_log_batch_size: u32,
+        max_compaction_size: usize,
+        max_partition_size: usize,
+        log: Log,
+        sysdb: SysDb,
+        blockfile_provider: BlockfileProvider,
+        hnsw_provider: HnswIndexProvider,
+        spann_provider: SpannProvider,
+        dispatcher: ComponentHandle<Dispatcher>,
+        result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
+        task_uuid: TaskUuid,
+        execution_nonce: NonceUuid,
+    ) -> Self {
+        let mut orchestrator = CompactOrchestrator::new(
+            input_collection_id,
+            rebuild,
+            fetch_log_batch_size,
+            max_compaction_size,
+            max_partition_size,
+            log,
+            sysdb,
+            blockfile_provider,
+            hnsw_provider,
+            spann_provider,
+            dispatcher,
+            result_channel,
+        );
+        orchestrator.task_context = Some(TaskContext {
+            task_id: task_uuid,
+            task: None,
+            execution_nonce,
+        });
+        orchestrator
     }
 
     async fn try_purge_hnsw(path: &Path, hnsw_index_uuid: Option<IndexUuid>) {
         if let Some(hnsw_index_uuid) = hnsw_index_uuid {
             let _ = HnswIndexProvider::purge_one_id(path, hnsw_index_uuid).await;
         }
+    }
+
+    async fn do_task(
+        &mut self,
+        log_records: Chunk<LogRecord>,
+        ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        // Get all needed data, cloning immediately to avoid borrow conflicts
+        let task = match self.get_task().cloned() {
+            Ok(t) => t,
+            Err(e) => {
+                self.terminate_with_result(Err(e), ctx).await;
+                return;
+            }
+        };
+
+        let output_collection = match self
+            .ok_or_terminate(self.get_output_collection(), ctx)
+            .await
+        {
+            Some(collection) => collection,
+            None => return,
+        };
+
+        let output_record_segment = match self
+            .ok_or_terminate(self.get_output_record_segment(), ctx)
+            .await
+        {
+            Some(segment) => segment,
+            None => return,
+        };
+
+        let output_collection_id = match self
+            .ok_or_terminate(self.get_output_collection_id(), ctx)
+            .await
+        {
+            Some(id) => id,
+            None => return,
+        };
+
+        // TODO: Get the actual task executor based on operator_id
+        // For now, hardcode CountTask as a placeholder
+        let task_executor = Arc::new(CountTask);
+
+        let execute_task_op = ExecuteTaskOperator {
+            log_client: self.log.clone(),
+            task_executor,
+        };
+
+        let execute_task_input = ExecuteTaskInput {
+            log_records,
+            tenant_id: output_collection.tenant.clone(),
+            output_collection_id,
+            completion_offset: task.completion_offset,
+            output_record_segment,
+            blockfile_provider: self.blockfile_provider.clone(),
+        };
+
+        let task_msg = wrap(
+            Box::new(execute_task_op),
+            execute_task_input,
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        self.send(task_msg, ctx, Some(Span::current())).await;
     }
 
     async fn partition(
@@ -462,7 +607,7 @@ impl CompactOrchestrator {
                 writer,
                 materialized_logs.clone(),
                 writers.record_reader.clone(),
-                self.collection.get().and_then(|c| c.schema.clone()),
+                self.output_collection.get().and_then(|c| c.schema.clone()),
             );
             let task = wrap(
                 operator,
@@ -546,12 +691,13 @@ impl CompactOrchestrator {
             .add(self.num_materialized_logs, &[]);
 
         self.state = ExecutionState::Register;
+        // Register uses OUTPUT collection
         let collection_cell =
-            self.collection
+            self.output_collection
                 .get()
                 .cloned()
                 .ok_or(CompactionError::InvariantViolation(
-                    "Collection information should have been obtained",
+                    "Output collection information should have been obtained",
                 ));
         let collection = match self.ok_or_terminate(collection_cell, ctx).await {
             Some(collection) => collection,
@@ -588,7 +734,7 @@ impl CompactOrchestrator {
             self.sysdb.clone(),
             self.log.clone(),
             self.schema.clone(),
-            None,
+            self.task_context.clone(),
         );
 
         let task = wrap(
@@ -660,6 +806,87 @@ impl CompactOrchestrator {
             }
         }
     }
+
+    /// Get task_context or return error
+    fn get_task_context(&self) -> Result<&TaskContext, CompactionError> {
+        self.task_context
+            .as_ref()
+            .ok_or(CompactionError::InvariantViolation(
+                "Task context should be set for task-based compaction",
+            ))
+    }
+
+    /// Get mutable task_context or return error
+    fn get_task_context_mut(&mut self) -> Result<&mut TaskContext, CompactionError> {
+        self.task_context
+            .as_mut()
+            .ok_or(CompactionError::InvariantViolation(
+                "Task context should be set for task-based compaction",
+            ))
+    }
+
+    /// Get task from task_context or return error
+    fn get_task(&self) -> Result<&Task, CompactionError> {
+        let task_context = self.get_task_context()?;
+        task_context
+            .task
+            .as_ref()
+            .ok_or(CompactionError::InvariantViolation(
+                "Task should be populated by PrepareTask",
+            ))
+    }
+
+    /// Get output_collection or return error
+    fn get_output_collection(&self) -> Result<Collection, CompactionError> {
+        self.output_collection
+            .get()
+            .cloned()
+            .ok_or(CompactionError::InvariantViolation(
+                "Output collection should be set",
+            ))
+    }
+
+    /// Get output_collection_id or return error
+    fn get_output_collection_id(&self) -> Result<CollectionUuid, CompactionError> {
+        self.output_collection_id
+            .get()
+            .copied()
+            .ok_or(CompactionError::InvariantViolation(
+                "Output collection ID should be set",
+            ))
+    }
+
+    /// Get output_segments or return error
+    fn get_output_segments(&self) -> Result<Vec<Segment>, CompactionError> {
+        self.output_segments
+            .get()
+            .cloned()
+            .ok_or(CompactionError::InvariantViolation(
+                "Output segments should be set",
+            ))
+    }
+
+    /// Get output record segment or return error
+    fn get_output_record_segment(&self) -> Result<Segment, CompactionError> {
+        let segments = self.get_output_segments()?;
+        segments
+            .iter()
+            .find(|s| s.r#type == SegmentType::BlockfileRecord)
+            .cloned()
+            .ok_or(CompactionError::InvariantViolation(
+                "Output record segment should exist",
+            ))
+    }
+
+    /// Get input_collection or return error
+    fn get_input_collection(&self) -> Result<Collection, CompactionError> {
+        self.input_collection
+            .get()
+            .cloned()
+            .ok_or(CompactionError::InvariantViolation(
+                "Input collection should be set",
+            ))
+    }
 }
 
 // ============== Component Implementation ==============
@@ -681,11 +908,33 @@ impl Orchestrator for CompactOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
+        // For task-based compaction, start with PrepareTask to fetch the task
+        if let Some(task_context) = self.task_context.as_ref() {
+            return vec![(
+                wrap(
+                    Box::new(PrepareTaskOperator {
+                        sysdb: self.sysdb.clone(),
+                        log: self.log.clone(),
+                        task_uuid: task_context.task_id,
+                    }),
+                    PrepareTaskInput {
+                        nonce: task_context.execution_nonce,
+                    },
+                    ctx.receiver(),
+                    self.context.task_cancellation_token.clone(),
+                ),
+                Some(Span::current()),
+            )];
+        }
+
+        // For non-task compaction, start with GetCollectionAndSegments
         vec![(
             wrap(
                 Box::new(GetCollectionAndSegmentsOperator {
                     sysdb: self.sysdb.clone(),
-                    collection_id: self.collection_id,
+                    input_collection_id: self.input_collection_id,
+                    // In legacy compaction mode, input_collection_id == output_collection_id
+                    output_collection_id: self.input_collection_id,
                 }),
                 (),
                 ctx.receiver(),
@@ -716,6 +965,65 @@ impl Orchestrator for CompactOrchestrator {
 
 // ============== Handlers ==============
 #[async_trait]
+impl Handler<TaskResult<PrepareTaskOutput, PrepareTaskError>> for CompactOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<PrepareTaskOutput, PrepareTaskError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        tracing::info!(
+            "[CompactOrchestrator] PrepareTask completed, task_id={}, execution_nonce={}",
+            output.task.id.0,
+            output.execution_nonce
+        );
+
+        // Store the task and execution_nonce in task_context
+        let task_context = match self.get_task_context_mut() {
+            Ok(tc) => tc,
+            Err(e) => {
+                self.terminate_with_result(Err(e), ctx).await;
+                return;
+            }
+        };
+        task_context.task = Some(output.task.clone());
+        task_context.execution_nonce = output.execution_nonce;
+        self.output_collection_id = output.output_collection_id.into();
+
+        if output.should_skip_execution {
+            // Proceed to FinishTask
+            let task = wrap(
+                FinishTaskOperator::new(self.log.clone(), self.sysdb.clone()),
+                FinishTaskInput::new(output.task),
+                ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
+            );
+            self.send(task, ctx, Some(Span::current())).await;
+            return;
+        }
+
+        // Proceed to GetCollectionAndSegments
+        let task = wrap(
+            Box::new(GetCollectionAndSegmentsOperator {
+                sysdb: self.sysdb.clone(),
+                input_collection_id: self.input_collection_id,
+                output_collection_id: output.output_collection_id,
+            }),
+            (),
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        self.send(task, ctx, Some(Span::current())).await;
+    }
+}
+
+#[async_trait]
 impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegmentsError>>
     for CompactOrchestrator
 {
@@ -731,26 +1039,107 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             None => return,
         };
 
-        let collection = output.collection.clone();
-        if self.collection.set(collection.clone()).is_err() {
+        // Store input collection and segments
+        let mut input_collection = output.input.collection.clone();
+        if self.input_collection.set(input_collection.clone()).is_err() {
             self.terminate_with_result(
                 Err(CompactionError::InvariantViolation(
-                    "Collection information should not have been initialized",
+                    "Input collection information should not have been initialized",
                 )),
                 ctx,
             )
             .await;
             return;
-        };
+        }
+        self.schema = input_collection.schema.clone();
+        // Create input segments vec from individual segment fields
+        let input_segments = vec![
+            output.input.metadata_segment.clone(),
+            output.input.record_segment.clone(),
+            output.input.vector_segment.clone(),
+        ];
+        if self.input_segments.set(input_segments).is_err() {
+            self.terminate_with_result(
+                Err(CompactionError::InvariantViolation(
+                    "Input segments should not have been initialized",
+                )),
+                ctx,
+            )
+            .await;
+            return;
+        }
 
-        self.schema = collection.schema.clone();
+        // Store output collection
+        let output_collection = output.output.collection.clone();
+        if self
+            .output_collection
+            .set(output_collection.clone())
+            .is_err()
+        {
+            self.terminate_with_result(
+                Err(CompactionError::InvariantViolation(
+                    "Output collection information should not have been initialized",
+                )),
+                ctx,
+            )
+            .await;
+            return;
+        }
 
-        self.pulled_log_offset = collection.log_position;
+        // Create output segments vec from individual segment fields
+        let output_segments = vec![
+            output.output.metadata_segment.clone(),
+            output.output.record_segment.clone(),
+            output.output.vector_segment.clone(),
+        ];
+        if self.output_segments.set(output_segments).is_err() {
+            self.terminate_with_result(
+                Err(CompactionError::InvariantViolation(
+                    "Output segments should not have been initialized",
+                )),
+                ctx,
+            )
+            .await;
+            return;
+        }
 
-        let record_reader = match self
+        // TODO(tanujnay112): move this somewhere cleaner
+        if let Some(task_context) = &self.task_context {
+            let Some(task) = &task_context.task else {
+                self.terminate_with_result(
+                    Err(CompactionError::InvariantViolation(
+                        "Task should not have been initialized",
+                    )),
+                    ctx,
+                )
+                .await;
+                return;
+            };
+
+            let result: i64 = match task.completion_offset.try_into() {
+                Ok(value) => value,
+                Err(_) => {
+                    self.terminate_with_result(
+                        Err(CompactionError::InvariantViolation(
+                            "Completion offset does not fit into an i64",
+                        )),
+                        ctx,
+                    )
+                    .await;
+                    return;
+                }
+            };
+            input_collection.log_position = result;
+        }
+
+        // Set pulled_log_offset from INPUT collection's log position
+        self.pulled_log_offset = input_collection.log_position;
+
+        // Create record reader from INPUT segments (for reading existing data)
+        let input_record_reader = match self
             .ok_or_terminate(
                 match Box::pin(RecordSegmentReader::from_segment(
-                    &output.record_segment,
+                    &output.input.record_segment,
                     &self.blockfile_provider,
                 ))
                 .await
@@ -769,11 +1158,11 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             None => return,
         };
 
-        let log_task = match self.rebuild {
+        let log_task = match self.rebuild || self.task_context.is_some() {
             true => wrap(
                 Box::new(SourceRecordSegmentOperator {}),
                 SourceRecordSegmentInput {
-                    record_segment_reader: record_reader.clone(),
+                    record_segment_reader: input_record_reader.clone(),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
@@ -782,12 +1171,12 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 Box::new(FetchLogOperator {
                     log_client: self.log.clone(),
                     batch_size: self.fetch_log_batch_size,
-                    // We need to start fetching from the first log that has not been compacted
-                    start_log_offset_id: u64::try_from(collection.log_position + 1)
+                    // We need to start fetching from the first log that has not been compacted from INPUT collection
+                    start_log_offset_id: u64::try_from(input_collection.log_position + 1)
                         .unwrap_or_default(),
                     maximum_fetch_count: Some(self.max_compaction_size as u32),
-                    collection_uuid: self.collection_id,
-                    tenant: collection.tenant.clone(),
+                    collection_uuid: self.input_collection_id, // Fetch logs from INPUT collection
+                    tenant: input_collection.tenant.clone(),
                 }),
                 (),
                 ctx.receiver(),
@@ -795,7 +1184,8 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             ),
         };
 
-        let dimension = match collection.dimension {
+        // Check dimension from OUTPUT collection (writers will be for output)
+        let dimension = match output_collection.dimension {
             Some(dim) => dim as usize,
             None => {
                 // Collection is not yet initialized, there is no need to initialize the writers
@@ -805,9 +1195,10 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             }
         };
 
-        let mut metadata_segment = output.metadata_segment.clone();
-        let mut record_segment = output.record_segment.clone();
-        let mut vector_segment = output.vector_segment.clone();
+        // Create writers from OUTPUT collection segments
+        let mut metadata_segment = output.output.metadata_segment.clone();
+        let mut record_segment = output.output.record_segment.clone();
+        let mut vector_segment = output.output.vector_segment.clone();
         if self.rebuild {
             // Reset the metadata and vector segments by purging the file paths
             metadata_segment.file_path = Default::default();
@@ -818,8 +1209,8 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         let record_writer = match self
             .ok_or_terminate(
                 RecordSegmentWriter::from_segment(
-                    &collection.tenant,
-                    &collection.database_id,
+                    &output_collection.tenant,
+                    &output_collection.database_id,
                     &record_segment,
                     &self.blockfile_provider,
                 )
@@ -834,8 +1225,8 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         let metadata_writer = match self
             .ok_or_terminate(
                 MetadataSegmentWriter::from_segment(
-                    &collection.tenant,
-                    &collection.database_id,
+                    &output_collection.tenant,
+                    &output_collection.database_id,
                     &metadata_segment,
                     &self.blockfile_provider,
                 )
@@ -852,7 +1243,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             SegmentType::Spann => match self
                 .ok_or_terminate(
                     self.spann_provider
-                        .write(&collection, &vector_segment, dimension)
+                        .write(&output_collection, &vector_segment, dimension)
                         .await,
                     ctx,
                 )
@@ -868,7 +1259,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             _ => match self
                 .ok_or_terminate(
                     DistributedHNSWSegmentWriter::from_segment(
-                        &collection,
+                        &output_collection,
                         &vector_segment,
                         dimension,
                         self.hnsw_provider.clone(),
@@ -888,8 +1279,33 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             },
         };
 
+        let mut output_record_reader = input_record_reader.clone();
+
+        if output_collection.collection_id != input_collection.collection_id {
+            output_record_reader = match self
+                .ok_or_terminate(
+                    match Box::pin(RecordSegmentReader::from_segment(
+                        &output.output.record_segment,
+                        &self.blockfile_provider,
+                    ))
+                    .await
+                    {
+                        Ok(reader) => Ok(Some(reader)),
+                        Err(err) => match *err {
+                            RecordSegmentReaderCreationError::UninitializedSegment => Ok(None),
+                            _ => Err(*err),
+                        },
+                    },
+                    ctx,
+                )
+                .await
+            {
+                Some(reader) => reader,
+                None => return,
+            };
+        }
         let writers = CompactWriters {
-            record_reader: record_reader.clone().filter(|_| !self.rebuild),
+            record_reader: output_record_reader.clone().filter(|_| !self.rebuild),
             metadata_writer,
             record_writer,
             vector_writer,
@@ -908,13 +1324,14 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
 
         self.hnsw_index_uuid = Some(hnsw_index_uuid);
 
-        // Prefetch segments
+        // Prefetch segments (OUTPUT segments where we write to)
         let prefetch_segments = match self.rebuild {
-            true => vec![output.record_segment],
+            true => vec![output.output.record_segment],
             false => {
-                let mut segments = vec![output.metadata_segment, output.record_segment];
+                let mut segments =
+                    vec![output.output.metadata_segment, output.output.record_segment];
                 if is_vector_segment_spann {
-                    segments.push(output.vector_segment);
+                    segments.push(output.output.vector_segment);
                 }
                 segments
             }
@@ -977,7 +1394,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
             }
             None => {
                 tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behing the sysdb.");
-                if let Some(collection) = self.collection.get() {
+                if let Some(collection) = self.input_collection.get() {
                     self.terminate_with_result(
                         Ok(CompactionResponse::RequireCompactionOffsetRepair {
                             collection_id: collection.collection_id,
@@ -989,7 +1406,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                 } else {
                     self.terminate_with_result(
                         Err(CompactionError::InvariantViolation(
-                            "self.collection not set",
+                            "self.input_collection not set",
                         )),
                         ctx,
                     )
@@ -998,7 +1415,38 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                 return;
             }
         }
-        self.partition(output, ctx).await;
+
+        // For task-based compaction, call ExecuteTask to run task logic
+        if self.task_context.is_some() {
+            self.do_task(output, ctx).await;
+        } else {
+            // For regular compaction, go directly to partition
+            self.partition(output, ctx).await;
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<ExecuteTaskOutput, ExecuteTaskError>> for CompactOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<ExecuteTaskOutput, ExecuteTaskError>,
+        ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        tracing::info!(
+            "[CompactOrchestrator] ExecuteTask completed. Processed {} records",
+            output.records_processed
+        );
+
+        // Proceed to partition the output records from the task
+        self.partition(output.output_records, ctx).await;
     }
 }
 
@@ -1020,7 +1468,7 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
         tracing::info!("Sourced Records: {}", output.len());
         // Each record should corresond to a log
         self.total_records_post_compaction = output.len() as u64;
-        if output.is_empty() {
+        if output.is_empty() && self.task_context.is_none() {
             let writers = match self.ok_or_terminate(self.get_segment_writers(), ctx).await {
                 Some(writer) => writer,
                 None => return,
@@ -1035,6 +1483,14 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
                 ctx,
             )
             .await;
+        } else if self.task_context.is_some() {
+            let input_collection =
+                match self.ok_or_terminate(self.get_input_collection(), ctx).await {
+                    Some(collection) => collection,
+                    None => return,
+                };
+            self.pulled_log_offset = input_collection.log_position;
+            self.do_task(output, ctx).await;
         } else {
             self.partition(output, ctx).await;
         }
@@ -1227,6 +1683,50 @@ impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorErro
 }
 
 #[async_trait]
+impl Handler<TaskResult<FinishTaskOutput, FinishTaskError>> for CompactOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<FinishTaskOutput, FinishTaskError>,
+        ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        self.state = ExecutionState::FinishTask;
+        let _finish_output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        let output_collection_id = match self.get_output_collection_id() {
+            Ok(id) => id,
+            Err(e) => {
+                self.terminate_with_result(Err(e), ctx).await;
+                return;
+            }
+        };
+
+        let task_id = match self.get_task_context().map(|tc| tc.task_id) {
+            Ok(id) => id,
+            Err(e) => {
+                self.terminate_with_result(Err(e), ctx).await;
+                return;
+            }
+        };
+
+        tracing::info!(
+            "Task finish_task completed for output collection {}",
+            output_collection_id
+        );
+
+        // Task verification complete, terminate with success
+        // TODO(tanujnay112): This no longer applied to functions, change the return type
+        // to a more suitable name.
+        self.terminate_with_result(Ok(CompactionResponse::Success { job_id: task_id.0 }), ctx)
+            .await;
+    }
+}
+
+#[async_trait]
 impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator {
     type Result = ();
 
@@ -1235,33 +1735,64 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator 
         message: TaskResult<RegisterOutput, RegisterError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        self.terminate_with_result(
-            message
-                .into_inner()
-                .map_err(|e| e.into())
-                .map(|_| CompactionResponse::Success {
-                    collection_id: self.collection_id,
+        let register_output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        // If this was a task-based compaction, invoke finish_task operator
+        if let Some(updated_task) = register_output.updated_task {
+            tracing::info!(
+                "Invoking finish_task operator for task {}",
+                updated_task.id.0
+            );
+
+            let finish_task_op = FinishTaskOperator::new(self.log.clone(), self.sysdb.clone());
+            let finish_task_input = FinishTaskInput::new(updated_task);
+
+            let task = wrap(
+                finish_task_op,
+                finish_task_input,
+                ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
+            );
+            self.send(task, ctx, Some(Span::current())).await;
+        } else {
+            // No task, terminate immediately with success
+            let output_collection_id = match self
+                .ok_or_terminate(self.get_output_collection_id(), ctx)
+                .await
+            {
+                Some(id) => id,
+                None => return,
+            };
+            self.terminate_with_result(
+                Ok(CompactionResponse::Success {
+                    job_id: output_collection_id.0,
                 }),
-            ctx,
-        )
-        .await;
+                ctx,
+            )
+            .await;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use chroma_blockstore::provider::BlockfileProvider;
     use chroma_config::{registry::Registry, Configurable};
     use chroma_log::{
         in_memory_log::{InMemoryLog, InternalLogRecord},
         test::{add_delete_generator, LogGenerator},
         Log,
     };
-    use chroma_segment::test::TestDistributedSegment;
+    use chroma_segment::{blockfile_record::RecordSegmentReader, test::TestDistributedSegment};
     use chroma_sysdb::{SysDb, TestSysDb};
     use chroma_system::{Dispatcher, Orchestrator, System};
     use chroma_types::{
         operator::{Filter, Limit, Projection},
-        DocumentExpression, DocumentOperator, MetadataExpression, PrimitiveOperator, Where,
+        CollectionUuid, DocumentExpression, DocumentOperator, MetadataExpression,
+        PrimitiveOperator, Where,
     };
     use regex::Regex;
 
@@ -1458,5 +1989,346 @@ mod tests {
             .expect("Get orchestrator should not fail");
 
         assert_eq!(new_vals, old_vals);
+    }
+
+    // Helper to read total_count from task result metadata
+    async fn get_total_count_output(
+        sysdb: &mut SysDb,
+        collection_id: CollectionUuid,
+        blockfile_provider: &BlockfileProvider,
+    ) -> i64 {
+        let output_info = sysdb
+            .get_collection_with_segments(collection_id)
+            .await
+            .expect("Should get output collection");
+        let reader = Box::pin(RecordSegmentReader::from_segment(
+            &output_info.record_segment,
+            blockfile_provider,
+        ))
+        .await
+        .expect("Should create reader");
+        let offset_id = reader
+            .get_offset_id_for_user_id("task_result")
+            .await
+            .expect("Should get offset")
+            .expect("task_result should exist");
+        let data_record = reader
+            .get_data_for_offset_id(offset_id)
+            .await
+            .expect("Should get data")
+            .expect("Data should exist");
+        let metadata = data_record.metadata.expect("Metadata should exist");
+        match metadata.get("total_count") {
+            Some(chroma_types::MetadataValue::Int(c)) => *c,
+            _ => panic!("total_count should be an Int"),
+        }
+    }
+
+    // This does an end to end test of attached function execution. It first creates a collection,
+    // then attached a record counting function to it. Once a few records have been added to the
+    // collection and compacted, the attached function is manually run. The attached function
+    // should create the output collection and populate it with the total number of records in the input
+    // collection. The test verified the completion offset and the lowest live offset of the attached function
+    // entry in sysdb after this run.
+    // The above is done twice.
+    #[tokio::test]
+    async fn test_k8s_integration_task_execution() {
+        // Setup test environment
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        // Connect to Grpc SysDb (requires Tilt running)
+        let grpc_sysdb = chroma_sysdb::GrpcSysDb::try_from_config(
+            &chroma_sysdb::GrpcSysDbConfig {
+                host: "localhost".to_string(),
+                port: 50051,
+                connect_timeout_ms: 5000,
+                request_timeout_ms: 10000,
+                num_channels: 4,
+            },
+            &registry,
+        )
+        .await
+        .expect("Should connect to grpc sysdb");
+        let mut sysdb = SysDb::Grpc(grpc_sysdb);
+
+        let test_segments = TestDistributedSegment::new().await;
+        let mut in_memory_log = InMemoryLog::new();
+
+        // Create input collection via HTTP API
+        let collection_name = format!("test_task_collection_{}", uuid::Uuid::new_v4());
+
+        let collection_id = CollectionUuid::new();
+        sysdb
+            .create_collection(
+                test_segments.collection.tenant,
+                test_segments.collection.database,
+                collection_id,
+                collection_name,
+                vec![
+                    test_segments.record_segment.clone(),
+                    test_segments.metadata_segment.clone(),
+                    test_segments.vector_segment.clone(),
+                ],
+                None,
+                None,
+                None,
+                test_segments.collection.dimension,
+                false,
+            )
+            .await
+            .expect("Collection create should be successful");
+        let input_collection_id = collection_id;
+        let tenant = "default_tenant".to_string();
+        let db = "default_database".to_string();
+
+        // Update input collection's log_position to -1 (no logs compacted yet)
+        sysdb
+            .flush_compaction(
+                tenant.clone(),
+                input_collection_id,
+                -1,                      // log_position = -1 means no logs compacted yet
+                0,                       // collection_version
+                std::sync::Arc::new([]), // no segment flushes
+                0,                       // total_records
+                0,                       // size_bytes
+                None,                    // schema
+            )
+            .await
+            .expect("Should be able to update log_position");
+
+        // Add 50 log records
+        add_delete_generator
+            .generate_vec(1..=50)
+            .into_iter()
+            .for_each(|log| {
+                in_memory_log.add_log(
+                    input_collection_id,
+                    InternalLogRecord {
+                        collection_id: input_collection_id,
+                        log_offset: log.log_offset - 1,
+                        log_ts: log.log_offset,
+                        record: log,
+                    },
+                )
+            });
+        let log = Log::InMemory(in_memory_log.clone());
+        let task_name = "test_count_task";
+
+        //  Create a task via sysdb
+        let task_id = sysdb
+            .create_task(
+                task_name.to_string(),
+                "record_counter".to_string(),
+                input_collection_id,
+                format!("test_output_collection_{}", uuid::Uuid::new_v4()),
+                serde_json::Value::Null,
+                tenant.clone(),
+                db.clone(),
+                10,
+            )
+            .await
+            .expect("Task creation should succeed");
+
+        // compact everything
+        let compact_orchestrator = CompactOrchestrator::new(
+            input_collection_id,
+            false,
+            50,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            None,
+        );
+
+        let result = compact_orchestrator.run(system.clone()).await;
+        assert!(
+            result.is_ok(),
+            "First compaction should succeed: {:?}",
+            result.err()
+        );
+
+        // Fetch the task to get the current nonce
+        let task_before_run = sysdb
+            .get_task_by_name(input_collection_id, task_name.to_string())
+            .await
+            .expect("Task should be found");
+        let execution_nonce = task_before_run.next_nonce;
+
+        // Run first compaction (PrepareTask will fetch and populate the task)
+        let compact_orchestrator = CompactOrchestrator::new_for_task(
+            input_collection_id,
+            false,
+            50,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            None,
+            task_id,
+            execution_nonce,
+        );
+        let result = compact_orchestrator.run(system.clone()).await;
+        assert!(
+            result.is_ok(),
+            "First task run should succeed: {:?}",
+            result.err()
+        );
+        // Verify task was updated with output collection ID
+        let updated_task = sysdb
+            .get_task_by_name(input_collection_id, task_name.to_string())
+            .await
+            .expect("Task should be found");
+        assert_eq!(
+            updated_task.completion_offset, 49,
+            "Processed logs 0-49, so completion_offset should be 49 (last offset processed)"
+        );
+
+        assert_eq!(
+            updated_task.lowest_live_nonce,
+            Some(updated_task.next_nonce),
+            "After a successful run, lowest_live_nonce should be equal to next_nonce"
+        );
+
+        let output_collection_id = updated_task.output_collection_id.unwrap();
+
+        // Verify first run: Read total_count from task result metadata
+        let total_count = Box::pin(get_total_count_output(
+            &mut sysdb,
+            output_collection_id,
+            &test_segments.blockfile_provider,
+        ))
+        .await;
+        assert_eq!(
+            total_count, 34,
+            "CountTask should have counted 34 records in input collection"
+        );
+
+        tracing::info!(
+            "First task run completed. CountTask result: total_count={}",
+            total_count
+        );
+
+        // SECOND ATTACHED FUNCTION INVOCATION
+
+        // Add 50 more records and run again
+        add_delete_generator
+            .generate_vec(51..=100)
+            .into_iter()
+            .for_each(|log| {
+                in_memory_log.add_log(
+                    input_collection_id,
+                    InternalLogRecord {
+                        collection_id: input_collection_id,
+                        log_offset: log.log_offset - 1,
+                        log_ts: log.log_offset,
+                        record: log,
+                    },
+                )
+            });
+
+        let log_2 = Log::InMemory(in_memory_log.clone());
+
+        // compact everything
+        let compact_orchestrator = CompactOrchestrator::new(
+            input_collection_id,
+            false,
+            50,
+            1000,
+            50,
+            log_2.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            None,
+        );
+
+        let result = compact_orchestrator.run(system.clone()).await;
+        assert!(
+            result.is_ok(),
+            "Second compaction should succeed: {:?}",
+            result.err()
+        );
+
+        let output_collection_id = updated_task.output_collection_id.unwrap();
+
+        // Fetch the task to get the updated nonce for second run
+        let task_before_run_2 = sysdb
+            .get_task_by_name(input_collection_id, "test_count_task".to_string())
+            .await
+            .expect("Task should be found");
+        let execution_nonce_2 = task_before_run_2.next_nonce;
+
+        // Run second task (PrepareTask will fetch updated task state)
+        let compact_orchestrator_2 = CompactOrchestrator::new_for_task(
+            input_collection_id,
+            false,
+            100,
+            1000,
+            50,
+            log_2.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            None,
+            task_id,
+            execution_nonce_2,
+        );
+        let result = compact_orchestrator_2.run(system.clone()).await;
+        assert!(
+            result.is_ok(),
+            "Second task run should succeed: {:?}",
+            result.err()
+        );
+
+        let updated_task_2 = sysdb
+            .get_task_by_name(input_collection_id, "test_count_task".to_string())
+            .await
+            .expect("Task should be found");
+        assert_eq!(
+            updated_task_2.completion_offset, 99,
+            "Processed logs 0-99, so completion_offset should be 99 (last offset processed)"
+        );
+
+        // Verify second run: Read updated total_count from task result metadata
+        let total_count_2 = Box::pin(get_total_count_output(
+            &mut sysdb,
+            output_collection_id,
+            &test_segments.blockfile_provider,
+        ))
+        .await;
+        assert_eq!(
+            total_count_2, 67,
+            "CountTask should have counted 67 total records in input collection"
+        );
+
+        assert_eq!(
+            updated_task_2.lowest_live_nonce,
+            Some(updated_task_2.next_nonce),
+            "After a successful run, lowest_live_nonce should be equal to next_nonce"
+        );
+
+        tracing::info!(
+            "Task execution test completed. First run: total_count=50, Second run: total_count={}",
+            total_count_2
+        );
     }
 }
