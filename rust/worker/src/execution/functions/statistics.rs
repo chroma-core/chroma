@@ -23,7 +23,7 @@ pub trait StatisticsFunctionFactory: std::fmt::Debug + Send + Sync {
     fn create(&self) -> Box<dyn StatisticsFunction>;
 }
 
-/// Accumulate statistics.  Must be a associative and commutative over a sequence of `observe` calls.
+/// Accumulate statistics.  Must be an associative and commutative over a sequence of `observe` calls.
 pub trait StatisticsFunction: std::fmt::Debug + Send {
     fn observe(&mut self, log_record: &LogRecord);
     fn output(&self) -> UpdateMetadataValue;
