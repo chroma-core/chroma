@@ -1,0 +1,33 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Chroma BM25 Embedding Function Schema",
+    "description": "Schema for the Chroma BM25 sparse embedding function configuration",
+    "version": "1.0.0",
+    "type": "object",
+    "properties": {
+        "k": {
+            "type": "number",
+            "description": "BM25 saturation parameter controlling term frequency scaling"
+        },
+        "b": {
+            "type": "number",
+            "description": "BM25 length normalization parameter"
+        },
+        "avg_doc_length": {
+            "type": "number",
+            "description": "Average document length in tokens used for normalization"
+        },
+        "token_max_length": {
+            "type": "number",
+            "description": "Maximum token length allowed before filtering"
+        },
+        "stopwords": {
+            "type": "array",
+            "description": "Optional custom stopword list (in lowercase) to override the defaults",
+            "items": {
+                "type": "string"
+            }
+        }
+    },
+    "additionalProperties": false
+}
