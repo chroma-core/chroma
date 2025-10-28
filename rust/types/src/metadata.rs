@@ -1,4 +1,5 @@
 use chroma_error::{ChromaError, ErrorCodes};
+use itertools::Itertools;
 use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Number, Value};
 use sprs::CsVec;
@@ -1006,13 +1007,63 @@ impl From<bool> for Where {
 }
 
 impl Where {
-    pub fn conjunction(children: Vec<Where>) -> Self {
+    pub fn conjunction(children: impl IntoIterator<Item = Where>) -> Self {
+        // If children.len() == 0, we will return a conjunction that is always true.
+        // If children.len() == 1, we will return the single child.
+        // Otherwise, we will return a conjunction of the children.
+        // We can safely filter out any conjunction children that are always true.
+
+        let mut children: Vec<_> = children
+            .into_iter()
+            .filter(|expr| {
+                if let Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::And,
+                    children,
+                }) = expr
+                {
+                    return !children.is_empty();
+                }
+
+                true
+            })
+            .dedup()
+            .collect();
+
+        if children.len() == 1 {
+            return children.pop().expect("just checked len is 1");
+        }
+
         Self::Composite(CompositeExpression {
             operator: BooleanOperator::And,
             children,
         })
     }
-    pub fn disjunction(children: Vec<Where>) -> Self {
+    pub fn disjunction(children: impl IntoIterator<Item = Where>) -> Self {
+        // If children.len() == 0, we will return a disjunction that is always false.
+        // If children.len() == 1, we will return the single child.
+        // Otherwise, we will return a disjunction of the children.
+        // We can safely filter out any disjunction children that are always false.
+
+        let mut children: Vec<_> = children
+            .into_iter()
+            .filter(|expr| {
+                if let Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::Or,
+                    children,
+                }) = expr
+                {
+                    return !children.is_empty();
+                }
+
+                true
+            })
+            .dedup()
+            .collect();
+
+        if children.len() == 1 {
+            return children.pop().expect("just checked len is 1");
+        }
+
         Self::Composite(CompositeExpression {
             operator: BooleanOperator::Or,
             children,
@@ -1059,53 +1110,7 @@ impl BitAnd for Where {
     type Output = Where;
 
     fn bitand(self, rhs: Self) -> Self::Output {
-        match self {
-            Where::Composite(CompositeExpression {
-                operator: BooleanOperator::And,
-                mut children,
-            }) => {
-                if children.is_empty() {
-                    return rhs;
-                }
-
-                match rhs {
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::And,
-                        children: rhs_children,
-                    }) => {
-                        children.extend(rhs_children);
-                        Where::Composite(CompositeExpression {
-                            operator: BooleanOperator::And,
-                            children,
-                        })
-                    }
-                    _ => {
-                        children.push(rhs);
-                        Where::Composite(CompositeExpression {
-                            operator: BooleanOperator::And,
-                            children,
-                        })
-                    }
-                }
-            }
-            _ => match rhs {
-                Where::Composite(CompositeExpression {
-                    operator: BooleanOperator::And,
-                    mut children,
-                }) => {
-                    if children.is_empty() {
-                        return self;
-                    }
-
-                    children.insert(0, self);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::And,
-                        children,
-                    })
-                }
-                _ => Where::conjunction(vec![self, rhs]),
-            },
-        }
+        Self::conjunction([self, rhs])
     }
 }
 
@@ -1113,80 +1118,7 @@ impl BitOr for Where {
     type Output = Where;
 
     fn bitor(self, rhs: Self) -> Self::Output {
-        match self {
-            Where::Composite(CompositeExpression {
-                operator: BooleanOperator::Or,
-                mut children,
-            }) => {
-                if children.is_empty() {
-                    return rhs;
-                }
-
-                match rhs {
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::Or,
-                        children: rhs_children,
-                    }) => {
-                        children.extend(rhs_children);
-                        Where::Composite(CompositeExpression {
-                            operator: BooleanOperator::Or,
-                            children,
-                        })
-                    }
-                    _ => {
-                        children.push(rhs);
-                        Where::Composite(CompositeExpression {
-                            operator: BooleanOperator::Or,
-                            children,
-                        })
-                    }
-                }
-            }
-            Where::Composite(CompositeExpression {
-                operator: BooleanOperator::And,
-                mut children,
-            }) => match rhs {
-                Where::Composite(CompositeExpression {
-                    operator: BooleanOperator::And,
-                    children: rhs_children,
-                }) => {
-                    if children.is_empty() && rhs_children.is_empty() {
-                        // Simplify
-                        Where::conjunction(vec![])
-                    } else {
-                        children.extend(rhs_children);
-                        Where::Composite(CompositeExpression {
-                            operator: BooleanOperator::And,
-                            children,
-                        })
-                    }
-                }
-                _ => {
-                    children.push(rhs);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::And,
-                        children,
-                    })
-                }
-            },
-            _ => match rhs {
-                Where::Composite(CompositeExpression {
-                    operator: BooleanOperator::Or,
-                    mut children,
-                }) => {
-                    if children.is_empty() {
-                        return self;
-                    }
-
-                    children.insert(0, self);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::Or,
-                        children,
-                    })
-                }
-                _ => Where::disjunction(vec![self, rhs]),
-            },
-        }
+        Self::disjunction([self, rhs])
     }
 }
 
