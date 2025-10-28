@@ -2275,10 +2275,10 @@ def test_modify_collection_preserves_other_schema_fields(client: ClientAPI) -> N
     collection_refreshed = client.get_collection(collection_name)
     refreshed_schema = collection_refreshed.schema
     assert refreshed_schema is not None
-    
+
     # Verify vector index was updated on server
     assert refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 128  # type: ignore
-    
+
     # Verify other value types are still intact on server
     assert refreshed_schema.defaults.string is not None
     assert refreshed_schema.defaults.string.string_inverted_index is not None
