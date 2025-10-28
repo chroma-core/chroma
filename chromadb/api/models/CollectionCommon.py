@@ -17,7 +17,6 @@ import numpy as np
 from uuid import UUID
 
 from chromadb.api.types import (
-    EMBEDDING_KEY,
     URI,
     Schema,
     SparseVectorIndexConfig,
@@ -840,22 +839,22 @@ class CollectionCommon(Generic[ClientT]):
 
         # Handle metadata field with potential sparse embedding
         schema = self.schema
-        if schema is None or key not in schema.key_overrides:
+        if schema is None or key not in schema.keys:
             raise ValueError(
                 f"Cannot embed string query for key '{key}': "
                 f"key not found in schema. Please provide an embedded vector or "
                 f"configure an embedding function for this key in the schema."
             )
 
-        value_type = schema.key_overrides[key]
+        value_type = schema.keys[key]
 
         # Check for sparse vector with embedding function
         if value_type.sparse_vector is not None:
             sparse_index = value_type.sparse_vector.sparse_vector_index
             if sparse_index is not None and sparse_index.enabled:
-                config = sparse_index.config
-                if config.embedding_function is not None:
-                    embedding_func = config.embedding_function
+                sparse_config = sparse_index.config
+                if sparse_config.embedding_function is not None:
+                    embedding_func = sparse_config.embedding_function
                     if not isinstance(embedding_func, SparseEmbeddingFunction):
                         embedding_func = cast(
                             SparseEmbeddingFunction[Any], embedding_func
@@ -887,9 +886,9 @@ class CollectionCommon(Generic[ClientT]):
         if value_type.float_list is not None:
             vector_index = value_type.float_list.vector_index
             if vector_index is not None and vector_index.enabled:
-                config = vector_index.config
-                if config.embedding_function is not None:
-                    embedding_func = config.embedding_function
+                dense_config = vector_index.config
+                if dense_config.embedding_function is not None:
+                    embedding_func = dense_config.embedding_function
                     validate_embedding_function(embedding_func)
 
                     # Embed the query using the schema's embedding function
