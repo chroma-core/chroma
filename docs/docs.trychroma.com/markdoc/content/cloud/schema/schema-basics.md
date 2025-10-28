@@ -199,35 +199,57 @@ The method returns the Schema object, enabling method chaining.
 
 ### Creating Global Indexes
 
-Create indexes that apply to all keys of a given type:
+Create indexes that apply globally. This example shows configuring the vector index with custom settings:
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
-from chromadb import Schema, IntInvertedIndexConfig, FloatInvertedIndexConfig
+from chromadb import Schema, VectorIndexConfig, SpannIndexConfig
+from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 
 schema = Schema()
 
-# Enable int inverted index globally (already enabled by default)
-schema.create_index(config=IntInvertedIndexConfig())
+# Configure vector index with custom embedding function and SPANN parameters
+embedding_function = OpenAIEmbeddingFunction(
+    api_key="your-api-key",
+    model_name="text-embedding-3-small"
+)
 
-# Enable float inverted index globally (already enabled by default)
-schema.create_index(config=FloatInvertedIndexConfig())
+schema.create_index(config=VectorIndexConfig(
+    space="cosine",
+    embedding_function=embedding_function,
+    source_key="#document",  # Generate embeddings from documents
+    spann=SpannIndexConfig(
+        search_nprobe=100,
+        write_nprobe=50
+    )
+))
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-import { Schema, IntInvertedIndexConfig, FloatInvertedIndexConfig } from 'chromadb';
+import { Schema, VectorIndexConfig } from 'chromadb';
+import { OpenAIEmbeddingFunction } from 'chromadb';
 
 const schema = new Schema();
 
-// Enable int inverted index globally (already enabled by default)
-schema.createIndex(new IntInvertedIndexConfig());
+// Configure vector index with custom embedding function and SPANN parameters
+const embeddingFunction = new OpenAIEmbeddingFunction({
+  apiKey: "your-api-key",
+  model: "text-embedding-3-small"
+});
 
-// Enable float inverted index globally (already enabled by default)
-schema.createIndex(new FloatInvertedIndexConfig());
+schema.createIndex(new VectorIndexConfig({
+  space: "cosine",
+  embeddingFunction: embeddingFunction,
+  sourceKey: "#document",  // Generate embeddings from documents
+  spann: {
+    searchNprobe: 100,
+    writeNprobe: 50
+  }
+}));
 ```
 {% /Tab %}
 

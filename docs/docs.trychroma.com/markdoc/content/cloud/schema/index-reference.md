@@ -205,7 +205,32 @@ HNSW algorithm configuration (for single-node deployments). See HNSW Parameters 
 
 #### spann
 
-SPANN algorithm configuration (for Chroma Cloud). Currently not user-configurable.
+SPANN algorithm configuration (for Chroma Cloud). See SPANN Parameters below.
+
+### SPANN Parameters
+
+Configure SPANN index for Chroma Cloud:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `search_nprobe` | int | - | Number of clusters to probe during search. Higher = better recall, slower queries |
+| `write_nprobe` | int | - | Number of clusters to probe during write operations. Higher = better accuracy, slower writes |
+| `ef_construction` | int | - | Candidate list size during index build. Higher = better quality, slower build |
+| `ef_search` | int | - | Candidate list size during search. Higher = better recall, slower queries |
+| `max_neighbors` | int | - | Max connections per node. Higher = better recall, more memory |
+| `reassign_neighbor_count` | int | - | Number of neighbors to consider when reassigning vectors between clusters |
+| `split_threshold` | int | - | Cluster size threshold for splitting |
+| `merge_threshold` | int | - | Cluster size threshold for merging |
+
+{% Note type="warning" %}
+**Advanced configuration:** SPANN parameters are optimized by default for most use cases. Only adjust these if you have specific performance requirements and understand the tradeoffs between recall, speed, and resource usage. Incorrect tuning can degrade performance.
+{% /Note %}
+
+**Tuning Tips:**
+- Increase `search_nprobe` and `write_nprobe` for better accuracy
+- Increase `ef_construction` and `max_neighbors` for better recall at build time
+- Increase `ef_search` for better recall at query time
+- Balance recall vs speed based on your requirements
 
 ### HNSW Parameters
 
@@ -221,6 +246,10 @@ Configure HNSW index for single-node deployments:
 | `sync_threshold` | int | 1000 | When to sync index to disk |
 | `resize_factor` | float | 1.2 | Growth factor when resizing |
 
+{% Note type="warning" %}
+**Advanced configuration:** HNSW parameters are optimized by default for most use cases. Only adjust these if you have specific performance requirements and understand the tradeoffs between recall, speed, and resource usage. Incorrect tuning can degrade performance.
+{% /Note %}
+
 **Tuning Tips:**
 - Increase `ef_construction` and `max_neighbors` for better recall at build time
 - Increase `ef_search` for better recall at query time
@@ -232,20 +261,21 @@ Configure HNSW index for single-node deployments:
 
 {% Tab label="python" %}
 ```python
-from chromadb import Schema, VectorIndexConfig, HnswIndexConfig
+from chromadb import Schema, VectorIndexConfig, SpannIndexConfig
 
 schema = Schema()
 
 # Basic: just set distance metric
 schema.create_index(config=VectorIndexConfig(space="cosine"))
 
-# Advanced: tune HNSW parameters for better recall
+# Advanced: tune SPANN parameters for better recall
 schema.create_index(config=VectorIndexConfig(
     space="cosine",
-    hnsw=HnswIndexConfig(
+    spann=SpannIndexConfig(
+        search_nprobe=100,
+        write_nprobe=50,
         ef_construction=200,
-        max_neighbors=32,
-        ef_search=200
+        ef_search=150
     )
 ))
 ```
@@ -260,13 +290,14 @@ const schema = new Schema();
 // Basic: just set distance metric
 schema.createIndex(new VectorIndexConfig({ space: "cosine" }));
 
-// Advanced: tune HNSW parameters for better recall
+// Advanced: tune SPANN parameters for better recall
 schema.createIndex(new VectorIndexConfig({
   space: "cosine",
-  hnsw: {
-    ef_construction: 200,
-    max_neighbors: 32,
-    ef_search: 200
+  spann: {
+    searchNprobe: 100,
+    writeNprobe: 50,
+    efConstruction: 200,
+    efSearch: 150
   }
 }));
 ```

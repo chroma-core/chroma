@@ -15,7 +15,6 @@ Schema allows you to configure which indexes are created for different data type
 
 - **Optimize Performance**: Disable unused indexes to speed up writes and reduce index build time
 - **Enable Hybrid Search**: Combine dense and sparse embeddings for better retrieval quality
-- **Reduce Storage Costs**: Only index the fields you query
 - **Fine-Tune Configuration**: Adjust vector index parameters for your workload
 
 ## Quick Start
@@ -55,6 +54,15 @@ collection.add(
         {"category": "tech", "year": 2023}
     ]
 )
+
+# Querying on disabled index will raise an error
+try:
+    collection.query(
+        query_texts=["query"],
+        where={"category": "science"}  # Error: string index is disabled
+    )
+except Exception as e:
+    print(f"Error: {e}")
 ```
 {% /Tab %}
 
@@ -88,6 +96,16 @@ await collection.add({
     { category: "tech", year: 2023 }
   ]
 });
+
+// Querying on disabled index will raise an error
+try {
+  await collection.query({
+    queryTexts: ["query"],
+    where: { category: "science" }  // Error: string index is disabled
+  });
+} catch (e) {
+  console.log(`Error: ${e}`);
+}
 ```
 {% /Tab %}
 
@@ -100,9 +118,10 @@ await collection.add({
 - **Per-Key Configuration**: Override defaults for specific metadata fields
 - **Sparse Vector Support**: Enable sparse embeddings for hybrid search with BM25-style retrieval
 - **Index Deletion**: Disable indexes you don't need to improve write performance
-- **Vector Index Tuning**: Configure HNSW parameters like `ef_construction` and `max_neighbors`
+- **Vector Index Tuning**: Configure SPANN parameters for optimal vector search performance
 - **Method Chaining**: Build schemas fluently with chainable `.create_index()` and `.delete_index()` calls
 - **Schema Persistence**: Schema configuration is saved with the collection and retrieved automatically
+- **Dynamic Schema Evolution**: New metadata keys added during writes automatically inherit from global defaults - manual schema modification is only available at collection creation time
 
 ## Availability
 
