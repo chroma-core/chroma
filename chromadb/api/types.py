@@ -2046,12 +2046,15 @@ class Schema:
 
     def _validate_sparse_vector_config(self, config: SparseVectorIndexConfig) -> None:
         """
-        Validate that if source_key is provided then ef is also provided since
-        there is no default embedding function. Raises ValueError otherwise.
+        Validate that if source_key is provided then either embedding_function or bm25
+        must be provided since there is no default embedding function.
+        Raises ValueError otherwise.
         """
-        if config.source_key is not None and config.embedding_function is None:
+        if (config.source_key is not None
+                and config.embedding_function is None
+                and config.bm25 is not True):
             raise ValueError(
-                f"If source_key is provided then embedding_function must also be provided "
+                f"If source_key is provided then either embedding_function or bm25 must be provided "
                 f"since there is no default embedding function. Config: {config}"
             )
 
