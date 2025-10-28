@@ -1870,6 +1870,7 @@ dependencies = [
  "sea-query-binder",
  "serde",
  "serde-pickle",
+ "serde_json",
  "shuttle",
  "sqlx",
  "tantivy",

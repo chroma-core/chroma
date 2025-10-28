@@ -1,4 +1,4 @@
-from chromadb.api import ClientAPI
+from chromadb.api import ClientAPI, ServerAPI
 from chromadb.api.types import (
     Schema,
     SparseVectorIndexConfig,
@@ -30,8 +30,10 @@ from chromadb.utils.embedding_functions import (
     register_sparse_embedding_function,
 )
 from chromadb.api.models.Collection import Collection
+from chromadb.api.models.CollectionCommon import CollectionCommon
 from chromadb.errors import InvalidArgumentError, InternalError
 from chromadb.execution.expression import Knn, Search
+from chromadb.types import Collection as CollectionModel
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, cast
 from uuid import uuid4
 import numpy as np
@@ -604,6 +606,36 @@ def test_search_embeds_string_knn_queries(
     embedded_rank = embedded_search._rank
     assert isinstance(embedded_rank, Knn)
     assert embedded_rank.query == [11.0, 12.5]
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_search_embeds_string_knn_queries_with_sparse_embedding_function(
+    client_factories: "ClientFactories",
+) -> None:
+    """_embed_search_string_queries should embed string KNN queries using collection EF."""
+
+    sparse_ef = DeterministicSparseEmbeddingFunction(label="sparse")
+    schema = Schema().create_index(
+        key="sparse_metadata",
+        config=SparseVectorIndexConfig(
+            source_key="raw_text", embedding_function=sparse_ef
+        ),
+    )
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    search = Search().rank(Knn(key="sparse_metadata", query="hello world"))
+
+    embedded_search = collection._embed_search_string_queries(search)
+
+    assert isinstance(search._rank, Knn)
+    assert search._rank.key == "sparse_metadata"
+    assert search._rank.query == "hello world"
+
+    embedded_rank = embedded_search._rank
+    assert isinstance(embedded_rank, Knn)
+    assert embedded_rank.key == "sparse_metadata"
+    print(embedded_rank.query)
+    assert embedded_rank.query == SparseVector(indices=[0], values=[11.0])
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
@@ -2048,7 +2080,9 @@ def test_sparse_vector_index_config_with_key_types(
     )
 
     # Verify sparse embeddings were generated from text_field
-    result2 = collection2.get(ids=["sparse-key-1", "sparse-key-2"], include=["metadatas"])
+    result2 = collection2.get(
+        ids=["sparse-key-1", "sparse-key-2"], include=["metadatas"]
+    )
     assert result2["metadatas"] is not None
     assert "sparse2" in result2["metadatas"][0]
     assert "sparse2" in result2["metadatas"][1]
@@ -2072,7 +2106,9 @@ def test_schema_rejects_special_key_in_create_index() -> None:
         schema.create_index(config=StringInvertedIndexConfig(), key="#custom_field")
 
     # Test with Key object starting with #
-    with pytest.raises(ValueError, match="Cannot create index on special key '#embedding'"):
+    with pytest.raises(
+        ValueError, match="Cannot create index on special key '#embedding'"
+    ):
         schema.create_index(config=StringInvertedIndexConfig(), key=Key.EMBEDDING)
 
 
@@ -2084,7 +2120,9 @@ def test_schema_rejects_special_key_in_delete_index() -> None:
         schema.delete_index(config=StringInvertedIndexConfig(), key="#custom_field")
 
     # Test with Key object starting with #
-    with pytest.raises(ValueError, match="Cannot delete index on special key '#document'"):
+    with pytest.raises(
+        ValueError, match="Cannot delete index on special key '#document'"
+    ):
         schema.delete_index(config=StringInvertedIndexConfig(), key=Key.DOCUMENT)
 
 
@@ -2122,7 +2160,13 @@ def test_server_validates_schema_with_special_keys(
     # This should be caught server-side by validate_schema()
     schema = Schema()
     # Bypass client-side validation by directly manipulating schema.keys
-    from chromadb.api.types import ValueTypes, StringValueType, StringInvertedIndexType, StringInvertedIndexConfig
+    from chromadb.api.types import (
+        ValueTypes,
+        StringValueType,
+        StringInvertedIndexType,
+        StringInvertedIndexConfig,
+    )
+
     schema.keys["#invalid_key"] = ValueTypes(
         string=StringValueType(
             string_inverted_index=StringInvertedIndexType(
@@ -2138,7 +2182,9 @@ def test_server_validates_schema_with_special_keys(
 
     # Verify server caught the invalid key
     error_msg = str(exc_info.value)
-    assert "#" in error_msg or "key" in error_msg.lower() or "invalid" in error_msg.lower()
+    assert (
+        "#" in error_msg or "key" in error_msg.lower() or "invalid" in error_msg.lower()
+    )
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
@@ -2153,14 +2199,18 @@ def test_server_validates_invalid_source_key_in_sparse_vector_config(
 
     # Create schema with invalid source_key
     # Bypass client-side validation by directly creating the config
-    from chromadb.api.types import ValueTypes, SparseVectorValueType, SparseVectorIndexType
+    from chromadb.api.types import (
+        ValueTypes,
+        SparseVectorValueType,
+        SparseVectorIndexType,
+    )
 
     schema = Schema()
     # Manually construct config with invalid source_key using model_construct to bypass validation
     invalid_config = SparseVectorIndexConfig.model_construct(
         embedding_function=None,
         source_key="#embedding",  # Invalid - should be rejected
-        bm25=None
+        bm25=None,
     )
 
     schema.keys["test_sparse"] = ValueTypes(
@@ -2178,11 +2228,17 @@ def test_server_validates_invalid_source_key_in_sparse_vector_config(
 
     # Verify server caught the invalid source_key
     error_msg = str(exc_info.value)
-    assert "source_key" in error_msg.lower() or "#" in error_msg or "document" in error_msg.lower()
+    assert (
+        "source_key" in error_msg.lower()
+        or "#" in error_msg
+        or "document" in error_msg.lower()
+    )
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
-def test_modify_collection_no_initial_config_creates_default_schema(client: ClientAPI) -> None:
+def test_modify_collection_no_initial_config_creates_default_schema(
+    client: ClientAPI,
+) -> None:
     """Test that modifying a collection without initial config/schema creates and updates default schema."""
     collection_name = f"test_modify_no_init_{uuid4()}"
 
@@ -2259,7 +2315,9 @@ def test_modify_collection_with_initial_spann_schema(client: ClientAPI) -> None:
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
-def test_modify_collection_updates_schema_spann_multiple_fields(client: ClientAPI) -> None:
+def test_modify_collection_updates_schema_spann_multiple_fields(
+    client: ClientAPI,
+) -> None:
     """Test that modifying multiple SPANN fields updates schema correctly."""
     collection_name = f"test_modify_schema_multi_{uuid4()}"
 
@@ -2372,3 +2430,37 @@ def test_modify_collection_preserves_other_schema_fields(client: ClientAPI) -> N
     assert refreshed_schema.defaults.boolean is not None
     assert refreshed_schema.defaults.sparse_vector is not None
     assert refreshed_schema.keys["#document"] is not None
+
+
+def test_embeds_using_schema_embedding_function() -> None:
+    """Test that embeddings are using the schema embedding function."""
+    schema = Schema().create_index(
+        config=VectorIndexConfig(embedding_function=SimpleEmbeddingFunction()),
+    )
+
+    collection_model = CollectionModel(
+        id=uuid4(),
+        name="schema_only_collection",
+        configuration_json={},
+        serialized_schema=schema.serialize_to_json(),
+        metadata=None,
+        dimension=4,
+        tenant="tenant",
+        database="database",
+        version=0,
+        log_position=0,
+    )
+
+    collection = CollectionCommon(
+        client=cast(ServerAPI, object()),
+        model=collection_model,
+        embedding_function=None,
+    )
+
+    assert collection._embedding_function is None
+    assert collection.configuration is not None
+    assert collection.configuration.get("embedding_function") is None
+
+    embeddings = collection._embed(["hello world"])
+    assert embeddings is not None
+    assert np.allclose(embeddings[0], [0.0, 1.0, 2.0, 3.0])
