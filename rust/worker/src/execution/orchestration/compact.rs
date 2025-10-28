@@ -29,8 +29,8 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    Chunk, Collection, CollectionUuid, LogRecord, NonceUuid, Schema, SchemaError, Segment,
-    SegmentFlushInfo, SegmentType, SegmentUuid, Task, TaskUuid,
+    Chunk, Collection, CollectionUuid, KnnIndex, LogRecord, NonceUuid, Schema, SchemaError,
+    Segment, SegmentFlushInfo, SegmentType, SegmentUuid, Task, TaskUuid,
 };
 use opentelemetry::trace::TraceContextExt;
 use s3heap_service::client::GrpcHeapService;
@@ -225,6 +225,8 @@ pub enum CompactionError {
     GetCollectionAndSegments(#[from] GetCollectionAndSegmentsError),
     #[error("Error creating hnsw writer: {0}")]
     HnswSegment(#[from] DistributedHNSWSegmentFromSegmentError),
+    #[error("Schema reconciliation failed: {0}")]
+    SchemaReconciliation(#[from] SchemaError),
     #[error("Invariant violation: {}", .0)]
     InvariantViolation(&'static str),
     #[error("Error materializing logs: {0}")]
@@ -291,6 +293,7 @@ impl ChromaError for CompactionError {
                 Self::Flush(e) => e.should_trace_error(),
                 Self::GetCollectionAndSegments(e) => e.should_trace_error(),
                 Self::HnswSegment(e) => e.should_trace_error(),
+                Self::SchemaReconciliation(e) => e.should_trace_error(),
                 Self::InvariantViolation(_) => true,
                 Self::MaterializeLogs(e) => e.should_trace_error(),
                 Self::MetadataSegment(e) => e.should_trace_error(),
@@ -1086,7 +1089,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         }
 
         // Store output collection
-        let output_collection = output.output.collection.clone();
+        let mut output_collection = output.output.collection.clone();
         if self
             .output_collection
             .set(output_collection.clone())
@@ -1254,6 +1257,23 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             Some(writer) => writer,
             None => return,
         };
+        if self
+            .ok_or_terminate(
+                match vector_segment.r#type {
+                    SegmentType::Spann => output_collection
+                        .reconcile_schema_with_config(KnnIndex::Spann)
+                        .map_err(CompactionError::from),
+                    _ => output_collection
+                        .reconcile_schema_with_config(KnnIndex::Hnsw)
+                        .map_err(CompactionError::from),
+                },
+                ctx,
+            )
+            .await
+            .is_none()
+        {
+            return;
+        }
         let (hnsw_index_uuid, vector_writer, is_vector_segment_spann) = match vector_segment.r#type
         {
             SegmentType::Spann => match self
