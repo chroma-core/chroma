@@ -409,6 +409,18 @@ pub enum MetadataValue {
     SparseVector(SparseVector),
 }
 
+impl std::fmt::Display for MetadataValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MetadataValue::Bool(v) => write!(f, "{}", v),
+            MetadataValue::Int(v) => write!(f, "{}", v),
+            MetadataValue::Float(v) => write!(f, "{}", v),
+            MetadataValue::Str(v) => write!(f, "\"{}\"", v),
+            MetadataValue::SparseVector(v) => write!(f, "SparseVector(len={})", v.values.len()),
+        }
+    }
+}
+
 impl Eq for MetadataValue {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -923,6 +935,35 @@ pub enum Where {
     Metadata(MetadataExpression),
 }
 
+impl std::fmt::Display for Where {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Where::Composite(composite) => {
+                let fragment = composite
+                    .children
+                    .iter()
+                    .map(|child| format!("{}", child))
+                    .collect::<Vec<_>>()
+                    .join(match composite.operator {
+                        BooleanOperator::And => " & ",
+                        BooleanOperator::Or => " | ",
+                    });
+                write!(f, "({})", fragment)?;
+
+                Ok(())
+            }
+            Where::Metadata(expr) => {
+                write!(f, "{}", expr)?;
+                Ok(())
+            }
+            Where::Document(expr) => {
+                write!(f, "{}", expr)?;
+                Ok(())
+            }
+        }
+    }
+}
+
 impl serde::Serialize for Where {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -1245,6 +1286,18 @@ pub struct DocumentExpression {
     pub pattern: String,
 }
 
+impl std::fmt::Display for DocumentExpression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op_str = match self.operator {
+            DocumentOperator::Contains => "CONTAINS",
+            DocumentOperator::NotContains => "NOT CONTAINS",
+            DocumentOperator::Regex => "REGEX",
+            DocumentOperator::NotRegex => "NOT REGEX",
+        };
+        write!(f, "#document {} \"{}\"", op_str, self.pattern)
+    }
+}
+
 impl From<chroma_proto::DirectWhereDocument> for DocumentExpression {
     fn from(value: chroma_proto::DirectWhereDocument) -> Self {
         Self {
@@ -1298,6 +1351,29 @@ impl From<DocumentOperator> for chroma_proto::WhereDocumentOperator {
 pub struct MetadataExpression {
     pub key: String,
     pub comparison: MetadataComparison,
+}
+
+impl std::fmt::Display for MetadataExpression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.comparison {
+            MetadataComparison::Primitive(op, value) => {
+                write!(f, "{}{}{}", self.key, op, value)
+            }
+            MetadataComparison::Set(op, set_value) => {
+                write!(
+                    f,
+                    "{} {} {:?}",
+                    self.key,
+                    if *op == SetOperator::In {
+                        "IN"
+                    } else {
+                        "NOT IN"
+                    },
+                    set_value
+                )
+            }
+        }
+    }
 }
 
 impl TryFrom<chroma_proto::DirectComparison> for MetadataExpression {
@@ -1443,6 +1519,20 @@ pub enum PrimitiveOperator {
     LessThanOrEqual,
 }
 
+impl std::fmt::Display for PrimitiveOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op_str = match self {
+            PrimitiveOperator::Equal => "=",
+            PrimitiveOperator::NotEqual => "≠",
+            PrimitiveOperator::GreaterThan => ">",
+            PrimitiveOperator::GreaterThanOrEqual => "≥",
+            PrimitiveOperator::LessThan => "<",
+            PrimitiveOperator::LessThanOrEqual => "≤",
+        };
+        write!(f, "{}", op_str)
+    }
+}
+
 impl From<chroma_proto::GenericComparator> for PrimitiveOperator {
     fn from(value: chroma_proto::GenericComparator) -> Self {
         match value {
@@ -1491,7 +1581,7 @@ impl TryFrom<PrimitiveOperator> for chroma_proto::NumberComparator {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 pub enum SetOperator {
     In,
