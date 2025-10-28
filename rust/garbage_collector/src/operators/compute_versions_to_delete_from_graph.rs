@@ -19,13 +19,13 @@ pub struct ComputeVersionsToDeleteInput {
     pub min_versions_to_keep: u32,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum CollectionVersionAction {
     Keep,
     Delete,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ComputeVersionsToDeleteOutput {
     pub versions: HashMap<CollectionUuid, HashMap<i64, CollectionVersionAction>>,
 }

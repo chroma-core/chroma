@@ -34,6 +34,10 @@ pub struct GarbageCollectorConfig {
     )]
     pub(super) version_cutoff_time: Duration,
     pub(super) max_collections_to_gc: u32,
+    #[serde(
+        default = "GarbageCollectorConfig::default_max_concurrent_list_files_operations_per_collection"
+    )]
+    pub(super) max_concurrent_list_files_operations_per_collection: usize,
     pub(super) max_collections_to_fetch: Option<u32>,
     pub(super) gc_interval_mins: u32,
     #[serde(default = "GarbageCollectorConfig::default_min_versions_to_keep")]
@@ -68,6 +72,10 @@ pub struct GarbageCollectorConfig {
 impl GarbageCollectorConfig {
     fn default_min_versions_to_keep() -> u32 {
         2
+    }
+
+    fn default_max_concurrent_list_files_operations_per_collection() -> usize {
+        10
     }
 
     fn default_filter_min_versions_if_alive() -> Option<u64> {

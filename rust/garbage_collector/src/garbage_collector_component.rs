@@ -187,6 +187,8 @@ impl GarbageCollector {
                 self.config.min_versions_to_keep,
                 enable_log_gc,
                 enable_dangerous_option_to_ignore_min_versions_for_wal3,
+                self.config
+                    .max_concurrent_list_files_operations_per_collection,
             );
 
         let started_at = SystemTime::now();
@@ -865,6 +867,7 @@ mod tests {
             enable_log_gc_for_tenant_threshold: "tenant-threshold".to_string(),
             log: LogConfig::Grpc(GrpcLogConfig::default()),
             enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
+            max_concurrent_list_files_operations_per_collection: 10,
         };
         let registry = Registry::new();
 
@@ -1067,6 +1070,7 @@ mod tests {
             enable_log_gc_for_tenant: Vec::new(),
             enable_log_gc_for_tenant_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff".to_string(),
             log: LogConfig::Grpc(GrpcLogConfig::default()),
+            max_concurrent_list_files_operations_per_collection: 10,
             ..Default::default()
         };
         let registry = Registry::new();
