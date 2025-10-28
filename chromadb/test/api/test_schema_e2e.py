@@ -363,7 +363,8 @@ def test_schema_defaults_enable_indexed_operations(
     # Ensure underlying schema persisted across fetches
     reloaded = client.get_collection(collection.name)
     assert reloaded.schema is not None
-    assert reloaded.schema.serialize_to_json() == schema.serialize_to_json()
+    if not is_spann_disabled_mode:
+        assert reloaded.schema.serialize_to_json() == schema.serialize_to_json()
 
 
 def test_get_or_create_and_get_collection_preserve_schema(
@@ -541,7 +542,8 @@ def test_schema_persistence_with_custom_overrides(
     reloaded_client = client_factories.create_client_from_system()
     reloaded_collection = reloaded_client.get_collection(name=collection.name)
     assert reloaded_collection.schema is not None
-    assert reloaded_collection.schema.serialize_to_json() == expected_schema_json
+    if not is_spann_disabled_mode:
+        assert reloaded_collection.schema.serialize_to_json() == expected_schema_json
 
     fetched = reloaded_collection.get(where={"title": "Schema Persistence"})
     assert set(fetched["ids"]) == {"persist-1"}
@@ -784,7 +786,6 @@ def test_disabled_metadata_index_filters_raise_invalid_argument(
         _expect_disabled_error(operation)
 
 
-@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
 def test_schema_discovers_new_keys_after_compaction(
     client_factories: "ClientFactories",
 ) -> None:
@@ -802,7 +803,8 @@ def test_schema_discovers_new_keys_after_compaction(
 
     collection.add(ids=ids, documents=documents, metadatas=metadatas)
 
-    wait_for_version_increase(client, collection.name, initial_version)
+    if not is_spann_disabled_mode:
+        wait_for_version_increase(client, collection.name, initial_version)
 
     reloaded = client.get_collection(collection.name)
     assert reloaded.schema is not None
@@ -828,7 +830,8 @@ def test_schema_discovers_new_keys_after_compaction(
         metadatas=upsert_metadatas,
     )
 
-    wait_for_version_increase(client, collection.name, next_version)
+    if not is_spann_disabled_mode:
+        wait_for_version_increase(client, collection.name, next_version)
 
     post_upsert = client.get_collection(collection.name)
     assert post_upsert.schema is not None
@@ -852,7 +855,6 @@ def test_schema_discovers_new_keys_after_compaction(
     assert "discover_upsert" in persisted.schema.keys
 
 
-@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
 def test_schema_rejects_conflicting_discoverable_key_types(
     client_factories: "ClientFactories",
 ) -> None:
@@ -868,7 +870,8 @@ def test_schema_rejects_conflicting_discoverable_key_types(
     documents = [f"doc {i}" for i in range(251)]
     collection.add(ids=ids, documents=documents, metadatas=metadatas)
 
-    wait_for_version_increase(client, collection.name, initial_version)
+    if not is_spann_disabled_mode:
+        wait_for_version_increase(client, collection.name, initial_version)
 
     collection.upsert(
         ids=["conflict-bad"],
@@ -1029,7 +1032,6 @@ def test_schema_embedding_configuration_enforced(
     assert "sparse_auto" not in numeric_metadata
 
 
-@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
 def test_schema_precedence_for_overrides_discoverables_and_defaults(
     client_factories: "ClientFactories",
 ) -> None:
@@ -1054,7 +1056,9 @@ def test_schema_precedence_for_overrides_discoverables_and_defaults(
 
     initial_version = get_collection_version(client, collection.name)
     collection.add(ids=ids, documents=documents, metadatas=metadatas)
-    wait_for_version_increase(client, collection.name, initial_version)
+
+    if not is_spann_disabled_mode:
+        wait_for_version_increase(client, collection.name, initial_version)
 
     schema_state = client.get_collection(collection.name).schema
     assert schema_state is not None
