@@ -60,6 +60,36 @@ func (_m *IDatabaseDb) FinishDatabaseDeletion(cutoffTime time.Time) (uint64, err
 	return r0, r1
 }
 
+// GetByID provides a mock function with given fields: databaseID
+func (_m *IDatabaseDb) GetByID(databaseID string) (*dbmodel.Database, error) {
+	ret := _m.Called(databaseID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetByID")
+	}
+
+	var r0 *dbmodel.Database
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*dbmodel.Database, error)); ok {
+		return rf(databaseID)
+	}
+	if rf, ok := ret.Get(0).(func(string) *dbmodel.Database); ok {
+		r0 = rf(databaseID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*dbmodel.Database)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(databaseID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetDatabases provides a mock function with given fields: tenantID, databaseName
 func (_m *IDatabaseDb) GetDatabases(tenantID string, databaseName string) ([]*dbmodel.Database, error) {
 	ret := _m.Called(tenantID, databaseName)

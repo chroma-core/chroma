@@ -40,6 +40,33 @@ func (s *Server) GetTaskByName(ctx context.Context, req *coordinatorpb.GetTaskBy
 	return res, nil
 }
 
+func (s *Server) GetTaskByUuid(ctx context.Context, req *coordinatorpb.GetTaskByUuidRequest) (*coordinatorpb.GetTaskByUuidResponse, error) {
+	log.Info("GetTaskByUuid", zap.String("task_id", req.TaskId))
+
+	res, err := s.coordinator.GetTaskByUuid(ctx, req)
+	if err != nil {
+		log.Error("GetTaskByUuid failed", zap.Error(err))
+		if err == common.ErrTaskNotFound {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+		return nil, err
+	}
+
+	return res, nil
+}
+
+func (s *Server) CreateOutputCollectionForTask(ctx context.Context, req *coordinatorpb.CreateOutputCollectionForTaskRequest) (*coordinatorpb.CreateOutputCollectionForTaskResponse, error) {
+	log.Info("CreateOutputCollectionForTask", zap.String("task_id", req.TaskId), zap.String("collection_name", req.CollectionName))
+
+	res, err := s.coordinator.CreateOutputCollectionForTask(ctx, req)
+	if err != nil {
+		log.Error("CreateOutputCollectionForTask failed", zap.Error(err))
+		return nil, err
+	}
+
+	return res, nil
+}
+
 func (s *Server) DeleteTask(ctx context.Context, req *coordinatorpb.DeleteTaskRequest) (*coordinatorpb.DeleteTaskResponse, error) {
 	log.Info("DeleteTask", zap.String("input_collection_id", req.InputCollectionId), zap.String("task_name", req.TaskName))
 
@@ -58,6 +85,18 @@ func (s *Server) AdvanceTask(ctx context.Context, req *coordinatorpb.AdvanceTask
 	res, err := s.coordinator.AdvanceTask(ctx, req)
 	if err != nil {
 		log.Error("AdvanceTask failed", zap.Error(err))
+		return nil, err
+	}
+
+	return res, nil
+}
+
+func (s *Server) FinishTask(ctx context.Context, req *coordinatorpb.FinishTaskRequest) (*coordinatorpb.FinishTaskResponse, error) {
+	log.Info("FinishTask", zap.String("task_id", req.TaskId))
+
+	res, err := s.coordinator.FinishTask(ctx, req)
+	if err != nil {
+		log.Error("FinishTask failed", zap.Error(err))
 		return nil, err
 	}
 
@@ -85,5 +124,18 @@ func (s *Server) PeekScheduleByCollectionId(ctx context.Context, req *coordinato
 		return nil, err
 	}
 
+	return res, nil
+}
+
+func (s *Server) CleanupExpiredPartialTasks(ctx context.Context, req *coordinatorpb.CleanupExpiredPartialTasksRequest) (*coordinatorpb.CleanupExpiredPartialTasksResponse, error) {
+	log.Info("CleanupExpiredPartialTasks", zap.Uint64("max_age_seconds", req.MaxAgeSeconds))
+
+	res, err := s.coordinator.CleanupExpiredPartialTasks(ctx, req)
+	if err != nil {
+		log.Error("CleanupExpiredPartialTasks failed", zap.Error(err))
+		return nil, err
+	}
+
+	log.Info("CleanupExpiredPartialTasks succeeded", zap.Uint64("cleaned_up_count", res.CleanedUpCount))
 	return res, nil
 }

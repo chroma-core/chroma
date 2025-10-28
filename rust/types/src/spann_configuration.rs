@@ -1,8 +1,7 @@
-use crate::hnsw_configuration::Space;
+use crate::{default_space, hnsw_configuration::Space, SpannIndexConfig};
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use utoipa::ToSchema;
 use validator::Validate;
 
 pub fn default_search_nprobe() -> u32 {
@@ -94,7 +93,8 @@ impl ChromaError for DistributedSpannParametersFromSegmentError {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct InternalSpannConfiguration {
     #[serde(default = "default_search_nprobe")]
     pub search_nprobe: u32,
@@ -147,7 +147,48 @@ impl Default for InternalSpannConfiguration {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
+impl From<(Option<&Space>, &SpannIndexConfig)> for InternalSpannConfiguration {
+    fn from((space, config): (Option<&Space>, &SpannIndexConfig)) -> Self {
+        InternalSpannConfiguration {
+            search_nprobe: config.search_nprobe.unwrap_or(default_search_nprobe()),
+            search_rng_factor: config
+                .search_rng_factor
+                .unwrap_or(default_search_rng_factor()),
+            search_rng_epsilon: config
+                .search_rng_epsilon
+                .unwrap_or(default_search_rng_epsilon()),
+            nreplica_count: config.nreplica_count.unwrap_or(default_nreplica_count()),
+            write_rng_factor: config
+                .write_rng_factor
+                .unwrap_or(default_write_rng_factor()),
+            write_rng_epsilon: config
+                .write_rng_epsilon
+                .unwrap_or(default_write_rng_epsilon()),
+            split_threshold: config.split_threshold.unwrap_or(default_split_threshold()),
+            num_samples_kmeans: config
+                .num_samples_kmeans
+                .unwrap_or(default_num_samples_kmeans()),
+            initial_lambda: config.initial_lambda.unwrap_or(default_initial_lambda()),
+            reassign_neighbor_count: config
+                .reassign_neighbor_count
+                .unwrap_or(default_reassign_neighbor_count()),
+            merge_threshold: config.merge_threshold.unwrap_or(default_merge_threshold()),
+            num_centers_to_merge_to: config
+                .num_centers_to_merge_to
+                .unwrap_or(default_num_centers_to_merge_to()),
+            write_nprobe: config.write_nprobe.unwrap_or(default_write_nprobe()),
+            ef_construction: config
+                .ef_construction
+                .unwrap_or(default_construction_ef_spann()),
+            ef_search: config.ef_search.unwrap_or(default_search_ef_spann()),
+            max_neighbors: config.max_neighbors.unwrap_or(default_m_spann()),
+            space: space.unwrap_or(&default_space()).clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct SpannConfiguration {
     pub search_nprobe: Option<u32>,
@@ -204,11 +245,14 @@ impl Default for SpannConfiguration {
     }
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, Validate, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct UpdateSpannConfiguration {
+    #[validate(range(max = 128))]
     pub search_nprobe: Option<u32>,
+    #[validate(range(max = 200))]
     pub ef_search: Option<usize>,
 }
 

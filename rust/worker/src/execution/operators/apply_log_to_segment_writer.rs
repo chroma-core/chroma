@@ -8,7 +8,7 @@ use chroma_segment::{
     types::{ChromaSegmentWriter, LogMaterializerError, MaterializeLogsResult},
 };
 use chroma_system::Operator;
-use chroma_types::{InternalSchema, SegmentUuid};
+use chroma_types::{Schema, SegmentUuid};
 use thiserror::Error;
 use tracing::Instrument;
 
@@ -56,7 +56,7 @@ pub struct ApplyLogToSegmentWriterInput<'bf> {
     segment_writer: ChromaSegmentWriter<'bf>,
     materialized_logs: MaterializeLogsResult,
     record_segment_reader: Option<RecordSegmentReader<'bf>>,
-    schema: Option<InternalSchema>,
+    schema: Option<Schema>,
 }
 
 impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
@@ -64,7 +64,7 @@ impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
         segment_writer: ChromaSegmentWriter<'bf>,
         materialized_logs: MaterializeLogsResult,
         record_segment_reader: Option<RecordSegmentReader<'bf>>,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
     ) -> Self {
         ApplyLogToSegmentWriterInput {
             segment_writer,
@@ -79,7 +79,7 @@ impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
 pub struct ApplyLogToSegmentWriterOutput {
     pub segment_id: SegmentUuid,
     pub segment_type: &'static str,
-    pub schema_update: Option<InternalSchema>,
+    pub schema_update: Option<Schema>,
 }
 
 #[async_trait]

@@ -2,11 +2,119 @@ syntax = "proto3";
 
 package chroma;
 
-import "chromadb/proto/chroma.proto";
+option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
 
+import "chromadb/proto/chroma.proto";
+import "google/protobuf/timestamp.proto";
+
+// A task that can be scheduled and triggered in the heap.
+message Triggerable {
+    string partitioning_uuid = 1;
+    string scheduling_uuid = 2;
+}
+
+// A scheduled task with its next execution time and unique identifier.
+message Schedule {
+    Triggerable triggerable = 1;
+    google.protobuf.Timestamp next_scheduled = 2;
+    string nonce = 3;
+}
+
+// A heap item with its scheduled time.
+message HeapItem {
+    Triggerable triggerable = 1;
+    string nonce = 2;
+    google.protobuf.Timestamp scheduled_time = 3;
+}
+
+// Limits on range-scan-backed operations.
+message Limits {
+    optional uint32 buckets_to_read = 1;
+    optional uint32 max_items = 2;
+    optional google.protobuf.Timestamp time_cut_off = 3;
+}
+
+// Statistics from a pruning operation.
+message PruneStats {
+    uint32 items_pruned = 1;
+    uint32 items_retained = 2;
+    uint32 buckets_deleted = 3;
+    uint32 buckets_updated = 4;
+}
+
+// Filter criteria for querying heap items.
+message FilterCriteria {
+    optional string partitioning_uuid = 1;
+    optional string scheduling_uuid = 2;
+}
+
+// Request to manually add schedules to the heap.
+message PushRequest {
+    repeated Schedule schedules = 1;
+}
+
+// Response from pushing schedules.
+message PushResponse {
+    uint32 schedules_added = 1;
+}
+
+// Request to query heap items with filters.
+message PeekRequest {
+    Limits limits = 1;
+    optional FilterCriteria filter = 2;
+}
+
+// Response containing heap items.
+message PeekResponse {
+    repeated HeapItem items = 1;
+}
+
+// Request to prune completed tasks.
+message PruneRequest {
+    Limits limits = 1;
+}
+
+// Response from pruning operation.
+message PruneResponse {
+    PruneStats stats = 1;
+}
+
+// Request to prune a specific bucket.
+message PruneBucketRequest {
+    google.protobuf.Timestamp bucket = 1;
+}
+
+// Response from bucket pruning operation.
+message PruneBucketResponse {
+    PruneStats stats = 1;
+}
+
+// Request to list buckets in the heap.
+message ListBucketsRequest {
+    optional uint32 max_buckets = 1;
+}
+
+// Response containing bucket timestamps.
+message ListBucketsResponse {
+    repeated google.protobuf.Timestamp buckets = 1;
+}
+
+// Request for heap summary statistics.
 message HeapSummaryRequest {}
-message HeapSummaryResponse {}
+
+// Response with heap summary statistics.
+message HeapSummaryResponse {
+    uint32 total_items = 1;
+    optional google.protobuf.Timestamp oldest_bucket = 2;
+    optional google.protobuf.Timestamp newest_bucket = 3;
+    uint32 bucket_count = 4;
+}
 
 service HeapTenderService {
+    rpc Push(PushRequest) returns (PushResponse) {}
+    rpc Peek(PeekRequest) returns (PeekResponse) {}
+    rpc Prune(PruneRequest) returns (PruneResponse) {}
+    rpc PruneBucket(PruneBucketRequest) returns (PruneBucketResponse) {}
+    rpc ListBuckets(ListBucketsRequest) returns (ListBucketsResponse) {}
     rpc Summary(HeapSummaryRequest) returns (HeapSummaryResponse) {}
 }

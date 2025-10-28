@@ -4,7 +4,7 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
 use chroma_types::{
-    CollectionAndSegments, CollectionUuid, GetCollectionWithSegmentsError, InternalSchema,
+    CollectionAndSegments, CollectionUuid, GetCollectionWithSegmentsError, KnnIndex, Schema,
     SchemaError,
 };
 use serde::{Deserialize, Serialize};
@@ -143,6 +143,7 @@ impl CollectionsWithSegmentsProvider {
     pub(crate) async fn get_collection_with_segments(
         &mut self,
         collection_id: CollectionUuid,
+        knn_index: KnnIndex,
     ) -> Result<CollectionAndSegments, CollectionsWithSegmentsProviderError> {
         if let Some(collection_and_segments_with_ttl) = self
             .collections_with_segments_cache
@@ -185,15 +186,12 @@ impl CollectionsWithSegmentsProvider {
         };
 
         // reconcile schema and config
-        let reconciled_schema = InternalSchema::reconcile_schema_and_config(
-            collection_and_segments_sysdb.collection.schema.clone(),
-            Some(collection_and_segments_sysdb.collection.config.clone()),
+        let reconciled_schema = Schema::reconcile_schema_and_config(
+            collection_and_segments_sysdb.collection.schema.as_ref(),
+            Some(&collection_and_segments_sysdb.collection.config),
+            knn_index,
         )
-        .map_err(|reason| {
-            CollectionsWithSegmentsProviderError::InvalidSchema(SchemaError::InvalidSchema {
-                reason,
-            })
-        })?;
+        .map_err(CollectionsWithSegmentsProviderError::InvalidSchema)?;
         collection_and_segments_sysdb.collection.schema = Some(reconciled_schema);
         self.set_collection_with_segments(collection_and_segments_sysdb.clone())
             .await;

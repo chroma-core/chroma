@@ -42,10 +42,18 @@ impl HeapScheduler for SysDbScheduler {
         let mut results = Vec::with_capacity(items.len());
         for (triggerable, nonce) in items.iter() {
             let Some(schedule) = by_triggerable.get(triggerable) else {
+                // No schedule found - task is done/completed
+                // TODO(tanujnay112): This has to be reconsidered when task templates are lazily created
                 results.push(true);
                 continue;
             };
-            results.push(schedule.task_run_nonce != *nonce);
+
+            // Check if this nonce is done based on lowest_live_nonce
+            let is_done = match schedule.lowest_live_nonce {
+                None => false,
+                Some(lowest_live) => *nonce < lowest_live,
+            };
+            results.push(is_done);
         }
         Ok(results)
     }
@@ -67,7 +75,7 @@ impl HeapScheduler for SysDbScheduler {
                         partitioning: schedule.collection_id.0.into(),
                         scheduling: schedule.task_id.into(),
                     },
-                    nonce: schedule.task_run_nonce,
+                    nonce: schedule.task_run_nonce.0,
                     next_scheduled: when_to_run,
                 });
             }

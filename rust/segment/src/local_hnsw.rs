@@ -106,8 +106,11 @@ impl LocalHnswSegmentReader {
         sql_db: SqliteDb,
     ) -> Result<Self, LocalHnswSegmentReaderError> {
         let hnsw_configuration = collection
-            .config
-            .get_hnsw_config_with_legacy_fallback(segment)?
+            .schema
+            .as_ref()
+            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(segment))
+            .transpose()?
+            .flatten()
             .ok_or(LocalHnswSegmentReaderError::MissingHnswConfiguration)?;
 
         match persist_root {
@@ -490,8 +493,11 @@ impl LocalHnswSegmentWriter {
         sql_db: SqliteDb,
     ) -> Result<Self, LocalHnswSegmentWriterError> {
         let hnsw_configuration = collection
-            .config
-            .get_hnsw_config_with_legacy_fallback(segment)?
+            .schema
+            .as_ref()
+            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(segment))
+            .transpose()?
+            .flatten()
             .ok_or(LocalHnswSegmentWriterError::MissingHnswConfiguration)?;
 
         match persist_root {

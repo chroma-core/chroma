@@ -17,7 +17,7 @@ pub async fn send_request<T, R>(
 ) -> Result<R, Box<dyn Error>>
 where
     T: Serialize + Debug,
-    R: DeserializeOwned + Default,
+    R: DeserializeOwned,
 {
     let url = format!("{}{}", url, route);
 

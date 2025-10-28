@@ -2,6 +2,7 @@ use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
 use super::OneOffCompactMessage;
 use super::RebuildMessage;
+use crate::compactor::tasks::SchedulableTask;
 use crate::compactor::types::{ListDeadJobsMessage, ScheduledCompactMessage};
 use crate::config::CompactionServiceConfig;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLog;
@@ -31,11 +32,13 @@ use chroma_system::Dispatcher;
 use chroma_system::Orchestrator;
 use chroma_system::TaskResult;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, JobId};
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::StreamExt;
 use opentelemetry::trace::TraceContextExt;
+use s3heap_service::client::GrpcHeapService;
+use s3heap_service::client::HeapServiceConfig;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
@@ -58,13 +61,19 @@ use uuid::Uuid;
 type CompactionOutput = Result<CompactionResponse, Box<dyn ChromaError>>;
 type BoxedFuture = Pin<Box<dyn Future<Output = CompactionOutput> + Send>>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExecutionMode {
+    Compaction,
+    Task,
+}
+
 struct CompactionTask {
-    collection_id: CollectionUuid,
+    job_id: JobId,
     future: BoxedFuture,
 }
 
 struct CompactionTaskCompletion {
-    collection_id: CollectionUuid,
+    job_id: JobId,
     result: CompactionOutput,
 }
 
@@ -74,6 +83,8 @@ pub(crate) struct CompactionManagerContext {
     // Dependencies
     log: Log,
     sysdb: SysDb,
+    #[allow(dead_code)]
+    heap_service: Option<s3heap_service::client::GrpcHeapService>,
     #[allow(dead_code)]
     storage: Storage,
     blockfile_provider: BlockfileProvider,
@@ -94,6 +105,7 @@ pub(crate) struct CompactionManagerContext {
 }
 
 pub(crate) struct CompactionManager {
+    mode: ExecutionMode,
     scheduler: Scheduler,
     context: CompactionManagerContext,
     compact_awaiter_channel: mpsc::Sender<CompactionTask>,
@@ -106,12 +118,18 @@ pub(crate) struct CompactionManager {
 pub(crate) enum CompactionError {
     #[error("Failed to compact")]
     FailedToCompact,
+    #[error("Failed to execute task")]
+    FailedToExecuteTask,
+    #[error("Heap service is not initialized for task based compaction")]
+    HeapServiceNotInitialized,
 }
 
 impl ChromaError for CompactionError {
     fn code(&self) -> ErrorCodes {
         match self {
             CompactionError::FailedToCompact => ErrorCodes::Internal,
+            CompactionError::FailedToExecuteTask => ErrorCodes::Internal,
+            CompactionError::HeapServiceNotInitialized => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -119,6 +137,7 @@ impl ChromaError for CompactionError {
 impl CompactionManager {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
+        mode: ExecutionMode,
         system: System,
         scheduler: Scheduler,
         log: Log,
@@ -135,7 +154,8 @@ impl CompactionManager {
         fetch_log_batch_size: u32,
         purge_dirty_log_timeout_seconds: u64,
         repair_log_offsets_timeout_seconds: u64,
-    ) -> Self {
+        heap_service: Option<GrpcHeapService>,
+    ) -> Result<Self, Box<dyn ChromaError>> {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
 
@@ -146,7 +166,18 @@ impl CompactionManager {
         let compact_awaiter = tokio::spawn(async {
             compact_awaiter_loop(compact_awaiter_rx, completion_tx).await;
         });
-        CompactionManager {
+
+        if mode == ExecutionMode::Task {
+            // Check to see if heap_service is Some
+            if heap_service.is_none() {
+                tracing::error!(
+                    "Heap service is required for task based compaction but was not initialized"
+                );
+                return Err(Box::new(CompactionError::HeapServiceNotInitialized));
+            }
+        }
+        Ok(CompactionManager {
+            mode,
             scheduler,
             context: CompactionManagerContext {
                 system,
@@ -165,12 +196,13 @@ impl CompactionManager {
                 fetch_log_batch_size,
                 purge_dirty_log_timeout_seconds,
                 repair_log_offsets_timeout_seconds,
+                heap_service,
             },
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
             compact_awaiter_completion_channel: completion_rx,
             compact_awaiter,
-        }
+        })
     }
 
     #[instrument(name = "CompactionManager::start_compaction_batch", skip(self))]
@@ -178,28 +210,72 @@ impl CompactionManager {
         self.process_completions();
         let compact_awaiter_channel = &self.compact_awaiter_channel;
         self.scheduler.schedule().await;
-        let jobs_iter = self.scheduler.get_jobs();
-        for job in jobs_iter {
-            let instrumented_span = span!(
-                parent: None,
-                tracing::Level::INFO,
-                "Compacting job",
-                collection_id = ?job.collection_id
-            );
-            Span::current().add_link(instrumented_span.context().span().span_context().clone());
 
-            let future = self
-                .context
-                .clone()
-                .compact(job.collection_id, false)
-                .instrument(instrumented_span);
-            compact_awaiter_channel
-                .send(CompactionTask {
-                    collection_id: job.collection_id,
-                    future: Box::pin(future),
-                })
-                .await
-                .unwrap();
+        match self.mode {
+            ExecutionMode::Compaction => {
+                let jobs: Vec<_> = self.scheduler.get_jobs().cloned().collect();
+                for job in jobs {
+                    let instrumented_span = span!(
+                        parent: None,
+                        tracing::Level::INFO,
+                        "Compacting job",
+                        collection_id = ?job.collection_id
+                    );
+                    Span::current()
+                        .add_link(instrumented_span.context().span().span_context().clone());
+
+                    let future = self
+                        .context
+                        .clone()
+                        .compact(job.collection_id, false)
+                        .instrument(instrumented_span);
+                    if let Err(e) = compact_awaiter_channel
+                        .send(CompactionTask {
+                            job_id: job.collection_id.into(),
+                            future: Box::pin(future),
+                        })
+                        .await
+                    {
+                        tracing::error!(
+                            collection_id = ?job.collection_id,
+                            error = ?e,
+                            "Failed to send start scheduled compaction task"
+                        );
+                    }
+                }
+            }
+            ExecutionMode::Task => {
+                let tasks = self.scheduler.get_tasks_scheduled_for_execution().clone();
+                for task in tasks {
+                    let instrumented_span = span!(
+                        parent: None,
+                        tracing::Level::INFO,
+                        "Compacting task",
+                        collection_id = ?task.collection_id
+                    );
+                    Span::current()
+                        .add_link(instrumented_span.context().span().span_context().clone());
+
+                    let future = self
+                        .context
+                        .clone()
+                        .execute_task(task.clone())
+                        .instrument(instrumented_span);
+                    if let Err(e) = compact_awaiter_channel
+                        .send(CompactionTask {
+                            job_id: task.task_id.into(),
+                            future: Box::pin(future),
+                        })
+                        .await
+                    {
+                        tracing::error!(
+                            task_id = ?task.task_id,
+                            error = ?e,
+                            "Failed to start scheduled task run"
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -215,6 +291,9 @@ impl CompactionManager {
 
     #[instrument(name = "CompactionManager::purge_dirty_log", skip(ctx))]
     pub(crate) async fn purge_dirty_log(&mut self, ctx: &ComponentContext<Self>) {
+        if !matches!(self.mode, ExecutionMode::Compaction) {
+            return; // Tasks don't purge logs
+        }
         let deleted_collection_uuids = self.scheduler.drain_deleted_collections();
         if deleted_collection_uuids.is_empty() {
             tracing::info!("Skipping purge dirty log because there is no deleted collections");
@@ -251,6 +330,9 @@ impl CompactionManager {
 
     #[instrument(name = "CompactionManager::repair_log_offsets", skip(ctx))]
     pub(crate) async fn repair_log_offsets(&mut self, ctx: &ComponentContext<Self>) {
+        if !matches!(self.mode, ExecutionMode::Compaction) {
+            return; // Tasks don't repair offsets
+        }
         let log_offsets_to_repair = self.scheduler.drain_collections_requiring_repair();
         if log_offsets_to_repair.is_empty() {
             tracing::info!("No offsets to repair");
@@ -286,34 +368,42 @@ impl CompactionManager {
         self.context.dispatcher = Some(dispatcher);
     }
 
+    /// Get a mutable reference to the heap service client if available.
+    #[allow(dead_code)]
+    pub(crate) fn heap_service(&mut self) -> Option<&mut s3heap_service::client::GrpcHeapService> {
+        self.context.heap_service.as_mut()
+    }
+
     fn process_completions(&mut self) -> Vec<CompactionTaskCompletion> {
         let compact_awaiter_completion_channel = &mut self.compact_awaiter_completion_channel;
         let mut completed_collections = Vec::new();
         while let Ok(resp) = compact_awaiter_completion_channel.try_recv() {
             match resp.result {
                 Ok(ref compaction_response) => match compaction_response {
-                    CompactionResponse::Success { collection_id } => {
-                        if *collection_id != resp.collection_id {
-                            tracing::event!(Level::ERROR, name = "mismatched collection ids in result", lhs =? *collection_id, rhs =? resp.collection_id);
+                    CompactionResponse::Success { job_id } => {
+                        if job_id != &resp.job_id.0 {
+                            tracing::event!(Level::ERROR, name = "mismatched job ids in result", lhs =? *job_id, rhs =? resp.job_id);
                         }
-                        self.scheduler.succeed_collection(resp.collection_id);
+                        self.scheduler.succeed_job(resp.job_id);
                     }
                     CompactionResponse::RequireCompactionOffsetRepair {
                         collection_id,
                         witnessed_offset_in_sysdb,
                     } => {
-                        if *collection_id != resp.collection_id {
-                            tracing::event!(Level::ERROR, name = "mismatched collection ids in result", lhs =? *collection_id, rhs =? resp.collection_id);
-                            self.scheduler.succeed_collection(resp.collection_id);
+                        if collection_id.0 != resp.job_id.0 {
+                            tracing::event!(Level::ERROR, name = "mismatched job ids in result", lhs =? *collection_id, rhs =? resp.job_id);
+                            self.scheduler.fail_job(resp.job_id);
                         } else {
-                            self.scheduler
-                                .require_repair(resp.collection_id, *witnessed_offset_in_sysdb);
-                            self.scheduler.succeed_collection(resp.collection_id);
+                            self.scheduler.require_repair(
+                                chroma_types::CollectionUuid(resp.job_id.0),
+                                *witnessed_offset_in_sysdb,
+                            );
+                            self.scheduler.succeed_job(resp.job_id);
                         }
                     }
                 },
                 Err(_) => {
-                    self.scheduler.fail_collection(resp.collection_id);
+                    self.scheduler.fail_job(resp.job_id);
                 }
             }
             completed_collections.push(resp);
@@ -345,7 +435,7 @@ impl CompactionManagerContext {
         };
 
         let orchestrator = CompactOrchestrator::new(
-            collection_id,
+            collection_id, // input_collection_id
             rebuild,
             self.fetch_log_batch_size,
             self.max_compaction_size,
@@ -369,6 +459,49 @@ impl CompactionManagerContext {
                     tracing::error!("Compaction Job failed: {:?}", e);
                 }
                 return Err(Box::new(e));
+            }
+        }
+    }
+
+    async fn execute_task(self, task: SchedulableTask) -> CompactionOutput {
+        tracing::info!("Executing task {}", task.task_id);
+        let dispatcher = match self.dispatcher {
+            Some(ref dispatcher) => dispatcher.clone(),
+            None => {
+                tracing::error!("No dispatcher found");
+                return Err(Box::new(CompactionError::FailedToExecuteTask));
+            }
+        };
+
+        let orchestrator = CompactOrchestrator::new_for_task(
+            task.collection_id,
+            false,
+            self.fetch_log_batch_size,
+            self.max_compaction_size,
+            self.max_partition_size,
+            self.log.clone(),
+            self.sysdb.clone(),
+            self.heap_service.ok_or_else(|| {
+                Box::new(CompactionError::HeapServiceNotInitialized) as Box<dyn ChromaError>
+            })?,
+            self.blockfile_provider.clone(),
+            self.hnsw_index_provider.clone(),
+            self.spann_provider.clone(),
+            dispatcher,
+            None,
+            task.task_id,
+            task.nonce,
+        );
+        match orchestrator.run(self.system.clone()).await {
+            Ok(result) => {
+                tracing::info!("Task {} completed: {:?}", task.task_id, result);
+                Ok(result)
+            }
+            Err(e) => {
+                if e.should_trace_error() {
+                    tracing::error!("Task {} failed: {:?}", task.task_id, e);
+                }
+                Err(Box::new(e))
             }
         }
     }
@@ -429,6 +562,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let job_expiry_seconds = config.compactor.job_expiry_seconds;
         let max_failure_count = config.compactor.max_failure_count;
         let scheduler = Scheduler::new(
+            ExecutionMode::Compaction, // Default to Compaction mode
             my_ip,
             log.clone(),
             sysdb.clone(),
@@ -464,7 +598,33 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         )
         .await?;
 
-        Ok(CompactionManager::new(
+        // Initialize heap service if enabled
+        let heap_service = match &config.heap_service {
+            HeapServiceConfig::Grpc(heap_config) if heap_config.enabled => {
+                match GrpcHeapService::try_from_config(
+                    &(heap_config.clone(), system.clone()),
+                    registry,
+                )
+                .await
+                {
+                    Ok(service) => {
+                        tracing::info!("Heap service client initialized");
+                        Some(service)
+                    }
+                    Err(err) => {
+                        tracing::warn!("Failed to initialize heap service: {:?}", err);
+                        None
+                    }
+                }
+            }
+            _ => {
+                tracing::info!("Heap service is disabled");
+                None
+            }
+        };
+
+        CompactionManager::new(
+            ExecutionMode::Compaction, // Default to Compaction mode
             system.clone(),
             scheduler,
             log,
@@ -481,8 +641,95 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             fetch_log_batch_size,
             purge_dirty_log_timeout_seconds,
             repair_log_offsets_timeout_seconds,
-        ))
+            heap_service,
+        )
     }
+}
+pub(crate) async fn create_taskrunner_manager(
+    config: &CompactionServiceConfig,
+    task_config: &crate::compactor::config::TaskRunnerConfig,
+    system: System,
+    _dispatcher: ComponentHandle<Dispatcher>,
+    registry: &Registry,
+) -> Result<CompactionManager, Box<dyn ChromaError>> {
+    let log_config = &config.log;
+    let log = Log::try_from_config(&(log_config.clone(), system.clone()), registry).await?;
+
+    let sysdb_config = &config.sysdb;
+    let sysdb = SysDb::try_from_config(sysdb_config, registry).await?;
+
+    let storage = Storage::try_from_config(&config.storage, registry).await?;
+
+    let my_ip = config.my_member_id.clone();
+    let policy = Box::new(LasCompactionTimeSchedulerPolicy {});
+    let assignment_policy_config = &config.assignment_policy;
+    let assignment_policy =
+        Box::<dyn AssignmentPolicy>::try_from_config(assignment_policy_config, registry).await?;
+
+    let heap_service_config = config.heap_service.clone();
+    let heap_service = match heap_service_config {
+        HeapServiceConfig::Grpc(grpc_config) => {
+            GrpcHeapService::try_from_config(&(grpc_config, system.clone()), registry).await?
+        }
+    };
+
+    let scheduler = Scheduler::new(
+        ExecutionMode::Task, // Taskrunner mode
+        my_ip,
+        log.clone(),
+        sysdb.clone(),
+        storage.clone(),
+        policy,
+        task_config.max_concurrent_jobs,
+        0, // min_compaction_size not used for tasks
+        assignment_policy,
+        HashSet::new(), // disabled_collections not used for tasks
+        task_config.job_expiry_seconds,
+        task_config.max_failure_count,
+    );
+
+    let blockfile_provider = BlockfileProvider::try_from_config(
+        &(config.blockfile_provider.clone(), storage.clone()),
+        registry,
+    )
+    .await?;
+
+    let hnsw_index_provider = HnswIndexProvider::try_from_config(
+        &(config.hnsw_provider.clone(), storage.clone()),
+        registry,
+    )
+    .await?;
+
+    let spann_provider = SpannProvider::try_from_config(
+        &(
+            hnsw_index_provider.clone(),
+            blockfile_provider.clone(),
+            config.spann_provider.clone(),
+        ),
+        registry,
+    )
+    .await?;
+
+    CompactionManager::new(
+        ExecutionMode::Task, // Taskrunner mode
+        system.clone(),
+        scheduler,
+        log,
+        sysdb,
+        storage.clone(),
+        blockfile_provider,
+        hnsw_index_provider,
+        spann_provider,
+        task_config.compaction_manager_queue_size,
+        Duration::from_secs(task_config.poll_interval_sec),
+        0, // min_compaction_size not used for tasks
+        task_config.max_compaction_size,
+        task_config.max_partition_size,
+        task_config.fetch_log_batch_size,
+        0, // purge_dirty_log_timeout_seconds not used for tasks
+        0, // repair_log_offsets_timeout_seconds not used for tasks
+        Some(heap_service),
+    )
 }
 
 async fn compact_awaiter_loop(
@@ -497,21 +744,21 @@ async fn compact_awaiter_loop(
                     let result = AssertUnwindSafe(job.future).catch_unwind().await;
                     match result {
                         Ok(response) => CompactionTaskCompletion {
-                            collection_id: job.collection_id,
+                            job_id: job.job_id,
                             result: response,
                         },
                         Err(_) => CompactionTaskCompletion {
-                            collection_id: job.collection_id,
+                            job_id: job.job_id,
                             result: Err(Box::new(CompactionError::FailedToCompact)),
                         },
                     }
                 });
             }
             Some(completed_job) = futures.next() => {
-                let collection_id = completed_job.collection_id;
+                let job_id = completed_job.job_id;
                 match completion_tx.send(completed_job) {
                     Ok(_) => {},
-                    Err(_) => tracing::error!("Failed to record compaction result for collection {}", collection_id),
+                    Err(_) => tracing::error!("Failed to record compaction result for job {}", job_id),
                 }
             }
             else => {
@@ -696,7 +943,7 @@ impl Handler<ListDeadJobsMessage> for CompactionManager {
         _ctx: &ComponentContext<CompactionManager>,
     ) {
         let dead_jobs = self.scheduler.get_dead_jobs();
-        if let Err(e) = message.response_tx.send(dead_jobs) {
+        if let Err(e) = message.response_tx.send(dead_jobs.into_iter().collect()) {
             tracing::error!("Failed to send dead jobs response: {:?}", e);
         }
     }
@@ -900,6 +1147,7 @@ mod tests {
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
         let mut scheduler = Scheduler::new(
+            ExecutionMode::Compaction,
             my_member.member_id.clone(),
             log.clone(),
             sysdb.clone(),
@@ -951,6 +1199,7 @@ mod tests {
         };
         let system = System::new();
         let mut manager = CompactionManager::new(
+            ExecutionMode::Compaction,
             system.clone(),
             scheduler,
             log,
@@ -967,7 +1216,9 @@ mod tests {
             fetch_log_batch_size,
             purge_dirty_log_timeout_seconds,
             repair_log_offsets_timeout_seconds,
-        );
+            None, // heap_service not needed in tests
+        )
+        .expect("Failed to create compaction manager in test");
 
         let dispatcher = Dispatcher::new(DispatcherConfig {
             num_worker_threads: 10,
@@ -982,7 +1233,8 @@ mod tests {
 
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(10);
-        let expected_compactions = HashSet::from([collection_uuid_1, collection_uuid_2]);
+        let expected_compactions =
+            HashSet::from([collection_uuid_1.into(), collection_uuid_2.into()]);
 
         let mut completed_compactions = HashSet::new();
 
@@ -993,8 +1245,8 @@ mod tests {
                 completed
                     .iter()
                     .filter(|c| c.result.is_ok())
-                    .map(|c| c.collection_id)
-                    .collect::<Vec<CollectionUuid>>(),
+                    .map(|c| c.job_id)
+                    .collect::<Vec<JobId>>(),
             );
         }
 
@@ -1032,6 +1284,7 @@ mod tests {
         assignment_policy.set_members(vec!["test-member".to_string()]);
 
         let mut scheduler = Scheduler::new(
+            ExecutionMode::Compaction,
             "test-member".to_string(),
             Log::InMemory(InMemoryLog::new()),
             SysDb::Test(TestSysDb::new()),
@@ -1047,11 +1300,11 @@ mod tests {
 
         // Simulate a dead job by marking a collection as killed (moved to dead_jobs)
         let test_collection_id = CollectionUuid::new();
-        scheduler.kill_collection(test_collection_id);
+        scheduler.kill_job(test_collection_id.into());
 
         // Verify it's in dead jobs
         let dead_jobs = scheduler.get_dead_jobs();
         assert_eq!(dead_jobs.len(), 1);
-        assert!(dead_jobs.contains(&test_collection_id));
+        assert!(dead_jobs.contains(&test_collection_id.into()));
     }
 }

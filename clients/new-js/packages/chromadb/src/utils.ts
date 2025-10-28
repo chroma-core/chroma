@@ -9,7 +9,7 @@ import {
   Where,
   WhereDocument,
 } from "./types";
-import { Include } from "./api";
+import { Include, SparseVector } from "./api";
 import { ChromaValueError } from "./errors";
 
 /** Default tenant name used when none is specified */
@@ -227,16 +227,22 @@ export const validateIDs = (ids: string[]) => {
   }
 };
 
-export const validateSparseVector = (v: any) => {
+export const validateSparseVector = (v: unknown): v is SparseVector => {
+  if (typeof v !== "object" || v === null) {
+    return false;
+  }
+
+  const candidate = v as Record<string, unknown>;
+  const indices = candidate.indices;
+  const values = candidate.values;
+
+  if (!Array.isArray(indices) || !Array.isArray(values)) {
+    return false;
+  }
+
   return (
-    typeof v === "object" &&
-    v !== null &&
-    "indices" in v &&
-    "values" in v &&
-    Array.isArray(v.indices) &&
-    v.indices.every((e: any) => typeof e === "number") &&
-    Array.isArray(v.values) &&
-    v.values.every((e: any) => typeof e === "number")
+    indices.every((e) => typeof e === "number") &&
+    values.every((e) => typeof e === "number")
   );
 };
 
@@ -269,6 +275,145 @@ export const validateMetadata = (metadata?: Metadata) => {
       "Expected metadata to be a string, number, boolean, SparseVector, or nullable",
     );
   }
+};
+
+const SPARSE_VECTOR_TYPE = "sparse_vector" as const;
+
+type SerializedSparseVector = SparseVector & { "#type": typeof SPARSE_VECTOR_TYPE };
+
+type SerializedMetadataValue =
+  | boolean
+  | number
+  | string
+  | SerializedSparseVector
+  | SparseVector
+  | null;
+
+export type SerializedMetadata = Record<string, SerializedMetadataValue>;
+
+const toSerializedSparseVector = (vector: SparseVector): SerializedSparseVector => ({
+  "#type": SPARSE_VECTOR_TYPE,
+  indices: vector.indices,
+  values: vector.values,
+});
+
+export const serializeMetadata = (
+  metadata?: Metadata | null,
+): SerializedMetadata | null | undefined => {
+  if (metadata === undefined) {
+    return undefined;
+  }
+
+  if (metadata === null) {
+    return null;
+  }
+
+  const result: SerializedMetadata = {};
+
+  Object.entries(metadata).forEach(([key, value]) => {
+    if (validateSparseVector(value)) {
+      result[key] = toSerializedSparseVector(value);
+    } else {
+      result[key] = value ?? null;
+    }
+  });
+
+  return result;
+};
+
+export const serializeMetadatas = (
+  metadatas?: Metadata[] | null,
+): (SerializedMetadata | null)[] | null | undefined => {
+  if (metadatas === undefined) {
+    return undefined;
+  }
+
+  if (metadatas === null) {
+    return null;
+  }
+
+  return metadatas.map((metadata) => serializeMetadata(metadata) ?? null);
+};
+
+const isSerializedSparseVector = (value: unknown): value is SerializedSparseVector => {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  if (candidate["#type"] !== SPARSE_VECTOR_TYPE) {
+    return false;
+  }
+
+  return validateSparseVector(candidate);
+};
+
+const deserializeMetadataValue = (
+  value: SerializedMetadataValue | undefined,
+): Metadata[keyof Metadata] | null => {
+  if (isSerializedSparseVector(value)) {
+    return {
+      indices: value.indices,
+      values: value.values,
+    };
+  }
+
+  return value as Metadata[keyof Metadata] | null;
+};
+
+export const deserializeMetadata = (
+  metadata?: SerializedMetadata | null,
+): Metadata | null | undefined => {
+  if (metadata === undefined) {
+    return undefined;
+  }
+
+  if (metadata === null) {
+    return null;
+  }
+
+  const result: Metadata = {};
+
+  Object.entries(metadata).forEach(([key, value]) => {
+    result[key] = deserializeMetadataValue(value);
+  });
+
+  return result;
+};
+
+export const deserializeMetadatas = (
+  metadatas?: (SerializedMetadata | null)[] | null,
+): (Metadata | null)[] | null | undefined => {
+  if (metadatas === undefined) {
+    return undefined;
+  }
+
+  if (metadatas === null) {
+    return null;
+  }
+
+  return metadatas.map((metadata) => deserializeMetadata(metadata) ?? null);
+};
+
+export const deserializeMetadataMatrix = (
+  metadatas?: (Array<SerializedMetadata | null> | null)[] | null,
+): (Array<Metadata | null> | null)[] | null | undefined => {
+  if (metadatas === undefined) {
+    return undefined;
+  }
+
+  if (metadatas === null) {
+    return null;
+  }
+
+  return metadatas.map((metadataArray) => {
+    if (metadataArray === null) {
+      return null;
+    }
+
+    const deserialized = deserializeMetadatas(metadataArray);
+    return deserialized ?? [];
+  });
 };
 
 const validateMetadatas = (metadatas: Metadata[]) => {

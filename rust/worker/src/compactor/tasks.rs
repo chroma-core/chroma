@@ -3,15 +3,15 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use chroma_storage::Storage;
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, NonceUuid, TaskUuid};
 use s3heap::{heap_path_from_hostname, Error, HeapReader, HeapScheduler, Limits};
 
 /// A task that has been scheduled for execution.
 #[derive(Clone, Debug)]
 pub struct SchedulableTask {
     pub collection_id: CollectionUuid,
-    pub task_id: uuid::Uuid,
-    pub nonce: uuid::Uuid,
+    pub task_id: TaskUuid,
+    pub nonce: NonceUuid,
     pub bucket: DateTime<Utc>,
 }
 
@@ -66,14 +66,15 @@ impl TaskHeapReader {
                 }
             };
 
-            match reader.peek(|_, _| true, limits).await {
+            match reader.peek(|_, _| true, limits.clone()).await {
                 Ok(items) => {
                     tracing::trace!("Found {} tasks in {}", items.len(), heap_prefix);
                     for (bucket, item) in items {
+                        let collection_id = CollectionUuid(*item.trigger.partitioning.as_uuid());
                         all_tasks.push(SchedulableTask {
-                            collection_id: CollectionUuid(*item.trigger.partitioning.as_uuid()),
-                            task_id: *item.trigger.scheduling.as_uuid(),
-                            nonce: item.nonce,
+                            collection_id,
+                            task_id: TaskUuid(*item.trigger.scheduling.as_uuid()),
+                            nonce: NonceUuid(item.nonce),
                             bucket,
                         });
                     }

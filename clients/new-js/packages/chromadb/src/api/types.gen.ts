@@ -25,7 +25,7 @@ export type BoolInvertedIndexType = {
  * Boolean value type index configurations
  */
 export type BoolValueType = {
-    $bool_inverted_index?: null | BoolInvertedIndexType;
+    bool_inverted_index?: null | BoolInvertedIndexType;
 };
 
 export type ChecklistResponse = {
@@ -41,7 +41,7 @@ export type Collection = {
     log_position: number;
     metadata?: null | HashMap;
     name: string;
-    schema?: null | InternalSchema;
+    schema?: null | Schema;
     tenant: string;
     version: number;
 };
@@ -62,7 +62,7 @@ export type CreateCollectionPayload = {
     get_or_create?: boolean;
     metadata?: null | HashMap;
     name: string;
-    schema?: null | InternalSchema;
+    schema?: null | Schema;
 };
 
 export type CreateDatabasePayload = {
@@ -115,7 +115,9 @@ export type EmbeddingFunctionConfiguration = {
     type: 'legacy';
 } | (EmbeddingFunctionNewConfiguration & {
     type: 'known';
-});
+}) | {
+    type: 'unknown';
+};
 
 export type EmbeddingFunctionNewConfiguration = {
     config: unknown;
@@ -142,14 +144,14 @@ export type FloatInvertedIndexType = {
  * Float list value type index configurations (for vectors)
  */
 export type FloatListValueType = {
-    $vector_index?: null | VectorIndexType;
+    vector_index?: null | VectorIndexType;
 };
 
 /**
  * Float value type index configurations
  */
 export type FloatValueType = {
-    $float_inverted_index?: null | FloatInvertedIndexType;
+    float_inverted_index?: null | FloatInvertedIndexType;
 };
 
 export type ForkCollectionPayload = {
@@ -239,26 +241,75 @@ export type IntInvertedIndexType = {
  * Integer value type index configurations
  */
 export type IntValueType = {
-    $int_inverted_index?: null | IntInvertedIndexType;
+    int_inverted_index?: null | IntInvertedIndexType;
 };
 
 /**
- * Internal schema representation for collection index configurations
- * This represents the server-side schema structure used for index management
+ * Represents a field key in search queries.
+ *
+ * Used for both selecting fields to return and building filter expressions.
+ * Predefined keys access special fields, while custom keys access metadata.
+ *
+ * # Predefined Keys
+ *
+ * - `Key::Document` - Document text content (`#document`)
+ * - `Key::Embedding` - Vector embeddings (`#embedding`)
+ * - `Key::Metadata` - All metadata fields (`#metadata`)
+ * - `Key::Score` - Search scores (`#score`)
+ *
+ * # Custom Keys
+ *
+ * Use `Key::field()` or `Key::from()` to reference metadata fields:
+ *
+ * ```
+ * use chroma_types::operator::Key;
+ *
+ * let key = Key::field("author");
+ * let key = Key::from("title");
+ * ```
+ *
+ * # Examples
+ *
+ * ## Building filters
+ *
+ * ```
+ * use chroma_types::operator::Key;
+ *
+ * // Equality
+ * let filter = Key::field("status").eq("published");
+ *
+ * // Comparisons
+ * let filter = Key::field("year").gte(2020);
+ * let filter = Key::field("score").lt(0.9);
+ *
+ * // Set operations
+ * let filter = Key::field("category").is_in(vec!["tech", "science"]);
+ * let filter = Key::field("status").not_in(vec!["deleted", "archived"]);
+ *
+ * // Document content
+ * let filter = Key::Document.contains("machine learning");
+ * let filter = Key::Document.regex(r"\bAPI\b");
+ *
+ * // Combining filters
+ * let filter = Key::field("status").eq("published")
+ * & Key::field("year").gte(2020);
+ * ```
+ *
+ * ## Selecting fields
+ *
+ * ```
+ * use chroma_types::plan::SearchPayload;
+ * use chroma_types::operator::Key;
+ *
+ * let search = SearchPayload::default()
+ * .select([
+ * Key::Document,
+ * Key::Score,
+ * Key::field("title"),
+ * Key::field("author"),
+ * ]);
+ * ```
  */
-export type InternalSchema = {
-    /**
-     * Default index configurations for each value type
-     */
-    defaults: ValueTypes;
-    /**
-     * Key-specific index overrides
-     */
-    key_overrides: {
-        [key: string]: ValueTypes;
-    };
-};
-
 export type Key = 'Document' | 'Embedding' | 'Metadata' | 'Score' | {
     MetadataField: string;
 };
@@ -295,6 +346,25 @@ export type RemoveTaskRequest = {
 
 export type RemoveTaskResponse = {
     success: boolean;
+};
+
+/**
+ * Schema representation for collection index configurations
+ *
+ * This represents the server-side schema structure used for index management
+ */
+export type Schema = {
+    /**
+     * Default index configurations for each value type
+     */
+    defaults: ValueTypes;
+    /**
+     * Key-specific index overrides
+     * TODO(Sanket): Needed for backwards compatibility. Should remove after deploy.
+     */
+    keys: {
+        [key: string]: ValueTypes;
+    };
 };
 
 export type SearchPayload = {
@@ -367,6 +437,11 @@ export type SpannIndexConfig = {
 
 /**
  * Represents a sparse vector using parallel arrays for indices and values.
+ *
+ * On deserialization: accepts both old format `{"indices": [...], "values": [...]}`
+ * and new format `{"#type": "sparse_vector", "indices": [...], "values": [...]}`.
+ *
+ * On serialization: always includes `#type` field with value `"sparse_vector"`.
  */
 export type SparseVector = {
     /**
@@ -400,7 +475,7 @@ export type SparseVectorIndexType = {
  * Sparse vector value type index configurations
  */
 export type SparseVectorValueType = {
-    $sparse_vector_index?: null | SparseVectorIndexType;
+    sparse_vector_index?: null | SparseVectorIndexType;
 };
 
 export type StringInvertedIndexConfig = {
@@ -416,8 +491,8 @@ export type StringInvertedIndexType = {
  * String value type index configurations
  */
 export type StringValueType = {
-    $fts_index?: null | FtsIndexType;
-    $string_inverted_index?: null | StringInvertedIndexType;
+    fts_index?: null | FtsIndexType;
+    string_inverted_index?: null | StringInvertedIndexType;
 };
 
 export type UpdateCollectionConfiguration = {
@@ -489,12 +564,12 @@ export type UpsertCollectionRecordsResponse = {
  * Contains optional configurations for each supported value type
  */
 export type ValueTypes = {
-    '#bool'?: null | BoolValueType;
-    '#float'?: null | FloatValueType;
-    '#float_list'?: null | FloatListValueType;
-    '#int'?: null | IntValueType;
-    '#sparse_vector'?: null | SparseVectorValueType;
-    '#string'?: null | StringValueType;
+    bool?: null | BoolValueType;
+    float?: null | FloatValueType;
+    float_list?: null | FloatListValueType;
+    int?: null | IntValueType;
+    sparse_vector?: null | SparseVectorValueType;
+    string?: null | StringValueType;
 };
 
 export type Vec = Array<{
@@ -505,7 +580,7 @@ export type Vec = Array<{
     log_position: number;
     metadata?: null | HashMap;
     name: string;
-    schema?: null | InternalSchema;
+    schema?: null | Schema;
     tenant: string;
     version: number;
 }>;

@@ -84,12 +84,12 @@ Continue with the full [getting started guide](./getting-started).
 | ------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | Python        | [`chromadb`](https://pypistats.org/packages/chromadb) (by Chroma)                                                         |
 | Javascript    | [`chromadb`](https://www.npmjs.com/package/chromadb) (by Chroma)                                                          |
+| Rust          | [`chroma`](https://crates.io/crates/chroma) (by Chroma), [from @Anush008](https://crates.io/crates/chromadb)                                                                       |
 | Ruby          | [from @mariochavez](https://github.com/mariochavez/chroma)                                                                |
 | Java          | [from @t_azarov](https://github.com/amikos-tech/chromadb-java-client)                                                     |
 | Java          | [from @locxngo](https://github.com/locxngo/chroma-client) (Java 17+, ChromaAPI V2)                                        |
 | Go            | [from @t_azarov](https://github.com/amikos-tech/chroma-go)                                                                |
 | C#/.NET       | [from @cincuranet, @ssone95, @microsoft](https://github.com/ssone95/ChromaDB.Client)                                      |
-| Rust          | [from @Anush008](https://crates.io/crates/chromadb)                                                                       |
 | Elixir        | [from @3zcurdia](https://hex.pm/packages/chroma/)                                                                         |
 | Dart          | [from @davidmigloz](https://pub.dev/packages/chromadb)                                                                    |
 | PHP           | [from @CodeWithKyrian](https://github.com/CodeWithKyrian/chromadb-php), [from @pari](https://github.com/pari/phpMyChroma) |

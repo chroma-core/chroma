@@ -7,6 +7,7 @@ collections as new records are added.
 """
 
 import chromadb
+import time
 
 # Connect to Chroma server
 client = chromadb.HttpClient(host="localhost", port=8000)
@@ -59,6 +60,8 @@ else:
 print("\n" + "=" * 60)
 print("Task is now registered and will run on new data!")
 print("=" * 60)
+
+time.sleep(10)
 
 # Add more documents to trigger task execution
 print("\nAdding more documents...")

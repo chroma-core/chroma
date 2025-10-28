@@ -15,7 +15,6 @@ use chroma_index::spann::types::{
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
 use chroma_types::Collection;
-use chroma_types::InternalSchema;
 use chroma_types::SchemaError;
 use chroma_types::SegmentUuid;
 use chroma_types::HNSW_PATH;
@@ -111,15 +110,13 @@ impl SpannSegmentWriter {
             return Err(SpannSegmentWriterError::InvalidArgument);
         }
 
-        let reconciled_schema = InternalSchema::reconcile_schema_and_config(
-            collection.schema.clone(),
-            Some(collection.config.clone()),
-        )
-        .map_err(|e| {
-            SpannSegmentWriterError::InvalidSchema(SchemaError::InvalidSchema { reason: e })
+        let schema = collection.schema.as_ref().ok_or_else(|| {
+            SpannSegmentWriterError::InvalidSchema(SchemaError::InvalidSchema {
+                reason: "Schema is None".to_string(),
+            })
         })?;
 
-        let params = reconciled_schema
+        let params = schema
             .get_internal_spann_config()
             .ok_or(SpannSegmentWriterError::MissingSpannConfiguration)?;
 
@@ -621,7 +618,7 @@ mod test {
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
         Chunk, Collection, CollectionUuid, DatabaseUuid, InternalCollectionConfiguration,
-        InternalSchema, InternalSpannConfiguration, LogRecord, Operation, OperationRecord,
+        InternalSpannConfiguration, KnnIndex, LogRecord, Operation, OperationRecord, Schema,
         SegmentUuid, SpannPostingList,
     };
 
@@ -690,7 +687,7 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+            Schema::reconcile_schema_and_config(None, Some(&collection.config), KnnIndex::Spann)
                 .expect("Error reconciling schema for test collection"),
         );
 
@@ -927,7 +924,7 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+            Schema::reconcile_schema_and_config(None, Some(&collection.config), KnnIndex::Spann)
                 .expect("Error reconciling schema for test collection"),
         );
 
@@ -1089,7 +1086,7 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+            Schema::reconcile_schema_and_config(None, Some(&collection.config), KnnIndex::Spann)
                 .expect("Error reconciling schema for test collection"),
         );
 
@@ -1220,7 +1217,7 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
+            Schema::reconcile_schema_and_config(None, Some(&collection.config), KnnIndex::Spann)
                 .expect("Error reconciling schema for test collection"),
         );
 

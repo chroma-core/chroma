@@ -1,13 +1,17 @@
 [package]
 name = "chroma-types"
-version = "0.1.0"
+version = "0.5.0"
 edition = "2021"
+description = "Chroma-provided crate for internal types used in the Chroma API."
+license = "Apache-2.0"
+repository = "https://github.com/chroma-core/chroma"
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
 async-trait = { workspace = true }
+base64 = { workspace = true }
 chrono = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
@@ -22,7 +26,7 @@ pyo3 = { workspace = true, optional = true }
 validator = { workspace = true }
 regex = { workspace = true }
 regex-syntax = { workspace = true }
-utoipa = { workspace = true }
+utoipa = { workspace = true, optional = true }
 sprs = { workspace = true }
 
 # (Cross-crate testing dependencies)
@@ -33,6 +37,8 @@ chroma-error = { workspace = true, features = ["tonic", "validator"] }
 
 [build-dependencies]
 tonic-build = "0.10"
+criterion = { workspace = true }
 
 [features]
 testing = ["dep:proptest", "dep:proptest-derive"]
+utoipa = ["dep:utoipa"]

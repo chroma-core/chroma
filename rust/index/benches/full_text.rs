@@ -10,8 +10,9 @@ use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::Block
 use chroma_cache::UnboundedCacheConfig;
 use chroma_index::fulltext::types::{DocumentMutation, FullTextIndexReader, FullTextIndexWriter};
 use chroma_storage::{local::LocalStorage, Storage};
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use futures::{StreamExt, TryStreamExt};
+use std::hint::black_box;
 use std::sync::Arc;
 mod dataset_utilities;
 use dataset_utilities::{get_record_dataset, get_record_query_dataset_pair};

@@ -1,5 +1,5 @@
 import { ChromaClient } from "./chroma-client";
-import { EmbeddingFunction } from "./embedding-function";
+import { EmbeddingFunction, SparseEmbeddingFunction } from "./embedding-function";
 import {
   BaseRecordSet,
   CollectionMetadata,
@@ -13,7 +13,7 @@ import {
   Where,
   WhereDocument,
 } from "./types";
-import { Include } from "./api";
+import { Include, SparseVector, SearchPayload } from "./api";
 import { DefaultService as Api } from "./api";
 import {
   validateRecordSetLengthConsistency,
@@ -26,6 +26,11 @@ import {
   validateMetadata,
   validateMaxBatchSize,
   embeddingsToBase64Bytes,
+  serializeMetadatas,
+  serializeMetadata,
+  deserializeMetadatas,
+  deserializeMetadataMatrix,
+  deserializeMetadata,
 } from "./utils";
 import { createClient } from "@hey-api/client-fetch";
 import { ChromaValueError } from "./errors";
@@ -35,6 +40,9 @@ import {
   UpdateCollectionConfiguration,
 } from "./collection-configuration";
 import { SearchLike, SearchResult, toSearch } from "./execution/expression";
+import { isPlainObject } from "./execution/expression/common";
+import { Schema, EMBEDDING_KEY, DOCUMENT_KEY } from "./schema";
+import type { SparseVectorIndexConfig } from "./schema";
 
 /**
  * Interface for collection operations using collection ID.
@@ -51,6 +59,8 @@ export interface Collection {
   configuration: CollectionConfiguration;
   /** Optional embedding function. Must match the one used to create the collection. */
   embeddingFunction?: EmbeddingFunction;
+  /** Collection schema describing index configuration */
+  schema?: Schema;
   /** Gets the total number of records in the collection */
   count(): Promise<number>;
   /**
@@ -207,6 +217,8 @@ export interface CollectionArgs {
   configuration: CollectionConfiguration;
   /** Optional collection metadata */
   metadata?: CollectionMetadata;
+  /** Optional schema returned by the server */
+  schema?: Schema;
 }
 
 /**
@@ -221,6 +233,7 @@ export class CollectionImpl implements Collection {
   private _metadata: CollectionMetadata | undefined;
   private _configuration: CollectionConfiguration;
   protected _embeddingFunction: EmbeddingFunction | undefined;
+  protected _schema: Schema | undefined;
 
   /**
    * Creates a new CollectionAPIImpl instance.
@@ -234,6 +247,7 @@ export class CollectionImpl implements Collection {
     metadata,
     configuration,
     embeddingFunction,
+    schema,
   }: CollectionArgs) {
     this.chromaClient = chromaClient;
     this.apiClient = apiClient;
@@ -242,6 +256,7 @@ export class CollectionImpl implements Collection {
     this._metadata = metadata;
     this._configuration = configuration;
     this._embeddingFunction = embeddingFunction;
+    this._schema = schema;
   }
 
   public get name(): string {
@@ -278,6 +293,14 @@ export class CollectionImpl implements Collection {
     this._embeddingFunction = embeddingFunction;
   }
 
+  public get schema(): Schema | undefined {
+    return this._schema;
+  }
+
+  protected set schema(schema: Schema | undefined) {
+    this._schema = schema;
+  }
+
   protected async path(): Promise<{
     tenant: string;
     database: string;
@@ -291,17 +314,296 @@ export class CollectionImpl implements Collection {
   }
 
   private async embed(inputs: string[], isQuery: boolean): Promise<number[][]> {
-    if (!this._embeddingFunction) {
+    const embeddingFunction =
+      this._embeddingFunction ?? this.getSchemaEmbeddingFunction();
+
+    if (!embeddingFunction) {
       throw new ChromaValueError(
         "Embedding function must be defined for operations requiring embeddings.",
       );
     }
 
-	if (this._embeddingFunction.generateForQueries && isQuery) {
-		return await this._embeddingFunction.generateForQueries(inputs);
-	} else {
-    	return await this._embeddingFunction.generate(inputs);
-	}
+    if (isQuery && embeddingFunction.generateForQueries) {
+      return await embeddingFunction.generateForQueries(inputs);
+    }
+
+    return await embeddingFunction.generate(inputs);
+  }
+
+  private async sparseEmbed(sparseEmbeddingFunction: SparseEmbeddingFunction, inputs: string[], isQuery: boolean): Promise<SparseVector[]> {
+    if (isQuery && sparseEmbeddingFunction.generateForQueries) {
+      return await sparseEmbeddingFunction.generateForQueries(inputs);
+    }
+
+    return await sparseEmbeddingFunction.generate(inputs);
+  }
+
+  private getSparseEmbeddingTargets(): Record<string, SparseVectorIndexConfig> {
+    const schema = this._schema;
+    if (!schema) return {};
+
+    const targets: Record<string, SparseVectorIndexConfig> = {};
+    for (const [key, valueTypes] of Object.entries(schema.keys)) {
+      const sparseVector = valueTypes.sparseVector;
+      const sparseIndex = sparseVector?.sparseVectorIndex;
+      if (!sparseIndex?.enabled) continue;
+
+      const config = sparseIndex.config;
+      if (!config.embeddingFunction || !config.sourceKey) continue;
+
+      targets[key] = config;
+    }
+
+    return targets;
+  }
+
+  private async applySparseEmbeddingsToMetadatas(
+    metadatas?: Metadata[],
+    documents?: string[],
+  ): Promise<Metadata[] | undefined> {
+    const sparseTargets = this.getSparseEmbeddingTargets();
+    if (Object.keys(sparseTargets).length === 0) {
+      return metadatas;
+    }
+
+    // If no metadatas provided, create empty objects based on documents length
+    if (!metadatas) {
+      if (!documents) {
+        return undefined;
+      }
+      metadatas = Array(documents.length).fill(null).map(() => ({}));
+    }
+
+    // Create copies, converting null to empty object
+    const updatedMetadatas = metadatas.map((metadata) =>
+      metadata !== null && metadata !== undefined ? { ...metadata } : {}
+    );
+    const documentsList = documents ? [...documents] : undefined;
+
+    for (const [targetKey, config] of Object.entries(sparseTargets)) {
+      const sourceKey = config.sourceKey;
+      const embeddingFunction = config.embeddingFunction;
+      if (!sourceKey || !embeddingFunction) {
+        continue;
+      }
+
+      const inputs: string[] = [];
+      const positions: number[] = [];
+
+      // Handle special case: source_key is "#document"
+      if (sourceKey === DOCUMENT_KEY) {
+        if (!documentsList) {
+          continue;
+        }
+
+        // Collect documents that need embedding
+        updatedMetadatas.forEach((metadata, index) => {
+          // Skip if target already exists in metadata
+          if (targetKey in metadata) {
+            return;
+          }
+
+          // Get document at this position
+          if (index < documentsList.length) {
+            const doc = documentsList[index];
+            if (typeof doc === "string") {
+              inputs.push(doc);
+              positions.push(index);
+            }
+          }
+        });
+
+        // Generate embeddings for all collected documents
+        if (inputs.length === 0) {
+          continue;
+        }
+
+        const sparseEmbeddings = await this.sparseEmbed(embeddingFunction, inputs, false);
+        if (sparseEmbeddings.length !== positions.length) {
+          throw new ChromaValueError(
+            "Sparse embedding function returned unexpected number of embeddings.",
+          );
+        }
+
+        positions.forEach((position, idx) => {
+          updatedMetadatas[position][targetKey] = sparseEmbeddings[idx];
+        });
+
+        continue; // Skip the metadata-based logic below
+      }
+
+      // Handle normal case: source_key is a metadata field
+      updatedMetadatas.forEach((metadata, index) => {
+        if (targetKey in metadata) {
+          return;
+        }
+
+        const sourceValue = metadata[sourceKey];
+        if (typeof sourceValue !== "string") {
+          return;
+        }
+
+        inputs.push(sourceValue);
+        positions.push(index);
+      });
+
+      if (inputs.length === 0) {
+        continue;
+      }
+
+      const sparseEmbeddings = await this.sparseEmbed(embeddingFunction, inputs, false);
+      if (sparseEmbeddings.length !== positions.length) {
+        throw new ChromaValueError(
+          "Sparse embedding function returned unexpected number of embeddings.",
+        );
+      }
+
+      positions.forEach((position, idx) => {
+        updatedMetadatas[position][targetKey] = sparseEmbeddings[idx];
+      });
+    }
+
+    // Convert empty objects back to null
+    const resultMetadatas = updatedMetadatas.map((metadata) =>
+      Object.keys(metadata).length === 0 ? null : metadata
+    );
+
+    return resultMetadatas as Metadata[];
+  }
+
+  private async embedKnnLiteral(
+    knn: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const queryValue = knn.query as unknown;
+    if (typeof queryValue !== "string") {
+      return { ...knn };
+    }
+
+    const keyValue = knn.key as unknown;
+    const key = typeof keyValue === "string" ? keyValue : EMBEDDING_KEY;
+
+    if (key === EMBEDDING_KEY) {
+      const embeddings = await this.embed([queryValue], true);
+      if (!embeddings || embeddings.length !== 1) {
+        throw new ChromaValueError(
+          "Embedding function returned unexpected number of embeddings.",
+        );
+      }
+      return { ...knn, query: embeddings[0] };
+    }
+
+    const schema = this._schema;
+    if (!schema) {
+      throw new ChromaValueError(
+        `Cannot embed string query for key '${key}': schema is not available. Provide an embedded vector or configure an embedding function.`,
+      );
+    }
+
+    const valueTypes = schema.keys[key];
+    if (!valueTypes) {
+      throw new ChromaValueError(
+        `Cannot embed string query for key '${key}': key not found in schema. Provide an embedded vector or configure an embedding function.`,
+      );
+    }
+
+    const sparseIndex = valueTypes.sparseVector?.sparseVectorIndex;
+    if (
+      sparseIndex?.enabled &&
+      sparseIndex.config.embeddingFunction
+    ) {
+      const sparseEmbeddingFunction = sparseIndex.config.embeddingFunction;
+      const sparseEmbeddings = await this.sparseEmbed(
+        sparseEmbeddingFunction,
+        [queryValue],
+        true,
+      );
+      if (!sparseEmbeddings || sparseEmbeddings.length !== 1) {
+        throw new ChromaValueError(
+          "Sparse embedding function returned unexpected number of embeddings.",
+        );
+      }
+      return { ...knn, query: sparseEmbeddings[0] };
+    }
+
+    const vectorIndex = valueTypes.floatList?.vectorIndex;
+    if (
+      vectorIndex?.enabled &&
+      vectorIndex.config.embeddingFunction
+    ) {
+      const embeddingFunction = vectorIndex.config.embeddingFunction;
+      const embeddings = embeddingFunction.generateForQueries
+        ? await embeddingFunction.generateForQueries([queryValue])
+        : await embeddingFunction.generate([queryValue]);
+
+      if (!embeddings || embeddings.length !== 1) {
+        throw new ChromaValueError(
+          "Embedding function returned unexpected number of embeddings.",
+        );
+      }
+
+      return { ...knn, query: embeddings[0] };
+    }
+
+    throw new ChromaValueError(
+      `Cannot embed string query for key '${key}': no embedding function configured. Provide an embedded vector or configure an embedding function.`,
+    );
+  }
+
+  private async embedRankLiteral(rank: unknown): Promise<unknown> {
+    if (rank === null || rank === undefined) {
+      return rank;
+    }
+
+    if (Array.isArray(rank)) {
+      return Promise.all(rank.map((item) => this.embedRankLiteral(item)));
+    }
+
+    if (!isPlainObject(rank)) {
+      return rank;
+    }
+
+    const entries = await Promise.all(
+      Object.entries(rank).map(async ([key, value]) => {
+        if (key === "$knn" && isPlainObject(value)) {
+          return [key, await this.embedKnnLiteral(value)];
+        }
+        return [key, await this.embedRankLiteral(value)];
+      }),
+    );
+
+    return Object.fromEntries(entries);
+  }
+
+  private async embedSearchPayload(payload: SearchPayload): Promise<SearchPayload> {
+    if (!payload.rank) {
+      return payload;
+    }
+
+    const embeddedRank = await this.embedRankLiteral(payload.rank);
+    if (!isPlainObject(embeddedRank)) {
+      return payload;
+    }
+
+    return {
+      ...payload,
+      rank: embeddedRank as SearchPayload["rank"],
+    };
+  }
+
+  private getSchemaEmbeddingFunction(): EmbeddingFunction | undefined {
+    const schema = this._schema;
+    if (!schema) return undefined;
+
+    const schemaOverride = schema.keys[EMBEDDING_KEY];
+    const overrideFunction = schemaOverride?.floatList?.vectorIndex?.config
+      .embeddingFunction;
+    if (overrideFunction) {
+      return overrideFunction;
+    }
+
+    const defaultFunction = schema.defaults.floatList?.vectorIndex?.config
+      .embeddingFunction;
+    return defaultFunction ?? undefined;
   }
 
   private async prepareRecords<T extends boolean = false>({
@@ -322,7 +624,15 @@ export class CollectionImpl implements Collection {
       recordSet.embeddings = await this.embed(recordSet.documents, false);
     }
 
-    const preparedRecordSet: PreparedRecordSet = { ...recordSet };
+    const metadatasWithSparse = await this.applySparseEmbeddingsToMetadatas(
+      recordSet.metadatas,
+      recordSet.documents,
+    );
+
+    const preparedRecordSet: PreparedRecordSet = {
+      ...recordSet,
+      metadatas: metadatasWithSparse,
+    };
 
     const base64Supported = await this.chromaClient.supportsBase64Encoding();
     if (base64Supported && recordSet.embeddings) {
@@ -429,7 +739,7 @@ export class CollectionImpl implements Collection {
         ids: preparedRecordSet.ids,
         embeddings: preparedRecordSet.embeddings,
         documents: preparedRecordSet.documents,
-        metadatas: preparedRecordSet.metadatas,
+        metadatas: serializeMetadatas(preparedRecordSet.metadatas),
         uris: preparedRecordSet.uris,
       },
     });
@@ -469,12 +779,14 @@ export class CollectionImpl implements Collection {
       },
     });
 
+    const deserializedMetadatas = deserializeMetadatas(data.metadatas) ?? [];
+
     return new GetResult<TMeta>({
       documents: data.documents ?? [],
       embeddings: data.embeddings ?? [],
       ids: data.ids,
       include: data.include,
-      metadatas: (data.metadatas ?? []) as (TMeta | null)[],
+      metadatas: deserializedMetadatas as (TMeta | null)[],
       uris: data.uris ?? [],
     });
   }
@@ -530,13 +842,16 @@ export class CollectionImpl implements Collection {
       },
     });
 
+    const deserializedMetadatas =
+      deserializeMetadataMatrix(data.metadatas) ?? [];
+
     return new QueryResult({
       distances: data.distances ?? [],
       documents: data.documents ?? [],
       embeddings: data.embeddings ?? [],
       ids: data.ids ?? [],
       include: data.include,
-      metadatas: (data.metadatas ?? []) as (TMeta | null)[][],
+      metadatas: deserializedMetadatas as (TMeta | null)[][],
       uris: data.uris ?? [],
     });
   }
@@ -548,7 +863,12 @@ export class CollectionImpl implements Collection {
       throw new ChromaValueError("At least one search payload must be provided.");
     }
 
-    const payloads = items.map((search) => toSearch(search).toPayload());
+    const payloads = await Promise.all(
+      items.map(async (search) => {
+        const payload = toSearch(search).toPayload();
+        return this.embedSearchPayload(payload);
+      }),
+    );
 
     const { data } = await Api.collectionSearch({
       client: this.apiClient,
@@ -577,11 +897,11 @@ export class CollectionImpl implements Collection {
 
     const { updateConfiguration, updateEmbeddingFunction } = configuration
       ? await processUpdateCollectionConfig({
-          collectionName: this.name,
-          currentConfiguration: this.configuration,
-          newConfiguration: configuration,
-          currentEmbeddingFunction: this.embeddingFunction,
-        })
+        collectionName: this.name,
+        currentConfiguration: this.configuration,
+        newConfiguration: configuration,
+        currentEmbeddingFunction: this.embeddingFunction,
+      })
       : {};
 
     if (updateEmbeddingFunction) {
@@ -601,7 +921,7 @@ export class CollectionImpl implements Collection {
       path: await this.path(),
       body: {
         new_name: name,
-        new_metadata: metadata,
+        new_metadata: serializeMetadata(metadata),
         new_configuration: updateConfiguration,
       },
     });
@@ -620,7 +940,7 @@ export class CollectionImpl implements Collection {
       name: data.name,
       id: data.id,
       embeddingFunction: this._embeddingFunction,
-      metadata: data.metadata ?? undefined,
+      metadata: deserializeMetadata(data.metadata ?? undefined) ?? undefined,
       configuration: data.configuration_json,
     });
   }
@@ -657,7 +977,7 @@ export class CollectionImpl implements Collection {
       body: {
         ids: preparedRecordSet.ids,
         embeddings: preparedRecordSet.embeddings,
-        metadatas: preparedRecordSet.metadatas,
+        metadatas: serializeMetadatas(preparedRecordSet.metadatas),
         uris: preparedRecordSet.uris,
         documents: preparedRecordSet.documents,
       },
@@ -695,7 +1015,7 @@ export class CollectionImpl implements Collection {
       body: {
         ids: preparedRecordSet.ids,
         embeddings: preparedRecordSet.embeddings,
-        metadatas: preparedRecordSet.metadatas,
+        metadatas: serializeMetadatas(preparedRecordSet.metadatas),
         uris: preparedRecordSet.uris,
         documents: preparedRecordSet.documents,
       },
