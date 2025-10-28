@@ -995,7 +995,25 @@ impl serde::Serialize for Where {
     }
 }
 
+impl From<bool> for Where {
+    fn from(value: bool) -> Self {
+        if value {
+            Where::conjunction(vec![])
+        } else {
+            Where::disjunction(vec![])
+        }
+    }
+}
+
 impl Where {
+    pub fn all() -> Self {
+        true.into()
+    }
+
+    pub fn none() -> Self {
+        false.into()
+    }
+
     pub fn conjunction(children: Vec<Where>) -> Self {
         Self::Composite(CompositeExpression {
             operator: BooleanOperator::And,
