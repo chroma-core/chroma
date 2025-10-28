@@ -1,40 +1,3 @@
-from chromadb.api.types import *  # noqa: F401, F403
-from chromadb.execution.expression import (  # noqa: F401, F403
-    Search,
-    Key,
-    K,
-    SearchWhere,
-    And,
-    Or,
-    Eq,
-    Ne,
-    Gt,
-    Gte,
-    Lt,
-    Lte,
-    In,
-    Nin,
-    Regex,
-    NotRegex,
-    Contains,
-    NotContains,
-    Limit,
-    Select,
-    Rank,
-    Abs,
-    Div,
-    Exp,
-    Log,
-    Max,
-    Min,
-    Mul,
-    Knn,
-    Rrf,
-    Sub,
-    Sum,
-    Val,
-)
-
 from abc import ABC, abstractmethod
 from typing import Sequence, Optional, List, Dict, Any
 from uuid import UUID
@@ -67,8 +30,8 @@ from chromadb.api.types import (
     SearchResult,
     DefaultEmbeddingFunction,
 )
-
 from chromadb.auth import UserIdentity
+from chromadb.execution.expression.plan import Search
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api.models.Collection import Collection
