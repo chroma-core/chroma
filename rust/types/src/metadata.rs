@@ -1006,14 +1006,6 @@ impl From<bool> for Where {
 }
 
 impl Where {
-    pub fn all() -> Self {
-        true.into()
-    }
-
-    pub fn none() -> Self {
-        false.into()
-    }
-
     pub fn conjunction(children: Vec<Where>) -> Self {
         Self::Composite(CompositeExpression {
             operator: BooleanOperator::And,
@@ -1071,30 +1063,40 @@ impl BitAnd for Where {
             Where::Composite(CompositeExpression {
                 operator: BooleanOperator::And,
                 mut children,
-            }) => match rhs {
-                Where::Composite(CompositeExpression {
-                    operator: BooleanOperator::And,
-                    children: rhs_children,
-                }) => {
-                    children.extend(rhs_children);
+            }) => {
+                if children.is_empty() {
+                    return rhs;
+                }
+
+                match rhs {
                     Where::Composite(CompositeExpression {
                         operator: BooleanOperator::And,
-                        children,
-                    })
+                        children: rhs_children,
+                    }) => {
+                        children.extend(rhs_children);
+                        Where::Composite(CompositeExpression {
+                            operator: BooleanOperator::And,
+                            children,
+                        })
+                    }
+                    _ => {
+                        children.push(rhs);
+                        Where::Composite(CompositeExpression {
+                            operator: BooleanOperator::And,
+                            children,
+                        })
+                    }
                 }
-                _ => {
-                    children.push(rhs);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::And,
-                        children,
-                    })
-                }
-            },
+            }
             _ => match rhs {
                 Where::Composite(CompositeExpression {
                     operator: BooleanOperator::And,
                     mut children,
                 }) => {
+                    if children.is_empty() {
+                        return self;
+                    }
+
                     children.insert(0, self);
                     Where::Composite(CompositeExpression {
                         operator: BooleanOperator::And,
@@ -1115,21 +1117,54 @@ impl BitOr for Where {
             Where::Composite(CompositeExpression {
                 operator: BooleanOperator::Or,
                 mut children,
-            }) => match rhs {
-                Where::Composite(CompositeExpression {
-                    operator: BooleanOperator::Or,
-                    children: rhs_children,
-                }) => {
-                    children.extend(rhs_children);
+            }) => {
+                if children.is_empty() {
+                    return rhs;
+                }
+
+                match rhs {
                     Where::Composite(CompositeExpression {
                         operator: BooleanOperator::Or,
-                        children,
-                    })
+                        children: rhs_children,
+                    }) => {
+                        children.extend(rhs_children);
+                        Where::Composite(CompositeExpression {
+                            operator: BooleanOperator::Or,
+                            children,
+                        })
+                    }
+                    _ => {
+                        children.push(rhs);
+                        Where::Composite(CompositeExpression {
+                            operator: BooleanOperator::Or,
+                            children,
+                        })
+                    }
+                }
+            }
+            Where::Composite(CompositeExpression {
+                operator: BooleanOperator::And,
+                mut children,
+            }) => match rhs {
+                Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::And,
+                    children: rhs_children,
+                }) => {
+                    if children.is_empty() && rhs_children.is_empty() {
+                        // Simplify
+                        Where::conjunction(vec![])
+                    } else {
+                        children.extend(rhs_children);
+                        Where::Composite(CompositeExpression {
+                            operator: BooleanOperator::And,
+                            children,
+                        })
+                    }
                 }
                 _ => {
                     children.push(rhs);
                     Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::Or,
+                        operator: BooleanOperator::And,
                         children,
                     })
                 }
@@ -1139,6 +1174,10 @@ impl BitOr for Where {
                     operator: BooleanOperator::Or,
                     mut children,
                 }) => {
+                    if children.is_empty() {
+                        return self;
+                    }
+
                     children.insert(0, self);
                     Where::Composite(CompositeExpression {
                         operator: BooleanOperator::Or,
@@ -1647,6 +1686,8 @@ impl TryFrom<chroma_proto::WhereDocument> for Where {
 
 #[cfg(test)]
 mod tests {
+    use crate::operator::Key;
+
     use super::*;
 
     #[test]
@@ -2106,5 +2147,20 @@ mod tests {
         let sv: SparseVector = serde_json::from_value(sparse_value.clone()).unwrap();
         assert_eq!(sv.indices, vec![0, 1]);
         assert_eq!(sv.values, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn test_simplifies_identities() {
+        let all: Where = true.into();
+        assert_eq!(all.clone() & all.clone(), true.into());
+        assert_eq!(all.clone() | all.clone(), true.into());
+
+        let foo = Key::field("foo").eq("bar");
+        assert_eq!(foo.clone() & all.clone(), foo.clone());
+        assert_eq!(all.clone() & foo.clone(), foo.clone());
+
+        let none: Where = false.into();
+        assert_eq!(foo.clone() | none.clone(), foo.clone());
+        assert_eq!(none | foo.clone(), foo);
     }
 }
