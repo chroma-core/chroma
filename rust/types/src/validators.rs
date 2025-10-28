@@ -281,6 +281,11 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
                             .into(),
                     ));
                 }
+                if svit.config.source_key.is_some() && svit.config.embedding_function.is_none() {
+                    return Err(ValidationError::new("schema").with_message(
+                        "If source_key is provided then embedding_function must also be provided since there is no default embedding function.".into(),
+                    ));
+                }
             }
             // Validate source_key for sparse vector index
             if let Some(source_key) = &svit.config.source_key {

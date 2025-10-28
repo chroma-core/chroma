@@ -2337,3 +2337,23 @@ def test_config_source_key_validates_special_keys() -> None:
     # Regular keys (no #) are allowed
     config6 = SparseVectorIndexConfig(source_key="my_field")
     assert config6.source_key == "my_field"
+
+
+def test_sparse_vector_config_requires_ef_with_source_key() -> None:
+    """Test that SparseVectorIndexConfig raises ValueError when source_key is provided without embedding_function."""
+    schema = Schema()
+
+    # Attempt to create sparse vector index with source_key but no embedding_function
+    with pytest.raises(ValueError) as exc_info:
+        schema.create_index(
+            key="invalid_sparse",
+            config=SparseVectorIndexConfig(
+                source_key="text_field",
+                # No embedding_function provided - should raise ValueError
+            ),
+        )
+
+    # Verify the error message mentions both source_key and embedding_function
+    error_msg = str(exc_info.value)
+    assert "source_key" in error_msg.lower()
+    assert "embedding_function" in error_msg.lower()
