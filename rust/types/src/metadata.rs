@@ -1011,20 +1011,18 @@ impl Where {
         // If children.len() == 0, we will return a conjunction that is always true.
         // If children.len() == 1, we will return the single child.
         // Otherwise, we will return a conjunction of the children.
-        // We can safely filter out any conjunction children that are always true.
 
         let mut children: Vec<_> = children
             .into_iter()
-            .filter(|expr| {
+            .flat_map(|expr| {
                 if let Where::Composite(CompositeExpression {
                     operator: BooleanOperator::And,
                     children,
                 }) = expr
                 {
-                    return !children.is_empty();
+                    return children;
                 }
-
-                true
+                vec![expr]
             })
             .dedup()
             .collect();
@@ -1042,20 +1040,18 @@ impl Where {
         // If children.len() == 0, we will return a disjunction that is always false.
         // If children.len() == 1, we will return the single child.
         // Otherwise, we will return a disjunction of the children.
-        // We can safely filter out any disjunction children that are always false.
 
         let mut children: Vec<_> = children
             .into_iter()
-            .filter(|expr| {
+            .flat_map(|expr| {
                 if let Where::Composite(CompositeExpression {
                     operator: BooleanOperator::Or,
                     children,
                 }) = expr
                 {
-                    return !children.is_empty();
+                    return children;
                 }
-
-                true
+                vec![expr]
             })
             .dedup()
             .collect();
@@ -2094,5 +2090,29 @@ mod tests {
         let none: Where = false.into();
         assert_eq!(foo.clone() | none.clone(), foo.clone());
         assert_eq!(none | foo.clone(), foo);
+    }
+
+    #[test]
+    fn test_flattens() {
+        let foo = Key::field("foo").eq("bar");
+        let baz = Key::field("baz").eq("quux");
+
+        let and_nested = foo.clone() & (baz.clone() & foo.clone());
+        assert_eq!(
+            and_nested,
+            Where::Composite(CompositeExpression {
+                operator: BooleanOperator::And,
+                children: vec![foo.clone(), baz.clone(), foo.clone()]
+            })
+        );
+
+        let or_nested = foo.clone() | (baz.clone() | foo.clone());
+        assert_eq!(
+            or_nested,
+            Where::Composite(CompositeExpression {
+                operator: BooleanOperator::Or,
+                children: vec![foo.clone(), baz.clone(), foo.clone()]
+            })
+        );
     }
 }
