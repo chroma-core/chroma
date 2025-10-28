@@ -13,8 +13,8 @@ Schema allows you to configure which indexes are created for different data type
 
 ## Why Use Schema?
 
-- **Optimize Performance**: Disable unused indexes to speed up writes and reduce index build time
 - **Enable Hybrid Search**: Combine dense and sparse embeddings for better retrieval quality
+- **Optimize Performance**: Disable unused indexes to speed up writes and reduce index build time
 - **Fine-Tune Configuration**: Adjust vector index parameters for your workload
 
 ## Quick Start
@@ -111,35 +111,18 @@ try {
 
 {% /TabbedCodeBlock %}
 
+{% Banner type="tip" %}
+**Important:** Schema is only configurable in `create_collection`. We are working on supporting schema update via collection `modify`
+{% /Banner %}
+
 ## Feature Highlights
 
-- **Default Indexes**: Collections start with sensible defaults - inverted indexes for scalar types, vector index for embeddings, FTS for documents
-- **Global Configuration**: Set index defaults that apply to all metadata keys of a given type
+- **Default Indexes**: Collections start with sensible defaults - inverted indexes for scalar types, vector index for embeddings, full text search index for documents
+- **Global Configuration**: Set index defaults that apply to all metadata keys of a given type during collection creation
 - **Per-Key Configuration**: Override defaults for specific metadata fields
 - **Sparse Vector Support**: Enable sparse embeddings for hybrid search with BM25-style retrieval
 - **Index Deletion**: Disable indexes you don't need to improve write performance
-- **Vector Index Tuning**: Configure SPANN parameters for optimal vector search performance
-- **Method Chaining**: Build schemas fluently with chainable `.create_index()` and `.delete_index()` calls
-- **Schema Persistence**: Schema configuration is saved with the collection and retrieved automatically
-- **Dynamic Schema Evolution**: New metadata keys added during writes automatically inherit from global defaults - manual schema modification is only available at collection creation time
-
-## Availability
-
-{% Banner type="tip" %}
-**Schema is available in Chroma Cloud.** Support for single-node Chroma is planned for a future release.
-{% /Banner %}
-
-## When to Use Schema
-
-**Use Schema if:**
-- You have large collections where performance and storage matter
-- You need hybrid search capabilities
-- Your query patterns are specific (not all metadata fields need indexing)
-
-**Use defaults if:**
-- You're prototyping or experimenting
-- You need quick setup with no configuration
-- Collection size and performance are not concerns
+- **Dynamic Schema Evolution**: New metadata keys added during writes automatically inherit from global defaults
 
 ## Next Steps
 

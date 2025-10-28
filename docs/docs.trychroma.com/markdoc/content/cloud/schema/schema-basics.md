@@ -70,7 +70,8 @@ collection = client.create_collection(name="my_collection")
 
 collection.add(
     ids=["id1"],
-    documents=["Some text"],
+    documents=["Some text"],    # FTS index
+    embeddings=[[1.0, 2.0]],    # Vector index
     metadatas=[{
         "category": "science",  # String inverted index
         "year": 2024,           # Int inverted index
@@ -101,9 +102,7 @@ await collection.add({
 
 {% /TabbedCodeBlock %}
 
-## Creating and Using Schema
-
-### Basic Schema Creation
+## Creating Schema Objects
 
 Create a Schema object to customize index configuration:
 
@@ -132,60 +131,6 @@ const schema = new Schema();
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
-
-### Using Schema with Collections
-
-Pass the schema to `create_collection()` or `get_or_create_collection()`:
-
-{% TabbedCodeBlock %}
-
-{% Tab label="python" %}
-```python
-from chromadb import Schema
-
-schema = Schema()
-# Configure schema here (see Creating Indexes below)
-
-# Create collection with schema
-collection = client.create_collection(
-    name="my_collection",
-    schema=schema
-)
-
-# Or use get_or_create_collection
-collection = client.get_or_create_collection(
-    name="my_collection",
-    schema=schema
-)
-```
-{% /Tab %}
-
-{% Tab label="typescript" %}
-```typescript
-import { Schema } from 'chromadb';
-
-const schema = new Schema();
-// Configure schema here (see Creating Indexes below)
-
-// Create collection with schema
-const collection = await client.createCollection({
-  name: "my_collection",
-  schema: schema
-});
-
-// Or use getOrCreateCollection
-const collection = await client.getOrCreateCollection({
-  name: "my_collection",
-  schema: schema
-});
-```
-{% /Tab %}
-
-{% /TabbedCodeBlock %}
-
-### Schema Persistence
-
-Schema configuration is automatically saved with the collection. When you retrieve a collection with `get_collection()` or `get_or_create_collection()`, the schema is loaded automatically. You don't need to provide the schema again.
 
 ## Creating Indexes
 
@@ -319,8 +264,6 @@ schema.delete_index(config=IntInvertedIndexConfig(), key="unimportant_count")
 
 # Disable all indexes for a specific key
 schema.delete_index(key="temporary_field")
-
-collection = client.create_collection(name="optimized", schema=schema)
 ```
 {% /Tab %}
 
@@ -338,8 +281,6 @@ schema.deleteIndex(new IntInvertedIndexConfig(), "unimportant_count");
 
 // Disable all indexes for a specific key
 schema.deleteIndex(undefined, "temporary_field");
-
-const collection = await client.createCollection({ name: "optimized", schema });
 ```
 {% /Tab %}
 
@@ -360,8 +301,6 @@ schema = (Schema()
     .create_index(config=StringInvertedIndexConfig(), key="category")  # Enable for category
     .create_index(config=StringInvertedIndexConfig(), key="tags")  # Enable for tags
     .delete_index(config=IntInvertedIndexConfig()))  # Disable int indexing
-
-collection = client.create_collection(name="optimized", schema=schema)
 ```
 {% /Tab %}
 
@@ -374,12 +313,54 @@ const schema = new Schema()
   .createIndex(new StringInvertedIndexConfig(), "category")  // Enable for category
   .createIndex(new StringInvertedIndexConfig(), "tags")  // Enable for tags
   .deleteIndex(new IntInvertedIndexConfig());  // Disable int indexing
-
-const collection = await client.createCollection({ name: "optimized", schema });
 ```
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
+
+## Using Schema with Collections
+
+Pass the configured schema to `create_collection()` or `get_or_create_collection()`:
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+```python
+# Create collection with schema
+collection = client.create_collection(
+    name="my_collection",
+    schema=schema
+)
+
+# Or use get_or_create_collection
+collection = client.get_or_create_collection(
+    name="my_collection",
+    schema=schema
+)
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+// Create collection with schema
+const collection = await client.createCollection({
+  name: "my_collection",
+  schema: schema
+});
+
+// Or use getOrCreateCollection
+const collection = await client.getOrCreateCollection({
+  name: "my_collection",
+  schema: schema
+});
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+### Schema Persistence
+
+Schema configuration is automatically saved with the collection. When you retrieve a collection with `get_collection()` or `get_or_create_collection()`, the schema is loaded automatically. You don't need to provide the schema again.
 
 ## Next Steps
 
