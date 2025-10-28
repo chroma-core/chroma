@@ -2044,20 +2044,6 @@ class Schema:
                             f"Only one sparse vector index is allowed per collection."
                         )
 
-    def _validate_sparse_vector_config(self, config: SparseVectorIndexConfig) -> None:
-        """
-        Validate that if source_key is provided then either embedding_function or bm25
-        must be provided since there is no default embedding function.
-        Raises ValueError otherwise.
-        """
-        if (config.source_key is not None
-                and config.embedding_function is None
-                and config.bm25 is not True):
-            raise ValueError(
-                f"If source_key is provided then either embedding_function or bm25 must be provided "
-                f"since there is no default embedding function. Config: {config}"
-            )
-
     def _set_index_for_key(self, key: str, config: IndexConfig, enabled: bool) -> None:
         """Set an index configuration for a specific key."""
         config_name = self._get_config_class_name(config)
@@ -2066,7 +2052,6 @@ class Schema:
         # Do this BEFORE creating the key entry
         if config_name == "SparseVectorIndexConfig" and enabled:
             self._validate_single_sparse_vector_index(key)
-            self._validate_sparse_vector_config(cast(SparseVectorIndexConfig, config))
 
         if key not in self.keys:
             self.keys[key] = ValueTypes()
@@ -2110,8 +2095,6 @@ class Schema:
         """Enable all possible index types for a specific key."""
         if key not in self.keys:
             self.keys[key] = ValueTypes()
-
-        self._validate_single_sparse_vector_index(key)
 
         # Enable all index types with default configs
         self.keys[key].string = StringValueType(

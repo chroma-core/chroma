@@ -246,7 +246,7 @@ class TestNewSchema:
         # 1. Create sparse vector index on "embeddings_key"
         # 2. Disable string inverted index on "text_key_1"
         # 3. Disable string inverted index on "text_key_2"
-        sparse_config = SparseVectorIndexConfig(source_key="raw_text", bm25=True)
+        sparse_config = SparseVectorIndexConfig(source_key="raw_text")
         string_config = StringInvertedIndexConfig()
 
         result = (
@@ -1268,7 +1268,7 @@ class TestNewSchema:
         schema = Schema()
 
         # Enable sparse vector on "multi_field"
-        sparse_config = SparseVectorIndexConfig(source_key="source", bm25=True)
+        sparse_config = SparseVectorIndexConfig(source_key="source")
         schema.create_index(config=sparse_config, key="multi_field")
 
         # Also enable string_inverted_index on the same key
@@ -1454,7 +1454,7 @@ class TestNewSchema:
                 hnsw=hnsw_config
             )
             original.create_index(config=vector_config)
-            original.create_index(config=SparseVectorIndexConfig(source_key="text", bm25=True), key="embeddings")
+            original.create_index(config=SparseVectorIndexConfig(source_key="text"), key="embeddings")
             original.delete_index(config=StringInvertedIndexConfig(), key="tags")
 
             # First roundtrip
@@ -1514,7 +1514,7 @@ class TestNewSchema:
             key_name = f"field_{i}"
             if i == 0:
                 # Enable sparse vector on ONE key only
-                schema.create_index(config=SparseVectorIndexConfig(source_key=f"source_{i}", bm25=True), key=key_name)
+                schema.create_index(config=SparseVectorIndexConfig(source_key=f"source_{i}"), key=key_name)
             elif i % 2 == 1:
                 # Disable string inverted index
                 schema.delete_index(config=StringInvertedIndexConfig(), key=key_name)
@@ -1578,7 +1578,7 @@ class TestNewSchema:
 
         # Chain multiple operations
         result = (schema
-                  .create_index(config=SparseVectorIndexConfig(source_key="text", bm25=True), key="field1")
+                  .create_index(config=SparseVectorIndexConfig(source_key="text"), key="field1")
                   .delete_index(config=StringInvertedIndexConfig(), key="field2")
                   .delete_index(config=StringInvertedIndexConfig(), key="field3")
                   .delete_index(config=IntInvertedIndexConfig(), key="field4"))
@@ -1820,7 +1820,7 @@ class TestNewSchema:
         schema = Schema()
 
         # Enable sparse vector on a key - it gets exactly what we specify
-        sparse_config = SparseVectorIndexConfig(source_key="default_source", bm25=True)
+        sparse_config = SparseVectorIndexConfig(source_key="default_source")
         schema.create_index(config=sparse_config, key="field1")
 
         # Verify field1 has the sparse vector with the specified source_key
@@ -1907,7 +1907,7 @@ class TestNewSchema:
         schema = Schema()
 
         # Create sparse vector on one key and string indexes on others
-        schema.create_index(config=SparseVectorIndexConfig(source_key="source_a", bm25=True), key="key_a")
+        schema.create_index(config=SparseVectorIndexConfig(source_key="source_a"), key="key_a")
         schema.create_index(config=StringInvertedIndexConfig(), key="key_b")
         schema.create_index(config=StringInvertedIndexConfig(), key="key_c")
 
@@ -1992,7 +1992,7 @@ class TestNewSchema:
         schema = Schema()
 
         # Enable sparse vector on a key
-        schema.create_index(config=SparseVectorIndexConfig(source_key="my_source", bm25=True), key="multi_index_field")
+        schema.create_index(config=SparseVectorIndexConfig(source_key="my_source"), key="multi_index_field")
 
         # This key now has sparse_vector overridden, but string, int, etc. should still follow global defaults
         field = schema.keys["multi_index_field"]
@@ -2337,23 +2337,3 @@ def test_config_source_key_validates_special_keys() -> None:
     # Regular keys (no #) are allowed
     config6 = SparseVectorIndexConfig(source_key="my_field")
     assert config6.source_key == "my_field"
-
-
-def test_sparse_vector_config_requires_ef_with_source_key() -> None:
-    """Test that SparseVectorIndexConfig raises ValueError when source_key is provided without embedding_function."""
-    schema = Schema()
-
-    # Attempt to create sparse vector index with source_key but no embedding_function
-    with pytest.raises(ValueError) as exc_info:
-        schema.create_index(
-            key="invalid_sparse",
-            config=SparseVectorIndexConfig(
-                source_key="text_field",
-                # No embedding_function provided - should raise ValueError
-            ),
-        )
-
-    # Verify the error message mentions both source_key and embedding_function
-    error_msg = str(exc_info.value)
-    assert "source_key" in error_msg.lower()
-    assert "embedding_function" in error_msg.lower()
