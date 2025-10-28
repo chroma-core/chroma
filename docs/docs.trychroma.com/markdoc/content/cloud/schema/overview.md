@@ -127,5 +127,5 @@ try {
 ## Next Steps
 
 - [Schema Basics](./schema-basics) - Learn the structure and how to use Schema
-- [Hybrid Search Setup](./hybrid-search) - Configure dense + sparse embeddings
+- [Sparse Vector Search Setup](./sparse-vector-search) - Configure sparse vectors and hybrid search
 - [Index Configuration Reference](./index-reference) - Complete index type reference

@@ -193,11 +193,11 @@ Distance function for measuring similarity between vectors:
 
 #### embedding_function
 
-Optional embedding function to automatically generate embeddings. If not provided, you must supply embeddings manually when adding data.
+Optional embedding function to automatically generate embeddings. When provided, embeddings are generated from the `#document` field. If not provided, you must supply embeddings manually when adding data.
 
 #### source_key
 
-The metadata field to source vectors from for auto-embedding. Default is `"#document"`.
+Reserved for future use. Currently, vector embeddings are always sourced from `#document` when using an embedding function.
 
 #### hnsw
 
@@ -261,22 +261,20 @@ Configure HNSW index for single-node deployments:
 
 {% Tab label="python" %}
 ```python
-from chromadb import Schema, VectorIndexConfig, SpannIndexConfig
+from chromadb import Schema, VectorIndexConfig
+from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 
 schema = Schema()
 
-# Basic: just set distance metric
-schema.create_index(config=VectorIndexConfig(space="cosine"))
+# Configure vector index with embedding function and distance metric
+embedding_function = OpenAIEmbeddingFunction(
+    api_key="your-api-key",
+    model_name="text-embedding-3-small"
+)
 
-# Advanced: tune SPANN parameters for better recall
 schema.create_index(config=VectorIndexConfig(
     space="cosine",
-    spann=SpannIndexConfig(
-        search_nprobe=100,
-        write_nprobe=50,
-        ef_construction=200,
-        ef_search=150
-    )
+    embedding_function=embedding_function
 ))
 ```
 {% /Tab %}
@@ -284,21 +282,19 @@ schema.create_index(config=VectorIndexConfig(
 {% Tab label="typescript" %}
 ```typescript
 import { Schema, VectorIndexConfig } from 'chromadb';
+import { OpenAIEmbeddingFunction } from 'chromadb';
 
 const schema = new Schema();
 
-// Basic: just set distance metric
-schema.createIndex(new VectorIndexConfig({ space: "cosine" }));
+// Configure vector index with embedding function and distance metric
+const embeddingFunction = new OpenAIEmbeddingFunction({
+  apiKey: "your-api-key",
+  model: "text-embedding-3-small"
+});
 
-// Advanced: tune SPANN parameters for better recall
 schema.createIndex(new VectorIndexConfig({
   space: "cosine",
-  spann: {
-    searchNprobe: 100,
-    writeNprobe: 50,
-    efConstruction: 200,
-    efSearch: 150
-  }
+  embeddingFunction: embeddingFunction
 }));
 ```
 {% /Tab %}
@@ -317,11 +313,11 @@ Sparse vector indexes enable keyword-based search (BM25-style) that complements 
 
 #### embedding_function
 
-Optional sparse embedding function. If not provided, Chroma uses a default BM25-based sparse embedding function.
+**Required when `source_key` is specified.** The sparse embedding function to generate sparse embeddings from the source field. Available options include `ChromaCloudSpladeEmbeddingFunction`, `HuggingFaceSparseEmbeddingFunction`, and `FastembedSparseEmbeddingFunction`.
 
 #### bm25
 
-Optional BM25 configuration parameters (if using default embedding function).
+Optional boolean flag. Set to `true` when using `Bm25EmbeddingFunction` to enable inverse document frequency scaling for queries. Not applicable for other sparse embedding functions like SPLADE.
 
 ### Use Cases
 
@@ -336,18 +332,28 @@ Optional BM25 configuration parameters (if using default embedding function).
 {% Tab label="python" %}
 ```python
 from chromadb import Schema, SparseVectorIndexConfig
+from chromadb.utils.embedding_functions import ChromaCloudSpladeEmbeddingFunction
 
 schema = Schema()
 
-# Basic: use default BM25 sparse embeddings from documents
+# Create sparse embedding function
+sparse_ef = ChromaCloudSpladeEmbeddingFunction()
+
+# Basic: use SPLADE sparse embeddings from documents
 schema.create_index(
-    config=SparseVectorIndexConfig(source_key="#document"),
+    config=SparseVectorIndexConfig(
+        source_key="#document",
+        embedding_function=sparse_ef
+    ),
     key="sparse_embedding"
 )
 
 # Advanced: use custom source field
 schema.create_index(
-    config=SparseVectorIndexConfig(source_key="abstract"),
+    config=SparseVectorIndexConfig(
+        source_key="abstract",
+        embedding_function=sparse_ef
+    ),
     key="abstract_sparse"
 )
 ```
@@ -355,19 +361,30 @@ schema.create_index(
 
 {% Tab label="typescript" %}
 ```typescript
-import { Schema, SparseVectorIndexConfig } from 'chromadb';
+import { Schema, SparseVectorIndexConfig, ChromaCloudSpladeEmbeddingFunction } from 'chromadb';
 
 const schema = new Schema();
 
-// Basic: use default BM25 sparse embeddings from documents
+// Create sparse embedding function
+const sparseEf = new ChromaCloudSpladeEmbeddingFunction({
+  apiKeyEnvVar: "CHROMA_API_KEY"
+});
+
+// Basic: use SPLADE sparse embeddings from documents
 schema.createIndex(
-  new SparseVectorIndexConfig({ sourceKey: "#document" }),
+  new SparseVectorIndexConfig({
+    sourceKey: "#document",
+    embeddingFunction: sparseEf
+  }),
   "sparse_embedding"
 );
 
 // Advanced: use custom source field
 schema.createIndex(
-  new SparseVectorIndexConfig({ sourceKey: "abstract" }),
+  new SparseVectorIndexConfig({
+    sourceKey: "abstract",
+    embeddingFunction: sparseEf
+  }),
   "abstract_sparse"
 );
 ```
@@ -376,10 +393,10 @@ schema.createIndex(
 {% /TabbedCodeBlock %}
 
 {% Note type="info" %}
-For complete hybrid search setup and querying with RRF, see [Hybrid Search Setup](./hybrid-search).
+This example uses `ChromaCloudSpladeEmbeddingFunction`. You can also use other sparse embedding functions like `HuggingFaceSparseEmbeddingFunction` or `FastembedSparseEmbeddingFunction` depending on your requirements. For complete sparse vector search setup and querying with RRF, see [Sparse Vector Search Setup](./sparse-vector-search).
 {% /Note %}
 
 ## Next Steps
 
 - Apply these configurations in [Schema Basics](./schema-basics)
-- Set up [hybrid search](./hybrid-search) with sparse vectors
+- Set up [sparse vector search](./sparse-vector-search) with sparse vectors and hybrid search

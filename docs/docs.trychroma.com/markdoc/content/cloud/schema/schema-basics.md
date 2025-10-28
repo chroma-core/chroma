@@ -150,12 +150,12 @@ Create indexes that apply globally. This example shows configuring the vector in
 
 {% Tab label="python" %}
 ```python
-from chromadb import Schema, VectorIndexConfig, SpannIndexConfig
+from chromadb import Schema, VectorIndexConfig
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 
 schema = Schema()
 
-# Configure vector index with custom embedding function and SPANN parameters
+# Configure vector index with custom embedding function
 embedding_function = OpenAIEmbeddingFunction(
     api_key="your-api-key",
     model_name="text-embedding-3-small"
@@ -163,12 +163,7 @@ embedding_function = OpenAIEmbeddingFunction(
 
 schema.create_index(config=VectorIndexConfig(
     space="cosine",
-    embedding_function=embedding_function,
-    source_key="#document",  # Generate embeddings from documents
-    spann=SpannIndexConfig(
-        search_nprobe=100,
-        write_nprobe=50
-    )
+    embedding_function=embedding_function
 ))
 ```
 {% /Tab %}
@@ -180,7 +175,7 @@ import { OpenAIEmbeddingFunction } from 'chromadb';
 
 const schema = new Schema();
 
-// Configure vector index with custom embedding function and SPANN parameters
+// Configure vector index with custom embedding function
 const embeddingFunction = new OpenAIEmbeddingFunction({
   apiKey: "your-api-key",
   model: "text-embedding-3-small"
@@ -188,12 +183,7 @@ const embeddingFunction = new OpenAIEmbeddingFunction({
 
 schema.createIndex(new VectorIndexConfig({
   space: "cosine",
-  embeddingFunction: embeddingFunction,
-  sourceKey: "#document",  // Generate embeddings from documents
-  spann: {
-    searchNprobe: 100,
-    writeNprobe: 50
-  }
+  embeddingFunction: embeddingFunction
 }));
 ```
 {% /Tab %}
@@ -202,35 +192,54 @@ schema.createIndex(new VectorIndexConfig({
 
 ### Creating Key-Specific Indexes
 
-Override defaults for specific metadata fields:
+Configure indexes for specific metadata fields. This example shows configuring the sparse vector index with custom settings:
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
-from chromadb import Schema, StringInvertedIndexConfig
+from chromadb import Schema, SparseVectorIndexConfig
+from chromadb.utils.embedding_functions import ChromaCloudSpladeEmbeddingFunction
 
 schema = Schema()
 
-# Enable string indexing only for specific fields
-schema.create_index(config=StringInvertedIndexConfig(), key="category")
-schema.create_index(config=StringInvertedIndexConfig(), key="author")
+# Add sparse vector index for a specific key (required for hybrid search)
+sparse_ef = ChromaCloudSpladeEmbeddingFunction()
+schema.create_index(
+    config=SparseVectorIndexConfig(
+        source_key="#document",
+        embedding_function=sparse_ef
+    ),
+    key="sparse_embedding"
+)
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-import { Schema, StringInvertedIndexConfig } from 'chromadb';
+import { Schema, SparseVectorIndexConfig, ChromaCloudSpladeEmbeddingFunction } from 'chromadb';
 
 const schema = new Schema();
 
-// Enable string indexing only for specific fields
-schema.createIndex(new StringInvertedIndexConfig(), "category");
-schema.createIndex(new StringInvertedIndexConfig(), "author");
+// Add sparse vector index for a specific key (required for hybrid search)
+const sparseEf = new ChromaCloudSpladeEmbeddingFunction({
+  apiKeyEnvVar: "CHROMA_API_KEY"
+});
+schema.createIndex(
+  new SparseVectorIndexConfig({
+    sourceKey: "#document",
+    embeddingFunction: sparseEf
+  }),
+  "sparse_embedding"
+);
 ```
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
+
+{% Note type="info" %}
+This example uses `ChromaCloudSpladeEmbeddingFunction`, but you can use other sparse embedding functions like `HuggingFaceSparseEmbeddingFunction` or `FastembedSparseEmbeddingFunction` depending on your needs.
+{% /Note %}
 
 ## Disabling Indexes
 
@@ -241,10 +250,6 @@ Use `delete_index()` to disable indexes. Like `create_index()`, it takes:
 - `key`: Optional - specify a metadata field name for key-specific configuration
 
 Returns the Schema object for method chaining.
-
-{% Note type="info" %}
-Not all indexes can be deleted. Vector, FTS, and Sparse Vector indexes currently cannot be disabled.
-{% /Note %}
 
 ### Examples
 
@@ -285,6 +290,10 @@ schema.deleteIndex(undefined, "temporary_field");
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
+
+{% Banner type="tip" %}
+**Note:** Not all indexes can be deleted. Vector and FTS indexes currently cannot be disabled
+{% /Banner %}
 
 ## Method Chaining
 
@@ -364,5 +373,5 @@ Schema configuration is automatically saved with the collection. When you retrie
 
 ## Next Steps
 
-- Set up [hybrid search](./hybrid-search) with sparse vectors
+- Set up [sparse vector search](./sparse-vector-search) with sparse vectors
 - Browse the complete [index configuration reference](./index-reference)

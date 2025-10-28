@@ -1,38 +1,43 @@
 ---
-id: hybrid-search
-name: Hybrid Search Setup
+id: sparse-vector-search
+name: Sparse Vector Search Setup
 ---
 
-# Hybrid Search Setup
+# Sparse Vector Search Setup
 
-Hybrid search combines dense semantic embeddings with sparse keyword embeddings for better retrieval quality. This page shows how to configure Schema to enable hybrid search capabilities.
+Learn how to configure and use sparse vectors for keyword-based search, and combine them with dense embeddings for powerful hybrid search capabilities.
 
-## What is Hybrid Search?
+## What are Sparse Vectors?
 
-Hybrid search combines two complementary approaches:
-- **Dense embeddings**: Capture semantic meaning (e.g., "car" matches "automobile")
-- **Sparse embeddings**: Capture exact keyword matches (e.g., BM25-style retrieval)
+Sparse vectors are high-dimensional vectors with mostly zero values, designed for keyword-based retrieval. Unlike dense embeddings which capture semantic meaning, sparse vectors excel at:
 
-By combining both with techniques like Reciprocal Rank Fusion (RRF), you often achieve better results than either approach alone.
+- **Exact keyword matching**: Finding documents containing specific terms
+- **Domain-specific terminology**: Better at matching technical terms, proper nouns, and rare words
+- **Lexical retrieval**: BM25-style retrieval patterns
 
-## Configuration Steps
+Sparse vectors use models like SPLADE that assign importance weights to specific tokens, making them complementary to dense semantic embeddings.
 
-### Step 1: Create Schema with Sparse Vector Index
+## Enabling Sparse Vector Index
 
-To enable hybrid search, add a sparse vector index to your schema. The `key` parameter is the metadata field name where sparse embeddings will be stored - you can name it whatever you want:
+To use sparse vectors, add a sparse vector index to your schema. The `key` parameter is the metadata field name where sparse embeddings will be stored - you can name it whatever you want:
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
 from chromadb import Schema, SparseVectorIndexConfig
+from chromadb.utils.embedding_functions import ChromaCloudSpladeEmbeddingFunction
 
 schema = Schema()
 
 # Add sparse vector index for keyword-based search
 # "sparse_embedding" is just a metadata key name - use any name you prefer
+sparse_ef = ChromaCloudSpladeEmbeddingFunction()
 schema.create_index(
-    config=SparseVectorIndexConfig(source_key="#document"),
+    config=SparseVectorIndexConfig(
+        source_key="#document",
+        embedding_function=sparse_ef
+    ),
     key="sparse_embedding"
 )
 ```
@@ -40,14 +45,20 @@ schema.create_index(
 
 {% Tab label="typescript" %}
 ```typescript
-import { Schema, SparseVectorIndexConfig } from 'chromadb';
+import { Schema, SparseVectorIndexConfig, ChromaCloudSpladeEmbeddingFunction } from 'chromadb';
 
 const schema = new Schema();
 
 // Add sparse vector index for keyword-based search
 // "sparse_embedding" is just a metadata key name - use any name you prefer
+const sparseEf = new ChromaCloudSpladeEmbeddingFunction({
+  apiKeyEnvVar: "CHROMA_API_KEY"
+});
 schema.createIndex(
-  new SparseVectorIndexConfig({ sourceKey: "#document" }),
+  new SparseVectorIndexConfig({
+    sourceKey: "#document",
+    embeddingFunction: sparseEf
+  }),
   "sparse_embedding"
 );
 ```
@@ -56,10 +67,12 @@ schema.createIndex(
 {% /TabbedCodeBlock %}
 
 {% Note type="info" %}
-The `source_key` specifies which field to generate sparse embeddings from (typically `#document` for document text). The sparse embeddings are automatically generated and stored in the metadata field you specify as the `key`.
+The `source_key` specifies which field to generate sparse embeddings from (typically `#document` for document text), and `embedding_function` specifies the function to generate the sparse embeddings. This example uses `ChromaCloudSpladeEmbeddingFunction`, but you can also use other sparse embedding functions like `HuggingFaceSparseEmbeddingFunction` or `FastembedSparseEmbeddingFunction`. The sparse embeddings are automatically generated and stored in the metadata field you specify as the `key`.
 {% /Note %}
 
-### Step 2: Create Collection with Schema
+## Create Collection and Add Data
+
+### Create Collection with Schema
 
 {% TabbedCodeBlock %}
 
@@ -99,7 +112,7 @@ const collection = await client.createCollection({
 
 {% /TabbedCodeBlock %}
 
-### Step 3: Add Data
+### Add Data
 
 When you add documents, sparse embeddings are automatically generated from the source key:
 
@@ -149,9 +162,74 @@ await collection.add({
 
 {% /TabbedCodeBlock %}
 
-## Querying with RRF
+## Using Sparse Vectors for Search
 
-Once configured, use RRF (Reciprocal Rank Fusion) to combine dense and sparse search results:
+Once configured, you can search using sparse vectors alone or combine them with dense embeddings for hybrid search.
+
+### Sparse Vector Search
+
+Use sparse vectors for keyword-based retrieval:
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+```python
+from chromadb import Search, K, Knn
+
+# Search using sparse embeddings only
+sparse_rank = Knn(query="fox animal", key="sparse_embedding")
+
+# Build and execute search
+search = (Search()
+    .rank(sparse_rank)
+    .limit(10)
+    .select(K.DOCUMENT, K.SCORE))
+
+results = collection.search(search)
+
+# Process results
+for row in results.rows()[0]:
+    print(f"Score: {row['score']:.3f} - {row['document']}")
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+import { Search, K, Knn } from 'chromadb';
+
+// Search using sparse embeddings only
+const sparseRank = Knn({ query: "fox animal", key: "sparse_embedding" });
+
+// Build and execute search
+const search = new Search()
+  .rank(sparseRank)
+  .limit(10)
+  .select(K.DOCUMENT, K.SCORE);
+
+const results = await collection.search(search);
+
+// Process results
+for (const row of results.rows()[0]) {
+  console.log(`Score: ${row.score.toFixed(3)} - ${row.document}`);
+}
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+## Hybrid Search
+
+Hybrid search combines dense semantic embeddings with sparse keyword embeddings for improved retrieval quality. By merging results from both approaches using Reciprocal Rank Fusion (RRF), you often achieve better results than either approach alone.
+
+### Benefits of Hybrid Search
+
+- **Semantic + Lexical**: Dense embeddings capture meaning while sparse vectors catch exact keywords
+- **Improved recall**: Finds relevant documents that either semantic or keyword search might miss alone
+- **Balanced results**: Combines the strengths of both retrieval methods
+
+### Combining Dense and Sparse with RRF
+
+Use RRF (Reciprocal Rank Fusion) to merge dense and sparse search results:
 
 {% TabbedCodeBlock %}
 

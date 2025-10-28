@@ -142,7 +142,7 @@ const sidebarConfig: AppSection[] = [
         pages: [
           { id: "overview", name: "Overview" },
           { id: "schema-basics", name: "Schema Basics" },
-          { id: "hybrid-search", name: "Hybrid Search Setup" },
+          { id: "sparse-vector-search", name: "Sparse Vector Search Setup" },
           { id: "index-reference", name: "Index Configuration Reference" },
         ],
       },
