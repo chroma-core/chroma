@@ -21,6 +21,7 @@ Features like:
 - The new [Chroma CLI](https://www.youtube.com/watch?v=lHassGpmvK8) that lets you browse your collections locally, manage your Chroma Cloud DBs, and more!
 - [Chroma Cloud](https://www.trychroma.com/cloud)!
 - [Package Search MCP](https://www.trychroma.com/package-search) - Allow your coding agent to search and understand the source code of thousands of dependencies from npm, pypi and crates.
+- [Github Sync](https://www.trychroma.com/changelog/introducing-chroma-sync) - Chroma can handle ingesting, parsing, chunking, and embedding your codebase.
 
 ## What will Chroma prioritize over the next 6mo?
 
