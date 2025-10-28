@@ -1,4 +1,5 @@
 use chroma_error::{ChromaError, ErrorCodes};
+use itertools::Itertools;
 use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Number, Value};
 use sprs::CsVec;
@@ -995,14 +996,70 @@ impl serde::Serialize for Where {
     }
 }
 
+impl From<bool> for Where {
+    fn from(value: bool) -> Self {
+        if value {
+            Where::conjunction(vec![])
+        } else {
+            Where::disjunction(vec![])
+        }
+    }
+}
+
 impl Where {
-    pub fn conjunction(children: Vec<Where>) -> Self {
+    pub fn conjunction(children: impl IntoIterator<Item = Where>) -> Self {
+        // If children.len() == 0, we will return a conjunction that is always true.
+        // If children.len() == 1, we will return the single child.
+        // Otherwise, we will return a conjunction of the children.
+
+        let mut children: Vec<_> = children
+            .into_iter()
+            .flat_map(|expr| {
+                if let Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::And,
+                    children,
+                }) = expr
+                {
+                    return children;
+                }
+                vec![expr]
+            })
+            .dedup()
+            .collect();
+
+        if children.len() == 1 {
+            return children.pop().expect("just checked len is 1");
+        }
+
         Self::Composite(CompositeExpression {
             operator: BooleanOperator::And,
             children,
         })
     }
-    pub fn disjunction(children: Vec<Where>) -> Self {
+    pub fn disjunction(children: impl IntoIterator<Item = Where>) -> Self {
+        // If children.len() == 0, we will return a disjunction that is always false.
+        // If children.len() == 1, we will return the single child.
+        // Otherwise, we will return a disjunction of the children.
+
+        let mut children: Vec<_> = children
+            .into_iter()
+            .flat_map(|expr| {
+                if let Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::Or,
+                    children,
+                }) = expr
+                {
+                    return children;
+                }
+                vec![expr]
+            })
+            .dedup()
+            .collect();
+
+        if children.len() == 1 {
+            return children.pop().expect("just checked len is 1");
+        }
+
         Self::Composite(CompositeExpression {
             operator: BooleanOperator::Or,
             children,
@@ -1049,43 +1106,7 @@ impl BitAnd for Where {
     type Output = Where;
 
     fn bitand(self, rhs: Self) -> Self::Output {
-        match self {
-            Where::Composite(CompositeExpression {
-                operator: BooleanOperator::And,
-                mut children,
-            }) => match rhs {
-                Where::Composite(CompositeExpression {
-                    operator: BooleanOperator::And,
-                    children: rhs_children,
-                }) => {
-                    children.extend(rhs_children);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::And,
-                        children,
-                    })
-                }
-                _ => {
-                    children.push(rhs);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::And,
-                        children,
-                    })
-                }
-            },
-            _ => match rhs {
-                Where::Composite(CompositeExpression {
-                    operator: BooleanOperator::And,
-                    mut children,
-                }) => {
-                    children.insert(0, self);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::And,
-                        children,
-                    })
-                }
-                _ => Where::conjunction(vec![self, rhs]),
-            },
-        }
+        Self::conjunction([self, rhs])
     }
 }
 
@@ -1093,43 +1114,7 @@ impl BitOr for Where {
     type Output = Where;
 
     fn bitor(self, rhs: Self) -> Self::Output {
-        match self {
-            Where::Composite(CompositeExpression {
-                operator: BooleanOperator::Or,
-                mut children,
-            }) => match rhs {
-                Where::Composite(CompositeExpression {
-                    operator: BooleanOperator::Or,
-                    children: rhs_children,
-                }) => {
-                    children.extend(rhs_children);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::Or,
-                        children,
-                    })
-                }
-                _ => {
-                    children.push(rhs);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::Or,
-                        children,
-                    })
-                }
-            },
-            _ => match rhs {
-                Where::Composite(CompositeExpression {
-                    operator: BooleanOperator::Or,
-                    mut children,
-                }) => {
-                    children.insert(0, self);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::Or,
-                        children,
-                    })
-                }
-                _ => Where::disjunction(vec![self, rhs]),
-            },
-        }
+        Self::disjunction([self, rhs])
     }
 }
 
@@ -1629,6 +1614,8 @@ impl TryFrom<chroma_proto::WhereDocument> for Where {
 
 #[cfg(test)]
 mod tests {
+    use crate::operator::Key;
+
     use super::*;
 
     #[test]
@@ -2088,5 +2075,44 @@ mod tests {
         let sv: SparseVector = serde_json::from_value(sparse_value.clone()).unwrap();
         assert_eq!(sv.indices, vec![0, 1]);
         assert_eq!(sv.values, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn test_simplifies_identities() {
+        let all: Where = true.into();
+        assert_eq!(all.clone() & all.clone(), true.into());
+        assert_eq!(all.clone() | all.clone(), true.into());
+
+        let foo = Key::field("foo").eq("bar");
+        assert_eq!(foo.clone() & all.clone(), foo.clone());
+        assert_eq!(all.clone() & foo.clone(), foo.clone());
+
+        let none: Where = false.into();
+        assert_eq!(foo.clone() | none.clone(), foo.clone());
+        assert_eq!(none | foo.clone(), foo);
+    }
+
+    #[test]
+    fn test_flattens() {
+        let foo = Key::field("foo").eq("bar");
+        let baz = Key::field("baz").eq("quux");
+
+        let and_nested = foo.clone() & (baz.clone() & foo.clone());
+        assert_eq!(
+            and_nested,
+            Where::Composite(CompositeExpression {
+                operator: BooleanOperator::And,
+                children: vec![foo.clone(), baz.clone(), foo.clone()]
+            })
+        );
+
+        let or_nested = foo.clone() | (baz.clone() | foo.clone());
+        assert_eq!(
+            or_nested,
+            Where::Composite(CompositeExpression {
+                operator: BooleanOperator::Or,
+                children: vec![foo.clone(), baz.clone(), foo.clone()]
+            })
+        );
     }
 }
