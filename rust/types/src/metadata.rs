@@ -948,18 +948,10 @@ impl std::fmt::Display for Where {
                         BooleanOperator::And => " & ",
                         BooleanOperator::Or => " | ",
                     });
-                write!(f, "({})", fragment)?;
-
-                Ok(())
+                write!(f, "({})", fragment)
             }
-            Where::Metadata(expr) => {
-                write!(f, "{}", expr)?;
-                Ok(())
-            }
-            Where::Document(expr) => {
-                write!(f, "{}", expr)?;
-                Ok(())
-            }
+            Where::Metadata(expr) => write!(f, "{}", expr),
+            Where::Document(expr) => write!(f, "{}", expr),
         }
     }
 }
@@ -1357,20 +1349,10 @@ impl std::fmt::Display for MetadataExpression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.comparison {
             MetadataComparison::Primitive(op, value) => {
-                write!(f, "{}{}{}", self.key, op, value)
+                write!(f, "{} {} {}", self.key, op, value)
             }
             MetadataComparison::Set(op, set_value) => {
-                write!(
-                    f,
-                    "{} {} {:?}",
-                    self.key,
-                    if *op == SetOperator::In {
-                        "IN"
-                    } else {
-                        "NOT IN"
-                    },
-                    set_value
-                )
+                write!(f, "{} {} {:?}", self.key, op, set_value)
             }
         }
     }
@@ -1586,6 +1568,16 @@ impl TryFrom<PrimitiveOperator> for chroma_proto::NumberComparator {
 pub enum SetOperator {
     In,
     NotIn,
+}
+
+impl std::fmt::Display for SetOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op_str = match self {
+            SetOperator::In => "∈",
+            SetOperator::NotIn => "∉",
+        };
+        write!(f, "{}", op_str)
+    }
 }
 
 impl From<chroma_proto::ListOperator> for SetOperator {
