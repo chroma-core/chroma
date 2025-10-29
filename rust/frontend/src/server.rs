@@ -1702,11 +1702,13 @@ async fn collection_delete(
         r#where,
     )?;
 
-    server
-        .frontend
-        .delete(request)
-        .meter(metering_context_container)
-        .await?;
+    Box::pin(
+        server
+            .frontend
+            .delete(request)
+            .meter(metering_context_container),
+    )
+    .await?;
 
     Ok(Json(DeleteCollectionRecordsResponse {}))
 }
