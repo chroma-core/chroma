@@ -161,16 +161,18 @@ const search5 = new Search().selectAll();
 
 ## Selectable Fields
 
-| Field | Usage | Description |
-|-------|-------|-------------|
-| IDs | Always included | Document IDs are always returned |
-| `K.DOCUMENT` | `.select(K.DOCUMENT)` | Full document text |
-| `K.EMBEDDING` | `.select(K.EMBEDDING)` | Vector embeddings |
-| `K.METADATA` | `.select(K.METADATA)` | All metadata fields as a dict |
-| `K.SCORE` | `.select(K.SCORE)` | Search scores (when ranking is used) |
-| `"field_name"` | `.select("title", "author")` | Specific metadata fields |
+| Field | Internal Key | Usage | Description |
+|-------|--------------|-------|-------------|
+| IDs | `#id` | Always included | Document IDs are always returned |
+| `K.DOCUMENT` | `#document` | `.select(K.DOCUMENT)` | Full document text |
+| `K.EMBEDDING` | `#embedding` | `.select(K.EMBEDDING)` | Vector embeddings |
+| `K.METADATA` | `#metadata` | `.select(K.METADATA)` | All metadata fields as a dict |
+| `K.SCORE` | `#score` | `.select(K.SCORE)` | Search scores (when ranking is used) |
+| `"field_name"` | (user-defined) | `.select("title", "author")` | Specific metadata fields |
 
 {% Note type="info" %}
+**Field constants:** `K.*` constants (e.g., `K.DOCUMENT`, `K.EMBEDDING`, `K.ID`) correspond to internal keys with `#` prefix (e.g., `#document`, `#embedding`, `#id`). Use the `K.*` constants in queries. Internal keys like `#document` and `#embedding` are used in schema configuration, while `#metadata` and `#score` are query-only fields not used in schema.
+
 When selecting specific metadata fields (e.g., "title"), they appear directly in the metadata dict. Using `K.METADATA` returns ALL metadata fields at once.
 {% /Note %}
 

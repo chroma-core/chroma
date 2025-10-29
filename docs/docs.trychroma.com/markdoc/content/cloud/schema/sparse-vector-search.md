@@ -25,7 +25,7 @@ To use sparse vectors, add a sparse vector index to your schema. The `key` param
 
 {% Tab label="python" %}
 ```python
-from chromadb import Schema, SparseVectorIndexConfig
+from chromadb import Schema, SparseVectorIndexConfig, K
 from chromadb.utils.embedding_functions import ChromaCloudSpladeEmbeddingFunction
 
 schema = Schema()
@@ -35,7 +35,7 @@ schema = Schema()
 sparse_ef = ChromaCloudSpladeEmbeddingFunction()
 schema.create_index(
     config=SparseVectorIndexConfig(
-        source_key="#document",
+        source_key=K.DOCUMENT,
         embedding_function=sparse_ef
     ),
     key="sparse_embedding"
@@ -45,7 +45,7 @@ schema.create_index(
 
 {% Tab label="typescript" %}
 ```typescript
-import { Schema, SparseVectorIndexConfig, ChromaCloudSpladeEmbeddingFunction } from 'chromadb';
+import { Schema, SparseVectorIndexConfig, ChromaCloudSpladeEmbeddingFunction, K } from 'chromadb';
 
 const schema = new Schema();
 
@@ -56,7 +56,7 @@ const sparseEf = new ChromaCloudSpladeEmbeddingFunction({
 });
 schema.createIndex(
   new SparseVectorIndexConfig({
-    sourceKey: "#document",
+    sourceKey: K.DOCUMENT,
     embeddingFunction: sparseEf
   }),
   "sparse_embedding"
@@ -67,7 +67,7 @@ schema.createIndex(
 {% /TabbedCodeBlock %}
 
 {% Note type="info" %}
-The `source_key` specifies which field to generate sparse embeddings from (typically `#document` for document text), and `embedding_function` specifies the function to generate the sparse embeddings. This example uses `ChromaCloudSpladeEmbeddingFunction`, but you can also use other sparse embedding functions like `HuggingFaceSparseEmbeddingFunction` or `FastembedSparseEmbeddingFunction`. The sparse embeddings are automatically generated and stored in the metadata field you specify as the `key`.
+The `source_key` specifies which field to generate sparse embeddings from (typically `K.DOCUMENT` for document text), and `embedding_function` specifies the function to generate the sparse embeddings. This example uses `ChromaCloudSpladeEmbeddingFunction`, but you can also use other sparse embedding functions like `HuggingFaceSparseEmbeddingFunction` or `FastembedSparseEmbeddingFunction`. The sparse embeddings are automatically generated and stored in the metadata field you specify as the `key`.
 {% /Note %}
 
 ## Create Collection and Add Data
@@ -135,7 +135,7 @@ collection.add(
 )
 
 # Sparse embeddings for "sparse_embedding" are generated automatically
-# from the documents (source_key="#document")
+# from the documents (source_key=K.DOCUMENT)
 ```
 {% /Tab %}
 
@@ -156,7 +156,7 @@ await collection.add({
 });
 
 // Sparse embeddings for "sparse_embedding" are generated automatically
-// from the documents (source_key="#document")
+// from the documents (source_key=K.DOCUMENT)
 ```
 {% /Tab %}
 

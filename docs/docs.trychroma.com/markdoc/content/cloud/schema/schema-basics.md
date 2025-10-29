@@ -41,12 +41,12 @@ Without providing a Schema, collections use built-in defaults for indexing. For 
 
 Chroma uses two reserved key names:
 
-**`#document`** stores document text content with FTS enabled and String Inverted Index disabled. This allows full-text search while avoiding redundant indexing.
+**`K.DOCUMENT`** (`#document`) stores document text content with FTS enabled and String Inverted Index disabled. This allows full-text search while avoiding redundant indexing.
 
-**`#embedding`** stores dense vector embeddings with Vector Index enabled, sourcing from `#document`. This enables semantic similarity search.
+**`K.EMBEDDING`** (`#embedding`) stores dense vector embeddings with Vector Index enabled, sourcing from `K.DOCUMENT`. This enables semantic similarity search.
 
 {% Note type="info" %}
-Currently, you cannot manually configure these special keys - their configuration is managed automatically. This restriction may be relaxed in future versions.
+Use `K.DOCUMENT` and `K.EMBEDDING` in your code (they correspond to internal keys `#document` and `#embedding`). These special keys are automatically configured and cannot be manually modified. See the [Search API field reference](../search-api/pagination-selection#available-fields) for more details.
 {% /Note %}
 
 ### Example: Using Defaults
@@ -188,7 +188,7 @@ Configure indexes for specific metadata fields. This example shows configuring t
 
 {% Tab label="python" %}
 ```python
-from chromadb import Schema, SparseVectorIndexConfig
+from chromadb import Schema, SparseVectorIndexConfig, K
 from chromadb.utils.embedding_functions import ChromaCloudSpladeEmbeddingFunction
 
 schema = Schema()
@@ -197,7 +197,7 @@ schema = Schema()
 sparse_ef = ChromaCloudSpladeEmbeddingFunction()
 schema.create_index(
     config=SparseVectorIndexConfig(
-        source_key="#document",
+        source_key=K.DOCUMENT,
         embedding_function=sparse_ef
     ),
     key="sparse_embedding"
@@ -207,7 +207,7 @@ schema.create_index(
 
 {% Tab label="typescript" %}
 ```typescript
-import { Schema, SparseVectorIndexConfig, ChromaCloudSpladeEmbeddingFunction } from 'chromadb';
+import { Schema, SparseVectorIndexConfig, ChromaCloudSpladeEmbeddingFunction, K } from 'chromadb';
 
 const schema = new Schema();
 
@@ -217,7 +217,7 @@ const sparseEf = new ChromaCloudSpladeEmbeddingFunction({
 });
 schema.createIndex(
   new SparseVectorIndexConfig({
-    sourceKey: "#document",
+    sourceKey: K.DOCUMENT,
     embeddingFunction: sparseEf
   }),
   "sparse_embedding"
