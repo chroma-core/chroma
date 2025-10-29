@@ -29,8 +29,8 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    Chunk, Collection, CollectionUuid, KnnIndex, LogRecord, NonceUuid, Schema, SchemaError,
-    Segment, SegmentFlushInfo, SegmentType, SegmentUuid, Task, TaskUuid,
+    AttachedFunction, AttachedFunctionUuid, Chunk, Collection, CollectionUuid, KnnIndex, LogRecord,
+    NonceUuid, Schema, SchemaError, Segment, SegmentFlushInfo, SegmentType, SegmentUuid,
 };
 use opentelemetry::trace::TraceContextExt;
 use s3heap_service::client::GrpcHeapService;
@@ -50,10 +50,14 @@ use crate::execution::operators::{
         CommitSegmentWriterOutput,
     },
     execute_task::{
-        CountTask, ExecuteTaskError, ExecuteTaskInput, ExecuteTaskOperator, ExecuteTaskOutput,
+        CountAttachedFunction, ExecuteAttachedFunctionError, ExecuteAttachedFunctionInput,
+        ExecuteAttachedFunctionOperator, ExecuteAttachedFunctionOutput,
     },
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-    finish_task::{FinishTaskError, FinishTaskInput, FinishTaskOperator, FinishTaskOutput},
+    finish_task::{
+        FinishAttachedFunctionError, FinishAttachedFunctionInput, FinishAttachedFunctionOperator,
+        FinishAttachedFunctionOutput,
+    },
     flush_segment_writer::{
         FlushSegmentWriterInput, FlushSegmentWriterOperator, FlushSegmentWriterOperatorError,
         FlushSegmentWriterOutput,
@@ -70,7 +74,10 @@ use crate::execution::operators::{
     prefetch_segment::{
         PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
     },
-    prepare_task::{PrepareTaskError, PrepareTaskInput, PrepareTaskOperator, PrepareTaskOutput},
+    prepare_task::{
+        PrepareAttachedFunctionError, PrepareAttachedFunctionInput,
+        PrepareAttachedFunctionOperator, PrepareAttachedFunctionOutput,
+    },
     register::{RegisterError, RegisterInput, RegisterOperator, RegisterOutput},
     source_record_segment::{
         SourceRecordSegmentError, SourceRecordSegmentInput, SourceRecordSegmentOperator,
@@ -122,13 +129,13 @@ enum ExecutionState {
     Partition,
     MaterializeApplyCommitFlush,
     Register,
-    FinishTask,
+    FinishAttachedFunction,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct TaskContext {
-    pub(crate) task_id: TaskUuid,
-    pub(crate) task: Option<Task>,
+pub(crate) struct AttachedFunctionContext {
+    pub(crate) attached_function_id: AttachedFunctionUuid,
+    pub(crate) attached_function: Option<AttachedFunction>,
     pub(crate) execution_nonce: NonceUuid,
 }
 
@@ -197,9 +204,9 @@ pub struct CompactOrchestrator {
 
     // schema after applying deltas
     schema: Option<Schema>,
-    // === Task Context (optional) ===
-    /// Available if this orchestrator is for a task
-    task_context: Option<TaskContext>,
+    // === Attached Function Context (optional) ===
+    /// Available if this orchestrator is for an attached function
+    attached_function_context: Option<AttachedFunctionContext>,
     heap_service: Option<GrpcHeapService>,
 }
 
@@ -213,12 +220,12 @@ pub enum CompactionError {
     Channel(#[from] ChannelError),
     #[error("Error commiting segment writers: {0}")]
     Commit(#[from] CommitSegmentWriterOperatorError),
-    #[error("Error executing task: {0}")]
-    ExecuteTask(#[from] ExecuteTaskError),
+    #[error("Error executing attached function: {0}")]
+    ExecuteAttachedFunction(#[from] ExecuteAttachedFunctionError),
     #[error("Error fetching logs: {0}")]
     FetchLog(#[from] FetchLogError),
-    #[error("Error finishing task: {0}")]
-    FinishTask(#[from] FinishTaskError),
+    #[error("Error finishing attached function: {0}")]
+    FinishAttachedFunction2(#[from] FinishAttachedFunctionError),
     #[error("Error flushing segment writers: {0}")]
     Flush(#[from] FlushSegmentWriterOperatorError),
     #[error("Error getting collection and segments: {0}")]
@@ -239,8 +246,8 @@ pub enum CompactionError {
     Partition(#[from] PartitionError),
     #[error("Error prefetching segment: {0}")]
     PrefetchSegment(#[from] PrefetchSegmentError),
-    #[error("Error preparing task: {0}")]
-    PrepareTask(#[from] PrepareTaskError),
+    #[error("Error preparing attached function: {0}")]
+    PrepareAttachedFunction(#[from] PrepareAttachedFunctionError),
     #[error("Error creating record segment reader: {0}")]
     RecordSegmentReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error creating record segment writer: {0}")]
@@ -287,9 +294,9 @@ impl ChromaError for CompactionError {
                 Self::ApplyLog(e) => e.should_trace_error(),
                 Self::Channel(e) => e.should_trace_error(),
                 Self::Commit(e) => e.should_trace_error(),
-                Self::ExecuteTask(e) => e.should_trace_error(),
+                Self::ExecuteAttachedFunction(e) => e.should_trace_error(),
                 Self::FetchLog(e) => e.should_trace_error(),
-                Self::FinishTask(e) => e.should_trace_error(),
+                Self::FinishAttachedFunction2(e) => e.should_trace_error(),
                 Self::Flush(e) => e.should_trace_error(),
                 Self::GetCollectionAndSegments(e) => e.should_trace_error(),
                 Self::HnswSegment(e) => e.should_trace_error(),
@@ -300,7 +307,7 @@ impl ChromaError for CompactionError {
                 Self::Panic(e) => e.should_trace_error(),
                 Self::Partition(e) => e.should_trace_error(),
                 Self::PrefetchSegment(e) => e.should_trace_error(),
-                Self::PrepareTask(e) => e.should_trace_error(),
+                Self::PrepareAttachedFunction(e) => e.should_trace_error(),
                 Self::RecordSegmentReader(e) => e.should_trace_error(),
                 Self::RecordSegmentWriter(e) => e.should_trace_error(),
                 Self::Register(e) => e.should_trace_error(),
@@ -375,13 +382,13 @@ impl CompactOrchestrator {
             segment_spans: HashMap::new(),
             metrics: CompactOrchestratorMetrics::default(),
             schema: None,
-            task_context: None,
+            attached_function_context: None,
             heap_service: None,
         }
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn new_for_task(
+    pub fn new_for_attached_function(
         input_collection_id: CollectionUuid,
         rebuild: bool,
         fetch_log_batch_size: u32,
@@ -395,7 +402,7 @@ impl CompactOrchestrator {
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
-        task_uuid: TaskUuid,
+        task_uuid: AttachedFunctionUuid,
         execution_nonce: NonceUuid,
     ) -> Self {
         let mut orchestrator = CompactOrchestrator::new(
@@ -412,9 +419,9 @@ impl CompactOrchestrator {
             dispatcher,
             result_channel,
         );
-        orchestrator.task_context = Some(TaskContext {
-            task_id: task_uuid,
-            task: None,
+        orchestrator.attached_function_context = Some(AttachedFunctionContext {
+            attached_function_id: task_uuid,
+            attached_function: None,
             execution_nonce,
         });
         orchestrator.heap_service = Some(heap_service);
@@ -427,13 +434,13 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn do_task(
+    async fn do_attached_function(
         &mut self,
         log_records: Chunk<LogRecord>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         // Get all needed data, cloning immediately to avoid borrow conflicts
-        let task = match self.get_task().cloned() {
+        let attached_function = match self.get_attached_function().cloned() {
             Ok(t) => t,
             Err(e) => {
                 self.terminate_with_result(Err(e), ctx).await;
@@ -465,27 +472,27 @@ impl CompactOrchestrator {
             None => return,
         };
 
-        // TODO: Get the actual task executor based on operator_id
-        // For now, hardcode CountTask as a placeholder
-        let task_executor = Arc::new(CountTask);
+        // TODO(tanujnay112): Get the actual attached function executor based on function_id
+        // For now, hardcode CountAttachedFunction as a placeholder
+        let attached_function_executor = Arc::new(CountAttachedFunction);
 
-        let execute_task_op = ExecuteTaskOperator {
+        let execute_attached_function_op = ExecuteAttachedFunctionOperator {
             log_client: self.log.clone(),
-            task_executor,
+            attached_function_executor,
         };
 
-        let execute_task_input = ExecuteTaskInput {
+        let execute_attached_function_input = ExecuteAttachedFunctionInput {
             log_records,
             tenant_id: output_collection.tenant.clone(),
             output_collection_id,
-            completion_offset: task.completion_offset,
+            completion_offset: attached_function.completion_offset,
             output_record_segment,
             blockfile_provider: self.blockfile_provider.clone(),
         };
 
         let task_msg = wrap(
-            Box::new(execute_task_op),
-            execute_task_input,
+            Box::new(execute_attached_function_op),
+            execute_attached_function_input,
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
         );
@@ -730,6 +737,7 @@ impl CompactOrchestrator {
                 .size_bytes_post_compaction
                 .saturating_add_signed(self.collection_logical_size_delta_bytes)
         };
+
         let operator = RegisterOperator::new();
         let input = RegisterInput::new(
             collection.tenant,
@@ -742,7 +750,7 @@ impl CompactOrchestrator {
             self.sysdb.clone(),
             self.log.clone(),
             self.schema.clone(),
-            self.task_context.clone(),
+            self.attached_function_context.clone(),
         );
 
         let task = wrap(
@@ -815,33 +823,34 @@ impl CompactOrchestrator {
         }
     }
 
-    /// Get task_context or return error
-    fn get_task_context(&self) -> Result<&TaskContext, CompactionError> {
-        self.task_context
+    /// Get attached_function_context or return error
+    fn get_attached_function_context(&self) -> Result<&AttachedFunctionContext, CompactionError> {
+        self.attached_function_context
             .as_ref()
             .ok_or(CompactionError::InvariantViolation(
-                "Task context should be set for task-based compaction",
+                "Attached function context should be set for attached-function-based compaction",
             ))
     }
 
-    /// Get mutable task_context or return error
-    fn get_task_context_mut(&mut self) -> Result<&mut TaskContext, CompactionError> {
-        self.task_context
+    /// Get mutable attached_function_context or return error
+    fn get_attached_function_context_mut(
+        &mut self,
+    ) -> Result<&mut AttachedFunctionContext, CompactionError> {
+        self.attached_function_context
             .as_mut()
             .ok_or(CompactionError::InvariantViolation(
-                "Task context should be set for task-based compaction",
+                "Attached function context should be set for attached-function-based compaction",
             ))
     }
 
-    /// Get task from task_context or return error
-    fn get_task(&self) -> Result<&Task, CompactionError> {
-        let task_context = self.get_task_context()?;
-        task_context
-            .task
-            .as_ref()
-            .ok_or(CompactionError::InvariantViolation(
-                "Task should be populated by PrepareTask",
-            ))
+    /// Get attached function from attached_function_context or return error
+    fn get_attached_function(&self) -> Result<&AttachedFunction, CompactionError> {
+        let attached_function_context = self.get_attached_function_context()?;
+        attached_function_context.attached_function.as_ref().ok_or(
+            CompactionError::InvariantViolation(
+                "Attached Function should be populated by PrepareAttachedFunction",
+            ),
+        )
     }
 
     /// Get output_collection or return error
@@ -916,17 +925,17 @@ impl Orchestrator for CompactOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        // For task-based compaction, start with PrepareTask to fetch the task
-        if let Some(task_context) = self.task_context.as_ref() {
+        // For attached-function-based compaction, start with PrepareAttachedFunction to fetch the attached function
+        if let Some(attached_function_context) = self.attached_function_context.as_ref() {
             return vec![(
                 wrap(
-                    Box::new(PrepareTaskOperator {
+                    Box::new(PrepareAttachedFunctionOperator {
                         sysdb: self.sysdb.clone(),
                         log: self.log.clone(),
-                        task_uuid: task_context.task_id,
+                        attached_function_uuid: attached_function_context.attached_function_id,
                     }),
-                    PrepareTaskInput {
-                        nonce: task_context.execution_nonce,
+                    PrepareAttachedFunctionInput {
+                        nonce: attached_function_context.execution_nonce,
                     },
                     ctx.receiver(),
                     self.context.task_cancellation_token.clone(),
@@ -973,12 +982,14 @@ impl Orchestrator for CompactOrchestrator {
 
 // ============== Handlers ==============
 #[async_trait]
-impl Handler<TaskResult<PrepareTaskOutput, PrepareTaskError>> for CompactOrchestrator {
+impl Handler<TaskResult<PrepareAttachedFunctionOutput, PrepareAttachedFunctionError>>
+    for CompactOrchestrator
+{
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<PrepareTaskOutput, PrepareTaskError>,
+        message: TaskResult<PrepareAttachedFunctionOutput, PrepareAttachedFunctionError>,
         ctx: &ComponentContext<Self>,
     ) {
         let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
@@ -987,21 +998,21 @@ impl Handler<TaskResult<PrepareTaskOutput, PrepareTaskError>> for CompactOrchest
         };
 
         tracing::info!(
-            "[CompactOrchestrator] PrepareTask completed, task_id={}, execution_nonce={}",
-            output.task.id.0,
+            "[CompactOrchestrator] PrepareAttachedFunction completed, attached_function_id={}, execution_nonce={}",
+            output.attached_function.id.0,
             output.execution_nonce
         );
 
-        // Store the task and execution_nonce in task_context
-        let task_context = match self.get_task_context_mut() {
+        // Store the task and execution_nonce in attached_function_context
+        let attached_function_context = match self.get_attached_function_context_mut() {
             Ok(tc) => tc,
             Err(e) => {
                 self.terminate_with_result(Err(e), ctx).await;
                 return;
             }
         };
-        task_context.task = Some(output.task.clone());
-        task_context.execution_nonce = output.execution_nonce;
+        attached_function_context.attached_function = Some(output.attached_function.clone());
+        attached_function_context.execution_nonce = output.execution_nonce;
         self.output_collection_id = output.output_collection_id.into();
 
         if output.should_skip_execution {
@@ -1016,10 +1027,14 @@ impl Handler<TaskResult<PrepareTaskOutput, PrepareTaskError>> for CompactOrchest
                 return;
             };
 
-            // Proceed to FinishTask
+            // Proceed to FinishAttachedFunction
             let task = wrap(
-                FinishTaskOperator::new(self.log.clone(), self.sysdb.clone(), heap_service),
-                FinishTaskInput::new(output.task),
+                FinishAttachedFunctionOperator::new(
+                    self.log.clone(),
+                    self.sysdb.clone(),
+                    heap_service,
+                ),
+                FinishAttachedFunctionInput::new(output.attached_function),
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
             );
@@ -1123,11 +1138,11 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         }
 
         // TODO(tanujnay112): move this somewhere cleaner
-        if let Some(task_context) = &self.task_context {
-            let Some(task) = &task_context.task else {
+        if let Some(attached_function_context) = &self.attached_function_context {
+            let Some(attached_function) = &attached_function_context.attached_function else {
                 self.terminate_with_result(
                     Err(CompactionError::InvariantViolation(
-                        "Task should not have been initialized",
+                        " Attached Function should not have been initialized",
                     )),
                     ctx,
                 )
@@ -1135,7 +1150,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 return;
             };
 
-            let result: i64 = match task.completion_offset.try_into() {
+            let result: i64 = match attached_function.completion_offset.try_into() {
                 Ok(value) => value,
                 Err(_) => {
                     self.terminate_with_result(
@@ -1177,7 +1192,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             None => return,
         };
 
-        let log_task = match self.rebuild || self.task_context.is_some() {
+        let log_task = match self.rebuild || self.attached_function_context.is_some() {
             true => wrap(
                 Box::new(SourceRecordSegmentOperator {}),
                 SourceRecordSegmentInput {
@@ -1452,9 +1467,9 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
             }
         }
 
-        // For task-based compaction, call ExecuteTask to run task logic
-        if self.task_context.is_some() {
-            self.do_task(output, ctx).await;
+        // For attached-function-based compaction, call ExecuteAttachedFunction to run attached function logic
+        if self.attached_function_context.is_some() {
+            self.do_attached_function(output, ctx).await;
         } else {
             // For regular compaction, go directly to partition
             self.partition(output, ctx).await;
@@ -1463,12 +1478,14 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
 }
 
 #[async_trait]
-impl Handler<TaskResult<ExecuteTaskOutput, ExecuteTaskError>> for CompactOrchestrator {
+impl Handler<TaskResult<ExecuteAttachedFunctionOutput, ExecuteAttachedFunctionError>>
+    for CompactOrchestrator
+{
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<ExecuteTaskOutput, ExecuteTaskError>,
+        message: TaskResult<ExecuteAttachedFunctionOutput, ExecuteAttachedFunctionError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
@@ -1477,7 +1494,7 @@ impl Handler<TaskResult<ExecuteTaskOutput, ExecuteTaskError>> for CompactOrchest
         };
 
         tracing::info!(
-            "[CompactOrchestrator] ExecuteTask completed. Processed {} records",
+            "[CompactOrchestrator] ExecuteAttachedFunction completed. Processed {} records",
             output.records_processed
         );
 
@@ -1504,7 +1521,7 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
         tracing::info!("Sourced Records: {}", output.len());
         // Each record should corresond to a log
         self.total_records_post_compaction = output.len() as u64;
-        if output.is_empty() && self.task_context.is_none() {
+        if output.is_empty() && self.attached_function_context.is_none() {
             let writers = match self.ok_or_terminate(self.get_segment_writers(), ctx).await {
                 Some(writer) => writer,
                 None => return,
@@ -1519,14 +1536,14 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
                 ctx,
             )
             .await;
-        } else if self.task_context.is_some() {
+        } else if self.attached_function_context.is_some() {
             let input_collection =
                 match self.ok_or_terminate(self.get_input_collection(), ctx).await {
                     Some(collection) => collection,
                     None => return,
                 };
             self.pulled_log_offset = input_collection.log_position;
-            self.do_task(output, ctx).await;
+            self.do_attached_function(output, ctx).await;
         } else {
             self.partition(output, ctx).await;
         }
@@ -1719,15 +1736,17 @@ impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorErro
 }
 
 #[async_trait]
-impl Handler<TaskResult<FinishTaskOutput, FinishTaskError>> for CompactOrchestrator {
+impl Handler<TaskResult<FinishAttachedFunctionOutput, FinishAttachedFunctionError>>
+    for CompactOrchestrator
+{
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<FinishTaskOutput, FinishTaskError>,
+        message: TaskResult<FinishAttachedFunctionOutput, FinishAttachedFunctionError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        self.state = ExecutionState::FinishTask;
+        self.state = ExecutionState::FinishAttachedFunction;
         let _finish_output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
@@ -1741,7 +1760,10 @@ impl Handler<TaskResult<FinishTaskOutput, FinishTaskError>> for CompactOrchestra
             }
         };
 
-        let task_id = match self.get_task_context().map(|tc| tc.task_id) {
+        let attached_function_id = match self
+            .get_attached_function_context()
+            .map(|tc| tc.attached_function_id)
+        {
             Ok(id) => id,
             Err(e) => {
                 self.terminate_with_result(Err(e), ctx).await;
@@ -1750,15 +1772,20 @@ impl Handler<TaskResult<FinishTaskOutput, FinishTaskError>> for CompactOrchestra
         };
 
         tracing::info!(
-            "Task finish_task completed for output collection {}",
+            " Attached Function finish_attached_function completed for output collection {}",
             output_collection_id
         );
 
         // Task verification complete, terminate with success
         // TODO(tanujnay112): This no longer applied to functions, change the return type
         // to a more suitable name.
-        self.terminate_with_result(Ok(CompactionResponse::Success { job_id: task_id.0 }), ctx)
-            .await;
+        self.terminate_with_result(
+            Ok(CompactionResponse::Success {
+                job_id: attached_function_id.0,
+            }),
+            ctx,
+        )
+        .await;
     }
 }
 
@@ -1776,11 +1803,11 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator 
             None => return,
         };
 
-        // If this was a task-based compaction, invoke finish_task operator
-        if let Some(updated_task) = register_output.updated_task {
+        // If this was an attached-function-based compaction, invoke finish_attached_function operator
+        if let Some(updated_attached_function) = register_output.updated_attached_function {
             tracing::info!(
-                "Invoking finish_task operator for task {}",
-                updated_task.id.0
+                "Invoking finish_attached_function operator for attached function {}",
+                updated_attached_function.id.0
             );
 
             let Some(heap_service) = self.heap_service.clone() else {
@@ -1794,19 +1821,23 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator 
                 return;
             };
 
-            let finish_task_op =
-                FinishTaskOperator::new(self.log.clone(), self.sysdb.clone(), heap_service);
-            let finish_task_input = FinishTaskInput::new(updated_task);
+            let finish_attached_function_op = FinishAttachedFunctionOperator::new(
+                self.log.clone(),
+                self.sysdb.clone(),
+                heap_service,
+            );
+            let finish_attached_function_input =
+                FinishAttachedFunctionInput::new(updated_attached_function);
 
             let task = wrap(
-                finish_task_op,
-                finish_task_input,
+                finish_attached_function_op,
+                finish_attached_function_input,
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
             );
             self.send(task, ctx, Some(Span::current())).await;
         } else {
-            // No task, terminate immediately with success
+            // No attached function, terminate immediately with success
             let output_collection_id = match self
                 .ok_or_terminate(self.get_output_collection_id(), ctx)
                 .await
@@ -2040,7 +2071,7 @@ mod tests {
         assert_eq!(new_vals, old_vals);
     }
 
-    // Helper to read total_count from task result metadata
+    // Helper to read total_count from attached function result metadata
     async fn get_total_count_output(
         sysdb: &mut SysDb,
         collection_id: CollectionUuid,
@@ -2057,10 +2088,10 @@ mod tests {
         .await
         .expect("Should create reader");
         let offset_id = reader
-            .get_offset_id_for_user_id("task_result")
+            .get_offset_id_for_user_id("attached_function_result")
             .await
             .expect("Should get offset")
-            .expect("task_result should exist");
+            .expect("attached_function_result should exist");
         let data_record = reader
             .get_data_for_offset_id(offset_id)
             .await
@@ -2081,7 +2112,7 @@ mod tests {
     // entry in sysdb after this run.
     // The above is done twice.
     #[tokio::test]
-    async fn test_k8s_integration_task_execution() {
+    async fn test_k8s_integration_attached_function_execution() {
         // Setup test environment
         let config = RootConfig::default();
         let system = System::default();
@@ -2118,7 +2149,7 @@ mod tests {
         let mut in_memory_log = InMemoryLog::new();
 
         // Create input collection via HTTP API
-        let collection_name = format!("test_task_collection_{}", uuid::Uuid::new_v4());
+        let collection_name = format!("test_attached_function_collection_{}", uuid::Uuid::new_v4());
 
         let collection_id = CollectionUuid::new();
         sysdb
@@ -2175,22 +2206,23 @@ mod tests {
                 )
             });
         let log = Log::InMemory(in_memory_log.clone());
-        let task_name = "test_count_task";
+        let attached_function_name = "test_count_attached_function";
+        let output_collection_name = format!("test_output_collection_{}", uuid::Uuid::new_v4());
 
-        //  Create a task via sysdb
-        let task_id = sysdb
-            .create_task(
-                task_name.to_string(),
+        // Create a task via sysdb
+        let attached_function_id = sysdb
+            .create_attached_function(
+                attached_function_name.to_string(),
                 "record_counter".to_string(),
                 input_collection_id,
-                format!("test_output_collection_{}", uuid::Uuid::new_v4()),
+                output_collection_name,
                 serde_json::Value::Null,
                 tenant.clone(),
                 db.clone(),
                 10,
             )
             .await
-            .expect("Task creation should succeed");
+            .expect(" Attached Function creation should succeed");
 
         // compact everything
         let compact_orchestrator = CompactOrchestrator::new(
@@ -2215,15 +2247,15 @@ mod tests {
             result.err()
         );
 
-        // Fetch the task to get the current nonce
-        let task_before_run = sysdb
-            .get_task_by_name(input_collection_id, task_name.to_string())
+        // Fetch the attached function to get the current nonce
+        let attached_function_before_run = sysdb
+            .get_attached_function_by_name(input_collection_id, attached_function_name.to_string())
             .await
-            .expect("Task should be found");
-        let execution_nonce = task_before_run.lowest_live_nonce.unwrap();
+            .expect("Attached Function should be found");
+        let execution_nonce = attached_function_before_run.lowest_live_nonce.unwrap();
 
-        // Run first compaction (PrepareTask will fetch and populate the task)
-        let compact_orchestrator = CompactOrchestrator::new_for_task(
+        // Run first compaction (PrepareAttachedFunction will fetch and populate the attached function)
+        let compact_orchestrator = CompactOrchestrator::new_for_attached_function(
             input_collection_id,
             false,
             50,
@@ -2237,34 +2269,34 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             None,
-            task_before_run.id,
+            attached_function_id,
             execution_nonce,
         );
         let result = compact_orchestrator.run(system.clone()).await;
         assert!(
             result.is_ok(),
-            "First task run should succeed: {:?}",
+            "First invocation of attached function should succeed: {:?}",
             result.err()
         );
-        // Verify task was updated with output collection ID
-        let updated_task = sysdb
-            .get_task_by_name(input_collection_id, task_name.to_string())
+        // Verify attached function was updated with output collection ID
+        let updated_attached_function = sysdb
+            .get_attached_function_by_name(input_collection_id, attached_function_name.to_string())
             .await
-            .expect("Task should be found");
+            .expect(" Attached Function should be found");
         assert_eq!(
-            updated_task.completion_offset, 49,
+            updated_attached_function.completion_offset, 49,
             "Processed logs 0-49, so completion_offset should be 49 (last offset processed)"
         );
 
         assert_eq!(
-            updated_task.lowest_live_nonce,
-            Some(updated_task.next_nonce),
+            updated_attached_function.lowest_live_nonce,
+            Some(updated_attached_function.next_nonce),
             "After a successful run, lowest_live_nonce should be equal to next_nonce"
         );
 
-        let output_collection_id = updated_task.output_collection_id.unwrap();
+        let output_collection_id = updated_attached_function.output_collection_id.unwrap();
 
-        // Verify first run: Read total_count from task result metadata
+        // Verify first run: Read total_count from attached function result metadata
         let total_count = Box::pin(get_total_count_output(
             &mut sysdb,
             output_collection_id,
@@ -2273,11 +2305,11 @@ mod tests {
         .await;
         assert_eq!(
             total_count, 34,
-            "CountTask should have counted 34 records in input collection"
+            "CountAttachedFunction should have counted 34 records in input collection"
         );
 
         tracing::info!(
-            "First task run completed. CountTask result: total_count={}",
+            "First attached function run completed. CountAttachedFunction result: total_count={}",
             total_count
         );
 
@@ -2324,17 +2356,20 @@ mod tests {
             result.err()
         );
 
-        let output_collection_id = updated_task.output_collection_id.unwrap();
+        let output_collection_id = updated_attached_function.output_collection_id.unwrap();
 
-        // Fetch the task to get the updated nonce for second run
-        let task_before_run_2 = sysdb
-            .get_task_by_name(input_collection_id, "test_count_task".to_string())
+        // Fetch the attached function to get the updated nonce for second run
+        let attached_function_before_run_2 = sysdb
+            .get_attached_function_by_name(
+                input_collection_id,
+                "test_count_attached_function".to_string(),
+            )
             .await
-            .expect("Task should be found");
-        let execution_nonce_2 = task_before_run_2.next_nonce;
+            .expect(" Attached Function should be found");
+        let execution_nonce_2 = attached_function_before_run_2.next_nonce;
 
-        // Run second task (PrepareTask will fetch updated task state)
-        let compact_orchestrator_2 = CompactOrchestrator::new_for_task(
+        // Run second attached function (PrepareAttachedFunction will fetch updated attached function state)
+        let compact_orchestrator_2 = CompactOrchestrator::new_for_attached_function(
             input_collection_id,
             false,
             100,
@@ -2348,26 +2383,29 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             None,
-            task_id,
+            attached_function_id,
             execution_nonce_2,
         );
         let result = compact_orchestrator_2.run(system.clone()).await;
         assert!(
             result.is_ok(),
-            "Second task run should succeed: {:?}",
+            "Second invocation of attached function should succeed: {:?}",
             result.err()
         );
 
-        let updated_task_2 = sysdb
-            .get_task_by_name(input_collection_id, "test_count_task".to_string())
+        let updated_attached_function_2 = sysdb
+            .get_attached_function_by_name(
+                input_collection_id,
+                "test_count_attached_function".to_string(),
+            )
             .await
-            .expect("Task should be found");
+            .expect(" Attached Function should be found");
         assert_eq!(
-            updated_task_2.completion_offset, 99,
+            updated_attached_function_2.completion_offset, 99,
             "Processed logs 0-99, so completion_offset should be 99 (last offset processed)"
         );
 
-        // Verify second run: Read updated total_count from task result metadata
+        // Verify second run: Read updated total_count from attached function result metadata
         let total_count_2 = Box::pin(get_total_count_output(
             &mut sysdb,
             output_collection_id,
@@ -2376,17 +2414,17 @@ mod tests {
         .await;
         assert_eq!(
             total_count_2, 67,
-            "CountTask should have counted 67 total records in input collection"
+            "CountAttachedFunction should have counted 67 total records in input collection"
         );
 
         assert_eq!(
-            updated_task_2.lowest_live_nonce,
-            Some(updated_task_2.next_nonce),
+            updated_attached_function_2.lowest_live_nonce,
+            Some(updated_attached_function_2.next_nonce),
             "After a successful run, lowest_live_nonce should be equal to next_nonce"
         );
 
         tracing::info!(
-            "Task execution test completed. First run: total_count=50, Second run: total_count={}",
+            " Attached Function execution test completed. First run: total_count=50, Second run: total_count={}",
             total_count_2
         );
     }

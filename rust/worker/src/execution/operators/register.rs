@@ -9,7 +9,7 @@ use chroma_types::{CollectionUuid, FlushCompactionResponse, SegmentFlushInfo};
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::execution::orchestration::TaskContext;
+use crate::execution::orchestration::AttachedFunctionContext;
 
 /// The register  operator is responsible for flushing compaction data to the sysdb
 /// as well as updating the log offset in the log service.
@@ -50,7 +50,7 @@ pub struct RegisterInput {
     sysdb: SysDb,
     log: Log,
     schema: Option<Schema>,
-    task_context: Option<TaskContext>,
+    attached_function_context: Option<AttachedFunctionContext>,
 }
 
 impl RegisterInput {
@@ -67,7 +67,7 @@ impl RegisterInput {
         sysdb: SysDb,
         log: Log,
         schema: Option<Schema>,
-        task_context: Option<TaskContext>,
+        attached_function_context: Option<AttachedFunctionContext>,
     ) -> Self {
         RegisterInput {
             tenant,
@@ -80,7 +80,7 @@ impl RegisterInput {
             sysdb,
             log,
             schema,
-            task_context,
+            attached_function_context,
         }
     }
 }
@@ -88,11 +88,11 @@ impl RegisterInput {
 /// The output for the flush sysdb operator.
 /// # Parameters
 /// * `result` - The result of the flush compaction operation.
-/// * `updated_task` - The updated task if this was a task-based compaction.
+/// * `updated_attached_function` - The updated attached function if this was a attached function-based compaction.
 #[derive(Debug)]
 pub struct RegisterOutput {
     _sysdb_registration_result: FlushCompactionResponse,
-    pub updated_task: Option<chroma_types::Task>,
+    pub updated_attached_function: Option<chroma_types::AttachedFunction>,
 }
 
 #[derive(Error, Debug)]
@@ -134,13 +134,13 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
     async fn run(&self, input: &RegisterInput) -> Result<RegisterOutput, RegisterError> {
         let mut sysdb = input.sysdb.clone();
 
-        // Handle task-based vs non-task compactions separately
-        match &input.task_context {
-            Some(task_context) => {
-                // Extract the task - it must be present by the time we reach RegisterOperator
-                let task = task_context.task.as_ref().ok_or_else(|| {
+        // Handle attached function-based vs non-attached function compactions separately
+        match &input.attached_function_context {
+            Some(attached_function_context) => {
+                // Extract the attached function - it must be present by the time we reach RegisterOperator
+                let attached_function = attached_function_context.attached_function.as_ref().ok_or_else(|| {
                     RegisterError::Generic(
-                        "Task context present but task not populated - PrepareTask should have run first"
+                        " Attached Function context present but attached function not populated - PrepareAttachedFunction should have run first"
                             .to_string(),
                     )
                 })?;
@@ -154,14 +154,14 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
                 } else {
                     0u64
                 };
-                let task_update = chroma_types::TaskUpdateInfo {
-                    task_id: task.id,
-                    task_run_nonce: task_context.execution_nonce.0,
+                let attach_function_update = chroma_types::AttachedFunctionUpdateInfo {
+                    attached_function_id: attached_function.id,
+                    attached_function_run_nonce: attached_function_context.execution_nonce.0,
                     completion_offset: last_offset_processed,
                 };
-                // Task-based compaction
-                let task_response = sysdb
-                    .flush_compaction_and_task(
+                // Attached Function-based compaction
+                let attached_function_response = sysdb
+                    .flush_compaction_and_attached_function(
                         input.tenant.clone(),
                         input.collection_id,
                         input.log_position,
@@ -170,28 +170,29 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
                         input.total_records_post_compaction,
                         input.collection_logical_size_bytes,
                         input.schema.clone(),
-                        task_update,
+                        attach_function_update,
                     )
                     .await
                     .map_err(RegisterError::FlushCompactionError)?;
 
-                // Create updated task with authoritative database values
-                let mut updated_task = task.clone();
-                updated_task.completion_offset = task_response.completion_offset;
-                // Note: next_run and next_nonce were already set by PrepareTask via advance_task()
-                // flush_compaction_and_task only updates completion_offset
+                // Create updated attached function with authoritative database values
+                let mut updated_attached_function = attached_function.clone();
+                updated_attached_function.completion_offset =
+                    attached_function_response.completion_offset;
+                // Note: next_run and next_nonce were already set by PrepareAttachedFunction via advance_attached_function()
+                // flush_compaction_and_attached_function only updates completion_offset
 
                 Ok(RegisterOutput {
                     _sysdb_registration_result: chroma_types::FlushCompactionResponse {
-                        collection_id: task_response.collection_id,
-                        collection_version: task_response.collection_version,
-                        last_compaction_time: task_response.last_compaction_time,
+                        collection_id: attached_function_response.collection_id,
+                        collection_version: attached_function_response.collection_version,
+                        last_compaction_time: attached_function_response.last_compaction_time,
                     },
-                    updated_task: Some(updated_task),
+                    updated_attached_function: Some(updated_attached_function),
                 })
             }
             None => {
-                // Non-task compaction
+                // Non-function compaction
                 let mut log = input.log.clone();
                 let response = sysdb
                     .flush_compaction(
@@ -218,7 +219,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
 
                 Ok(RegisterOutput {
                     _sysdb_registration_result: response,
-                    updated_task: None,
+                    updated_attached_function: None,
                 })
             }
         }
@@ -338,7 +339,7 @@ mod tests {
             sysdb.clone(),
             log.clone(),
             None, // schema
-            None, // task_context
+            None, // attached_function_context
         );
 
         let result = operator.run(&input).await;

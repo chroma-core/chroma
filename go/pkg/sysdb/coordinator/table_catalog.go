@@ -1732,25 +1732,26 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 	return flushCollectionInfo, nil
 }
 
-// FlushCollectionCompactionAndTask atomically updates collection compaction data and task completion offset.
-// NOTE: This does NOT advance next_nonce - that is done separately by AdvanceTask in PrepareTask.
+// FlushCollectionCompactionAndAttachedFunction atomically updates collection compaction data and attached function completion offset.
+// NOTE: This does NOT advance next_nonce - that is done separately by AdvanceAttachedFunction.
 // This only updates the completion_offset to record how far we've processed.
 // This is only supported for versioned collections (the modern/default path).
-func (tc *Catalog) FlushCollectionCompactionAndTask(
+func (tc *Catalog) FlushCollectionCompactionAndAttachedFunction(
 	ctx context.Context,
 	flushCollectionCompaction *model.FlushCollectionCompaction,
-	taskID uuid.UUID,
-	taskRunNonce uuid.UUID,
+	attachedFunctionID uuid.UUID,
+	runNonce uuid.UUID,
 	completionOffset int64,
 ) (*model.FlushCollectionInfo, error) {
 	if !tc.versionFileEnabled {
-		// Task-based compactions are only supported with versioned collections
-		log.Error("FlushCollectionCompactionAndTask is only supported for versioned collections")
-		return nil, errors.New("task-based compaction requires versioned collections")
+		// Attached-function-based compactions are only supported with versioned collections
+		log.Error("FlushCollectionCompactionAndAttachedFunction is only supported for versioned collections")
+		return nil, errors.New("attached-function-based compaction requires versioned collections")
 	}
 
 	var flushCollectionInfo *model.FlushCollectionInfo
 
+	// TODO(tanujnay112): This apparently doesn't create a subtransaction. Fix this.
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		var err error
 		flushCollectionInfo, err = tc.FlushCollectionCompactionForVersionedCollection(txCtx, flushCollectionCompaction)
@@ -1758,9 +1759,9 @@ func (tc *Catalog) FlushCollectionCompactionAndTask(
 			return err
 		}
 
-		// Update ONLY completion_offset - next_nonce was already advanced in PrepareTask
-		// We still validate taskRunNonce to ensure we're updating the correct nonce
-		err = tc.metaDomain.TaskDb(txCtx).UpdateCompletionOffset(taskID, taskRunNonce, completionOffset)
+		// Update ONLY completion_offset - next_nonce was already advanced by AdvanceAttachedFunction
+		// We still validate runNonce to ensure we're updating the correct nonce
+		err = tc.metaDomain.AttachedFunctionDb(txCtx).UpdateCompletionOffset(attachedFunctionID, runNonce, completionOffset)
 		if err != nil {
 			return err
 		}
@@ -1772,12 +1773,12 @@ func (tc *Catalog) FlushCollectionCompactionAndTask(
 		return nil, err
 	}
 
-	// Populate task fields with authoritative values from database
-	flushCollectionInfo.TaskCompletionOffset = &completionOffset
+	// Populate attached function fields with authoritative values from database
+	flushCollectionInfo.AttachedFunctionCompletionOffset = &completionOffset
 
-	log.Info("FlushCollectionCompactionAndTask",
+	log.Info("FlushCollectionCompactionAndAttachedFunction",
 		zap.String("collection_id", flushCollectionCompaction.ID.String()),
-		zap.String("task_id", taskID.String()),
+		zap.String("attached_function_id", attachedFunctionID.String()),
 		zap.Int64("completion_offset", completionOffset))
 
 	return flushCollectionInfo, nil

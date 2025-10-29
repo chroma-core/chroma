@@ -20,85 +20,85 @@ impl From<CollectionUuid> for JobId {
     }
 }
 
-impl From<TaskUuid> for JobId {
-    fn from(task_uuid: TaskUuid) -> Self {
-        JobId(task_uuid.0)
+impl From<AttachedFunctionUuid> for JobId {
+    fn from(attached_function_uuid: AttachedFunctionUuid) -> Self {
+        JobId(attached_function_uuid.0)
     }
 }
 
 define_uuid_newtype!(
-    /// TaskUuid is a wrapper around Uuid to provide a type for task identifiers.
+    /// AttachedFunctionUuid is a wrapper around Uuid to provide a type for attached function identifiers.
     #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-    TaskUuid,
+    AttachedFunctionUuid,
     new_v4
 );
 
 define_uuid_newtype!(
-    /// NonceUuid is a wrapper around Uuid to provide a type for task execution nonces.
+    /// NonceUuid is a wrapper around Uuid to provide a type for attached function execution nonces.
     NonceUuid,
     now_v7
 );
 
-/// Task represents an asynchronous task that is triggered by collection writes
+/// AttachedFunction represents an asynchronous function that is triggered by collection writes
 /// to map records from a source collection to a target collection.
 fn default_systemtime() -> SystemTime {
     SystemTime::UNIX_EPOCH
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Task {
-    /// Unique identifier for the task
-    pub id: TaskUuid,
-    /// Human-readable name for the task instance
+pub struct AttachedFunction {
+    /// Unique identifier for the attached function
+    pub id: AttachedFunctionUuid,
+    /// Human-readable name for the attached function instance
     pub name: String,
-    /// Name of the operator/built-in definition this task uses (despite field name, this is a name not a UUID)
-    pub operator_id: String,
-    /// Source collection that triggers the task
+    /// Name of the function/built-in definition this attached function uses
+    pub function_id: String,
+    /// Source collection that triggers the attached function
     pub input_collection_id: CollectionUuid,
-    /// Name of target collection where task output is stored
+    /// Name of target collection where attached function output is stored
     pub output_collection_name: String,
     /// ID of the output collection (lazily filled in after creation)
     pub output_collection_id: Option<CollectionUuid>,
-    /// Optional JSON parameters for the operator
+    /// Optional JSON parameters for the function
     pub params: Option<String>,
-    /// Tenant name this task belongs to (despite field name, this is a name not a UUID)
+    /// Tenant name this attached function belongs to (despite field name, this is a name not a UUID)
     pub tenant_id: String,
-    /// Database name this task belongs to (despite field name, this is a name not a UUID)
+    /// Database name this attached function belongs to (despite field name, this is a name not a UUID)
     pub database_id: String,
-    /// Timestamp of the last successful task run
+    /// Timestamp of the last successful function run
     #[serde(skip, default)]
     pub last_run: Option<SystemTime>,
-    /// Timestamp when the task should next run
+    /// Timestamp when the attached function should next run
     #[serde(skip, default = "default_systemtime")]
     pub next_run: SystemTime,
-    /// Completion offset: the WAL position up to which the task has processed records
+    /// Completion offset: the WAL position up to which the attached function has processed records
     pub completion_offset: u64,
-    /// Minimum number of new records required before the task runs again
-    pub min_records_for_task: u64,
-    /// Whether the task has been soft-deleted
+    /// Minimum number of new records required before the attached function runs again
+    pub min_records_for_invocation: u64,
+    /// Whether the attached function has been soft-deleted
     #[serde(skip, default)]
     pub is_deleted: bool,
-    /// Timestamp when the task was created
+    /// Timestamp when the attached function was created
     #[serde(default = "default_systemtime")]
     pub created_at: SystemTime,
-    /// Timestamp when the task was last updated
+    /// Timestamp when the attached function was last updated
     #[serde(default = "default_systemtime")]
     pub updated_at: SystemTime,
-    /// Next nonce (UUIDv7) for task execution tracking
+    /// Next nonce (UUIDv7) for execution tracking
     pub next_nonce: NonceUuid,
     /// Lowest live nonce (UUIDv7) - marks the earliest epoch that still needs verification
-    /// When lowest_live_nonce is Some and < next_nonce, it indicates finish_task failed and we should
+    /// When lowest_live_nonce is Some and < next_nonce, it indicates finish failed and we should
     /// skip execution and only run the scout_logs recheck phase
-    /// None indicates the task has never been scheduled (brand new task)
+    /// None indicates the attached function has never been scheduled (brand new)
     pub lowest_live_nonce: Option<NonceUuid>,
 }
 
-/// ScheduleEntry represents a scheduled task run for a collection.
+/// ScheduleEntry represents a scheduled attached function run for a collection.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ScheduleEntry {
     pub collection_id: CollectionUuid,
-    pub task_id: Uuid,
-    pub task_run_nonce: NonceUuid,
+    pub attached_function_id: Uuid,
+    pub attached_function_run_nonce: NonceUuid,
     pub when_to_run: Option<DateTime<Utc>>,
     /// Lowest live nonce - marks the earliest nonce that still needs verification.
     /// Nonces less than this value are considered complete.
@@ -120,25 +120,26 @@ impl TryFrom<crate::chroma_proto::ScheduleEntry> for ScheduleEntry {
                 })
             })?;
 
-        let task_id = proto
-            .task_id
+        let attached_function_id = proto
+            .attached_function_id
             .ok_or(ScheduleEntryConversionError::MissingField(
-                "task_id".to_string(),
+                "attached_function_id".to_string(),
             ))
             .and_then(|id| {
-                Uuid::parse_str(&id)
-                    .map_err(|_| ScheduleEntryConversionError::InvalidUuid("task_id".to_string()))
+                Uuid::parse_str(&id).map_err(|_| {
+                    ScheduleEntryConversionError::InvalidUuid("attached_function_id".to_string())
+                })
             })?;
 
-        let task_run_nonce = proto
-            .task_run_nonce
+        let attached_function_run_nonce = proto
+            .run_nonce
             .ok_or(ScheduleEntryConversionError::MissingField(
-                "task_run_nonce".to_string(),
+                "run_nonce".to_string(),
             ))
             .and_then(|nonce| {
-                Uuid::parse_str(&nonce).map(NonceUuid).map_err(|_| {
-                    ScheduleEntryConversionError::InvalidUuid("task_run_nonce".to_string())
-                })
+                Uuid::parse_str(&nonce)
+                    .map(NonceUuid)
+                    .map_err(|_| ScheduleEntryConversionError::InvalidUuid("run_nonce".to_string()))
             })?;
 
         let when_to_run = proto
@@ -152,8 +153,8 @@ impl TryFrom<crate::chroma_proto::ScheduleEntry> for ScheduleEntry {
 
         Ok(ScheduleEntry {
             collection_id,
-            task_id,
-            task_run_nonce,
+            attached_function_id,
+            attached_function_run_nonce,
             when_to_run,
             lowest_live_nonce,
         })

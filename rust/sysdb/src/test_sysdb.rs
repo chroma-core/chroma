@@ -42,7 +42,7 @@ struct Inner {
     tenant_resource_names: HashMap<String, String>,
     collection_to_version_file: HashMap<CollectionUuid, CollectionVersionFile>,
     soft_deleted_collections: HashSet<CollectionUuid>,
-    tasks: HashMap<chroma_types::TaskUuid, chroma_types::Task>,
+    tasks: HashMap<chroma_types::AttachedFunctionUuid, chroma_types::AttachedFunction>,
     #[derivative(Debug = "ignore")]
     storage: Option<chroma_storage::Storage>,
     mock_time: u64,
@@ -672,19 +672,19 @@ impl TestSysDb {
         Ok(vec![])
     }
 
-    pub(crate) async fn finish_task(
+    pub(crate) async fn finish_attached_function(
         &mut self,
-        task_id: chroma_types::TaskUuid,
-    ) -> Result<(), chroma_types::FinishTaskError> {
+        task_id: chroma_types::AttachedFunctionUuid,
+    ) -> Result<(), chroma_types::FinishAttachedFunctionError> {
         let mut inner = self.inner.lock();
-        let task = inner
+        let attached_function = inner
             .tasks
             .get_mut(&task_id)
-            .ok_or(chroma_types::FinishTaskError::TaskNotFound)?;
+            .ok_or(chroma_types::FinishAttachedFunctionError::AttachedFunctionNotFound)?;
 
         // Update lowest_live_nonce to equal next_nonce
         // This marks the current epoch as verified and complete
-        task.lowest_live_nonce = Some(task.next_nonce);
+        attached_function.lowest_live_nonce = Some(attached_function.next_nonce);
         Ok(())
     }
 }

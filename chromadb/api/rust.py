@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from chromadb import (
     CollectionMetadata,
     Embeddings,
@@ -12,6 +14,9 @@ from chromadb import (
     URIs,
 )
 from chromadb.api import ServerAPI
+
+if TYPE_CHECKING:
+    from chromadb.api.models.AttachedFunction import AttachedFunction
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
@@ -599,35 +604,34 @@ class RustBindingsAPI(ServerAPI):
         return self.bindings.get_max_batch_size()
 
     @override
-    def create_task(
+    def attach_function(
         self,
-        task_name: str,
-        operator_name: str,
+        function_id: str,
+        name: str,
         input_collection_id: UUID,
-        output_collection_name: str,
+        output_collection: str,
         params: Optional[Dict[str, Any]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> tuple[bool, str]:
-        """Tasks are not supported in the Rust bindings (local embedded mode)."""
+    ) -> "AttachedFunction":
+        """Attached functions are not supported in the Rust bindings (local embedded mode)."""
         raise NotImplementedError(
-            "Tasks are only supported when connecting to a Chroma server via HttpClient. "
-            "The Rust bindings (embedded mode) do not support task operations."
+            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
+            "The Rust bindings (embedded mode) do not support attached function operations."
         )
 
     @override
-    def remove_task(
+    def detach_function(
         self,
-        task_name: str,
-        input_collection_id: UUID,
+        attached_function_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        """Tasks are not supported in the Rust bindings (local embedded mode)."""
+        """Attached functions are not supported in the Rust bindings (local embedded mode)."""
         raise NotImplementedError(
-            "Tasks are only supported when connecting to a Chroma server via HttpClient. "
-            "The Rust bindings (embedded mode) do not support task operations."
+            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
+            "The Rust bindings (embedded mode) do not support attached function operations."
         )
 
     # TODO: Remove this if it's not planned to be used

@@ -68,46 +68,46 @@ func (m *MockMemberlistStore) UpdateMemberlist(ctx context.Context, memberlist m
 	return args.Error(0)
 }
 
-// CreateTaskTestSuite is a test suite for testing CreateTask two-phase commit logic
-type CreateTaskTestSuite struct {
+// AttachFunctionTestSuite is a test suite for testing AttachFunction two-phase commit logic
+type AttachFunctionTestSuite struct {
 	suite.Suite
-	mockMetaDomain   *dbmodel_mocks.IMetaDomain
-	mockTxImpl       *dbmodel_mocks.ITransaction
-	mockTaskDb       *dbmodel_mocks.ITaskDb
-	mockOperatorDb   *dbmodel_mocks.IOperatorDb
-	mockDatabaseDb   *dbmodel_mocks.IDatabaseDb
-	mockCollectionDb *dbmodel_mocks.ICollectionDb
-	mockHeapClient   *MockHeapClient
-	coordinator      *Coordinator
+	mockMetaDomain         *dbmodel_mocks.IMetaDomain
+	mockTxImpl             *dbmodel_mocks.ITransaction
+	mockAttachedFunctionDb *dbmodel_mocks.IAttachedFunctionDb
+	mockFunctionDb         *dbmodel_mocks.IFunctionDb
+	mockDatabaseDb         *dbmodel_mocks.IDatabaseDb
+	mockCollectionDb       *dbmodel_mocks.ICollectionDb
+	mockHeapClient         *MockHeapClient
+	coordinator            *Coordinator
 }
 
-// setupCreateTaskMocks sets up all the mocks for a CreateTask call (Phases 0 and 1)
-// Returns a function that can be called to capture the created task ID
-func (suite *CreateTaskTestSuite) setupCreateTaskMocks(ctx context.Context, request *coordinatorpb.CreateTaskRequest, databaseID string, operatorID uuid.UUID) func(*dbmodel.Task) bool {
+// setupAttachFunctionMocks sets up all the mocks for an AttachFunction call (Phases 0 and 1)
+// Returns a function that can be called to capture the created attached function ID
+func (suite *AttachFunctionTestSuite) setupAttachFunctionMocks(ctx context.Context, request *coordinatorpb.AttachFunctionRequest, databaseID string, functionID uuid.UUID) func(*dbmodel.AttachedFunction) bool {
 	inputCollectionID := request.InputCollectionId
-	taskName := request.Name
+	attachedFunctionName := request.Name
 	outputCollectionName := request.OutputCollectionName
 	tenantID := request.TenantId
 	databaseName := request.Database
-	operatorName := request.OperatorName
+	functionName := request.FunctionName
 
-	// Phase 0: No existing task
-	suite.mockMetaDomain.On("TaskDb", ctx).Return(suite.mockTaskDb).Once()
-	suite.mockTaskDb.On("GetByName", inputCollectionID, taskName).
+	// Phase 0: No existing attached function
+	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("GetByName", inputCollectionID, attachedFunctionName).
 		Return(nil, nil).Once()
 
-	// Phase 1: Create task in transaction
-	suite.mockMetaDomain.On("TaskDb", mock.Anything).Return(suite.mockTaskDb).Once()
-	suite.mockTaskDb.On("GetByName", inputCollectionID, taskName).
+	// Phase 1: Create attached function in transaction
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("GetByName", inputCollectionID, attachedFunctionName).
 		Return(nil, nil).Once()
 
 	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
 	suite.mockDatabaseDb.On("GetDatabases", tenantID, databaseName).
 		Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
 
-	suite.mockMetaDomain.On("OperatorDb", mock.Anything).Return(suite.mockOperatorDb).Once()
-	suite.mockOperatorDb.On("GetByName", operatorName).
-		Return(&dbmodel.Operator{OperatorID: operatorID, OperatorName: operatorName}, nil).Once()
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
+	suite.mockFunctionDb.On("GetByName", functionName).
+		Return(&dbmodel.Function{ID: functionID, Name: functionName}, nil).Once()
 
 	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
 	suite.mockCollectionDb.On("GetCollections",
@@ -119,13 +119,13 @@ func (suite *CreateTaskTestSuite) setupCreateTaskMocks(ctx context.Context, requ
 		[]string(nil), &outputCollectionName, tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
 		Return([]*dbmodel.CollectionAndMetadata{}, nil).Once()
 
-	// Return a matcher function that can be used to capture task data
-	return func(task *dbmodel.Task) bool {
-		return task.LowestLiveNonce == nil
+	// Return a matcher function that can be used to capture attached function data
+	return func(attachedFunction *dbmodel.AttachedFunction) bool {
+		return attachedFunction.LowestLiveNonce == nil
 	}
 }
 
-func (suite *CreateTaskTestSuite) SetupTest() {
+func (suite *AttachFunctionTestSuite) SetupTest() {
 	// Create all mocks - note: we manually control AssertExpectations
 	// to avoid conflicts with automatic cleanup
 	suite.mockMetaDomain = &dbmodel_mocks.IMetaDomain{}
@@ -134,11 +134,11 @@ func (suite *CreateTaskTestSuite) SetupTest() {
 	suite.mockTxImpl = &dbmodel_mocks.ITransaction{}
 	suite.mockTxImpl.Test(suite.T())
 
-	suite.mockTaskDb = &dbmodel_mocks.ITaskDb{}
-	suite.mockTaskDb.Test(suite.T())
+	suite.mockAttachedFunctionDb = &dbmodel_mocks.IAttachedFunctionDb{}
+	suite.mockAttachedFunctionDb.Test(suite.T())
 
-	suite.mockOperatorDb = &dbmodel_mocks.IOperatorDb{}
-	suite.mockOperatorDb.Test(suite.T())
+	suite.mockFunctionDb = &dbmodel_mocks.IFunctionDb{}
+	suite.mockFunctionDb.Test(suite.T())
 
 	suite.mockDatabaseDb = &dbmodel_mocks.IDatabaseDb{}
 	suite.mockDatabaseDb.Test(suite.T())
@@ -160,24 +160,24 @@ func (suite *CreateTaskTestSuite) SetupTest() {
 	}
 }
 
-// TestCreateTask_SuccessfulCreation_WithHeapService tests the happy path:
-// - No existing task (Phase 0)
-// - Create task with NULL lowest_live_nonce (Phase 1)
+// TestAttachFunction_SuccessfulCreation_WithHeapService tests the happy path:
+// - No existing attached function (Phase 0)
+// - Create attached function with NULL lowest_live_nonce (Phase 1)
 // - Push to heap service (Phase 2)
 // - Update lowest_live_nonce to complete initialization (Phase 3)
-func (suite *CreateTaskTestSuite) TestCreateTask_SuccessfulCreation_WithHeapService() {
+func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation_WithHeapService() {
 	ctx := context.Background()
 
 	// Test data
-	taskName := "test-task"
+	attachedFunctionName := "test-attachedFunction"
 	inputCollectionID := "input-collection-id"
 	outputCollectionName := "output-collection"
-	operatorName := "record_counter"
+	functionName := "record_counter"
 	tenantID := "test-tenant"
 	databaseName := "test-database"
 	databaseID := "database-uuid"
-	operatorID := uuid.New()
-	minRecordsForTask := uint64(100)
+	functionID := uuid.New()
+	MinRecordsForInvocation := uint64(100)
 
 	params := &structpb.Struct{
 		Fields: map[string]*structpb.Value{
@@ -185,22 +185,22 @@ func (suite *CreateTaskTestSuite) TestCreateTask_SuccessfulCreation_WithHeapServ
 		},
 	}
 
-	request := &coordinatorpb.CreateTaskRequest{
-		Name:                 taskName,
-		InputCollectionId:    inputCollectionID,
-		OutputCollectionName: outputCollectionName,
-		OperatorName:         operatorName,
-		TenantId:             tenantID,
-		Database:             databaseName,
-		MinRecordsForTask:    minRecordsForTask,
-		Params:               params,
+	request := &coordinatorpb.AttachFunctionRequest{
+		Name:                    attachedFunctionName,
+		InputCollectionId:       inputCollectionID,
+		OutputCollectionName:    outputCollectionName,
+		FunctionName:            functionName,
+		TenantId:                tenantID,
+		Database:                databaseName,
+		MinRecordsForInvocation: MinRecordsForInvocation,
+		Params:                  params,
 	}
 
-	// ===== Phase 1: Create task in transaction =====
+	// ===== Phase 1: Attach function in transaction =====
 	// Setup mocks that will be called within the transaction (using mock.Anything for context)
-	// Check if task exists (idempotency check inside transaction)
-	suite.mockMetaDomain.On("TaskDb", mock.Anything).Return(suite.mockTaskDb).Once()
-	suite.mockTaskDb.On("GetByName", inputCollectionID, taskName).
+	// Check if attached function exists (idempotency check inside transaction)
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("GetByName", inputCollectionID, attachedFunctionName).
 		Return(nil, nil).Once()
 
 	// Look up database
@@ -208,10 +208,10 @@ func (suite *CreateTaskTestSuite) TestCreateTask_SuccessfulCreation_WithHeapServ
 	suite.mockDatabaseDb.On("GetDatabases", tenantID, databaseName).
 		Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
 
-	// Look up operator
-	suite.mockMetaDomain.On("OperatorDb", mock.Anything).Return(suite.mockOperatorDb).Once()
-	suite.mockOperatorDb.On("GetByName", operatorName).
-		Return(&dbmodel.Operator{OperatorID: operatorID, OperatorName: operatorName}, nil).Once()
+	// Look up function
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
+	suite.mockFunctionDb.On("GetByName", functionName).
+		Return(&dbmodel.Function{ID: functionID, Name: functionName}, nil).Once()
 
 	// Check input collection exists
 	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
@@ -225,19 +225,19 @@ func (suite *CreateTaskTestSuite) TestCreateTask_SuccessfulCreation_WithHeapServ
 		[]string(nil), &outputCollectionName, tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
 		Return([]*dbmodel.CollectionAndMetadata{}, nil).Once()
 
-	// Insert task with lowest_live_nonce = NULL
-	suite.mockMetaDomain.On("TaskDb", mock.Anything).Return(suite.mockTaskDb).Once()
-	suite.mockTaskDb.On("Insert", mock.MatchedBy(func(task *dbmodel.Task) bool {
-		// Verify task structure
-		return task.Name == taskName &&
-			task.InputCollectionID == inputCollectionID &&
-			task.OutputCollectionName == outputCollectionName &&
-			task.OperatorID == operatorID &&
-			task.TenantID == tenantID &&
-			task.DatabaseID == databaseID &&
-			task.MinRecordsForTask == int64(minRecordsForTask) &&
-			task.LowestLiveNonce == nil && // KEY: Must be NULL for 2PC
-			task.NextNonce != uuid.Nil
+	// Insert attached function with lowest_live_nonce = NULL
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("Insert", mock.MatchedBy(func(attachedFunction *dbmodel.AttachedFunction) bool {
+		// Verify attached function structure
+		return attachedFunction.Name == attachedFunctionName &&
+			attachedFunction.InputCollectionID == inputCollectionID &&
+			attachedFunction.OutputCollectionName == outputCollectionName &&
+			attachedFunction.FunctionID == functionID &&
+			attachedFunction.TenantID == tenantID &&
+			attachedFunction.DatabaseID == databaseID &&
+			attachedFunction.MinRecordsForInvocation == int64(MinRecordsForInvocation) &&
+			attachedFunction.LowestLiveNonce == nil && // KEY: Must be NULL for 2PC
+			attachedFunction.NextNonce != uuid.Nil
 	})).Return(nil).Once()
 
 	// Mock the Transaction call itself - it will execute the function
@@ -264,51 +264,51 @@ func (suite *CreateTaskTestSuite) TestCreateTask_SuccessfulCreation_WithHeapServ
 	})).Return(nil).Once()
 
 	// ===== Phase 3: Update lowest_live_nonce =====
-	suite.mockMetaDomain.On("TaskDb", ctx).Return(suite.mockTaskDb).Once()
-	suite.mockTaskDb.On("UpdateLowestLiveNonce", mock.AnythingOfType("uuid.UUID"), testMinimalUUIDv7).
+	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("UpdateLowestLiveNonce", mock.AnythingOfType("uuid.UUID"), testMinimalUUIDv7).
 		Return(nil).Once()
 
-	// Execute CreateTask
-	response, err := suite.coordinator.CreateTask(ctx, request)
+	// Execute AttachFunction
+	response, err := suite.coordinator.AttachFunction(ctx, request)
 
 	// Assertions
 	suite.NoError(err)
 	suite.NotNil(response)
-	suite.NotEmpty(response.TaskId)
+	suite.NotEmpty(response.Id)
 
-	// Verify task ID is valid UUID
-	taskID, err := uuid.Parse(response.TaskId)
+	// Verify attached function ID is valid UUID
+	attachedFunctionID, err := uuid.Parse(response.Id)
 	suite.NoError(err)
-	suite.NotEqual(uuid.Nil, taskID)
+	suite.NotEqual(uuid.Nil, attachedFunctionID)
 
 	// Verify all mocks were called as expected
 	suite.mockMetaDomain.AssertExpectations(suite.T())
-	suite.mockTaskDb.AssertExpectations(suite.T())
-	suite.mockOperatorDb.AssertExpectations(suite.T())
+	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
+	suite.mockFunctionDb.AssertExpectations(suite.T())
 	suite.mockDatabaseDb.AssertExpectations(suite.T())
 	suite.mockCollectionDb.AssertExpectations(suite.T())
 	suite.mockHeapClient.AssertExpectations(suite.T())
 	suite.mockTxImpl.AssertExpectations(suite.T())
 }
 
-// TestCreateTask_IdempotentRequest_AlreadyInitialized tests idempotency:
-// - Task already exists with lowest_live_nonce set (fully initialized)
-// - Should return existing task immediately without any writes
+// TestAttachFunction_IdempotentRequest_AlreadyInitialized tests idempotency:
+// - Attached function already exists with lowest_live_nonce set (fully initialized)
+// - Should return existing attached function immediately without any writes
 // - Should validate that all parameters match
-func (suite *CreateTaskTestSuite) TestCreateTask_IdempotentRequest_AlreadyInitialized() {
+func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_AlreadyInitialized() {
 	ctx := context.Background()
 
 	// Test data
-	existingTaskID := uuid.New()
-	taskName := "existing-task"
+	existingAttachedFunctionID := uuid.New()
+	attachedFunctionName := "existing-attachedFunction"
 	inputCollectionID := "input-collection-id"
 	outputCollectionName := "output-collection"
-	operatorName := "record_counter"
+	functionName := "record_counter"
 	tenantID := "test-tenant"
 	databaseName := "test-database"
 	databaseID := "database-uuid"
-	operatorID := uuid.New()
-	minRecordsForTask := uint64(100)
+	functionID := uuid.New()
+	MinRecordsForInvocation := uint64(100)
 	nextNonce := uuid.Must(uuid.NewV7())
 	lowestLiveNonce := uuid.Must(uuid.NewV7())
 
@@ -318,99 +318,102 @@ func (suite *CreateTaskTestSuite) TestCreateTask_IdempotentRequest_AlreadyInitia
 		},
 	}
 
-	request := &coordinatorpb.CreateTaskRequest{
-		Name:                 taskName,
-		InputCollectionId:    inputCollectionID,
-		OutputCollectionName: outputCollectionName,
-		OperatorName:         operatorName,
-		TenantId:             tenantID,
-		Database:             databaseName,
-		MinRecordsForTask:    minRecordsForTask,
-		Params:               params,
+	request := &coordinatorpb.AttachFunctionRequest{
+		Name:                    attachedFunctionName,
+		InputCollectionId:       inputCollectionID,
+		OutputCollectionName:    outputCollectionName,
+		FunctionName:            functionName,
+		TenantId:                tenantID,
+		Database:                databaseName,
+		MinRecordsForInvocation: MinRecordsForInvocation,
+		Params:                  params,
 	}
 
-	// Existing task in database (fully initialized)
+	// Existing attached function in database (fully initialized)
 	now := time.Now()
-	existingTask := &dbmodel.Task{
-		ID:                   existingTaskID,
-		Name:                 taskName,
-		TenantID:             tenantID,
-		DatabaseID:           databaseID,
-		InputCollectionID:    inputCollectionID,
-		OutputCollectionName: outputCollectionName,
-		OperatorID:           operatorID,
-		MinRecordsForTask:    int64(minRecordsForTask),
-		NextNonce:            nextNonce,
-		LowestLiveNonce:      &lowestLiveNonce, // KEY: Already initialized
-		NextRun:              now,
-		CreatedAt:            now,
-		UpdatedAt:            now,
+	existingAttachedFunction := &dbmodel.AttachedFunction{
+		ID:                      existingAttachedFunctionID,
+		Name:                    attachedFunctionName,
+		TenantID:                tenantID,
+		DatabaseID:              databaseID,
+		InputCollectionID:       inputCollectionID,
+		OutputCollectionName:    outputCollectionName,
+		FunctionID:              functionID,
+		MinRecordsForInvocation: int64(MinRecordsForInvocation),
+		NextNonce:               nextNonce,
+		LowestLiveNonce:         &lowestLiveNonce, // KEY: Already initialized
+		NextRun:                 now,
+		CreatedAt:               now,
+		UpdatedAt:               now,
 	}
 
-	// ===== Phase 1: Transaction checks if task exists =====
-	suite.mockMetaDomain.On("TaskDb", mock.Anything).Return(suite.mockTaskDb).Once()
-	suite.mockTaskDb.On("GetByName", inputCollectionID, taskName).
-		Return(existingTask, nil).Once()
-
-	// Validate operator matches (inside transaction)
-	suite.mockMetaDomain.On("OperatorDb", mock.Anything).Return(suite.mockOperatorDb).Once()
-	suite.mockOperatorDb.On("GetByID", operatorID).
-		Return(&dbmodel.Operator{OperatorID: operatorID, OperatorName: operatorName}, nil).Once()
-
-	// Validate database matches (inside transaction)
-	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
-	suite.mockDatabaseDb.On("GetDatabases", tenantID, databaseName).
-		Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
+	// ===== Phase 1: Transaction checks if attached function exists =====
+	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("GetByName", inputCollectionID, attachedFunctionName).
+		Return(existingAttachedFunction, nil).Once()
 
 	// Mock transaction call
 	suite.mockTxImpl.On("Transaction", ctx, mock.AnythingOfType("func(context.Context) error")).
 		Run(func(args mock.Arguments) {
 			txFunc := args.Get(1).(func(context.Context) error)
-			_ = txFunc(context.Background())
+			txCtx := context.Background()
+
+			// Inside transaction: validate function by ID
+			suite.mockMetaDomain.On("FunctionDb", txCtx).Return(suite.mockFunctionDb).Once()
+			suite.mockFunctionDb.On("GetByID", functionID).
+				Return(&dbmodel.Function{ID: functionID, Name: functionName}, nil).Once()
+
+			// Validate database matches
+			suite.mockMetaDomain.On("DatabaseDb", txCtx).Return(suite.mockDatabaseDb).Once()
+			suite.mockDatabaseDb.On("GetDatabases", tenantID, databaseName).
+				Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
+
+			_ = txFunc(txCtx)
 		}).Return(nil).Once()
 
-	// Execute CreateTask
-	response, err := suite.coordinator.CreateTask(ctx, request)
+	// Execute AttachFunction
+	response, err := suite.coordinator.AttachFunction(ctx, request)
 
 	// Assertions
 	suite.NoError(err)
 	suite.NotNil(response)
-	suite.Equal(existingTaskID.String(), response.TaskId)
+	suite.Equal(existingAttachedFunctionID.String(), response.Id)
 
 	// Verify no writes occurred (no Insert, no UpdateLowestLiveNonce, no heap Push)
 	// Note: Transaction IS called for idempotency check, but no writes happen inside it
 	suite.mockTxImpl.AssertNumberOfCalls(suite.T(), "Transaction", 1)
-	suite.mockTaskDb.AssertNotCalled(suite.T(), "Insert")
-	suite.mockTaskDb.AssertNotCalled(suite.T(), "UpdateLowestLiveNonce")
+	suite.mockAttachedFunctionDb.AssertNotCalled(suite.T(), "Insert")
+	suite.mockAttachedFunctionDb.AssertNotCalled(suite.T(), "UpdateLowestLiveNonce")
+
 	suite.mockHeapClient.AssertNotCalled(suite.T(), "Push")
 
 	// Verify all read mocks were called
 	suite.mockMetaDomain.AssertExpectations(suite.T())
-	suite.mockTaskDb.AssertExpectations(suite.T())
-	suite.mockOperatorDb.AssertExpectations(suite.T())
+	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
+	suite.mockFunctionDb.AssertExpectations(suite.T())
 	suite.mockDatabaseDb.AssertExpectations(suite.T())
 }
 
-// TestCreateTask_RecoveryFlow_HeapFailureThenSuccess tests the realistic recovery scenario:
-// - First CreateTask: Phase 1 succeeds (task created), Phase 2 fails (heap error)
-// - Task left in incomplete state (lowest_live_nonce = NULL)
-// - GetTaskByName: Returns ErrTaskNotReady because task is incomplete
-// - Second CreateTask: Detects incomplete task, completes Phase 2 & 3, succeeds
-// - GetTaskByName: Now succeeds and returns the ready task
-func (suite *CreateTaskTestSuite) TestCreateTask_RecoveryFlow_HeapFailureThenSuccess() {
+// TestAttachFunction_RecoveryFlow_HeapFailureThenSuccess tests the realistic recovery scenario:
+// - First AttachFunction: Phase 1 succeeds (attached function created), Phase 2 fails (heap error)
+// - Attached function left in incomplete state (lowest_live_nonce = NULL)
+// - GetAttachedFunctionByName: Returns ErrAttachedFunctionNotReady because attached function is incomplete
+// - Second AttachFunction: Detects incomplete attached function, completes Phase 2 & 3, succeeds
+// - GetAttachedFunctionByName: Now succeeds and returns the ready attached function
+func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow_HeapFailureThenSuccess() {
 	ctx := context.Background()
 
 	// Test data
-	incompleteTaskID := uuid.New()
-	taskName := "task-with-heap-failure"
+	incompleteAttachedFunctionID := uuid.New()
+	attachedFunctionName := "attachedFunction-with-heap-failure"
 	inputCollectionID := "input-collection-id"
 	outputCollectionName := "output-collection"
-	operatorName := "record_counter"
+	functionName := "record_counter"
 	tenantID := "test-tenant"
 	databaseName := "test-database"
 	databaseID := "database-uuid"
-	operatorID := uuid.New()
-	minRecordsForTask := uint64(100)
+	functionID := uuid.New()
+	MinRecordsForInvocation := uint64(100)
 	nextNonce := uuid.Must(uuid.NewV7())
 	now := time.Now()
 
@@ -420,31 +423,31 @@ func (suite *CreateTaskTestSuite) TestCreateTask_RecoveryFlow_HeapFailureThenSuc
 		},
 	}
 
-	request := &coordinatorpb.CreateTaskRequest{
-		Name:                 taskName,
-		InputCollectionId:    inputCollectionID,
-		OutputCollectionName: outputCollectionName,
-		OperatorName:         operatorName,
-		TenantId:             tenantID,
-		Database:             databaseName,
-		MinRecordsForTask:    minRecordsForTask,
-		Params:               params,
+	request := &coordinatorpb.AttachFunctionRequest{
+		Name:                    attachedFunctionName,
+		InputCollectionId:       inputCollectionID,
+		OutputCollectionName:    outputCollectionName,
+		FunctionName:            functionName,
+		TenantId:                tenantID,
+		Database:                databaseName,
+		MinRecordsForInvocation: MinRecordsForInvocation,
+		Params:                  params,
 	}
 
 	// ========== FIRST ATTEMPT: Heap Push Fails ==========
 
-	// Phase 1: Create task in transaction
-	suite.mockMetaDomain.On("TaskDb", mock.Anything).Return(suite.mockTaskDb).Once()
-	suite.mockTaskDb.On("GetByName", inputCollectionID, taskName).
+	// Phase 1: Create attached function in transaction
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("GetByName", inputCollectionID, attachedFunctionName).
 		Return(nil, nil).Once()
 
 	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
 	suite.mockDatabaseDb.On("GetDatabases", tenantID, databaseName).
 		Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
 
-	suite.mockMetaDomain.On("OperatorDb", mock.Anything).Return(suite.mockOperatorDb).Once()
-	suite.mockOperatorDb.On("GetByName", operatorName).
-		Return(&dbmodel.Operator{OperatorID: operatorID, OperatorName: operatorName}, nil).Once()
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
+	suite.mockFunctionDb.On("GetByName", functionName).
+		Return(&dbmodel.Function{ID: functionID, Name: functionName}, nil).Once()
 
 	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
 	suite.mockCollectionDb.On("GetCollections",
@@ -456,9 +459,9 @@ func (suite *CreateTaskTestSuite) TestCreateTask_RecoveryFlow_HeapFailureThenSuc
 		[]string(nil), &outputCollectionName, tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
 		Return([]*dbmodel.CollectionAndMetadata{}, nil).Once()
 
-	suite.mockMetaDomain.On("TaskDb", mock.Anything).Return(suite.mockTaskDb).Once()
-	suite.mockTaskDb.On("Insert", mock.MatchedBy(func(task *dbmodel.Task) bool {
-		return task.LowestLiveNonce == nil
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("Insert", mock.MatchedBy(func(attachedFunction *dbmodel.AttachedFunction) bool {
+		return attachedFunction.LowestLiveNonce == nil
 	})).Return(nil).Once()
 
 	suite.mockTxImpl.On("Transaction", ctx, mock.AnythingOfType("func(context.Context) error")).
@@ -473,41 +476,41 @@ func (suite *CreateTaskTestSuite) TestCreateTask_RecoveryFlow_HeapFailureThenSuc
 
 	// Phase 3: NOT REACHED (because Phase 2 failed)
 
-	// First CreateTask call - should fail at heap push
-	response1, err1 := suite.coordinator.CreateTask(ctx, request)
+	// First AttachFunction call - should fail at heap push
+	response1, err1 := suite.coordinator.AttachFunction(ctx, request)
 	suite.Error(err1)
 	suite.Nil(response1)
 	suite.Contains(err1.Error(), "heap service")
 
-	// ========== GetTaskByName: Should Return ErrTaskNotReady ==========
+	// ========== GetAttachedFunctionByName: Should Return ErrAttachedFunctionNotReady ==========
 
-	incompleteTask := &dbmodel.Task{
-		ID:                   incompleteTaskID,
-		Name:                 taskName,
-		TenantID:             tenantID,
-		DatabaseID:           databaseID,
-		InputCollectionID:    inputCollectionID,
-		OutputCollectionName: outputCollectionName,
-		OperatorID:           operatorID,
-		MinRecordsForTask:    int64(minRecordsForTask),
-		NextNonce:            nextNonce,
-		LowestLiveNonce:      nil,
-		NextRun:              now,
-		CreatedAt:            now,
-		UpdatedAt:            now,
+	incompleteAttachedFunction := &dbmodel.AttachedFunction{
+		ID:                      incompleteAttachedFunctionID,
+		Name:                    attachedFunctionName,
+		TenantID:                tenantID,
+		DatabaseID:              databaseID,
+		InputCollectionID:       inputCollectionID,
+		OutputCollectionName:    outputCollectionName,
+		FunctionID:              functionID,
+		MinRecordsForInvocation: int64(MinRecordsForInvocation),
+		NextNonce:               nextNonce,
+		LowestLiveNonce:         nil,
+		NextRun:                 now,
+		CreatedAt:               now,
+		UpdatedAt:               now,
 	}
 
 	// ========== SECOND ATTEMPT: Recovery Succeeds ==========
 
-	// Phase 1: Transaction - GetByName returns incomplete task inside transaction
-	suite.mockMetaDomain.On("TaskDb", mock.Anything).Return(suite.mockTaskDb).Once()
-	suite.mockTaskDb.On("GetByName", inputCollectionID, taskName).
-		Return(incompleteTask, nil).Once() // Return task without error (DAO doesn't return ErrTaskNotReady, that's for GetByID)
+	// Phase 0: GetByName returns incomplete attached function (with ErrAttachedFunctionNotReady, which AttachFunction handles)
+	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("GetByName", inputCollectionID, attachedFunctionName).
+		Return(incompleteAttachedFunction, nil).Once()
 
-	// Validate operator matches (inside validateTaskMatchesRequest, called within transaction)
-	suite.mockMetaDomain.On("OperatorDb", mock.Anything).Return(suite.mockOperatorDb).Once()
-	suite.mockOperatorDb.On("GetByID", operatorID).
-		Return(&dbmodel.Operator{OperatorID: operatorID, OperatorName: operatorName}, nil).Once()
+	// Validate function matches
+	suite.mockMetaDomain.On("FunctionDb", ctx).Return(suite.mockFunctionDb).Once()
+	suite.mockFunctionDb.On("GetByID", functionID).
+		Return(&dbmodel.Function{ID: functionID, Name: functionName}, nil).Once()
 
 	// Validate database matches (inside validateTaskMatchesRequest, called within transaction)
 	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
@@ -528,50 +531,50 @@ func (suite *CreateTaskTestSuite) TestCreateTask_RecoveryFlow_HeapFailureThenSuc
 		}
 		schedule := schedules[0]
 		return schedule.Triggerable.PartitioningUuid == inputCollectionID &&
-			schedule.Triggerable.SchedulingUuid == incompleteTaskID.String() &&
+			schedule.Triggerable.SchedulingUuid == incompleteAttachedFunctionID.String() &&
 			schedule.Nonce == testMinimalUUIDv7.String() &&
 			schedule.NextScheduled != nil
 	})).Return(nil).Once()
 
 	// Phase 3: Update lowest_live_nonce to complete initialization
-	suite.mockMetaDomain.On("TaskDb", ctx).Return(suite.mockTaskDb).Once()
-	suite.mockTaskDb.On("UpdateLowestLiveNonce", incompleteTaskID, testMinimalUUIDv7).
+	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("UpdateLowestLiveNonce", incompleteAttachedFunctionID, testMinimalUUIDv7).
 		Return(nil).Once()
 
-	// Second CreateTask call - should succeed
-	response2, err2 := suite.coordinator.CreateTask(ctx, request)
+	// Second AttachFunction call - should succeed
+	response2, err2 := suite.coordinator.AttachFunction(ctx, request)
 	suite.NoError(err2)
 	suite.NotNil(response2)
-	suite.Equal(incompleteTaskID.String(), response2.TaskId)
+	suite.Equal(incompleteAttachedFunctionID.String(), response2.Id)
 
 	// Verify transaction was called in both attempts (idempotency check happens in transaction)
 	suite.mockTxImpl.AssertNumberOfCalls(suite.T(), "Transaction", 2) // First attempt + recovery attempt
 
 	// Verify Phase 2 and 3 were executed in recovery
 	suite.mockHeapClient.AssertExpectations(suite.T())
-	suite.mockTaskDb.AssertExpectations(suite.T())
+	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
 	suite.mockMetaDomain.AssertExpectations(suite.T())
 }
 
-// TestCreateTask_IdempotentRequest_ParameterMismatch tests when task exists but with different parameters:
-// - Task already exists with different operator_name
+// TestAttachFunction_IdempotentRequest_ParameterMismatch tests when attached function exists but with different parameters:
+// - Attached function already exists with different function_name
 // - Should return AlreadyExists error with descriptive message
 // - Should not proceed with any initialization
-func (suite *CreateTaskTestSuite) TestCreateTask_IdempotentRequest_ParameterMismatch() {
+func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_ParameterMismatch() {
 	ctx := context.Background()
 
 	// Test data
-	existingTaskID := uuid.New()
-	taskName := "existing-task"
+	existingAttachedFunctionID := uuid.New()
+	attachedFunctionName := "existing-attachedFunction"
 	inputCollectionID := "input-collection-id"
 	outputCollectionName := "output-collection"
 	existingOperatorName := "record_counter"
-	requestedOperatorName := "different_operator" // DIFFERENT
+	requestedOperatorName := "different_function" // DIFFERENT
 	tenantID := "test-tenant"
 	databaseName := "test-database"
 	databaseID := "database-uuid"
 	existingOperatorID := uuid.New()
-	minRecordsForTask := uint64(100)
+	MinRecordsForInvocation := uint64(100)
 	nextNonce := uuid.Must(uuid.NewV7())
 	lowestLiveNonce := uuid.Must(uuid.NewV7())
 	now := time.Now()
@@ -582,45 +585,45 @@ func (suite *CreateTaskTestSuite) TestCreateTask_IdempotentRequest_ParameterMism
 		},
 	}
 
-	request := &coordinatorpb.CreateTaskRequest{
-		Name:                 taskName,
-		InputCollectionId:    inputCollectionID,
-		OutputCollectionName: outputCollectionName,
-		OperatorName:         requestedOperatorName, // Different from existing
-		TenantId:             tenantID,
-		Database:             databaseName,
-		MinRecordsForTask:    minRecordsForTask,
-		Params:               params,
+	request := &coordinatorpb.AttachFunctionRequest{
+		Name:                    attachedFunctionName,
+		InputCollectionId:       inputCollectionID,
+		OutputCollectionName:    outputCollectionName,
+		FunctionName:            requestedOperatorName, // Different from existing
+		TenantId:                tenantID,
+		Database:                databaseName,
+		MinRecordsForInvocation: MinRecordsForInvocation,
+		Params:                  params,
 	}
 
-	// Existing task in database with DIFFERENT operator
-	existingTask := &dbmodel.Task{
-		ID:                   existingTaskID,
-		Name:                 taskName,
-		TenantID:             tenantID,
-		DatabaseID:           databaseID,
-		InputCollectionID:    inputCollectionID,
-		OutputCollectionName: outputCollectionName,
-		OperatorID:           existingOperatorID,
-		MinRecordsForTask:    int64(minRecordsForTask),
-		NextNonce:            nextNonce,
-		LowestLiveNonce:      &lowestLiveNonce, // Already initialized
-		NextRun:              now,
-		CreatedAt:            now,
-		UpdatedAt:            now,
+	// Existing attached function in database with DIFFERENT function
+	existingAttachedFunction := &dbmodel.AttachedFunction{
+		ID:                      existingAttachedFunctionID,
+		Name:                    attachedFunctionName,
+		TenantID:                tenantID,
+		DatabaseID:              databaseID,
+		InputCollectionID:       inputCollectionID,
+		OutputCollectionName:    outputCollectionName,
+		FunctionID:              existingOperatorID,
+		MinRecordsForInvocation: int64(MinRecordsForInvocation),
+		NextNonce:               nextNonce,
+		LowestLiveNonce:         &lowestLiveNonce, // Already initialized
+		NextRun:                 now,
+		CreatedAt:               now,
+		UpdatedAt:               now,
 	}
 
 	// ===== Phase 1: Transaction checks if task exists - finds task with different params =====
-	suite.mockMetaDomain.On("TaskDb", mock.Anything).Return(suite.mockTaskDb).Once()
-	suite.mockTaskDb.On("GetByName", inputCollectionID, taskName).
-		Return(existingTask, nil).Once()
+	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
+	suite.mockAttachedFunctionDb.On("GetByName", inputCollectionID, attachedFunctionName).
+		Return(existingAttachedFunction, nil).Once()
 
-	// Validate operator - returns DIFFERENT operator name (inside transaction)
-	suite.mockMetaDomain.On("OperatorDb", mock.Anything).Return(suite.mockOperatorDb).Once()
-	suite.mockOperatorDb.On("GetByID", existingOperatorID).
-		Return(&dbmodel.Operator{
-			OperatorID:   existingOperatorID,
-			OperatorName: existingOperatorName, // Different from request
+	// Validate function - returns DIFFERENT function name
+	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Once()
+	suite.mockFunctionDb.On("GetByID", existingOperatorID).
+		Return(&dbmodel.Function{
+			ID:   existingOperatorID,
+			Name: existingOperatorName, // Different from request
 		}, nil).Once()
 
 	// Database lookup happens before the error is returned (inside transaction)
@@ -633,30 +636,30 @@ func (suite *CreateTaskTestSuite) TestCreateTask_IdempotentRequest_ParameterMism
 		Run(func(args mock.Arguments) {
 			txFunc := args.Get(1).(func(context.Context) error)
 			_ = txFunc(context.Background())
-		}).Return(status.Errorf(codes.AlreadyExists, "task already exists with different operator: existing=%s, requested=%s", existingOperatorName, requestedOperatorName)).Once()
+		}).Return(status.Errorf(codes.AlreadyExists, "different function is attached with this name: existing=%s, requested=%s", existingOperatorName, requestedOperatorName)).Once()
 
-	// Execute CreateTask
-	response, err := suite.coordinator.CreateTask(ctx, request)
+	// Execute AttachFunction
+	response, err := suite.coordinator.AttachFunction(ctx, request)
 
 	// Assertions - should fail with AlreadyExists error
 	suite.Error(err)
 	suite.Nil(response)
-	suite.Contains(err.Error(), "task already exists with different operator")
+	suite.Contains(err.Error(), "different function is attached with this name")
 	suite.Contains(err.Error(), existingOperatorName)
 	suite.Contains(err.Error(), requestedOperatorName)
 
 	// Verify no writes occurred (Transaction IS called but Insert/Update/Push are not)
 	suite.mockTxImpl.AssertNumberOfCalls(suite.T(), "Transaction", 1)
-	suite.mockTaskDb.AssertNotCalled(suite.T(), "Insert")
-	suite.mockTaskDb.AssertNotCalled(suite.T(), "UpdateLowestLiveNonce")
+	suite.mockAttachedFunctionDb.AssertNotCalled(suite.T(), "Insert")
+	suite.mockAttachedFunctionDb.AssertNotCalled(suite.T(), "UpdateLowestLiveNonce")
 	suite.mockHeapClient.AssertNotCalled(suite.T(), "Push")
 
 	// Verify read mocks were called
 	suite.mockMetaDomain.AssertExpectations(suite.T())
-	suite.mockTaskDb.AssertExpectations(suite.T())
-	suite.mockOperatorDb.AssertExpectations(suite.T())
+	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
+	suite.mockFunctionDb.AssertExpectations(suite.T())
 }
 
-func TestCreateTaskTestSuite(t *testing.T) {
-	suite.Run(t, new(CreateTaskTestSuite))
+func TestAttachFunctionTestSuite(t *testing.T) {
+	suite.Run(t, new(AttachFunctionTestSuite))
 }

@@ -32,105 +32,105 @@ var minimalUUIDv7 = uuid.UUID{
 	0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // variant bits + rest = 0 (bytes 8-15)
 }
 
-// validateTaskMatchesRequest validates that an existing task's parameters match the request parameters.
+// validateAttachedFunctionMatchesRequest validates that an existing attached function's parameters match the request parameters.
 // Returns an error if any parameters don't match. This is used for idempotency and race condition handling.
-func (s *Coordinator) validateTaskMatchesRequest(ctx context.Context, task *dbmodel.Task, req *coordinatorpb.CreateTaskRequest) error {
-	// Look up the operator for the existing task
-	existingOperator, err := s.catalog.metaDomain.OperatorDb(ctx).GetByID(task.OperatorID)
+func (s *Coordinator) validateAttachedFunctionMatchesRequest(ctx context.Context, attachedFunction *dbmodel.AttachedFunction, req *coordinatorpb.AttachFunctionRequest) error {
+	// Look up the function for the existing attached function
+	existingFunction, err := s.catalog.metaDomain.FunctionDb(ctx).GetByID(attachedFunction.FunctionID)
 	if err != nil {
-		log.Error("validateTaskMatchesRequest: failed to get task's operator", zap.Error(err))
+		log.Error("validateAttachedFunctionMatchesRequest: failed to get attached function's function", zap.Error(err))
 		return err
 	}
-	if existingOperator == nil {
-		log.Error("validateTaskMatchesRequest: task's operator not found")
-		return common.ErrOperatorNotFound
+	if existingFunction == nil {
+		log.Error("validateAttachedFunctionMatchesRequest: attached function's function not found")
+		return common.ErrFunctionNotFound
 	}
 
 	// Look up database for comparison
 	databases, err := s.catalog.metaDomain.DatabaseDb(ctx).GetDatabases(req.TenantId, req.Database)
 	if err != nil {
-		log.Error("validateTaskMatchesRequest: failed to get database for validation", zap.Error(err))
+		log.Error("validateAttachedFunctionMatchesRequest: failed to get database for validation", zap.Error(err))
 		return err
 	}
 	if len(databases) == 0 {
-		log.Error("validateTaskMatchesRequest: database not found")
+		log.Error("validateAttachedFunctionMatchesRequest: database not found")
 		return common.ErrDatabaseNotFound
 	}
 
 	// Validate attributes match
-	if existingOperator.OperatorName != req.OperatorName {
-		log.Error("validateTaskMatchesRequest: task has different operator",
-			zap.String("existing", existingOperator.OperatorName),
-			zap.String("requested", req.OperatorName))
-		return status.Errorf(codes.AlreadyExists, "task already exists with different operator: existing=%s, requested=%s", existingOperator.OperatorName, req.OperatorName)
+	if existingFunction.Name != req.FunctionName {
+		log.Error("validateAttachedFunctionMatchesRequest: attached function has different function",
+			zap.String("existing", existingFunction.Name),
+			zap.String("requested", req.FunctionName))
+		return status.Errorf(codes.AlreadyExists, "attached function already exists with different function: existing=%s, requested=%s", existingFunction.Name, req.FunctionName)
 	}
-	if task.TenantID != req.TenantId {
-		log.Error("validateTaskMatchesRequest: task has different tenant")
-		return status.Errorf(codes.AlreadyExists, "task already exists with different tenant")
+	if attachedFunction.TenantID != req.TenantId {
+		log.Error("validateAttachedFunctionMatchesRequest: attached function has different tenant")
+		return status.Errorf(codes.AlreadyExists, "attached function already exists with different tenant")
 	}
-	if task.DatabaseID != databases[0].ID {
-		log.Error("validateTaskMatchesRequest: task has different database")
-		return status.Errorf(codes.AlreadyExists, "task already exists with different database")
+	if attachedFunction.DatabaseID != databases[0].ID {
+		log.Error("validateAttachedFunctionMatchesRequest: attached function has different database")
+		return status.Errorf(codes.AlreadyExists, "attached function already exists with different database")
 	}
-	if task.OutputCollectionName != req.OutputCollectionName {
-		log.Error("validateTaskMatchesRequest: task has different output collection name",
-			zap.String("existing", task.OutputCollectionName),
+	if attachedFunction.OutputCollectionName != req.OutputCollectionName {
+		log.Error("validateAttachedFunctionMatchesRequest: attached function has different output collection name",
+			zap.String("existing", attachedFunction.OutputCollectionName),
 			zap.String("requested", req.OutputCollectionName))
-		return status.Errorf(codes.AlreadyExists, "task already exists with different output collection: existing=%s, requested=%s", task.OutputCollectionName, req.OutputCollectionName)
+		return status.Errorf(codes.AlreadyExists, "attached function already exists with different output collection: existing=%s, requested=%s", attachedFunction.OutputCollectionName, req.OutputCollectionName)
 	}
-	if task.MinRecordsForTask != int64(req.MinRecordsForTask) {
-		log.Error("validateTaskMatchesRequest: task has different min_records_for_task",
-			zap.Int64("existing", task.MinRecordsForTask),
-			zap.Uint64("requested", req.MinRecordsForTask))
-		return status.Errorf(codes.AlreadyExists, "task already exists with different min_records_for_task: existing=%d, requested=%d", task.MinRecordsForTask, req.MinRecordsForTask)
+	if attachedFunction.MinRecordsForInvocation != int64(req.MinRecordsForInvocation) {
+		log.Error("validateAttachedFunctionMatchesRequest: attached function has different min_records_for_invocation",
+			zap.Int64("existing", attachedFunction.MinRecordsForInvocation),
+			zap.Uint64("requested", req.MinRecordsForInvocation))
+		return status.Errorf(codes.AlreadyExists, "attached function already exists with different min_records_for_invocation: existing=%d, requested=%d", attachedFunction.MinRecordsForInvocation, req.MinRecordsForInvocation)
 	}
 
 	return nil
 }
 
-// CreateTask creates a new task in the database
-func (s *Coordinator) CreateTask(ctx context.Context, req *coordinatorpb.CreateTaskRequest) (*coordinatorpb.CreateTaskResponse, error) {
-	log := log.With(zap.String("method", "CreateTask"))
+// AttachFunction creates a new attached function in the database
+func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.AttachFunctionRequest) (*coordinatorpb.AttachFunctionResponse, error) {
+	log := log.With(zap.String("method", "AttachFunction"))
 
-	// Validate task name doesn't use reserved prefix
+	// Validate attached function name doesn't use reserved prefix
 	if strings.HasPrefix(req.Name, "_deleted_") {
-		log.Error("CreateTask: task name cannot start with _deleted_")
-		return nil, common.ErrInvalidTaskName
+		log.Error("AttachFunction: attached function name cannot start with _deleted_")
+		return nil, common.ErrInvalidAttachedFunctionName
 	}
 
-	var taskID uuid.UUID = uuid.New()
+	var attachedFunctionID uuid.UUID = uuid.New()
 	var nextNonce uuid.UUID       // Store next_nonce to avoid re-fetching from DB
 	var lowestLiveNonce uuid.UUID // Store lowest_live_nonce to set in Phase 3
 	var nextRun time.Time
 	var skipPhase2And3 bool // Flag to skip Phase 2 & 3 if task is already fully initialized
 
-	// ===== Phase 1: Create task with lowest_live_nonce = NULL (if needed) =====
+	// ===== Phase 1: Create attached function with lowest_live_nonce = NULL (if needed) =====
 	err := s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		// Double-check task doesn't exist (race condition protection)
-		concurrentTask, err := s.catalog.metaDomain.TaskDb(txCtx).GetByName(req.InputCollectionId, req.Name)
+		// Double-check attached function doesn't exist (race condition protection)
+		concurrentAttachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetByName(req.InputCollectionId, req.Name)
 		if err != nil {
-			log.Error("CreateTask: failed to double-check task", zap.Error(err))
+			log.Error("AttachFunction: failed to double-check attached function", zap.Error(err))
 			return err
 		}
-		if concurrentTask != nil {
-			// Task was created concurrently, validate it matches our request
-			log.Info("CreateTask: task created concurrently, validating parameters",
-				zap.String("task_id", concurrentTask.ID.String()))
+		if concurrentAttachedFunction != nil {
+			// Attached function was created concurrently, validate it matches our request
+			log.Info("AttachFunction: attached function created concurrently, validating parameters",
+				zap.String("attached_function_id", concurrentAttachedFunction.ID.String()))
 
-			// Validate that concurrent task matches our request
-			if err := s.validateTaskMatchesRequest(txCtx, concurrentTask, req); err != nil {
+			// Validate that concurrent attached function matches our request
+			if err := s.validateAttachedFunctionMatchesRequest(txCtx, concurrentAttachedFunction, req); err != nil {
 				return err
 			}
 
-			// Validation passed, reuse the concurrent task's data
-			taskID = concurrentTask.ID
-			nextNonce = concurrentTask.NextNonce
-			nextRun = concurrentTask.NextRun
+			// Validation passed, reuse the concurrent attached function's data
+			attachedFunctionID = concurrentAttachedFunction.ID
+			nextNonce = concurrentAttachedFunction.NextNonce
+			nextRun = concurrentAttachedFunction.NextRun
 
 			// Set lowestLiveNonce for the concurrent case
-			if concurrentTask.LowestLiveNonce != nil {
+			if concurrentAttachedFunction.LowestLiveNonce != nil {
 				// Already initialized, skip Phase 2 & 3
-				lowestLiveNonce = *concurrentTask.LowestLiveNonce
+				lowestLiveNonce = *concurrentAttachedFunction.LowestLiveNonce
 				skipPhase2And3 = true
 			} else {
 				// Not initialized yet, generate minimal UUIDv7 and continue to Phase 2 & 3
@@ -142,23 +142,23 @@ func (s *Coordinator) CreateTask(ctx context.Context, req *coordinatorpb.CreateT
 		// Look up database_id
 		databases, err := s.catalog.metaDomain.DatabaseDb(txCtx).GetDatabases(req.TenantId, req.Database)
 		if err != nil {
-			log.Error("CreateTask: failed to get database", zap.Error(err))
+			log.Error("AttachFunction: failed to get database", zap.Error(err))
 			return err
 		}
 		if len(databases) == 0 {
-			log.Error("CreateTask: database not found")
+			log.Error("AttachFunction: database not found")
 			return common.ErrDatabaseNotFound
 		}
 
-		// Look up operator by name
-		operator, err := s.catalog.metaDomain.OperatorDb(txCtx).GetByName(req.OperatorName)
+		// Look up function by name
+		function, err := s.catalog.metaDomain.FunctionDb(txCtx).GetByName(req.FunctionName)
 		if err != nil {
-			log.Error("CreateTask: failed to get operator", zap.Error(err))
+			log.Error("AttachFunction: failed to get function", zap.Error(err))
 			return err
 		}
-		if operator == nil {
-			log.Error("CreateTask: operator not found", zap.String("operator_name", req.OperatorName))
-			return common.ErrOperatorNotFound
+		if function == nil {
+			log.Error("AttachFunction: function not found", zap.String("function_name", req.FunctionName))
+			return common.ErrFunctionNotFound
 		}
 
 		// Generate next_nonce as UUIDv7 with current time
@@ -173,11 +173,11 @@ func (s *Coordinator) CreateTask(ctx context.Context, req *coordinatorpb.CreateT
 		// Check if input collection exists
 		collections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections([]string{req.InputCollectionId}, nil, req.TenantId, req.Database, nil, nil, false)
 		if err != nil {
-			log.Error("CreateTask: failed to get input collection", zap.Error(err))
+			log.Error("AttachFunction: failed to get input collection", zap.Error(err))
 			return err
 		}
 		if len(collections) == 0 {
-			log.Error("CreateTask: input collection not found")
+			log.Error("AttachFunction: input collection not found")
 			return common.ErrCollectionNotFound
 		}
 
@@ -185,11 +185,11 @@ func (s *Coordinator) CreateTask(ctx context.Context, req *coordinatorpb.CreateT
 		outputCollectionName := req.OutputCollectionName
 		existingOutputCollections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections(nil, &outputCollectionName, req.TenantId, req.Database, nil, nil, false)
 		if err != nil {
-			log.Error("CreateTask: failed to check output collection", zap.Error(err))
+			log.Error("AttachFunction: failed to check output collection", zap.Error(err))
 			return err
 		}
 		if len(existingOutputCollections) > 0 {
-			log.Error("CreateTask: output collection already exists")
+			log.Error("AttachFunction: output collection already exists")
 			return common.ErrCollectionUniqueConstraintViolation
 		}
 
@@ -198,7 +198,7 @@ func (s *Coordinator) CreateTask(ctx context.Context, req *coordinatorpb.CreateT
 		if req.Params != nil {
 			paramsBytes, err := req.Params.MarshalJSON()
 			if err != nil {
-				log.Error("CreateTask: failed to marshal params", zap.Error(err))
+				log.Error("AttachFunction: failed to marshal params", zap.Error(err))
 				return err
 			}
 			paramsJSON = string(paramsBytes)
@@ -207,37 +207,37 @@ func (s *Coordinator) CreateTask(ctx context.Context, req *coordinatorpb.CreateT
 		}
 
 		now := time.Now()
-		task := &dbmodel.Task{
-			ID:                   taskID,
-			Name:                 req.Name,
-			TenantID:             req.TenantId,
-			DatabaseID:           databases[0].ID,
-			InputCollectionID:    req.InputCollectionId,
-			OutputCollectionName: req.OutputCollectionName,
-			OperatorID:           operator.OperatorID,
-			OperatorParams:       paramsJSON,
-			CompletionOffset:     0,
-			LastRun:              nil,
-			NextRun:              now,
-			MinRecordsForTask:    int64(req.MinRecordsForTask),
-			CurrentAttempts:      0,
-			CreatedAt:            now,
-			UpdatedAt:            now,
-			NextNonce:            nextNonce,
-			LowestLiveNonce:      nil, // **KEY: Set to NULL for 2PC**
-			OldestWrittenNonce:   nil,
+		attachedFunction := &dbmodel.AttachedFunction{
+			ID:                      attachedFunctionID,
+			Name:                    req.Name,
+			TenantID:                req.TenantId,
+			DatabaseID:              databases[0].ID,
+			InputCollectionID:       req.InputCollectionId,
+			OutputCollectionName:    req.OutputCollectionName,
+			FunctionID:              function.ID,
+			FunctionParams:          paramsJSON,
+			CompletionOffset:        0,
+			LastRun:                 nil,
+			NextRun:                 now,
+			MinRecordsForInvocation: int64(req.MinRecordsForInvocation),
+			CurrentAttempts:         0,
+			CreatedAt:               now,
+			UpdatedAt:               now,
+			NextNonce:               nextNonce,
+			LowestLiveNonce:         nil, // **KEY: Set to NULL for 2PC**
+			OldestWrittenNonce:      nil,
 		}
 
-		nextRun = task.NextRun
+		nextRun = attachedFunction.NextRun
 
-		err = s.catalog.metaDomain.TaskDb(txCtx).Insert(task)
+		err = s.catalog.metaDomain.AttachedFunctionDb(txCtx).Insert(attachedFunction)
 		if err != nil {
-			log.Error("CreateTask: failed to insert task", zap.Error(err))
+			log.Error("AttachFunction: failed to insert attached function", zap.Error(err))
 			return err
 		}
 
-		log.Info("CreateTask Phase 1: task created with lowest_live_nonce=NULL",
-			zap.String("task_id", taskID.String()),
+		log.Debug("AttachFunction: Phase 1: attached function created with lowest_live_nonce=NULL",
+			zap.String("attached_function_id", attachedFunctionID.String()),
 			zap.String("name", req.Name))
 		return nil
 	})
@@ -246,29 +246,29 @@ func (s *Coordinator) CreateTask(ctx context.Context, req *coordinatorpb.CreateT
 		return nil, err
 	}
 
-	// If task is already fully initialized, return immediately (idempotent request)
+	// If function is already fully attached, return immediately (idempotency)
 	if skipPhase2And3 {
-		log.Info("CreateTask: task already fully initialized, skipping Phase 2 & 3",
-			zap.String("task_id", taskID.String()))
-		return &coordinatorpb.CreateTaskResponse{
-			TaskId: taskID.String(),
+		log.Info("AttachFunction: function already fully attached, skipping Phase 2 & 3",
+			zap.String("attached_function_id", attachedFunctionID.String()))
+		return &coordinatorpb.AttachFunctionResponse{
+			Id: attachedFunctionID.String(),
 		}, nil
 	}
 
-	// Phase 2
-	// This phase runs for both new tasks and recovered incomplete tasks
-	log.Info("CreateTask Phase 2: doing initialization work",
-		zap.String("task_id", taskID.String()))
-
+	// ===== Phase 2 =====
+	// This phase runs for both new attached functions and recovered incomplete attached functions
+	log.Debug("AttachFunction: Phase 2: doing initialization work",
+		zap.String("attached_function_id", attachedFunctionID.String()))
 	// Push initial schedule to heap service if enabled
 	if s.heapClient == nil {
 		return nil, common.ErrHeapServiceNotEnabled
 	}
-	// Create schedule for the task
+
+	// Create schedule for the attached function
 	schedule := &coordinatorpb.Schedule{
 		Triggerable: &coordinatorpb.Triggerable{
 			PartitioningUuid: req.InputCollectionId,
-			SchedulingUuid:   taskID.String(),
+			SchedulingUuid:   attachedFunctionID.String(),
 		},
 		NextScheduled: timestamppb.New(nextRun),
 		Nonce:         lowestLiveNonce.String(),
@@ -276,230 +276,230 @@ func (s *Coordinator) CreateTask(ctx context.Context, req *coordinatorpb.CreateT
 
 	err = s.heapClient.Push(ctx, req.InputCollectionId, []*coordinatorpb.Schedule{schedule})
 	if err != nil {
-		log.Error("CreateTask Phase 2: failed to push schedule to heap service",
+		log.Error("AttachFunction: Phase 2: failed to push schedule to heap service",
 			zap.Error(err),
-			zap.String("task_id", taskID.String()),
+			zap.String("attached_function_id", attachedFunctionID.String()),
 			zap.String("collection_id", req.InputCollectionId))
 		return nil, err
 	}
 
-	log.Info("CreateTask Phase 2: pushed schedule to heap service",
-		zap.String("task_id", taskID.String()),
+	log.Debug("AttachFunction: Phase 2: pushed schedule to heap service",
+		zap.String("attached_function_id", attachedFunctionID.String()),
 		zap.String("collection_id", req.InputCollectionId))
 
 	// ===== Phase 3: Update lowest_live_nonce to complete initialization =====
 	// No database fetch needed - we already have lowestLiveNonce and nextNonce from Phase 1/Recovery
-	err = s.catalog.metaDomain.TaskDb(ctx).UpdateLowestLiveNonce(taskID, lowestLiveNonce)
+	err = s.catalog.metaDomain.AttachedFunctionDb(ctx).UpdateLowestLiveNonce(attachedFunctionID, lowestLiveNonce)
 	if err != nil {
-		log.Error("CreateTask Phase 3: failed to update lowest_live_nonce", zap.Error(err))
+		log.Error("AttachFunction: Phase 3: failed to update lowest_live_nonce", zap.Error(err), zap.String("attached_function_id", attachedFunctionID.String()), zap.String("lowest_live_nonce", lowestLiveNonce.String()))
 		return nil, err
 	}
 
-	log.Info("CreateTask Phase 3: task initialization completed",
-		zap.String("task_id", taskID.String()),
+	log.Debug("AttachFunction: Phase 3: attached function initialization completed",
+		zap.String("attached_function_id", attachedFunctionID.String()),
 		zap.String("lowest_live_nonce", lowestLiveNonce.String()),
 		zap.String("next_nonce", nextNonce.String()))
 
-	return &coordinatorpb.CreateTaskResponse{
-		TaskId: taskID.String(),
+	return &coordinatorpb.AttachFunctionResponse{
+		Id: attachedFunctionID.String(),
 	}, nil
 }
 
-// GetTaskByName retrieves a task by name from the database
-func (s *Coordinator) GetTaskByName(ctx context.Context, req *coordinatorpb.GetTaskByNameRequest) (*coordinatorpb.GetTaskByNameResponse, error) {
+// GetAttachedFunctionByName retrieves an attached function by name from the database
+func (s *Coordinator) GetAttachedFunctionByName(ctx context.Context, req *coordinatorpb.GetAttachedFunctionByNameRequest) (*coordinatorpb.GetAttachedFunctionByNameResponse, error) {
 	// Can do both calls with a JOIN
-	task, err := s.catalog.metaDomain.TaskDb(ctx).GetByName(req.InputCollectionId, req.TaskName)
+	attachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetByName(req.InputCollectionId, req.Name)
 	if err != nil {
 		return nil, err
 	}
 
-	// If task not found, return empty response
-	if task == nil {
-		return nil, common.ErrTaskNotFound
+	// If attached function not found, return empty response
+	if attachedFunction == nil {
+		return nil, common.ErrAttachedFunctionNotFound
 	}
 
-	// Look up operator name from operators table
-	operator, err := s.catalog.metaDomain.OperatorDb(ctx).GetByID(task.OperatorID)
+	// Look up function name from functions table
+	function, err := s.catalog.metaDomain.FunctionDb(ctx).GetByID(attachedFunction.FunctionID)
 	if err != nil {
-		log.Error("GetTaskByName: failed to get operator", zap.Error(err))
+		log.Error("GetAttachedFunctionByName: failed to get function", zap.Error(err))
 		return nil, err
 	}
-	if operator == nil {
-		log.Error("GetTaskByName: operator not found", zap.String("operator_id", task.OperatorID.String()))
-		return nil, common.ErrOperatorNotFound
+	if function == nil {
+		log.Error("GetAttachedFunctionByName: function not found", zap.String("function_id", attachedFunction.FunctionID.String()))
+		return nil, common.ErrFunctionNotFound
 	}
 
 	// Debug logging
-	log.Info("Found task", zap.String("task_id", task.ID.String()), zap.String("name", task.Name), zap.String("input_collection_id", task.InputCollectionID), zap.String("output_collection_name", task.OutputCollectionName))
+	log.Info("Found attached function", zap.String("attached_function_id", attachedFunction.ID.String()), zap.String("name", attachedFunction.Name), zap.String("input_collection_id", attachedFunction.InputCollectionID), zap.String("output_collection_name", attachedFunction.OutputCollectionName))
 
 	// Deserialize params from JSON string to protobuf Struct
 	var paramsStruct *structpb.Struct
-	if task.OperatorParams != "" {
+	if attachedFunction.FunctionParams != "" {
 		paramsStruct = &structpb.Struct{}
-		if err := paramsStruct.UnmarshalJSON([]byte(task.OperatorParams)); err != nil {
-			log.Error("GetTaskByName: failed to unmarshal params", zap.Error(err))
+		if err := paramsStruct.UnmarshalJSON([]byte(attachedFunction.FunctionParams)); err != nil {
+			log.Error("GetAttachedFunctionByName: failed to unmarshal params", zap.Error(err))
 			return nil, err
 		}
 	}
 
 	// Validate completion_offset is non-negative before converting to uint64
-	if task.CompletionOffset < 0 {
-		log.Error("GetTaskByName: invalid completion_offset",
-			zap.String("task_id", task.ID.String()),
-			zap.Int64("completion_offset", task.CompletionOffset))
+	if attachedFunction.CompletionOffset < 0 {
+		log.Error("GetAttachedFunctionByName: invalid completion_offset",
+			zap.String("attached_function_id", attachedFunction.ID.String()),
+			zap.Int64("completion_offset", attachedFunction.CompletionOffset))
 		return nil, status.Errorf(codes.Internal,
-			"task has invalid completion_offset: %d", task.CompletionOffset)
+			"attached function has invalid completion_offset: %d", attachedFunction.CompletionOffset)
 	}
 
-	// Convert task to response with nested Task message
-	taskProto := &coordinatorpb.Task{
-		TaskId:               task.ID.String(),
-		Name:                 task.Name,
-		OperatorName:         operator.OperatorName,
-		InputCollectionId:    task.InputCollectionID,
-		OutputCollectionName: task.OutputCollectionName,
-		Params:               paramsStruct,
-		CompletionOffset:     uint64(task.CompletionOffset),
-		MinRecordsForTask:    uint64(task.MinRecordsForTask),
-		TenantId:             task.TenantID,
-		DatabaseId:           task.DatabaseID,
-		NextRunAt:            uint64(task.NextRun.UnixMicro()),
-		LowestLiveNonce:      "",
-		NextNonce:            task.NextNonce.String(),
-		CreatedAt:            uint64(task.CreatedAt.UnixMicro()),
-		UpdatedAt:            uint64(task.UpdatedAt.UnixMicro()),
+	// Convert attached function to response
+	attachedFunctionProto := &coordinatorpb.AttachedFunction{
+		Id:                      attachedFunction.ID.String(),
+		Name:                    attachedFunction.Name,
+		FunctionName:            function.Name,
+		InputCollectionId:       attachedFunction.InputCollectionID,
+		OutputCollectionName:    attachedFunction.OutputCollectionName,
+		Params:                  paramsStruct,
+		CompletionOffset:        uint64(attachedFunction.CompletionOffset),
+		MinRecordsForInvocation: uint64(attachedFunction.MinRecordsForInvocation),
+		TenantId:                attachedFunction.TenantID,
+		DatabaseId:              attachedFunction.DatabaseID,
+		NextRunAt:               uint64(attachedFunction.NextRun.UnixMicro()),
+		LowestLiveNonce:         "",
+		NextNonce:               attachedFunction.NextNonce.String(),
+		CreatedAt:               uint64(attachedFunction.CreatedAt.UnixMicro()),
+		UpdatedAt:               uint64(attachedFunction.UpdatedAt.UnixMicro()),
 	}
 	// Add lowest_live_nonce if it's set
-	if task.LowestLiveNonce != nil {
-		taskProto.LowestLiveNonce = task.LowestLiveNonce.String()
+	if attachedFunction.LowestLiveNonce != nil {
+		attachedFunctionProto.LowestLiveNonce = attachedFunction.LowestLiveNonce.String()
 	}
 	// Add output_collection_id if it's set
-	if task.OutputCollectionID != nil {
-		taskProto.OutputCollectionId = task.OutputCollectionID
+	if attachedFunction.OutputCollectionID != nil {
+		attachedFunctionProto.OutputCollectionId = attachedFunction.OutputCollectionID
 	}
 
-	return &coordinatorpb.GetTaskByNameResponse{
-		Task: taskProto,
+	return &coordinatorpb.GetAttachedFunctionByNameResponse{
+		AttachedFunction: attachedFunctionProto,
 	}, nil
 }
 
-// GetTaskByUuid retrieves a task by UUID from the database
-func (s *Coordinator) GetTaskByUuid(ctx context.Context, req *coordinatorpb.GetTaskByUuidRequest) (*coordinatorpb.GetTaskByUuidResponse, error) {
-	// Parse the task UUID
-	taskID, err := uuid.Parse(req.TaskId)
+// GetAttachedFunctionByUuid retrieves an attached function by UUID from the database
+func (s *Coordinator) GetAttachedFunctionByUuid(ctx context.Context, req *coordinatorpb.GetAttachedFunctionByUuidRequest) (*coordinatorpb.GetAttachedFunctionByUuidResponse, error) {
+	// Parse the attached function UUID
+	attachedFunctionID, err := uuid.Parse(req.Id)
 	if err != nil {
-		log.Error("GetTaskByUuid: invalid task_id", zap.Error(err))
-		return nil, status.Errorf(codes.InvalidArgument, "invalid task_id: %v", err)
+		log.Error("GetAttachedFunctionByUuid: invalid attached_function_id", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
 	}
 
-	// Fetch task by ID
-	task, err := s.catalog.metaDomain.TaskDb(ctx).GetByID(taskID)
+	// Fetch attached function by ID
+	attachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetByID(attachedFunctionID)
 	if err != nil {
-		// Map ErrTaskNotReady to NotFound so it appears non-existent to clients
-		if errors.Is(err, common.ErrTaskNotReady) {
-			return nil, status.Error(codes.NotFound, "task not ready")
+		// Map ErrAttachedFunctionNotReady to NotFound so it appears non-existent to clients
+		if errors.Is(err, common.ErrAttachedFunctionNotReady) {
+			return nil, status.Error(codes.NotFound, "attached function not ready")
 		}
 		return nil, err
 	}
 
-	// If task not found, return error
-	if task == nil {
-		return nil, status.Error(codes.NotFound, "task not found")
+	// If attached function not found, return error
+	if attachedFunction == nil {
+		return nil, status.Error(codes.NotFound, "attached function not found")
 	}
 
-	// Look up operator name from operators table
-	operator, err := s.catalog.metaDomain.OperatorDb(ctx).GetByID(task.OperatorID)
+	// Look up function name from functions table
+	function, err := s.catalog.metaDomain.FunctionDb(ctx).GetByID(attachedFunction.FunctionID)
 	if err != nil {
-		log.Error("GetTaskByUuid: failed to get operator", zap.Error(err))
+		log.Error("GetAttachedFunctionByUuid: failed to get function", zap.Error(err))
 		return nil, err
 	}
-	if operator == nil {
-		log.Error("GetTaskByUuid: operator not found", zap.String("operator_id", task.OperatorID.String()))
-		return nil, common.ErrOperatorNotFound
+	if function == nil {
+		log.Error("GetAttachedFunctionByUuid: function not found", zap.String("function_id", attachedFunction.FunctionID.String()))
+		return nil, common.ErrFunctionNotFound
 	}
 
 	// Debug logging
-	log.Info("Found task by UUID", zap.String("task_id", task.ID.String()), zap.String("name", task.Name), zap.String("input_collection_id", task.InputCollectionID), zap.String("output_collection_name", task.OutputCollectionName))
+	log.Info("Found attached function by UUID", zap.String("attached_function_id", attachedFunction.ID.String()), zap.String("name", attachedFunction.Name), zap.String("input_collection_id", attachedFunction.InputCollectionID), zap.String("output_collection_name", attachedFunction.OutputCollectionName))
 
 	// Deserialize params from JSON string to protobuf Struct
 	var paramsStruct *structpb.Struct
-	if task.OperatorParams != "" {
+	if attachedFunction.FunctionParams != "" {
 		paramsStruct = &structpb.Struct{}
-		if err := paramsStruct.UnmarshalJSON([]byte(task.OperatorParams)); err != nil {
-			log.Error("GetTaskByUuid: failed to unmarshal params", zap.Error(err))
+		if err := paramsStruct.UnmarshalJSON([]byte(attachedFunction.FunctionParams)); err != nil {
+			log.Error("GetAttachedFunctionByUuid: failed to unmarshal params", zap.Error(err))
 			return nil, err
 		}
 	}
 
 	// Validate completion_offset is non-negative before converting to uint64
-	if task.CompletionOffset < 0 {
-		log.Error("GetTaskByUuid: invalid completion_offset",
-			zap.String("task_id", task.ID.String()),
-			zap.Int64("completion_offset", task.CompletionOffset))
+	if attachedFunction.CompletionOffset < 0 {
+		log.Error("GetAttachedFunctionByUuid: invalid completion_offset",
+			zap.String("attached_function_id", attachedFunction.ID.String()),
+			zap.Int64("completion_offset", attachedFunction.CompletionOffset))
 		return nil, status.Errorf(codes.Internal,
-			"task has invalid completion_offset: %d", task.CompletionOffset)
+			"attached function has invalid completion_offset: %d", attachedFunction.CompletionOffset)
 	}
 
-	// Convert task to response with nested Task message
-	taskProto := &coordinatorpb.Task{
-		TaskId:               task.ID.String(),
-		Name:                 task.Name,
-		OperatorName:         operator.OperatorName,
-		InputCollectionId:    task.InputCollectionID,
-		OutputCollectionName: task.OutputCollectionName,
-		Params:               paramsStruct,
-		CompletionOffset:     uint64(task.CompletionOffset),
-		MinRecordsForTask:    uint64(task.MinRecordsForTask),
-		TenantId:             task.TenantID,
-		DatabaseId:           task.DatabaseID,
-		NextRunAt:            uint64(task.NextRun.UnixMicro()),
-		LowestLiveNonce:      "",
-		NextNonce:            task.NextNonce.String(),
-		CreatedAt:            uint64(task.CreatedAt.UnixMicro()),
-		UpdatedAt:            uint64(task.UpdatedAt.UnixMicro()),
+	// Convert attached function to response
+	attachedFunctionProto := &coordinatorpb.AttachedFunction{
+		Id:                      attachedFunction.ID.String(),
+		Name:                    attachedFunction.Name,
+		FunctionName:            function.Name,
+		InputCollectionId:       attachedFunction.InputCollectionID,
+		OutputCollectionName:    attachedFunction.OutputCollectionName,
+		Params:                  paramsStruct,
+		CompletionOffset:        uint64(attachedFunction.CompletionOffset),
+		MinRecordsForInvocation: uint64(attachedFunction.MinRecordsForInvocation),
+		TenantId:                attachedFunction.TenantID,
+		DatabaseId:              attachedFunction.DatabaseID,
+		NextRunAt:               uint64(attachedFunction.NextRun.UnixMicro()),
+		LowestLiveNonce:         "",
+		NextNonce:               attachedFunction.NextNonce.String(),
+		CreatedAt:               uint64(attachedFunction.CreatedAt.UnixMicro()),
+		UpdatedAt:               uint64(attachedFunction.UpdatedAt.UnixMicro()),
 	}
 	// Add lowest_live_nonce if it's set
-	if task.LowestLiveNonce != nil {
-		taskProto.LowestLiveNonce = task.LowestLiveNonce.String()
+	if attachedFunction.LowestLiveNonce != nil {
+		attachedFunctionProto.LowestLiveNonce = attachedFunction.LowestLiveNonce.String()
 	}
 	// Add output_collection_id if it's set
-	if task.OutputCollectionID != nil {
-		taskProto.OutputCollectionId = task.OutputCollectionID
+	if attachedFunction.OutputCollectionID != nil {
+		attachedFunctionProto.OutputCollectionId = attachedFunction.OutputCollectionID
 	}
 
-	return &coordinatorpb.GetTaskByUuidResponse{
-		Task: taskProto,
+	return &coordinatorpb.GetAttachedFunctionByUuidResponse{
+		AttachedFunction: attachedFunctionProto,
 	}, nil
 }
 
-// CreateOutputCollectionForTask atomically creates an output collection and updates the task's output_collection_id
-func (s *Coordinator) CreateOutputCollectionForTask(ctx context.Context, req *coordinatorpb.CreateOutputCollectionForTaskRequest) (*coordinatorpb.CreateOutputCollectionForTaskResponse, error) {
+// CreateOutputCollectionForAttachedFunction atomically creates an output collection and updates the attached function's output_collection_id
+func (s *Coordinator) CreateOutputCollectionForAttachedFunction(ctx context.Context, req *coordinatorpb.CreateOutputCollectionForAttachedFunctionRequest) (*coordinatorpb.CreateOutputCollectionForAttachedFunctionResponse, error) {
 	var collectionID types.UniqueID
 
 	// Execute all operations in a transaction for atomicity
 	err := s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		// 1. Parse task ID
-		taskID, err := uuid.Parse(req.TaskId)
+		// 1. Parse attached function ID
+		attachedFunctionID, err := uuid.Parse(req.AttachedFunctionId)
 		if err != nil {
-			log.Error("CreateOutputCollectionForTask: invalid task_id", zap.Error(err))
-			return status.Errorf(codes.InvalidArgument, "invalid task_id: %v", err)
+			log.Error("CreateOutputCollectionForAttachedFunction: invalid attached_function_id", zap.Error(err))
+			return status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
 		}
 
-		// 2. Get the task to verify it exists and doesn't already have an output collection
-		task, err := s.catalog.metaDomain.TaskDb(txCtx).GetByID(taskID)
+		// 2. Get the attached function to verify it exists and doesn't already have an output collection
+		attachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetByID(attachedFunctionID)
 		if err != nil {
-			log.Error("CreateOutputCollectionForTask: failed to get task", zap.Error(err))
+			log.Error("CreateOutputCollectionForAttachedFunction: failed to get attached function", zap.Error(err))
 			return err
 		}
-		if task == nil {
-			log.Error("CreateOutputCollectionForTask: task not found")
-			return status.Errorf(codes.NotFound, "task not found")
+		if attachedFunction == nil {
+			log.Error("CreateOutputCollectionForAttachedFunction: attached function not found")
+			return status.Errorf(codes.NotFound, "attached function not found")
 		}
 
 		// Check if output collection already exists
-		if task.OutputCollectionID != nil && *task.OutputCollectionID != "" {
-			log.Error("CreateOutputCollectionForTask: output collection already exists",
-				zap.String("existing_collection_id", *task.OutputCollectionID))
+		if attachedFunction.OutputCollectionID != nil && *attachedFunction.OutputCollectionID != "" {
+			log.Error("CreateOutputCollectionForAttachedFunction: output collection already exists",
+				zap.String("existing_collection_id", *attachedFunction.OutputCollectionID))
 			return status.Errorf(codes.AlreadyExists, "output collection already exists")
 		}
 
@@ -509,17 +509,17 @@ func (s *Coordinator) CreateOutputCollectionForTask(ctx context.Context, req *co
 		// 4. Look up database by ID to get its name
 		database, err := s.catalog.metaDomain.DatabaseDb(txCtx).GetByID(req.DatabaseId)
 		if err != nil {
-			log.Error("CreateOutputCollectionForTask: failed to get database", zap.Error(err))
+			log.Error("CreateOutputCollectionForAttachedFunction: failed to get database", zap.Error(err))
 			return err
 		}
 		if database == nil {
-			log.Error("CreateOutputCollectionForTask: database not found", zap.String("database_id", req.DatabaseId), zap.String("tenant_id", req.TenantId))
+			log.Error("CreateOutputCollectionForAttachedFunction: database not found", zap.String("database_id", req.DatabaseId), zap.String("tenant_id", req.TenantId))
 			return common.ErrDatabaseNotFound
 		}
 
 		// 5. Create the collection with segments
 		// Set a default dimension to ensure segment writers can be initialized
-		dimension := int32(1) // Default dimension for task output collections
+		dimension := int32(1) // Default dimension for attached function output collections
 		collection := &model.CreateCollection{
 			ID:                   collectionID,
 			Name:                 req.CollectionName,
@@ -554,15 +554,15 @@ func (s *Coordinator) CreateOutputCollectionForTask(ctx context.Context, req *co
 
 		_, _, err = s.catalog.CreateCollectionAndSegments(txCtx, collection, segments, 0)
 		if err != nil {
-			log.Error("CreateOutputCollectionForTask: failed to create collection", zap.Error(err))
+			log.Error("CreateOutputCollectionForAttachedFunction: failed to create collection", zap.Error(err))
 			return err
 		}
 
-		// 6. Update task with output_collection_id
+		// 6. Update attached function with output_collection_id
 		collectionIDStr := collectionID.String()
-		err = s.catalog.metaDomain.TaskDb(txCtx).UpdateOutputCollectionID(taskID, &collectionIDStr)
+		err = s.catalog.metaDomain.AttachedFunctionDb(txCtx).UpdateOutputCollectionID(attachedFunctionID, &collectionIDStr)
 		if err != nil {
-			log.Error("CreateOutputCollectionForTask: failed to update task", zap.Error(err))
+			log.Error("CreateOutputCollectionForAttachedFunction: failed to update attached function", zap.Error(err))
 			return err
 		}
 
@@ -573,69 +573,76 @@ func (s *Coordinator) CreateOutputCollectionForTask(ctx context.Context, req *co
 		return nil, err
 	}
 
-	return &coordinatorpb.CreateOutputCollectionForTaskResponse{
+	return &coordinatorpb.CreateOutputCollectionForAttachedFunctionResponse{
 		CollectionId: collectionID.String(),
 	}, nil
 }
 
-// DeleteTask soft deletes a task by name
-func (s *Coordinator) DeleteTask(ctx context.Context, req *coordinatorpb.DeleteTaskRequest) (*coordinatorpb.DeleteTaskResponse, error) {
-	// First get the task to check if we need to delete the output collection
-	task, err := s.catalog.metaDomain.TaskDb(ctx).GetByName(req.InputCollectionId, req.TaskName)
+// DetachFunction soft deletes an attached function by ID
+func (s *Coordinator) DetachFunction(ctx context.Context, req *coordinatorpb.DetachFunctionRequest) (*coordinatorpb.DetachFunctionResponse, error) {
+	// Parse attached_function_id
+	attachedFunctionID, err := uuid.Parse(req.AttachedFunctionId)
 	if err != nil {
-		// If task is not ready (lowest_live_nonce == NULL), treat it as not found
-		if errors.Is(err, common.ErrTaskNotReady) {
-			log.Error("DeleteTask: task not ready (not initialized)")
-			return nil, status.Error(codes.NotFound, "task not found")
-		}
-		log.Error("DeleteTask: failed to get task", zap.Error(err))
-		return nil, err
-	}
-	if task == nil {
-		log.Error("DeleteTask: task not found")
-		return nil, status.Errorf(codes.NotFound, "task not found")
+		log.Error("DetachFunction: invalid attached_function_id", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
 	}
 
-	// Execute collection and task deletion in a single transaction
+	// First get the attached function to check if we need to delete the output collection
+	attachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetByID(attachedFunctionID)
+	if err != nil {
+		// If attached function is not ready (lowest_live_nonce == NULL), treat it as not found
+		if errors.Is(err, common.ErrAttachedFunctionNotReady) {
+			log.Error("DetachFunction: attached function not ready (not initialized)")
+			return nil, status.Error(codes.NotFound, "attached function not found")
+		}
+		log.Error("DetachFunction: failed to get attached function", zap.Error(err))
+		return nil, err
+	}
+	if attachedFunction == nil {
+		log.Error("DetachFunction: attached function not found")
+		return nil, status.Errorf(codes.NotFound, "attached function not found")
+	}
+
+	// Execute collection and attached function deletion in a single transaction
 	err = s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// If delete_output is true and output_collection_id is set, soft-delete the output collection
-		if req.DeleteOutput && task.OutputCollectionID != nil && *task.OutputCollectionID != "" {
-			collectionUUID, err := types.ToUniqueID(task.OutputCollectionID)
+		if req.DeleteOutput && attachedFunction.OutputCollectionID != nil && *attachedFunction.OutputCollectionID != "" {
+			collectionUUID, err := types.ToUniqueID(attachedFunction.OutputCollectionID)
 			if err != nil {
-				log.Error("DeleteTask: invalid output_collection_id", zap.Error(err))
+				log.Error("DetachFunction: invalid output_collection_id", zap.Error(err))
 				return status.Errorf(codes.InvalidArgument, "invalid output_collection_id: %v", err)
 			}
 
 			deleteCollection := &model.DeleteCollection{
 				ID:       collectionUUID,
-				TenantID: task.TenantID,
+				TenantID: attachedFunction.TenantID,
 				// Database name isn't available but also isn't needed since we supplied a collection id
 				DatabaseName: "",
 			}
 
 			err = s.SoftDeleteCollection(txCtx, deleteCollection)
 			if err != nil {
-				// If collection doesn't exist, that's fine - still delete the task
+				// If collection doesn't exist, that's fine - still delete the attached function
 				if errors.Is(err, common.ErrCollectionDeleteNonExistingCollection) {
-					log.Info("DeleteTask: output collection already deleted", zap.String("collection_id", *task.OutputCollectionID))
+					log.Info("DetachFunction: output collection already deleted", zap.String("collection_id", *attachedFunction.OutputCollectionID))
 				} else {
 					// Other errors should fail the transaction
-					log.Error("DeleteTask: failed to delete output collection", zap.Error(err), zap.String("collection_id", *task.OutputCollectionID))
+					log.Error("DetachFunction: failed to delete output collection", zap.Error(err), zap.String("collection_id", *attachedFunction.OutputCollectionID))
 					return err
 				}
 			} else {
-				log.Info("DeleteTask: deleted output collection", zap.String("collection_id", *task.OutputCollectionID))
+				log.Info("DetachFunction: deleted output collection", zap.String("collection_id", *attachedFunction.OutputCollectionID))
 			}
 		}
 
-		// Now soft-delete the task
-		err := s.catalog.metaDomain.TaskDb(txCtx).SoftDelete(req.InputCollectionId, req.TaskName)
+		// Now soft-delete the attached function
+		err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).SoftDeleteByID(attachedFunctionID)
 		if err != nil {
-			log.Error("DeleteTask: failed to delete task", zap.Error(err))
+			log.Error("DetachFunction: failed to delete attached function", zap.Error(err))
 			return err
 		}
 
-		log.Info("DeleteTask: successfully deleted task", zap.String("task_name", req.TaskName))
+		log.Info("DetachFunction: successfully deleted attached function", zap.String("attached_function_id", attachedFunctionID.String()))
 		return nil
 	})
 
@@ -643,117 +650,117 @@ func (s *Coordinator) DeleteTask(ctx context.Context, req *coordinatorpb.DeleteT
 		return nil, err
 	}
 
-	log.Info("Task deleted", zap.String("input_collection_id", req.InputCollectionId), zap.String("task_name", req.TaskName))
+	log.Info("Attached function deleted", zap.String("attached_function_id", req.AttachedFunctionId))
 
-	return &coordinatorpb.DeleteTaskResponse{
+	return &coordinatorpb.DetachFunctionResponse{
 		Success: true,
 	}, nil
 }
 
-// Mark a task run as complete and set the nonce for the next task run.
-func (s *Coordinator) AdvanceTask(ctx context.Context, req *coordinatorpb.AdvanceTaskRequest) (*coordinatorpb.AdvanceTaskResponse, error) {
-	if req.TaskId == nil {
-		log.Error("AdvanceTask: task_id is required")
-		return nil, status.Errorf(codes.InvalidArgument, "task_id is required")
+// Mark an attached function run as complete and set the nonce for the next run.
+func (s *Coordinator) AdvanceAttachedFunction(ctx context.Context, req *coordinatorpb.AdvanceAttachedFunctionRequest) (*coordinatorpb.AdvanceAttachedFunctionResponse, error) {
+	if req.Id == nil {
+		log.Error("AdvanceAttachedFunction: id is required")
+		return nil, status.Errorf(codes.InvalidArgument, "id is required")
 	}
 
-	if req.TaskRunNonce == nil {
-		log.Error("AdvanceTask: task_run_nonce is required")
-		return nil, status.Errorf(codes.InvalidArgument, "task_run_nonce is required")
+	if req.RunNonce == nil {
+		log.Error("AdvanceAttachedFunction: run_nonce is required")
+		return nil, status.Errorf(codes.InvalidArgument, "run_nonce is required")
 	}
 
-	taskID, err := uuid.Parse(*req.TaskId)
+	attachedFunctionID, err := uuid.Parse(*req.Id)
 	if err != nil {
-		log.Error("AdvanceTask: invalid task_id", zap.Error(err))
-		return nil, status.Errorf(codes.InvalidArgument, "invalid task_id: %v", err)
+		log.Error("AdvanceAttachedFunction: invalid attached_function_id", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
 	}
 
-	taskRunNonce, err := uuid.Parse(*req.TaskRunNonce)
+	runNonce, err := uuid.Parse(*req.RunNonce)
 	if err != nil {
-		log.Error("AdvanceTask: invalid task_run_nonce", zap.Error(err))
-		return nil, status.Errorf(codes.InvalidArgument, "invalid task_run_nonce: %v", err)
+		log.Error("AdvanceAttachedFunction: invalid run_nonce", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid run_nonce: %v", err)
 	}
 
 	// Validate completion_offset fits in int64 before storing in database
 	if *req.CompletionOffset > uint64(math.MaxInt64) { // math.MaxInt64
-		log.Error("AdvanceTask: completion_offset too large",
+		log.Error("AdvanceAttachedFunction: completion_offset too large",
 			zap.Uint64("completion_offset", *req.CompletionOffset))
 		return nil, status.Errorf(codes.InvalidArgument,
 			"completion_offset too large: %d", *req.CompletionOffset)
 	}
 	completionOffsetInt64 := int64(*req.CompletionOffset)
 
-	advanceTask, err := s.catalog.metaDomain.TaskDb(ctx).AdvanceTask(taskID, taskRunNonce, completionOffsetInt64, *req.NextRunDelaySecs)
+	advanceResult, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).Advance(attachedFunctionID, runNonce, completionOffsetInt64, *req.NextRunDelaySecs)
 	if err != nil {
-		log.Error("AdvanceTask failed", zap.Error(err), zap.String("task_id", taskID.String()))
+		log.Error("AdvanceAttachedFunction failed", zap.Error(err), zap.String("attached_function_id", attachedFunctionID.String()))
 		return nil, err
 	}
 
 	// Validate completion_offset from database is non-negative before converting to uint64
-	if advanceTask.CompletionOffset < 0 {
-		log.Error("AdvanceTask: invalid completion_offset from database",
-			zap.String("task_id", taskID.String()),
-			zap.Int64("completion_offset", advanceTask.CompletionOffset))
+	if advanceResult.CompletionOffset < 0 {
+		log.Error("AdvanceAttachedFunction: invalid completion_offset from database",
+			zap.String("attached_function_id", attachedFunctionID.String()),
+			zap.Int64("completion_offset", advanceResult.CompletionOffset))
 		return nil, status.Errorf(codes.Internal,
-			"task has invalid completion_offset: %d", advanceTask.CompletionOffset)
+			"attached function has invalid completion_offset: %d", advanceResult.CompletionOffset)
 	}
 
-	return &coordinatorpb.AdvanceTaskResponse{
-		NextRunNonce:     advanceTask.NextNonce.String(),
-		NextRunAt:        uint64(advanceTask.NextRun.UnixMilli()),
-		CompletionOffset: uint64(advanceTask.CompletionOffset),
+	return &coordinatorpb.AdvanceAttachedFunctionResponse{
+		NextRunNonce:     advanceResult.NextNonce.String(),
+		NextRunAt:        uint64(advanceResult.NextRun.UnixMilli()),
+		CompletionOffset: uint64(advanceResult.CompletionOffset),
 	}, nil
 }
 
-// GetOperators retrieves all operators from the database
-func (s *Coordinator) GetOperators(ctx context.Context, req *coordinatorpb.GetOperatorsRequest) (*coordinatorpb.GetOperatorsResponse, error) {
-	operators, err := s.catalog.metaDomain.OperatorDb(ctx).GetAll()
+// GetFunctions retrieves all functions from the database
+func (s *Coordinator) GetFunctions(ctx context.Context, req *coordinatorpb.GetFunctionsRequest) (*coordinatorpb.GetFunctionsResponse, error) {
+	functions, err := s.catalog.metaDomain.FunctionDb(ctx).GetAll()
 	if err != nil {
-		log.Error("GetOperators failed", zap.Error(err))
+		log.Error("GetFunctions failed", zap.Error(err))
 		return nil, err
 	}
 
 	// Convert to proto response
-	protoOperators := make([]*coordinatorpb.Operator, len(operators))
-	for i, op := range operators {
-		protoOperators[i] = &coordinatorpb.Operator{
-			Id:   op.OperatorID.String(),
-			Name: op.OperatorName,
+	protoFunctions := make([]*coordinatorpb.Function, len(functions))
+	for i, op := range functions {
+		protoFunctions[i] = &coordinatorpb.Function{
+			Id:   op.ID.String(),
+			Name: op.Name,
 		}
 	}
 
-	log.Info("GetOperators succeeded", zap.Int("count", len(operators)))
+	log.Info("GetFunctions succeeded", zap.Int("count", len(functions)))
 
-	return &coordinatorpb.GetOperatorsResponse{
-		Operators: protoOperators,
+	return &coordinatorpb.GetFunctionsResponse{
+		Functions: protoFunctions,
 	}, nil
 }
 
 // PeekScheduleByCollectionId gives, for a vector of collection IDs, a vector of schedule entries,
 // including when to run and the nonce to use for said run.
 func (s *Coordinator) PeekScheduleByCollectionId(ctx context.Context, req *coordinatorpb.PeekScheduleByCollectionIdRequest) (*coordinatorpb.PeekScheduleByCollectionIdResponse, error) {
-	tasks, err := s.catalog.metaDomain.TaskDb(ctx).PeekScheduleByCollectionId(req.CollectionId)
+	attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).PeekScheduleByCollectionId(req.CollectionId)
 	if err != nil {
 		log.Error("PeekScheduleByCollectionId failed", zap.Error(err))
 		return nil, err
 	}
 
-	scheduleEntries := make([]*coordinatorpb.ScheduleEntry, 0, len(tasks))
-	for _, task := range tasks {
-		task_id := task.ID.String()
+	scheduleEntries := make([]*coordinatorpb.ScheduleEntry, 0, len(attachedFunctions))
+	for _, attachedFunction := range attachedFunctions {
+		attached_function_id := attachedFunction.ID.String()
 		entry := &coordinatorpb.ScheduleEntry{
-			CollectionId:    &task.InputCollectionID,
-			TaskId:          &task_id,
-			TaskRunNonce:    proto.String(task.NextNonce.String()),
-			WhenToRun:       nil,
-			LowestLiveNonce: nil,
+			CollectionId:       &attachedFunction.InputCollectionID,
+			AttachedFunctionId: &attached_function_id,
+			RunNonce:           proto.String(attachedFunction.NextNonce.String()),
+			WhenToRun:          nil,
+			LowestLiveNonce:    nil,
 		}
-		if !task.NextRun.IsZero() {
-			whenToRun := uint64(task.NextRun.UnixMilli())
+		if !attachedFunction.NextRun.IsZero() {
+			whenToRun := uint64(attachedFunction.NextRun.UnixMilli())
 			entry.WhenToRun = &whenToRun
 		}
-		if task.LowestLiveNonce != nil {
-			entry.LowestLiveNonce = proto.String(task.LowestLiveNonce.String())
+		if attachedFunction.LowestLiveNonce != nil {
+			entry.LowestLiveNonce = proto.String(attachedFunction.LowestLiveNonce.String())
 		}
 		scheduleEntries = append(scheduleEntries, entry)
 	}
@@ -763,53 +770,53 @@ func (s *Coordinator) PeekScheduleByCollectionId(ctx context.Context, req *coord
 	}, nil
 }
 
-func (s *Coordinator) FinishTask(ctx context.Context, req *coordinatorpb.FinishTaskRequest) (*coordinatorpb.FinishTaskResponse, error) {
-	taskID, err := uuid.Parse(req.TaskId)
+func (s *Coordinator) FinishAttachedFunction(ctx context.Context, req *coordinatorpb.FinishAttachedFunctionRequest) (*coordinatorpb.FinishAttachedFunctionResponse, error) {
+	attachedFunctionID, err := uuid.Parse(req.Id)
 	if err != nil {
-		log.Error("FinishTask: invalid task_id", zap.Error(err))
+		log.Error("FinishAttachedFunction: invalid attached_function_id", zap.Error(err))
 		return nil, err
 	}
 
-	err = s.catalog.metaDomain.TaskDb(ctx).FinishTask(taskID)
+	err = s.catalog.metaDomain.AttachedFunctionDb(ctx).Finish(attachedFunctionID)
 	if err != nil {
-		log.Error("FinishTask: failed to fin task", zap.Error(err))
+		log.Error("FinishAttachedFunction: failed to finish attached function", zap.Error(err))
 		return nil, err
 	}
 
-	return &coordinatorpb.FinishTaskResponse{}, nil
+	return &coordinatorpb.FinishAttachedFunctionResponse{}, nil
 }
 
-// CleanupExpiredPartialTasks finds and soft deletes tasks that were partially created
+// CleanupExpiredPartialAttachedFunctions finds and soft deletes attached functions that were partially created
 // (lowest_live_nonce IS NULL) and are older than the specified max age.
-// This is used to clean up tasks that got stuck during the 2-phase creation process.
-func (s *Coordinator) CleanupExpiredPartialTasks(ctx context.Context, req *coordinatorpb.CleanupExpiredPartialTasksRequest) (*coordinatorpb.CleanupExpiredPartialTasksResponse, error) {
-	log := log.With(zap.String("method", "CleanupExpiredPartialTasks"))
+// This is used to clean up attached functions that got stuck during the 2-phase creation process.
+func (s *Coordinator) CleanupExpiredPartialAttachedFunctions(ctx context.Context, req *coordinatorpb.CleanupExpiredPartialAttachedFunctionsRequest) (*coordinatorpb.CleanupExpiredPartialAttachedFunctionsResponse, error) {
+	log := log.With(zap.String("method", "CleanupExpiredPartialAttachedFunctions"))
 
 	if req.MaxAgeSeconds == 0 {
-		log.Error("CleanupExpiredPartialTasks: max_age_seconds must be greater than 0")
+		log.Error("CleanupExpiredPartialAttachedFunctions: max_age_seconds must be greater than 0")
 		return nil, status.Errorf(codes.InvalidArgument, "max_age_seconds must be greater than 0")
 	}
 
-	log.Info("CleanupExpiredPartialTasks: starting cleanup",
+	log.Info("CleanupExpiredPartialAttachedFunctions: starting cleanup",
 		zap.Uint64("max_age_seconds", req.MaxAgeSeconds))
 
-	cleanedTaskIDs, err := s.catalog.metaDomain.TaskDb(ctx).CleanupExpiredPartialTasks(req.MaxAgeSeconds)
+	cleanedAttachedFunctionIDs, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).CleanupExpiredPartial(req.MaxAgeSeconds)
 	if err != nil {
-		log.Error("CleanupExpiredPartialTasks: failed to cleanup tasks", zap.Error(err))
+		log.Error("CleanupExpiredPartialAttachedFunctions: failed to cleanup attached functions", zap.Error(err))
 		return nil, err
 	}
 
 	// Convert UUIDs to strings for response
-	cleanedTaskIDStrings := make([]string, len(cleanedTaskIDs))
-	for i, taskID := range cleanedTaskIDs {
-		cleanedTaskIDStrings[i] = taskID.String()
+	cleanedAttachedFunctionIDStrings := make([]string, len(cleanedAttachedFunctionIDs))
+	for i, attachedFunctionID := range cleanedAttachedFunctionIDs {
+		cleanedAttachedFunctionIDStrings[i] = attachedFunctionID.String()
 	}
 
-	log.Info("CleanupExpiredPartialTasks: completed successfully",
-		zap.Uint64("cleaned_up_count", uint64(len(cleanedTaskIDs))))
+	log.Info("CleanupExpiredPartialAttachedFunctions: completed successfully",
+		zap.Uint64("cleaned_up_count", uint64(len(cleanedAttachedFunctionIDs))))
 
-	return &coordinatorpb.CleanupExpiredPartialTasksResponse{
-		CleanedUpCount:   uint64(len(cleanedTaskIDs)),
-		CleanedUpTaskIds: cleanedTaskIDStrings,
+	return &coordinatorpb.CleanupExpiredPartialAttachedFunctionsResponse{
+		CleanedUpCount: uint64(len(cleanedAttachedFunctionIDs)),
+		CleanedUpIds:   cleanedAttachedFunctionIDStrings,
 	}, nil
 }

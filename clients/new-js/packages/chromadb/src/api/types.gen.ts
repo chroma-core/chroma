@@ -12,6 +12,23 @@ export type AddCollectionRecordsResponse = {
     [key: string]: unknown;
 };
 
+export type AttachFunctionRequest = {
+    function_id: string;
+    name: string;
+    output_collection: string;
+    params?: unknown;
+};
+
+export type AttachFunctionResponse = {
+    attached_function: AttachedFunctionInfo;
+};
+
+export type AttachedFunctionInfo = {
+    function_id: string;
+    id: string;
+    name: string;
+};
+
 export type BoolInvertedIndexConfig = {
     [key: string]: never;
 };
@@ -73,18 +90,6 @@ export type CreateDatabaseResponse = {
     [key: string]: unknown;
 };
 
-export type CreateTaskRequest = {
-    operator_name: string;
-    output_collection_name: string;
-    params?: unknown;
-    task_name: string;
-};
-
-export type CreateTaskResponse = {
-    success: boolean;
-    task_id: string;
-};
-
 export type CreateTenantPayload = {
     name: string;
 };
@@ -109,6 +114,17 @@ export type DeleteCollectionRecordsResponse = {
 
 export type DeleteDatabaseResponse = {
     [key: string]: unknown;
+};
+
+export type DetachFunctionRequest = {
+    /**
+     * Whether to delete the output collection as well
+     */
+    delete_output?: boolean;
+};
+
+export type DetachFunctionResponse = {
+    success: boolean;
 };
 
 export type EmbeddingFunctionConfiguration = {
@@ -334,18 +350,6 @@ export type QueryResponse = {
 export type RawWhereFields = {
     where?: unknown;
     where_document?: unknown;
-};
-
-export type RemoveTaskRequest = {
-    /**
-     * Whether to delete the output collection as well
-     */
-    delete_output?: boolean;
-    task_name: string;
-};
-
-export type RemoveTaskResponse = {
-    success: boolean;
 };
 
 /**
@@ -1040,6 +1044,48 @@ export type GetDatabaseResponses = {
 
 export type GetDatabaseResponse = GetDatabaseResponses[keyof GetDatabaseResponses];
 
+export type DetachFunctionData = {
+    body: DetachFunctionRequest;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Attached Function ID
+         */
+        attached_function_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/attached_functions/{attached_function_id}/detach';
+};
+
+export type DetachFunctionErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type DetachFunctionError = DetachFunctionErrors[keyof DetachFunctionErrors];
+
+export type DetachFunctionResponses = {
+    /**
+     * Function detached successfully
+     */
+    200: DetachFunctionResponse;
+};
+
+export type DetachFunctionResponse2 = DetachFunctionResponses[keyof DetachFunctionResponses];
+
 export type ListCollectionsData = {
     body?: never;
     path: {
@@ -1428,6 +1474,48 @@ export type ForkCollectionResponses = {
 
 export type ForkCollectionResponse = ForkCollectionResponses[keyof ForkCollectionResponses];
 
+export type AttachFunctionData = {
+    body: AttachFunctionRequest;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Collection ID
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/attach';
+};
+
+export type AttachFunctionErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type AttachFunctionError = AttachFunctionErrors[keyof AttachFunctionErrors];
+
+export type AttachFunctionResponses = {
+    /**
+     *  Function attached successfully
+     */
+    200: AttachFunctionResponse;
+};
+
+export type AttachFunctionResponse2 = AttachFunctionResponses[keyof AttachFunctionResponses];
+
 export type CollectionGetData = {
     body: GetRequestPayload;
     path: {
@@ -1574,90 +1662,6 @@ export type CollectionSearchResponses = {
 };
 
 export type CollectionSearchResponse = CollectionSearchResponses[keyof CollectionSearchResponses];
-
-export type CreateTaskData = {
-    body: CreateTaskRequest;
-    path: {
-        /**
-         * Tenant ID
-         */
-        tenant: string;
-        /**
-         * Database name
-         */
-        database: string;
-        /**
-         * Collection ID
-         */
-        collection_id: string;
-    };
-    query?: never;
-    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/tasks/create';
-};
-
-export type CreateTaskErrors = {
-    /**
-     * Unauthorized
-     */
-    401: ErrorResponse;
-    /**
-     * Server error
-     */
-    500: ErrorResponse;
-};
-
-export type CreateTaskError = CreateTaskErrors[keyof CreateTaskErrors];
-
-export type CreateTaskResponses = {
-    /**
-     * Task created successfully
-     */
-    200: CreateTaskResponse;
-};
-
-export type CreateTaskResponse2 = CreateTaskResponses[keyof CreateTaskResponses];
-
-export type RemoveTaskData = {
-    body: RemoveTaskRequest;
-    path: {
-        /**
-         * Tenant ID
-         */
-        tenant: string;
-        /**
-         * Database name
-         */
-        database: string;
-        /**
-         * Collection ID
-         */
-        collection_id: string;
-    };
-    query?: never;
-    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/tasks/delete';
-};
-
-export type RemoveTaskErrors = {
-    /**
-     * Unauthorized
-     */
-    401: ErrorResponse;
-    /**
-     * Server error
-     */
-    500: ErrorResponse;
-};
-
-export type RemoveTaskError = RemoveTaskErrors[keyof RemoveTaskErrors];
-
-export type RemoveTaskResponses = {
-    /**
-     * Task removed successfully
-     */
-    200: RemoveTaskResponse;
-};
-
-export type RemoveTaskResponse2 = RemoveTaskResponses[keyof RemoveTaskResponses];
 
 export type CollectionUpdateData = {
     body: UpdateCollectionRecordsPayload;
