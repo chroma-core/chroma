@@ -138,6 +138,8 @@ def test_schema_vector_config_persistence(
     assert vector_index is not None
     assert vector_index.enabled is True
     assert vector_index.config is not None
+    assert vector_index.config.space is not None
+    assert vector_index.config.space == "cosine"
 
     if not is_spann_disabled_mode:
         assert vector_index.config.spann is not None
@@ -187,6 +189,8 @@ def test_schema_vector_config_persistence(
     reloaded_vector_index = reloaded_embedding_override.vector_index
     assert reloaded_vector_index is not None
     assert reloaded_vector_index.config is not None
+    assert reloaded_vector_index.config.space is not None
+    assert reloaded_vector_index.config.space == "cosine"
     if not is_spann_disabled_mode:
         assert reloaded_vector_index.config.spann is not None
         assert reloaded_vector_index.config.spann.search_nprobe == 16
@@ -1687,6 +1691,8 @@ def test_default_embedding_function_when_no_schema_provided(
     assert vector_index is not None
     assert vector_index.enabled is True
     assert vector_index.config is not None
+    assert vector_index.config.space is not None
+    assert vector_index.config.space == "l2"
 
     # Get the embedding function
     ef = vector_index.config.embedding_function
@@ -1759,6 +1765,8 @@ def test_custom_embedding_function_without_schema(
     assert vector_index is not None
     assert vector_index.enabled is True
     assert vector_index.config is not None
+    assert vector_index.config.space is not None
+    assert vector_index.config.space == "cosine"
 
     # Get the embedding function from schema
     ef = vector_index.config.embedding_function
@@ -1834,6 +1842,8 @@ def test_custom_embedding_function_with_default_schema(
     assert vector_index is not None
     assert vector_index.enabled is True
     assert vector_index.config is not None
+    assert vector_index.config.space is not None
+    assert vector_index.config.space == "cosine"
 
     # Get the embedding function from schema
     ef = vector_index.config.embedding_function
@@ -1993,6 +2003,8 @@ def test_vector_index_config_with_key_document_source(
     embedding_config = collection.schema.keys["#embedding"].float_list
     assert embedding_config is not None
     assert embedding_config.vector_index is not None
+    assert embedding_config.vector_index.config.space is not None
+    assert embedding_config.vector_index.config.space == "cosine"
     assert embedding_config.vector_index.config.source_key == "#document"
 
     # Add test data
@@ -2269,6 +2281,40 @@ def test_modify_collection_no_initial_config_creates_default_schema(
     assert refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 32  # type: ignore
 
 
+@pytest.mark.skipif(not is_spann_disabled_mode, reason="SPANN is disabled")
+def test_modify_collection_no_initial_config_creates_default_schema_local(
+    client: ClientAPI,
+) -> None:
+    """Test that modifying a collection without initial config/schema creates and updates default schema."""
+    collection_name = f"test_modify_no_init_{uuid4()}"
+
+    # Create collection WITHOUT any configuration (uses defaults)
+    collection = client.create_collection(name=collection_name)
+
+    # Verify default schema was created (SPANN by default in SPANN mode)
+    schema = collection.schema
+    assert schema is not None
+    assert schema.defaults.float_list is not None
+    assert schema.defaults.float_list.vector_index is not None
+    # Should have SPANN config by default
+    assert schema.defaults.float_list.vector_index.config.hnsw is not None
+
+    # Modify configuration
+    collection.modify(configuration={"hnsw": {"ef_search": 100}})
+
+    # Verify schema was updated
+    updated_schema = collection.schema
+    assert updated_schema is not None
+    assert updated_schema.defaults.float_list.vector_index.config.hnsw.ef_search == 100  # type: ignore
+    assert updated_schema.keys["#embedding"].float_list.vector_index.config.hnsw.ef_search == 100  # type: ignore
+
+    # Re-fetch from server
+    collection_refreshed = client.get_collection(collection_name)
+    refreshed_schema = collection_refreshed.schema
+    assert refreshed_schema is not None
+    assert refreshed_schema.defaults.float_list.vector_index.config.hnsw.ef_search == 100  # type: ignore
+
+
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
 def test_modify_collection_with_initial_spann_schema(client: ClientAPI) -> None:
     """Test creating collection with SPANN schema within server limits and modifying it."""
@@ -2417,10 +2463,10 @@ def test_modify_collection_preserves_other_schema_fields(client: ClientAPI) -> N
     collection_refreshed = client.get_collection(collection_name)
     refreshed_schema = collection_refreshed.schema
     assert refreshed_schema is not None
-    
+
     # Verify vector index was updated on server
     assert refreshed_schema.defaults.float_list.vector_index.config.spann.search_nprobe == 128  # type: ignore
-    
+
     # Verify other value types are still intact on server
     assert refreshed_schema.defaults.string is not None
     assert refreshed_schema.defaults.string.string_inverted_index is not None
