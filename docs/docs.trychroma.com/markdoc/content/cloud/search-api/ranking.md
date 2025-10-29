@@ -88,6 +88,10 @@ When combining multiple `Knn` expressions, documents must appear in at least one
 
 The `Knn` class performs K-nearest neighbor search to find similar vectors. It's the primary way to add vector similarity scoring to your searches.
 
+{% Banner type="tip" %}
+**Sparse embeddings:** To search custom sparse embedding fields, you must first configure a sparse vector index in your collection schema. See [Sparse Vector Search Setup](../schema/sparse-vector-search) for configuration instructions.
+{% /Banner %}
+
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}

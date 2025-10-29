@@ -7,6 +7,10 @@ name: Hybrid Search with RRF
 
 Learn how to combine multiple ranking strategies using Reciprocal Rank Fusion (RRF). RRF is ideal for hybrid search scenarios where you want to merge results from different ranking methods (e.g., dense and sparse embeddings).
 
+{% Banner type="tip" %}
+**Prerequisites:** To use hybrid search with sparse embeddings, you must first configure a sparse vector index in your collection schema. See [Sparse Vector Search Setup](../schema/sparse-vector-search) for configuration instructions.
+{% /Banner %}
+
 ## Understanding RRF
 
 Reciprocal Rank Fusion combines multiple rankings by using rank positions rather than raw scores. This makes it effective for merging rankings with different score scales.
