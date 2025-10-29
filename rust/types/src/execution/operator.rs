@@ -802,7 +802,8 @@ impl TryFrom<KnnBatchResult> for chroma_proto::KnnBatchResult {
 ///
 /// let sparse = QueryVector::Sparse(SparseVector::new(
 ///     vec![0, 5, 10, 50],      // indices
-///     vec![0.5, 0.3, 0.8, 0.2] // values
+///     vec![0.5, 0.3, 0.8, 0.2], // values
+///     None,
 /// ));
 /// ```
 ///
@@ -831,7 +832,8 @@ impl TryFrom<KnnBatchResult> for chroma_proto::KnnBatchResult {
 /// let rank = RankExpr::Knn {
 ///     query: QueryVector::Sparse(SparseVector::new(
 ///         vec![1, 5, 10],
-///         vec![0.5, 0.3, 0.8]
+///         vec![0.5, 0.3, 0.8],
+///         None,
 ///     )),
 ///     key: Key::field("sparse_embedding"),
 ///     limit: 100,
@@ -856,7 +858,9 @@ impl TryFrom<chroma_proto::QueryVector> for QueryVector {
                 Ok(QueryVector::Dense(dense.try_into().map(|(v, _)| v)?))
             }
             chroma_proto::query_vector::Vector::Sparse(sparse) => {
-                Ok(QueryVector::Sparse(sparse.into()))
+                Ok(QueryVector::Sparse(sparse.try_into().map_err(|_| {
+                    QueryConversionError::validation("sparse vector length mismatch")
+                })?))
             }
         }
     }
@@ -2693,7 +2697,7 @@ mod tests {
 
     #[test]
     fn test_query_vector_sparse_proto_conversion() {
-        let sparse = SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]);
+        let sparse = SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]).unwrap();
         let query_vector = QueryVector::Sparse(sparse.clone());
 
         // Convert to proto
@@ -2979,7 +2983,8 @@ mod tests {
         assert_eq!(deserialized, dense);
 
         // Test sparse vector
-        let sparse = QueryVector::Sparse(SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]));
+        let sparse =
+            QueryVector::Sparse(SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]).unwrap());
         let json = serde_json::to_string(&sparse).unwrap();
         let deserialized: QueryVector = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, sparse);

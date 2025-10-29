@@ -138,7 +138,9 @@ impl StateMachineTest for FrontendUnderTest {
                         }
                     }
 
-                    state.frontend.delete(request.clone()).await.unwrap();
+                    Box::pin(state.frontend.delete(request.clone()))
+                        .await
+                        .unwrap();
                 }
                 CollectionRequest::Get(mut request) => {
                     let expected_result = {

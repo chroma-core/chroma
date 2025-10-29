@@ -453,6 +453,10 @@ export type SparseVector = {
      */
     indices: Array<number>;
     /**
+     * Tokens corresponding to each index
+     */
+    tokens?: Array<string> | null;
+    /**
      * Values corresponding to each index
      */
     values: Array<number>;

@@ -561,7 +561,7 @@ impl Bindings {
 
         let mut frontend_clone = self.frontend.clone();
         self.runtime
-            .block_on(async { frontend_clone.delete(request).await })?;
+            .block_on(async { Box::pin(frontend_clone.delete(request)).await })?;
         Ok(())
     }
 
