@@ -523,13 +523,13 @@ impl SysDb {
     }
 
     // Only meant for testing.
-    pub async fn get_all_operators(
+    pub async fn get_all_functions(
         &mut self,
     ) -> Result<Vec<(String, uuid::Uuid)>, Box<dyn std::error::Error>> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_all_operators().await,
-            SysDb::Sqlite(_) => unimplemented!("get_all_operators not implemented for sqlite"),
-            SysDb::Test(_) => unimplemented!("get_all_operators not implemented for test"),
+            SysDb::Grpc(grpc) => grpc.get_all_functions().await,
+            SysDb::Sqlite(_) => unimplemented!("get_all_functions not implemented for sqlite"),
+            SysDb::Test(_) => unimplemented!("get_all_functions not implemented for test"),
         }
     }
 
@@ -1508,7 +1508,7 @@ impl GrpcSysDb {
         })
     }
 
-    async fn get_all_operators(
+    async fn get_all_functions(
         &mut self,
     ) -> Result<Vec<(String, uuid::Uuid)>, Box<dyn std::error::Error>> {
         let res = self
@@ -2014,10 +2014,20 @@ impl GrpcSysDb {
                 None
             };
 
+        // Parse function_id from the dedicated UUID field
+        let function_id = uuid::Uuid::parse_str(&attached_function.function_id).map_err(|e| {
+            tracing::error!(
+                function_id = %attached_function.function_id,
+                error = %e,
+                "Server returned invalid function_id UUID"
+            );
+            GetAttachedFunctionError::ServerReturnedInvalidData
+        })?;
+
         Ok(chroma_types::AttachedFunction {
             id: attached_function_id,
             name: attached_function.name,
-            function_id: attached_function.function_name,
+            function_id,
             input_collection_id: parsed_input_collection_id,
             output_collection_name: attached_function.output_collection_name,
             output_collection_id: parsed_output_collection_id,

@@ -1,3 +1,3 @@
 mod statistics;
 
-pub use statistics::StatisticsFunctionExecutor;
+pub use statistics::{CounterFunctionFactory, StatisticsFunctionExecutor};

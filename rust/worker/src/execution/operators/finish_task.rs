@@ -389,13 +389,13 @@ mod tests {
         let collection_id = CollectionUuid::new();
 
         // Create a fake attached function that's not in the database
-        use chroma_types::{AttachedFunction, NonceUuid};
+        use chroma_types::{AttachedFunction, NonceUuid, FUNCTION_RECORD_COUNTER_ID};
         use std::time::SystemTime;
 
         let fake_attached_function = AttachedFunction {
             id: AttachedFunctionUuid(Uuid::new_v4()),
             name: "fake_function".to_string(),
-            function_id: "record_counter".to_string(),
+            function_id: FUNCTION_RECORD_COUNTER_ID,
             input_collection_id: collection_id,
             output_collection_name: format!("test_output_{}", Uuid::new_v4()),
             output_collection_id: None,

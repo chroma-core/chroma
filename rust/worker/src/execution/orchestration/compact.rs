@@ -50,7 +50,7 @@ use crate::execution::operators::{
         CommitSegmentWriterOutput,
     },
     execute_task::{
-        CountAttachedFunction, ExecuteAttachedFunctionError, ExecuteAttachedFunctionInput,
+        ExecuteAttachedFunctionError, ExecuteAttachedFunctionInput,
         ExecuteAttachedFunctionOperator, ExecuteAttachedFunctionOutput,
     },
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
@@ -472,14 +472,21 @@ impl CompactOrchestrator {
             None => return,
         };
 
-        // TODO(tanujnay112): Get the actual attached function executor based on function_id
-        // For now, hardcode CountAttachedFunction as a placeholder
-        let attached_function_executor = Arc::new(CountAttachedFunction);
-
-        let execute_attached_function_op = ExecuteAttachedFunctionOperator {
-            log_client: self.log.clone(),
-            attached_function_executor,
-        };
+        let execute_attached_function_op =
+            match ExecuteAttachedFunctionOperator::from_attached_function(
+                &attached_function,
+                self.log.clone(),
+            ) {
+                Ok(op) => op,
+                Err(e) => {
+                    self.terminate_with_result(
+                        Err(CompactionError::ExecuteAttachedFunction(e)),
+                        ctx,
+                    )
+                    .await;
+                    return;
+                }
+            };
 
         let execute_attached_function_input = ExecuteAttachedFunctionInput {
             log_records,
