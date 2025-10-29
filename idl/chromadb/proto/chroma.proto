@@ -28,6 +28,7 @@ message Vector {
 message SparseVector {
     repeated uint32 indices = 1;
     repeated float values = 2;
+    repeated string tokens = 3;
 }
 
 enum SegmentScope {

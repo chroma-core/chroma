@@ -181,7 +181,12 @@ impl PartialOrd for SparseVector {
 
 impl From<chroma_proto::SparseVector> for SparseVector {
     fn from(proto: chroma_proto::SparseVector) -> Self {
-        SparseVector::new(proto.indices, proto.values, None)
+        let tokens = if proto.tokens.is_empty() && !proto.indices.is_empty() {
+            None
+        } else {
+            Some(proto.tokens)
+        };
+        SparseVector::new(proto.indices, proto.values, tokens)
     }
 }
 
@@ -190,6 +195,7 @@ impl From<SparseVector> for chroma_proto::SparseVector {
         chroma_proto::SparseVector {
             indices: sparse.indices,
             values: sparse.values,
+            tokens: sparse.tokens.unwrap_or_default(),
         }
     }
 }
@@ -1810,6 +1816,7 @@ mod tests {
                         chroma_proto::SparseVector {
                             indices: vec![0, 5, 10],
                             values: vec![0.1, 0.5, 0.9],
+                            tokens: vec!["foo".to_string(), "bar".to_string(), "baz".to_string()],
                         },
                     ),
                 ),
@@ -1834,7 +1841,11 @@ mod tests {
             &UpdateMetadataValue::SparseVector(SparseVector::new(
                 vec![0, 5, 10],
                 vec![0.1, 0.5, 0.9],
-                None,
+                Some(vec![
+                    "foo".to_string(),
+                    "bar".to_string(),
+                    "baz".to_string(),
+                ]),
             ))
         );
     }
@@ -1873,6 +1884,7 @@ mod tests {
                         chroma_proto::SparseVector {
                             indices: vec![1, 10, 100],
                             values: vec![0.2, 0.4, 0.6],
+                            tokens: vec!["foo".to_string(), "bar".to_string(), "baz".to_string()],
                         },
                     ),
                 ),
@@ -1897,7 +1909,11 @@ mod tests {
             &MetadataValue::SparseVector(SparseVector::new(
                 vec![1, 10, 100],
                 vec![0.2, 0.4, 0.6],
-                None,
+                Some(vec![
+                    "foo".to_string(),
+                    "bar".to_string(),
+                    "baz".to_string(),
+                ]),
             ))
         );
     }
@@ -2098,13 +2114,33 @@ mod tests {
 
     #[test]
     fn test_sparse_vector_proto_conversion() {
-        let sparse = SparseVector::new(vec![1, 10, 100], vec![0.2, 0.4, 0.6], None);
+        let tokens = Some(vec![
+            "token1".to_string(),
+            "token2".to_string(),
+            "token3".to_string(),
+        ]);
+        let sparse = SparseVector::new(vec![1, 10, 100], vec![0.2, 0.4, 0.6], tokens.clone());
         let proto: chroma_proto::SparseVector = sparse.clone().into();
         assert_eq!(proto.indices, vec![1, 10, 100]);
         assert_eq!(proto.values, vec![0.2, 0.4, 0.6]);
+        assert_eq!(proto.tokens, tokens.clone().unwrap());
 
         let converted: SparseVector = proto.into();
         assert_eq!(converted, sparse);
+        assert_eq!(converted.tokens, tokens);
+    }
+
+    #[test]
+    fn test_sparse_vector_proto_conversion_empty_tokens() {
+        let sparse = SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9], None);
+        let proto: chroma_proto::SparseVector = sparse.clone().into();
+        assert_eq!(proto.indices, vec![0, 5, 10]);
+        assert_eq!(proto.values, vec![0.1, 0.5, 0.9]);
+        assert_eq!(proto.tokens, Vec::<String>::new());
+
+        let converted: SparseVector = proto.into();
+        assert_eq!(converted, sparse);
+        assert_eq!(converted.tokens, None);
     }
 
     #[test]
