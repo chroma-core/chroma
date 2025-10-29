@@ -209,7 +209,7 @@ impl TaskExecutor for StatisticsFunctionExecutor {
 
                 let mut metadata = HashMap::with_capacity(4);
                 metadata.insert("count".to_string(), count.output());
-                metadata.insert("term".to_string(), UpdateMetadataValue::Str(key.clone()));
+                metadata.insert("key".to_string(), UpdateMetadataValue::Str(key.clone()));
                 metadata.insert(
                     "type".to_string(),
                     UpdateMetadataValue::Str(stats_value.stable_type().to_string()),
@@ -296,9 +296,9 @@ mod tests {
             Some(UpdateMetadataValue::Int(value)) => *value,
             other => panic!("unexpected count metadata: {other:?}"),
         };
-        let term = match metadata.get("term") {
+        let key = match metadata.get("key") {
             Some(UpdateMetadataValue::Str(value)) => value.clone(),
-            other => panic!("unexpected term metadata: {other:?}"),
+            other => panic!("unexpected key metadata: {other:?}"),
         };
         let value_type = match metadata.get("type") {
             Some(UpdateMetadataValue::Str(value)) => value.clone(),
@@ -308,7 +308,7 @@ mod tests {
             Some(UpdateMetadataValue::Str(value)) => value.clone(),
             other => panic!("unexpected value metadata: {other:?}"),
         };
-        (count, term, value_type, value)
+        (count, key, value_type, value)
     }
 
     fn collect_statistics_map(
@@ -332,16 +332,13 @@ mod tests {
 
     fn build_statistics_metadata(
         count: i64,
-        term: &str,
+        key: &str,
         value_type: &str,
         value: &str,
     ) -> UpdateMetadata {
         HashMap::from([
             ("count".to_string(), UpdateMetadataValue::Int(count)),
-            (
-                "term".to_string(),
-                UpdateMetadataValue::Str(term.to_string()),
-            ),
+            ("key".to_string(), UpdateMetadataValue::Str(key.to_string())),
             (
                 "type".to_string(),
                 UpdateMetadataValue::Str(value_type.to_string()),
@@ -713,10 +710,10 @@ mod tests {
             .as_ref()
             .expect("statistics executor always sets metadata");
 
-        let (count, term, value_type, value) = extract_metadata_tuple(metadata);
+        let (count, key, value_type, value) = extract_metadata_tuple(metadata);
 
         assert_eq!(count, 1);
-        assert_eq!(term, "fresh_key");
+        assert_eq!(key, "fresh_key");
         assert_eq!(value_type, "int");
         assert_eq!(value, "1");
     }
