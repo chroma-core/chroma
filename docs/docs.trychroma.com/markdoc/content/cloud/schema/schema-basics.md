@@ -33,19 +33,9 @@ When determining whether to index a field, Chroma follows this precedence:
 
 This means you can set broad defaults and then override them for specific fields as needed.
 
-## Value Types and Default Behavior
+## Default Index Behavior
 
-Schema recognizes six value types, each with associated index types. Without providing a Schema, collections use these built-in defaults:
-
-| Value Type | Index Types | Default Enabled | Use Case |
-|-----------|-------------|-----------------|----------|
-| `string` | String Inverted Index | ✓ (all metadata) | Filter on string values |
-| `string` | FTS Index | ✓ (`#document` only) | Full-text search on documents |
-| `float_list` | Vector Index | ✓ (`#embedding` only) | Similarity search on embeddings |
-| `sparse_vector` | Sparse Vector Index | ✗ (requires config) | Keyword-based search |
-| `int_value` | Int Inverted Index | ✓ (all metadata) | Filter on integer values |
-| `float_value` | Float Inverted Index | ✓ (all metadata) | Filter on float values |
-| `boolean` | Bool Inverted Index | ✓ (all metadata) | Filter on boolean values |
+Without providing a Schema, collections use built-in defaults for indexing. For a complete overview of all value types, index types, and their defaults, see the [Index Configuration Reference](./index-reference#index-types-overview).
 
 ### Special Keys
 
