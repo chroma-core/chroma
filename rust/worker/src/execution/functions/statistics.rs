@@ -16,7 +16,7 @@ use chroma_types::{
 };
 use futures::StreamExt;
 
-use crate::execution::operators::execute_task::TaskExecutor;
+use crate::execution::operators::execute_task::AttachedFunctionExecutor;
 
 /// Create an accumulator for statistics.
 pub trait StatisticsFunctionFactory: std::fmt::Debug + Send + Sync {
@@ -170,7 +170,7 @@ impl Hash for StatisticsValue {
 pub struct StatisticsFunctionExecutor(pub Box<dyn StatisticsFunctionFactory>);
 
 #[async_trait]
-impl TaskExecutor for StatisticsFunctionExecutor {
+impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
     async fn execute(
         &self,
         input_records: Chunk<LogRecord>,
