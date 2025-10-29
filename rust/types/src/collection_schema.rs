@@ -3053,7 +3053,7 @@ mod tests {
         let schema = Schema::new_default(KnnIndex::Spann);
         let result = schema.is_knn_key_indexing_enabled(
             "custom_sparse",
-            &QueryVector::Sparse(SparseVector::new(vec![0_u32], vec![1.0_f32])),
+            &QueryVector::Sparse(SparseVector::new(vec![0_u32], vec![1.0_f32], None)),
         );
 
         let err = result.expect_err("expected indexing disabled error");
@@ -3088,7 +3088,7 @@ mod tests {
 
         let result = schema.is_knn_key_indexing_enabled(
             "sparse_enabled",
-            &QueryVector::Sparse(SparseVector::new(vec![0_u32], vec![1.0_f32])),
+            &QueryVector::Sparse(SparseVector::new(vec![0_u32], vec![1.0_f32], None)),
         );
 
         assert!(result.is_ok());

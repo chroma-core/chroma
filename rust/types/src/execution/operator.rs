@@ -800,7 +800,8 @@ impl TryFrom<KnnBatchResult> for chroma_proto::KnnBatchResult {
 ///
 /// let sparse = QueryVector::Sparse(SparseVector::new(
 ///     vec![0, 5, 10, 50],      // indices
-///     vec![0.5, 0.3, 0.8, 0.2] // values
+///     vec![0.5, 0.3, 0.8, 0.2], // values
+///     None,
 /// ));
 /// ```
 ///
@@ -829,7 +830,8 @@ impl TryFrom<KnnBatchResult> for chroma_proto::KnnBatchResult {
 /// let rank = RankExpr::Knn {
 ///     query: QueryVector::Sparse(SparseVector::new(
 ///         vec![1, 5, 10],
-///         vec![0.5, 0.3, 0.8]
+///         vec![0.5, 0.3, 0.8],
+///         None,
 ///     )),
 ///     key: Key::field("sparse_embedding"),
 ///     limit: 100,
@@ -2691,7 +2693,7 @@ mod tests {
 
     #[test]
     fn test_query_vector_sparse_proto_conversion() {
-        let sparse = SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]);
+        let sparse = SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9], None);
         let query_vector = QueryVector::Sparse(sparse.clone());
 
         // Convert to proto
@@ -2977,7 +2979,8 @@ mod tests {
         assert_eq!(deserialized, dense);
 
         // Test sparse vector
-        let sparse = QueryVector::Sparse(SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]));
+        let sparse =
+            QueryVector::Sparse(SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9], None));
         let json = serde_json::to_string(&sparse).unwrap();
         let deserialized: QueryVector = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, sparse);
