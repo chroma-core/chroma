@@ -1337,7 +1337,7 @@ impl std::fmt::Display for MetadataExpression {
                 write!(f, "{} {} {}", self.key, op, value)
             }
             MetadataComparison::Set(op, set_value) => {
-                write!(f, "{} {} {:?}", self.key, op, set_value)
+                write!(f, "{} {} {}", self.key, op, set_value)
             }
         }
     }
@@ -1590,6 +1590,45 @@ pub enum MetadataSetValue {
     Int(Vec<i64>),
     Float(Vec<f64>),
     Str(Vec<String>),
+}
+
+impl std::fmt::Display for MetadataSetValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MetadataSetValue::Bool(values) => {
+                let values_str = values
+                    .iter()
+                    .map(|v| format!("\"{}\"", v))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "[{}]", values_str)
+            }
+            MetadataSetValue::Int(values) => {
+                let values_str = values
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "[{}]", values_str)
+            }
+            MetadataSetValue::Float(values) => {
+                let values_str = values
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "[{}]", values_str)
+            }
+            MetadataSetValue::Str(values) => {
+                let values_str = values
+                    .iter()
+                    .map(|v| format!("\"{}\"", v))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "[{}]", values_str)
+            }
+        }
+    }
 }
 
 impl MetadataSetValue {
