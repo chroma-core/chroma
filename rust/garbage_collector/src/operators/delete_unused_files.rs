@@ -1,4 +1,5 @@
 use crate::types::CleanupMode;
+use crate::types::FilePathSet;
 use crate::types::RENAMED_FILE_PREFIX;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -6,7 +7,7 @@ use chroma_storage::Storage;
 use chroma_storage::StorageError;
 use chroma_system::{Operator, OperatorType};
 use futures::stream::StreamExt;
-use std::collections::HashSet;
+use futures::TryStreamExt;
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
@@ -39,13 +40,12 @@ impl DeleteUnusedFilesOperator {
 
 #[derive(Debug)]
 pub struct DeleteUnusedFilesInput {
-    pub unused_s3_files: Vec<String>,
-    pub hnsw_prefixes_for_deletion: Vec<String>,
+    pub unused_s3_files: FilePathSet,
 }
 
 #[derive(Debug)]
 pub struct DeleteUnusedFilesOutput {
-    pub deleted_files: HashSet<String>,
+    pub num_files_deleted: usize,
 }
 
 #[derive(Error, Debug)]
@@ -80,14 +80,9 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
     ) -> Result<DeleteUnusedFilesOutput, DeleteUnusedFilesError> {
         tracing::debug!(
             files_count = input.unused_s3_files.len(),
-            hnsw_prefixes_count = input.hnsw_prefixes_for_deletion.len(),
             cleanup_mode = ?self.cleanup_mode,
             "Starting deletion of unused files"
         );
-
-        // Create a list that contains all files that will be deleted.
-        let mut all_files = input.unused_s3_files.clone();
-        all_files.extend(input.hnsw_prefixes_for_deletion.clone());
 
         // NOTE(rohit):
         // We don't want to fail the entire operation if one file fails to rename or delete.
@@ -97,8 +92,8 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
             CleanupMode::DryRunV2 => {}
             CleanupMode::Rename => {
                 // Soft delete - rename the file
-                if !all_files.is_empty() {
-                    let mut rename_stream = futures::stream::iter(all_files.clone())
+                if !input.unused_s3_files.is_empty() {
+                    let mut rename_stream = futures::stream::iter(input.unused_s3_files.iter())
                         .map(move |file_path| {
                             let new_path = self.get_rename_path(&file_path);
                             self.rename_with_path(file_path, new_path)
@@ -123,18 +118,22 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
             }
             CleanupMode::DeleteV2 => {
                 // Hard delete - remove the file
-                if !all_files.is_empty() {
-                    // The S3 DeleteObjects API allows up to 1000 objects per request
-                    for chunk in all_files.chunks(1000) {
-                        let result = self.storage.delete_many(chunk).await?;
-                        if !result.errors.is_empty() {
+                if !input.unused_s3_files.is_empty() {
+                    let mut delete_stream = futures::stream::iter(input.unused_s3_files.iter())
+                        // The S3 DeleteObjects API allows up to 1000 objects per request
+                        .chunks(1000)
+                        .then(|chunk| async move { self.storage.delete_many(chunk).await })
+                        .boxed();
+
+                    while let Some(delete_result) = delete_stream.try_next().await? {
+                        if !delete_result.errors.is_empty() {
                             // Log the errors but don't fail the operation
-                            for error in result.errors {
+                            for error in delete_result.errors {
                                 match error {
                                     StorageError::NotFound { path, source } => {
-                                        tracing::warn!("Delete file {path} not found: {source}")
+                                        tracing::info!("Delete file {path} not found: {source}")
                                     }
-                                    err => return Err(DeleteUnusedFilesError::StorageError(err)),
+                                    err => tracing::error!("Failed to delete: {err}"),
                                 }
                             }
                         }
@@ -144,12 +143,10 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
         }
 
         Ok(DeleteUnusedFilesOutput {
-            deleted_files: all_files.into_iter().collect(),
+            num_files_deleted: input.unused_s3_files.len(),
         })
     }
 }
-
-impl DeleteUnusedFilesOperator {}
 
 #[cfg(test)]
 mod tests {
@@ -167,11 +164,14 @@ mod tests {
             .unwrap();
     }
 
-    async fn setup_test_files(storage: &Storage) -> (Vec<String>, Vec<String>) {
+    async fn setup_test_files(storage: &Storage) -> FilePathSet {
+        let mut set = FilePathSet::new();
+
         // Create regular test files
         let test_files = vec!["file1.txt", "file2.txt"];
         for file in &test_files {
             create_test_file(storage, file, b"test content").await;
+            set.insert_path(file.to_string());
         }
 
         // Create HNSW test files
@@ -181,19 +181,17 @@ mod tests {
             .collect::<Vec<String>>();
         for file in &hnsw_files {
             create_test_file(storage, file, b"test content").await;
+            set.insert_path(file.to_string());
         }
 
-        (
-            test_files.iter().map(|s| s.to_string()).collect(),
-            hnsw_files.iter().map(|s| s.to_string()).collect(),
-        )
+        set
     }
 
     #[tokio::test]
     async fn test_dry_run_mode() {
         let tmp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let (test_files, hnsw_files) = setup_test_files(&storage).await;
+        let unused_s3_files = setup_test_files(&storage).await;
 
         let operator = DeleteUnusedFilesOperator::new(
             storage.clone(),
@@ -201,20 +199,13 @@ mod tests {
             "test_tenant".to_string(),
         );
         let input = DeleteUnusedFilesInput {
-            unused_s3_files: test_files.clone(),
-            hnsw_prefixes_for_deletion: hnsw_files.clone(),
+            unused_s3_files: unused_s3_files.clone(),
         };
 
-        let result = operator.run(&input).await.unwrap();
+        operator.run(&input).await.unwrap();
 
         // Verify original files still exist
-        for file in &test_files {
-            assert!(result.deleted_files.contains(file));
-            assert!(Path::new(&tmp_dir.path().join(file)).exists());
-        }
-
-        for file in &hnsw_files {
-            assert!(result.deleted_files.contains(file));
+        for file in unused_s3_files.iter() {
             assert!(Path::new(&tmp_dir.path().join(file)).exists());
         }
     }
@@ -223,7 +214,7 @@ mod tests {
     async fn test_rename_mode() {
         let tmp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let (test_files, hnsw_files) = setup_test_files(&storage).await;
+        let unused_s3_files = setup_test_files(&storage).await;
 
         let operator = DeleteUnusedFilesOperator::new(
             storage.clone(),
@@ -231,32 +222,19 @@ mod tests {
             "test_tenant".to_string(),
         );
         let input = DeleteUnusedFilesInput {
-            unused_s3_files: test_files.clone(),
-            hnsw_prefixes_for_deletion: hnsw_files.clone(),
+            unused_s3_files: unused_s3_files.clone(),
         };
 
-        let result = operator.run(&input).await.unwrap();
+        operator.run(&input).await.unwrap();
 
-        // Verify regular files were moved to deleted directory
-        for file in &test_files {
-            let original_path = tmp_dir.path().join(file);
+        // Verify files were moved to deleted directory
+        for file in unused_s3_files.iter() {
+            let original_path = tmp_dir.path().join(&file);
             let new_path = tmp_dir
                 .path()
                 .join(format!("{}{}/{}", RENAMED_FILE_PREFIX, "test_tenant", file));
             assert!(!original_path.exists());
             assert!(new_path.exists());
-            assert!(result.deleted_files.contains(file));
-        }
-
-        // Verify HNSW files were moved to deleted directory
-        for file in &hnsw_files {
-            let original_path = tmp_dir.path().join(file);
-            let new_path = tmp_dir
-                .path()
-                .join(format!("{}{}/{}", RENAMED_FILE_PREFIX, "test_tenant", file));
-            assert!(!original_path.exists());
-            assert!(new_path.exists());
-            assert!(result.deleted_files.contains(file));
         }
     }
 
@@ -264,7 +242,7 @@ mod tests {
     async fn test_delete_mode() {
         let tmp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let (test_files, hnsw_files) = setup_test_files(&storage).await;
+        let unused_s3_files = setup_test_files(&storage).await;
 
         let operator = DeleteUnusedFilesOperator::new(
             storage.clone(),
@@ -272,22 +250,14 @@ mod tests {
             "test_tenant".to_string(),
         );
         let input = DeleteUnusedFilesInput {
-            unused_s3_files: test_files.clone(),
-            hnsw_prefixes_for_deletion: hnsw_files.clone(),
+            unused_s3_files: unused_s3_files.clone(),
         };
 
-        let result = operator.run(&input).await.unwrap();
+        operator.run(&input).await.unwrap();
 
-        // Verify regular files were deleted
-        for file in &test_files {
+        // Verify files were deleted
+        for file in unused_s3_files.iter() {
             assert!(!Path::new(&tmp_dir.path().join(file)).exists());
-            assert!(result.deleted_files.contains(file));
-        }
-
-        // Verify HNSW files were deleted
-        for file in &hnsw_files {
-            assert!(!Path::new(&tmp_dir.path().join(file)).exists());
-            assert!(result.deleted_files.contains(file));
         }
     }
 
@@ -296,7 +266,8 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
 
-        let unused_files = vec!["nonexistent.txt".to_string()];
+        let mut unused_files = FilePathSet::new();
+        unused_files.insert_path("nonexistent.txt".to_string());
 
         // Test Delete mode - should succeed but record the error in deletion list
         let delete_operator = DeleteUnusedFilesOperator::new(
@@ -307,7 +278,6 @@ mod tests {
         let result = delete_operator
             .run(&DeleteUnusedFilesInput {
                 unused_s3_files: unused_files.clone(),
-                hnsw_prefixes_for_deletion: vec![],
             })
             .await;
         assert!(result.is_ok());
@@ -321,7 +291,6 @@ mod tests {
         let result = rename_operator
             .run(&DeleteUnusedFilesInput {
                 unused_s3_files: unused_files.clone(),
-                hnsw_prefixes_for_deletion: vec![],
             })
             .await;
         assert!(result.is_ok());
@@ -335,7 +304,6 @@ mod tests {
         let result = list_operator
             .run(&DeleteUnusedFilesInput {
                 unused_s3_files: unused_files,
-                hnsw_prefixes_for_deletion: vec![],
             })
             .await;
         assert!(result.is_ok());
