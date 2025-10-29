@@ -20,7 +20,7 @@ use chroma_types::{
     ListCollectionVersionsError, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
     ResetResponse, ScheduleEntry, ScheduleEntryConversionError, SegmentFlushInfo,
     SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError, UpdateTenantError,
-    UpdateTenantResponse, VectorIndexConfiguration,
+    UpdateTenantResponse,
 };
 use chroma_types::{
     AdvanceTaskError, AdvanceTaskResponse, BatchGetCollectionSoftDeleteStatusError,
@@ -295,17 +295,6 @@ impl SysDb {
         dimension: Option<i32>,
         get_or_create: bool,
     ) -> Result<Collection, CreateCollectionError> {
-        let configuration = match configuration {
-            Some(mut config) => {
-                let hnsw_params = config.get_hnsw_config_from_legacy_metadata(&metadata)?;
-                if let Some(hnsw_params) = hnsw_params {
-                    config.vector_index = VectorIndexConfiguration::Hnsw(hnsw_params);
-                }
-                Some(config)
-            }
-            None => None,
-        };
-
         match self {
             SysDb::Grpc(grpc) => {
                 grpc.create_collection(

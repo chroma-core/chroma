@@ -1539,7 +1539,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-cli"
-version = "1.1.11"
+version = "1.1.12"
 dependencies = [
  "arboard",
  "axum 0.8.1",
@@ -1870,6 +1870,7 @@ dependencies = [
  "sea-query-binder",
  "serde",
  "serde-pickle",
+ "serde_json",
  "shuttle",
  "sqlx",
  "tantivy",
@@ -2010,6 +2011,7 @@ dependencies = [
  "chroma-error",
  "chrono",
  "criterion",
+ "itertools 0.13.0",
  "proptest",
  "proptest-derive 0.5.1",
  "prost 0.13.5",

@@ -4,7 +4,7 @@ import type { SearchResponse, SparseVector } from "../src/api";
 import { CollectionImpl } from "../src/collection";
 import type { CollectionConfiguration } from "../src/collection-configuration";
 import type { ChromaClient } from "../src/chroma-client";
-import type { EmbeddingFunction } from "../src/embedding-function";
+import type { EmbeddingFunction, SparseEmbeddingFunction } from "../src/embedding-function";
 
 class QueryMockEmbedding implements EmbeddingFunction {
   public readonly name = "query_mock";
@@ -401,5 +401,95 @@ describe("search expression DSL", () => {
     expect(knnPayload.query).toEqual(embeddedVector);
     expect(knnPayload.key).toBe("#embedding");
     expect(knnPayload.limit).toBe(7);
+  });
+
+  test("search auto-embeds string knn queries with sparse embedding function", async () => {
+    const queryText = "hello world";
+
+    class DeterministicSparseEmbedding implements SparseEmbeddingFunction {
+      public readonly name = "deterministic_sparse";
+
+      constructor(private readonly label = "sparse") { }
+
+      async generate(texts: string[]): Promise<SparseVector[]> {
+        return texts.map((text) => {
+          if (text === "hello world") {
+            return { indices: [0], values: [11.0] };
+          }
+          return { indices: [], values: [] };
+        });
+      }
+
+      getConfig(): Record<string, any> {
+        return { label: this.label };
+      }
+
+      static buildFromConfig(config: Record<string, any>): DeterministicSparseEmbedding {
+        return new DeterministicSparseEmbedding(config.label);
+      }
+    }
+
+    const sparseEf = new DeterministicSparseEmbedding("sparse");
+    const generateSpy = jest.spyOn(sparseEf, "generate");
+
+    const { Schema, SparseVectorIndexConfig } = await import("../src/schema");
+    const schema = new Schema().createIndex(
+      new SparseVectorIndexConfig({
+        sourceKey: "raw_text",
+        embeddingFunction: sparseEf,
+      }),
+      "sparse_metadata",
+    );
+
+    let capturedBody: any;
+    const mockChromaClient = {
+      getMaxBatchSize: jest.fn<() => Promise<number>>().mockResolvedValue(1000),
+      supportsBase64Encoding: jest.fn<() => Promise<boolean>>().mockResolvedValue(false),
+      _path: jest.fn<() => Promise<{ path: string; tenant: string; database: string }>>().mockResolvedValue({ path: "/api/v1", tenant: "default_tenant", database: "default_database" }),
+    };
+
+    const mockApiClient = {
+      post: jest.fn().mockImplementation(async (options: any) => {
+        capturedBody = options.body;
+        return {
+          data: {
+            ids: [],
+            documents: [],
+            embeddings: [],
+            metadatas: [],
+            scores: [],
+            select: [],
+          } as SearchResponse,
+        };
+      }),
+    };
+
+    const collection = new CollectionImpl({
+      chromaClient: mockChromaClient as unknown as ChromaClient,
+      apiClient: mockApiClient as any,
+      id: "col-id",
+      name: "test",
+      configuration: {} as CollectionConfiguration,
+      metadata: undefined,
+      embeddingFunction: undefined,
+      schema,
+    });
+
+    await collection.search(
+      new Search().rank(Knn({ key: "sparse_metadata", query: queryText, limit: 10 })),
+    );
+
+    expect(mockApiClient.post).toHaveBeenCalledTimes(1);
+    expect(generateSpy).toHaveBeenCalledTimes(1);
+    expect(generateSpy).toHaveBeenCalledWith([queryText]);
+
+    expect(capturedBody).toBeDefined();
+    expect(Array.isArray(capturedBody.searches)).toBe(true);
+    expect(capturedBody.searches).toHaveLength(1);
+
+    const knnPayload = capturedBody.searches[0].rank.$knn;
+    expect(knnPayload.query).toEqual({ indices: [0], values: [11.0] });
+    expect(knnPayload.key).toBe("sparse_metadata");
+    expect(knnPayload.limit).toBe(10);
   });
 });

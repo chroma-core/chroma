@@ -1,21 +1,21 @@
 {
-    "name": "@chroma-core/chroma-cloud-splade",
+    "name": "@chroma-core/chroma-bm25",
     "version": "0.1.8",
     "private": false,
-    "description": "Chroma Cloud Splade sparse embedding function",
-    "main": "dist/cjs/chroma-cloud-splade.cjs",
-    "types": "dist/chroma-cloud-splade.d.ts",
-    "module": "dist/chroma-cloud-splade.legacy-esm.js",
+    "description": "Chroma BM25 sparse embedding function implemented in TypeScript",
+    "main": "dist/cjs/chroma-bm25.cjs",
+    "types": "dist/chroma-bm25.d.ts",
+    "module": "dist/chroma-bm25.legacy-esm.js",
     "type": "module",
     "exports": {
         ".": {
             "import": {
-                "types": "./dist/chroma-cloud-splade.d.ts",
-                "default": "./dist/chroma-cloud-splade.mjs"
+                "types": "./dist/chroma-bm25.d.ts",
+                "default": "./dist/chroma-bm25.mjs"
             },
             "require": {
-                "types": "./dist/cjs/chroma-cloud-splade.d.cts",
-                "default": "./dist/cjs/chroma-cloud-splade.cjs"
+                "types": "./dist/cjs/chroma-bm25.d.cts",
+                "default": "./dist/cjs/chroma-bm25.cjs"
             }
         }
     },
@@ -43,7 +43,8 @@
         "chromadb": "workspace:^"
     },
     "dependencies": {
-        "@chroma-core/ai-embeddings-common": "workspace:^"
+        "@chroma-core/ai-embeddings-common": "workspace:^",
+        "snowball-stemmers": "^0.6.0"
     },
     "engines": {
         "node": ">=20"
