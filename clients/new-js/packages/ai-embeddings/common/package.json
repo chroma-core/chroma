@@ -1,6 +1,6 @@
 {
   "name": "@chroma-core/ai-embeddings-common",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Common utilities for ChromaDB AI embedding packages",
   "private": false,
   "main": "./dist/index.js",
