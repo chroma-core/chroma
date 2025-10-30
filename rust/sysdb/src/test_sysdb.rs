@@ -2,13 +2,15 @@ use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionAndSegments, CollectionUuid, CountForksError, Database, FlushCompactionResponse,
     GetCollectionByCrnError, GetCollectionSizeError, GetCollectionWithSegmentsError,
-    GetSegmentsError, ListDatabasesError, ListDatabasesResponse, Segment, SegmentFlushInfo,
-    SegmentScope, SegmentType, Tenant, UpdateTenantError, UpdateTenantResponse,
+    GetSegmentsError, ListAttachedFunctionsError, ListDatabasesError, ListDatabasesResponse,
+    Segment, SegmentFlushInfo, SegmentScope, SegmentType, Tenant, UpdateTenantError,
+    UpdateTenantResponse,
 };
 use chroma_types::{GetCollectionsError, SegmentUuid};
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::sysdb::FlushCompactionError;
 use super::sysdb::GetLastCompactionTimeError;
@@ -27,6 +29,7 @@ use chroma_types::ListCollectionVersionsError;
 use chrono;
 use derivative::Derivative;
 use prost::Message;
+use serde_json::Value as JsonValue;
 
 #[derive(Clone, Debug)]
 pub struct TestSysDb {
@@ -613,6 +616,20 @@ impl TestSysDb {
         Ok(10)
     }
 
+    pub(crate) async fn list_attached_functions(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Vec<chroma_types::chroma_proto::AttachedFunction>, ListAttachedFunctionsError> {
+        let inner = self.inner.lock();
+        let functions = inner
+            .tasks
+            .values()
+            .filter(|af| af.input_collection_id == collection_id)
+            .map(attached_function_to_proto)
+            .collect();
+        Ok(functions)
+    }
+
     pub(crate) async fn batch_get_collection_version_file_paths(
         &self,
         collection_ids: Vec<CollectionUuid>,
@@ -687,4 +704,82 @@ impl TestSysDb {
         attached_function.lowest_live_nonce = Some(attached_function.next_nonce);
         Ok(())
     }
+}
+
+fn attached_function_to_proto(
+    attached_function: &chroma_types::AttachedFunction,
+) -> chroma_types::chroma_proto::AttachedFunction {
+    chroma_types::chroma_proto::AttachedFunction {
+        id: attached_function.id.0.to_string(),
+        name: attached_function.name.clone(),
+        function_name: attached_function.function_id.to_string(),
+        function_id: attached_function.function_id.to_string(),
+        input_collection_id: attached_function.input_collection_id.0.to_string(),
+        output_collection_name: attached_function.output_collection_name.clone(),
+        output_collection_id: attached_function
+            .output_collection_id
+            .as_ref()
+            .map(|id| id.0.to_string()),
+        params: parse_params(attached_function.params.as_deref()),
+        completion_offset: attached_function.completion_offset,
+        min_records_for_invocation: attached_function.min_records_for_invocation,
+        tenant_id: attached_function.tenant_id.clone(),
+        database_id: attached_function.database_id.clone(),
+        next_run_at: system_time_to_micros(attached_function.next_run),
+        lowest_live_nonce: attached_function
+            .lowest_live_nonce
+            .as_ref()
+            .map(|nonce| nonce.0.to_string()),
+        next_nonce: attached_function.next_nonce.0.to_string(),
+        created_at: system_time_to_micros(attached_function.created_at),
+        updated_at: system_time_to_micros(attached_function.updated_at),
+    }
+}
+
+fn parse_params(params: Option<&str>) -> Option<prost_types::Struct> {
+    let json = params?;
+    let value: JsonValue = serde_json::from_str(json).ok()?;
+    match value {
+        JsonValue::Object(map) => Some(prost_types::Struct {
+            fields: map
+                .into_iter()
+                .map(|(k, v)| (k, json_value_to_prost_value(v)))
+                .collect(),
+        }),
+        _ => None,
+    }
+}
+
+fn json_value_to_prost_value(value: JsonValue) -> prost_types::Value {
+    use prost_types::value::Kind;
+
+    let kind = match value {
+        JsonValue::Null => Kind::NullValue(0),
+        JsonValue::Bool(b) => Kind::BoolValue(b),
+        JsonValue::Number(n) => {
+            if let Some(f) = n.as_f64() {
+                Kind::NumberValue(f)
+            } else {
+                Kind::NullValue(0)
+            }
+        }
+        JsonValue::String(s) => Kind::StringValue(s),
+        JsonValue::Array(arr) => Kind::ListValue(prost_types::ListValue {
+            values: arr.into_iter().map(json_value_to_prost_value).collect(),
+        }),
+        JsonValue::Object(map) => Kind::StructValue(prost_types::Struct {
+            fields: map
+                .into_iter()
+                .map(|(k, v)| (k, json_value_to_prost_value(v)))
+                .collect(),
+        }),
+    };
+
+    prost_types::Value { kind: Some(kind) }
+}
+
+fn system_time_to_micros(time: SystemTime) -> u64 {
+    time.duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+        .as_micros() as u64
 }

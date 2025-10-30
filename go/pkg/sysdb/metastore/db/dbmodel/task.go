@@ -47,6 +47,7 @@ type IAttachedFunctionDb interface {
 	Insert(attachedFunction *AttachedFunction) error
 	GetByName(inputCollectionID string, name string) (*AttachedFunction, error)
 	GetByID(id uuid.UUID) (*AttachedFunction, error)
+	GetByCollectionID(inputCollectionID string) ([]*AttachedFunction, error)
 	Advance(id uuid.UUID, nextRunNonce uuid.UUID, completionOffset int64, nextRunDelaySecs uint64) (*AdvanceAttachedFunction, error)
 	UpdateCompletionOffset(id uuid.UUID, runNonce uuid.UUID, completionOffset int64) error
 	UpdateLowestLiveNonce(id uuid.UUID, lowestLiveNonce uuid.UUID) error

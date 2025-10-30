@@ -17,10 +17,10 @@ use chroma_types::{
     GetCollectionSizeError, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
     GetDatabaseResponse, GetSegmentsError, GetTenantError, GetTenantResponse,
     InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
-    ListCollectionVersionsError, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
-    ResetResponse, ScheduleEntry, ScheduleEntryConversionError, SegmentFlushInfo,
-    SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError, UpdateTenantError,
-    UpdateTenantResponse,
+    ListAttachedFunctionsError, ListCollectionVersionsError, ListDatabasesError,
+    ListDatabasesResponse, Metadata, ResetError, ResetResponse, ScheduleEntry,
+    ScheduleEntryConversionError, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    UpdateCollectionError, UpdateTenantError, UpdateTenantResponse,
 };
 use chroma_types::{
     AdvanceAttachedFunctionError, AdvanceAttachedFunctionResponse, AttachedFunctionUpdateInfo,
@@ -458,6 +458,17 @@ impl SysDb {
             SysDb::Grpc(grpc) => grpc.count_forks(source_collection_id).await,
             SysDb::Sqlite(_) => Err(CountForksError::Local),
             SysDb::Test(test) => test.count_forks(source_collection_id).await,
+        }
+    }
+
+    pub async fn list_attached_functions(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Vec<chroma_proto::AttachedFunction>, ListAttachedFunctionsError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.list_attached_functions(collection_id).await,
+            SysDb::Sqlite(_) => Err(ListAttachedFunctionsError::NotImplemented),
+            SysDb::Test(test) => test.list_attached_functions(collection_id).await,
         }
     }
 
@@ -1362,6 +1373,25 @@ impl GrpcSysDb {
         Ok(res.count as usize)
     }
 
+    pub async fn list_attached_functions(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Vec<chroma_proto::AttachedFunction>, ListAttachedFunctionsError> {
+        let res = self
+            .client
+            .list_attached_functions(chroma_proto::ListAttachedFunctionsRequest {
+                input_collection_id: collection_id.0.to_string(),
+            })
+            .await
+            .map_err(|err| match err.code() {
+                Code::NotFound => ListAttachedFunctionsError::NotFound(collection_id.0.to_string()),
+                _ => ListAttachedFunctionsError::Internal(err.into()),
+            })?
+            .into_inner();
+
+        Ok(res.attached_functions)
+    }
+
     pub async fn get_collections_to_gc(
         &mut self,
         cutoff_time: Option<SystemTime>,
@@ -1959,21 +1989,20 @@ impl GrpcSysDb {
             + std::time::Duration::from_micros(attached_function.next_run_at);
 
         // Parse nonces
-        let lowest_live_nonce = if attached_function.lowest_live_nonce.is_empty() {
-            None
-        } else {
-            Some(
-                uuid::Uuid::parse_str(&attached_function.lowest_live_nonce)
+        let lowest_live_nonce = match &attached_function.lowest_live_nonce {
+            Some(nonce_str) if !nonce_str.is_empty() => Some(
+                uuid::Uuid::parse_str(nonce_str)
                     .map(chroma_types::NonceUuid)
                     .map_err(|e| {
                         tracing::error!(
-                            lowest_live_nonce = %attached_function.lowest_live_nonce,
+                            lowest_live_nonce = %nonce_str,
                             error = %e,
                             "Server returned invalid lowest_live_nonce UUID"
                         );
                         GetAttachedFunctionError::ServerReturnedInvalidData
                     })?,
-            )
+            ),
+            _ => None,
         };
 
         let next_nonce = uuid::Uuid::parse_str(&attached_function.next_nonce)
