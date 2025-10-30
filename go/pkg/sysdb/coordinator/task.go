@@ -406,23 +406,40 @@ func (s *Coordinator) ListAttachedFunctions(ctx context.Context, req *coordinato
 		return &coordinatorpb.ListAttachedFunctionsResponse{AttachedFunctions: []*coordinatorpb.AttachedFunction{}}, nil
 	}
 
-	functionCache := make(map[uuid.UUID]*dbmodel.Function)
+	functionIDsSet := make(map[uuid.UUID]struct{})
+	functionIDs := make([]uuid.UUID, 0, len(attachedFunctions))
+	for _, attachedFunction := range attachedFunctions {
+		if _, exists := functionIDsSet[attachedFunction.FunctionID]; !exists {
+			functionIDsSet[attachedFunction.FunctionID] = struct{}{}
+			functionIDs = append(functionIDs, attachedFunction.FunctionID)
+		}
+	}
+
+	functions, err := s.catalog.metaDomain.FunctionDb(ctx).GetByIDs(functionIDs)
+	if err != nil {
+		log.Error("ListAttachedFunctions: failed to get functions", zap.Error(err))
+		return nil, err
+	}
+
+	functionsByID := make(map[uuid.UUID]*dbmodel.Function, len(functions))
+	for _, function := range functions {
+		if function == nil {
+			continue
+		}
+		functionsByID[function.ID] = function
+	}
+
+	for _, functionID := range functionIDs {
+		if _, ok := functionsByID[functionID]; !ok {
+			log.Error("ListAttachedFunctions: function not found", zap.String("function_id", functionID.String()))
+			return nil, common.ErrFunctionNotFound
+		}
+	}
+
 	protoFunctions := make([]*coordinatorpb.AttachedFunction, 0, len(attachedFunctions))
 
 	for _, attachedFunction := range attachedFunctions {
-		function, ok := functionCache[attachedFunction.FunctionID]
-		if !ok {
-			function, err = s.catalog.metaDomain.FunctionDb(ctx).GetByID(attachedFunction.FunctionID)
-			if err != nil {
-				log.Error("ListAttachedFunctions: failed to get function", zap.Error(err), zap.String("function_id", attachedFunction.FunctionID.String()))
-				return nil, err
-			}
-			if function == nil {
-				log.Error("ListAttachedFunctions: function not found", zap.String("function_id", attachedFunction.FunctionID.String()))
-				return nil, common.ErrFunctionNotFound
-			}
-			functionCache[attachedFunction.FunctionID] = function
-		}
+		function := functionsByID[attachedFunction.FunctionID]
 
 		attachedFunctionProto, err := attachedFunctionToProto(attachedFunction, function)
 		if err != nil {

@@ -10,6 +10,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	dbmodel_mocks "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel/mocks"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -90,9 +91,25 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_Success()
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
 	suite.mockAttachedFunctionDb.On("GetByCollectionID", collectionID).Return(attachedFunctions, nil).Once()
 
-	suite.mockMetaDomain.On("FunctionDb", ctx).Return(suite.mockFunctionDb).Twice()
-	suite.mockFunctionDb.On("GetByID", functionID1).Return(&dbmodel.Function{ID: functionID1, Name: "function-one"}, nil).Once()
-	suite.mockFunctionDb.On("GetByID", functionID2).Return(&dbmodel.Function{ID: functionID2, Name: "function-two"}, nil).Once()
+	functionOne := &dbmodel.Function{ID: functionID1, Name: "function-one"}
+	functionTwo := &dbmodel.Function{ID: functionID2, Name: "function-two"}
+
+	suite.mockMetaDomain.On("FunctionDb", ctx).Return(suite.mockFunctionDb).Once()
+	suite.mockFunctionDb.
+		On("GetByIDs", mock.MatchedBy(func(ids []uuid.UUID) bool {
+			if len(ids) != 2 {
+				return false
+			}
+			found := map[uuid.UUID]struct{}{
+				functionID1: {},
+				functionID2: {},
+			}
+			for _, id := range ids {
+				delete(found, id)
+			}
+			return len(found) == 0
+		})).
+		Return([]*dbmodel.Function{functionOne, functionTwo}, nil).Once()
 
 	req := &coordinatorpb.ListAttachedFunctionsRequest{InputCollectionId: collectionID}
 	resp, err := suite.coordinator.ListAttachedFunctions(ctx, req)
@@ -107,7 +124,8 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_Success()
 
 	suite.Equal("function-two", resp.AttachedFunctions[1].FunctionName)
 	suite.Equal(uint64(20), resp.AttachedFunctions[1].CompletionOffset)
-	suite.Nil(resp.AttachedFunctions[1].Params)
+	suite.NotNil(resp.AttachedFunctions[1].Params)
+	suite.Len(resp.AttachedFunctions[1].Params.Fields, 0)
 }
 
 func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_EmptyResult() {
@@ -152,7 +170,7 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_FunctionD
 	suite.mockAttachedFunctionDb.On("GetByCollectionID", collectionID).Return([]*dbmodel.AttachedFunction{attachedFunction}, nil).Once()
 
 	suite.mockMetaDomain.On("FunctionDb", ctx).Return(suite.mockFunctionDb).Once()
-	suite.mockFunctionDb.On("GetByID", functionID).Return(nil, errors.New("db error")).Once()
+	suite.mockFunctionDb.On("GetByIDs", []uuid.UUID{functionID}).Return(nil, errors.New("db error")).Once()
 
 	req := &coordinatorpb.ListAttachedFunctionsRequest{InputCollectionId: collectionID}
 	resp, err := suite.coordinator.ListAttachedFunctions(ctx, req)
@@ -187,8 +205,10 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_InvalidPa
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
 	suite.mockAttachedFunctionDb.On("GetByCollectionID", collectionID).Return([]*dbmodel.AttachedFunction{attachedFunction}, nil).Once()
 
+	functionModel := &dbmodel.Function{ID: functionID, Name: "function"}
+
 	suite.mockMetaDomain.On("FunctionDb", ctx).Return(suite.mockFunctionDb).Once()
-	suite.mockFunctionDb.On("GetByID", functionID).Return(&dbmodel.Function{ID: functionID, Name: "function"}, nil).Once()
+	suite.mockFunctionDb.On("GetByIDs", []uuid.UUID{functionID}).Return([]*dbmodel.Function{functionModel}, nil).Once()
 
 	req := &coordinatorpb.ListAttachedFunctionsRequest{InputCollectionId: collectionID}
 	resp, err := suite.coordinator.ListAttachedFunctions(ctx, req)

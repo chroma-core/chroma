@@ -48,6 +48,23 @@ func (s *functionDb) GetByID(id uuid.UUID) (*dbmodel.Function, error) {
 	return &function, nil
 }
 
+func (s *functionDb) GetByIDs(ids []uuid.UUID) ([]*dbmodel.Function, error) {
+	if len(ids) == 0 {
+		return []*dbmodel.Function{}, nil
+	}
+
+	var functions []*dbmodel.Function
+	err := s.db.
+		Where("id IN ?", ids).
+		Find(&functions).Error
+
+	if err != nil {
+		log.Error("GetFunctionsByIDs failed", zap.Error(err))
+		return nil, err
+	}
+	return functions, nil
+}
+
 func (s *functionDb) GetAll() ([]*dbmodel.Function, error) {
 	var functions []*dbmodel.Function
 	err := s.db.Find(&functions).Error
