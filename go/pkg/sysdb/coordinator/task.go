@@ -345,9 +345,8 @@ func attachedFunctionToProto(attachedFunction *dbmodel.AttachedFunction, functio
 	}
 
 	if attachedFunction.LowestLiveNonce != nil {
-		tmp := attachedFunction.LowestLiveNonce.String()
-		var ptr *string = &tmp
-		attachedFunctionProto.LowestLiveNonce = ptr
+		val := attachedFunction.LowestLiveNonce.String()
+		attachedFunctionProto.LowestLiveNonce = &val
 	}
 	if attachedFunction.OutputCollectionID != nil {
 		attachedFunctionProto.OutputCollectionId = attachedFunction.OutputCollectionID
