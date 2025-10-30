@@ -23,12 +23,13 @@ pip install chromadb contextual-client
 
 #### Parse documents and store in Chroma
 
+{% Tabs %}
+{% Tab label="python" %}
+
 ```python
 from contextual import ContextualAI
 import chromadb
 from chromadb.utils import embedding_functions
-from time import sleep, time
-import os
 
 # Initialize clients
 contextual_client = ContextualAI(api_key=os.environ["CONTEXTUAL_AI_API_KEY"])
@@ -43,17 +44,14 @@ with open("document.pdf", "rb") as f:
     )
 
 # Monitor job status (Parse API is asynchronous)
-start_time = time()
-timeout_seconds = 600  # 10 minutes
-while time() - start_time < timeout_seconds:
+from time import sleep
+while True:
     status = contextual_client.parse.job_status(parse_response.job_id)
     if status.status == "completed":
         break
     elif status.status == "failed":
         raise Exception("Parse job failed")
-    sleep(30)
-else:
-    raise Exception("Parse job timed out")
+    sleep(30)  # Wait 30 seconds before checking again
 
 # Get results after job completion
 results = contextual_client.parse.job_results(
@@ -94,7 +92,91 @@ collection.add(
 )
 ```
 
+{% /Tab %}
+{% Tab label="typescript" %}
+
+```typescript
+import ContextualAI, { toFile } from "contextual-client";
+import { ChromaClient, OpenAIEmbeddingFunction } from "chromadb";
+import fs from "node:fs";
+
+const contextual = new ContextualAI({
+  apiKey: process.env.CONTEXTUAL_AI_API_KEY!,
+});
+const chroma = new ChromaClient();
+const embedder = new OpenAIEmbeddingFunction({
+  apiKey: process.env.OPENAI_API_KEY!,
+  model: "text-embedding-3-small",
+});
+
+const parseRes = await contextual.parse.create({
+  raw_file: await toFile(fs.createReadStream("document.pdf"), "document.pdf", {
+    type: "application/pdf",
+  }),
+  parse_mode: "standard",
+  enable_document_hierarchy: true,
+});
+
+// Monitor job status (Parse API is asynchronous)
+while (true) {
+  const s = await contextual.parse.jobStatus(parseRes.job_id);
+  if (s.status === "completed") break;
+  if (s.status === "failed") throw new Error("Parse job failed");
+  await new Promise((r) => setTimeout(r, 30000));
+}
+
+// Get results after job completion
+const results = await contextual.parse.jobResults(parseRes.job_id, {
+  output_types: ["blocks-per-page"],
+});
+
+// Create collection
+const collection = await chroma.createCollection({
+  name: "documents",
+  embeddingFunction: embedder,
+});
+
+// Add parsed content to Chroma
+const texts: string[] = [];
+const metadatas: Array<Record<string, string | number | boolean | null>> = [];
+const ids: string[] = [];
+
+for (const page of results.pages ?? []) {
+  for (const block of page.blocks ?? []) {
+    if (["text", "heading", "table"].includes(block.type)) {
+      texts.push(block.markdown);
+      metadatas.push({ page: (page.index ?? 0) + 1, block_type: block.type });
+      ids.push(`block_${block.id}`);
+    }
+  }
+}
+
+await collection.add({ documents: texts, metadatas, ids });
+```
+
+> Note: If your Chroma JS package does not expose `OpenAIEmbeddingFunction`, define a small embedder using the OpenAI SDK instead:
+
+```typescript
+import OpenAI from "openai";
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+const embedder = {
+  generate: async (texts: string[]) => {
+    const res = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: texts,
+    });
+    return res.data.map((d) => d.embedding);
+  },
+} as any;
+```
+
+{% /Tab %}
+{% /Tabs %}
+
 #### Query Chroma and rerank results with custom instructions
+
+{% Tabs %}
+{% Tab label="python" %}
 
 ```python
 # Query Chroma
@@ -120,7 +202,40 @@ top_docs = [
 ]
 ```
 
+{% /Tab %}
+{% Tab label="typescript" %}
+
+```typescript
+const query = "What are the key findings?";
+const q = await collection.query({ queryTexts: [query], nResults: 10 });
+const docs: string[] = (q.documents?.[0] ?? []).filter(
+  (d): d is string => typeof d === "string"
+);
+
+const rerankResponse = await contextual.rerank.create({
+  query,
+  documents: docs,
+  metadata: (q.metadatas?.[0] ?? []).map((m) => String(m)),
+  model: "ctxl-rerank-v2-instruct-multilingual",
+  instruction:
+    "Prioritize recent documents. Technical details and specific findings should rank higher than general information.",
+});
+
+const topDocsAll = rerankResponse.results
+  .slice(0, 5)
+  .map((r: { index: number }) => (q.documents?.[0] ?? [])[r.index]);
+const topDocs: string[] = topDocsAll.filter(
+  (d): d is string => typeof d === "string"
+);
+```
+
+{% /Tab %}
+{% /Tabs %}
+
 #### Generate grounded response
+
+{% Tabs %}
+{% Tab label="python" %}
 
 ```python
 # Generate grounded response
@@ -138,7 +253,28 @@ generate_response = contextual_client.generate.create(
 print("Response:", generate_response.response)
 ```
 
+{% /Tab %}
+{% Tab label="typescript" %}
+
+```typescript
+const generateResponse = await contextual.generate.create({
+  messages: [{ role: "user", content: query }],
+  knowledge: topDocs,
+  model: "v1", // Supported models: v1, v2
+  avoid_commentary: false,
+  temperature: 0.7,
+});
+
+console.log("Response:", generateResponse.response);
+```
+
+{% /Tab %}
+{% /Tabs %}
+
 #### Evaluate response quality with LMUnit
+
+{% Tabs %}
+{% Tab label="python" %}
 
 ```python
 # Evaluate generated response quality
@@ -157,6 +293,29 @@ print(f"Quality Score: {lmunit_response.score}")
 # 2 = Poor - Significant issues
 # 1 = Unacceptable - Fails criteria
 ```
+
+{% /Tab %}
+{% Tab label="typescript" %}
+
+```typescript
+const lmunitResponse = await contextual.lmUnit.create({
+  query,
+  response: generateResponse.response,
+  unit_test:
+    "The response should be technically accurate and cite specific findings",
+});
+
+console.log("Quality Score:", lmunitResponse.score);
+// Score interpretation (continuous scale 1-5):
+// 5 = Excellent - Fully satisfies criteria
+// 4 = Good - Minor issues
+// 3 = Acceptable - Some issues
+// 2 = Poor - Significant issues
+// 1 = Unacceptable - Fails criteria
+```
+
+{% /Tab %}
+{% /Tabs %}
 
 ## Advanced Usage
 
