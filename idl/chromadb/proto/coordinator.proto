@@ -683,6 +683,21 @@ message PeekScheduleByCollectionIdResponse {
   repeated ScheduleEntry schedule = 1;
 }
 
+message GetSoftDeletedAttachedFunctionsRequest {
+  google.protobuf.Timestamp cutoff_time = 1;
+  int32 limit = 2;
+}
+
+message GetSoftDeletedAttachedFunctionsResponse {
+  repeated AttachedFunction attached_functions = 1;
+}
+
+message FinishAttachedFunctionDeletionRequest {
+  string attached_function_id = 1;
+}
+
+message FinishAttachedFunctionDeletionResponse {}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -731,4 +746,6 @@ service SysDB {
   rpc CleanupExpiredPartialAttachedFunctions(CleanupExpiredPartialAttachedFunctionsRequest) returns (CleanupExpiredPartialAttachedFunctionsResponse) {}
   rpc GetFunctions(GetFunctionsRequest) returns (GetFunctionsResponse) {}
   rpc PeekScheduleByCollectionId(PeekScheduleByCollectionIdRequest) returns (PeekScheduleByCollectionIdResponse) {}
+  rpc GetSoftDeletedAttachedFunctions(GetSoftDeletedAttachedFunctionsRequest) returns (GetSoftDeletedAttachedFunctionsResponse) {}
+  rpc FinishAttachedFunctionDeletion(FinishAttachedFunctionDeletionRequest) returns (FinishAttachedFunctionDeletionResponse) {}
 }

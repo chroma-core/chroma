@@ -55,6 +55,8 @@ chroma-index = { workspace = true }
 chroma-memberlist = { workspace = true }
 chroma-tracing = { workspace = true }
 chroma-jemalloc-pprof-server = { workspace = true }
+s3heap = { workspace = true }
+s3heap-service = { workspace = true }
 wal3 = { workspace = true }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]

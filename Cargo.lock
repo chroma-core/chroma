@@ -3500,6 +3500,8 @@ dependencies = [
  "proptest-state-machine",
  "prost 0.13.5",
  "rand 0.8.5",
+ "s3heap",
+ "s3heap-service",
  "serde",
  "serde_json",
  "sqlx",

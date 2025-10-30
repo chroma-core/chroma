@@ -822,3 +822,75 @@ func (s *Coordinator) CleanupExpiredPartialAttachedFunctions(ctx context.Context
 		CleanedUpIds:   cleanedAttachedFunctionIDStrings,
 	}, nil
 }
+
+// GetSoftDeletedAttachedFunctions retrieves attached functions that are soft deleted and were updated before the cutoff time
+func (s *Coordinator) GetSoftDeletedAttachedFunctions(ctx context.Context, req *coordinatorpb.GetSoftDeletedAttachedFunctionsRequest) (*coordinatorpb.GetSoftDeletedAttachedFunctionsResponse, error) {
+	log := log.With(zap.String("method", "GetSoftDeletedAttachedFunctions"))
+
+	if req.CutoffTime == nil {
+		log.Error("GetSoftDeletedAttachedFunctions: cutoff_time is required")
+		return nil, status.Errorf(codes.InvalidArgument, "cutoff_time is required")
+	}
+
+	if req.Limit <= 0 {
+		log.Error("GetSoftDeletedAttachedFunctions: limit must be greater than 0")
+		return nil, status.Errorf(codes.InvalidArgument, "limit must be greater than 0")
+	}
+
+	cutoffTime := req.CutoffTime.AsTime()
+	attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetSoftDeletedAttachedFunctions(cutoffTime, req.Limit)
+	if err != nil {
+		log.Error("GetSoftDeletedAttachedFunctions: failed to get soft deleted attached functions", zap.Error(err))
+		return nil, err
+	}
+
+	// Convert to proto response
+	protoAttachedFunctions := make([]*coordinatorpb.AttachedFunction, len(attachedFunctions))
+	for i, af := range attachedFunctions {
+		protoAttachedFunctions[i] = &coordinatorpb.AttachedFunction{
+			Id:                      af.ID.String(),
+			Name:                    af.Name,
+			InputCollectionId:       af.InputCollectionID,
+			OutputCollectionName:    af.OutputCollectionName,
+			CompletionOffset:        uint64(af.CompletionOffset),
+			MinRecordsForInvocation: uint64(af.MinRecordsForInvocation),
+			CreatedAt:               uint64(af.CreatedAt.UnixMicro()),
+			UpdatedAt:               uint64(af.UpdatedAt.UnixMicro()),
+		}
+
+		protoAttachedFunctions[i].NextRunAt = uint64(af.NextRun.UnixMicro())
+		if af.OutputCollectionID != nil {
+			protoAttachedFunctions[i].OutputCollectionId = proto.String(*af.OutputCollectionID)
+		}
+	}
+
+	log.Info("GetSoftDeletedAttachedFunctions: completed successfully",
+		zap.Int("count", len(attachedFunctions)))
+
+	return &coordinatorpb.GetSoftDeletedAttachedFunctionsResponse{
+		AttachedFunctions: protoAttachedFunctions,
+	}, nil
+}
+
+// FinishAttachedFunctionDeletion permanently deletes an attached function from the database (hard delete)
+// This should only be called after the soft delete grace period has passed
+func (s *Coordinator) FinishAttachedFunctionDeletion(ctx context.Context, req *coordinatorpb.FinishAttachedFunctionDeletionRequest) (*coordinatorpb.FinishAttachedFunctionDeletionResponse, error) {
+	log := log.With(zap.String("method", "FinishAttachedFunctionDeletion"))
+
+	attachedFunctionID, err := uuid.Parse(req.AttachedFunctionId)
+	if err != nil {
+		log.Error("FinishAttachedFunctionDeletion: invalid attached_function_id", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
+	}
+
+	err = s.catalog.metaDomain.AttachedFunctionDb(ctx).HardDeleteAttachedFunction(attachedFunctionID)
+	if err != nil {
+		log.Error("FinishAttachedFunctionDeletion: failed to hard delete attached function", zap.Error(err))
+		return nil, err
+	}
+
+	log.Info("FinishAttachedFunctionDeletion: completed successfully",
+		zap.String("attached_function_id", attachedFunctionID.String()))
+
+	return &coordinatorpb.FinishAttachedFunctionDeletionResponse{}, nil
+}

@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // testMinimalUUIDv7 is the test's copy of minimalUUIDv7 from task.go
@@ -662,4 +663,86 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 
 func TestAttachFunctionTestSuite(t *testing.T) {
 	suite.Run(t, new(AttachFunctionTestSuite))
+}
+
+// TestGetSoftDeletedAttachedFunctions_TimestampConsistency verifies that timestamps
+// are returned in microseconds (UnixMicro) to match other API methods
+func TestGetSoftDeletedAttachedFunctions_TimestampConsistency(t *testing.T) {
+	ctx := context.Background()
+
+	// Create test timestamps with known values
+	testTime := time.Date(2025, 10, 30, 12, 0, 0, 123456000, time.UTC) // 123.456 milliseconds
+	expectedMicros := uint64(testTime.UnixMicro())
+
+	// Create mock coordinator with minimal setup
+	mockMetaDomain := &dbmodel_mocks.IMetaDomain{}
+	mockAttachedFunctionDb := &dbmodel_mocks.IAttachedFunctionDb{}
+	mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(mockAttachedFunctionDb)
+
+	// Mock the database response with our test timestamps
+	attachedFunctions := []*dbmodel.AttachedFunction{
+		{
+			ID:                      uuid.New(),
+			Name:                    "test_function",
+			InputCollectionID:       "collection_123",
+			OutputCollectionName:    "output_collection",
+			CompletionOffset:        100,
+			MinRecordsForInvocation: 10,
+			CreatedAt:               testTime,
+			UpdatedAt:               testTime,
+			NextRun:                 testTime,
+		},
+	}
+
+	mockAttachedFunctionDb.On("GetSoftDeletedAttachedFunctions", mock.Anything, mock.Anything).
+		Return(attachedFunctions, nil)
+
+	coordinator := &Coordinator{
+		catalog: Catalog{
+			metaDomain: mockMetaDomain,
+		},
+	}
+
+	// Call GetSoftDeletedAttachedFunctions
+	cutoffTime := timestamppb.New(testTime.Add(-24 * time.Hour))
+	resp, err := coordinator.GetSoftDeletedAttachedFunctions(ctx, &coordinatorpb.GetSoftDeletedAttachedFunctionsRequest{
+		CutoffTime: cutoffTime,
+		Limit:      100,
+	})
+
+	// Verify response
+	if err != nil {
+		t.Fatalf("GetSoftDeletedAttachedFunctions failed: %v", err)
+	}
+	if len(resp.AttachedFunctions) != 1 {
+		t.Fatalf("Expected 1 attached function, got %d", len(resp.AttachedFunctions))
+	}
+
+	af := resp.AttachedFunctions[0]
+
+	// Verify timestamps are in microseconds (not seconds)
+	if af.CreatedAt != expectedMicros {
+		t.Errorf("CreatedAt timestamp mismatch: expected %d microseconds, got %d", expectedMicros, af.CreatedAt)
+	}
+	if af.UpdatedAt != expectedMicros {
+		t.Errorf("UpdatedAt timestamp mismatch: expected %d microseconds, got %d", expectedMicros, af.UpdatedAt)
+	}
+	if af.NextRunAt != expectedMicros {
+		t.Errorf("NextRunAt timestamp mismatch: expected %d microseconds, got %d", expectedMicros, af.NextRunAt)
+	}
+
+	// Verify these are NOT in seconds (would be ~1000x smaller)
+	expectedSeconds := uint64(testTime.Unix())
+	if af.CreatedAt == expectedSeconds {
+		t.Error("CreatedAt appears to be in seconds instead of microseconds")
+	}
+	if af.UpdatedAt == expectedSeconds {
+		t.Error("UpdatedAt appears to be in seconds instead of microseconds")
+	}
+	if af.NextRunAt == expectedSeconds {
+		t.Error("NextRunAt appears to be in seconds instead of microseconds")
+	}
+
+	mockMetaDomain.AssertExpectations(t)
+	mockAttachedFunctionDb.AssertExpectations(t)
 }
