@@ -130,8 +130,8 @@ const results = await contextual.parse.jobResults(parseRes.job_id, {
   output_types: ["blocks-per-page"],
 });
 
-// Create collection
-const collection = await chroma.createCollection({
+// Create or get existing collection
+const collection = await chroma.getOrCreateCollection({
   name: "documents",
   embeddingFunction: embedder,
 });
