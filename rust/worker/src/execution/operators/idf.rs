@@ -56,9 +56,7 @@ pub enum IdfError {
     RecordReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error using sparse reader: {0}")]
     SparseReader(#[from] SparseReaderError),
-    #[error(
-        "Query tokens length ({tokens}) does not match query indices length ({indices})"
-    )]
+    #[error("Query tokens length ({tokens}) does not match query indices length ({indices})")]
     TokenLengthMismatch { tokens: usize, indices: usize },
 }
 
