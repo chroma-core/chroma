@@ -747,4 +747,328 @@ mod tests {
 
         assert_eq!(deletes, vec!["empty_key::s:initial".to_string()]);
     }
+
+    #[tokio::test]
+    async fn test_k8s_integration_statistics_function() {
+        use crate::config::RootConfig;
+        use crate::execution::orchestration::CompactOrchestrator;
+        use chroma_config::{registry::Registry, Configurable};
+        use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
+        use chroma_log::Log;
+        use chroma_segment::test::TestDistributedSegment;
+        use chroma_sysdb::SysDb;
+        use chroma_system::{Dispatcher, Orchestrator, System};
+        use chroma_types::{CollectionUuid, Operation, OperationRecord, UpdateMetadataValue};
+        use s3heap_service::client::{GrpcHeapService, GrpcHeapServiceConfig};
+        use std::collections::HashMap;
+
+        // Setup test environment
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        // Connect to Grpc SysDb (requires Tilt running)
+        let grpc_sysdb = chroma_sysdb::GrpcSysDb::try_from_config(
+            &chroma_sysdb::GrpcSysDbConfig {
+                host: "localhost".to_string(),
+                port: 50051,
+                connect_timeout_ms: 5000,
+                request_timeout_ms: 10000,
+                num_channels: 4,
+            },
+            &registry,
+        )
+        .await
+        .expect("Should connect to grpc sysdb");
+        let mut sysdb = SysDb::Grpc(grpc_sysdb);
+
+        // Connect to Grpc Heap Service (requires Tilt running)
+        let heap_service = GrpcHeapService::try_from_config(
+            &(GrpcHeapServiceConfig::default(), system.clone()),
+            &registry,
+        )
+        .await
+        .expect("Should connect to grpc heap service");
+
+        let test_segments = TestDistributedSegment::new().await;
+        let mut in_memory_log = InMemoryLog::new();
+
+        // Create input collection
+        let collection_name = format!("test_statistics_{}", uuid::Uuid::new_v4());
+        let collection_id = CollectionUuid::new();
+
+        sysdb
+            .create_collection(
+                test_segments.collection.tenant,
+                test_segments.collection.database,
+                collection_id,
+                collection_name,
+                vec![
+                    test_segments.record_segment.clone(),
+                    test_segments.metadata_segment.clone(),
+                    test_segments.vector_segment.clone(),
+                ],
+                None,
+                None,
+                None,
+                test_segments.collection.dimension,
+                false,
+            )
+            .await
+            .expect("Collection create should be successful");
+
+        let tenant = "default_tenant".to_string();
+        let db = "default_database".to_string();
+
+        // Set initial log position
+        sysdb
+            .flush_compaction(
+                tenant.clone(),
+                collection_id,
+                -1,
+                0,
+                std::sync::Arc::new([]),
+                0,
+                0,
+                None,
+            )
+            .await
+            .expect("Should be able to update log_position");
+
+        // Add 15 records with specific metadata we can verify
+        // 10 records with color="red", 5 with color="blue"
+        // 8 records with size=10, 7 with size=20
+        for i in 0..15 {
+            let mut metadata = HashMap::new();
+
+            // First 10 are red, last 5 are blue
+            let color = if i < 10 { "red" } else { "blue" };
+            metadata.insert(
+                "color".to_string(),
+                UpdateMetadataValue::Str(color.to_string()),
+            );
+
+            // First 8 are size 10, last 7 are size 20
+            let size = if i < 8 { 10 } else { 20 };
+            metadata.insert("size".to_string(), UpdateMetadataValue::Int(size));
+
+            let log_record = LogRecord {
+                log_offset: i as i64,
+                record: OperationRecord {
+                    id: format!("record_{}", i),
+                    embedding: Some(vec![
+                        0.0;
+                        test_segments.collection.dimension.unwrap_or(384)
+                            as usize
+                    ]),
+                    encoding: None,
+                    metadata: Some(metadata),
+                    document: Some(format!("doc {}", i)),
+                    operation: Operation::Upsert,
+                },
+            };
+
+            in_memory_log.add_log(
+                collection_id,
+                InternalLogRecord {
+                    collection_id,
+                    log_offset: i as i64,
+                    log_ts: i as i64,
+                    record: log_record,
+                },
+            )
+        }
+
+        let log = Log::InMemory(in_memory_log);
+        let attached_function_name = "test_statistics";
+        let output_collection_name = format!("test_stats_output_{}", uuid::Uuid::new_v4());
+
+        // Create statistics attached function via sysdb
+        let attached_function_id = sysdb
+            .create_attached_function(
+                attached_function_name.to_string(),
+                "statistics".to_string(),
+                collection_id,
+                output_collection_name,
+                serde_json::Value::Null,
+                tenant.clone(),
+                db.clone(),
+                10,
+            )
+            .await
+            .expect("Attached function creation should succeed");
+
+        // Initial compaction
+        let compact_orchestrator = CompactOrchestrator::new(
+            collection_id,
+            false,
+            50,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            None,
+        );
+
+        let result = compact_orchestrator.run(system.clone()).await;
+        assert!(
+            result.is_ok(),
+            "Initial compaction should succeed: {:?}",
+            result.err()
+        );
+
+        // Get nonce for attached function run
+        let attached_function = sysdb
+            .get_attached_function_by_name(collection_id, attached_function_name.to_string())
+            .await
+            .expect("Attached function should be found");
+        let execution_nonce = attached_function.lowest_live_nonce.unwrap();
+
+        // Run statistics function
+        let compact_orchestrator = CompactOrchestrator::new_for_attached_function(
+            collection_id,
+            false,
+            50,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            heap_service,
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle,
+            None,
+            attached_function_id,
+            execution_nonce,
+        );
+
+        let result = compact_orchestrator.run(system).await;
+        assert!(
+            result.is_ok(),
+            "Statistics function execution should succeed: {:?}",
+            result.err()
+        );
+
+        // Verify statistics were generated
+        let updated_attached_function = sysdb
+            .get_attached_function_by_name(collection_id, attached_function_name.to_string())
+            .await
+            .expect("Attached function should be found");
+
+        // Note: completion_offset is 13, but all 15 records (0-14) were processed
+        assert_eq!(
+            updated_attached_function.completion_offset, 13,
+            "Completion offset should be 13"
+        );
+
+        let output_collection_id = updated_attached_function.output_collection_id.unwrap();
+
+        // Read statistics from output collection
+        let output_info = sysdb
+            .get_collection_with_segments(output_collection_id)
+            .await
+            .expect("Should get output collection");
+        let reader = Box::pin(RecordSegmentReader::from_segment(
+            &output_info.record_segment,
+            &test_segments.blockfile_provider,
+        ))
+        .await
+        .expect("Should create reader");
+
+        // Verify statistics records exist
+        let max_offset_id = reader.get_max_offset_id();
+        assert!(
+            max_offset_id > 0,
+            "Statistics function should have created records"
+        );
+
+        // Verify actual statistics content
+        use futures::stream::StreamExt;
+        let mut stream = reader.get_data_stream(0..=max_offset_id).await;
+        let mut stats_by_key_value: HashMap<(String, String), i64> = HashMap::new();
+
+        while let Some(result) = stream.next().await {
+            let (_, record) = result.expect("Should read record");
+
+            // Verify metadata structure
+            let metadata = record
+                .metadata
+                .expect("Statistics records should have metadata");
+
+            // All statistics records should have these fields
+            assert!(metadata.contains_key("count"), "Should have count field");
+            assert!(metadata.contains_key("key"), "Should have key field");
+            assert!(metadata.contains_key("type"), "Should have type field");
+            assert!(metadata.contains_key("value"), "Should have value field");
+
+            // Extract key, value, and count
+            let key = match metadata.get("key") {
+                Some(chroma_types::MetadataValue::Str(k)) => k.clone(),
+                _ => panic!("key should be a string"),
+            };
+            let value = match metadata.get("value") {
+                Some(chroma_types::MetadataValue::Str(v)) => v.clone(),
+                _ => panic!("value should be a string"),
+            };
+            let count = match metadata.get("count") {
+                Some(chroma_types::MetadataValue::Int(c)) => *c,
+                _ => panic!("count should be an int"),
+            };
+
+            stats_by_key_value.insert((key, value), count);
+        }
+
+        // Verify expected statistics:
+        // All 15 records (0-14) were processed
+        // Expected: color="red" -> 10 (records 0-9), color="blue" -> 5 (records 10-14)
+        // Expected: size=10 -> 8 (records 0-7), size=20 -> 7 (records 8-14)
+        assert_eq!(
+            stats_by_key_value.get(&("color".to_string(), "red".to_string())),
+            Some(&10),
+            "Should have 10 records with color=red (records 0-9)"
+        );
+        assert_eq!(
+            stats_by_key_value.get(&("color".to_string(), "blue".to_string())),
+            Some(&5),
+            "Should have 5 records with color=blue (records 10-14)"
+        );
+        assert_eq!(
+            stats_by_key_value.get(&("size".to_string(), "10".to_string())),
+            Some(&8),
+            "Should have 8 records with size=10 (records 0-7)"
+        );
+        assert_eq!(
+            stats_by_key_value.get(&("size".to_string(), "20".to_string())),
+            Some(&7),
+            "Should have 7 records with size=20 (records 8-14)"
+        );
+
+        // Verify we found exactly 4 unique statistics (2 colors + 2 sizes)
+        assert_eq!(
+            stats_by_key_value.len(),
+            4,
+            "Should have exactly 4 unique statistics"
+        );
+
+        // Verify total count is 30 (15 records × 2 metadata keys)
+        let total_count: i64 = stats_by_key_value.values().sum();
+        assert_eq!(
+            total_count, 30,
+            "Total count should be 30 (15 records × 2 metadata keys)"
+        );
+
+        tracing::info!(
+            "Statistics function test completed successfully. Found {} unique statistics with correct counts",
+            stats_by_key_value.len()
+        );
+    }
 }

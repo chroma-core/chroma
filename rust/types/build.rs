@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile(&proto_paths, &["idl/"])?;
 
     // Note: Operator constants are now generated via bin/generate_operator_constants.sh
-    // and committed to git as rust/types/src/operators_generated.rs.
+    // and committed to git as rust/types/src/functions.rs.
     // This avoids needing Go source files in Docker builds.
 
     Ok(())

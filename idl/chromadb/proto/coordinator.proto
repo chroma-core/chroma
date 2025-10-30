@@ -597,6 +597,7 @@ message AttachedFunction {
   string next_nonce = 14;
   uint64 created_at = 15;
   uint64 updated_at = 16;
+  string function_id = 17;
 }
 
 message GetAttachedFunctionByNameResponse {

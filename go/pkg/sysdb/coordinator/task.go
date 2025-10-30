@@ -355,7 +355,8 @@ func (s *Coordinator) GetAttachedFunctionByName(ctx context.Context, req *coordi
 	attachedFunctionProto := &coordinatorpb.AttachedFunction{
 		Id:                      attachedFunction.ID.String(),
 		Name:                    attachedFunction.Name,
-		FunctionName:            function.Name,
+		FunctionName:            function.Name,        // Human-readable name for user-facing API
+		FunctionId:              function.ID.String(), // UUID for internal use
 		InputCollectionId:       attachedFunction.InputCollectionID,
 		OutputCollectionName:    attachedFunction.OutputCollectionName,
 		Params:                  paramsStruct,
@@ -444,7 +445,8 @@ func (s *Coordinator) GetAttachedFunctionByUuid(ctx context.Context, req *coordi
 	attachedFunctionProto := &coordinatorpb.AttachedFunction{
 		Id:                      attachedFunction.ID.String(),
 		Name:                    attachedFunction.Name,
-		FunctionName:            function.Name,
+		FunctionName:            function.Name,        // Human-readable name for user-facing API
+		FunctionId:              function.ID.String(), // UUID for internal use
 		InputCollectionId:       attachedFunction.InputCollectionID,
 		OutputCollectionName:    attachedFunction.OutputCollectionName,
 		Params:                  paramsStruct,
