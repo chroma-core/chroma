@@ -20,14 +20,14 @@ pub trait AttachedFunctionExecutor: Send + Sync + std::fmt::Debug {
     /// Execute the attached function logic on input records.
     ///
     /// # Arguments
-    /// * `input_records` - The log records to process
+    /// * `input_records` - The log records to process (multiple chunks)
     /// * `output_reader` - Optional reader for the output collection's compacted data
     ///
     /// # Returns
     /// The output records to be written to the output collection
     async fn execute(
         &self,
-        input_records: Chunk<LogRecord>,
+        input_records: Vec<Chunk<LogRecord>>,
         output_reader: Option<&RecordSegmentReader<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>>;
 }
@@ -41,15 +41,25 @@ pub struct CountAttachedFunction;
 impl AttachedFunctionExecutor for CountAttachedFunction {
     async fn execute(
         &self,
-        input_records: Chunk<LogRecord>,
+        input_records: Vec<Chunk<LogRecord>>,
         _output_reader: Option<&RecordSegmentReader<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
-        let records_count = input_records.len() as i64;
+        // Flatten all chunks and count total records, excluding delete operations
+        println!("input_records: {}", input_records.len());
+        let records_count: usize = input_records
+            .iter()
+            .flat_map(|chunk| chunk.iter())
+            .filter(|(log_record, _index)| {
+                !matches!(log_record.record.operation, Operation::Delete)
+            })
+            .count();
+        let records_count = records_count as i64;
 
         let new_total_count = records_count;
 
         // Create output record with updated count
         let mut metadata = std::collections::HashMap::new();
+        println!("new_total_count: {}", new_total_count);
         metadata.insert(
             "total_count".to_string(),
             UpdateMetadataValue::Int(new_total_count),
@@ -69,7 +79,7 @@ impl AttachedFunctionExecutor for CountAttachedFunction {
             record: operation_record,
         };
 
-        Ok(Chunk::new(Arc::new([log_record])))
+        Ok(Chunk::new(vec![log_record].into()))
     }
 }
 
@@ -118,7 +128,7 @@ impl ExecuteAttachedFunctionOperator {
 #[derive(Debug)]
 pub struct ExecuteAttachedFunctionInput {
     /// The fetched log records to process
-    pub log_records: Chunk<LogRecord>,
+    pub log_records: Vec<Chunk<LogRecord>>,
     /// The tenant ID
     pub tenant_id: String,
     /// The output collection ID where results are written
@@ -138,6 +148,8 @@ pub struct ExecuteAttachedFunctionOutput {
     pub records_processed: u64,
     /// The output log records to be partitioned and compacted
     pub output_records: Chunk<LogRecord>,
+    /// The change in logical size of the collection in bytes
+    pub collection_logical_size_delta_bytes: i64,
 }
 
 #[derive(Debug, Error)]
@@ -229,7 +241,7 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
         let output_records_with_offsets: Vec<LogRecord> = output_records
             .iter()
             .enumerate()
-            .map(|(i, (log_record, _))| {
+            .map(|(i, (log_record, _chunk_index))| {
                 let i_i64 = i64::try_from(i)
                     .map_err(|_| ExecuteAttachedFunctionError::LogOffsetOverflow(base_offset, i))?;
                 let offset = base_offset.checked_add(i_i64).ok_or_else(|| {
@@ -242,6 +254,12 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
             })
             .collect::<Result<Vec<_>, ExecuteAttachedFunctionError>>()?;
 
+        // TODO(tanujnay112): This computation can be combined witht he above pass.
+        let collection_logical_size_delta_bytes = output_records_with_offsets
+            .iter()
+            .map(|record| record.record.size_bytes())
+            .sum::<u64>() as i64;
+
         tracing::info!(
             "[ExecuteAttachedFunction]: Attached function executed successfully, produced {} output records",
             output_records_with_offsets.len()
@@ -250,7 +268,8 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
         // Return the output records to be partitioned
         Ok(ExecuteAttachedFunctionOutput {
             records_processed: records_count,
-            output_records: Chunk::new(Arc::from(output_records_with_offsets)),
+            output_records: Chunk::new(output_records_with_offsets.into()),
+            collection_logical_size_delta_bytes,
         })
     }
 }

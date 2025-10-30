@@ -88,6 +88,18 @@ impl<T> Chunk<T> {
             index: 0,
         }
     }
+
+    /// Consumes the chunk and returns an iterator over all elements (including invisible ones)
+    /// # Returns
+    /// An iterator that consumes the chunk and yields all elements
+    pub fn into_iter(self) -> std::vec::IntoIter<T>
+    where
+        T: Clone,
+    {
+        // Convert Arc<[T]> to Vec<T> by cloning all elements
+        let data: Vec<T> = self.data.to_vec();
+        data.into_iter()
+    }
 }
 
 pub struct DataChunkIteraror<'a, T> {

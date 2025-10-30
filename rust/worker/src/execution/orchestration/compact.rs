@@ -20,7 +20,8 @@ use chroma_segment::{
     distributed_spann::SpannSegmentWriterError,
     spann_provider::SpannProvider,
     types::{
-        ChromaSegmentFlusher, ChromaSegmentWriter, MaterializeLogsResult, VectorSegmentWriter,
+        ChromaSegmentFlusher, ChromaSegmentWriter, MaterializeLogsResult,
+        MaterializeLogsResultIter, VectorSegmentWriter,
     },
 };
 use chroma_sysdb::SysDb;
@@ -208,6 +209,12 @@ pub struct CompactOrchestrator {
     /// Available if this orchestrator is for an attached function
     attached_function_context: Option<AttachedFunctionContext>,
     heap_service: Option<GrpcHeapService>,
+
+    execution_chunks: Vec<Chunk<LogRecord>>,
+    is_attached_functions_done: bool,
+    pending_partition_inputs: usize,
+    // Buffer to collect all materialized logs before calling attached function
+    buffered_materialized_logs: Vec<MaterializeLogsResult>,
 }
 
 #[derive(Error, Debug)]
@@ -385,6 +392,10 @@ impl CompactOrchestrator {
             schema: None,
             attached_function_context: None,
             heap_service: None,
+            execution_chunks: Vec::new(),
+            is_attached_functions_done: false,
+            pending_partition_inputs: 0,
+            buffered_materialized_logs: None,
         }
     }
 
@@ -433,6 +444,14 @@ impl CompactOrchestrator {
         if let Some(hnsw_index_uuid) = hnsw_index_uuid {
             let _ = HnswIndexProvider::purge_one_id(path, hnsw_index_uuid).await;
         }
+    }
+
+    async fn do_attached_function_with_materialized_logs(
+        &mut self,
+        materialized_logs: Vec<MaterializeLogsResult>,
+        ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        let log_records = materialized_logs.into_iter().map(|log| log.hy).collect();
     }
 
     async fn do_attached_function(
@@ -489,8 +508,10 @@ impl CompactOrchestrator {
                 }
             };
 
+        self.pending_partition_inputs = 1;
+
         let execute_attached_function_input = ExecuteAttachedFunctionInput {
-            log_records,
+            log_records: vec![log_records],
             tenant_id: output_collection.tenant.clone(),
             output_collection_id,
             completion_offset: attached_function.completion_offset,
@@ -507,6 +528,19 @@ impl CompactOrchestrator {
         self.send(task_msg, ctx, Some(Span::current())).await;
     }
 
+    async fn buffer_materialized_logs(
+        &mut self,
+        materialized_logs: MaterializeLogsResult,
+        _ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        println!("Buffering {} materialized logs", materialized_logs.len());
+        println!(
+            "Materialized logs result contains: {} logs",
+            materialized_logs.logs.len()
+        );
+        self.buffered_materialized_logs.push(materialized_logs);
+    }
+
     async fn partition(
         &mut self,
         records: Chunk<LogRecord>,
@@ -515,7 +549,41 @@ impl CompactOrchestrator {
         self.state = ExecutionState::Partition;
         let operator = PartitionOperator::new();
         tracing::info!("Sending N Records: {:?}", records.len());
-        let input = PartitionInput::new(records, self.max_partition_size);
+        self.execution_chunks.push(records);
+        println!(
+            "execution_chunks has {} chunks, pending_partition_inputs = {}",
+            self.execution_chunks.len(),
+            self.pending_partition_inputs
+        );
+        if self.execution_chunks.len() < self.pending_partition_inputs {
+            println!(
+                "Not enough records to partition yet: have {} chunks, need {}",
+                self.execution_chunks.len(),
+                self.pending_partition_inputs
+            );
+            return;
+        }
+
+        self.execution_chunks.sort_by_key(|chunk| {
+            if !chunk.is_empty() {
+                // TODO(tanujnay112): unwrap bad
+                chunk.get(0).unwrap().log_offset
+            } else {
+                0
+            }
+        });
+
+        let all_records: Vec<LogRecord> = self
+            .execution_chunks
+            .drain(..)
+            .flat_map(|chunk| chunk.into_iter())
+            .collect();
+        let input = PartitionInput::new(Chunk::new(all_records.into()), self.max_partition_size);
+
+        // Reset pending partition tasks after processing
+        self.pending_partition_inputs = 0;
+        println!("Reset pending_partition_inputs to 0");
+
         let task = wrap(
             operator,
             input,
@@ -531,6 +599,7 @@ impl CompactOrchestrator {
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         self.state = ExecutionState::MaterializeApplyCommitFlush;
+        println!("MATERIALIZED LOGS: {}", partitions.len());
 
         // NOTE: We allow writers to be uninitialized for the case when the materialized logs are empty
         let record_reader = self
@@ -579,11 +648,21 @@ impl CompactOrchestrator {
         materialized_logs: MaterializeLogsResult,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
+        println!(
+            "dispatch_apply_log_to_segment_writer_tasks called with {} logs",
+            materialized_logs.len()
+        );
         self.num_materialized_logs += materialized_logs.len() as u64;
 
         let writers = match self.ok_or_terminate(self.get_segment_writers(), ctx).await {
-            Some(writers) => writers,
-            None => return,
+            Some(writers) => {
+                println!("Got segment writers");
+                writers
+            }
+            None => {
+                println!("WARN: Failed to get segment writers, terminating");
+                return;
+            }
         };
 
         {
@@ -709,6 +788,7 @@ impl CompactOrchestrator {
     }
 
     async fn register(&mut self, ctx: &ComponentContext<CompactOrchestrator>) {
+        println!("Register called");
         self.metrics
             .total_logs_applied_flushed
             .add(self.num_materialized_logs, &[]);
@@ -886,7 +966,7 @@ impl CompactOrchestrator {
     /// For regular compaction (input == output), also updates output_pulled_log_offset.
     /// For task compaction (input != output), output collection keeps its own log position.
     fn set_input_log_offset(&mut self, log_offset: i64) {
-        self.input_pulled_log_offset = log_offset;
+        self.input_pulled_log_offset = log_offset.max(self.input_pulled_log_offset);
         // Only update output offset if input and output are the same collection
         if Some(self.input_collection_id) == self.output_collection_id.get().copied() {
             self.output_pulled_log_offset = log_offset;
@@ -1215,16 +1295,30 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             None => return,
         };
 
-        let log_task = match self.rebuild || self.attached_function_context.is_some() {
-            true => wrap(
+        let mut log_tasks = Vec::new();
+
+        if self.rebuild || self.attached_function_context.is_some() {
+            self.pending_partition_inputs += 1;
+            log_tasks.push(wrap(
                 Box::new(SourceRecordSegmentOperator {}),
                 SourceRecordSegmentInput {
                     record_segment_reader: input_record_reader.clone(),
+                    highest_log_offset: Some(input_collection.log_position),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
-            ),
-            false => wrap(
+            ));
+        }
+
+        // For attached functions, we need both source records AND new logs
+        // For regular compaction, we only need new logs if not rebuilding
+        if self.attached_function_context.is_some() || !self.rebuild {
+            self.pending_partition_inputs += 1;
+            println!(
+                "Adding fetch log task at offset {}",
+                input_collection.log_position + 1
+            );
+            log_tasks.push(wrap(
                 Box::new(FetchLogOperator {
                     log_client: self.log.clone(),
                     batch_size: self.fetch_log_batch_size,
@@ -1238,8 +1332,8 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 (),
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
-            ),
-        };
+            ));
+        }
 
         // Check dimension from OUTPUT collection (writers will be for output)
         let dimension = match output_collection.dimension {
@@ -1247,7 +1341,9 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             None => {
                 // Collection is not yet initialized, there is no need to initialize the writers
                 // Future handlers should return early on empty materialized logs without using writers
-                self.send(log_task, ctx, Some(Span::current())).await;
+                for task in log_tasks {
+                    self.send(task, ctx, Some(Span::current())).await;
+                }
                 return;
             }
         };
@@ -1410,7 +1506,9 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             self.send(prefetch_task, ctx, Some(prefetch_span)).await;
         }
 
-        self.send(log_task, ctx, Some(Span::current())).await;
+        for log_task in log_tasks {
+            self.send(log_task, ctx, Some(Span::current())).await;
+        }
     }
 }
 
@@ -1436,14 +1534,21 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
         message: TaskResult<FetchLogOutput, FetchLogError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
+        println!("FetchLog handler called");
         let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(recs) => recs,
+            Some(recs) => {
+                println!(
+                    "FetchLog message processed successfully, got {} records",
+                    recs.len()
+                );
+                recs
+            }
             None => {
-                tracing::info!("cancelled fetch log task");
+                println!("INFO: cancelled fetch log task");
                 return;
             }
         };
-        tracing::info!("Pulled Records: {}", output.len());
+        println!("Pulled Records: {}", output.len());
         match output.iter().last() {
             Some((rec, _)) => {
                 self.set_input_log_offset(rec.log_offset);
@@ -1476,13 +1581,8 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
             }
         }
 
-        // For attached-function-based compaction, call ExecuteAttachedFunction to run attached function logic
-        if self.attached_function_context.is_some() {
-            self.do_attached_function(output, ctx).await;
-        } else {
-            // For regular compaction, go directly to partition
-            self.partition(output, ctx).await;
-        }
+        // For regular compaction, go directly to partition
+        self.partition(output, ctx).await;
     }
 }
 
@@ -1502,10 +1602,20 @@ impl Handler<TaskResult<ExecuteAttachedFunctionOutput, ExecuteAttachedFunctionEr
             None => return,
         };
 
+        println!(
+            "EXECUTED TASK OUTPUT HAS {} RECORDS",
+            output.output_records.len()
+        );
+
         tracing::info!(
             "[CompactOrchestrator] ExecuteAttachedFunction completed. Processed {} records",
             output.records_processed
         );
+
+        // TODO(tanujnay112): Audit this
+        self.collection_logical_size_delta_bytes += output.collection_logical_size_delta_bytes;
+
+        self.is_attached_functions_done = true;
 
         // Proceed to partition the output records from the task
         self.partition(output.output_records, ctx).await;
@@ -1527,12 +1637,17 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
             Some(output) => output,
             None => return,
         };
+        println!("Sourced Records: {}", output.len());
         tracing::info!("Sourced Records: {}", output.len());
         // Each record should corresond to a log
         self.total_records_post_compaction = output.len() as u64;
         if output.is_empty() && self.attached_function_context.is_none() {
             self.register(ctx).await;
-        } else if self.attached_function_context.is_some() {
+        } else if self.attached_function_context.is_some() && self.pending_partition_inputs == 0 {
+            println!(
+                "Checking attached function execution, pending_partition_inputs: {}",
+                self.pending_partition_inputs
+            );
             let input_collection =
                 match self.ok_or_terminate(self.get_input_collection(), ctx).await {
                     Some(collection) => collection,
@@ -1555,9 +1670,19 @@ impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrato
         message: TaskResult<PartitionOutput, PartitionError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
+        println!("Partition handler called");
         let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(recs) => recs.records,
-            None => return,
+            Some(recs) => {
+                println!(
+                    "Partition message processed successfully, got {} records",
+                    recs.records.len()
+                );
+                recs.records
+            }
+            None => {
+                println!("WARN: Partition message failed to process, terminating");
+                return;
+            }
         };
         self.materialize_log(output, ctx).await;
     }
@@ -1574,9 +1699,19 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
         message: TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
+        println!("MaterializeLog handler called");
         let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(res) => res,
-            None => return,
+            Some(res) => {
+                println!(
+                    "MaterializeLog message processed successfully, got {} logs",
+                    res.result.logs.len()
+                );
+                res
+            }
+            None => {
+                println!("WARN: MaterializeLog message failed to process, terminating");
+                return;
+            }
         };
 
         if output.result.is_empty() {
@@ -1587,12 +1722,32 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
                 // There is nothing to flush, proceed to register
                 self.register(ctx).await;
             }
+        } else if self.attached_function_context.is_some() && !self.is_attached_functions_done {
+            // Buffer the materialized logs instead of immediately calling attached function
+            self.buffer_materialized_logs(output.result, ctx).await;
         } else {
             self.collection_logical_size_delta_bytes += output.collection_logical_size_delta;
             Box::pin(self.dispatch_apply_log_to_segment_writer_tasks(output.result, ctx)).await;
         }
 
-        self.num_uncompleted_materialization_tasks -= 1;
+        if self.num_uncompleted_materialization_tasks > 0 {
+            self.num_uncompleted_materialization_tasks -= 1;
+        } else {
+            tracing::error!(
+                "Attempting to decrement num_uncompleted_materialization_tasks when it's already 0. This indicates a serious logic bug."
+            );
+            // Don't panic in production, but this is a bug that needs to be fixed
+        }
+
+        // Check if all materialization tasks are done and we have buffered logs
+        if self.num_uncompleted_materialization_tasks == 0
+            && self.attached_function_context.is_some()
+            && !self.is_attached_functions_done
+        {
+            println!("All materialization done, calling attached function with buffered logs");
+            let buffered_logs = self.buffered_materialized_logs;
+            self.do_attached_function({}, buffered_logs, ctx).await;
+        }
     }
 }
 
@@ -1607,9 +1762,19 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
         message: TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
+        println!("ApplyLogToSegmentWriter handler called");
         let message = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(message) => message,
-            None => return,
+            Some(message) => {
+                println!(
+                    "ApplyLogToSegmentWriter message processed successfully for segment type: {}",
+                    message.segment_type
+                );
+                message
+            }
+            None => {
+                println!("WARN: ApplyLogToSegmentWriter message failed to process, terminating");
+                return;
+            }
         };
 
         if message.segment_type == "MetadataSegmentWriter" {
@@ -1687,9 +1852,16 @@ impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorEr
         message: TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
+        println!("CommitSegmentWriter handler called");
         let message = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(message) => message,
-            None => return,
+            Some(message) => {
+                println!("CommitSegmentWriter message processed successfully");
+                message
+            }
+            None => {
+                println!("WARN: CommitSegmentWriter message failed to process, terminating");
+                return;
+            }
         };
 
         // If the flusher recieved is a record segment flusher, get the number of keys for the blockfile and set it on the orchestrator
@@ -1712,9 +1884,19 @@ impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorErro
         message: TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
+        println!("FlushSegmentWriter handler called");
         let message = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(message) => message,
-            None => return,
+            Some(message) => {
+                println!(
+                    "FlushSegmentWriter message processed successfully for segment_id: {:?}",
+                    message.flush_info.segment_id
+                );
+                message
+            }
+            None => {
+                println!("WARN: FlushSegmentWriter message failed to process, terminating");
+                return;
+            }
         };
 
         let segment_id = message.flush_info.segment_id;
@@ -2251,6 +2433,7 @@ mod tests {
             .generate_vec(1..=50)
             .into_iter()
             .for_each(|log| {
+                println!("Adding log: {log:?}");
                 in_memory_log.add_log(
                     input_collection_id,
                     InternalLogRecord {
@@ -2311,6 +2494,7 @@ mod tests {
         let execution_nonce = attached_function_before_run.lowest_live_nonce.unwrap();
 
         // Run first compaction (PrepareAttachedFunction will fetch and populate the attached function)
+        println!("Running first TASK");
         let compact_orchestrator = CompactOrchestrator::new_for_attached_function(
             input_collection_id,
             false,
@@ -2360,8 +2544,8 @@ mod tests {
         ))
         .await;
         assert_eq!(
-            total_count, 34,
-            "CountAttachedFunction should have counted 34 records in input collection"
+            total_count, 41,
+            "CountAttachedFunction should have counted 41 records in input collection (50 total - 9 deletes)"
         );
 
         tracing::info!(
@@ -2390,6 +2574,7 @@ mod tests {
         let log_2 = Log::InMemory(in_memory_log.clone());
 
         // compact everything
+        println!("COMPACTING ON 2482");
         let compact_orchestrator = CompactOrchestrator::new(
             input_collection_id,
             false,
@@ -2424,6 +2609,8 @@ mod tests {
             .expect(" Attached Function should be found");
         let execution_nonce_2 = attached_function_before_run_2.next_nonce;
 
+        println!("RUNNING TASK ON 2518");
+
         // Run second attached function (PrepareAttachedFunction will fetch updated attached function state)
         let compact_orchestrator_2 = CompactOrchestrator::new_for_attached_function(
             input_collection_id,
@@ -2443,6 +2630,14 @@ mod tests {
             execution_nonce_2,
         );
         let result = compact_orchestrator_2.run(system.clone()).await;
+        match &result {
+            Ok(_) => {
+                tracing::info!("Second compaction succeeded");
+            }
+            Err(e) => {
+                tracing::error!("Second compaction failed with error: {:?}", e);
+            }
+        }
         assert!(
             result.is_ok(),
             "Second invocation of attached function should succeed: {:?}",
@@ -2469,8 +2664,8 @@ mod tests {
         ))
         .await;
         assert_eq!(
-            total_count_2, 67,
-            "CountAttachedFunction should have counted 67 total records in input collection"
+            total_count_2, 109,
+            "CountAttachedFunction should have counted 109 total records in input collection"
         );
 
         assert_eq!(

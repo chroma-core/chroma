@@ -173,26 +173,30 @@ pub struct StatisticsFunctionExecutor(pub Box<dyn StatisticsFunctionFactory>);
 impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
     async fn execute(
         &self,
-        input_records: Chunk<LogRecord>,
+        input_records: Vec<Chunk<LogRecord>>,
         output_reader: Option<&RecordSegmentReader<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
         let mut counts: HashMap<String, HashMap<StatisticsValue, Box<dyn StatisticsFunction>>> =
             HashMap::default();
-        for (log_record, _) in input_records.iter() {
-            if matches!(log_record.record.operation, Operation::Delete) {
-                continue;
-            }
 
-            if let Some(update_metadata) = log_record.record.metadata.as_ref() {
-                for (key, update_value) in update_metadata.iter() {
-                    let value: Option<MetadataValue> = update_value.try_into().ok();
-                    if let Some(value) = value {
-                        let inner_map = counts.entry(key.clone()).or_default();
-                        for stats_value in StatisticsValue::from_metadata_value(&value) {
-                            inner_map
-                                .entry(stats_value)
-                                .or_insert_with(|| self.0.create())
-                                .observe(log_record);
+        // Process all chunks
+        for chunk in input_records.iter() {
+            for (log_record, _) in chunk.iter() {
+                if matches!(log_record.record.operation, Operation::Delete) {
+                    continue;
+                }
+
+                if let Some(update_metadata) = log_record.record.metadata.as_ref() {
+                    for (key, update_value) in update_metadata.iter() {
+                        let value: Option<MetadataValue> = update_value.try_into().ok();
+                        if let Some(value) = value {
+                            let inner_map = counts.entry(key.clone()).or_default();
+                            for stats_value in StatisticsValue::from_metadata_value(&value) {
+                                inner_map
+                                    .entry(stats_value)
+                                    .or_insert_with(|| self.0.create())
+                                    .observe(log_record);
+                            }
                         }
                     }
                 }
@@ -315,7 +319,7 @@ mod tests {
         output: &Chunk<LogRecord>,
     ) -> HashMap<String, (i64, String, String, String)> {
         let mut actual: HashMap<String, (i64, String, String, String)> = HashMap::new();
-        for (log_record, _) in output.iter() {
+        for (log_record, _index) in output.iter() {
             let record = &log_record.record;
             assert_eq!(record.operation, Operation::Upsert);
             assert_eq!(record.embedding.as_deref(), Some(&[0.0][..]));
@@ -382,8 +386,7 @@ mod tests {
     ) -> (HashMap<String, OperationRecord>, Vec<String>) {
         let mut upserts: HashMap<String, OperationRecord> = HashMap::new();
         let mut deletes: Vec<String> = Vec::new();
-
-        for (log_record, _) in output.iter() {
+        for (log_record, _index) in output.iter() {
             match log_record.record.operation {
                 Operation::Upsert => {
                     upserts.insert(log_record.record.id.clone(), log_record.record.clone());
@@ -403,7 +406,7 @@ mod tests {
     fn partition_output_expect_no_upserts(output: &Chunk<LogRecord>) -> Vec<String> {
         let mut deletes: Vec<String> = Vec::new();
 
-        for (log_record, _) in output.iter() {
+        for (log_record, _index) in output.iter() {
             match log_record.record.operation {
                 Operation::Delete => {
                     deletes.push(log_record.record.id.clone());
@@ -463,7 +466,7 @@ mod tests {
         let input = Chunk::new(vec![record_one, record_two].into());
 
         let output = executor
-            .execute(input, None)
+            .execute(vec![input], None)
             .await
             .expect("execution succeeds");
 
@@ -560,7 +563,7 @@ mod tests {
 
         let input = Chunk::new(vec![record_one, record_two].into());
         let output = executor
-            .execute(input, None)
+            .execute(vec![input], None)
             .await
             .expect("execution succeeds");
 
@@ -599,7 +602,7 @@ mod tests {
 
         let input = Chunk::new(vec![upsert_record, delete_record].into());
         let output = executor
-            .execute(input, None)
+            .execute(vec![input], None)
             .await
             .expect("execution succeeds");
 
@@ -636,7 +639,7 @@ mod tests {
 
         let input = Chunk::new(vec![record].into());
         let output = executor
-            .execute(input, None)
+            .execute(vec![input], None)
             .await
             .expect("execution succeeds");
 
@@ -655,11 +658,10 @@ mod tests {
         let input = Chunk::new(vec![record].into());
 
         let output = executor
-            .execute(input, None)
+            .execute(vec![input], None)
             .await
             .expect("execution succeeds");
 
-        assert_eq!(output.total_len(), 0);
         assert_eq!(output.len(), 0);
         assert!(output.is_empty());
     }
@@ -694,7 +696,7 @@ mod tests {
         );
 
         let output = executor
-            .execute(input, Some(&record_reader))
+            .execute(vec![input], Some(&record_reader))
             .await
             .expect("execution succeeds");
 
@@ -739,7 +741,7 @@ mod tests {
         let empty_input: Chunk<LogRecord> = Chunk::new(Vec::<LogRecord>::new().into());
 
         let output = executor
-            .execute(empty_input, Some(&record_reader))
+            .execute(vec![empty_input], Some(&record_reader))
             .await
             .expect("execution succeeds");
 

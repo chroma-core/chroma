@@ -22,6 +22,7 @@ pub struct SourceRecordSegmentOperator {}
 #[derive(Clone, Debug)]
 pub struct SourceRecordSegmentInput {
     pub record_segment_reader: Option<RecordSegmentReader<'static>>,
+    pub highest_log_offset: Option<i64>,
 }
 
 pub type SourceRecordSegmentOutput = Chunk<LogRecord>;
@@ -48,7 +49,7 @@ impl Operator<SourceRecordSegmentInput, SourceRecordSegmentOutput> for SourceRec
         input: &SourceRecordSegmentInput,
     ) -> Result<SourceRecordSegmentOutput, SourceRecordSegmentError> {
         tracing::trace!("[{}]: {:?}", self.get_name(), input);
-        let logs = match input.record_segment_reader.as_ref() {
+        let logs: Vec<LogRecord> = match input.record_segment_reader.as_ref() {
             Some(reader) => {
                 reader
                     .get_data_stream(..)
@@ -72,6 +73,15 @@ impl Operator<SourceRecordSegmentInput, SourceRecordSegmentOutput> for SourceRec
                     })
                     .try_collect::<Vec<_>>()
                     .await?
+                    .into_iter()
+                    .filter(|log_record| {
+                        // Only include records up to the highest_log_offset
+                        match input.highest_log_offset {
+                            Some(highest_offset) => log_record.log_offset <= highest_offset,
+                            None => true,
+                        }
+                    })
+                    .collect()
             }
             None => Default::default(),
         };
@@ -105,6 +115,7 @@ mod tests {
         .expect("Record segment reader should be initialized");
         SourceRecordSegmentInput {
             record_segment_reader: Some(reader),
+            highest_log_offset: None,
         }
     }
 

@@ -477,7 +477,7 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
 
 #[derive(Debug, Clone)]
 pub struct MaterializeLogsResult {
-    logs: Chunk<LogRecord>,
+    pub logs: Chunk<LogRecord>,
     materialized: Chunk<MaterializedLogRecord>,
 }
 
