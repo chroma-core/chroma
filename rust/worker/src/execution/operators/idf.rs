@@ -607,4 +607,29 @@ mod tests {
         assert!((scaled.values[0] - 3.091).abs() < 0.01);
         assert!((scaled.values[1] - 6.182).abs() < 0.01); // 2.0 * 3.091
     }
+
+    #[tokio::test]
+    async fn test_idf_tokens_length_mismatch_returns_error() {
+        let (_test_segment, input) = Box::pin(setup_idf_input(1, vec![])).await;
+
+        let query_vector = SparseVector {
+            indices: vec![0, 1],
+            values: vec![1.0, 1.0],
+            tokens: Some(vec!["only_one_token".to_string()]),
+        };
+
+        let idf_operator = Idf {
+            query: query_vector,
+            key: "sparse_embedding".to_string(),
+        };
+
+        let result = idf_operator.run(&input).await;
+        assert!(matches!(
+            result,
+            Err(IdfError::TokenLengthMismatch {
+                tokens: 1,
+                indices: 2
+            })
+        ));
+    }
 }

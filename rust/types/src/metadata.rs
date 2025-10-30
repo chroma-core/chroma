@@ -2182,6 +2182,19 @@ mod tests {
             MetadataValueConversionError::SparseVectorLengthMismatch
         ));
 
+        // Tokens length mismatch with indices/values
+        let sparse = SparseVector::new(
+            vec![1, 2, 3],
+            vec![0.1, 0.2, 0.3],
+            Some(vec!["a".to_string(), "b".to_string()]),
+        );
+        let result = sparse.validate();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            MetadataValueConversionError::SparseVectorLengthMismatch
+        ));
+
         // Unsorted indices (descending order)
         let sparse = SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2], None);
         let result = sparse.validate();
