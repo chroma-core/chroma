@@ -171,14 +171,14 @@ pub struct CompactOrchestrator {
     input_collection_id: CollectionUuid,
     input_collection: OnceCell<Collection>,
     input_segments: OnceCell<Vec<Segment>>,
-    /// How much to pull from fetch_logs for INPUT collection
-    pulled_log_offset: i64,
+    input_pulled_log_offset: i64,
 
     // === Output Collection (write compacted data to) ===
     /// Collection to write compacted segments to
     output_collection_id: OnceCell<CollectionUuid>,
     output_collection: OnceCell<Collection>,
     output_segments: OnceCell<Vec<Segment>>,
+    output_pulled_log_offset: i64,
 
     // === Writers & Results ===
     writers: OnceCell<CompactWriters>,
@@ -366,10 +366,11 @@ impl CompactOrchestrator {
             input_collection_id,
             input_collection: OnceCell::new(),
             input_segments: OnceCell::new(),
-            pulled_log_offset: 0,
+            input_pulled_log_offset: 0,
             output_collection_id: output_collection_cell,
             output_collection: OnceCell::new(),
             output_segments: OnceCell::new(),
+            output_pulled_log_offset: 0,
             writers: OnceCell::new(),
             flush_results: Vec::new(),
             result_channel,
@@ -742,7 +743,7 @@ impl CompactOrchestrator {
         let input = RegisterInput::new(
             collection.tenant,
             collection.collection_id,
-            self.pulled_log_offset,
+            self.output_pulled_log_offset,
             collection.version,
             self.flush_results.clone().into(),
             self.total_records_post_compaction,
@@ -751,6 +752,7 @@ impl CompactOrchestrator {
             self.log.clone(),
             self.schema.clone(),
             self.attached_function_context.clone(),
+            self.input_pulled_log_offset,
         );
 
         let task = wrap(
@@ -871,6 +873,17 @@ impl CompactOrchestrator {
             .ok_or(CompactionError::InvariantViolation(
                 "Output collection ID should be set",
             ))
+    }
+
+    /// Set input_pulled_log_offset to the given position.
+    /// For regular compaction (input == output), also updates output_pulled_log_offset.
+    /// For task compaction (input != output), output collection keeps its own log position.
+    fn set_input_log_offset(&mut self, log_offset: i64) {
+        self.input_pulled_log_offset = log_offset;
+        // Only update output offset if input and output are the same collection
+        if Some(self.input_collection_id) == self.output_collection_id.get().copied() {
+            self.output_pulled_log_offset = log_offset;
+        }
     }
 
     /// Get output_segments or return error
@@ -1120,6 +1133,9 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             return;
         }
 
+        // Initialize output_pulled_log_offset from OUTPUT collection's log position
+        self.output_pulled_log_offset = output_collection.log_position;
+
         // Create output segments vec from individual segment fields
         let output_segments = vec![
             output.output.metadata_segment.clone(),
@@ -1166,8 +1182,8 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             input_collection.log_position = result;
         }
 
-        // Set pulled_log_offset from INPUT collection's log position
-        self.pulled_log_offset = input_collection.log_position;
+        // Initialize input_pulled_log_offset from INPUT collection's log position (last compacted offset)
+        self.input_pulled_log_offset = input_collection.log_position;
 
         // Create record reader from INPUT segments (for reading existing data)
         let input_record_reader = match self
@@ -1440,8 +1456,11 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
         tracing::info!("Pulled Records: {}", output.len());
         match output.iter().last() {
             Some((rec, _)) => {
-                self.pulled_log_offset = rec.log_offset;
-                tracing::info!("Pulled Logs Up To Offset: {:?}", self.pulled_log_offset);
+                self.set_input_log_offset(rec.log_offset);
+                tracing::info!(
+                    "Pulled Logs Up To Offset: {:?}",
+                    self.input_pulled_log_offset
+                );
             }
             None => {
                 tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behing the sysdb.");
@@ -1542,7 +1561,7 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
                     Some(collection) => collection,
                     None => return,
                 };
-            self.pulled_log_offset = input_collection.log_position;
+            self.set_input_log_offset(input_collection.log_position);
             self.do_attached_function(output, ctx).await;
         } else {
             self.partition(output, ctx).await;

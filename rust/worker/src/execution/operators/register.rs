@@ -51,6 +51,8 @@ pub struct RegisterInput {
     log: Log,
     schema: Option<Schema>,
     attached_function_context: Option<AttachedFunctionContext>,
+    /// Input collection's pulled log offset (used for attached function completion_offset calculation)
+    input_pulled_log_offset: i64,
 }
 
 impl RegisterInput {
@@ -68,6 +70,7 @@ impl RegisterInput {
         log: Log,
         schema: Option<Schema>,
         attached_function_context: Option<AttachedFunctionContext>,
+        input_pulled_log_offset: i64,
     ) -> Self {
         RegisterInput {
             tenant,
@@ -81,6 +84,7 @@ impl RegisterInput {
             log,
             schema,
             attached_function_context,
+            input_pulled_log_offset,
         }
     }
 }
@@ -145,15 +149,11 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
                     )
                 })?;
 
-                // log_position is "up to which offset we've compacted"
+                // input_pulled_log_offset is "up to which offset we've compacted from INPUT collection"
                 // completion_offset is "last offset processed"
-                // In practice, log_position means "next offset to start compacting from"
-                // So to get "last offset processed", we subtract 1
-                let last_offset_processed = if input.log_position > 0 {
-                    (input.log_position - 1).max(0) as u64
-                } else {
-                    0u64
-                };
+                // In practice, input_pulled_log_offset means "next offset to start compacting from"
+                // So to get "last offset processed"/"completion_offset", we subtract 1
+                let last_offset_processed = (input.input_pulled_log_offset - 1).max(0) as u64;
                 let attach_function_update = chroma_types::AttachedFunctionUpdateInfo {
                     attached_function_id: attached_function.id,
                     attached_function_run_nonce: attached_function_context.execution_nonce.0,
@@ -338,8 +338,9 @@ mod tests {
             size_bytes_post_compaction,
             sysdb.clone(),
             log.clone(),
-            None, // schema
-            None, // attached_function_context
+            None,         // schema
+            None,         // attached_function_context
+            log_position, // input_pulled_log_offset (same as log_position for non-task compaction)
         );
 
         let result = operator.run(&input).await;
