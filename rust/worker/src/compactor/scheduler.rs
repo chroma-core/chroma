@@ -15,6 +15,7 @@ use figment::Figment;
 use mdac::{Scorecard, ScorecardGuard};
 use s3heap_service::SysDbScheduler;
 use serde::Deserialize;
+use tracing::Level;
 use uuid::Uuid;
 
 use crate::compactor::compaction_manager::ExecutionMode;
@@ -598,8 +599,17 @@ impl Scheduler {
                         let guard = self.scorecard.track(&tags).map(|ticket| {
                             ScorecardGuard::new(Arc::clone(&self.scorecard), Some(ticket))
                         });
-                        entry.insert(InProgressJob::new(3_600, guard));
-                        self.func_queue.push(func);
+                        if let Some(guard) = guard {
+                            entry.insert(InProgressJob::new(3_600, Some(guard)));
+                            self.func_queue.push(func);
+                        } else {
+                            tracing::event!(
+                                Level::INFO,
+                                name = "not scheduling function because scorecard",
+                                collection_id =? func.collection_id,
+                                tenant =? collections[0].tenant,
+                            );
+                        }
                     }
                     Err(err) => {
                         tracing::error!("Error: {:?}", err);
