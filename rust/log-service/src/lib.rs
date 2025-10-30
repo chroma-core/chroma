@@ -1452,6 +1452,17 @@ impl LogServer {
             Arc::clone(&storage),
             target_prefix,
         );
+        let first_copied_offset = log_reader.oldest_timestamp().await.map_err(|err| {
+            Status::new(
+                err.code().into(),
+                format!("Failed to read first offset in copied manifest: {}", err),
+            )
+        })?;
+        if offset < first_copied_offset {
+            return Err(Status::internal(format!(
+                "Compaction cursor [{offset:?}] is behind start of manifest [{first_copied_offset:?}]",
+            )));
+        }
         // This is the next record to insert, so we'll have to adjust downwards.
         let max_offset = log_reader.next_write_timestamp().await.map_err(|err| {
             Status::new(
