@@ -568,7 +568,7 @@ impl Scheduler {
                     func.collection_id,
                     self.max_failure_count
                 );
-                self.kill_job(func.collection_id.into());
+                self.kill_job(func.task_id.into());
                 continue;
             }
 
@@ -581,7 +581,7 @@ impl Scheduler {
                 );
                 continue;
             }
-            if let Entry::Vacant(entry) = self.in_progress_jobs.entry(func.nonce.into()) {
+            if let Entry::Vacant(entry) = self.in_progress_jobs.entry(func.task_id.into()) {
                 let result = self
                     .sysdb
                     .get_collections(GetCollectionsOptions {
@@ -600,7 +600,7 @@ impl Scheduler {
                             ScorecardGuard::new(Arc::clone(&self.scorecard), Some(ticket))
                         });
                         if let Some(guard) = guard {
-                            entry.insert(InProgressJob::new(3_600, Some(guard)));
+                            entry.insert(InProgressJob::new(self.job_expiry_seconds, Some(guard)));
                             self.func_queue.push(func);
                         } else {
                             tracing::event!(
