@@ -215,7 +215,7 @@ const docs: string[] = (q.documents?.[0] ?? []).filter(
 const rerankResponse = await contextual.rerank.create({
   query,
   documents: docs,
-  metadata: (q.metadatas?.[0] ?? []).map((m) => String(m)),
+  metadata: (q.metadatas?.[0] ?? []).map((m) => JSON.stringify(m)),
   model: "ctxl-rerank-v2-instruct-multilingual",
   instruction:
     "Prioritize recent documents. Technical details and specific findings should rank higher than general information.",
