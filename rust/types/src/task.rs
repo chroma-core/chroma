@@ -26,6 +26,12 @@ impl From<AttachedFunctionUuid> for JobId {
     }
 }
 
+impl From<NonceUuid> for JobId {
+    fn from(nonce_uuid: NonceUuid) -> Self {
+        JobId(nonce_uuid.0)
+    }
+}
+
 define_uuid_newtype!(
     /// AttachedFunctionUuid is a wrapper around Uuid to provide a type for attached function identifiers.
     #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]

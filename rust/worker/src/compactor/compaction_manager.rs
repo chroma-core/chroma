@@ -2,7 +2,7 @@ use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
 use super::OneOffCompactMessage;
 use super::RebuildMessage;
-use crate::compactor::tasks::SchedulableTask;
+use crate::compactor::tasks::SchedulableFunction;
 use crate::compactor::types::{ListDeadJobsMessage, ScheduledCompactMessage};
 use crate::config::CompactionServiceConfig;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLog;
@@ -463,7 +463,7 @@ impl CompactionManagerContext {
         }
     }
 
-    async fn execute_task(self, task: SchedulableTask) -> CompactionOutput {
+    async fn execute_task(self, task: SchedulableFunction) -> CompactionOutput {
         tracing::info!("Executing task {}", task.task_id);
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher.clone(),
