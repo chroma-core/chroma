@@ -147,7 +147,7 @@ func TestUpdateSchemaFromConfig_HnswSuccess(t *testing.T) {
 					"config": {}
 				}
 			},
-			"boolean": {
+			"bool": {
 				"bool_inverted_index": {
 					"enabled": true,
 					"config": {}
@@ -312,7 +312,7 @@ func TestUpdateSchemaFromConfig_SpannSuccess(t *testing.T) {
 					"config": {}
 				}
 			},
-			"boolean": {
+			"bool": {
 				"bool_inverted_index": {
 					"enabled": true,
 					"config": {}
@@ -481,7 +481,7 @@ func TestUpdateSchemaFromConfig_EmbeddingFunction(t *testing.T) {
 					"config": {}
 				}
 			},
-			"boolean": {
+			"bool": {
 				"bool_inverted_index": {
 					"enabled": true,
 					"config": {}

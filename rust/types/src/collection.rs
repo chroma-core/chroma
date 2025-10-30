@@ -2,8 +2,8 @@ use std::str::FromStr;
 
 use super::{Metadata, MetadataValueConversionError};
 use crate::{
-    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, KnnIndex,
-    Schema, SchemaError, Segment, SegmentScope, UpdateCollectionConfiguration, UpdateMetadata,
+    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Schema,
+    SchemaError, Segment, SegmentScope, UpdateCollectionConfiguration, UpdateMetadata,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
@@ -228,17 +228,18 @@ impl Collection {
 }
 
 impl Collection {
-    /// Reconcile the collection schema and configuration, ensuring both are consistent.
-    pub fn reconcile_schema_with_config(&mut self, knn_index: KnnIndex) -> Result<(), SchemaError> {
-        let reconciled_schema = Schema::reconcile_schema_and_config(
-            self.schema.as_ref(),
-            Some(&self.config),
-            knn_index,
-        )?;
-
-        self.config = InternalCollectionConfiguration::try_from(&reconciled_schema)
-            .map_err(|reason| SchemaError::InvalidSchema { reason })?;
-        self.schema = Some(reconciled_schema);
+    /// Reconcile the collection schema and configuration when serving read requests.
+    ///
+    /// The read path needs to tolerate collections that only have a configuration persisted.
+    /// This helper hydrates `schema` from the stored configuration when needed, or regenerates
+    /// the configuration from the existing schema to keep both representations consistent.
+    pub fn reconcile_schema_for_read(&mut self) -> Result<(), SchemaError> {
+        if let Some(schema) = self.schema.as_ref() {
+            self.config = InternalCollectionConfiguration::try_from(schema)
+                .map_err(|reason| SchemaError::InvalidSchema { reason })?;
+        } else {
+            self.schema = Some(Schema::try_from(&self.config)?);
+        }
 
         Ok(())
     }
