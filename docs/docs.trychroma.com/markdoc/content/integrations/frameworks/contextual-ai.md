@@ -9,7 +9,7 @@ name: Contextual AI
 
 ![](https://img.shields.io/badge/License-Commercial-blue.svg)
 
-| [Docs](https://docs.contextual.ai/user-guides/beginner-guide?utm_campaign=Standalone-api-integration&utm_source=chroma&utm_medium=github&utm_content=repo) | [Github](https://github.com/ContextualAI?utm_campaign=Standalone-api-integration&utm_source=chroma&utm_medium=github&utm_content=repo) | [Examples](https://github.com/ContextualAI/examples) | [Blog](https://contextual.ai/blog/?utm_campaign=Standalone-api-integration&utm_source=chroma&utm_medium=github&utm_content=repo) |
+| [Docs](https://docs.contextual.ai/user-guides/beginner-guide?utm_campaign=Standalone-api-integration&utm_source=chroma&utm_medium=github&utm_content=repo) | [GitHub](https://github.com/ContextualAI?utm_campaign=Standalone-api-integration&utm_source=chroma&utm_medium=github&utm_content=repo) | [Examples](https://github.com/ContextualAI/examples) | [Blog](https://contextual.ai/blog/?utm_campaign=Standalone-api-integration&utm_source=chroma&utm_medium=github&utm_content=repo) |
 
 You can use Chroma together with Contextual AI's Parse, Rerank, Generate, and LMUnit APIs to build and evaluate comprehensive RAG pipelines.
 
@@ -27,6 +27,7 @@ pip install chromadb contextual-client
 from contextual import ContextualAI
 import chromadb
 from chromadb.utils import embedding_functions
+from time import sleep, time
 
 # Initialize clients
 contextual_client = ContextualAI(api_key="your-contextual-api-key")
@@ -41,14 +42,17 @@ with open("document.pdf", "rb") as f:
     )
 
 # Monitor job status (Parse API is asynchronous)
-from time import sleep
-while True:
+start_time = time()
+timeout_seconds = 600  # 10 minutes
+while time() - start_time < timeout_seconds:
     status = contextual_client.parse.job_status(parse_response.job_id)
     if status.status == "completed":
         break
     elif status.status == "failed":
         raise Exception("Parse job failed")
-    sleep(30)  # Wait 30 seconds before checking again
+    sleep(30)
+else:
+    raise Exception("Parse job timed out")
 
 # Get results after job completion
 results = contextual_client.parse.job_results(
@@ -110,7 +114,7 @@ rerank_response = contextual_client.rerank.create(
 
 # Get top documents
 top_docs = [
-    results['documents'][0][r.index] 
+    results['documents'][0][r.index]
     for r in rerank_response.results[:5]
 ]
 ```
@@ -164,6 +168,7 @@ For more advanced usage examples including table extraction, document hierarchy 
 ### Parse API
 
 Advanced document parsing that handles PDFs, DOCX, and PPTX files with:
+
 - Document hierarchy preservation through parent-child relationships
 - Intelligent table extraction with automatic splitting for large tables
 - Multiple output formats: markdown-document, markdown-per-page, blocks-per-page
@@ -174,6 +179,7 @@ Advanced document parsing that handles PDFs, DOCX, and PPTX files with:
 ### Rerank API
 
 State-of-the-art reranker with instruction-following capabilities:
+
 - BEIR benchmark-leading accuracy
 - Custom reranking instructions for domain-specific requirements
 - Handles conflicting retrieval results
@@ -199,12 +205,14 @@ Grounded Language Model optimized for minimal hallucinations:
 ### LMUnit API
 
 Natural language unit testing for LLM response evaluation:
+
 - State-of-the-art response quality assessment
 - Structured testing methodology
 - Domain-agnostic evaluation framework
 - API-based evaluation at scale
 
 **Scoring Scale (Continuous 1-5):**
+
 - **5**: Excellent - Fully satisfies criteria
 - **4**: Good - Minor issues
 - **3**: Acceptable - Some issues
