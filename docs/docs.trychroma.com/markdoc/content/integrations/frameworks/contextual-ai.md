@@ -31,7 +31,7 @@ from time import sleep, time
 
 # Initialize clients
 contextual_client = ContextualAI(api_key="your-contextual-api-key")
-chroma_client = chromadb.Client()
+chroma_client = chromadb.EphemeralClient()
 
 # Parse document
 with open("document.pdf", "rb") as f:
