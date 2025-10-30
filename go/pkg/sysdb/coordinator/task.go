@@ -338,14 +338,16 @@ func attachedFunctionToProto(attachedFunction *dbmodel.AttachedFunction, functio
 		TenantId:                attachedFunction.TenantID,
 		DatabaseId:              attachedFunction.DatabaseID,
 		NextRunAt:               uint64(attachedFunction.NextRun.UnixMicro()),
-		LowestLiveNonce:         "",
+		LowestLiveNonce:         nil,
 		NextNonce:               attachedFunction.NextNonce.String(),
 		CreatedAt:               uint64(attachedFunction.CreatedAt.UnixMicro()),
 		UpdatedAt:               uint64(attachedFunction.UpdatedAt.UnixMicro()),
 	}
 
 	if attachedFunction.LowestLiveNonce != nil {
-		attachedFunctionProto.LowestLiveNonce = attachedFunction.LowestLiveNonce.String()
+		tmp := attachedFunction.LowestLiveNonce.String()
+		var ptr *string = &tmp
+		attachedFunctionProto.LowestLiveNonce = ptr
 	}
 	if attachedFunction.OutputCollectionID != nil {
 		attachedFunctionProto.OutputCollectionId = attachedFunction.OutputCollectionID
