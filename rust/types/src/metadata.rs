@@ -146,6 +146,13 @@ impl SparseVector {
             return Err(MetadataValueConversionError::SparseVectorLengthMismatch);
         }
 
+        // Check that tokens (if present) align with indices
+        if let Some(tokens) = self.tokens.as_ref() {
+            if tokens.len() != self.indices.len() {
+                return Err(MetadataValueConversionError::SparseVectorLengthMismatch);
+            }
+        }
+
         // Check that indices are sorted in strictly ascending order (no duplicates)
         for i in 1..self.indices.len() {
             if self.indices[i] <= self.indices[i - 1] {
@@ -686,7 +693,7 @@ pub enum MetadataValueConversionError {
     InvalidValue,
     #[error("Metadata key cannot start with '#' or '$': {0}")]
     InvalidKey(String),
-    #[error("Sparse vector indices and values must have the same length")]
+    #[error("Sparse vector indices, values, and tokens (when present) must have the same length")]
     SparseVectorLengthMismatch,
     #[error("Sparse vector indices must be sorted in strictly ascending order (no duplicates)")]
     SparseVectorIndicesNotSorted,

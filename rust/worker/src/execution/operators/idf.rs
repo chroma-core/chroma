@@ -56,6 +56,10 @@ pub enum IdfError {
     RecordReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error using sparse reader: {0}")]
     SparseReader(#[from] SparseReaderError),
+    #[error(
+        "Query tokens length ({tokens}) does not match query indices length ({indices})"
+    )]
+    TokenLengthMismatch { tokens: usize, indices: usize },
 }
 
 impl ChromaError for IdfError {
@@ -66,6 +70,7 @@ impl ChromaError for IdfError {
             IdfError::MetadataReader(err) => err.code(),
             IdfError::RecordReader(err) => err.code(),
             IdfError::SparseReader(err) => err.code(),
+            IdfError::TokenLengthMismatch { .. } => chroma_error::ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -169,6 +174,12 @@ impl Operator<IdfInput, IdfOutput> for Idf {
         }
 
         if let Some(tokens) = self.query.tokens.as_ref() {
+            if tokens.len() != self.query.indices.len() {
+                return Err(IdfError::TokenLengthMismatch {
+                    tokens: tokens.len(),
+                    indices: self.query.indices.len(),
+                });
+            }
             let scaled_query = SparseVector::from_triples(self.query.iter().enumerate().map(
                 |(token_position, (index, value))| {
                     let nt = nts.get(&index).cloned().unwrap_or_default() as f32;
