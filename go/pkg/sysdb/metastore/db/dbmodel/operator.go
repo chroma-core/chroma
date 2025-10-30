@@ -19,5 +19,6 @@ func (v Function) TableName() string {
 type IFunctionDb interface {
 	GetByName(name string) (*Function, error)
 	GetByID(id uuid.UUID) (*Function, error)
+	GetByIDs(ids []uuid.UUID) ([]*Function, error)
 	GetAll() ([]*Function, error)
 }

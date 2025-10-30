@@ -74,6 +74,36 @@ func (_m *IFunctionDb) GetByID(functionID uuid.UUID) (*dbmodel.Function, error) 
 	return r0, r1
 }
 
+// GetByIDs provides a mock function with given fields: functionIDs
+func (_m *IFunctionDb) GetByIDs(functionIDs []uuid.UUID) ([]*dbmodel.Function, error) {
+	ret := _m.Called(functionIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetByIDs")
+	}
+
+	var r0 []*dbmodel.Function
+	var r1 error
+	if rf, ok := ret.Get(0).(func([]uuid.UUID) ([]*dbmodel.Function, error)); ok {
+		return rf(functionIDs)
+	}
+	if rf, ok := ret.Get(0).(func([]uuid.UUID) []*dbmodel.Function); ok {
+		r0 = rf(functionIDs)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*dbmodel.Function)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func([]uuid.UUID) error); ok {
+		r1 = rf(functionIDs)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetByName provides a mock function with given fields: functionName
 func (_m *IFunctionDb) GetByName(functionName string) (*dbmodel.Function, error) {
 	ret := _m.Called(functionName)

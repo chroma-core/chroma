@@ -40,6 +40,18 @@ func (s *Server) GetAttachedFunctionByName(ctx context.Context, req *coordinator
 	return res, nil
 }
 
+func (s *Server) ListAttachedFunctions(ctx context.Context, req *coordinatorpb.ListAttachedFunctionsRequest) (*coordinatorpb.ListAttachedFunctionsResponse, error) {
+	log.Info("ListAttachedFunctions", zap.String("input_collection_id", req.InputCollectionId))
+
+	res, err := s.coordinator.ListAttachedFunctions(ctx, req)
+	if err != nil {
+		log.Error("ListAttachedFunctions failed", zap.Error(err))
+		return nil, err
+	}
+
+	return res, nil
+}
+
 func (s *Server) GetAttachedFunctionByUuid(ctx context.Context, req *coordinatorpb.GetAttachedFunctionByUuidRequest) (*coordinatorpb.GetAttachedFunctionByUuidResponse, error) {
 	log.Info("GetAttachedFunctionByUuid", zap.String("id", req.Id))
 

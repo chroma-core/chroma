@@ -94,6 +94,22 @@ func (s *attachedFunctionDb) GetByID(id uuid.UUID) (*dbmodel.AttachedFunction, e
 	return &attachedFunction, nil
 }
 
+func (s *attachedFunctionDb) GetByCollectionID(inputCollectionID string) ([]*dbmodel.AttachedFunction, error) {
+	var attachedFunctions []*dbmodel.AttachedFunction
+	err := s.db.
+		Where("input_collection_id = ?", inputCollectionID).
+		Where("is_deleted = ?", false).
+		Where("lowest_live_nonce IS NOT NULL").
+		Find(&attachedFunctions).Error
+
+	if err != nil {
+		log.Error("GetByCollectionID failed", zap.Error(err), zap.String("input_collection_id", inputCollectionID))
+		return nil, err
+	}
+
+	return attachedFunctions, nil
+}
+
 func (s *attachedFunctionDb) UpdateOutputCollectionID(id uuid.UUID, outputCollectionID *string) error {
 	now := time.Now()
 	result := s.db.Model(&dbmodel.AttachedFunction{}).
