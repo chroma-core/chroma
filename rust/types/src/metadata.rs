@@ -232,9 +232,11 @@ impl<'py> pyo3::IntoPyObject<'py> for SparseVector {
 
     fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
         use pyo3::types::PyDict;
-        let dict = PyDict::new(py);
+
+        let dict = PyDict::new_bound(py);
         dict.set_item("indices", self.indices)?;
         dict.set_item("values", self.values)?;
+        dict.set_item("tokens", self.tokens)?;
         Ok(dict.into_any())
     }
 }
@@ -245,13 +247,23 @@ impl<'py> pyo3::FromPyObject<'py> for SparseVector {
         use pyo3::types::PyDict;
 
         let dict = ob.downcast::<PyDict>()?;
-        let indices_obj = dict.get_item("indices")?;
-        let values_obj = dict.get_item("values")?;
+        let indices_obj = dict
+            .get_item("indices")?
+            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("missing 'indices' key"))?;
+        let values_obj = dict
+            .get_item("values")?
+            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("missing 'values' key"))?;
 
         let indices: Vec<u32> = indices_obj.extract()?;
         let values: Vec<f32> = values_obj.extract()?;
 
-        Ok(SparseVector::new(indices, values, None))
+        let tokens = match dict.get_item("tokens")? {
+            Some(item) if item.is_none() => None,
+            Some(item) => Some(item.extract::<Vec<String>>()?),
+            None => None,
+        };
+
+        Ok(SparseVector::new(indices, values, tokens))
     }
 }
 
@@ -2417,6 +2429,73 @@ mod tests {
         assert_eq!(deserialized.indices, sv.indices);
         assert_eq!(deserialized.values, sv.values);
         assert_eq!(deserialized.tokens, sv.tokens);
+    }
+
+    #[cfg(feature = "pyo3")]
+    #[test]
+    fn test_sparse_vector_pyo3_roundtrip_with_tokens() {
+        pyo3::Python::with_gil(|py| {
+            use pyo3::types::PyDict;
+            use pyo3::IntoPyObject;
+
+            let dict_in = PyDict::new_bound(py);
+            dict_in.set_item("indices", vec![0u32, 1, 2]).unwrap();
+            dict_in
+                .set_item("values", vec![0.1f32, 0.2f32, 0.3f32])
+                .unwrap();
+            dict_in
+                .set_item("tokens", vec!["foo", "bar", "baz"])
+                .unwrap();
+
+            let sparse: SparseVector = dict_in.clone().into_any().extract().unwrap();
+            assert_eq!(sparse.indices, vec![0, 1, 2]);
+            assert_eq!(sparse.values, vec![0.1, 0.2, 0.3]);
+            assert_eq!(
+                sparse.tokens,
+                Some(vec![
+                    "foo".to_string(),
+                    "bar".to_string(),
+                    "baz".to_string()
+                ])
+            );
+
+            let py_obj = sparse.clone().into_pyobject(py).unwrap();
+            let dict_out = py_obj.downcast::<PyDict>().unwrap();
+            let tokens_obj = dict_out
+                .get_item("tokens")
+                .unwrap()
+                .expect("expected tokens key in Python dict");
+            let tokens: Vec<String> = tokens_obj.extract().unwrap();
+            assert_eq!(
+                tokens,
+                vec!["foo".to_string(), "bar".to_string(), "baz".to_string()]
+            );
+        });
+    }
+
+    #[cfg(feature = "pyo3")]
+    #[test]
+    fn test_sparse_vector_pyo3_roundtrip_without_tokens() {
+        pyo3::Python::with_gil(|py| {
+            use pyo3::types::PyDict;
+            use pyo3::IntoPyObject;
+
+            let dict_in = PyDict::new_bound(py);
+            dict_in.set_item("indices", vec![5u32]).unwrap();
+            dict_in.set_item("values", vec![1.5f32]).unwrap();
+
+            let sparse: SparseVector = dict_in.clone().into_any().extract().unwrap();
+            assert_eq!(sparse.indices, vec![5]);
+            assert_eq!(sparse.values, vec![1.5]);
+            assert!(sparse.tokens.is_none());
+
+            let py_obj = sparse.into_pyobject(py).unwrap();
+            let dict_out = py_obj.downcast::<PyDict>().unwrap();
+            match dict_out.get_item("tokens").unwrap() {
+                Some(obj) => assert!(obj.is_none()),
+                None => panic!("expected tokens key in Python dict"),
+            }
+        });
     }
 
     #[test]
