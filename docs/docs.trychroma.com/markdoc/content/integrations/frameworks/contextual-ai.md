@@ -28,9 +28,10 @@ from contextual import ContextualAI
 import chromadb
 from chromadb.utils import embedding_functions
 from time import sleep, time
+import os
 
 # Initialize clients
-contextual_client = ContextualAI(api_key="your-contextual-api-key")
+contextual_client = ContextualAI(api_key=os.environ["CONTEXTUAL_AI_API_KEY"])
 chroma_client = chromadb.EphemeralClient()
 
 # Parse document
@@ -62,7 +63,7 @@ results = contextual_client.parse.job_results(
 
 # Create Chroma collection
 openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-    api_key="your-openai-api-key",
+    api_key=os.environ["OPENAI_API_KEY"],
     model_name="text-embedding-3-small"
 )
 
