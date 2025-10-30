@@ -45,7 +45,7 @@ use uuid::{Error, Uuid};
 pub const VERSION_FILE_S3_PREFIX: &str = "sysdb/version_files/";
 
 // Helper function to convert serde_json::Value to prost_types::Value
-fn json_to_prost_value(json: serde_json::Value) -> prost_types::Value {
+pub(crate) fn json_to_prost_value(json: serde_json::Value) -> prost_types::Value {
     use prost_types::value::Kind;
     let kind = match json {
         serde_json::Value::Null => Kind::NullValue(0),

@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::sysdb::json_to_prost_value;
 use super::sysdb::FlushCompactionError;
 use super::sysdb::GetLastCompactionTimeError;
 use crate::sysdb::VERSION_FILE_S3_PREFIX;
@@ -743,39 +744,11 @@ fn parse_params(params: Option<&str>) -> Option<prost_types::Struct> {
         JsonValue::Object(map) => Some(prost_types::Struct {
             fields: map
                 .into_iter()
-                .map(|(k, v)| (k, json_value_to_prost_value(v)))
+                .map(|(k, v)| (k, json_to_prost_value(v)))
                 .collect(),
         }),
         _ => None,
     }
-}
-
-fn json_value_to_prost_value(value: JsonValue) -> prost_types::Value {
-    use prost_types::value::Kind;
-
-    let kind = match value {
-        JsonValue::Null => Kind::NullValue(0),
-        JsonValue::Bool(b) => Kind::BoolValue(b),
-        JsonValue::Number(n) => {
-            if let Some(f) = n.as_f64() {
-                Kind::NumberValue(f)
-            } else {
-                Kind::NullValue(0)
-            }
-        }
-        JsonValue::String(s) => Kind::StringValue(s),
-        JsonValue::Array(arr) => Kind::ListValue(prost_types::ListValue {
-            values: arr.into_iter().map(json_value_to_prost_value).collect(),
-        }),
-        JsonValue::Object(map) => Kind::StructValue(prost_types::Struct {
-            fields: map
-                .into_iter()
-                .map(|(k, v)| (k, json_value_to_prost_value(v)))
-                .collect(),
-        }),
-    };
-
-    prost_types::Value { kind: Some(kind) }
 }
 
 fn system_time_to_micros(time: SystemTime) -> u64 {
