@@ -439,6 +439,7 @@ mod tests {
                     UpdateMetadataValue::SparseVector(SparseVector::new(
                         vec![1, 3],
                         vec![0.25, 0.75],
+                        None,
                     )),
                 ),
             ]),
@@ -455,7 +456,7 @@ mod tests {
                 ),
                 (
                     "sparse_key".to_string(),
-                    UpdateMetadataValue::SparseVector(SparseVector::new(vec![3], vec![0.5])),
+                    UpdateMetadataValue::SparseVector(SparseVector::new(vec![3], vec![0.5], None)),
                 ),
             ]),
         );
@@ -630,6 +631,7 @@ mod tests {
                 UpdateMetadataValue::SparseVector(SparseVector::new(
                     Vec::<u32>::new(),
                     Vec::<f32>::new(),
+                    None,
                 )),
             )]),
         );
