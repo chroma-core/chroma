@@ -29,7 +29,7 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    AttachedFunction, AttachedFunctionUuid, Chunk, Collection, CollectionUuid, KnnIndex, LogRecord,
+    AttachedFunction, AttachedFunctionUuid, Chunk, Collection, CollectionUuid, LogRecord,
     NonceUuid, Schema, SchemaError, Segment, SegmentFlushInfo, SegmentType, SegmentUuid,
 };
 use opentelemetry::trace::TraceContextExt;
@@ -1124,7 +1124,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         }
 
         // Store output collection
-        let mut output_collection = output.output.collection.clone();
+        let output_collection = output.output.collection.clone();
         if self
             .output_collection
             .set(output_collection.clone())
@@ -1295,23 +1295,6 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             Some(writer) => writer,
             None => return,
         };
-        if self
-            .ok_or_terminate(
-                match vector_segment.r#type {
-                    SegmentType::Spann => output_collection
-                        .reconcile_schema_with_config(KnnIndex::Spann)
-                        .map_err(CompactionError::from),
-                    _ => output_collection
-                        .reconcile_schema_with_config(KnnIndex::Hnsw)
-                        .map_err(CompactionError::from),
-                },
-                ctx,
-            )
-            .await
-            .is_none()
-        {
-            return;
-        }
         let (hnsw_index_uuid, vector_writer, is_vector_segment_spann) = match vector_segment.r#type
         {
             SegmentType::Spann => match self
