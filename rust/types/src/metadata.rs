@@ -14,7 +14,7 @@ use thiserror::Error;
 use crate::chroma_proto;
 
 #[cfg(feature = "pyo3")]
-use pyo3::types::PyAnyMethods;
+use pyo3::types::{PyAnyMethods, PyDictMethods};
 
 #[cfg(feature = "testing")]
 use proptest::prelude::*;
@@ -253,21 +253,21 @@ impl<'py> pyo3::FromPyObject<'py> for SparseVector {
                 "missing 'indices' key",
             ));
         }
+        let indices: Vec<u32> = indices_obj.unwrap().extract()?;
+
         let values_obj = dict.get_item("values")?;
         if values_obj.is_none() {
             return Err(pyo3::exceptions::PyKeyError::new_err(
                 "missing 'values' key",
             ));
         }
-
-        let indices: Vec<u32> = indices_obj.extract()?;
-        let values: Vec<f32> = values_obj.extract()?;
+        let values: Vec<f32> = values_obj.unwrap().extract()?;
 
         let tokens_obj = dict.get_item("tokens")?;
-        let tokens = if tokens_obj.is_none() {
-            None
-        } else {
-            Some(tokens_obj.extract::<Vec<String>>()?)
+        let tokens = match tokens_obj {
+            Some(obj) if obj.is_none() => None,
+            Some(obj) => Some(obj.extract::<Vec<String>>()?),
+            None => None,
         };
 
         Ok(SparseVector::new(indices, values, tokens))
@@ -2479,8 +2479,10 @@ mod tests {
             let py_obj = sparse.clone().into_pyobject(py).unwrap();
             let dict_out = py_obj.downcast::<PyDict>().unwrap();
             let tokens_obj = dict_out.get_item("tokens").unwrap();
-            assert!(!tokens_obj.is_none(), "expected tokens key in Python dict");
-            let tokens: Vec<String> = tokens_obj.extract().unwrap();
+            let tokens: Vec<String> = tokens_obj
+                .expect("expected tokens key in Python dict")
+                .extract()
+                .unwrap();
             assert_eq!(
                 tokens,
                 vec!["foo".to_string(), "bar".to_string(), "baz".to_string()]
@@ -2509,7 +2511,11 @@ mod tests {
             let py_obj = sparse.into_pyobject(py).unwrap();
             let dict_out = py_obj.downcast::<PyDict>().unwrap();
             let tokens_obj = dict_out.get_item("tokens").unwrap();
-            assert!(tokens_obj.is_none(), "expected tokens to be None");
+            let tokens_value = tokens_obj.expect("expected tokens key in Python dict");
+            assert!(
+                tokens_value.is_none(),
+                "expected tokens value in Python dict to be None"
+            );
         });
     }
 
