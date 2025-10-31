@@ -132,7 +132,7 @@ impl LogReader {
             return Err(Error::UninitializedLog);
         };
         let mut short_read = false;
-        self.scan_with_cache(manifest, from, limits, &mut short_read)
+        self.scan_with_cache(&manifest, from, limits, &mut short_read)
             .await
     }
 
@@ -145,7 +145,7 @@ impl LogReader {
     /// This differs from scan_from_manifest because it will load snapshots.
     pub async fn scan_with_cache(
         &self,
-        manifest: Manifest,
+        manifest: &Manifest,
         from: LogPosition,
         limits: Limits,
         short_read: &mut bool,
@@ -351,7 +351,7 @@ impl LogReader {
         let from = manifest.oldest_timestamp();
         let mut short_read = false;
         let fragments = self
-            .scan_with_cache(manifest, from, limits, &mut short_read)
+            .scan_with_cache(&manifest, from, limits, &mut short_read)
             .await
             .map_err(|x| vec![x])?;
         let futures = fragments

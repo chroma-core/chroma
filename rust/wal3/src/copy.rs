@@ -21,12 +21,7 @@ pub async fn copy(
         .unwrap_or(Manifest::new_empty("zero-copy task"));
     let mut short_read = false;
     let fragments = reader
-        .scan_with_cache(
-            reference.clone(),
-            offset,
-            Limits::UNLIMITED,
-            &mut short_read,
-        )
+        .scan_with_cache(&reference, offset, Limits::UNLIMITED, &mut short_read)
         .await?;
     if short_read {
         tracing::error!("short_read in unlimited copy");
