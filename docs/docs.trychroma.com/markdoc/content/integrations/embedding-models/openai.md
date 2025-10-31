@@ -43,6 +43,8 @@ openai_ef = embedding_functions.OpenAIEmbeddingFunction(
                 api_type="azure",
                 api_version="YOUR_API_VERSION",
                 model_name="text-embedding-3-small",
+                # deployment_id is required for Azure OpenAI and newer SDK versions
+                # This parameter specifies the deployment name created in Azure OpenAI Studio
                 deployment_id="DEPLOYMENT_ID",
             )
 ```
