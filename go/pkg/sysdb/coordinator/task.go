@@ -338,7 +338,6 @@ func attachedFunctionToProto(attachedFunction *dbmodel.AttachedFunction, functio
 		TenantId:                attachedFunction.TenantID,
 		DatabaseId:              attachedFunction.DatabaseID,
 		NextRunAt:               uint64(attachedFunction.NextRun.UnixMicro()),
-		LowestLiveNonce:         nil,
 		NextNonce:               attachedFunction.NextNonce.String(),
 		CreatedAt:               uint64(attachedFunction.CreatedAt.UnixMicro()),
 		UpdatedAt:               uint64(attachedFunction.UpdatedAt.UnixMicro()),
