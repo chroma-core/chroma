@@ -15,6 +15,8 @@ use chroma_index::spann::types::{
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
 use chroma_types::Collection;
+use chroma_types::KnnIndex;
+use chroma_types::Schema;
 use chroma_types::SchemaError;
 use chroma_types::SegmentUuid;
 use chroma_types::HNSW_PATH;
@@ -110,13 +112,14 @@ impl SpannSegmentWriter {
             return Err(SpannSegmentWriterError::InvalidArgument);
         }
 
-        let schema = collection.schema.as_ref().ok_or_else(|| {
-            SpannSegmentWriterError::InvalidSchema(SchemaError::InvalidSchema {
-                reason: "Schema is None".to_string(),
-            })
-        })?;
+        let reconciled_schema = Schema::reconcile_schema_and_config(
+            collection.schema.as_ref(),
+            Some(&collection.config),
+            KnnIndex::Spann,
+        )
+        .map_err(SpannSegmentWriterError::InvalidSchema)?;
 
-        let params = schema
+        let params = reconciled_schema
             .get_internal_spann_config()
             .ok_or(SpannSegmentWriterError::MissingSpannConfiguration)?;
 
