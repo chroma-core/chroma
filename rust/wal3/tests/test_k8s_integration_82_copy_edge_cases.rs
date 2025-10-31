@@ -8,7 +8,7 @@ use wal3::{
 };
 
 #[tokio::test]
-async fn copy_single_fragment() {
+async fn test_k8s_integration_copy_single_fragment() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     Manifest::initialize(
         &LogWriterOptions::default(),
@@ -62,7 +62,7 @@ async fn copy_single_fragment() {
 }
 
 #[tokio::test]
-async fn copy_immediately_after_initialization() {
+async fn test_k8s_integration_copy_immediately_after_initialization() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     Manifest::initialize(
         &LogWriterOptions::default(),
@@ -115,7 +115,7 @@ async fn copy_immediately_after_initialization() {
 }
 
 #[tokio::test]
-async fn copy_after_garbage_collection_leaves_empty() {
+async fn test_k8s_integration_copy_after_garbage_collection_leaves_empty() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let log = LogWriter::open_or_initialize(
         LogWriterOptions::default(),
@@ -188,7 +188,7 @@ async fn copy_after_garbage_collection_leaves_empty() {
 }
 
 #[tokio::test]
-async fn copy_preserves_fragment_boundaries() {
+async fn test_k8s_integration_copy_preserves_fragment_boundaries() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     Manifest::initialize(
         &LogWriterOptions::default(),
@@ -263,7 +263,7 @@ async fn copy_preserves_fragment_boundaries() {
 }
 
 #[tokio::test]
-async fn copy_with_partial_offset_splits_correctly() {
+async fn test_k8s_integration_copy_with_partial_offset_splits_correctly() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     Manifest::initialize(
         &LogWriterOptions::default(),
@@ -331,7 +331,7 @@ async fn copy_with_partial_offset_splits_correctly() {
 }
 
 #[tokio::test]
-async fn copy_multiple_times_creates_independent_copies() {
+async fn test_k8s_integration_copy_multiple_times_creates_independent_copies() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     Manifest::initialize(
         &LogWriterOptions::default(),

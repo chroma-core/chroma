@@ -8,7 +8,7 @@ use wal3::{
 };
 
 #[tokio::test]
-async fn copy_with_deep_snapshots() {
+async fn test_k8s_integration_copy_with_deep_snapshots() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     Manifest::initialize(
         &LogWriterOptions::default(),
@@ -88,7 +88,7 @@ async fn copy_with_deep_snapshots() {
 }
 
 #[tokio::test]
-async fn copy_at_specific_offset() {
+async fn test_k8s_integration_copy_at_specific_offset() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     Manifest::initialize(
         &LogWriterOptions::default(),
@@ -162,7 +162,7 @@ async fn copy_at_specific_offset() {
 }
 
 #[tokio::test]
-async fn copy_verifies_manifest_consistency() {
+async fn test_k8s_integration_copy_verifies_manifest_consistency() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     Manifest::initialize(
         &LogWriterOptions::default(),
@@ -248,7 +248,7 @@ async fn copy_verifies_manifest_consistency() {
 }
 
 #[tokio::test]
-async fn copy_empty_with_advanced_manifest() {
+async fn test_k8s_integration_copy_empty_with_advanced_manifest() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let log = LogWriter::open_or_initialize(
         LogWriterOptions::default(),
@@ -323,7 +323,7 @@ async fn copy_empty_with_advanced_manifest() {
 }
 
 #[tokio::test]
-async fn copy_with_large_fragments() {
+async fn test_k8s_integration_copy_with_large_fragments() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     Manifest::initialize(
         &LogWriterOptions::default(),
