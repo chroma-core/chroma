@@ -136,7 +136,14 @@ impl LogReader {
             .await
     }
 
-    async fn scan_with_cache(
+    /// Scan up to:
+    /// 1. Up to, but not including, the offset of the log position.  This makes it a half-open
+    ///    interval.
+    /// 2. Up to, and including, the number of files to return.
+    ///
+    /// This differs from scan in that it takes a loaded manifest.
+    /// This differs from scan_from_manifest because it will load snapshots.
+    pub async fn scan_with_cache(
         &self,
         manifest: Manifest,
         from: LogPosition,

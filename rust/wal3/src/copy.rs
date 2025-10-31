@@ -15,11 +15,23 @@ pub async fn copy(
     offset: LogPosition,
     target: String,
 ) -> Result<(), Error> {
-    let fragments = match reader.scan(offset, Limits::UNLIMITED).await {
-        Ok(fragments) => fragments,
-        Err(Error::UninitializedLog) => vec![],
-        Err(err) => return Err(err),
-    };
+    let reference = reader
+        .manifest()
+        .await?
+        .unwrap_or(Manifest::new_empty("zero-copy task"));
+    let mut short_read = false;
+    let fragments = reader
+        .scan_with_cache(
+            reference.clone(),
+            offset,
+            Limits::UNLIMITED,
+            &mut short_read,
+        )
+        .await?;
+    if short_read {
+        tracing::error!("short_read in unlimited copy");
+        return Err(Error::Internal);
+    }
     if !fragments.is_empty() {
         let mut futures = vec![];
         for fragment in fragments.into_iter() {
@@ -63,10 +75,6 @@ pub async fn copy(
         };
         Manifest::initialize_from_manifest(options, storage, &target, manifest).await?;
     } else {
-        let reference = reader
-            .manifest()
-            .await?
-            .unwrap_or(Manifest::new_empty("zero-copy task"));
         let setsum = Setsum::default();
         let collected = Setsum::default();
         let acc_bytes = 0;
