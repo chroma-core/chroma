@@ -1808,6 +1808,14 @@ mod tests {
 
     use super::*;
 
+    #[cfg(feature = "pyo3")]
+    fn ensure_python_interpreter() {
+        static PYTHON_INIT: std::sync::Once = std::sync::Once::new();
+        PYTHON_INIT.call_once(|| {
+            pyo3::prepare_freethreaded_python();
+        });
+    }
+
     #[test]
     fn test_update_metadata_try_from() {
         let mut proto_metadata = chroma_proto::UpdateMetadata {
@@ -2441,6 +2449,8 @@ mod tests {
     #[cfg(feature = "pyo3")]
     #[test]
     fn test_sparse_vector_pyo3_roundtrip_with_tokens() {
+        ensure_python_interpreter();
+
         pyo3::Python::with_gil(|py| {
             use pyo3::types::PyDict;
             use pyo3::IntoPyObject;
@@ -2481,6 +2491,8 @@ mod tests {
     #[cfg(feature = "pyo3")]
     #[test]
     fn test_sparse_vector_pyo3_roundtrip_without_tokens() {
+        ensure_python_interpreter();
+
         pyo3::Python::with_gil(|py| {
             use pyo3::types::PyDict;
             use pyo3::IntoPyObject;
