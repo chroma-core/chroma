@@ -228,10 +228,7 @@ async fn copy_preserves_fragment_boundaries() {
     .await
     .unwrap();
     let manifest_before = reader.manifest().await.unwrap().unwrap();
-    println!(
-        "Source has {} fragments",
-        manifest_before.fragments.len()
-    );
+    println!("Source has {} fragments", manifest_before.fragments.len());
     assert!(
         manifest_before.fragments.len() >= 2,
         "Should have multiple fragments"
