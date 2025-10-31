@@ -9992,6 +9992,7 @@ dependencies = [
  "flatbuffers",
  "futures",
  "indicatif",
+ "mdac",
  "num_cpus",
  "opentelemetry",
  "parking_lot",

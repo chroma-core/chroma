@@ -31,7 +31,7 @@ use chroma_types::{
     UpdateCollectionResponse, UpdateTenantRequest, UpdateTenantResponse,
     UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
 };
-use mdac::{Rule, Scorecard, ScorecardTicket};
+use mdac::{Rule, Scorecard, ScorecardGuard};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use serde::{Deserialize, Serialize};
@@ -62,19 +62,6 @@ use crate::{
     types::errors::{ErrorResponse, ServerError, ValidationError},
     Frontend,
 };
-
-struct ScorecardGuard {
-    scorecard: Arc<Scorecard<'static>>,
-    ticket: Option<ScorecardTicket>,
-}
-
-impl Drop for ScorecardGuard {
-    fn drop(&mut self) {
-        if let Some(ticket) = self.ticket.take() {
-            self.scorecard.untrack(ticket);
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
 #[error("Too many requests; backoff and try again")]
@@ -401,16 +388,10 @@ impl FrontendServer {
         if self.scorecard_enabled.load(Ordering::Relaxed) {
             self.scorecard
                 .track(tags)
-                .map(|ticket| ScorecardGuard {
-                    scorecard: Arc::clone(&self.scorecard),
-                    ticket: Some(ticket),
-                })
+                .map(|ticket| ScorecardGuard::new(Arc::clone(&self.scorecard), Some(ticket)))
                 .ok_or_else(|| Box::new(RateLimitError) as _)
         } else {
-            Ok(ScorecardGuard {
-                scorecard: Arc::clone(&self.scorecard),
-                ticket: None,
-            })
+            Ok(ScorecardGuard::new(Arc::clone(&self.scorecard), None))
         }
     }
 }
