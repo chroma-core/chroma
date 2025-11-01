@@ -35,7 +35,7 @@ The entrypoint for all client traffic.
 
 ### The Log
 
-Chroma’s write-ahead log.
+Chroma's write-ahead log.
 
 - All writes are recorded here before acknowledgment to clients.
 - Ensures atomicity across multi-record writes.
@@ -58,7 +58,7 @@ A service that periodically builds and maintains indexes.
 
 ### The System Database
 
-Chroma’s internal catalog.
+Chroma's internal catalog.
 
 - Tracks tenants, collections, and their metadata.
 - In distributed mode, also manages cluster state (e.g., query/compactor node membership).
@@ -71,7 +71,7 @@ These components operate differently depending on the deployment mode, particula
 - In Local and Single Node mode, all components share a process and use the local filesystem for durability.
 - In **Distributed** mode, components are deployed as independent services.
   - The log and built indexes are stored in cloud object storage.
-  - The system catalog is backed by a SQL database.
+  - The system catalog is backed by an SQL database.
   - All services use local SSDs as caches to reduce object storage latency and cost.
 
 ## Request Sequences
