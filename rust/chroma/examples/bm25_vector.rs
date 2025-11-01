@@ -28,8 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             spann: None,
                         }
                         .into(),
-                    )
-                    .unwrap(),
+                    )?,
             ),
             None,
         )
