@@ -55,6 +55,7 @@ pub fn init_global_filter_layer(
         "chroma_log",
         "chroma_log-service",
         "chroma_index",
+        "chroma_system",
         "chroma_test",
         "chroma_types",
         "compaction_service",
