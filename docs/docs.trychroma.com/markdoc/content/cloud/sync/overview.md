@@ -77,7 +77,7 @@ A source of the GitHub repository type is an individual GitHub repository config
 
 ## Web
 
-A source of the web type is configured with a starting URL and a few othr optional parameters:
+A source of the web type is configured with a starting URL and a few other optional parameters:
 
 ```json
 {
@@ -171,7 +171,7 @@ For a web source:
     },
     "web_scrape": {
         "starting_url": "https://docs.trychroma.com",
-        "page_limit": 5,
+        "page_limit": 5
     }
 }
 ```
