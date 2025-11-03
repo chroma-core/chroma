@@ -22,6 +22,80 @@ for MacOS `brew install protobuf`
 
 You can also install `chromadb` the `pypi` package locally and in editable mode with `pip install -e .`.
 
+### Python-only dev setup (Windows)
+
+If you want to work on the Python package only and you're on Windows (PowerShell), this minimal setup gets you started quickly.
+
+Prerequisites
+
+- Windows with Python 3.8+ installed and on PATH
+- Git (optional, for cloning/forking)
+
+Quick steps (PowerShell)
+
+1. Create and activate a virtual environment:
+
+```powershell
+python -m venv .venv
+.\\.venv\\Scripts\\Activate.ps1
+```
+
+2. Install runtime and dev dependencies and the package in editable mode:
+
+```powershell
+pip install -r .\\requirements.txt
+pip install -r .\\requirements_dev.txt
+pip install -e .
+```
+
+3. (Optional) If you plan to build or develop the Rust bindings later, install `maturin` and build:
+
+```powershell
+pip install maturin
+maturin develop
+```
+
+Notes
+
+- If you don't want to build the native Rust bindings, install the PyPI wheel instead:
+
+```powershell
+pip install chromadb
+```
+
+- Install the repository's pre-commit hooks to get consistent styling and checks:
+
+```powershell
+pre-commit install
+```
+
+This minimal flow keeps Python-only development fast on Windows. If you want to run the distributed system or use Tilt/Docker, follow the "Local dev setup for distributed chroma" section below.
+
+### Quick local embedding examples
+
+If you want to exercise embedding functions locally without downloading models or using API keys, the repository includes a tiny dependency-free embedding function called `local_simple_hash` in `chromadb.utils.embedding_functions`.
+
+Run the example script (PowerShell):
+
+```powershell
+# install in editable mode (if not already installed)
+python -m pip install -e .
+
+# run the example script that demonstrates direct and config-based usage
+python examples/local_simple_hash_example.py
+```
+
+What the example demonstrates:
+
+- Constructing `SimpleHashEmbeddingFunction` directly and generating embeddings for a list of inputs (including non-strings).
+- Using `config_to_embedding_function` to build an embedding function from a config dict (useful for dynamic configs loaded from JSON/YAML).
+- Using the `examples/local_simple_hash_example.py` output as a quick smoke test in CI or developer workflows.
+
+Notes:
+
+- `local_simple_hash` is deterministic and very fast — it's intended for testing, not production semantic search.
+- For higher-quality local embeddings, use `SentenceTransformerEmbeddingFunction` (requires installing `sentence_transformers`).
+
 ## Local dev setup for distributed chroma
 
 We use tilt for providing local dev setup. Tilt is an open source project
