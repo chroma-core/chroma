@@ -47,7 +47,7 @@ enum Command {
 
 #[derive(Parser, Debug)]
 #[command(name = "chroma")]
-#[command(version = "1.0.0")]
+#[command(version = "1.2.0")]
 #[command(about = "A CLI for Chroma", long_about = None)]
 struct Cli {
     #[command(subcommand)]
