@@ -108,6 +108,64 @@ def test_schema_vector_config_persistence(
     collection_name = f"schema_spann_{uuid4().hex}"
 
     schema = Schema()
+    schema.create_index(
+        config=VectorIndexConfig(
+            space="cosine",
+            spann=SpannIndexConfig(
+                search_nprobe=16,
+                write_nprobe=32,
+                ef_construction=120,
+                max_neighbors=24,
+            ),
+        )
+    )
+
+    collection = client.get_or_create_collection(
+        name=collection_name,
+        schema=schema,
+    )
+
+    persisted_schema = collection.schema
+    assert persisted_schema is not None
+
+    print(persisted_schema.serialize_to_json())
+
+    embedding_override = persisted_schema.keys["#embedding"].float_list
+    assert embedding_override is not None
+    vector_index = embedding_override.vector_index
+    assert vector_index is not None
+    assert vector_index.enabled is True
+    assert vector_index.config is not None
+    assert vector_index.config.space is not None
+    assert vector_index.config.space == "cosine"
+
+    client_reloaded = client_factories.create_client_from_system()
+    reloaded_collection = client_reloaded.get_collection(
+        name=collection_name,
+    )
+
+    reloaded_schema = reloaded_collection.schema
+    assert reloaded_schema is not None
+    reloaded_embedding_override = reloaded_schema.keys["#embedding"].float_list
+    assert reloaded_embedding_override is not None
+    reloaded_vector_index = reloaded_embedding_override.vector_index
+    assert reloaded_vector_index is not None
+    assert reloaded_vector_index.config is not None
+    assert reloaded_vector_index.config.space is not None
+    assert reloaded_vector_index.config.space == "cosine"
+
+
+def test_schema_vector_config_persistence_with_ef(
+    client_factories: "ClientFactories",
+) -> None:
+    """Ensure schema-provided SPANN settings persist across client restarts."""
+
+    client = client_factories.create_client_from_system()
+    client.reset()
+
+    collection_name = f"schema_spann_{uuid4().hex}"
+
+    schema = Schema()
     embedding_function = SimpleEmbeddingFunction(dim=6)
     schema.create_index(
         config=VectorIndexConfig(
