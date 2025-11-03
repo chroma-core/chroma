@@ -38,6 +38,7 @@ For TypeScript users, Chroma provides packages for a number of embedding model p
 | Morph                       | [@chroma-core/morph](https://www.npmjs.com/package/@chroma-core/morph)     
 | Ollama                      | [@chroma-core/ollama](https://www.npmjs.com/package/@chroma-core/ollama)     
 | OpenAI                      | [@chroma-core/openai](https://www.npmjs.com/package/@chroma-core/openai)     
+| Qwen (via Chroma Cloud)     | [@chroma-core/chroma-cloud-qwen](https://www.npmjs.com/package/@chroma-core/chroma-cloud-qwen)
 | Together AI                 | [@chroma-core/together-ai](https://www.npmjs.com/package/@chroma-core/together-ai)     
 | Voyage AI                   | [@chroma-core/voyageai](https://www.npmjs.com/package/@chroma-core/voyageai)     
 
