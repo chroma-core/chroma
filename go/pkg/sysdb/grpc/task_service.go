@@ -127,6 +127,21 @@ func (s *Server) GetFunctions(ctx context.Context, req *coordinatorpb.GetFunctio
 	return res, nil
 }
 
+func (s *Server) GetFunctionById(ctx context.Context, req *coordinatorpb.GetFunctionByIdRequest) (*coordinatorpb.GetFunctionByIdResponse, error) {
+	log.Info("GetFunctionById", zap.String("id", req.Id))
+
+	res, err := s.coordinator.GetFunctionById(ctx, req)
+	if err != nil {
+		log.Error("GetFunctionById failed", zap.Error(err))
+		if err == common.ErrFunctionNotFound {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+		return nil, err
+	}
+
+	return res, nil
+}
+
 func (s *Server) PeekScheduleByCollectionId(ctx context.Context, req *coordinatorpb.PeekScheduleByCollectionIdRequest) (*coordinatorpb.PeekScheduleByCollectionIdResponse, error) {
 	log.Info("PeekScheduleByCollectionId", zap.Int64("num_collections", int64(len(req.CollectionId))))
 

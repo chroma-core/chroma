@@ -203,3 +203,63 @@ def test_function_remove_nonexistent(basic_http_client: System) -> None:
     # Trying to detach this function again should raise NotFoundError
     with pytest.raises(NotFoundError, match="does not exist"):
         attached_fn.detach(delete_output_collection=True)
+
+
+def test_attach_get_function_equality(basic_http_client: System) -> None:
+    """Test that attach_function and get_attached_function return objects with equal structure and fields"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    # Create a collection
+    collection = client.get_or_create_collection(name="test_equality_collection")
+    collection.add(
+        ids=["doc1", "doc2"], documents=["Test document 1", "Test document 2"]
+    )
+
+    # Attach a function
+    test_params = {"threshold": 100, "mode": "count"}
+    attached_from_attach = collection.attach_function(
+        name="equality_test_fn",
+        function_id="record_counter",
+        output_collection="equality_output",
+        params=test_params,
+    )
+
+    # Get the same function
+    attached_from_get = collection.get_attached_function("equality_test_fn")
+
+    # Verify both objects have the same structure and core fields
+    assert attached_from_attach.id == attached_from_get.id
+    assert attached_from_attach.name == attached_from_get.name
+    assert attached_from_attach.name == "equality_test_fn"
+    assert attached_from_attach.function_id == attached_from_get.function_id
+    # Note: function_id is now the human-readable function name ("record_counter")
+    # instead of the UUID, thanks to the new AttachedFunctionWithInfo approach
+    assert attached_from_attach.function_id == "record_counter"
+    assert (
+        attached_from_attach.input_collection_id
+        == attached_from_get.input_collection_id
+    )
+    assert attached_from_attach.input_collection_id == collection.id
+    assert attached_from_attach.output_collection == attached_from_get.output_collection
+    assert attached_from_attach.output_collection == "equality_output"
+    assert attached_from_attach.params == attached_from_get.params
+    assert (
+        attached_from_attach.global_function_parent
+        == attached_from_get.global_function_parent
+    )
+
+    # Both should have the timing fields (even if values differ)
+    assert hasattr(attached_from_attach, "last_run")
+    assert hasattr(attached_from_get, "last_run")
+    assert hasattr(attached_from_attach, "next_run")
+    assert hasattr(attached_from_get, "next_run")
+
+    # For a newly attached function, last_run should be None
+    assert attached_from_attach.last_run is None
+    # next_run should be set (current time for attach, actual time for get)
+    assert attached_from_attach.next_run is not None
+    assert attached_from_get.next_run is not None
+
+    # Clean up
+    attached_from_attach.detach(delete_output_collection=True)

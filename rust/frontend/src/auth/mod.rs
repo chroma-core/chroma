@@ -40,6 +40,7 @@ pub enum AuthzAction {
     Search,
     CreateAttachedFunction,
     RemoveAttachedFunction,
+    GetAttachedFunction,
 }
 
 impl Display for AuthzAction {
@@ -72,6 +73,7 @@ impl Display for AuthzAction {
             AuthzAction::Search => write!(f, "collection:search"),
             AuthzAction::CreateAttachedFunction => write!(f, "collection:create_attached_function"),
             AuthzAction::RemoveAttachedFunction => write!(f, "collection:remove_attached_function"),
+            AuthzAction::GetAttachedFunction => write!(f, "collection:get_attached_function"),
         }
     }
 }

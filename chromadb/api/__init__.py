@@ -861,3 +861,25 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
             bool: True if successful
         """
         pass
+
+    @abstractmethod
+    def get_attached_function(
+        self,
+        attached_function_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "AttachedFunction":
+        """Get metadata for a specific attached function.
+
+        Args:
+            attached_function_name: Name of the attached function to retrieve
+            tenant: The tenant name
+            database: The database name
+
+        Returns:
+            AttachedFunction: Object representing the attached function with metadata
+
+        Raises:
+            ValueError: If the attached function does not exist
+        """
+        pass

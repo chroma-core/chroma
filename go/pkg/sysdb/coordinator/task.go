@@ -33,28 +33,28 @@ var minimalUUIDv7 = uuid.UUID{
 }
 
 // validateAttachedFunctionMatchesRequest validates that an existing attached function's parameters match the request parameters.
-// Returns an error if any parameters don't match. This is used for idempotency and race condition handling.
-func (s *Coordinator) validateAttachedFunctionMatchesRequest(ctx context.Context, attachedFunction *dbmodel.AttachedFunction, req *coordinatorpb.AttachFunctionRequest) error {
+// Returns the function for reuse if validation passes, or an error if any parameters don't match. This is used for idempotency and race condition handling.
+func (s *Coordinator) validateAttachedFunctionMatchesRequest(ctx context.Context, attachedFunction *dbmodel.AttachedFunction, req *coordinatorpb.AttachFunctionRequest) (*dbmodel.Function, error) {
 	// Look up the function for the existing attached function
 	existingFunction, err := s.catalog.metaDomain.FunctionDb(ctx).GetByID(attachedFunction.FunctionID)
 	if err != nil {
 		log.Error("validateAttachedFunctionMatchesRequest: failed to get attached function's function", zap.Error(err))
-		return err
+		return nil, err
 	}
 	if existingFunction == nil {
 		log.Error("validateAttachedFunctionMatchesRequest: attached function's function not found")
-		return common.ErrFunctionNotFound
+		return nil, common.ErrFunctionNotFound
 	}
 
 	// Look up database for comparison
 	databases, err := s.catalog.metaDomain.DatabaseDb(ctx).GetDatabases(req.TenantId, req.Database)
 	if err != nil {
 		log.Error("validateAttachedFunctionMatchesRequest: failed to get database for validation", zap.Error(err))
-		return err
+		return nil, err
 	}
 	if len(databases) == 0 {
 		log.Error("validateAttachedFunctionMatchesRequest: database not found")
-		return common.ErrDatabaseNotFound
+		return nil, common.ErrDatabaseNotFound
 	}
 
 	// Validate attributes match
@@ -62,30 +62,30 @@ func (s *Coordinator) validateAttachedFunctionMatchesRequest(ctx context.Context
 		log.Error("validateAttachedFunctionMatchesRequest: attached function has different function",
 			zap.String("existing", existingFunction.Name),
 			zap.String("requested", req.FunctionName))
-		return status.Errorf(codes.AlreadyExists, "attached function already exists with different function: existing=%s, requested=%s", existingFunction.Name, req.FunctionName)
+		return nil, status.Errorf(codes.AlreadyExists, "attached function already exists with different function: existing=%s, requested=%s", existingFunction.Name, req.FunctionName)
 	}
 	if attachedFunction.TenantID != req.TenantId {
 		log.Error("validateAttachedFunctionMatchesRequest: attached function has different tenant")
-		return status.Errorf(codes.AlreadyExists, "attached function already exists with different tenant")
+		return nil, status.Errorf(codes.AlreadyExists, "attached function already exists with different tenant")
 	}
 	if attachedFunction.DatabaseID != databases[0].ID {
 		log.Error("validateAttachedFunctionMatchesRequest: attached function has different database")
-		return status.Errorf(codes.AlreadyExists, "attached function already exists with different database")
+		return nil, status.Errorf(codes.AlreadyExists, "attached function already exists with different database")
 	}
 	if attachedFunction.OutputCollectionName != req.OutputCollectionName {
 		log.Error("validateAttachedFunctionMatchesRequest: attached function has different output collection name",
 			zap.String("existing", attachedFunction.OutputCollectionName),
 			zap.String("requested", req.OutputCollectionName))
-		return status.Errorf(codes.AlreadyExists, "attached function already exists with different output collection: existing=%s, requested=%s", attachedFunction.OutputCollectionName, req.OutputCollectionName)
+		return nil, status.Errorf(codes.AlreadyExists, "attached function already exists with different output collection: existing=%s, requested=%s", attachedFunction.OutputCollectionName, req.OutputCollectionName)
 	}
 	if attachedFunction.MinRecordsForInvocation != int64(req.MinRecordsForInvocation) {
 		log.Error("validateAttachedFunctionMatchesRequest: attached function has different min_records_for_invocation",
 			zap.Int64("existing", attachedFunction.MinRecordsForInvocation),
 			zap.Uint64("requested", req.MinRecordsForInvocation))
-		return status.Errorf(codes.AlreadyExists, "attached function already exists with different min_records_for_invocation: existing=%d, requested=%d", attachedFunction.MinRecordsForInvocation, req.MinRecordsForInvocation)
+		return nil, status.Errorf(codes.AlreadyExists, "attached function already exists with different min_records_for_invocation: existing=%d, requested=%d", attachedFunction.MinRecordsForInvocation, req.MinRecordsForInvocation)
 	}
 
-	return nil
+	return existingFunction, nil
 }
 
 // AttachFunction creates a new attached function in the database
@@ -104,6 +104,10 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 	var nextRun time.Time
 	var skipPhase2And3 bool // Flag to skip Phase 2 & 3 if task is already fully initialized
 
+	// Variables to store function info for response (used in concurrent case)
+	var concurrentAttachedFunction *dbmodel.AttachedFunction
+	var concurrentExistingFunction *dbmodel.Function
+
 	// ===== Phase 1: Create attached function with lowest_live_nonce = NULL (if needed) =====
 	err := s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// Double-check attached function doesn't exist (race condition protection)
@@ -118,7 +122,8 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 				zap.String("attached_function_id", concurrentAttachedFunction.ID.String()))
 
 			// Validate that concurrent attached function matches our request
-			if err := s.validateAttachedFunctionMatchesRequest(txCtx, concurrentAttachedFunction, req); err != nil {
+			existingFunction, err := s.validateAttachedFunctionMatchesRequest(txCtx, concurrentAttachedFunction, req)
+			if err != nil {
 				return err
 			}
 
@@ -132,6 +137,10 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 				// Already initialized, skip Phase 2 & 3
 				lowestLiveNonce = *concurrentAttachedFunction.LowestLiveNonce
 				skipPhase2And3 = true
+
+				// Store the concurrent function and existing function for response
+				concurrentAttachedFunction = concurrentAttachedFunction
+				concurrentExistingFunction = existingFunction
 			} else {
 				// Not initialized yet, generate minimal UUIDv7 and continue to Phase 2 & 3
 				lowestLiveNonce = minimalUUIDv7
@@ -250,8 +259,16 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 	if skipPhase2And3 {
 		log.Info("AttachFunction: function already fully attached, skipping Phase 2 & 3",
 			zap.String("attached_function_id", attachedFunctionID.String()))
+
+		// Convert the concurrent attached function to proto with function info
+		attachedFunctionProto, err := attachedFunctionToProto(concurrentAttachedFunction, concurrentExistingFunction)
+		if err != nil {
+			log.Error("AttachFunction: failed to convert concurrent attached function to proto", zap.Error(err))
+			return nil, err
+		}
+
 		return &coordinatorpb.AttachFunctionResponse{
-			Id: attachedFunctionID.String(),
+			AttachedFunction: attachedFunctionProto,
 		}, nil
 	}
 
@@ -300,8 +317,37 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 		zap.String("lowest_live_nonce", lowestLiveNonce.String()),
 		zap.String("next_nonce", nextNonce.String()))
 
+	// Fetch the attached function we just created to return with function info
+	createdAttachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetByID(attachedFunctionID)
+	if err != nil {
+		log.Error("AttachFunction: failed to fetch created attached function", zap.Error(err))
+		return nil, err
+	}
+	if createdAttachedFunction == nil {
+		log.Error("AttachFunction: created attached function not found")
+		return nil, status.Error(codes.Internal, "created attached function not found")
+	}
+
+	// Re-fetch the function (we already validated it exists)
+	function, err := s.catalog.metaDomain.FunctionDb(ctx).GetByName(req.FunctionName)
+	if err != nil {
+		log.Error("AttachFunction: failed to re-fetch function", zap.Error(err))
+		return nil, err
+	}
+	if function == nil {
+		log.Error("AttachFunction: function not found during response creation")
+		return nil, common.ErrFunctionNotFound
+	}
+
+	// Convert to proto response
+	attachedFunctionProto, err := attachedFunctionToProto(createdAttachedFunction, function)
+	if err != nil {
+		log.Error("AttachFunction: failed to convert attached function to proto", zap.Error(err))
+		return nil, err
+	}
+
 	return &coordinatorpb.AttachFunctionResponse{
-		Id: attachedFunctionID.String(),
+		AttachedFunction: attachedFunctionProto,
 	}, nil
 }
 
@@ -765,6 +811,38 @@ func (s *Coordinator) GetFunctions(ctx context.Context, req *coordinatorpb.GetFu
 
 	return &coordinatorpb.GetFunctionsResponse{
 		Functions: protoFunctions,
+	}, nil
+}
+
+// GetFunctionById retrieves a function by ID from the database
+func (s *Coordinator) GetFunctionById(ctx context.Context, req *coordinatorpb.GetFunctionByIdRequest) (*coordinatorpb.GetFunctionByIdResponse, error) {
+	// Parse the function UUID
+	functionID, err := uuid.Parse(req.Id)
+	if err != nil {
+		log.Error("GetFunctionById: invalid function_id", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid function_id: %v", err)
+	}
+
+	// Fetch function by ID
+	function, err := s.catalog.metaDomain.FunctionDb(ctx).GetByID(functionID)
+	if err != nil {
+		log.Error("GetFunctionById: failed to get function", zap.Error(err))
+		return nil, err
+	}
+
+	// If function not found, return error
+	if function == nil {
+		log.Error("GetFunctionById: function not found", zap.String("function_id", req.Id))
+		return nil, common.ErrFunctionNotFound
+	}
+
+	log.Info("GetFunctionById succeeded", zap.String("function_id", req.Id), zap.String("function_name", function.Name))
+
+	return &coordinatorpb.GetFunctionByIdResponse{
+		Function: &coordinatorpb.Function{
+			Id:   function.ID.String(),
+			Name: function.Name,
+		},
 	}, nil
 }
 

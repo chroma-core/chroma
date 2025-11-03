@@ -148,7 +148,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             let response = client.attach_function(request).await?;
-            println!("Attached Function created: {}", response.into_inner().id);
+            let attached_function = response.into_inner().attached_function.unwrap();
+            println!("Attached Function created: {}", attached_function.id);
         }
         Command::GetAttachedFunction {
             input_collection_id,
