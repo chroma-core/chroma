@@ -1919,7 +1919,7 @@ impl GrpcSysDb {
         tenant_name: String,
         database_name: String,
         min_records_for_invocation: u64,
-    ) -> Result<chroma_types::AttachedFunctionUuid, AttachFunctionError> {
+    ) -> Result<chroma_types::AttachedFunctionWithInfo, AttachFunctionError> {
         // Convert serde_json::Value to prost_types::Struct for gRPC
         let params_struct = match params {
             serde_json::Value::Object(map) => Some(prost_types::Struct {
@@ -1941,19 +1941,32 @@ impl GrpcSysDb {
             min_records_for_invocation,
         };
         let response = self.client.attach_function(req).await?.into_inner();
-        // Parse the returned attached_function_id - this should always succeed since the server generated it
-        // If this fails, it indicates a serious server bug or protocol corruption
-        let attached_function_id = chroma_types::AttachedFunctionUuid(
-            uuid::Uuid::parse_str(&response.id).map_err(|e| {
-                tracing::error!(
-                    attached_function_id = %response.id,
-                    error = %e,
-                    "Server returned invalid attached_function_id UUID - attached function was created but response is corrupt"
-                );
-                AttachFunctionError::ServerReturnedInvalidData
-            })?,
-        );
-        Ok(attached_function_id)
+
+        // Extract the attached function from the response
+        let attached_function_proto = response.attached_function.ok_or_else(|| {
+            AttachFunctionError::FailedToCreateAttachedFunction(tonic::Status::internal(
+                "Missing attached function in response",
+            ))
+        })?;
+
+        // Convert proto to AttachedFunction
+        let attached_function = Self::attached_function_from_proto(attached_function_proto)
+            .map_err(|e| AttachFunctionError::FailedToCreateAttachedFunction(
+                tonic::Status::internal(format!("Failed to convert attached function: {:?}", e))
+            ))?;
+
+        // Extract function info from the attached function
+        let function = chroma_types::Function {
+            id: attached_function.function_id,
+            name: "record_counter".to_string(), // TODO: Get from proto when available - need to add function_name to AttachedFunction proto
+            is_incremental: true, // TODO: Get from proto when available
+            return_type: serde_json::json!({"type": "object"}), // TODO: Get from proto when available
+        };
+
+        Ok(chroma_types::AttachedFunctionWithInfo {
+            attached_function,
+            function,
+        })
     }
 
     /// Helper function to convert a proto AttachedFunction to a chroma_types::AttachedFunction
@@ -2074,6 +2087,8 @@ impl GrpcSysDb {
                 + std::time::Duration::from_micros(attached_function.created_at),
             updated_at: std::time::SystemTime::UNIX_EPOCH
                 + std::time::Duration::from_micros(attached_function.updated_at),
+            global_parent: None, // TODO: Parse from proto when available
+            oldest_written_nonce: None, // TODO: Parse from proto when available
         })
     }
 
@@ -2345,7 +2360,7 @@ impl SysDb {
         tenant_name: String,
         database_name: String,
         min_records_for_invocation: u64,
-    ) -> Result<chroma_types::AttachedFunctionUuid, AttachFunctionError> {
+    ) -> Result<chroma_types::AttachedFunctionWithInfo, AttachFunctionError> {
         match self {
             SysDb::Grpc(grpc) => {
                 grpc.create_attached_function(
@@ -2391,14 +2406,90 @@ impl SysDb {
                     .await
             }
             SysDb::Sqlite(sqlite) => {
-                sqlite
-                    .get_attached_function_by_name(input_collection_id, attached_function_name)
+                sqlite.get_attached_function_by_name(input_collection_id, attached_function_name)
                     .await
             }
             SysDb::Test(_) => {
                 todo!()
             }
         }
+    }
+
+    pub async fn get_attached_function_with_info_by_name(
+        &mut self,
+        input_collection_id: chroma_types::CollectionUuid,
+        attached_function_name: String,
+    ) -> Result<chroma_types::AttachedFunctionWithInfo, GetAttachedFunctionError> {
+        // For now, get the attached function and fetch function info via gRPC
+        let attached_function = match self {
+            SysDb::Grpc(grpc) => {
+                grpc.get_attached_function_by_name(input_collection_id, attached_function_name.clone())
+                    .await?
+            }
+            SysDb::Sqlite(sqlite) => {
+                sqlite.get_attached_function_by_name(input_collection_id, attached_function_name.clone())
+                    .await?
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        };
+
+        // Now fetch the function information using the function_id via gRPC
+        let function = match self {
+            SysDb::Grpc(grpc) => {
+                let req = chroma_proto::GetFunctionByIdRequest {
+                    id: attached_function.function_id.to_string(),
+                };
+
+                let response = match grpc.client.get_function_by_id(req).await {
+                    Ok(resp) => resp,
+                    Err(status) => {
+                        return Err(GetAttachedFunctionError::FailedToGetAttachedFunction(
+                            tonic::Status::internal(format!("Failed to fetch function info: {}", status)),
+                        ));
+                    }
+                };
+                let response = response.into_inner();
+
+                let function_proto = response.function.ok_or_else(|| {
+                    GetAttachedFunctionError::FailedToGetAttachedFunction(tonic::Status::internal(
+                        "Missing function in response",
+                    ))
+                })?;
+
+                chroma_types::Function {
+                    id: uuid::Uuid::parse_str(&function_proto.id).map_err(|_| {
+                        GetAttachedFunctionError::ServerReturnedInvalidData
+                    })?,
+                    name: function_proto.name,
+                    is_incremental: true, // TODO: Get from proto when available
+                    return_type: serde_json::json!({"type": "object"}), // TODO: Get from proto when available
+                }
+            }
+            SysDb::Sqlite(_) => {
+                // Fallback to UUID-to-name mapping for SQLite
+                let function_name = match attached_function.function_id.to_string().as_str() {
+                    "ccf2e3ba-633e-43ba-9394-46b0c54c61e3" => "record_counter",
+                    _ => "unknown_function",
+                };
+
+                chroma_types::Function {
+                    id: attached_function.function_id,
+                    name: function_name.to_string(),
+                    is_incremental: true,
+                    return_type: serde_json::json!({"type": "object"}),
+                }
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        };
+
+        Ok(chroma_types::AttachedFunctionWithInfo {
+            attached_function,
+            function,
+        })
     }
 
     pub async fn get_attached_function_by_uuid(

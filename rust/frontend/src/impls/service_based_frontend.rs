@@ -5,6 +5,7 @@ use crate::{
 };
 use backon::{ExponentialBuilder, Retryable};
 use chroma_api_types::HeartbeatResponse;
+use chroma_types::AttachedFunctionInfo;
 use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
@@ -22,7 +23,7 @@ use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn, Search},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    AttachFunctionRequest, AttachFunctionResponse, Collection, CollectionUuid,
+    AttachFunctionRequest, Collection, CollectionUuid,
     CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse, CountRequest,
     CountResponse, CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse,
     CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
@@ -30,7 +31,7 @@ use chroma_types::{
     DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
     DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionError,
     DetachFunctionRequest, DetachFunctionResponse, ForkCollectionError, ForkCollectionRequest,
-    ForkCollectionResponse, GetCollectionByCrnError, GetCollectionByCrnRequest,
+    ForkCollectionResponse, GetAttachedFunctionError, GetAttachedFunctionResponse, GetCollectionByCrnError, GetCollectionByCrnRequest,
     GetCollectionByCrnResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
     GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
     GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
@@ -1893,7 +1894,7 @@ impl ServiceBasedFrontend {
             params,
             ..
         }: AttachFunctionRequest,
-    ) -> Result<AttachFunctionResponse, chroma_types::AttachFunctionError> {
+    ) -> Result<GetAttachedFunctionResponse, chroma_types::AttachFunctionError> {
         // Parse collection_id from path parameter - client-side validation
         let input_collection_id =
             CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
@@ -1905,14 +1906,14 @@ impl ServiceBasedFrontend {
                 )))
             })?);
 
-        let attached_function_id = self
+        let attached_function_with_info = self
             .sysdb_client
             .create_attached_function(
                 name.clone(),
                 function_id.clone(),
                 input_collection_id,
                 output_collection.clone(),
-                params,
+                params.clone(),
                 tenant_name,
                 database_name,
                 self.min_records_for_invocation,
@@ -1934,11 +1935,148 @@ impl ServiceBasedFrontend {
                 }
             })?;
 
-        Ok(AttachFunctionResponse {
-            attached_function: chroma_types::AttachedFunctionInfo {
-                id: attached_function_id.to_string(),
-                name,
-                function_id,
+        // Get the input collection name for the response
+        let input_collection = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(input_collection_id),
+                limit: Some(1),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?
+            .into_iter()
+            .next()
+            .ok_or(chroma_types::AttachFunctionError::Internal(Box::new(
+                chroma_error::TonicError(tonic::Status::internal("Input collection not found after attaching function"))
+            )))?;
+
+        // Format timestamps as strings (same as get_attached_function)
+        let last_run = attached_function_with_info.attached_function.last_run.map(|time| {
+            time.duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_secs().to_string())
+                .unwrap_or_else(|_| "0".to_string())
+        });
+        let next_run = attached_function_with_info.attached_function.next_run
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs().to_string())
+            .unwrap_or_else(|_| "0".to_string());
+
+        Ok(GetAttachedFunctionResponse {
+            attached_function: AttachedFunctionInfo {
+                id: attached_function_with_info.attached_function.id.to_string(),
+                name: attached_function_with_info.attached_function.name,
+                function_name: attached_function_with_info.function.name,  // Use function name instead of ID
+                input_collection: input_collection.name,
+                output_collection: attached_function_with_info.attached_function.output_collection_name,
+                last_run,
+                next_run,
+                params: attached_function_with_info.attached_function.params,
+                global_function_parent: attached_function_with_info.attached_function.global_parent.map(|u| u.to_string()),
+            },
+        })
+    }
+
+    pub async fn get_attached_function(
+        &mut self,
+        tenant_name: String,
+        database_name: String,
+        attached_function_name: String,
+    ) -> Result<GetAttachedFunctionResponse, GetAttachedFunctionError> {
+        // First, we need to find the input collection that has this attached function
+        // We'll need to query collections to find the one with the attached function
+        let collections = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                tenant: Some(tenant_name.clone()),
+                database: Some(database_name.clone()),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| GetAttachedFunctionError::FailedToGetAttachedFunction(Box::new(e)))?;
+
+        // Find the collection that has the attached function with the given name
+        let mut input_collection_id = None;
+        for collection in collections {
+            match self
+                .sysdb_client
+                .get_attached_function_by_name(collection.collection_id, attached_function_name.clone())
+                .await
+            {
+                Ok(_) => {
+                    input_collection_id = Some(collection.collection_id);
+                    break;
+                }
+                Err(chroma_sysdb::GetAttachedFunctionError::NotFound) => {
+                    // Continue searching other collections
+                    continue;
+                }
+                Err(e) => {
+                    return Err(GetAttachedFunctionError::FailedToGetAttachedFunction(
+                        Box::new(e) as Box<dyn ChromaError>,
+                    ));
+                }
+            }
+        }
+
+        let input_collection_id = input_collection_id.ok_or(GetAttachedFunctionError::NotFound)?;
+
+        // Get the attached function details
+        let attached_function_with_info = self
+            .sysdb_client
+            .get_attached_function_with_info_by_name(input_collection_id, attached_function_name)
+            .await
+            .map_err(|e| match e {
+                chroma_sysdb::GetAttachedFunctionError::NotFound => {
+                    GetAttachedFunctionError::NotFound
+                }
+                chroma_sysdb::GetAttachedFunctionError::NotReady => {
+                    GetAttachedFunctionError::NotReady
+                }
+                chroma_sysdb::GetAttachedFunctionError::FailedToGetAttachedFunction(s) => {
+                    GetAttachedFunctionError::FailedToGetAttachedFunction(Box::new(chroma_error::TonicError(s)) as Box<dyn ChromaError>)
+                }
+                chroma_sysdb::GetAttachedFunctionError::ServerReturnedInvalidData => {
+                    GetAttachedFunctionError::ServerReturnedInvalidData
+                }
+            })?;
+
+        // Get the input collection name
+        let input_collection = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(input_collection_id),
+                limit: Some(1),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| GetAttachedFunctionError::FailedToGetAttachedFunction(Box::new(e)))?
+            .into_iter()
+            .next()
+            .ok_or(GetAttachedFunctionError::ServerReturnedInvalidData)?;
+
+        // Format timestamps as strings
+        let last_run = attached_function_with_info.attached_function.last_run.map(|time| {
+            time.duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_secs().to_string())
+                .unwrap_or_else(|_| "0".to_string())
+        });
+        let next_run = attached_function_with_info.attached_function.next_run
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs().to_string())
+            .unwrap_or_else(|_| "0".to_string());
+
+        Ok(GetAttachedFunctionResponse {
+            attached_function: AttachedFunctionInfo {
+                id: attached_function_with_info.attached_function.id.to_string(),
+                name: attached_function_with_info.attached_function.name,
+                function_name: attached_function_with_info.function.name,  // Use function name instead of ID
+                input_collection: input_collection.name,
+                output_collection: attached_function_with_info.attached_function.output_collection_name,
+                last_run,
+                next_run,
+                params: attached_function_with_info.attached_function.params,
+                global_function_parent: attached_function_with_info.attached_function.global_parent.map(|u| u.to_string()),
             },
         })
     }

@@ -1,3 +1,6 @@
+"""FastAPI client implementation for Chroma API."""
+
+import json
 import orjson
 import logging
 from typing import Any, Dict, Optional, cast, Tuple, List
@@ -774,16 +777,43 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             },
         )
 
+        # The response now contains a nested attached_function object
+        attached_func_data = resp_json["attached_function"]
+
+        # Parse timestamps from the response (Unix timestamps as strings)
+        from datetime import datetime
+
+        last_run = None
+        if attached_func_data.get("last_run"):
+            try:
+                # Convert Unix timestamp string to datetime
+                last_run = datetime.fromtimestamp(float(attached_func_data["last_run"]))
+            except (ValueError, TypeError):
+                last_run = None
+
+        next_run = None
+        if attached_func_data.get("next_run"):
+            try:
+                # Convert Unix timestamp string to datetime
+                next_run = datetime.fromtimestamp(float(attached_func_data["next_run"]))
+            except (ValueError, TypeError):
+                next_run = None
+
         return AttachedFunction(
             client=self,
-            id=UUID(resp_json["attached_function"]["id"]),
-            name=resp_json["attached_function"]["name"],
-            function_id=resp_json["attached_function"]["function_id"],
+            id=UUID(attached_func_data["id"]),
+            name=attached_func_data["name"],
+            function_id=attached_func_data[
+                "function_name"
+            ],  # Using function_name from the nested response
             input_collection_id=input_collection_id,
-            output_collection=output_collection,
-            params=params,
+            output_collection=attached_func_data["output_collection"],
+            params=attached_func_data.get("params"),
             tenant=tenant,
             database=database,
+            last_run=last_run,
+            next_run=next_run,
+            global_function_parent=attached_func_data.get("global_function_parent"),
         )
 
     @trace_method("FastAPI.detach_function", OpenTelemetryGranularity.ALL)
@@ -804,3 +834,60 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             },
         )
         return cast(bool, resp_json["success"])
+
+    @trace_method("FastAPI.get_attached_function", OpenTelemetryGranularity.ALL)
+    @override
+    def get_attached_function(
+        self,
+        attached_function_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "AttachedFunction":
+        """Get metadata for a specific attached function."""
+        resp_json = self._make_request(
+            "get",
+            f"/tenants/{tenant}/databases/{database}/attached_functions/{attached_function_name}",
+        )
+
+        # The response now contains a nested attached_function object
+        attached_func_data = resp_json["attached_function"]
+
+        # Parse timestamps from the response (Unix timestamps as strings)
+        from datetime import datetime
+
+        last_run = None
+        if attached_func_data.get("last_run"):
+            try:
+                # Convert Unix timestamp string to datetime
+                last_run = datetime.fromtimestamp(float(attached_func_data["last_run"]))
+            except (ValueError, TypeError):
+                last_run = None
+
+        next_run = None
+        if attached_func_data.get("next_run"):
+            try:
+                # Convert Unix timestamp string to datetime
+                next_run = datetime.fromtimestamp(float(attached_func_data["next_run"]))
+            except (ValueError, TypeError):
+                next_run = None
+
+        # Get the input collection by name to find its ID
+        input_collection_name = attached_func_data["input_collection"]
+        input_collection = self.get_collection(input_collection_name, tenant, database)
+
+        return AttachedFunction(
+            client=self,
+            id=UUID(attached_func_data["id"]),
+            name=attached_func_data["name"],
+            function_id=attached_func_data[
+                "function_name"
+            ],  # Using function_name from nested response
+            input_collection_id=input_collection.id,
+            output_collection=attached_func_data["output_collection"],
+            params=attached_func_data.get("params"),
+            tenant=tenant,
+            database=database,
+            last_run=last_run,
+            next_run=next_run,
+            global_function_parent=attached_func_data.get("global_function_parent"),
+        )

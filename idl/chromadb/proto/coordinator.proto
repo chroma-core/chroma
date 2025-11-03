@@ -561,7 +561,7 @@ message AttachFunctionRequest {
 }
 
 message AttachFunctionResponse {
-  string id = 1;
+  AttachedFunction attached_function = 1;
 }
 
 message CreateOutputCollectionForAttachedFunctionRequest {
@@ -675,6 +675,14 @@ message GetFunctionsResponse {
   repeated Function functions = 1;
 }
 
+message GetFunctionByIdRequest {
+  string id = 1;
+}
+
+message GetFunctionByIdResponse {
+  Function function = 1;
+}
+
 message PeekScheduleByCollectionIdRequest {
   repeated string collection_id = 1;
 }
@@ -739,5 +747,6 @@ service SysDB {
   rpc FinishAttachedFunction(FinishAttachedFunctionRequest) returns (FinishAttachedFunctionResponse) {}
   rpc CleanupExpiredPartialAttachedFunctions(CleanupExpiredPartialAttachedFunctionsRequest) returns (CleanupExpiredPartialAttachedFunctionsResponse) {}
   rpc GetFunctions(GetFunctionsRequest) returns (GetFunctionsResponse) {}
+  rpc GetFunctionById(GetFunctionByIdRequest) returns (GetFunctionByIdResponse) {}
   rpc PeekScheduleByCollectionId(PeekScheduleByCollectionIdRequest) returns (PeekScheduleByCollectionIdResponse) {}
 }

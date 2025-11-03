@@ -634,6 +634,19 @@ class RustBindingsAPI(ServerAPI):
             "The Rust bindings (embedded mode) do not support attached function operations."
         )
 
+    @override
+    def get_attached_function(
+        self,
+        attached_function_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "AttachedFunction":
+        """Attached functions are not supported in the Rust bindings (local embedded mode)."""
+        raise NotImplementedError(
+            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
+            "The Rust bindings (embedded mode) do not support attached function operations."
+        )
+
     # TODO: Remove this if it's not planned to be used
     @override
     def get_user_identity(self) -> UserIdentity:
