@@ -35,6 +35,10 @@ The platform tier requires you to grant Chroma access to a GitHub App that you o
 
 The platform tier grants access to the Chroma Sync API and is ideal for companies and organizations that offer services which access their users’ codebases. The platform tier is available on Chroma’s Team plan. If you are interested in using it, please reach out to us at [engineering@trychroma.com](mailto:engineering@trychroma.com).
 
+## Web
+
+The web source type allows developers to scrape the contents of web pages into Chroma. Given a starting URL, Sync will crawl the page and its links up to a specified depth.
+
 # Sources
 
 A source is a specific instance of a source type configured according to the global and source type-specific configuration schema. The global source configuration schema refers to the configuration parameters that are required across sources of all types, while the source-type specific configuration schema refers to the configuration parameters required for a specific source type.
@@ -44,12 +48,16 @@ The global source configuration schema requires the following parameters:
 ```json
 {
   "database_name": "string",
-  "embedding_model": "Qwen/Qwen3-Embedding-0.6B"
+  "embedding": {
+    "dense": {
+        "model": "Qwen/Qwen3-Embedding-0.6B"
+    }
+  }
 }
 ```
 
 - `database_name` defines the Chroma database in which collections should be created by invocations run on this source. A database must exist before creating sources that point to it.
-- `embedding_model` defines the embedding model that should be used to generate embeddings for chunked documents. Currently, only the [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) model is supported, but if there is a model you would like to use, please let us know by reaching out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
+- `embedding.dense.model` defines the embedding model that should be used to generate dense embeddings for chunked documents. Currently, only the [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) model is supported, but if there is a model you would like to use, please let us know by reaching out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
 
 ## GitHub Repositories
 
@@ -66,6 +74,21 @@ A source of the GitHub repository type is an individual GitHub repository config
 - `repository` defines the GitHub repository whose code should be synced. This must be the forward slash-separated combination of the repository owner’s GitHub username and the repository name (e.g., `chroma-core/chroma`). Note that changing a repository name after creating a Chroma Sync source for it will result in invocations on that source failing, so a new source with the updated repository name must be created.
 - `app_id` defines the GitHub App ID of the GitHub App that has access to the provided `repository`. This parameter should only be supplied if the provided repository is private. If you are unsure of the GitHub App ID you should use, [see more](https://www.notion.so/Chroma-Sync-Docs-28b58a6d81918062b6ebf00deedde0ab?pvs=21) about the two tiers Chroma offers for the GitHub repository source type.
 - `include_globs` defines a set of glob patterns for which matching files should be synced. If this parameter is not provided, files matching `"*"` will be synced. Note that Chroma will not sync binary data, images, and other large or non-UTF-8 files.
+
+## Web
+
+A source of the web type is configured with a starting URL and a few othr optional parameters:
+
+```json
+{
+    "starting_url": "https://docs.trychroma.com",
+    // all below are optional
+    "page_limit": 5,
+    "include_path_regexes": ["/cloud/*"],
+    "exclude_path_regexes": ["/blog/*"],
+    "max_depth": 2
+}
+```
 
 # Invocations
 
@@ -118,14 +141,37 @@ Creates a new source of the specified type with the provided configuration.
 
 **Request Body**
 
+For a GitHub repository source:
+
 ```json
 {
     "database_name": "string",
-    "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
+    "embedding": {
+        "dense": {
+            "model": "Qwen/Qwen3-Embedding-0.6B"
+        }
+    },
     "github": {
         "repository": "string",
         "app_id": "string" | null, // optional
         "include_globs": ["string", ...] | null, // optional
+    }
+}
+```
+
+For a web source:
+
+```json
+{
+    "database_name": "string",
+    "embedding": {
+        "dense": {
+            "model": "Qwen/Qwen3-Embedding-0.6B"
+        }
+    },
+    "web_scrape": {
+        "starting_url": "https://docs.trychroma.com",
+        "page_limit": 5,
     }
 }
 ```
@@ -171,13 +217,15 @@ Retrieve a specific source by its ID.
 {
     "id": "string",
     "database_name": "string",
-    "embedding_model": "string",
-    "source_type": {
-        "github": {
-            "repository": "string",
-            "app_id": "string" | null,
-            "include_globs": ["string", ...]
+    "embedding": {
+        "dense": {
+            "model": "string"
         }
+    },
+    "github": {
+        "repository": "string",
+        "app_id": "string" | null,
+        "include_globs": ["string", ...]
     },
     "created_at": "string"
 }
@@ -221,7 +269,11 @@ List sources with optional filtering.
         {
             "id": "string",
             "database_name": "string",
-            "embedding_model": "string",
+            "embedding": {
+                "dense": {
+                    "model": "string"
+                }
+            },
             "source_type": {
                 "github": {
                     "repository": "string",
