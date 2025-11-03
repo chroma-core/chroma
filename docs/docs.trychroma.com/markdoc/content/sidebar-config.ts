@@ -132,9 +132,7 @@ const sidebarConfig: AppSection[] = [
       {
         id: "features",
         name: "Features",
-        pages: [
-          { id: "collection-forking", name: "Collection Forking" },
-        ],
+        pages: [{ id: "collection-forking", name: "Collection Forking" }],
       },
       {
         id: "schema",
@@ -191,9 +189,7 @@ const sidebarConfig: AppSection[] = [
         pages: [
           { id: "building-with-ai", name: "Building With AI" },
           { id: "intro-to-retrieval", name: "Introduction to Retrieval" },
-          // { id: "chunking", name: "Chunking" },
-          // { id: "embeddings", name: "Embeddings" },
-          // { id: "organizing-collections", name: "Organizing Collections" },
+          { id: "agentic-search", name: "Agentic Search" },
         ],
       },
       // { id: "develop", name: "Develop", generatePages: true },
