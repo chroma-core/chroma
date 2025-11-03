@@ -1548,20 +1548,7 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
         // Each record should corresond to a log
         self.total_records_post_compaction = output.len() as u64;
         if output.is_empty() && self.attached_function_context.is_none() {
-            let writers = match self.ok_or_terminate(self.get_segment_writers(), ctx).await {
-                Some(writer) => writer,
-                None => return,
-            };
-            self.dispatch_segment_writer_commit(
-                ChromaSegmentWriter::MetadataSegment(writers.metadata_writer),
-                ctx,
-            )
-            .await;
-            self.dispatch_segment_writer_commit(
-                ChromaSegmentWriter::VectorSegment(writers.vector_writer),
-                ctx,
-            )
-            .await;
+            self.register(ctx).await;
         } else if self.attached_function_context.is_some() {
             let input_collection =
                 match self.ok_or_terminate(self.get_input_collection(), ctx).await {
@@ -2095,6 +2082,66 @@ mod tests {
             .expect("Get orchestrator should not fail");
 
         assert_eq!(new_vals, old_vals);
+    }
+
+    #[tokio::test]
+    async fn test_rebuild_empty_filepath() {
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        let test_segments = TestDistributedSegment::new().await;
+        let collection_id = test_segments.collection.collection_id;
+        sysdb
+            .create_collection(
+                test_segments.collection.tenant,
+                test_segments.collection.database,
+                collection_id,
+                test_segments.collection.name,
+                vec![
+                    test_segments.record_segment.clone(),
+                    test_segments.metadata_segment.clone(),
+                    test_segments.vector_segment.clone(),
+                ],
+                None,
+                None,
+                None,
+                test_segments.collection.dimension,
+                false,
+            )
+            .await
+            .expect("Colleciton create should be successful");
+        let in_memory_log = InMemoryLog::new();
+        let log = Log::InMemory(in_memory_log);
+
+        let rebuild_orchestrator = CompactOrchestrator::new(
+            collection_id,
+            true,
+            5000,
+            10000,
+            1000,
+            log,
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            None,
+        );
+        assert!(rebuild_orchestrator.run(system.clone()).await.is_ok());
+
+        let new_cas = sysdb
+            .get_collection_with_segments(collection_id)
+            .await
+            .expect("Collection and segment information should be present");
+
+        assert!(new_cas.metadata_segment.file_path.is_empty());
+        assert!(new_cas.record_segment.file_path.is_empty());
+        assert!(new_cas.vector_segment.file_path.is_empty());
     }
 
     // Helper to read total_count from attached function result metadata
