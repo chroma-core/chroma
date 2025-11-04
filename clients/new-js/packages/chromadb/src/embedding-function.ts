@@ -92,7 +92,7 @@ export interface SparseEmbeddingFunction {
  */
 export interface EmbeddingFunctionClass {
   /** Constructor for creating new instances */
-  new(...args: any[]): EmbeddingFunction;
+  new (...args: any[]): EmbeddingFunction;
   /** Name identifier for the embedding function */
   name: string;
   /** Static method to build instance from configuration */
@@ -105,7 +105,7 @@ export interface EmbeddingFunctionClass {
  */
 export interface SparseEmbeddingFunctionClass {
   /** Constructor for creating new instances */
-  new(...args: any[]): SparseEmbeddingFunction;
+  new (...args: any[]): SparseEmbeddingFunction;
   /** Name identifier for the embedding function */
   name: string;
   /** Static method to build instance from configuration */
@@ -177,7 +177,7 @@ export const registerSparseEmbeddingFunction = (
  * @param efConfig - Configuration for the embedding function
  * @returns EmbeddingFunction instance or undefined if it cannot be constructed
  */
-export const getEmbeddingFunction = (
+export const getEmbeddingFunction = async (
   collectionName: string,
   efConfig?: EmbeddingFunctionConfiguration,
 ) => {
@@ -208,12 +208,22 @@ export const getEmbeddingFunction = (
 
   const name = efConfig.name;
 
-  const embeddingFunction = knownEmbeddingFunctions.get(name);
+  let embeddingFunction = knownEmbeddingFunctions.get(name);
   if (!embeddingFunction) {
-    console.warn(
-      `Collection ${collectionName} was created with the ${embeddingFunction} embedding function. However, the @chroma-core/${embeddingFunction} package is not install. 'add' and 'query' will fail unless you provide them embeddings directly, or install the @chroma-core/${embeddingFunction} package.`,
-    );
-    return undefined;
+    try {
+      const packageName = `@chroma-core/${name}`;
+      await import(packageName);
+      embeddingFunction = knownEmbeddingFunctions.get(name);
+    } catch (error) {
+      // Dynamic loading failed, proceed with warning
+    }
+
+    if (!embeddingFunction) {
+      console.warn(
+        `Collection ${collectionName} was created with the ${name} embedding function. However, the @chroma-core/${name} package is not install. 'add' and 'query' will fail unless you provide them embeddings directly, or install the @chroma-core/${name} package.`,
+      );
+      return undefined;
+    }
   }
 
   let constructorConfig: Record<string, any> =
@@ -242,7 +252,7 @@ export const getEmbeddingFunction = (
  * @param efConfig - Configuration for the sparse embedding function
  * @returns SparseEmbeddingFunction instance or undefined if it cannot be constructed
  */
-export const getSparseEmbeddingFunction = (
+export const getSparseEmbeddingFunction = async (
   collectionName: string,
   efConfig?: EmbeddingFunctionConfiguration,
 ) => {
@@ -267,12 +277,22 @@ export const getSparseEmbeddingFunction = (
 
   const name = efConfig.name;
 
-  const sparseEmbeddingFunction = knownSparseEmbeddingFunctions.get(name);
+  let sparseEmbeddingFunction = knownSparseEmbeddingFunctions.get(name);
   if (!sparseEmbeddingFunction) {
-    console.warn(
-      `Collection ${collectionName} was created with the ${name} sparse embedding function. However, the @chroma-core/${name} package is not installed.`,
-    );
-    return undefined;
+    try {
+      const packageName = `@chroma-core/${name}`;
+      await import(packageName);
+      sparseEmbeddingFunction = knownSparseEmbeddingFunctions.get(name);
+    } catch (error) {
+      // Dynamic loading failed, proceed with warning
+    }
+
+    if (!sparseEmbeddingFunction) {
+      console.warn(
+        `Collection ${collectionName} was created with the ${name} sparse embedding function. However, the @chroma-core/${name} package is not installed.`,
+      );
+      return undefined;
+    }
   }
 
   let constructorConfig: Record<string, any> =
