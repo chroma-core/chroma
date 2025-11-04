@@ -50,13 +50,13 @@ class TestEmbeddingFunctionSchemas:
         if ef_name == "chroma-cloud-qwen":
             from chromadb.utils.embedding_functions.chroma_cloud_qwen_embedding_function import (
                 ChromaCloudQwenEmbeddingModel,
-                ChromaCloudQwenEmbeddingTask,
                 CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
             )
+
             mock_ef.get_config.return_value = {
                 "api_key_env_var": "CHROMA_API_KEY",
                 "model": ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B.value,
-                "task": ChromaCloudQwenEmbeddingTask.NL_TO_CODE.value,
+                "task": "nl_to_code",
                 "instructions": CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
             }
 
