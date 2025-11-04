@@ -1,8 +1,16 @@
 ## Release Process
 
-This guide covers how to release chroma to PyPi, NPM, as well as releasing the standalone Chroma CLI.  
+This guide covers how to release chroma to PyPi, NPM, as well as releasing the standalone Chroma CLI.
+
+### CLI
+
+**Note:** Use this path for releasing any Chroma server updates, or any CLI functionality updates. The CLI is bundled in both our Python and JS/TS packages, so this path also includes releasing both clients, with the updated CLI.
+
+
 
 ### Python
+
+**Note:** use this path for releasing python **client** side changes.
 
 1. Create a new PR for the release that upgrades the version in code. Name it `release/python-[A.B.C]`. For example, for releasing version `1.2.3` you'd make a new branch:
 
@@ -18,19 +26,19 @@ __version__ = "1.2.3"
 
 3. The AWS CloudFormation template, as well as the TF Azure and GCP templates use the Python package to run a Chroma server via the CLI. Update these templates to download the correct version.
 
-In [`deployments/aws/chroma.cf.json`](https://github.com/chroma-core/chroma/blob/main/deployments/aws/chroma.cf.json):
+[`deployments/aws/chroma.cf.json`](https://github.com/chroma-core/chroma/blob/main/deployments/aws/chroma.cf.json):
 
 ```json
 "Default": "1.2.3"
 ```
 
-In [`deployments/azure/chroma.tfvars.tf`](https://github.com/chroma-core/chroma/blob/main/deployments/azure/chroma.tfvars.tf):
+[`deployments/azure/chroma.tfvars.tf`](https://github.com/chroma-core/chroma/blob/main/deployments/azure/chroma.tfvars.tf):
 
 ```yaml
 chroma_version                  = "1.2.3"
 ```
 
-In [`deployments/azure/main.tf`](https://github.com/chroma-core/chroma/blob/main/deployments/azure/main.tf):
+[`deployments/azure/main.tf`](https://github.com/chroma-core/chroma/blob/main/deployments/azure/main.tf):
 
 ```yaml
 variable "chroma_version" {
@@ -39,13 +47,13 @@ variable "chroma_version" {
 }
 ```
 
-In [`deployments/gcp/chroma.tfvars.tf`](https://github.com/chroma-core/chroma/blob/main/deployments/gcp/chroma.tfvars.tf):
+[`deployments/gcp/chroma.tfvars.tf`](https://github.com/chroma-core/chroma/blob/main/deployments/gcp/chroma.tfvars.tf):
 
 ```yaml
 chroma_version                  = "1.2.3"
 ```
 
-In [`deployments/gcp/main.tf`](https://github.com/chroma-core/chroma/blob/main/deployments/gcp/main.tf):
+[`deployments/gcp/main.tf`](https://github.com/chroma-core/chroma/blob/main/deployments/gcp/main.tf):
 
 ```yaml
 variable "chroma_version" {
@@ -68,11 +76,25 @@ Once the release workflow is done, you should see the new release in on the righ
 
 ### Javascript/Typescript
 
+**Note:** use this path for releasing JS/TS **client** side changes.
+
 1. Create a new PR for the release that upgrades the version in code. Name it `release/js-[A.B.C]`. For example, for releasing version `1.2.3` you'd make a new branch:
 
 ```shell
 git checkout -b release/js-1.2.3
 ```
 
-2. Update the version in `clients/new-js/packages/chromadb/package.json`
+2. Update the version in [`clients/new-js/packages/chromadb/package.json`](https://github.com/chroma-core/chroma/blob/main/clients/new-js/packages/chromadb/package.json). For example, when releasing version `1.2.3`, set:
+
+```json
+"version": "1.2.3"
+```
+
+3. Make a new PR with your branch, and label it with the `release` label.
+4. Once the PR is merged, and the GitHub actions pass on `main`, tag your commit SHA with `js_release_<version>` and push it. This will trigger a workflow that performs the release to NPM.
+
+```shell
+git tag <version> <SHA>
+git push origin <version>
+```
 
