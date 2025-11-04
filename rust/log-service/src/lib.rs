@@ -2021,6 +2021,7 @@ impl LogServerWrapper {
 
         let max_encoding_message_size = log_server.config.max_encoding_message_size;
         let max_decoding_message_size = log_server.config.max_decoding_message_size;
+        let max_concurrent_streams = log_server.config.grpc_max_concurrent_streams;
         let shutdown_grace_period = log_server.config.grpc_shutdown_grace_period;
 
         let wrapper = LogServerWrapper {
@@ -2030,6 +2031,7 @@ impl LogServerWrapper {
         let background =
             tokio::task::spawn(async move { background_server.background_task().await });
         let server = Server::builder()
+            .max_concurrent_streams(Some(max_concurrent_streams))
             .layer(chroma_tracing::GrpcServerTraceLayer)
             .add_service(health_service)
             .add_service(
@@ -2208,6 +2210,8 @@ pub struct LogServerConfig {
         default = "LogServerConfig::default_grpc_shutdown_grace_period"
     )]
     pub grpc_shutdown_grace_period: Duration,
+    #[serde(default = "LogServerConfig::default_grpc_max_concurrent_streams")]
+    pub grpc_max_concurrent_streams: u32,
 }
 
 impl LogServerConfig {
@@ -2256,6 +2260,9 @@ impl LogServerConfig {
     fn default_grpc_shutdown_grace_period() -> Duration {
         Duration::from_secs(1)
     }
+    fn default_grpc_max_concurrent_streams() -> u32 {
+        1000
+    }
 }
 
 impl Default for LogServerConfig {
@@ -2278,6 +2285,7 @@ impl Default for LogServerConfig {
             max_encoding_message_size: Self::default_max_encoding_message_size(),
             max_decoding_message_size: Self::default_max_decoding_message_size(),
             grpc_shutdown_grace_period: Self::default_grpc_shutdown_grace_period(),
+            grpc_max_concurrent_streams: Self::default_grpc_max_concurrent_streams(),
         }
     }
 }
