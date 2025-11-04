@@ -209,3 +209,19 @@ Delete the embeddings based on ids and/or a where filter
 **Returns**:
 
 None
+
+## list_collections
+
+```python
+def list_collections() -> List[Collection]
+```
+
+List all collections currently stored in the database.
+
+**Arguments**:
+
+None
+
+**Returns**:
+
+- `List[Collection]` - A list of collection objects currently in the database.
