@@ -264,13 +264,6 @@ export const getSparseEmbeddingFunction = async (
     return undefined;
   }
 
-  if (efConfig.type === "unknown") {
-    console.warn(
-      `Unknown embedding function configuration for collection ${collectionName}. 'add' and 'query' will fail unless you provide them embeddings directly.`,
-    );
-    return undefined;
-  }
-
   if (efConfig.type !== "known") {
     return undefined;
   }
