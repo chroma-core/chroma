@@ -2568,3 +2568,71 @@ def test_embeds_using_schema_embedding_function() -> None:
     embeddings = collection._embed(["hello world"])
     assert embeddings is not None
     assert np.allclose(embeddings[0], [0.0, 1.0, 2.0, 3.0])
+
+
+@register_sparse_embedding_function
+class TestSparseEmbeddingFunction(SparseEmbeddingFunction[List[str]]):
+    """Sparse embedding function for testing search API with string queries."""
+
+    def __init__(self, label: str = "test_sparse"):
+        self._label = label
+
+    def __call__(self, input: List[str]) -> List[SparseVector]:
+        return [
+            SparseVector(indices=[idx], values=[float(len(text) + idx)])
+            for idx, text in enumerate(input)
+        ]
+
+    def embed_query(self, input: List[str]) -> List[SparseVector]:
+        return [
+            SparseVector(indices=[idx], values=[float(len(text) + idx + 1)])
+            for idx, text in enumerate(input)
+        ]
+
+    @staticmethod
+    def name() -> str:
+        return "test_sparse_ef"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {"label": self._label}
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "TestSparseEmbeddingFunction":
+        return TestSparseEmbeddingFunction(config.get("label", "test_sparse"))
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_search_api_uses_embedded_searches_with_sparse_embeddings(
+    client_factories: ClientFactories,
+) -> None:
+    """Test that search API uses embedded_searches when string queries are embedded."""
+
+    sparse_ef = TestSparseEmbeddingFunction(label="search_test")
+    schema = Schema().create_index(
+        key="sparse_field",
+        config=SparseVectorIndexConfig(
+            source_key=Key.DOCUMENT,  # type: ignore[arg-type]
+            embedding_function=sparse_ef,
+        ),
+    )
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    collection.add(
+        ids=["doc1", "doc2"],
+        documents=["hello world", "test document"],
+    )
+
+    result = collection.get()
+    assert result is not None
+    assert result["documents"] is not None
+    assert len(result["documents"]) == 2
+
+    search = Search().rank(Knn(key="sparse_field", query="hello world"))
+
+    results = collection.search(search)
+
+    assert results["ids"] is not None
+    assert len(results["ids"]) == 1
+    assert len(results["ids"][0]) > 0
+    assert "doc1" in results["ids"][0]
