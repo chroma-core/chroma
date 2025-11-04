@@ -1745,7 +1745,7 @@ impl ServiceBasedFrontend {
                         for knn_query in knn_queries {
                             schema
                                 .is_knn_key_indexing_enabled(
-                                    &knn_query.key.to_string(),
+                                    knn_query.key.as_ref(),
                                     &knn_query.query,
                                 )
                                 .map_err(|err| {

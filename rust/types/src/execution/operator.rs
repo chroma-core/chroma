@@ -1826,6 +1826,18 @@ impl From<String> for Key {
     }
 }
 
+impl AsRef<str> for Key {
+    fn as_ref(&self) -> &str {
+        match self {
+            Key::Document => "#document",
+            Key::Embedding => "#embedding",
+            Key::Metadata => "#metadata",
+            Key::Score => "#score",
+            Key::MetadataField(field) => field.as_str(),
+        }
+    }
+}
+
 impl Key {
     /// Creates a Key for a custom metadata field.
     ///
@@ -2217,15 +2229,15 @@ impl TryFrom<Select> for chroma_proto::SelectOperator {
 /// fn process_results(records: Vec<SearchRecord>) {
 ///     for record in records {
 ///         println!("ID: {}", record.id);
-///         
+///
 ///         if let Some(score) = record.score {
 ///             println!("  Score: {:.3}", score);
 ///         }
-///         
+///
 ///         if let Some(doc) = record.document {
 ///             println!("  Document: {}", doc);
 ///         }
-///         
+///
 ///         if let Some(meta) = record.metadata {
 ///             println!("  Metadata: {:?}", meta);
 ///         }
@@ -2298,7 +2310,7 @@ impl TryFrom<SearchRecord> for chroma_proto::SearchRecord {
 ///
 /// fn process_search_result(result: SearchPayloadResult) {
 ///     println!("Found {} results", result.records.len());
-///     
+///
 ///     for (i, record) in result.records.iter().enumerate() {
 ///         println!("{}. {} (score: {:?})", i + 1, record.id, record.score);
 ///     }
@@ -2357,7 +2369,7 @@ impl TryFrom<SearchPayloadResult> for chroma_proto::SearchPayloadResult {
 /// fn process_single_search(result: SearchResult) {
 ///     // Single search, so results[0] contains our records
 ///     let records = &result.results[0].records;
-///     
+///
 ///     for record in records {
 ///         println!("{}: score={:?}", record.id, record.score);
 ///     }

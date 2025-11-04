@@ -578,10 +578,7 @@ impl ChromaHttpClient {
             )
             .await?;
 
-        Ok(ChromaCollection {
-            client: self.clone(),
-            collection: Arc::new(collection),
-        })
+        Ok(ChromaCollection::new(self.clone(), collection))
     }
 
     /// Removes a collection and all its records from the database.
@@ -685,10 +682,7 @@ impl ChromaHttpClient {
 
         Ok(collections
             .into_iter()
-            .map(|collection| ChromaCollection {
-                client: self.clone(),
-                collection: Arc::new(collection),
-            })
+            .map(|collection| ChromaCollection::new(self.clone(), collection))
             .collect())
     }
 
@@ -720,10 +714,7 @@ impl ChromaHttpClient {
             )
             .await?;
 
-        Ok(ChromaCollection {
-            client: self.clone(),
-            collection: Arc::new(collection),
-        })
+        Ok(ChromaCollection::new(self.clone(), collection))
     }
 
     /// Executes an HTTP request with automatic retry logic and OpenTelemetry metrics.
