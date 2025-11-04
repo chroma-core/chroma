@@ -74,3 +74,5 @@ Once the release workflow is done, you should see the new release in on the righ
 git checkout -b release/js-1.2.3
 ```
 
+2. Update the version in `clients/new-js/packages/chromadb/package.json`
+
