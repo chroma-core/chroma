@@ -1996,7 +1996,7 @@ impl Schema {
     ///
     /// # Examples
     /// ```
-    /// use chroma_types::{Schema, VectorIndexConfig, StringInvertedIndexConfig, Space};
+    /// use chroma_types::{Schema, VectorIndexConfig, StringInvertedIndexConfig, Space, SchemaBuilderError};
     ///
     /// # fn main() -> Result<(), SchemaBuilderError> {
     /// let schema = Schema::default()
@@ -2077,7 +2077,7 @@ impl Schema {
     ///
     /// # Examples
     /// ```
-    /// use chroma_types::{Schema, StringInvertedIndexConfig};
+    /// use chroma_types::{Schema, StringInvertedIndexConfig, SchemaBuilderError};
     ///
     /// # fn main() -> Result<(), SchemaBuilderError> {
     /// let schema = Schema::default()
