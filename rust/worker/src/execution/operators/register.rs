@@ -9,8 +9,6 @@ use chroma_types::{CollectionUuid, FlushCompactionResponse, SegmentFlushInfo};
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::execution::orchestration::AttachedFunctionContext;
-
 /// The register  operator is responsible for flushing compaction data to the sysdb
 /// as well as updating the log offset in the log service.
 #[derive(Debug)]
@@ -50,9 +48,6 @@ pub struct RegisterInput {
     sysdb: SysDb,
     log: Log,
     schema: Option<Schema>,
-    attached_function_context: Option<AttachedFunctionContext>,
-    /// Input collection's pulled log offset (used for attached function completion_offset calculation)
-    input_pulled_log_offset: i64,
 }
 
 impl RegisterInput {
@@ -69,8 +64,6 @@ impl RegisterInput {
         sysdb: SysDb,
         log: Log,
         schema: Option<Schema>,
-        attached_function_context: Option<AttachedFunctionContext>,
-        input_pulled_log_offset: i64,
     ) -> Self {
         RegisterInput {
             tenant,
@@ -83,8 +76,6 @@ impl RegisterInput {
             sysdb,
             log,
             schema,
-            attached_function_context,
-            input_pulled_log_offset,
         }
     }
 }
@@ -92,11 +83,9 @@ impl RegisterInput {
 /// The output for the flush sysdb operator.
 /// # Parameters
 /// * `result` - The result of the flush compaction operation.
-/// * `updated_attached_function` - The updated attached function if this was a attached function-based compaction.
 #[derive(Debug)]
 pub struct RegisterOutput {
     _sysdb_registration_result: FlushCompactionResponse,
-    pub updated_attached_function: Option<chroma_types::AttachedFunction>,
 }
 
 #[derive(Error, Debug)]
@@ -105,8 +94,6 @@ pub enum RegisterError {
     FlushCompactionError(#[from] FlushCompactionError),
     #[error("Update log offset error: {0}")]
     UpdateLogOffsetError(#[from] Box<dyn ChromaError>),
-    #[error("Generic error: {0}")]
-    Generic(String),
 }
 
 impl ChromaError for RegisterError {
@@ -114,7 +101,6 @@ impl ChromaError for RegisterError {
         match self {
             RegisterError::FlushCompactionError(e) => e.code(),
             RegisterError::UpdateLogOffsetError(e) => e.code(),
-            RegisterError::Generic(_) => ErrorCodes::FailedPrecondition,
         }
     }
 
@@ -122,7 +108,6 @@ impl ChromaError for RegisterError {
         match self {
             RegisterError::FlushCompactionError(e) => e.should_trace_error(),
             RegisterError::UpdateLogOffsetError(e) => e.should_trace_error(),
-            RegisterError::Generic(_) => true,
         }
     }
 }
@@ -137,91 +122,37 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
 
     async fn run(&self, input: &RegisterInput) -> Result<RegisterOutput, RegisterError> {
         let mut sysdb = input.sysdb.clone();
+        let mut log = input.log.clone();
+        let result = sysdb
+            .flush_compaction(
+                input.tenant.clone(),
+                input.collection_id,
+                input.log_position,
+                input.collection_version,
+                input.segment_flush_info.clone(),
+                input.total_records_post_compaction,
+                input.collection_logical_size_bytes,
+                input.schema.clone(),
+            )
+            .await;
 
-        // Handle attached function-based vs non-attached function compactions separately
-        match &input.attached_function_context {
-            Some(attached_function_context) => {
-                // Extract the attached function - it must be present by the time we reach RegisterOperator
-                let attached_function = attached_function_context.attached_function.as_ref().ok_or_else(|| {
-                    RegisterError::Generic(
-                        " Attached Function context present but attached function not populated - PrepareAttachedFunction should have run first"
-                            .to_string(),
-                    )
-                })?;
+        // We must make sure that the log postion in sysdb is always greater than or equal to the log position
+        // in the log service. If the log position in sysdb is less than the log position in the log service,
+        // the we may lose data in compaction.
+        let sysdb_registration_result = match result {
+            Ok(response) => response,
+            Err(error) => return Err(RegisterError::FlushCompactionError(error)),
+        };
 
-                // input_pulled_log_offset is "up to which offset we've compacted from INPUT collection"
-                // completion_offset is "last offset processed"
-                // In practice, input_pulled_log_offset means "next offset to start compacting from"
-                // So to get "last offset processed"/"completion_offset", we subtract 1
-                let last_offset_processed = (input.input_pulled_log_offset - 1).max(0) as u64;
-                let attach_function_update = chroma_types::AttachedFunctionUpdateInfo {
-                    attached_function_id: attached_function.id,
-                    attached_function_run_nonce: attached_function_context.execution_nonce.0,
-                    completion_offset: last_offset_processed,
-                };
-                // Attached Function-based compaction
-                let attached_function_response = sysdb
-                    .flush_compaction_and_attached_function(
-                        input.tenant.clone(),
-                        input.collection_id,
-                        input.log_position,
-                        input.collection_version,
-                        input.segment_flush_info.clone(),
-                        input.total_records_post_compaction,
-                        input.collection_logical_size_bytes,
-                        input.schema.clone(),
-                        attach_function_update,
-                    )
-                    .await
-                    .map_err(RegisterError::FlushCompactionError)?;
+        let result = log
+            .update_collection_log_offset(&input.tenant, input.collection_id, input.log_position)
+            .await;
 
-                // Create updated attached function with authoritative database values
-                let mut updated_attached_function = attached_function.clone();
-                updated_attached_function.completion_offset =
-                    attached_function_response.completion_offset;
-                // Note: next_run and next_nonce were already set by PrepareAttachedFunction via advance_attached_function()
-                // flush_compaction_and_attached_function only updates completion_offset
-
-                Ok(RegisterOutput {
-                    _sysdb_registration_result: chroma_types::FlushCompactionResponse {
-                        collection_id: attached_function_response.collection_id,
-                        collection_version: attached_function_response.collection_version,
-                        last_compaction_time: attached_function_response.last_compaction_time,
-                    },
-                    updated_attached_function: Some(updated_attached_function),
-                })
-            }
-            None => {
-                // Non-function compaction
-                let mut log = input.log.clone();
-                let response = sysdb
-                    .flush_compaction(
-                        input.tenant.clone(),
-                        input.collection_id,
-                        input.log_position,
-                        input.collection_version,
-                        input.segment_flush_info.clone(),
-                        input.total_records_post_compaction,
-                        input.collection_logical_size_bytes,
-                        input.schema.clone(),
-                    )
-                    .await
-                    .map_err(RegisterError::FlushCompactionError)?;
-
-                // Update log offset
-                log.update_collection_log_offset(
-                    &input.tenant,
-                    input.collection_id,
-                    input.log_position,
-                )
-                .await
-                .map_err(RegisterError::UpdateLogOffsetError)?;
-
-                Ok(RegisterOutput {
-                    _sysdb_registration_result: response,
-                    updated_attached_function: None,
-                })
-            }
+        match result {
+            Ok(_) => Ok(RegisterOutput {
+                _sysdb_registration_result: sysdb_registration_result,
+            }),
+            Err(error) => Err(RegisterError::UpdateLogOffsetError(error)),
         }
     }
 }
@@ -338,9 +269,7 @@ mod tests {
             size_bytes_post_compaction,
             sysdb.clone(),
             log.clone(),
-            None,         // schema
-            None,         // attached_function_context
-            log_position, // input_pulled_log_offset (same as log_position for non-task compaction)
+            None,
         );
 
         let result = operator.run(&input).await;

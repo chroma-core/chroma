@@ -475,6 +475,17 @@ impl TestSysDb {
                 return Err(FlushCompactionError::CollectionNotFound);
             }
             let collection = collection.unwrap();
+
+            // Check for stale version (optimistic concurrency control)
+            if collection.version > collection_version {
+                return Err(FlushCompactionError::FailedToFlushCompaction(
+                    tonic::Status::failed_precondition(format!(
+                        "Collection version is stale: expected {}, but collection is at version {}",
+                        collection_version, collection.version
+                    )),
+                ));
+            }
+
             let mut collection = collection.clone();
             collection.log_position = log_position;
             new_collection_version = collection_version + 1;

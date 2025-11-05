@@ -1,87 +1,35 @@
-use std::{
-    cell::OnceCell,
-    collections::HashMap,
-    path::Path,
-    sync::{atomic::AtomicU32, Arc},
-};
+use std::cell::OnceCell;
 
-use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{hnsw_provider::HnswIndexProvider, IndexUuid};
 use chroma_log::Log;
 use chroma_segment::{
-    blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
-    blockfile_record::{
-        ApplyMaterializedLogError, RecordSegmentReader, RecordSegmentReaderCreationError,
-        RecordSegmentWriter, RecordSegmentWriterCreationError,
-    },
-    distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter},
-    distributed_spann::SpannSegmentWriterError,
+    blockfile_metadata::MetadataSegmentWriter,
+    blockfile_record::{RecordSegmentReader, RecordSegmentWriter},
     spann_provider::SpannProvider,
-    types::{
-        ChromaSegmentFlusher, ChromaSegmentWriter, MaterializeLogsResult, VectorSegmentWriter,
-    },
+    types::{ChromaSegmentWriter, VectorSegmentWriter},
 };
 use chroma_sysdb::SysDb;
 use chroma_system::{
-    wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
+    ComponentHandle, Dispatcher, Orchestrator, OrchestratorContext, PanicError, System, TaskError,
 };
-use chroma_types::{
-    AttachedFunction, AttachedFunctionUuid, Chunk, Collection, CollectionUuid, LogRecord,
-    NonceUuid, Schema, SchemaError, Segment, SegmentFlushInfo, SegmentType, SegmentUuid,
-};
-use opentelemetry::trace::TraceContextExt;
-use s3heap_service::client::GrpcHeapService;
+use chroma_types::{Collection, CollectionUuid, JobId, Schema, SegmentFlushInfo, SegmentUuid};
+use opentelemetry::metrics::Counter;
 use thiserror::Error;
-use tokio::sync::oneshot::{error::RecvError, Sender};
-use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
-use uuid::Uuid;
 
-use crate::execution::operators::{
-    apply_log_to_segment_writer::{
-        ApplyLogToSegmentWriterInput, ApplyLogToSegmentWriterOperator,
-        ApplyLogToSegmentWriterOperatorError, ApplyLogToSegmentWriterOutput,
-    },
-    commit_segment_writer::{
-        CommitSegmentWriterInput, CommitSegmentWriterOperator, CommitSegmentWriterOperatorError,
-        CommitSegmentWriterOutput,
-    },
-    execute_task::{
-        ExecuteAttachedFunctionError, ExecuteAttachedFunctionInput,
-        ExecuteAttachedFunctionOperator, ExecuteAttachedFunctionOutput,
-    },
-    fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-    finish_task::{
-        FinishAttachedFunctionError, FinishAttachedFunctionInput, FinishAttachedFunctionOperator,
-        FinishAttachedFunctionOutput,
-    },
-    flush_segment_writer::{
-        FlushSegmentWriterInput, FlushSegmentWriterOperator, FlushSegmentWriterOperatorError,
-        FlushSegmentWriterOutput,
-    },
-    get_collection_and_segments::{
-        GetCollectionAndSegmentsError, GetCollectionAndSegmentsOperator,
-        GetCollectionAndSegmentsOutput,
-    },
-    materialize_logs::{
-        MaterializeLogInput, MaterializeLogOperator, MaterializeLogOperatorError,
-        MaterializeLogOutput,
-    },
-    partition_log::{PartitionError, PartitionInput, PartitionOperator, PartitionOutput},
-    prefetch_segment::{
-        PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
-    },
-    prepare_task::{
-        PrepareAttachedFunctionError, PrepareAttachedFunctionInput,
-        PrepareAttachedFunctionOperator, PrepareAttachedFunctionOutput,
-    },
-    register::{RegisterError, RegisterInput, RegisterOperator, RegisterOutput},
-    source_record_segment::{
-        SourceRecordSegmentError, SourceRecordSegmentInput, SourceRecordSegmentOperator,
-        SourceRecordSegmentOutput,
+use super::apply_logs_orchestrator::{ApplyLogsOrchestrator, ApplyLogsOrchestratorError};
+use super::log_fetch_orchestrator::{
+    LogFetchOrchestrator, LogFetchOrchestratorResponse, RequireCompactionOffsetRepair, Success,
+};
+use super::register_orchestrator::RegisterOrchestrator;
+
+use crate::execution::{
+    operators::materialize_logs::MaterializeLogOutput,
+    orchestration::{
+        apply_logs_orchestrator::ApplyLogsOrchestratorResponse,
+        log_fetch_orchestrator::LogFetchOrchestratorError,
+        register_orchestrator::{RegisterOrchestratorError, RegisterOrchestratorResponse},
     },
 };
 
@@ -105,14 +53,14 @@ Pending ──► PullLogs/SourceRecord ──► Partition │                 
 */
 
 #[derive(Debug)]
-struct CompactOrchestratorMetrics {
-    total_logs_applied_flushed: opentelemetry::metrics::Counter<u64>,
+pub struct CompactionMetrics {
+    pub total_logs_applied_flushed: Counter<u64>,
 }
 
-impl Default for CompactOrchestratorMetrics {
+impl Default for CompactionMetrics {
     fn default() -> Self {
         let meter = opentelemetry::global::meter("chroma.compactor");
-        CompactOrchestratorMetrics {
+        CompactionMetrics {
             total_logs_applied_flushed: meter
                 .u64_counter("total_logs_applied_flushed")
                 .with_description(
@@ -124,144 +72,87 @@ impl Default for CompactOrchestratorMetrics {
 }
 
 #[derive(Debug)]
-enum ExecutionState {
+pub enum ExecutionState {
     Pending,
     Partition,
     MaterializeApplyCommitFlush,
     Register,
-    FinishAttachedFunction,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct AttachedFunctionContext {
-    pub(crate) attached_function_id: AttachedFunctionUuid,
-    pub(crate) attached_function: Option<AttachedFunction>,
-    pub(crate) execution_nonce: NonceUuid,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct CompactWriters {
+pub struct CompactWriters {
     pub(crate) record_reader: Option<RecordSegmentReader<'static>>,
     pub(crate) metadata_writer: MetadataSegmentWriter<'static>,
     pub(crate) record_writer: RecordSegmentWriter,
     pub(crate) vector_writer: VectorSegmentWriter,
 }
 
+#[derive(Debug, Clone)]
+pub struct CollectionCompactInfo {
+    pub collection_id: CollectionUuid,
+    pub collection: Collection,
+    pub(crate) writers: Option<CompactWriters>,
+    pub pulled_log_offset: i64,
+    pub hnsw_index_uuid: Option<IndexUuid>,
+    pub schema: Option<Schema>,
+}
+
 #[derive(Debug)]
-pub struct CompactOrchestrator {
-    // === Compaction Configuration ===
-    hnsw_index_uuid: Option<IndexUuid>,
-    rebuild: bool,
-    fetch_log_batch_size: u32,
-    max_compaction_size: usize,
-    max_partition_size: usize,
+pub struct CompactionContext {
+    pub collection_info: OnceCell<CollectionCompactInfo>,
+    pub log: Log,
+    pub sysdb: SysDb,
+    pub blockfile_provider: BlockfileProvider,
+    pub hnsw_provider: HnswIndexProvider,
+    pub spann_provider: SpannProvider,
+    pub dispatcher: ComponentHandle<Dispatcher>,
+    pub orchestrator_context: OrchestratorContext,
+    pub is_rebuild: bool,
+    pub fetch_log_batch_size: u32,
+    pub max_compaction_size: usize,
+    pub max_partition_size: usize,
+    #[cfg(test)]
+    pub poison_offset: Option<u32>,
+}
 
-    // === Shared Services & Providers ===
-    context: OrchestratorContext,
-    blockfile_provider: BlockfileProvider,
-    log: Log,
-    sysdb: SysDb,
-    hnsw_provider: HnswIndexProvider,
-    spann_provider: SpannProvider,
-
-    // === Input Collection (read logs/segments from) ===
-    /// Collection to read logs and segments from
-    /// For regular compaction: input_collection_id == output_collection_id
-    /// For task compaction: input_collection_id != output_collection_id
-    input_collection_id: CollectionUuid,
-    input_collection: OnceCell<Collection>,
-    input_segments: OnceCell<Vec<Segment>>,
-    input_pulled_log_offset: i64,
-
-    // === Output Collection (write compacted data to) ===
-    /// Collection to write compacted segments to
-    output_collection_id: OnceCell<CollectionUuid>,
-    output_collection: OnceCell<Collection>,
-    output_segments: OnceCell<Vec<Segment>>,
-    output_pulled_log_offset: i64,
-
-    // === Writers & Results ===
-    writers: OnceCell<CompactWriters>,
-    flush_results: Vec<SegmentFlushInfo>,
-    result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
-
-    // === State Tracking ===
-    num_uncompleted_materialization_tasks: usize,
-    num_uncompleted_tasks_by_segment: HashMap<SegmentUuid, usize>,
-    collection_logical_size_delta_bytes: i64,
-    state: ExecutionState,
-
-    // Total number of records in the collection after the compaction
-    total_records_post_compaction: u64,
-
-    // Total number of materialized logs
-    num_materialized_logs: u64,
-
-    // We track a parent span for each segment type so we can group all the spans for a given segment type (makes the resulting trace much easier to read)
-    segment_spans: HashMap<SegmentUuid, Span>,
-
-    metrics: CompactOrchestratorMetrics,
-
-    // schema after applying deltas
-    schema: Option<Schema>,
-    // === Attached Function Context (optional) ===
-    /// Available if this orchestrator is for an attached function
-    attached_function_context: Option<AttachedFunctionContext>,
-    heap_service: Option<GrpcHeapService>,
+impl Clone for CompactionContext {
+    fn clone(&self) -> Self {
+        let orchestrator_context = OrchestratorContext::new(self.dispatcher.clone());
+        Self {
+            collection_info: self.collection_info.clone(),
+            log: self.log.clone(),
+            sysdb: self.sysdb.clone(),
+            blockfile_provider: self.blockfile_provider.clone(),
+            hnsw_provider: self.hnsw_provider.clone(),
+            spann_provider: self.spann_provider.clone(),
+            dispatcher: self.dispatcher.clone(),
+            orchestrator_context,
+            is_rebuild: self.is_rebuild,
+            fetch_log_batch_size: self.fetch_log_batch_size,
+            max_compaction_size: self.max_compaction_size,
+            max_partition_size: self.max_partition_size,
+            #[cfg(test)]
+            poison_offset: self.poison_offset,
+        }
+    }
 }
 
 #[derive(Error, Debug)]
 pub enum CompactionError {
     #[error("Operation aborted because resources exhausted")]
     Aborted,
-    #[error("Error applying logs to segment writers: {0}")]
-    ApplyLog(#[from] ApplyLogToSegmentWriterOperatorError),
-    #[error("Error sending message through channel: {0}")]
-    Channel(#[from] ChannelError),
-    #[error("Error commiting segment writers: {0}")]
-    Commit(#[from] CommitSegmentWriterOperatorError),
-    #[error("Error executing attached function: {0}")]
-    ExecuteAttachedFunction(#[from] ExecuteAttachedFunctionError),
+    #[error("Error applying data to segment writers: {0}")]
+    ApplyDataError(#[from] ApplyLogsOrchestratorError),
+    #[error("Error fetching compaction context: {0}")]
+    CompactionContextError(#[from] CompactionContextError),
     #[error("Error fetching logs: {0}")]
-    FetchLog(#[from] FetchLogError),
-    #[error("Error finishing attached function: {0}")]
-    FinishAttachedFunction2(#[from] FinishAttachedFunctionError),
-    #[error("Error flushing segment writers: {0}")]
-    Flush(#[from] FlushSegmentWriterOperatorError),
-    #[error("Error getting collection and segments: {0}")]
-    GetCollectionAndSegments(#[from] GetCollectionAndSegmentsError),
-    #[error("Error creating hnsw writer: {0}")]
-    HnswSegment(#[from] DistributedHNSWSegmentFromSegmentError),
-    #[error("Schema reconciliation failed: {0}")]
-    SchemaReconciliation(#[from] SchemaError),
+    DataFetchError(#[from] LogFetchOrchestratorError),
+    #[error("Error registering collection: {0}")]
+    RegisterError(#[from] RegisterOrchestratorError),
+    #[error("Panic during compaction: {0}")]
+    PanicError(#[from] PanicError),
     #[error("Invariant violation: {}", .0)]
     InvariantViolation(&'static str),
-    #[error("Error materializing logs: {0}")]
-    MaterializeLogs(#[from] MaterializeLogOperatorError),
-    #[error("Error creating metadata writer: {0}")]
-    MetadataSegment(#[from] MetadataSegmentError),
-    #[error("Panic during compaction: {0}")]
-    Panic(#[from] PanicError),
-    #[error("Error partitioning logs: {0}")]
-    Partition(#[from] PartitionError),
-    #[error("Error prefetching segment: {0}")]
-    PrefetchSegment(#[from] PrefetchSegmentError),
-    #[error("Error preparing attached function: {0}")]
-    PrepareAttachedFunction(#[from] PrepareAttachedFunctionError),
-    #[error("Error creating record segment reader: {0}")]
-    RecordSegmentReader(#[from] RecordSegmentReaderCreationError),
-    #[error("Error creating record segment writer: {0}")]
-    RecordSegmentWriter(#[from] RecordSegmentWriterCreationError),
-    #[error("Error registering compaction result: {0}")]
-    Register(#[from] RegisterError),
-    #[error("Error receiving final result: {0}")]
-    Result(#[from] RecvError),
-    #[error("Error creating spann writer: {0}")]
-    SpannSegment(#[from] SpannSegmentWriterError),
-    #[error("Error sourcing record segment: {0}")]
-    SourceRecordSegment(#[from] SourceRecordSegmentError),
-    #[error("Could not count current segment: {0}")]
-    CountError(Box<dyn chroma_error::ChromaError>),
 }
 
 impl<E> From<TaskError<E>> for CompactionError
@@ -286,56 +177,42 @@ impl ChromaError for CompactionError {
     }
 
     fn should_trace_error(&self) -> bool {
-        if let CompactionError::FetchLog(FetchLogError::PullLog(e)) = self {
-            e.code() != ErrorCodes::NotFound
-        } else {
-            match self {
-                Self::Aborted => true,
-                Self::ApplyLog(e) => e.should_trace_error(),
-                Self::Channel(e) => e.should_trace_error(),
-                Self::Commit(e) => e.should_trace_error(),
-                Self::ExecuteAttachedFunction(e) => e.should_trace_error(),
-                Self::FetchLog(e) => e.should_trace_error(),
-                Self::FinishAttachedFunction2(e) => e.should_trace_error(),
-                Self::Flush(e) => e.should_trace_error(),
-                Self::GetCollectionAndSegments(e) => e.should_trace_error(),
-                Self::HnswSegment(e) => e.should_trace_error(),
-                Self::SchemaReconciliation(e) => e.should_trace_error(),
-                Self::InvariantViolation(_) => true,
-                Self::MaterializeLogs(e) => e.should_trace_error(),
-                Self::MetadataSegment(e) => e.should_trace_error(),
-                Self::Panic(e) => e.should_trace_error(),
-                Self::Partition(e) => e.should_trace_error(),
-                Self::PrefetchSegment(e) => e.should_trace_error(),
-                Self::PrepareAttachedFunction(e) => e.should_trace_error(),
-                Self::RecordSegmentReader(e) => e.should_trace_error(),
-                Self::RecordSegmentWriter(e) => e.should_trace_error(),
-                Self::Register(e) => e.should_trace_error(),
-                Self::Result(_) => true,
-                Self::SpannSegment(e) => e.should_trace_error(),
-                Self::SourceRecordSegment(e) => e.should_trace_error(),
-                Self::CountError(e) => e.should_trace_error(),
-            }
+        match self {
+            Self::Aborted => true,
+            Self::ApplyDataError(e) => e.should_trace_error(),
+            Self::CompactionContextError(e) => e.should_trace_error(),
+            Self::DataFetchError(e) => e.should_trace_error(),
+            Self::PanicError(e) => e.should_trace_error(),
+            Self::RegisterError(e) => e.should_trace_error(),
+            Self::InvariantViolation(_) => true,
         }
     }
 }
 
-#[derive(Debug)]
-pub enum CompactionResponse {
-    Success {
-        job_id: Uuid,
-    },
-    RequireCompactionOffsetRepair {
-        collection_id: CollectionUuid,
-        witnessed_offset_in_sysdb: i64,
-    },
+#[derive(Error, Debug)]
+pub enum CompactionContextError {
+    #[error("Invariant violation: {0}")]
+    InvariantViolation(&'static str),
 }
 
-impl CompactOrchestrator {
+impl ChromaError for CompactionContextError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CompactionContextError::InvariantViolation(_) => ErrorCodes::Internal,
+        }
+    }
+
+    fn should_trace_error(&self) -> bool {
+        match self {
+            CompactionContextError::InvariantViolation(_) => true,
+        }
+    }
+}
+
+impl CompactionContext {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        input_collection_id: CollectionUuid,
-        rebuild: bool,
+        is_rebuild: bool,
         fetch_log_batch_size: u32,
         max_compaction_size: usize,
         max_partition_size: usize,
@@ -345,70 +222,11 @@ impl CompactOrchestrator {
         hnsw_provider: HnswIndexProvider,
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
-        result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
     ) -> Self {
-        let context = OrchestratorContext::new(dispatcher);
-        let output_collection_cell = OnceCell::new();
-        // SAFETY(tanujnay112): We just created the OnceCell, so this should never fail
-        output_collection_cell.set(input_collection_id).unwrap();
-        CompactOrchestrator {
-            hnsw_index_uuid: None,
-            rebuild,
-            fetch_log_batch_size,
-            max_compaction_size,
-            max_partition_size,
-            context,
-            blockfile_provider,
-            log,
-            sysdb,
-            hnsw_provider,
-            spann_provider,
-            input_collection_id,
-            input_collection: OnceCell::new(),
-            input_segments: OnceCell::new(),
-            input_pulled_log_offset: 0,
-            output_collection_id: output_collection_cell,
-            output_collection: OnceCell::new(),
-            output_segments: OnceCell::new(),
-            output_pulled_log_offset: 0,
-            writers: OnceCell::new(),
-            flush_results: Vec::new(),
-            result_channel,
-            num_uncompleted_materialization_tasks: 0,
-            num_uncompleted_tasks_by_segment: HashMap::new(),
-            collection_logical_size_delta_bytes: 0,
-            state: ExecutionState::Pending,
-            total_records_post_compaction: 0,
-            num_materialized_logs: 0,
-            segment_spans: HashMap::new(),
-            metrics: CompactOrchestratorMetrics::default(),
-            schema: None,
-            attached_function_context: None,
-            heap_service: None,
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_for_attached_function(
-        input_collection_id: CollectionUuid,
-        rebuild: bool,
-        fetch_log_batch_size: u32,
-        max_compaction_size: usize,
-        max_partition_size: usize,
-        log: Log,
-        sysdb: SysDb,
-        heap_service: GrpcHeapService,
-        blockfile_provider: BlockfileProvider,
-        hnsw_provider: HnswIndexProvider,
-        spann_provider: SpannProvider,
-        dispatcher: ComponentHandle<Dispatcher>,
-        result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
-        task_uuid: AttachedFunctionUuid,
-        execution_nonce: NonceUuid,
-    ) -> Self {
-        let mut orchestrator = CompactOrchestrator::new(
-            input_collection_id,
-            rebuild,
+        let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
+        CompactionContext {
+            collection_info: OnceCell::new(),
+            is_rebuild,
             fetch_log_batch_size,
             max_compaction_size,
             max_partition_size,
@@ -418,372 +236,45 @@ impl CompactOrchestrator {
             hnsw_provider,
             spann_provider,
             dispatcher,
-            result_channel,
-        );
-        orchestrator.attached_function_context = Some(AttachedFunctionContext {
-            attached_function_id: task_uuid,
-            attached_function: None,
-            execution_nonce,
-        });
-        orchestrator.heap_service = Some(heap_service);
-        orchestrator
-    }
-
-    async fn try_purge_hnsw(path: &Path, hnsw_index_uuid: Option<IndexUuid>) {
-        if let Some(hnsw_index_uuid) = hnsw_index_uuid {
-            let _ = HnswIndexProvider::purge_one_id(path, hnsw_index_uuid).await;
+            orchestrator_context,
+            #[cfg(test)]
+            poison_offset: None,
         }
     }
 
-    async fn do_attached_function(
-        &mut self,
-        log_records: Chunk<LogRecord>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        // Get all needed data, cloning immediately to avoid borrow conflicts
-        let attached_function = match self.get_attached_function().cloned() {
-            Ok(t) => t,
-            Err(e) => {
-                self.terminate_with_result(Err(e), ctx).await;
-                return;
-            }
-        };
-
-        let output_collection = match self
-            .ok_or_terminate(self.get_output_collection(), ctx)
-            .await
-        {
-            Some(collection) => collection,
-            None => return,
-        };
-
-        let output_record_segment = match self
-            .ok_or_terminate(self.get_output_record_segment(), ctx)
-            .await
-        {
-            Some(segment) => segment,
-            None => return,
-        };
-
-        let output_collection_id = match self
-            .ok_or_terminate(self.get_output_collection_id(), ctx)
-            .await
-        {
-            Some(id) => id,
-            None => return,
-        };
-
-        let execute_attached_function_op =
-            match ExecuteAttachedFunctionOperator::from_attached_function(
-                &attached_function,
-                self.log.clone(),
-            ) {
-                Ok(op) => op,
-                Err(e) => {
-                    self.terminate_with_result(
-                        Err(CompactionError::ExecuteAttachedFunction(e)),
-                        ctx,
-                    )
-                    .await;
-                    return;
-                }
-            };
-
-        let execute_attached_function_input = ExecuteAttachedFunctionInput {
-            log_records,
-            tenant_id: output_collection.tenant.clone(),
-            output_collection_id,
-            completion_offset: attached_function.completion_offset,
-            output_record_segment,
-            blockfile_provider: self.blockfile_provider.clone(),
-        };
-
-        let task_msg = wrap(
-            Box::new(execute_attached_function_op),
-            execute_attached_function_input,
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-        self.send(task_msg, ctx, Some(Span::current())).await;
+    #[cfg(test)]
+    pub fn set_poison_offset(&mut self, offset: u32) {
+        self.poison_offset = Some(offset);
     }
 
-    async fn partition(
-        &mut self,
-        records: Chunk<LogRecord>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        self.state = ExecutionState::Partition;
-        let operator = PartitionOperator::new();
-        tracing::info!("Sending N Records: {:?}", records.len());
-        let input = PartitionInput::new(records, self.max_partition_size);
-        let task = wrap(
-            operator,
-            input,
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-        self.send(task, ctx, Some(Span::current())).await;
+    pub fn get_segment_writers(&self) -> Result<CompactWriters, CompactionContextError> {
+        self.get_collection_info()?.writers.clone().ok_or(
+            CompactionContextError::InvariantViolation("Segment writers should have been set"),
+        )
     }
 
-    async fn materialize_log(
-        &mut self,
-        partitions: Vec<Chunk<LogRecord>>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        self.state = ExecutionState::MaterializeApplyCommitFlush;
-
-        // NOTE: We allow writers to be uninitialized for the case when the materialized logs are empty
-        let record_reader = self
-            .get_segment_writers()
-            .ok()
-            .and_then(|writers| writers.record_reader);
-
-        let next_max_offset_id = Arc::new(
-            record_reader
-                .as_ref()
-                .map(|reader| AtomicU32::new(reader.get_max_offset_id() + 1))
-                .unwrap_or_default(),
-        );
-
-        if let Some(rr) = record_reader.as_ref() {
-            self.total_records_post_compaction = match rr.count().await {
-                Ok(count) => count as u64,
-                Err(err) => {
-                    return self
-                        .terminate_with_result(Err(CompactionError::CountError(err)), ctx)
-                        .await;
-                }
-            };
-        }
-
-        self.num_uncompleted_materialization_tasks = partitions.len();
-        for partition in partitions.iter() {
-            let operator = MaterializeLogOperator::new();
-            let input = MaterializeLogInput::new(
-                partition.clone(),
-                record_reader.clone(),
-                next_max_offset_id.clone(),
-            );
-            let task = wrap(
-                operator,
-                input,
-                ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
-            );
-            self.send(task, ctx, Some(Span::current())).await;
-        }
-    }
-
-    async fn dispatch_apply_log_to_segment_writer_tasks(
-        &mut self,
-        materialized_logs: MaterializeLogsResult,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        self.num_materialized_logs += materialized_logs.len() as u64;
-
-        let writers = match self.ok_or_terminate(self.get_segment_writers(), ctx).await {
-            Some(writers) => writers,
-            None => return,
-        };
-
-        {
-            self.num_uncompleted_tasks_by_segment
-                .entry(writers.record_writer.id)
-                .and_modify(|v| {
-                    *v += 1;
-                })
-                .or_insert(1);
-
-            let writer = ChromaSegmentWriter::RecordSegment(writers.record_writer);
-            let span = self.get_segment_writer_span(&writer);
-            let operator = ApplyLogToSegmentWriterOperator::new();
-            let input = ApplyLogToSegmentWriterInput::new(
-                writer,
-                materialized_logs.clone(),
-                writers.record_reader.clone(),
-                None,
-            );
-            let task = wrap(
-                operator,
-                input,
-                ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
-            );
-            let res = self.dispatcher().send(task, Some(span)).await;
-            if self.ok_or_terminate(res, ctx).await.is_none() {
-                return;
-            }
-        }
-
-        {
-            self.num_uncompleted_tasks_by_segment
-                .entry(writers.metadata_writer.id)
-                .and_modify(|v| {
-                    *v += 1;
-                })
-                .or_insert(1);
-
-            let writer = ChromaSegmentWriter::MetadataSegment(writers.metadata_writer);
-            let span = self.get_segment_writer_span(&writer);
-            let operator = ApplyLogToSegmentWriterOperator::new();
-            let input = ApplyLogToSegmentWriterInput::new(
-                writer,
-                materialized_logs.clone(),
-                writers.record_reader.clone(),
-                self.output_collection.get().and_then(|c| c.schema.clone()),
-            );
-            let task = wrap(
-                operator,
-                input,
-                ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
-            );
-            let res = self.dispatcher().send(task, Some(span)).await;
-            if self.ok_or_terminate(res, ctx).await.is_none() {
-                return;
-            }
-        }
-
-        {
-            self.num_uncompleted_tasks_by_segment
-                .entry(writers.vector_writer.get_id())
-                .and_modify(|v| {
-                    *v += 1;
-                })
-                .or_insert(1);
-
-            let writer = ChromaSegmentWriter::VectorSegment(writers.vector_writer);
-            let span = self.get_segment_writer_span(&writer);
-            let operator = ApplyLogToSegmentWriterOperator::new();
-            let input = ApplyLogToSegmentWriterInput::new(
-                writer,
-                materialized_logs,
-                writers.record_reader,
-                None,
-            );
-            let task = wrap(
-                operator,
-                input,
-                ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
-            );
-            let res = self.dispatcher().send(task, Some(span)).await;
-            self.ok_or_terminate(res, ctx).await;
-        }
-    }
-
-    async fn dispatch_segment_writer_commit(
-        &mut self,
-        segment_writer: ChromaSegmentWriter<'static>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        let span = self.get_segment_writer_span(&segment_writer);
-        let operator = CommitSegmentWriterOperator::new();
-        let input = CommitSegmentWriterInput::new(segment_writer);
-        let task = wrap(
-            operator,
-            input,
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-        let res = self.dispatcher().send(task, Some(span)).await;
-        self.ok_or_terminate(res, ctx).await;
-    }
-
-    async fn dispatch_segment_flush(
-        &mut self,
-        segment_flusher: ChromaSegmentFlusher,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        let span = self.get_segment_flusher_span(&segment_flusher);
-        let operator = FlushSegmentWriterOperator::new();
-        let input = FlushSegmentWriterInput::new(segment_flusher);
-        let task = wrap(
-            operator,
-            input,
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-        let res = self.dispatcher().send(task, Some(span)).await;
-        self.ok_or_terminate(res, ctx).await;
-    }
-
-    async fn register(&mut self, ctx: &ComponentContext<CompactOrchestrator>) {
-        self.metrics
-            .total_logs_applied_flushed
-            .add(self.num_materialized_logs, &[]);
-
-        self.state = ExecutionState::Register;
-        // Register uses OUTPUT collection
-        let collection_cell =
-            self.output_collection
-                .get()
-                .cloned()
-                .ok_or(CompactionError::InvariantViolation(
-                    "Output collection information should have been obtained",
-                ));
-        let collection = match self.ok_or_terminate(collection_cell, ctx).await {
-            Some(collection) => collection,
-            None => return,
-        };
-        let collection_logical_size_bytes = if self.rebuild {
-            match u64::try_from(self.collection_logical_size_delta_bytes) {
-                Ok(size_bytes) => size_bytes,
-                _ => {
-                    self.terminate_with_result(
-                        Err(CompactionError::InvariantViolation(
-                            "The collection size delta after rebuild should be non-negative",
-                        )),
-                        ctx,
-                    )
-                    .await;
-                    return;
-                }
-            }
-        } else {
-            collection
-                .size_bytes_post_compaction
-                .saturating_add_signed(self.collection_logical_size_delta_bytes)
-        };
-
-        let operator = RegisterOperator::new();
-        let input = RegisterInput::new(
-            collection.tenant,
-            collection.collection_id,
-            self.output_pulled_log_offset,
-            collection.version,
-            self.flush_results.clone().into(),
-            self.total_records_post_compaction,
-            collection_logical_size_bytes,
-            self.sysdb.clone(),
-            self.log.clone(),
-            self.schema.clone(),
-            self.attached_function_context.clone(),
-            self.input_pulled_log_offset,
-        );
-
-        let task = wrap(
-            operator,
-            input,
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-        self.send(task, ctx, Some(Span::current())).await;
-    }
-
-    fn get_segment_writers(&self) -> Result<CompactWriters, CompactionError> {
-        self.writers
+    pub fn get_collection_info(&self) -> Result<&CollectionCompactInfo, CompactionContextError> {
+        self.collection_info
             .get()
-            .cloned()
-            .ok_or(CompactionError::InvariantViolation(
-                "Segment writers should have been set",
+            .ok_or(CompactionContextError::InvariantViolation(
+                "Collection info should have been set",
             ))
     }
 
-    async fn get_segment_writer_by_id(
+    pub fn get_collection_info_mut(
         &mut self,
+    ) -> Result<&mut CollectionCompactInfo, CompactionContextError> {
+        self.collection_info
+            .get_mut()
+            .ok_or(CompactionContextError::InvariantViolation(
+                "Collection info mut should have been set",
+            ))
+    }
+
+    pub fn get_segment_writer_by_id(
+        &self,
         segment_id: SegmentUuid,
-    ) -> Result<ChromaSegmentWriter<'static>, CompactionError> {
+    ) -> Result<ChromaSegmentWriter<'static>, CompactionContextError> {
         let writers = self.get_segment_writers()?;
 
         if writers.metadata_writer.id == segment_id {
@@ -800,1084 +291,338 @@ impl CompactOrchestrator {
             return Ok(ChromaSegmentWriter::VectorSegment(writers.vector_writer));
         }
 
-        Err(CompactionError::InvariantViolation(
+        Err(CompactionContextError::InvariantViolation(
             "Segment id should match one of the writer segment id",
         ))
     }
 
-    fn get_segment_writer_span(&mut self, writer: &ChromaSegmentWriter) -> Span {
-        let span = self
-            .segment_spans
-            .entry(writer.get_id())
-            .or_insert_with(|| {
-                tracing::span!(
-                    tracing::Level::INFO,
-                    "Segment",
-                    otel.name = format!("Segment: {:?}", writer.get_name())
-                )
-            });
-        span.clone()
+    pub(crate) async fn run_get_logs(
+        &mut self,
+        collection_id: CollectionUuid,
+        system: System,
+    ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
+        let log_fetch_orchestrator = LogFetchOrchestrator::new(
+            collection_id,
+            self.is_rebuild,
+            self.fetch_log_batch_size,
+            self.max_compaction_size,
+            self.max_partition_size,
+            self.log.clone(),
+            self.sysdb.clone(),
+            self.blockfile_provider.clone(),
+            self.hnsw_provider.clone(),
+            self.spann_provider.clone(),
+            self.dispatcher.clone(),
+        );
+
+        let log_fetch_response = match log_fetch_orchestrator.run(system.clone()).await {
+            Ok(response) => response,
+            Err(e) => {
+                if e.should_trace_error() {
+                    tracing::error!("Data fetch phase failed: {e}");
+                }
+                return Err(e);
+            }
+        };
+
+        match log_fetch_response {
+            LogFetchOrchestratorResponse::Success(success) => {
+                let materialized = success.materialized;
+                let collection_info = success.collection_info;
+
+                self.collection_info
+                    .set(collection_info.clone())
+                    .map_err(|_| {
+                        CompactionContextError::InvariantViolation("Collection info already set")
+                    })?;
+
+                Ok(Success::new(materialized, collection_info.clone()).into())
+            }
+            LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(repair) => Ok(
+                RequireCompactionOffsetRepair::new(repair.job_id, repair.witnessed_offset_in_sysdb)
+                    .into(),
+            ),
+        }
     }
 
-    fn get_segment_flusher_span(&mut self, flusher: &ChromaSegmentFlusher) -> Span {
-        match self.segment_spans.get(&flusher.get_id()) {
-            Some(span) => span.clone(),
-            None => {
-                tracing::error!(
-                    "No span found for segment: {:?}. This should never happen because get_segment_writer_span() should have previously created a span.",
-                    flusher.get_name()
-                );
-                Span::current()
+    pub(crate) async fn run_apply_logs(
+        &mut self,
+        log_fetch_records: Vec<MaterializeLogOutput>,
+        system: System,
+    ) -> Result<ApplyLogsOrchestratorResponse, ApplyLogsOrchestratorError> {
+        let collection_info = self.get_collection_info()?;
+        if log_fetch_records.is_empty() {
+            return Ok(ApplyLogsOrchestratorResponse::new_with_empty_results(
+                collection_info.collection_id.into(),
+                collection_info,
+            ));
+        }
+
+        // INVARIANT: Every element of log_fetch_records should be non-empty
+        for mat_logs in &log_fetch_records {
+            if mat_logs.result.is_empty() {
+                return Err(ApplyLogsOrchestratorError::InvariantViolation(
+                    "Every element of log_fetch_records should be non-empty",
+                ));
+            }
+        }
+
+        let apply_logs_orchestrator = ApplyLogsOrchestrator::new(self, Some(log_fetch_records));
+
+        let apply_logs_response = match apply_logs_orchestrator.run(system).await {
+            Ok(response) => response,
+            Err(e) => {
+                if e.should_trace_error() {
+                    tracing::error!("Apply data phase failed: {e}");
+                }
+                return Err(e);
+            }
+        };
+
+        let collection_info = self.collection_info.get_mut().ok_or(
+            ApplyLogsOrchestratorError::InvariantViolation("Collection info should have been set"),
+        )?;
+        collection_info.schema = apply_logs_response.schema.clone();
+        collection_info.collection.total_records_post_compaction =
+            apply_logs_response.total_records_post_compaction;
+
+        Ok(apply_logs_response)
+    }
+
+    pub(crate) async fn run_register(
+        &mut self,
+        flush_results: Vec<SegmentFlushInfo>,
+        collection_logical_size_bytes: u64,
+        system: System,
+    ) -> Result<RegisterOrchestratorResponse, RegisterOrchestratorError> {
+        let dispatcher = self.dispatcher.clone();
+        let register_orchestrator = RegisterOrchestrator::new(
+            self,
+            dispatcher,
+            flush_results,
+            collection_logical_size_bytes,
+        );
+
+        match register_orchestrator.run(system).await {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                if e.should_trace_error() {
+                    tracing::error!("Register phase failed: {e}");
+                }
+                Err(e)
             }
         }
     }
 
-    /// Get attached_function_context or return error
-    fn get_attached_function_context(&self) -> Result<&AttachedFunctionContext, CompactionError> {
-        self.attached_function_context
-            .as_ref()
-            .ok_or(CompactionError::InvariantViolation(
-                "Attached function context should be set for attached-function-based compaction",
-            ))
-    }
-
-    /// Get mutable attached_function_context or return error
-    fn get_attached_function_context_mut(
+    pub(crate) async fn run_compaction(
         &mut self,
-    ) -> Result<&mut AttachedFunctionContext, CompactionError> {
-        self.attached_function_context
-            .as_mut()
-            .ok_or(CompactionError::InvariantViolation(
-                "Attached function context should be set for attached-function-based compaction",
-            ))
-    }
+        collection_id: CollectionUuid,
+        system: System,
+    ) -> Result<CompactionResponse, CompactionError> {
+        let result = self.run_get_logs(collection_id, system.clone()).await?;
 
-    /// Get attached function from attached_function_context or return error
-    fn get_attached_function(&self) -> Result<&AttachedFunction, CompactionError> {
-        let attached_function_context = self.get_attached_function_context()?;
-        attached_function_context.attached_function.as_ref().ok_or(
-            CompactionError::InvariantViolation(
-                "Attached Function should be populated by PrepareAttachedFunction",
-            ),
-        )
-    }
+        let (log_fetch_records, _) = match result {
+            LogFetchOrchestratorResponse::Success(success) => {
+                (success.materialized, success.collection_info)
+            }
+            LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(repair) => {
+                return Ok(CompactionResponse::RequireCompactionOffsetRepair {
+                    job_id: repair.job_id,
+                    witnessed_offset_in_sysdb: repair.witnessed_offset_in_sysdb,
+                });
+            }
+        };
 
-    /// Get output_collection or return error
-    fn get_output_collection(&self) -> Result<Collection, CompactionError> {
-        self.output_collection
-            .get()
-            .cloned()
-            .ok_or(CompactionError::InvariantViolation(
-                "Output collection should be set",
-            ))
-    }
+        let apply_logs_response = self
+            .run_apply_logs(log_fetch_records, system.clone())
+            .await?;
 
-    /// Get output_collection_id or return error
-    fn get_output_collection_id(&self) -> Result<CollectionUuid, CompactionError> {
-        self.output_collection_id
-            .get()
-            .copied()
-            .ok_or(CompactionError::InvariantViolation(
-                "Output collection ID should be set",
-            ))
-    }
-
-    /// Set input_pulled_log_offset to the given position.
-    /// For regular compaction (input == output), also updates output_pulled_log_offset.
-    /// For task compaction (input != output), output collection keeps its own log position.
-    fn set_input_log_offset(&mut self, log_offset: i64) {
-        self.input_pulled_log_offset = log_offset;
-        // Only update output offset if input and output are the same collection
-        if Some(self.input_collection_id) == self.output_collection_id.get().copied() {
-            self.output_pulled_log_offset = log_offset;
+        // Invariant: flush_results is empty => collection_logical_size_bytes == collection_info.collection.size_bytes_post_compaction
+        if apply_logs_response.flush_results.is_empty()
+            && apply_logs_response.collection_logical_size_bytes
+                != self
+                    .get_collection_info()?
+                    .collection
+                    .size_bytes_post_compaction
+        {
+            return Err(CompactionError::InvariantViolation(
+                "Collection logical size bytes should be equal to whatever it started with",
+            ));
         }
+
+        let _ = Box::pin(self.run_register(
+            apply_logs_response.flush_results,
+            apply_logs_response.collection_logical_size_bytes,
+            system.clone(),
+        ))
+        .await?;
+
+        Ok(CompactionResponse::Success {
+            job_id: collection_id.into(),
+        })
     }
 
-    /// Get output_segments or return error
-    fn get_output_segments(&self) -> Result<Vec<Segment>, CompactionError> {
-        self.output_segments
-            .get()
-            .cloned()
-            .ok_or(CompactionError::InvariantViolation(
-                "Output segments should be set",
-            ))
-    }
-
-    /// Get output record segment or return error
-    fn get_output_record_segment(&self) -> Result<Segment, CompactionError> {
-        let segments = self.get_output_segments()?;
-        segments
-            .iter()
-            .find(|s| s.r#type == SegmentType::BlockfileRecord)
-            .cloned()
-            .ok_or(CompactionError::InvariantViolation(
-                "Output record segment should exist",
-            ))
-    }
-
-    /// Get input_collection or return error
-    fn get_input_collection(&self) -> Result<Collection, CompactionError> {
-        self.input_collection
-            .get()
-            .cloned()
-            .ok_or(CompactionError::InvariantViolation(
-                "Input collection should be set",
-            ))
+    pub(crate) async fn cleanup(self) {
+        if let Some(collection_info) = self.collection_info.get() {
+            if let Some(hnsw_index_uuid) = collection_info.hnsw_index_uuid {
+                let _ = HnswIndexProvider::purge_one_id(
+                    self.hnsw_provider.temporary_storage_path.as_path(),
+                    hnsw_index_uuid,
+                )
+                .await;
+            }
+        }
     }
 }
 
 // ============== Component Implementation ==============
-
-#[async_trait]
-impl Orchestrator for CompactOrchestrator {
-    type Output = CompactionResponse;
-    type Error = CompactionError;
-
-    fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.context.dispatcher.clone()
-    }
-
-    fn context(&self) -> &OrchestratorContext {
-        &self.context
-    }
-
-    async fn initial_tasks(
-        &mut self,
-        ctx: &ComponentContext<Self>,
-    ) -> Vec<(TaskMessage, Option<Span>)> {
-        // For attached-function-based compaction, start with PrepareAttachedFunction to fetch the attached function
-        if let Some(attached_function_context) = self.attached_function_context.as_ref() {
-            return vec![(
-                wrap(
-                    Box::new(PrepareAttachedFunctionOperator {
-                        sysdb: self.sysdb.clone(),
-                        log: self.log.clone(),
-                        attached_function_uuid: attached_function_context.attached_function_id,
-                    }),
-                    PrepareAttachedFunctionInput {
-                        nonce: attached_function_context.execution_nonce,
-                    },
-                    ctx.receiver(),
-                    self.context.task_cancellation_token.clone(),
-                ),
-                Some(Span::current()),
-            )];
-        }
-
-        // For non-task compaction, start with GetCollectionAndSegments
-        vec![(
-            wrap(
-                Box::new(GetCollectionAndSegmentsOperator {
-                    sysdb: self.sysdb.clone(),
-                    input_collection_id: self.input_collection_id,
-                    // In legacy compaction mode, input_collection_id == output_collection_id
-                    output_collection_id: self.input_collection_id,
-                }),
-                (),
-                ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
-            ),
-            Some(Span::current()),
-        )]
-    }
-
-    fn set_result_channel(&mut self, sender: Sender<Result<CompactionResponse, CompactionError>>) {
-        self.result_channel = Some(sender)
-    }
-
-    fn take_result_channel(
-        &mut self,
-    ) -> Option<Sender<Result<CompactionResponse, CompactionError>>> {
-        self.result_channel.take()
-    }
-
-    async fn cleanup(&mut self) {
-        Self::try_purge_hnsw(
-            &self.hnsw_provider.temporary_storage_path,
-            self.hnsw_index_uuid,
-        )
-        .await
-    }
+#[derive(Debug)]
+pub enum CompactionResponse {
+    Success {
+        job_id: JobId,
+    },
+    RequireCompactionOffsetRepair {
+        job_id: JobId,
+        witnessed_offset_in_sysdb: i64,
+    },
 }
 
-// ============== Handlers ==============
-#[async_trait]
-impl Handler<TaskResult<PrepareAttachedFunctionOutput, PrepareAttachedFunctionError>>
-    for CompactOrchestrator
-{
-    type Result = ();
+#[allow(clippy::too_many_arguments)]
+pub async fn compact(
+    system: System,
+    collection_id: CollectionUuid,
+    is_rebuild: bool,
+    fetch_log_batch_size: u32,
+    max_compaction_size: usize,
+    max_partition_size: usize,
+    log: Log,
+    sysdb: SysDb,
+    blockfile_provider: BlockfileProvider,
+    hnsw_index_provider: HnswIndexProvider,
+    spann_provider: SpannProvider,
+    dispatcher: ComponentHandle<Dispatcher>,
+    #[cfg(test)] poison_offset: Option<u32>,
+) -> Result<CompactionResponse, CompactionError> {
+    let mut compaction_context = CompactionContext::new(
+        is_rebuild,
+        fetch_log_batch_size,
+        max_compaction_size,
+        max_partition_size,
+        log.clone(),
+        sysdb.clone(),
+        blockfile_provider.clone(),
+        hnsw_index_provider.clone(),
+        spann_provider.clone(),
+        dispatcher.clone(),
+    );
 
-    async fn handle(
-        &mut self,
-        message: TaskResult<PrepareAttachedFunctionOutput, PrepareAttachedFunctionError>,
-        ctx: &ComponentContext<Self>,
-    ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(output) => output,
-            None => return,
-        };
-
-        tracing::info!(
-            "[CompactOrchestrator] PrepareAttachedFunction completed, attached_function_id={}, execution_nonce={}",
-            output.attached_function.id.0,
-            output.execution_nonce
-        );
-
-        // Store the task and execution_nonce in attached_function_context
-        let attached_function_context = match self.get_attached_function_context_mut() {
-            Ok(tc) => tc,
-            Err(e) => {
-                self.terminate_with_result(Err(e), ctx).await;
-                return;
-            }
-        };
-        attached_function_context.attached_function = Some(output.attached_function.clone());
-        attached_function_context.execution_nonce = output.execution_nonce;
-        self.output_collection_id = output.output_collection_id.into();
-
-        if output.should_skip_execution {
-            let Some(heap_service) = self.heap_service.clone() else {
-                self.terminate_with_result(
-                    Err(CompactionError::InvariantViolation(
-                        "Heap service not initialized",
-                    )),
-                    ctx,
-                )
-                .await;
-                return;
-            };
-
-            // Proceed to FinishAttachedFunction
-            let task = wrap(
-                FinishAttachedFunctionOperator::new(
-                    self.log.clone(),
-                    self.sysdb.clone(),
-                    heap_service,
-                ),
-                FinishAttachedFunctionInput::new(output.attached_function),
-                ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
-            );
-            self.send(task, ctx, Some(Span::current())).await;
-            return;
-        }
-
-        // Proceed to GetCollectionAndSegments
-        let task = wrap(
-            Box::new(GetCollectionAndSegmentsOperator {
-                sysdb: self.sysdb.clone(),
-                input_collection_id: self.input_collection_id,
-                output_collection_id: output.output_collection_id,
-            }),
-            (),
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-        self.send(task, ctx, Some(Span::current())).await;
+    #[cfg(test)]
+    if let Some(poison_offset) = poison_offset {
+        compaction_context.set_poison_offset(poison_offset);
     }
-}
 
-#[async_trait]
-impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegmentsError>>
-    for CompactOrchestrator
-{
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegmentsError>,
-        ctx: &ComponentContext<Self>,
-    ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(output) => output,
-            None => return,
-        };
-
-        // Store input collection and segments
-        let mut input_collection = output.input.collection.clone();
-        if self.input_collection.set(input_collection.clone()).is_err() {
-            self.terminate_with_result(
-                Err(CompactionError::InvariantViolation(
-                    "Input collection information should not have been initialized",
-                )),
-                ctx,
-            )
-            .await;
-            return;
-        }
-        self.schema = input_collection.schema.clone();
-        // Create input segments vec from individual segment fields
-        let input_segments = vec![
-            output.input.metadata_segment.clone(),
-            output.input.record_segment.clone(),
-            output.input.vector_segment.clone(),
-        ];
-        if self.input_segments.set(input_segments).is_err() {
-            self.terminate_with_result(
-                Err(CompactionError::InvariantViolation(
-                    "Input segments should not have been initialized",
-                )),
-                ctx,
-            )
-            .await;
-            return;
-        }
-
-        // Store output collection
-        let output_collection = output.output.collection.clone();
-        if self
-            .output_collection
-            .set(output_collection.clone())
-            .is_err()
-        {
-            self.terminate_with_result(
-                Err(CompactionError::InvariantViolation(
-                    "Output collection information should not have been initialized",
-                )),
-                ctx,
-            )
-            .await;
-            return;
-        }
-
-        // Initialize output_pulled_log_offset from OUTPUT collection's log position
-        self.output_pulled_log_offset = output_collection.log_position;
-
-        // Create output segments vec from individual segment fields
-        let output_segments = vec![
-            output.output.metadata_segment.clone(),
-            output.output.record_segment.clone(),
-            output.output.vector_segment.clone(),
-        ];
-        if self.output_segments.set(output_segments).is_err() {
-            self.terminate_with_result(
-                Err(CompactionError::InvariantViolation(
-                    "Output segments should not have been initialized",
-                )),
-                ctx,
-            )
-            .await;
-            return;
-        }
-
-        // TODO(tanujnay112): move this somewhere cleaner
-        if let Some(attached_function_context) = &self.attached_function_context {
-            let Some(attached_function) = &attached_function_context.attached_function else {
-                self.terminate_with_result(
-                    Err(CompactionError::InvariantViolation(
-                        " Attached Function should not have been initialized",
-                    )),
-                    ctx,
-                )
-                .await;
-                return;
-            };
-
-            let result: i64 = match attached_function.completion_offset.try_into() {
-                Ok(value) => value,
-                Err(_) => {
-                    self.terminate_with_result(
-                        Err(CompactionError::InvariantViolation(
-                            "Completion offset does not fit into an i64",
-                        )),
-                        ctx,
-                    )
-                    .await;
-                    return;
-                }
-            };
-            input_collection.log_position = result;
-        }
-
-        // Initialize input_pulled_log_offset from INPUT collection's log position (last compacted offset)
-        self.input_pulled_log_offset = input_collection.log_position;
-
-        // Create record reader from INPUT segments (for reading existing data)
-        let input_record_reader = match self
-            .ok_or_terminate(
-                match Box::pin(RecordSegmentReader::from_segment(
-                    &output.input.record_segment,
-                    &self.blockfile_provider,
-                ))
-                .await
-                {
-                    Ok(reader) => Ok(Some(reader)),
-                    Err(err) => match *err {
-                        RecordSegmentReaderCreationError::UninitializedSegment => Ok(None),
-                        _ => Err(*err),
-                    },
-                },
-                ctx,
-            )
-            .await
-        {
-            Some(reader) => reader,
-            None => return,
-        };
-
-        let log_task = match self.rebuild || self.attached_function_context.is_some() {
-            true => wrap(
-                Box::new(SourceRecordSegmentOperator {}),
-                SourceRecordSegmentInput {
-                    record_segment_reader: input_record_reader.clone(),
-                },
-                ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
-            ),
-            false => wrap(
-                Box::new(FetchLogOperator {
-                    log_client: self.log.clone(),
-                    batch_size: self.fetch_log_batch_size,
-                    // We need to start fetching from the first log that has not been compacted from INPUT collection
-                    start_log_offset_id: u64::try_from(input_collection.log_position + 1)
-                        .unwrap_or_default(),
-                    maximum_fetch_count: Some(self.max_compaction_size as u32),
-                    collection_uuid: self.input_collection_id, // Fetch logs from INPUT collection
-                    tenant: input_collection.tenant.clone(),
-                }),
-                (),
-                ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
-            ),
-        };
-
-        // Check dimension from OUTPUT collection (writers will be for output)
-        let dimension = match output_collection.dimension {
-            Some(dim) => dim as usize,
-            None => {
-                // Collection is not yet initialized, there is no need to initialize the writers
-                // Future handlers should return early on empty materialized logs without using writers
-                self.send(log_task, ctx, Some(Span::current())).await;
-                return;
-            }
-        };
-
-        // Create writers from OUTPUT collection segments
-        let mut metadata_segment = output.output.metadata_segment.clone();
-        let mut record_segment = output.output.record_segment.clone();
-        let mut vector_segment = output.output.vector_segment.clone();
-        if self.rebuild {
-            // Reset the metadata and vector segments by purging the file paths
-            metadata_segment.file_path = Default::default();
-            record_segment.file_path = Default::default();
-            vector_segment.file_path = Default::default();
-        }
-
-        let record_writer = match self
-            .ok_or_terminate(
-                RecordSegmentWriter::from_segment(
-                    &output_collection.tenant,
-                    &output_collection.database_id,
-                    &record_segment,
-                    &self.blockfile_provider,
-                )
-                .await,
-                ctx,
-            )
-            .await
-        {
-            Some(writer) => writer,
-            None => return,
-        };
-        let metadata_writer = match self
-            .ok_or_terminate(
-                MetadataSegmentWriter::from_segment(
-                    &output_collection.tenant,
-                    &output_collection.database_id,
-                    &metadata_segment,
-                    &self.blockfile_provider,
-                )
-                .await,
-                ctx,
-            )
-            .await
-        {
-            Some(writer) => writer,
-            None => return,
-        };
-        let (hnsw_index_uuid, vector_writer, is_vector_segment_spann) = match vector_segment.r#type
-        {
-            SegmentType::Spann => match self
-                .ok_or_terminate(
-                    self.spann_provider
-                        .write(&output_collection, &vector_segment, dimension)
-                        .await,
-                    ctx,
-                )
-                .await
-            {
-                Some(writer) => (
-                    writer.hnsw_index_uuid(),
-                    VectorSegmentWriter::Spann(writer),
-                    true,
-                ),
-                None => return,
-            },
-            _ => match self
-                .ok_or_terminate(
-                    DistributedHNSWSegmentWriter::from_segment(
-                        &output_collection,
-                        &vector_segment,
-                        dimension,
-                        self.hnsw_provider.clone(),
-                    )
-                    .await
-                    .map_err(|err| *err),
-                    ctx,
-                )
-                .await
-            {
-                Some(writer) => (
-                    writer.index_uuid(),
-                    VectorSegmentWriter::Hnsw(writer),
-                    false,
-                ),
-                None => return,
-            },
-        };
-
-        let mut output_record_reader = input_record_reader.clone();
-
-        if output_collection.collection_id != input_collection.collection_id {
-            output_record_reader = match self
-                .ok_or_terminate(
-                    match Box::pin(RecordSegmentReader::from_segment(
-                        &output.output.record_segment,
-                        &self.blockfile_provider,
-                    ))
-                    .await
-                    {
-                        Ok(reader) => Ok(Some(reader)),
-                        Err(err) => match *err {
-                            RecordSegmentReaderCreationError::UninitializedSegment => Ok(None),
-                            _ => Err(*err),
-                        },
-                    },
-                    ctx,
-                )
-                .await
-            {
-                Some(reader) => reader,
-                None => return,
-            };
-        }
-        let writers = CompactWriters {
-            record_reader: output_record_reader.clone().filter(|_| !self.rebuild),
-            metadata_writer,
-            record_writer,
-            vector_writer,
-        };
-
-        if self.writers.set(writers).is_err() {
-            self.terminate_with_result(
-                Err(CompactionError::InvariantViolation(
-                    "Segment writers should not have been initialized",
-                )),
-                ctx,
-            )
-            .await;
-            return;
-        }
-
-        self.hnsw_index_uuid = Some(hnsw_index_uuid);
-
-        // Prefetch segments (OUTPUT segments where we write to)
-        let prefetch_segments = match self.rebuild {
-            true => vec![output.output.record_segment],
-            false => {
-                let mut segments =
-                    vec![output.output.metadata_segment, output.output.record_segment];
-                if is_vector_segment_spann {
-                    segments.push(output.output.vector_segment);
-                }
-                segments
-            }
-        };
-        for segment in prefetch_segments {
-            let segment_id = segment.id;
-            let prefetch_task = wrap(
-                Box::new(PrefetchSegmentOperator::new()),
-                PrefetchSegmentInput::new(segment, self.blockfile_provider.clone()),
-                ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
-            );
-
-            // Prefetch task is detached from the orchestrator
-            let prefetch_span =
-                tracing::info_span!(parent: None, "Prefetch segment", segment_id = %segment_id);
-            Span::current().add_link(prefetch_span.context().span().span_context().clone());
-
-            self.send(prefetch_task, ctx, Some(prefetch_span)).await;
-        }
-
-        self.send(log_task, ctx, Some(Span::current())).await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for CompactOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        self.ok_or_terminate(message.into_inner(), ctx).await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<FetchLogOutput, FetchLogError>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(recs) => recs,
-            None => {
-                tracing::info!("cancelled fetch log task");
-                return;
-            }
-        };
-        tracing::info!("Pulled Records: {}", output.len());
-        match output.iter().last() {
-            Some((rec, _)) => {
-                self.set_input_log_offset(rec.log_offset);
-                tracing::info!(
-                    "Pulled Logs Up To Offset: {:?}",
-                    self.input_pulled_log_offset
-                );
-            }
-            None => {
-                tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behing the sysdb.");
-                if let Some(collection) = self.input_collection.get() {
-                    self.terminate_with_result(
-                        Ok(CompactionResponse::RequireCompactionOffsetRepair {
-                            collection_id: collection.collection_id,
-                            witnessed_offset_in_sysdb: collection.log_position,
-                        }),
-                        ctx,
-                    )
-                    .await;
-                } else {
-                    self.terminate_with_result(
-                        Err(CompactionError::InvariantViolation(
-                            "self.input_collection not set",
-                        )),
-                        ctx,
-                    )
-                    .await;
-                }
-                return;
-            }
-        }
-
-        // For attached-function-based compaction, call ExecuteAttachedFunction to run attached function logic
-        if self.attached_function_context.is_some() {
-            self.do_attached_function(output, ctx).await;
-        } else {
-            // For regular compaction, go directly to partition
-            self.partition(output, ctx).await;
-        }
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<ExecuteAttachedFunctionOutput, ExecuteAttachedFunctionError>>
-    for CompactOrchestrator
-{
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<ExecuteAttachedFunctionOutput, ExecuteAttachedFunctionError>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(output) => output,
-            None => return,
-        };
-
-        tracing::info!(
-            "[CompactOrchestrator] ExecuteAttachedFunction completed. Processed {} records",
-            output.records_processed
-        );
-
-        // Proceed to partition the output records from the task
-        self.partition(output.output_records, ctx).await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
-    for CompactOrchestrator
-{
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(output) => output,
-            None => return,
-        };
-        tracing::info!("Sourced Records: {}", output.len());
-        // Each record should corresond to a log
-        self.total_records_post_compaction = output.len() as u64;
-        if output.is_empty() && self.attached_function_context.is_none() {
-            self.register(ctx).await;
-        } else if self.attached_function_context.is_some() {
-            let input_collection =
-                match self.ok_or_terminate(self.get_input_collection(), ctx).await {
-                    Some(collection) => collection,
-                    None => return,
-                };
-            self.set_input_log_offset(input_collection.log_position);
-            self.do_attached_function(output, ctx).await;
-        } else {
-            self.partition(output, ctx).await;
-        }
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<PartitionOutput, PartitionError>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(recs) => recs.records,
-            None => return,
-        };
-        self.materialize_log(output, ctx).await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
-    for CompactOrchestrator
-{
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(res) => res,
-            None => return,
-        };
-
-        if output.result.is_empty() {
-            // We check the number of remaining materialization tasks to prevent a race condition
-            if self.num_uncompleted_materialization_tasks == 1
-                && self.num_uncompleted_tasks_by_segment.is_empty()
-            {
-                // There is nothing to flush, proceed to register
-                self.register(ctx).await;
-            }
-        } else {
-            self.collection_logical_size_delta_bytes += output.collection_logical_size_delta;
-            Box::pin(self.dispatch_apply_log_to_segment_writer_tasks(output.result, ctx)).await;
-        }
-
-        self.num_uncompleted_materialization_tasks -= 1;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>>
-    for CompactOrchestrator
-{
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        let message = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(message) => message,
-            None => return,
-        };
-
-        if message.segment_type == "MetadataSegmentWriter" {
-            if let Some(update) = message.schema_update {
-                match self.schema.take() {
-                    Some(existing) => match existing.merge(&update) {
-                        Ok(merged) => {
-                            self.schema = Some(merged);
-                        }
-                        Err(err) => {
-                            let err = CompactionError::ApplyLog(
-                                ApplyLogToSegmentWriterOperatorError::ApplyMaterializedLogsError(
-                                    ApplyMaterializedLogError::Schema(err),
-                                ),
-                            );
-                            self.terminate_with_result(Err(err), ctx).await;
-                            return;
-                        }
-                    },
-                    None => {
-                        let err = CompactionError::ApplyLog(
-                            ApplyLogToSegmentWriterOperatorError::ApplyMaterializedLogsError(
-                                ApplyMaterializedLogError::Schema(SchemaError::InvalidSchema {
-                                    reason: "schema not found".to_string(),
-                                }),
-                            ),
-                        );
-                        self.terminate_with_result(Err(err), ctx).await;
-                        return;
-                    }
-                }
-            }
-        }
-        self.num_uncompleted_tasks_by_segment
-            .entry(message.segment_id)
-            .and_modify(|v| {
-                *v -= 1;
-            });
-
-        let num_tasks_left = {
-            let num_tasks_left = self
-                .num_uncompleted_tasks_by_segment
-                .get(&message.segment_id)
-                .ok_or(CompactionError::InvariantViolation(
-                    "Invariant violation: segment writer task count not found",
-                ))
-                .cloned();
-            match self.ok_or_terminate(num_tasks_left, ctx).await {
-                Some(num_tasks_left) => num_tasks_left,
-                None => return,
-            }
-        };
-
-        if num_tasks_left == 0 && self.num_uncompleted_materialization_tasks == 0 {
-            let segment_writer = self.get_segment_writer_by_id(message.segment_id).await;
-            let segment_writer = match self.ok_or_terminate(segment_writer, ctx).await {
-                Some(writer) => writer,
-                None => return,
-            };
-
-            self.dispatch_segment_writer_commit(segment_writer, ctx)
-                .await;
-        }
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>>
-    for CompactOrchestrator
-{
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        let message = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(message) => message,
-            None => return,
-        };
-
-        // If the flusher recieved is a record segment flusher, get the number of keys for the blockfile and set it on the orchestrator
-        if let ChromaSegmentFlusher::RecordSegment(record_segment_flusher) = &message.flusher {
-            self.total_records_post_compaction = record_segment_flusher.count();
-        }
-
-        self.dispatch_segment_flush(message.flusher, ctx).await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>>
-    for CompactOrchestrator
-{
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        let message = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(message) => message,
-            None => return,
-        };
-
-        let segment_id = message.flush_info.segment_id;
-
-        // Drops the span so that the end timestamp is accurate
-        let _ = self.segment_spans.remove(&segment_id);
-
-        self.flush_results.push(message.flush_info);
-        self.num_uncompleted_tasks_by_segment.remove(&segment_id);
-
-        if self.num_uncompleted_tasks_by_segment.is_empty() {
-            self.register(ctx).await;
-        }
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<FinishAttachedFunctionOutput, FinishAttachedFunctionError>>
-    for CompactOrchestrator
-{
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<FinishAttachedFunctionOutput, FinishAttachedFunctionError>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        self.state = ExecutionState::FinishAttachedFunction;
-        let _finish_output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(output) => output,
-            None => return,
-        };
-
-        let output_collection_id = match self.get_output_collection_id() {
-            Ok(id) => id,
-            Err(e) => {
-                self.terminate_with_result(Err(e), ctx).await;
-                return;
-            }
-        };
-
-        let attached_function_id = match self
-            .get_attached_function_context()
-            .map(|tc| tc.attached_function_id)
-        {
-            Ok(id) => id,
-            Err(e) => {
-                self.terminate_with_result(Err(e), ctx).await;
-                return;
-            }
-        };
-
-        tracing::info!(
-            " Attached Function finish_attached_function completed for output collection {}",
-            output_collection_id
-        );
-
-        // Task verification complete, terminate with success
-        // TODO(tanujnay112): This no longer applied to functions, change the return type
-        // to a more suitable name.
-        self.terminate_with_result(
-            Ok(CompactionResponse::Success {
-                job_id: attached_function_id.0,
-            }),
-            ctx,
-        )
+    let result = compaction_context
+        .run_compaction(collection_id, system)
         .await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<RegisterOutput, RegisterError>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        let register_output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(output) => output,
-            None => return,
-        };
-
-        // If this was an attached-function-based compaction, invoke finish_attached_function operator
-        if let Some(updated_attached_function) = register_output.updated_attached_function {
-            tracing::info!(
-                "Invoking finish_attached_function operator for attached function {}",
-                updated_attached_function.id.0
-            );
-
-            let Some(heap_service) = self.heap_service.clone() else {
-                self.terminate_with_result(
-                    Err(CompactionError::InvariantViolation(
-                        "Heap service not initialized",
-                    )),
-                    ctx,
-                )
-                .await;
-                return;
-            };
-
-            let finish_attached_function_op = FinishAttachedFunctionOperator::new(
-                self.log.clone(),
-                self.sysdb.clone(),
-                heap_service,
-            );
-            let finish_attached_function_input =
-                FinishAttachedFunctionInput::new(updated_attached_function);
-
-            let task = wrap(
-                finish_attached_function_op,
-                finish_attached_function_input,
-                ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
-            );
-            self.send(task, ctx, Some(Span::current())).await;
-        } else {
-            // No attached function, terminate immediately with success
-            let output_collection_id = match self
-                .ok_or_terminate(self.get_output_collection_id(), ctx)
-                .await
-            {
-                Some(id) => id,
-                None => return,
-            };
-            self.terminate_with_result(
-                Ok(CompactionResponse::Success {
-                    job_id: output_collection_id.0,
-                }),
-                ctx,
-            )
-            .await;
-        }
-    }
+    Box::pin(compaction_context.cleanup()).await;
+    result
 }
 
 #[cfg(test)]
 mod tests {
+    use chroma_log::test::{
+        add_delete_net_zero_generator, upsert_generator, TEST_EMBEDDING_DIMENSION,
+    };
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+    use tokio::fs;
+
+    use chroma_blockstore::arrow::config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES};
     use chroma_blockstore::provider::BlockfileProvider;
+    use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_config::{registry::Registry, Configurable};
+    use chroma_index::config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig};
+    use chroma_index::spann::types::SpannMetrics;
+    use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::GarbageCollectionContext};
     use chroma_log::{
         in_memory_log::{InMemoryLog, InternalLogRecord},
         test::{add_delete_generator, LogGenerator},
         Log,
     };
-    use chroma_segment::{blockfile_record::RecordSegmentReader, test::TestDistributedSegment};
+    use chroma_segment::{spann_provider::SpannProvider, test::TestDistributedSegment};
+    use chroma_storage::{local::LocalStorage, Storage};
     use chroma_sysdb::{SysDb, TestSysDb};
-    use chroma_system::{Dispatcher, Orchestrator, System};
+    use chroma_system::{ComponentHandle, Dispatcher, DispatcherConfig, Orchestrator, System};
     use chroma_types::{
-        operator::{Filter, Limit, Projection},
-        CollectionUuid, DocumentExpression, DocumentOperator, MetadataExpression,
-        PrimitiveOperator, Where,
+        operator::{Filter, Limit, Projection, ProjectionRecord},
+        Collection, DocumentExpression, DocumentOperator, MetadataExpression, PrimitiveOperator,
+        Segment, SegmentUuid, Where,
     };
     use regex::Regex;
-    use s3heap_service::client::{GrpcHeapService, GrpcHeapServiceConfig};
+    use tempfile;
 
     use crate::{
         config::RootConfig,
         execution::{operators::fetch_log::FetchLogOperator, orchestration::get::GetOrchestrator},
     };
 
-    use super::CompactOrchestrator;
+    use super::{compact, CompactionContext, CompactionResponse, LogFetchOrchestratorResponse};
+
+    async fn get_all_records(
+        system: &System,
+        dispatcher_handle: &ComponentHandle<Dispatcher>,
+        blockfile_provider: BlockfileProvider,
+        log: Log,
+        cas: chroma_types::CollectionAndSegments,
+    ) -> HashMap<String, ProjectionRecord> {
+        let fetch_log = FetchLogOperator {
+            log_client: log,
+            batch_size: 50,
+            start_log_offset_id: u64::try_from(cas.collection.log_position + 1).unwrap_or_default(),
+            maximum_fetch_count: None,
+            collection_uuid: cas.collection.collection_id,
+            tenant: cas.collection.tenant.clone(),
+        };
+
+        let filter = Filter {
+            query_ids: None,
+            where_clause: None,
+        };
+
+        let limit = Limit {
+            offset: 0,
+            limit: None,
+        };
+
+        let project = Projection {
+            document: true,
+            embedding: true,
+            metadata: true,
+        };
+
+        let get_orchestrator = GetOrchestrator::new(
+            blockfile_provider,
+            dispatcher_handle.clone(),
+            1000,
+            cas,
+            fetch_log,
+            filter,
+            limit,
+            project,
+        );
+
+        let result = get_orchestrator
+            .run(system.clone())
+            .await
+            .expect("Get orchestrator should not fail");
+
+        result
+            .result
+            .records
+            .into_iter()
+            .map(|record| (record.id.clone(), record))
+            .collect()
+    }
 
     #[tokio::test]
     async fn test_rebuild() {
@@ -1927,7 +672,8 @@ mod tests {
             });
         let log = Log::InMemory(in_memory_log);
 
-        let compact_orchestrator = CompactOrchestrator::new(
+        let compact_result = Box::pin(compact(
+            system.clone(),
             collection_id,
             false,
             50,
@@ -1940,8 +686,9 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             None,
-        );
-        assert!(compact_orchestrator.run(system.clone()).await.is_ok());
+        ))
+        .await;
+        assert!(compact_result.is_ok());
 
         let old_cas = sysdb
             .get_collection_with_segments(collection_id)
@@ -2000,7 +747,8 @@ mod tests {
 
         assert!(!old_vals.result.records.is_empty());
 
-        let rebuild_orchestrator = CompactOrchestrator::new(
+        let rebuild_result = Box::pin(compact(
+            system.clone(),
             collection_id,
             true,
             5000,
@@ -2013,8 +761,9 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             None,
-        );
-        assert!(rebuild_orchestrator.run(system.clone()).await.is_ok());
+        ))
+        .await;
+        assert!(rebuild_result.is_ok());
 
         let new_cas = sysdb
             .get_collection_with_segments(collection_id)
@@ -2101,7 +850,8 @@ mod tests {
         let in_memory_log = InMemoryLog::new();
         let log = Log::InMemory(in_memory_log);
 
-        let rebuild_orchestrator = CompactOrchestrator::new(
+        let rebuild_result = Box::pin(compact(
+            system.clone(),
             collection_id,
             true,
             5000,
@@ -2114,8 +864,9 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             None,
-        );
-        assert!(rebuild_orchestrator.run(system.clone()).await.is_ok());
+        ))
+        .await;
+        assert!(rebuild_result.is_ok());
 
         let new_cas = sysdb
             .get_collection_with_segments(collection_id)
@@ -2127,49 +878,128 @@ mod tests {
         assert!(new_cas.vector_segment.file_path.is_empty());
     }
 
-    // Helper to read total_count from attached function result metadata
-    async fn get_total_count_output(
-        sysdb: &mut SysDb,
-        collection_id: CollectionUuid,
-        blockfile_provider: &BlockfileProvider,
-    ) -> i64 {
-        let output_info = sysdb
-            .get_collection_with_segments(collection_id)
-            .await
-            .expect("Should get output collection");
-        let reader = Box::pin(RecordSegmentReader::from_segment(
-            &output_info.record_segment,
-            blockfile_provider,
-        ))
-        .await
-        .expect("Should create reader");
-        let offset_id = reader
-            .get_offset_id_for_user_id("attached_function_result")
-            .await
-            .expect("Should get offset")
-            .expect("attached_function_result should exist");
-        let data_record = reader
-            .get_data_for_offset_id(offset_id)
-            .await
-            .expect("Should get data")
-            .expect("Data should exist");
-        let metadata = data_record.metadata.expect("Metadata should exist");
-        match metadata.get("total_count") {
-            Some(chroma_types::MetadataValue::Int(c)) => *c,
-            _ => panic!("total_count should be an Int"),
-        }
-    }
-
-    // This does an end to end test of attached function execution. It first creates a collection,
-    // then attached a record counting function to it. Once a few records have been added to the
-    // collection and compacted, the attached function is manually run. The attached function
-    // should create the output collection and populate it with the total number of records in the input
-    // collection. The test verified the completion offset and the lowest live offset of the attached function
-    // entry in sysdb after this run.
-    // The above is done twice.
     #[tokio::test]
-    async fn test_k8s_integration_attached_function_execution() {
-        // Setup test environment
+    async fn test_some_empty_partitions() {
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
+            Log::InMemory(ref mut log) => log,
+            _ => panic!("Expected InMemoryLog"),
+        };
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        tokio::fs::remove_dir_all(tmpdir.path())
+            .await
+            .expect("Failed to remove temp dir");
+        let storage = Storage::Local(LocalStorage::new(tmpdir.path().to_str().unwrap()));
+
+        let tenant = "tenant_log_repair".to_string();
+        let collection = Collection {
+            name: "collection_log_repair".to_string(),
+            dimension: Some(TEST_EMBEDDING_DIMENSION.try_into().unwrap()),
+            tenant: tenant.clone(),
+            database: "database_log_repair".to_string(),
+            log_position: -1,
+            ..Default::default()
+        };
+
+        let collection_uuid = collection.collection_id;
+
+        // Add some log records
+        add_delete_generator
+            .generate_vec(1..=60)
+            .into_iter()
+            .for_each(|log| {
+                in_memory_log.add_log(
+                    collection_uuid,
+                    InternalLogRecord {
+                        collection_id: collection_uuid,
+                        log_offset: log.log_offset - 1,
+                        log_ts: log.log_offset,
+                        record: log,
+                    },
+                )
+            });
+
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        match sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_collection(collection);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let record_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let hnsw_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::HnswDistributed,
+            scope: chroma_types::SegmentScope::VECTOR,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let metadata_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        match sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_segment(record_segment);
+                sysdb.add_segment(hnsw_segment);
+                sysdb.add_segment(metadata_segment);
+                sysdb.add_tenant_last_compaction_time(tenant, 1);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let hnsw_cache = new_non_persistent_cache_for_test();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let blockfile_provider = BlockfileProvider::new_arrow(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
+        let hnsw_provider = HnswIndexProvider::new(
+            storage.clone(),
+            PathBuf::from(tmpdir.path()),
+            hnsw_cache,
+            16,
+            false,
+        );
+        let spann_provider = SpannProvider {
+            hnsw_provider: hnsw_provider.clone(),
+            blockfile_provider: blockfile_provider.clone(),
+            garbage_collection_context: gc_context,
+            metrics: SpannMetrics::default(),
+            pl_block_size: 5 * 1024 * 1024,
+            adaptive_search_nprobe: true,
+        };
+
         let config = RootConfig::default();
         let system = System::default();
         let registry = Registry::new();
@@ -2178,208 +1008,98 @@ mod tests {
             .expect("Should be able to initialize dispatcher");
         let dispatcher_handle = system.start_component(dispatcher);
 
-        // Connect to Grpc SysDb (requires Tilt running)
-        let grpc_sysdb = chroma_sysdb::GrpcSysDb::try_from_config(
-            &chroma_sysdb::GrpcSysDbConfig {
-                host: "localhost".to_string(),
-                port: 50051,
-                connect_timeout_ms: 5000,
-                request_timeout_ms: 10000,
-                num_channels: 4,
-            },
-            &registry,
+        let old_cas = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .unwrap();
+
+        let old_records = get_all_records(
+            &system,
+            &dispatcher_handle,
+            blockfile_provider.clone(),
+            log.clone(),
+            old_cas,
         )
-        .await
-        .expect("Should connect to grpc sysdb");
-        let mut sysdb = SysDb::Grpc(grpc_sysdb);
+        .await;
 
-        // Connect to Grpc Heap Service (requires Tilt running)
-        let heap_service = GrpcHeapService::try_from_config(
-            &(GrpcHeapServiceConfig::default(), system.clone()),
-            &registry,
-        )
-        .await
-        .expect("Should connect to grpc heap service");
-
-        let test_segments = TestDistributedSegment::new().await;
-        let mut in_memory_log = InMemoryLog::new();
-
-        // Create input collection via HTTP API
-        let collection_name = format!("test_attached_function_collection_{}", uuid::Uuid::new_v4());
-
-        let collection_id = CollectionUuid::new();
-        sysdb
-            .create_collection(
-                test_segments.collection.tenant,
-                test_segments.collection.database,
-                collection_id,
-                collection_name,
-                vec![
-                    test_segments.record_segment.clone(),
-                    test_segments.metadata_segment.clone(),
-                    test_segments.vector_segment.clone(),
-                ],
-                None,
-                None,
-                None,
-                test_segments.collection.dimension,
-                false,
-            )
-            .await
-            .expect("Collection create should be successful");
-        let input_collection_id = collection_id;
-        let tenant = "default_tenant".to_string();
-        let db = "default_database".to_string();
-
-        // Update input collection's log_position to -1 (no logs compacted yet)
-        sysdb
-            .flush_compaction(
-                tenant.clone(),
-                input_collection_id,
-                -1,                      // log_position = -1 means no logs compacted yet
-                0,                       // collection_version
-                std::sync::Arc::new([]), // no segment flushes
-                0,                       // total_records
-                0,                       // size_bytes
-                None,                    // schema
-            )
-            .await
-            .expect("Should be able to update log_position");
-
-        // Add 50 log records
-        add_delete_generator
-            .generate_vec(1..=50)
-            .into_iter()
-            .for_each(|log| {
-                in_memory_log.add_log(
-                    input_collection_id,
-                    InternalLogRecord {
-                        collection_id: input_collection_id,
-                        log_offset: log.log_offset - 1,
-                        log_ts: log.log_offset,
-                        record: log,
-                    },
-                )
-            });
-        let log = Log::InMemory(in_memory_log.clone());
-        let attached_function_name = "test_count_attached_function";
-        let output_collection_name = format!("test_output_collection_{}", uuid::Uuid::new_v4());
-
-        // Create a task via sysdb
-        let attached_function_id = sysdb
-            .create_attached_function(
-                attached_function_name.to_string(),
-                "record_counter".to_string(),
-                input_collection_id,
-                output_collection_name,
-                serde_json::Value::Null,
-                tenant.clone(),
-                db.clone(),
-                10,
-            )
-            .await
-            .expect(" Attached Function creation should succeed");
-
-        // compact everything
-        let compact_orchestrator = CompactOrchestrator::new(
-            input_collection_id,
+        let first_compaction_result = Box::pin(compact(
+            system.clone(),
+            collection_uuid,
             false,
-            50,
-            1000,
-            50,
+            5000,
+            10000,
+            1,
             log.clone(),
             sysdb.clone(),
-            test_segments.blockfile_provider.clone(),
-            test_segments.hnsw_provider.clone(),
-            test_segments.spann_provider.clone(),
+            blockfile_provider.clone(),
+            hnsw_provider.clone(),
+            spann_provider.clone(),
             dispatcher_handle.clone(),
             None,
-        );
-
-        let result = compact_orchestrator.run(system.clone()).await;
-        assert!(
-            result.is_ok(),
-            "First compaction should succeed: {:?}",
-            result.err()
-        );
-
-        // Fetch the attached function to get the current nonce
-        let attached_function_before_run = sysdb
-            .get_attached_function_by_name(input_collection_id, attached_function_name.to_string())
-            .await
-            .expect("Attached Function should be found");
-        let execution_nonce = attached_function_before_run.lowest_live_nonce.unwrap();
-
-        // Run first compaction (PrepareAttachedFunction will fetch and populate the attached function)
-        let compact_orchestrator = CompactOrchestrator::new_for_attached_function(
-            input_collection_id,
-            false,
-            50,
-            1000,
-            50,
-            log.clone(),
-            sysdb.clone(),
-            heap_service.clone(),
-            test_segments.blockfile_provider.clone(),
-            test_segments.hnsw_provider.clone(),
-            test_segments.spann_provider.clone(),
-            dispatcher_handle.clone(),
-            None,
-            attached_function_id,
-            execution_nonce,
-        );
-        let result = compact_orchestrator.run(system.clone()).await;
-        assert!(
-            result.is_ok(),
-            "First invocation of attached function should succeed: {:?}",
-            result.err()
-        );
-        // Verify attached function was updated with output collection ID
-        let updated_attached_function = sysdb
-            .get_attached_function_by_name(input_collection_id, attached_function_name.to_string())
-            .await
-            .expect(" Attached Function should be found");
-        assert_eq!(
-            updated_attached_function.completion_offset, 49,
-            "Processed logs 0-49, so completion_offset should be 49 (last offset processed)"
-        );
-
-        assert_eq!(
-            updated_attached_function.lowest_live_nonce,
-            Some(updated_attached_function.next_nonce),
-            "After a successful run, lowest_live_nonce should be equal to next_nonce"
-        );
-
-        let output_collection_id = updated_attached_function.output_collection_id.unwrap();
-
-        // Verify first run: Read total_count from attached function result metadata
-        let total_count = Box::pin(get_total_count_output(
-            &mut sysdb,
-            output_collection_id,
-            &test_segments.blockfile_provider,
         ))
         .await;
-        assert_eq!(
-            total_count, 34,
-            "CountAttachedFunction should have counted 34 records in input collection"
-        );
 
-        tracing::info!(
-            "First attached function run completed. CountAttachedFunction result: total_count={}",
-            total_count
-        );
+        first_compaction_result.expect("Should succeed");
 
-        // SECOND ATTACHED FUNCTION INVOCATION
+        let collection = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .unwrap()
+            .collection;
+        assert_eq!(collection.log_position, 60);
+        assert_eq!(collection.version, 1);
 
-        // Add 50 more records and run again
-        add_delete_generator
-            .generate_vec(51..=100)
+        let new_cas = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .unwrap();
+        let new_records = get_all_records(
+            &system,
+            &dispatcher_handle,
+            blockfile_provider.clone(),
+            log.clone(),
+            new_cas,
+        )
+        .await;
+        assert_eq!(old_records, new_records);
+    }
+
+    #[tokio::test]
+    async fn test_broken_apply() {
+        // Setup: Create a log that will fail on update_collection_log_offset
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
+            Log::InMemory(ref mut log) => log,
+            _ => panic!("Expected InMemoryLog"),
+        };
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        tokio::fs::remove_dir_all(tmpdir.path())
+            .await
+            .expect("Failed to remove temp dir");
+        let storage = Storage::Local(LocalStorage::new(tmpdir.path().to_str().unwrap()));
+
+        let tenant = "tenant_log_repair".to_string();
+        let collection = Collection {
+            name: "collection_log_repair".to_string(),
+            dimension: Some(TEST_EMBEDDING_DIMENSION.try_into().unwrap()),
+            tenant: tenant.clone(),
+            database: "database_log_repair".to_string(),
+            log_position: -1,
+            ..Default::default()
+        };
+
+        let collection_uuid = collection.collection_id;
+
+        // Add some log records
+        upsert_generator
+            .generate_vec(1..=60)
             .into_iter()
             .for_each(|log| {
                 in_memory_log.add_log(
-                    input_collection_id,
+                    collection_uuid,
                     InternalLogRecord {
-                        collection_id: input_collection_id,
+                        collection_id: collection_uuid,
                         log_offset: log.log_offset - 1,
                         log_ts: log.log_offset,
                         record: log,
@@ -2387,101 +1107,1213 @@ mod tests {
                 )
             });
 
-        let log_2 = Log::InMemory(in_memory_log.clone());
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        match sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_collection(collection);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
 
-        // compact everything
-        let compact_orchestrator = CompactOrchestrator::new(
-            input_collection_id,
+        let record_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let hnsw_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::HnswDistributed,
+            scope: chroma_types::SegmentScope::VECTOR,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let metadata_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        match sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_segment(record_segment);
+                sysdb.add_segment(hnsw_segment);
+                sysdb.add_segment(metadata_segment);
+                sysdb.add_tenant_last_compaction_time(tenant, 1);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let hnsw_cache = new_non_persistent_cache_for_test();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let blockfile_provider = BlockfileProvider::new_arrow(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
+        let hnsw_provider = HnswIndexProvider::new(
+            storage.clone(),
+            PathBuf::from(tmpdir.path()),
+            hnsw_cache,
+            16,
             false,
-            50,
-            1000,
-            50,
-            log_2.clone(),
-            sysdb.clone(),
-            test_segments.blockfile_provider.clone(),
-            test_segments.hnsw_provider.clone(),
-            test_segments.spann_provider.clone(),
-            dispatcher_handle.clone(),
-            None,
         );
+        let spann_provider = SpannProvider {
+            hnsw_provider: hnsw_provider.clone(),
+            blockfile_provider: blockfile_provider.clone(),
+            garbage_collection_context: gc_context,
+            metrics: SpannMetrics::default(),
+            pl_block_size: 5 * 1024 * 1024,
+            adaptive_search_nprobe: true,
+        };
 
-        let result = compact_orchestrator.run(system.clone()).await;
-        assert!(
-            result.is_ok(),
-            "Second compaction should succeed: {:?}",
-            result.err()
-        );
-
-        let output_collection_id = updated_attached_function.output_collection_id.unwrap();
-
-        // Fetch the attached function to get the updated nonce for second run
-        let attached_function_before_run_2 = sysdb
-            .get_attached_function_by_name(
-                input_collection_id,
-                "test_count_attached_function".to_string(),
-            )
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
             .await
-            .expect(" Attached Function should be found");
-        let execution_nonce_2 = attached_function_before_run_2.next_nonce;
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+        let old_cas = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .unwrap();
 
-        // Run second attached function (PrepareAttachedFunction will fetch updated attached function state)
-        let compact_orchestrator_2 = CompactOrchestrator::new_for_attached_function(
-            input_collection_id,
+        let old_records = get_all_records(
+            &system,
+            &dispatcher_handle,
+            blockfile_provider.clone(),
+            log.clone(),
+            old_cas,
+        )
+        .await;
+
+        let first_compaction_result = Box::pin(compact(
+            system.clone(),
+            collection_uuid,
             false,
-            100,
-            1000,
-            50,
-            log_2.clone(),
+            5000,
+            10000,
+            1, // Important to make sure each partition is one key.
+            log.clone(),
             sysdb.clone(),
-            heap_service.clone(),
-            test_segments.blockfile_provider.clone(),
-            test_segments.hnsw_provider.clone(),
-            test_segments.spann_provider.clone(),
+            blockfile_provider.clone(),
+            hnsw_provider.clone(),
+            spann_provider.clone(),
             dispatcher_handle.clone(),
-            None,
-            attached_function_id,
-            execution_nonce_2,
-        );
-        let result = compact_orchestrator_2.run(system.clone()).await;
-        assert!(
-            result.is_ok(),
-            "Second invocation of attached function should succeed: {:?}",
-            result.err()
-        );
-
-        let updated_attached_function_2 = sysdb
-            .get_attached_function_by_name(
-                input_collection_id,
-                "test_count_attached_function".to_string(),
-            )
-            .await
-            .expect(" Attached Function should be found");
-        assert_eq!(
-            updated_attached_function_2.completion_offset, 99,
-            "Processed logs 0-99, so completion_offset should be 99 (last offset processed)"
-        );
-
-        // Verify second run: Read updated total_count from attached function result metadata
-        let total_count_2 = Box::pin(get_total_count_output(
-            &mut sysdb,
-            output_collection_id,
-            &test_segments.blockfile_provider,
+            Some(2), // The apply operator processing this offset will fail.
         ))
         .await;
-        assert_eq!(
-            total_count_2, 67,
-            "CountAttachedFunction should have counted 67 total records in input collection"
+
+        first_compaction_result.expect_err("Should fail");
+
+        let new_cas = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .unwrap();
+        let new_records = get_all_records(
+            &system,
+            &dispatcher_handle,
+            blockfile_provider.clone(),
+            log.clone(),
+            new_cas.clone(),
+        )
+        .await;
+        assert_eq!(new_cas.collection.log_position, -1);
+        assert_eq!(new_cas.collection.version, 0);
+        assert_eq!(old_records, new_records);
+        assert_eq!(new_cas.record_segment.file_path.len(), 0);
+        assert_eq!(new_cas.vector_segment.file_path.len(), 0);
+        assert_eq!(new_cas.metadata_segment.file_path.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_log_repair() {
+        // Setup: Create a log that will fail on update_collection_log_offset
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
+            Log::InMemory(ref mut log) => log,
+            _ => panic!("Expected InMemoryLog"),
+        };
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        tokio::fs::remove_dir_all(tmpdir.path())
+            .await
+            .expect("Failed to remove temp dir");
+        let storage = Storage::Local(LocalStorage::new(tmpdir.path().to_str().unwrap()));
+
+        let tenant = "tenant_log_repair".to_string();
+        let collection = Collection {
+            name: "collection_log_repair".to_string(),
+            dimension: Some(TEST_EMBEDDING_DIMENSION.try_into().unwrap()),
+            tenant: tenant.clone(),
+            database: "database_log_repair".to_string(),
+            log_position: -1,
+            ..Default::default()
+        };
+
+        let collection_uuid = collection.collection_id;
+
+        // Add some log records
+        add_delete_generator
+            .generate_vec(1..=10)
+            .into_iter()
+            .for_each(|log| {
+                in_memory_log.add_log(
+                    collection_uuid,
+                    InternalLogRecord {
+                        collection_id: collection_uuid,
+                        log_offset: log.log_offset - 1,
+                        log_ts: log.log_offset,
+                        record: log,
+                    },
+                )
+            });
+
+        // Configure InMemoryLog to fail on update_collection_log_offset
+        in_memory_log.set_fail_update_offset(true);
+
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        match sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_collection(collection);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let record_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let hnsw_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::HnswDistributed,
+            scope: chroma_types::SegmentScope::VECTOR,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let metadata_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        match sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_segment(record_segment);
+                sysdb.add_segment(hnsw_segment);
+                sysdb.add_segment(metadata_segment);
+                sysdb.add_tenant_last_compaction_time(tenant, 1);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let hnsw_cache = new_non_persistent_cache_for_test();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let blockfile_provider = BlockfileProvider::new_arrow(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
+        let hnsw_provider = HnswIndexProvider::new(
+            storage.clone(),
+            PathBuf::from(tmpdir.path()),
+            hnsw_cache,
+            16,
+            false,
+        );
+        let spann_provider = SpannProvider {
+            hnsw_provider: hnsw_provider.clone(),
+            blockfile_provider: blockfile_provider.clone(),
+            garbage_collection_context: gc_context,
+            metrics: SpannMetrics::default(),
+            pl_block_size: 5 * 1024 * 1024,
+            adaptive_search_nprobe: true,
+        };
+
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        let old_cas = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .unwrap();
+
+        let old_records = get_all_records(
+            &system,
+            &dispatcher_handle,
+            blockfile_provider.clone(),
+            log.clone(),
+            old_cas,
+        )
+        .await;
+
+        // Run first compaction - this should fail to update the log offset
+        let first_compaction_result = Box::pin(compact(
+            system.clone(),
+            collection_uuid,
+            false,
+            5000,
+            10000,
+            1000,
+            log.clone(),
+            sysdb.clone(),
+            blockfile_provider.clone(),
+            hnsw_provider.clone(),
+            spann_provider.clone(),
+            dispatcher_handle.clone(),
+            None,
+        ))
+        .await;
+
+        // First compaction should fail because update_collection_log_offset fails
+        assert!(
+            first_compaction_result.is_err(),
+            "First compaction should fail due to update_collection_log_offset failure"
+        );
+
+        // Now fix the log to allow updates
+        match log {
+            Log::InMemory(ref mut log) => {
+                log.set_fail_update_offset(false);
+            }
+            _ => panic!("Expected InMemoryLog"),
+        }
+
+        // Run second compaction - this should detect the repair is needed
+        // because the offset wasn't updated in the first compaction
+        let second_compaction_result = Box::pin(compact(
+            system.clone(),
+            collection_uuid,
+            false,
+            5000,
+            10000,
+            1000,
+            log.clone(),
+            sysdb.clone(),
+            blockfile_provider.clone(),
+            hnsw_provider.clone(),
+            spann_provider.clone(),
+            dispatcher_handle.clone(),
+            None,
+        ))
+        .await;
+
+        // Second compaction should return RequireCompactionOffsetRepair
+        match second_compaction_result {
+            Ok(CompactionResponse::RequireCompactionOffsetRepair {
+                job_id,
+                witnessed_offset_in_sysdb,
+            }) => {
+                println!("Got expected RequireCompactionOffsetRepair response");
+                println!("Job ID: {:?}", job_id);
+                println!("Witnessed offset: {}", witnessed_offset_in_sysdb);
+                assert_eq!(
+                    witnessed_offset_in_sysdb, 10,
+                    "Expected witnessed offset to be 10"
+                );
+            }
+            Ok(CompactionResponse::Success { .. }) => {
+                panic!("Expected RequireCompactionOffsetRepair but got Success");
+            }
+            Err(e) => {
+                panic!(
+                    "Expected RequireCompactionOffsetRepair but got error: {:?}",
+                    e
+                );
+            }
+        }
+
+        // Manually repair the log position in sysdb (simulating external repair)
+        // The segments were actually flushed with data up to offset 60, so update the collection
+        let mut collection = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .unwrap()
+            .collection;
+        collection.log_position = 60;
+        match sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_collection(collection);
+            }
+            _ => panic!("Expected TestSysDb"),
+        }
+
+        // Now verify we can get records successfully after repair
+        let new_cas = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .unwrap();
+        let new_records = get_all_records(
+            &system,
+            &dispatcher_handle,
+            blockfile_provider.clone(),
+            log.clone(),
+            new_cas,
+        )
+        .await;
+        assert_eq!(old_records, new_records);
+    }
+
+    #[tokio::test]
+    async fn test_compaction_with_empty_logs_from_inserts_and_deletes() {
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
+            Log::InMemory(ref mut log) => log,
+            _ => panic!("Expected InMemoryLog"),
+        };
+        let tmpdir = tempfile::tempdir().unwrap();
+        // Clear temp dir.
+        tokio::fs::remove_dir_all(tmpdir.path())
+            .await
+            .expect("Failed to remove temp dir");
+        let storage = Storage::Local(LocalStorage::new(tmpdir.path().to_str().unwrap()));
+
+        let tenant = "tenant_empty_logs".to_string();
+        let collection = Collection {
+            name: "collection_empty_logs".to_string(),
+            dimension: Some(TEST_EMBEDDING_DIMENSION.try_into().unwrap()),
+            tenant: tenant.clone(),
+            database: "database_empty_logs".to_string(),
+            log_position: -1,
+            ..Default::default()
+        };
+
+        let collection_uuid = collection.collection_id;
+
+        // Add logs that represent inserts and deletes that net out to 0
+        // Use the add_delete_generator to create 250 records (125 pairs of insert+delete)
+
+        add_delete_net_zero_generator
+            .generate_vec(1..=251) // This creates 100 log entries that net out to empty
+            .into_iter()
+            .for_each(|log| {
+                in_memory_log.add_log(
+                    collection_uuid,
+                    InternalLogRecord {
+                        collection_id: collection_uuid,
+                        log_offset: log.log_offset - 1,
+                        log_ts: log.log_offset,
+                        record: log,
+                    },
+                )
+            });
+
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        match sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_collection(collection);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let record_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let hnsw_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::HnswDistributed,
+            scope: chroma_types::SegmentScope::VECTOR,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let metadata_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        match sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_segment(record_segment);
+                sysdb.add_segment(hnsw_segment);
+                sysdb.add_segment(metadata_segment);
+                sysdb.add_tenant_last_compaction_time(tenant, 1);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let hnsw_cache = new_non_persistent_cache_for_test();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let blockfile_provider = BlockfileProvider::new_arrow(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
+        let hnsw_provider = HnswIndexProvider::new(
+            storage.clone(),
+            PathBuf::from(tmpdir.path().to_str().unwrap()),
+            hnsw_cache,
+            16,
+            false,
+        );
+        let spann_provider = SpannProvider {
+            hnsw_provider: hnsw_provider.clone(),
+            blockfile_provider: blockfile_provider.clone(),
+            garbage_collection_context: gc_context,
+            metrics: SpannMetrics::default(),
+            pl_block_size: 5 * 1024 * 1024,
+            adaptive_search_nprobe: true,
+        };
+        let system = System::new();
+
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: 10,
+            task_queue_limit: 100,
+            dispatcher_queue_size: 100,
+            worker_queue_size: 100,
+            active_io_tasks: 100,
+        });
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        let old_cas = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .unwrap();
+
+        let old_records = get_all_records(
+            &system,
+            &dispatcher_handle,
+            blockfile_provider.clone(),
+            log.clone(),
+            old_cas,
+        )
+        .await;
+
+        let compact_result = Box::pin(compact(
+            system.clone(),
+            collection_uuid,
+            false, // walrus_enabled
+            50,    // min_compaction_size
+            1000,  // max_compaction_size
+            50,    // max_partition_size
+            log.clone(),
+            sysdb.clone(),
+            blockfile_provider.clone(),
+            hnsw_provider.clone(),
+            spann_provider.clone(),
+            dispatcher_handle.clone(),
+            None,
+        ))
+        .await;
+
+        // Verify compaction completed successfully
+        assert!(
+            compact_result.is_ok(),
+            "Compaction should succeed when logs net out to empty, but got error: {:?}",
+            compact_result.err()
+        );
+
+        // Verify that the collection has 0 bytes post-compaction since all operations net out to empty
+        let new_cas = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .unwrap();
+        let collection_after_compaction = new_cas.clone().collection;
+
+        println!(
+            "Collection size post-compaction: {} bytes",
+            collection_after_compaction.size_bytes_post_compaction
+        );
+        println!(
+            "Collection log position: {}",
+            collection_after_compaction.log_position
         );
 
         assert_eq!(
-            updated_attached_function_2.lowest_live_nonce,
-            Some(updated_attached_function_2.next_nonce),
-            "After a successful run, lowest_live_nonce should be equal to next_nonce"
+            collection_after_compaction.total_records_post_compaction, 0,
+            "Collection should have 0 records post-compaction when all inserts/deletes net out to empty, but got {} records",
+            collection_after_compaction.total_records_post_compaction
         );
 
-        tracing::info!(
-            " Attached Function execution test completed. First run: total_count=50, Second run: total_count={}",
-            total_count_2
+        assert_eq!(
+            collection_after_compaction.size_bytes_post_compaction, 0,
+            "Collection should have 0 bytes post-compaction when all inserts/deletes net out to empty, but got {} bytes",
+            collection_after_compaction.size_bytes_post_compaction
         );
+
+        assert_eq!(
+            collection_after_compaction.log_position, 251,
+            "Collection log position is wrong"
+        );
+        check_purge_successful(tmpdir.path()).await;
+        let new_records = get_all_records(
+            &system,
+            &dispatcher_handle,
+            blockfile_provider.clone(),
+            log.clone(),
+            new_cas.clone(),
+        )
+        .await;
+        assert_eq!(old_records, new_records);
+        assert_eq!(new_cas.record_segment.file_path.len(), 0);
+        assert_eq!(new_cas.vector_segment.file_path.len(), 0);
+        assert_eq!(new_cas.metadata_segment.file_path.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_compaction_with_empty_logs_second_compaction() {
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let tmpdir = tempfile::tempdir().unwrap();
+        // Clear temp dir.
+        tokio::fs::remove_dir_all(tmpdir.path())
+            .await
+            .expect("Failed to remove temp dir");
+        let storage = Storage::Local(LocalStorage::new(tmpdir.path().to_str().unwrap()));
+
+        let tenant = "tenant_empty_logs_second".to_string();
+        let collection = Collection {
+            name: "collection_empty_logs_second".to_string(),
+            dimension: Some(TEST_EMBEDDING_DIMENSION.try_into().unwrap()),
+            tenant: tenant.clone(),
+            database: "database_empty_logs_second".to_string(),
+            log_position: -1,
+            ..Default::default()
+        };
+
+        let collection_uuid = collection.collection_id;
+
+        // First, add some real data for the first compaction (50 records)
+        {
+            let in_memory_log = match log {
+                Log::InMemory(ref mut log) => log,
+                _ => panic!("Expected InMemoryLog"),
+            };
+            upsert_generator
+                .generate_vec(1..=49)
+                .into_iter()
+                .for_each(|log| {
+                    in_memory_log.add_log(
+                        collection_uuid,
+                        InternalLogRecord {
+                            collection_id: collection_uuid,
+                            log_offset: log.log_offset - 1,
+                            log_ts: log.log_offset,
+                            record: log,
+                        },
+                    )
+                });
+        }
+
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        match sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_collection(collection);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let record_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let hnsw_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::HnswDistributed,
+            scope: chroma_types::SegmentScope::VECTOR,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let metadata_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        match sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_segment(record_segment);
+                sysdb.add_segment(hnsw_segment);
+                sysdb.add_segment(metadata_segment);
+                sysdb.add_tenant_last_compaction_time(tenant.clone(), 1);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let hnsw_cache = new_non_persistent_cache_for_test();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let blockfile_provider = BlockfileProvider::new_arrow(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
+        let hnsw_provider = HnswIndexProvider::new(
+            storage.clone(),
+            PathBuf::from(tmpdir.path().to_str().unwrap()),
+            hnsw_cache,
+            16,
+            false,
+        );
+        let spann_provider = SpannProvider {
+            hnsw_provider: hnsw_provider.clone(),
+            blockfile_provider: blockfile_provider.clone(),
+            garbage_collection_context: gc_context,
+            metrics: SpannMetrics::default(),
+            pl_block_size: 5 * 1024 * 1024,
+            adaptive_search_nprobe: true,
+        };
+        let system = System::new();
+
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: 10,
+            task_queue_limit: 100,
+            dispatcher_queue_size: 100,
+            worker_queue_size: 100,
+            active_io_tasks: 100,
+        });
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        // Run first compaction with real data
+        let first_compact_result = Box::pin(compact(
+            system.clone(),
+            collection_uuid,
+            false, // walrus_enabled
+            50,    // min_compaction_size
+            1000,  // max_compaction_size
+            50,    // max_partition_size
+            log.clone(),
+            sysdb.clone(),
+            blockfile_provider.clone(),
+            hnsw_provider.clone(),
+            spann_provider.clone(),
+            dispatcher_handle.clone(),
+            None,
+        ))
+        .await;
+
+        assert!(
+            first_compact_result.is_ok(),
+            "First compaction should succeed, but got error: {:?}",
+            first_compact_result.err()
+        );
+
+        // Verify first compaction created data
+        let collection_after_first = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .expect("Collection should exist after first compaction");
+
+        assert_eq!(
+            collection_after_first
+                .collection
+                .total_records_post_compaction,
+            49,
+            "Collection should have 49 records after first compaction, but got {}",
+            collection_after_first
+                .collection
+                .total_records_post_compaction
+        );
+
+        assert!(
+            collection_after_first.collection.size_bytes_post_compaction > 0,
+            "Collection should have non-zero size after first compaction, but got {} bytes",
+            collection_after_first.collection.size_bytes_post_compaction
+        );
+
+        // Now add logs that net out to 0 for the second compaction
+        {
+            let in_memory_log = match log {
+                Log::InMemory(ref mut log) => log,
+                _ => panic!("Expected InMemoryLog"),
+            };
+            add_delete_net_zero_generator
+                .generate_vec(100..=250) // Starting from 51 since we already have 50 logs
+                .into_iter()
+                .for_each(|log| {
+                    in_memory_log.add_log(
+                        collection_uuid,
+                        InternalLogRecord {
+                            collection_id: collection_uuid,
+                            log_offset: log.log_offset - 1 - 50,
+                            log_ts: log.log_offset - 50,
+                            record: log,
+                        },
+                    )
+                });
+        }
+
+        let old_cas = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .unwrap();
+
+        let old_records = get_all_records(
+            &system,
+            &dispatcher_handle,
+            blockfile_provider.clone(),
+            log.clone(),
+            old_cas,
+        )
+        .await;
+
+        // Run second compaction with empty logs
+        let second_compact_result = Box::pin(compact(
+            system.clone(),
+            collection_uuid,
+            false, // walrus_enabled
+            50,    // min_compaction_size
+            1000,  // max_compaction_size
+            50,    // max_partition_size
+            log.clone(),
+            sysdb.clone(),
+            blockfile_provider.clone(),
+            hnsw_provider.clone(),
+            spann_provider.clone(),
+            dispatcher_handle.clone(),
+            None,
+        ))
+        .await;
+
+        // Verify second compaction completed successfully
+        assert!(
+            second_compact_result.is_ok(),
+            "Second compaction should succeed when logs net out to empty, but got error: {:?}",
+            second_compact_result.err()
+        );
+
+        // Verify that the collection still has the same data from the first compaction
+        let collection_after_second = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .expect("Collection should exist after second compaction");
+
+        println!(
+            "Collection size after second compaction: {} bytes",
+            collection_after_second
+                .collection
+                .size_bytes_post_compaction
+        );
+        println!(
+            "Collection log position: {}",
+            collection_after_second.collection.log_position
+        );
+
+        assert_eq!(
+            collection_after_second.collection.total_records_post_compaction, 50,
+            "Collection should still have 50 records after second compaction with empty logs, but got {} records",
+            collection_after_second.collection.total_records_post_compaction
+        );
+
+        assert!(
+            collection_after_second.collection.size_bytes_post_compaction > 0,
+            "Collection should still have non-zero size after second compaction with empty logs, but got {} bytes",
+            collection_after_second.collection.size_bytes_post_compaction
+        );
+
+        assert_eq!(
+            collection_after_second.collection.log_position, 250,
+            "Collection log position should be 250 after processing all logs"
+        );
+
+        check_purge_successful(tmpdir.path()).await;
+        let new_cas = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .unwrap();
+        let new_records = get_all_records(
+            &system,
+            &dispatcher_handle,
+            blockfile_provider.clone(),
+            log.clone(),
+            new_cas,
+        )
+        .await;
+        assert_eq!(old_records, new_records);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_concurrent_compactions() {
+        // This test simulates the scenario where:
+        // 1. Compaction 1 starts its log_fetch_orchestrator
+        // 2. Compaction 2 starts and finishes everything
+        // 3. Compaction 1 continues with the rest of its orchestrators and fails cleanly
+
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
+            Log::InMemory(ref mut log) => log,
+            _ => panic!("Expected InMemoryLog"),
+        };
+        let tmpdir = tempfile::tempdir().unwrap();
+        // Clear temp dir.
+        tokio::fs::remove_dir_all(tmpdir.path())
+            .await
+            .expect("Failed to remove temp dir");
+        let storage = Storage::Local(LocalStorage::new(tmpdir.path().to_str().unwrap()));
+
+        let tenant = "tenant_concurrent_log_fetch".to_string();
+
+        // Create a collection for testing
+        let collection = Collection {
+            name: "collection_concurrent_log_fetch".to_string(),
+            dimension: Some(TEST_EMBEDDING_DIMENSION.try_into().unwrap()),
+            tenant: tenant.clone(),
+            database: "database_concurrent_log_fetch".to_string(),
+            log_position: -1,
+            ..Default::default()
+        };
+
+        let collection_uuid = collection.collection_id;
+
+        // Add logs for the collection
+        add_delete_net_zero_generator
+            .generate_vec(1..=101) // This creates 100 log entries that net out to empty
+            .into_iter()
+            .for_each(|log| {
+                in_memory_log.add_log(
+                    collection_uuid,
+                    InternalLogRecord {
+                        collection_id: collection_uuid,
+                        log_offset: log.log_offset - 1,
+                        log_ts: log.log_offset,
+                        record: log,
+                    },
+                )
+            });
+
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        match sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_collection(collection.clone());
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        // Create segments for the collection
+        let record_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let hnsw_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::HnswDistributed,
+            scope: chroma_types::SegmentScope::VECTOR,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        let metadata_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: collection_uuid,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        match sysdb {
+            SysDb::Test(ref mut sysdb) => {
+                sysdb.add_segment(record_segment);
+                sysdb.add_segment(hnsw_segment);
+                sysdb.add_segment(metadata_segment);
+                sysdb.add_tenant_last_compaction_time(tenant.clone(), 1);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let hnsw_cache = new_non_persistent_cache_for_test();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let blockfile_provider = BlockfileProvider::new_arrow(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
+        let hnsw_provider = HnswIndexProvider::new(
+            storage.clone(),
+            PathBuf::from(tmpdir.path().to_str().unwrap()),
+            hnsw_cache,
+            16,
+            false,
+        );
+        let spann_provider = SpannProvider {
+            hnsw_provider: hnsw_provider.clone(),
+            blockfile_provider: blockfile_provider.clone(),
+            garbage_collection_context: gc_context,
+            metrics: SpannMetrics::default(),
+            pl_block_size: 5 * 1024 * 1024,
+            adaptive_search_nprobe: true,
+        };
+        let system = System::new();
+
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: 10,
+            task_queue_limit: 100,
+            dispatcher_queue_size: 100,
+            worker_queue_size: 100,
+            active_io_tasks: 100,
+        });
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        let old_cas = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .unwrap();
+
+        let old_records = get_all_records(
+            &system,
+            &dispatcher_handle,
+            blockfile_provider.clone(),
+            log.clone(),
+            old_cas,
+        )
+        .await;
+
+        // Test the actual compaction workflow by simulating the timing
+        // Manually create compaction contexts to control each phase
+
+        // Compaction 1: Start with run_get_logs only
+        let mut compaction_context_1 = CompactionContext::new(
+            false,
+            50,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            blockfile_provider.clone(),
+            hnsw_provider.clone(),
+            spann_provider.clone(),
+            dispatcher_handle.clone(),
+        );
+
+        // Start compaction 1's log_fetch_orchestrator
+        println!("Starting compaction 1's run_get_logs...");
+        let compaction_1_logs_result = compaction_context_1
+            .run_get_logs(collection_uuid, system.clone())
+            .await;
+
+        // Store the logs for compaction 1 to use later
+        let (compaction_1_log_records, _compaction_1_collection_info) =
+            match compaction_1_logs_result {
+                Ok(LogFetchOrchestratorResponse::Success(success)) => {
+                    (success.materialized, success.collection_info)
+                }
+                Ok(LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_)) => {
+                    panic!("Unexpected repair response in test");
+                }
+                Err(e) => {
+                    panic!("Compaction 1 run_get_logs failed: {:?}", e);
+                }
+            };
+
+        println!(
+            "Compaction 1's run_get_logs completed successfully, got {} log records",
+            compaction_1_log_records.len()
+        );
+
+        // Create a NEW compaction context for compaction 2 to simulate a fresh compaction
+        // This ensures both compactions work with the same initial state
+        let _ = CompactionContext::new(
+            false,
+            50,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            blockfile_provider.clone(),
+            hnsw_provider.clone(),
+            spann_provider.clone(),
+            dispatcher_handle.clone(),
+        );
+
+        // Now start compaction 2 and let it run completely using the compact() function
+        println!("Starting compaction 2 to completion...");
+        let compaction_2 = Box::pin(compact(
+            system.clone(),
+            collection_uuid,
+            false, // walrus_enabled
+            50,    // min_compaction_size
+            1000,  // max_compaction_size
+            50,    // max_partition_size
+            log.clone(),
+            sysdb.clone(),
+            blockfile_provider.clone(),
+            hnsw_provider.clone(),
+            spann_provider.clone(),
+            dispatcher_handle.clone(),
+            None,
+        ));
+
+        let _compaction_2_result = compaction_2
+            .await
+            .expect("Compaction 2 should have succeeded.");
+
+        assert_eq!(
+            sysdb
+                .get_collection_with_segments(collection_uuid)
+                .await
+                .unwrap()
+                .collection
+                .version,
+            1
+        );
+
+        // Now try to continue compaction 1 with the rest of the phases
+        // Compaction 1 should fail because compaction 2 already processed the same logs
+        println!(
+            "Continuing compaction 1 with run_apply_logs using {} log records...",
+            compaction_1_log_records.len()
+        );
+        let compaction_1_apply_response = compaction_context_1
+            .run_apply_logs(compaction_1_log_records, system.clone())
+            .await
+            .expect("Apply should have succeeded.");
+
+        let _register_result = Box::pin(compaction_context_1.run_register(
+            compaction_1_apply_response.flush_results,
+            compaction_1_apply_response.collection_logical_size_bytes,
+            system.clone(),
+        ))
+        .await
+        .expect_err("Register should have failed.");
+
+        // Verify that the collection was successfully compacted (by whichever succeeded)
+        let collection_after_compaction = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .expect("Collection should exist after compaction");
+
+        // The collection should be in a consistent state
+        assert_eq!(
+            collection_after_compaction.collection.version, 1,
+            "Collection should have version 1"
+        );
+
+        let new_cas = sysdb
+            .get_collection_with_segments(collection_uuid)
+            .await
+            .unwrap();
+        let new_records = get_all_records(
+            &system,
+            &dispatcher_handle,
+            blockfile_provider.clone(),
+            log.clone(),
+            new_cas,
+        )
+        .await;
+        assert_eq!(old_records, new_records);
+    }
+
+    pub async fn check_purge_successful(path: impl AsRef<Path>) {
+        let mut entries = fs::read_dir(&path).await.expect("Failed to read dir");
+
+        while let Some(entry) = entries.next_entry().await.expect("Failed to read next dir") {
+            let path = entry.path();
+            let metadata = entry.metadata().await.expect("Failed to read metadata");
+
+            if metadata.is_dir() {
+                assert!(path.ends_with("tenant"));
+            } else {
+                panic!("Expected hnsw purge to be successful")
+            }
+        }
     }
 }

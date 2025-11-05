@@ -1,26 +1,18 @@
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_log::{CollectionInfo, CollectionRecord, Log};
 use chroma_memberlist::memberlist_provider::Memberlist;
-use chroma_storage::Storage;
 use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_types::{CollectionUuid, JobId};
 use figment::providers::Env;
 use figment::Figment;
-use mdac::{Scorecard, ScorecardGuard};
-use s3heap_service::SysDbScheduler;
 use serde::Deserialize;
-use tracing::Level;
 use uuid::Uuid;
 
-use crate::compactor::compaction_manager::ExecutionMode;
 use crate::compactor::scheduler_policy::SchedulerPolicy;
-use crate::compactor::tasks::{FunctionHeapReader, SchedulableFunction};
 use crate::compactor::types::CompactionJob;
 
 #[derive(Debug, Clone)]
@@ -71,16 +63,12 @@ impl FailedJob {
 
 struct InProgressJob {
     expires_at: SystemTime,
-    // dead because RAII-style drop protection
-    #[allow(dead_code)]
-    guard: Option<ScorecardGuard>,
 }
 
 impl InProgressJob {
-    fn new(job_expiry_seconds: u64, guard: Option<ScorecardGuard>) -> Self {
+    fn new(job_expiry_seconds: u64) -> Self {
         Self {
             expires_at: SystemTime::now() + Duration::from_secs(job_expiry_seconds),
-            guard,
         }
     }
 
@@ -90,7 +78,6 @@ impl InProgressJob {
 }
 
 pub(crate) struct Scheduler {
-    mode: ExecutionMode,
     my_member_id: String,
     log: Log,
     sysdb: SysDb,
@@ -110,9 +97,6 @@ pub(crate) struct Scheduler {
     dead_jobs: HashSet<JobId>,
     max_failure_count: u8,
     metrics: SchedulerMetrics,
-    tasks: FunctionHeapReader,
-    func_queue: Vec<SchedulableFunction>,
-    scorecard: Arc<Scorecard<'static>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -123,11 +107,9 @@ struct RunTimeConfig {
 impl Scheduler {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        mode: ExecutionMode,
         my_ip: String,
         log: Log,
         sysdb: SysDb,
-        storage: Storage,
         policy: Box<dyn SchedulerPolicy>,
         max_concurrent_jobs: usize,
         min_compaction_size: usize,
@@ -136,17 +118,7 @@ impl Scheduler {
         job_expiry_seconds: u64,
         max_failure_count: u8,
     ) -> Scheduler {
-        let heap_scheduler =
-            Arc::new(SysDbScheduler::new(sysdb.clone())) as Arc<dyn s3heap::HeapScheduler>;
-        let tasks = FunctionHeapReader::new(storage, heap_scheduler);
-        let scorecard = Arc::new(Scorecard::new(
-            &(),
-            vec![],
-            128.try_into().expect("128 is not zero"),
-        ));
-
         Scheduler {
-            mode,
             my_member_id: my_ip,
             log,
             sysdb,
@@ -166,9 +138,6 @@ impl Scheduler {
             max_failure_count,
             dead_jobs: HashSet::new(),
             metrics: SchedulerMetrics::default(),
-            tasks,
-            func_queue: Vec::with_capacity(max_concurrent_jobs),
-            scorecard,
         }
     }
 
@@ -428,7 +397,7 @@ impl Scheduler {
     fn add_in_progress(&mut self, collection_id: CollectionUuid) {
         self.in_progress_jobs.insert(
             collection_id.into(),
-            InProgressJob::new(self.job_expiry_seconds, None),
+            InProgressJob::new(self.job_expiry_seconds),
         );
     }
 
@@ -501,130 +470,24 @@ impl Scheduler {
     pub(crate) async fn schedule(&mut self) {
         // For now, we clear the job queue every time, assuming we will not have any pending jobs running
         self.job_queue.clear();
-        self.func_queue.clear();
 
         if self.memberlist.is_none() || self.memberlist.as_ref().unwrap().is_empty() {
             tracing::error!("Memberlist is not set or empty. Cannot schedule compaction jobs.");
             return;
         }
 
-        match self.mode {
-            ExecutionMode::Compaction => {
-                // Recompute disabled list.
-                self.recompute_disabled_collections();
-                let collections = self.get_collections_with_new_data().await;
-                if collections.is_empty() {
-                    return;
-                }
-                let collection_records = self.verify_and_enrich_collections(collections).await;
-                self.schedule_internal(collection_records).await;
-            }
-            ExecutionMode::AttachedFunction => {
-                let tasks = self
-                    .tasks
-                    .get_tasks_scheduled_for_execution(
-                        s3heap::Limits::default().with_items(self.max_concurrent_jobs),
-                    )
-                    .await;
-                self.schedule_tasks(tasks).await;
-            }
+        // Recompute disabled list.
+        self.recompute_disabled_collections();
+        let collections = self.get_collections_with_new_data().await;
+        if collections.is_empty() {
+            return;
         }
-    }
-
-    pub(crate) async fn schedule_tasks(&mut self, funcs: Vec<SchedulableFunction>) {
-        let members = self.memberlist.as_ref().unwrap();
-        let members_as_string = members
-            .iter()
-            .map(|member| member.member_id.clone())
-            .collect();
-        self.assignment_policy.set_members(members_as_string);
-        for func in funcs {
-            let result = self
-                .assignment_policy
-                .assign_one(func.collection_id.0.to_string().as_str());
-            if result.is_err() {
-                tracing::error!(
-                    "Failed to assign func {} for collection {} to member: {}",
-                    func.task_id,
-                    func.collection_id,
-                    result.err().unwrap()
-                );
-                continue;
-            }
-            let member = result.unwrap();
-            if member != self.my_member_id {
-                continue;
-            }
-
-            let failure_count = self
-                .failing_jobs
-                .get(&func.collection_id.into())
-                .map(|job| job.failure_count())
-                .unwrap_or(0);
-
-            if failure_count >= self.max_failure_count {
-                tracing::warn!(
-                    "Job for collection {} failed more than {} times, moving this to dead jobs and skipping function for it",
-                    func.collection_id,
-                    self.max_failure_count
-                );
-                self.kill_job(func.task_id.into());
-                continue;
-            }
-
-            if self.disabled_collections.contains(&func.collection_id)
-                || self.dead_jobs.contains(&func.collection_id.into())
-            {
-                tracing::info!(
-                    "Ignoring collection: {:?} because it disabled",
-                    func.collection_id
-                );
-                continue;
-            }
-            if let Entry::Vacant(entry) = self.in_progress_jobs.entry(func.task_id.into()) {
-                let result = self
-                    .sysdb
-                    .get_collections(GetCollectionsOptions {
-                        collection_id: Some(func.collection_id),
-                        ..Default::default()
-                    })
-                    .await;
-                match result {
-                    Ok(collections) => {
-                        if collections.is_empty() {
-                            self.deleted_collections.insert(func.collection_id);
-                            continue;
-                        }
-                        let tags = ["op:function", &format!("tenant:{}", collections[0].tenant)];
-                        let guard = self.scorecard.track(&tags).map(|ticket| {
-                            ScorecardGuard::new(Arc::clone(&self.scorecard), Some(ticket))
-                        });
-                        if let Some(guard) = guard {
-                            entry.insert(InProgressJob::new(self.job_expiry_seconds, Some(guard)));
-                            self.func_queue.push(func);
-                        } else {
-                            tracing::event!(
-                                Level::INFO,
-                                name = "not scheduling function because scorecard",
-                                collection_id =? func.collection_id,
-                                tenant =? collections[0].tenant,
-                            );
-                        }
-                    }
-                    Err(err) => {
-                        tracing::error!("Error: {:?}", err);
-                    }
-                }
-            }
-        }
+        let collection_records = self.verify_and_enrich_collections(collections).await;
+        self.schedule_internal(collection_records).await;
     }
 
     pub(crate) fn get_jobs(&self) -> impl Iterator<Item = &CompactionJob> {
         self.job_queue.iter()
-    }
-
-    pub(crate) fn get_tasks_scheduled_for_execution(&self) -> &Vec<SchedulableFunction> {
-        &self.func_queue
     }
 
     pub(crate) fn set_memberlist(&mut self, memberlist: Memberlist) {
@@ -645,16 +508,11 @@ mod tests {
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
-    use chroma_storage::s3_client_for_test_with_new_bucket;
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord};
 
-    use crate::compactor::compaction_manager::ExecutionMode;
-
     #[tokio::test]
     async fn test_k8s_integration_scheduler() {
-        let storage = s3_client_for_test_with_new_bucket().await;
-
         let mut log = Log::InMemory(InMemoryLog::new());
         let in_memory_log = match log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
@@ -751,11 +609,9 @@ mod tests {
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
         let mut scheduler = Scheduler::new(
-            ExecutionMode::Compaction,
             my_member.member_id.clone(),
             log,
             sysdb.clone(),
-            storage,
             scheduler_policy,
             max_concurrent_jobs,
             1,
@@ -885,8 +741,6 @@ mod tests {
     #[tokio::test]
     #[should_panic(expected = "is less than offset")]
     async fn test_k8s_integration_scheduler_panic() {
-        let storage = s3_client_for_test_with_new_bucket().await;
-
         let mut log = Log::InMemory(InMemoryLog::new());
         let in_memory_log = match log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
@@ -1008,11 +862,9 @@ mod tests {
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
         let mut scheduler = Scheduler::new(
-            ExecutionMode::Compaction,
             my_member.member_id.clone(),
             log,
             sysdb.clone(),
-            storage,
             scheduler_policy,
             max_concurrent_jobs,
             1,

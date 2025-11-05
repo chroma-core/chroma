@@ -137,37 +137,6 @@ pub async fn compaction_service_entrypoint() {
     let mut compaction_manager_handle = system.start_component(compaction_manager);
     memberlist.subscribe(compaction_manager_handle.receiver());
 
-    // Create taskrunner manager if config is present and enabled (runtime config)
-    let taskrunner_manager_handle = if let Some(task_config) = &config.task_runner {
-        if !task_config.enabled {
-            None
-        } else {
-            match crate::compactor::attach_functionrunner_manager(
-                &config,
-                task_config,
-                system.clone(),
-                dispatcher_handle.clone(),
-                &registry,
-            )
-            .await
-            {
-                Ok(mut task_manager) => {
-                    println!("Taskrunner manager created");
-                    task_manager.set_dispatcher(dispatcher_handle.clone());
-                    let task_handle = system.start_component(task_manager);
-                    memberlist.subscribe(task_handle.receiver());
-                    Some(task_handle)
-                }
-                Err(err) => {
-                    println!("Failed to create taskrunner manager: {:?}", err);
-                    None
-                }
-            }
-        }
-    } else {
-        None
-    };
-
     let mut memberlist_handle = system.start_component(memberlist);
 
     let compaction_server = CompactionServer {
@@ -198,10 +167,6 @@ pub async fn compaction_service_entrypoint() {
             let _ = dispatcher_handle.join().await;
             compaction_manager_handle.stop();
             let _ = compaction_manager_handle.join().await;
-            if let Some(mut handle) = taskrunner_manager_handle {
-                handle.stop();
-                let _ = handle.join().await;
-            }
             system.stop().await;
             system.join().await;
             let _ = server_join_handle.await;
