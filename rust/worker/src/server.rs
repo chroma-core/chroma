@@ -29,6 +29,7 @@ use crate::{
     execution::{
         operators::fetch_log::FetchLogOperator,
         orchestration::{
+            count::CountOrchestrator,
             get::GetOrchestrator,
             knn::KnnOrchestrator,
             knn_filter::KnnFilterOrchestrator,
@@ -36,7 +37,6 @@ use crate::{
             rank::{RankOrchestrator, RankOrchestratorOutput},
             spann_knn::SpannKnnOrchestrator,
             sparse_knn::SparseKnnOrchestrator,
-            CountOrchestrator,
         },
     },
 };
