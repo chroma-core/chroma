@@ -123,6 +123,7 @@ export const knownEmbeddingFunctions = new Map<
 
 const pythonEmbeddingFunctions: Record<string, string> = {
   onnx_mini_lm_l6_v2: "default-embed",
+  default: "default-embed",
   together_ai: "together-ai",
 };
 
@@ -241,21 +242,21 @@ export const getEmbeddingFunction = async (
     return undefined;
   }
 
-  const name = pythonEmbeddingFunctions[efConfig.name] || efConfig.name;
+  const packageName = pythonEmbeddingFunctions[efConfig.name] || efConfig.name;
 
-  let embeddingFunction = knownEmbeddingFunctions.get(name);
+  let embeddingFunction = knownEmbeddingFunctions.get(packageName);
   if (!embeddingFunction) {
     try {
-      const packageName = `@chroma-core/${name}`;
-      await import(packageName);
-      embeddingFunction = knownEmbeddingFunctions.get(name);
+      const fullPackageName = `@chroma-core/${packageName}`;
+      await import(fullPackageName);
+      embeddingFunction = knownEmbeddingFunctions.get(packageName);
     } catch (error) {
       // Dynamic loading failed, proceed with warning
     }
 
     if (!embeddingFunction) {
       console.warn(
-        `Collection ${collectionName} was created with the ${name} embedding function. However, the @chroma-core/${name} package is not install. 'add' and 'query' will fail unless you provide them embeddings directly, or install the @chroma-core/${name} package.`,
+        `Collection ${collectionName} was created with the ${packageName} embedding function. However, the @chroma-core/${packageName} package is not install. 'add' and 'query' will fail unless you provide them embeddings directly, or install the @chroma-core/${packageName} package.`,
       );
       return undefined;
     }
@@ -270,12 +271,12 @@ export const getEmbeddingFunction = async (
     }
 
     console.warn(
-      `Embedding function ${name} does not define a 'buildFromConfig' function. 'add' and 'query' will fail unless you provide them embeddings directly.`,
+      `Embedding function ${packageName} does not define a 'buildFromConfig' function. 'add' and 'query' will fail unless you provide them embeddings directly.`,
     );
     return undefined;
   } catch (e) {
     console.warn(
-      `Embedding function ${name} failed to build with config: ${constructorConfig}. 'add' and 'query' will fail unless you provide them embeddings directly. Error: ${e}`,
+      `Embedding function ${packageName} failed to build with config: ${constructorConfig}. 'add' and 'query' will fail unless you provide them embeddings directly. Error: ${e}`,
     );
     return undefined;
   }
@@ -310,21 +311,22 @@ export const getSparseEmbeddingFunction = async (
     return undefined;
   }
 
-  const name = pythonSparseEmbeddingFunctions[efConfig.name] || efConfig.name;
+  const packageName =
+    pythonSparseEmbeddingFunctions[efConfig.name] || efConfig.name;
 
-  let sparseEmbeddingFunction = knownSparseEmbeddingFunctions.get(name);
+  let sparseEmbeddingFunction = knownSparseEmbeddingFunctions.get(packageName);
   if (!sparseEmbeddingFunction) {
     try {
-      const packageName = `@chroma-core/${name}`;
-      await import(packageName);
-      sparseEmbeddingFunction = knownSparseEmbeddingFunctions.get(name);
+      const fullPackageName = `@chroma-core/${packageName}`;
+      await import(fullPackageName);
+      sparseEmbeddingFunction = knownSparseEmbeddingFunctions.get(packageName);
     } catch (error) {
       // Dynamic loading failed, proceed with warning
     }
 
     if (!sparseEmbeddingFunction) {
       console.warn(
-        `Collection ${collectionName} was created with the ${name} sparse embedding function. However, the @chroma-core/${name} package is not installed.`,
+        `Collection ${collectionName} was created with the ${packageName} sparse embedding function. However, the @chroma-core/${packageName} package is not installed.`,
       );
       return undefined;
     }
@@ -339,12 +341,12 @@ export const getSparseEmbeddingFunction = async (
     }
 
     console.warn(
-      `Sparse embedding function ${name} does not define a 'buildFromConfig' function.`,
+      `Sparse embedding function ${packageName} does not define a 'buildFromConfig' function.`,
     );
     return undefined;
   } catch (e) {
     console.warn(
-      `Sparse embedding function ${name} failed to build with config: ${constructorConfig}. Error: ${e}`,
+      `Sparse embedding function ${packageName} failed to build with config: ${constructorConfig}. Error: ${e}`,
     );
     return undefined;
   }
