@@ -5,8 +5,11 @@ use chroma_sysdb::{
     CreateOutputCollectionForAttachedFunctionError, GetAttachedFunctionError, SysDb,
 };
 use chroma_system::{Operator, OperatorType};
-use chroma_types::{AdvanceAttachedFunctionError, AttachedFunction, CollectionUuid};
+use chroma_types::chroma_proto::AttachedFunction;
+use chroma_types::ListAttachedFunctionsError;
+use chroma_types::{AdvanceAttachedFunctionError, CollectionUuid};
 use thiserror::Error;
+use uuid;
 
 /// The `PrepareAttachedFunctionOperator` prepares a attached function execution by:
 /// 1. Fetching the latest attached function state from SysDB using attached_function_uuid
@@ -29,20 +32,17 @@ use thiserror::Error;
 pub struct PrepareAttachedFunctionOperator {
     pub sysdb: SysDb,
     pub log: Log,
-    pub attached_function_uuid: chroma_types::AttachedFunctionUuid,
 }
 
 #[derive(Clone, Debug)]
 pub struct PrepareAttachedFunctionInput {
-    pub nonce: chroma_types::NonceUuid,
+    pub input_collection_id: CollectionUuid,
 }
 
 #[derive(Clone, Debug)]
 pub struct PrepareAttachedFunctionOutput {
     /// The attached function object fetched from SysDB
     pub attached_function: AttachedFunction,
-    /// The nonce to use for this attached function execution
-    pub execution_nonce: chroma_types::NonceUuid,
     /// If true, skip execution and go directly to FinishAttachedFunction
     /// This happens when there aren't enough new records to process
     pub should_skip_execution: bool,
@@ -54,8 +54,12 @@ pub struct PrepareAttachedFunctionOutput {
 pub enum PrepareAttachedFunctionError {
     #[error(" Attached Function not found in SysDB")]
     AttachedFunctionNotFound,
+    #[error("No attached function found for collection")]
+    NoAttachedFunctionFound,
     #[error("Failed to get attached function: {0}")]
     GetAttachedFunction(#[from] GetAttachedFunctionError),
+    #[error("Failed to list attached functions: {0}")]
+    ListAttachedFunctions(#[from] ListAttachedFunctionsError),
     #[error("Failed to create output collection for attached function: {0}")]
     CreateOutputCollectionForAttachedFunction(
         #[from] CreateOutputCollectionForAttachedFunctionError,
@@ -80,7 +84,11 @@ impl ChromaError for PrepareAttachedFunctionError {
             PrepareAttachedFunctionError::AttachedFunctionNotFound => {
                 chroma_error::ErrorCodes::NotFound
             }
+            PrepareAttachedFunctionError::NoAttachedFunctionFound => {
+                chroma_error::ErrorCodes::NotFound
+            }
             PrepareAttachedFunctionError::GetAttachedFunction(e) => e.code(),
+            PrepareAttachedFunctionError::ListAttachedFunctions(e) => e.code(),
             PrepareAttachedFunctionError::CreateOutputCollectionForAttachedFunction(e) => e.code(),
             PrepareAttachedFunctionError::InvalidNonce { .. } => {
                 chroma_error::ErrorCodes::InvalidArgument
@@ -109,169 +117,77 @@ impl Operator<PrepareAttachedFunctionInput, PrepareAttachedFunctionOutput>
         input: &PrepareAttachedFunctionInput,
     ) -> Result<PrepareAttachedFunctionOutput, PrepareAttachedFunctionError> {
         tracing::info!(
-            "[{}]: Preparing attached function {} with nonce {}",
+            "[{}]: Preparing attached function for input collection {}",
             self.get_name(),
-            self.attached_function_uuid.0,
-            input.nonce
+            input.input_collection_id.0,
         );
 
         let mut sysdb = self.sysdb.clone();
-        let mut log = self.log.clone();
 
-        // 1. Fetch the attached function from SysDB using UUID
-        let mut attached_function = sysdb
-            .get_attached_function_by_uuid(self.attached_function_uuid)
+        // 1. Fetch attached functions from SysDB for the collection
+        let attached_functions = sysdb
+            .list_attached_functions(input.input_collection_id)
             .await
-            .map_err(|e| match e {
-                GetAttachedFunctionError::NotFound => {
-                    PrepareAttachedFunctionError::AttachedFunctionNotFound
-                }
-                other => PrepareAttachedFunctionError::GetAttachedFunction(other),
-            })?;
+            .map_err(PrepareAttachedFunctionError::ListAttachedFunctions)?;
 
-        tracing::debug!(
-            "[{}]: Retrieved attached function {} - next_nonce={}, lowest_live_nonce={:?}",
-            self.get_name(),
-            attached_function.name,
-            attached_function.next_nonce,
-            attached_function.lowest_live_nonce
-        );
-
-        // 2. ASSERT: nonce must match either next_nonce or lowest_live_nonce
-        let matches_lowest = attached_function.lowest_live_nonce == Some(input.nonce);
-        if input.nonce != attached_function.next_nonce && !matches_lowest {
-            tracing::error!(
-                "[{}]: Invalid nonce for attached function {} - provided={}, expected next={} or lowest={:?}",
-                self.get_name(),
-                attached_function.name,
-                input.nonce,
-                attached_function.next_nonce,
-                attached_function.lowest_live_nonce
-            );
-            return Err(PrepareAttachedFunctionError::InvalidNonce {
-                provided: input.nonce,
-                expected_next: attached_function.next_nonce,
-                expected_lowest: attached_function.lowest_live_nonce.unwrap_or_default(),
-            });
-        }
-
-        let execution_nonce = match attached_function.lowest_live_nonce {
-            Some(nonce) => nonce,
-            None => {
+        // 2. Handle zero or one attached function
+        let attached_function = match attached_functions.len() {
+            0 => {
+                tracing::info!(
+                    "[{}]: No attached function found for collection {}",
+                    self.get_name(),
+                    input.input_collection_id.0
+                );
+                return Err(PrepareAttachedFunctionError::NoAttachedFunctionFound);
+            }
+            1 => {
+                let attached_function = attached_functions.into_iter().next().unwrap();
+                tracing::debug!(
+                    "[{}]: Retrieved attached function {} - next_nonce={}, lowest_live_nonce={:?}",
+                    self.get_name(),
+                    attached_function.name,
+                    attached_function.next_nonce,
+                    attached_function.lowest_live_nonce
+                );
+                attached_function
+            }
+            _ => {
                 return Err(PrepareAttachedFunctionError::InvariantViolation(format!(
-                    "Attached function {} has no lowest_live_nonce",
-                    attached_function.name
+                    "Expected 0 or 1 attached functions for collection {}, found {}",
+                    input.input_collection_id.0,
+                    attached_functions.len()
                 )));
             }
         };
 
-        // Scout logs to see if we should skip execution (task may have already executed)
-        let next_log_offset = log
-            .scout_logs(
-                &attached_function.tenant_id,
-                attached_function.input_collection_id,
-                attached_function.completion_offset,
-            )
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    "[{}]: Failed to scout logs for attached function {}: {}",
+        // 5. Create output collection if it doesn't exist
+        let output_collection_id =
+            if let Some(output_id) = attached_function.output_collection_id.clone() {
+                // Parse output_collection_id from string to CollectionUuid
+                CollectionUuid(uuid::Uuid::parse_str(&output_id).map_err(|e| {
+                    tracing::error!(
+                    "[{}]: Failed to parse output_collection_id '{}' for attached function {}: {}",
                     self.get_name(),
+                    output_id,
                     attached_function.name,
                     e
                 );
-                PrepareAttachedFunctionError::ScoutLogs(format!("Failed to scout logs: {}", e))
-            })?;
+                    PrepareAttachedFunctionError::InvariantViolation(format!(
+                        "Invalid output_collection_id: {}",
+                        output_id
+                    ))
+                })?)
+            } else {
+                // Create new output collection atomically with attached function update
 
-        // 3. Determine state transition and whether to skip execution
-        let new_records_count = next_log_offset.saturating_sub(attached_function.completion_offset);
-        let should_skip_execution =
-            new_records_count < attached_function.min_records_for_invocation;
-
-        if should_skip_execution {
-            tracing::info!(
-                "[{}]: Skipping execution for attached function {} - not enough new records (new={}, min={})",
-                self.get_name(),
-                attached_function.name,
-                new_records_count,
-                attached_function.min_records_for_invocation
-            );
-        } else {
-            tracing::info!(
-                "[{}]: Attached function {} will proceed with execution ({} new records available)",
-                self.get_name(),
-                attached_function.name,
-                new_records_count
-            );
-        }
-
-        if attached_function
-            .lowest_live_nonce
-            .is_some_and(|lln| attached_function.next_nonce == lln)
-        {
-            // Currently **waiting**, transition to **scheduled**
-            tracing::info!(
-                "[{}]: AttachedFunction {} transitioning from waiting to scheduled",
-                self.get_name(),
-                attached_function.name
-            );
-
-            // Call advance_attached_function to increment next_nonce and set next_run (with nonce check for concurrency safety)
-            // Set next_run to some reasonable delay (e.g., 60 seconds) since we're starting work
-            const DEFAULT_THROTTLE_INTERVAL_SECS: u64 = 60;
-            let advance_response = sysdb
-                .advance_attached_function(
-                    attached_function.id,
-                    input.nonce.0,
-                    attached_function.completion_offset,
-                    DEFAULT_THROTTLE_INTERVAL_SECS, // Set next_run since we're advancing nonce
-                )
-                .await?;
-
-            tracing::debug!(
-                "[{}]: Advanced attached function {} - new next_nonce={}",
-                self.get_name(),
-                attached_function.name,
-                advance_response.next_nonce
-            );
-
-            // Update attached function with the new nonce values
-            attached_function.next_nonce = chroma_types::NonceUuid(advance_response.next_nonce);
-            attached_function.next_run = advance_response.next_run;
-        }
-
-        // 4. Create output collection if it doesn't exist
-        let output_collection_id = if let Some(output_id) = attached_function.output_collection_id {
-            // Output collection already exists
-            output_id
-        } else {
-            // Create new output collection atomically with attached function update
-            tracing::info!(
-                "[{}]: Creating output collection '{}' for attached function {}",
-                self.get_name(),
-                attached_function.output_collection_name,
-                attached_function.name
-            );
-
-            let collection_id = sysdb
-                .create_output_collection_for_attached_function(
-                    attached_function.id,
-                    attached_function.output_collection_name.clone(),
-                    attached_function.tenant_id.clone(),
-                    attached_function.database_id.clone(),
-                )
-                .await?;
-
-            // Update local attached function object with the new output collection ID
-            attached_function.output_collection_id = Some(collection_id);
-
-            collection_id
-        };
+                return Err(PrepareAttachedFunctionError::InvariantViolation(
+                    "Not output_collection_id".to_string(),
+                ));
+            };
 
         Ok(PrepareAttachedFunctionOutput {
             attached_function: attached_function.clone(),
-            execution_nonce,
-            should_skip_execution,
+            should_skip_execution: false,
             output_collection_id,
         })
     }

@@ -500,6 +500,7 @@ impl Scheduler {
 
     pub(crate) async fn schedule(&mut self) {
         // For now, we clear the job queue every time, assuming we will not have any pending jobs running
+        // TODO(tanujnay112): No need for these to be separate...
         self.job_queue.clear();
         self.func_queue.clear();
 
@@ -526,6 +527,7 @@ impl Scheduler {
                         s3heap::Limits::default().with_items(self.max_concurrent_jobs),
                     )
                     .await;
+                // TODO(tanujnay112): ...and this
                 self.schedule_tasks(tasks).await;
             }
         }
@@ -551,6 +553,8 @@ impl Scheduler {
                 );
                 continue;
             }
+
+            // TODO(tanujnay112): Get rid of this unwrap.
             let member = result.unwrap();
             if member != self.my_member_id {
                 continue;
@@ -572,6 +576,7 @@ impl Scheduler {
                 continue;
             }
 
+            // TODO(tanujnay112): The below is a wrong key into dead_jobs
             if self.disabled_collections.contains(&func.collection_id)
                 || self.dead_jobs.contains(&func.collection_id.into())
             {

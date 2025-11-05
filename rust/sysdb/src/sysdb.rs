@@ -723,17 +723,6 @@ impl SysDb {
         }
     }
 
-    pub async fn peek_schedule_by_collection_id(
-        &mut self,
-        collection_ids: &[CollectionUuid],
-    ) -> Result<Vec<ScheduleEntry>, PeekScheduleError> {
-        match self {
-            SysDb::Grpc(grpc) => grpc.peek_schedule_by_collection_id(collection_ids).await,
-            SysDb::Sqlite(_) => unimplemented!(),
-            SysDb::Test(test) => test.peek_schedule_by_collection_id(collection_ids).await,
-        }
-    }
-
     pub async fn finish_attached_function(
         &mut self,
         attached_function_id: AttachedFunctionUuid,
@@ -1955,127 +1944,129 @@ impl GrpcSysDb {
         );
         Ok(attached_function_id)
     }
+}
 
+impl SysDb {
     /// Helper function to convert a proto AttachedFunction to a chroma_types::AttachedFunction
-    fn attached_function_from_proto(
+    pub fn attached_function_from_proto(
         attached_function: chroma_proto::AttachedFunction,
     ) -> Result<chroma_types::AttachedFunction, GetAttachedFunctionError> {
-        // Parse attached_function_id
-        let attached_function_id = chroma_types::AttachedFunctionUuid(
-            uuid::Uuid::parse_str(&attached_function.id).map_err(|e| {
-                tracing::error!(
-                    attached_function_id = %attached_function.id,
-                    error = %e,
-                    "Server returned invalid attached_function_id UUID"
-                );
-                GetAttachedFunctionError::ServerReturnedInvalidData
-            })?,
-        );
-
-        // Parse input_collection_id
-        let parsed_input_collection_id = chroma_types::CollectionUuid(
-            uuid::Uuid::parse_str(&attached_function.input_collection_id).map_err(|e| {
-                tracing::error!(
-                    input_collection_id = %attached_function.input_collection_id,
-                    error = %e,
-                    "Server returned invalid input_collection_id UUID"
-                );
-                GetAttachedFunctionError::ServerReturnedInvalidData
-            })?,
-        );
-
-        // Parse next_run timestamp from microseconds
-        let next_run = std::time::SystemTime::UNIX_EPOCH
-            + std::time::Duration::from_micros(attached_function.next_run_at);
-
-        // Parse nonces
-        let lowest_live_nonce = match &attached_function.lowest_live_nonce {
-            Some(nonce_str) if !nonce_str.is_empty() => Some(
-                uuid::Uuid::parse_str(nonce_str)
-                    .map(chroma_types::NonceUuid)
-                    .map_err(|e| {
-                        tracing::error!(
-                            lowest_live_nonce = %nonce_str,
-                            error = %e,
-                            "Server returned invalid lowest_live_nonce UUID"
-                        );
-                        GetAttachedFunctionError::ServerReturnedInvalidData
-                    })?,
-            ),
-            _ => None,
-        };
-
-        let next_nonce = uuid::Uuid::parse_str(&attached_function.next_nonce)
-            .map(chroma_types::NonceUuid)
-            .map_err(|e| {
-                tracing::error!(
-                    next_nonce = %attached_function.next_nonce,
-                    error = %e,
-                    "Server returned invalid next_nonce UUID"
-                );
-                GetAttachedFunctionError::ServerReturnedInvalidData
-            })?;
-
-        // Convert params from Struct to JSON string
-        let params_str = attached_function.params.map(|s| {
-            let json_value = prost_struct_to_json(s);
-            serde_json::to_string(&json_value).unwrap_or_else(|_| "{}".to_string())
-        });
-
-        // Parse output_collection_id if present
-        let parsed_output_collection_id =
-            if let Some(id_str) = attached_function.output_collection_id.as_ref() {
-                if id_str.is_empty() {
-                    None
-                } else {
-                    Some(chroma_types::CollectionUuid(
-                        uuid::Uuid::parse_str(id_str).map_err(|e| {
-                            tracing::error!(
-                                output_collection_id = %id_str,
-                                error = %e,
-                                "Server returned invalid output_collection_id UUID"
-                            );
-                            GetAttachedFunctionError::ServerReturnedInvalidData
-                        })?,
-                    ))
-                }
-            } else {
-                None
-            };
-
-        // Parse function_id from the dedicated UUID field
-        let function_id = uuid::Uuid::parse_str(&attached_function.function_id).map_err(|e| {
+    // Parse attached_function_id
+    let attached_function_id = chroma_types::AttachedFunctionUuid(
+        uuid::Uuid::parse_str(&attached_function.id).map_err(|e| {
             tracing::error!(
-                function_id = %attached_function.function_id,
+                attached_function_id = %attached_function.id,
                 error = %e,
-                "Server returned invalid function_id UUID"
+                "Server returned invalid attached_function_id UUID"
+            );
+            GetAttachedFunctionError::ServerReturnedInvalidData
+        })?,
+    );
+
+    // Parse input_collection_id
+    let parsed_input_collection_id = chroma_types::CollectionUuid(
+        uuid::Uuid::parse_str(&attached_function.input_collection_id).map_err(|e| {
+            tracing::error!(
+                input_collection_id = %attached_function.input_collection_id,
+                error = %e,
+                "Server returned invalid input_collection_id UUID"
+            );
+            GetAttachedFunctionError::ServerReturnedInvalidData
+        })?,
+    );
+
+    // Parse next_run timestamp from microseconds
+    let next_run = std::time::SystemTime::UNIX_EPOCH
+        + std::time::Duration::from_micros(attached_function.next_run_at);
+
+    // Parse nonces
+    let lowest_live_nonce = match &attached_function.lowest_live_nonce {
+        Some(nonce_str) if !nonce_str.is_empty() => Some(
+            uuid::Uuid::parse_str(nonce_str)
+                .map(chroma_types::NonceUuid)
+                .map_err(|e| {
+                    tracing::error!(
+                        lowest_live_nonce = %nonce_str,
+                        error = %e,
+                        "Server returned invalid lowest_live_nonce UUID"
+                    );
+                    GetAttachedFunctionError::ServerReturnedInvalidData
+                })?,
+        ),
+        _ => None,
+    };
+
+    let next_nonce = uuid::Uuid::parse_str(&attached_function.next_nonce)
+        .map(chroma_types::NonceUuid)
+        .map_err(|e| {
+            tracing::error!(
+                next_nonce = %attached_function.next_nonce,
+                error = %e,
+                "Server returned invalid next_nonce UUID"
             );
             GetAttachedFunctionError::ServerReturnedInvalidData
         })?;
 
-        Ok(chroma_types::AttachedFunction {
-            id: attached_function_id,
-            name: attached_function.name,
-            function_id,
-            input_collection_id: parsed_input_collection_id,
-            output_collection_name: attached_function.output_collection_name,
-            output_collection_id: parsed_output_collection_id,
-            params: params_str,
-            tenant_id: attached_function.tenant_id,
-            database_id: attached_function.database_id,
-            last_run: None,
-            next_run,
-            lowest_live_nonce,
-            next_nonce,
-            completion_offset: attached_function.completion_offset,
-            min_records_for_invocation: attached_function.min_records_for_invocation,
-            is_deleted: false,
-            created_at: std::time::SystemTime::UNIX_EPOCH
-                + std::time::Duration::from_micros(attached_function.created_at),
-            updated_at: std::time::SystemTime::UNIX_EPOCH
-                + std::time::Duration::from_micros(attached_function.updated_at),
-        })
-    }
+    // Convert params from Struct to JSON string
+    let params_str = attached_function.params.map(|s| {
+        let json_value = prost_struct_to_json(s);
+        serde_json::to_string(&json_value).unwrap_or_else(|_| "{}".to_string())
+    });
+
+    // Parse output_collection_id if present
+    let parsed_output_collection_id =
+        if let Some(id_str) = attached_function.output_collection_id.as_ref() {
+            if id_str.is_empty() {
+                None
+            } else {
+                Some(chroma_types::CollectionUuid(
+                    uuid::Uuid::parse_str(id_str).map_err(|e| {
+                        tracing::error!(
+                            output_collection_id = %id_str,
+                            error = %e,
+                            "Server returned invalid output_collection_id UUID"
+                        );
+                        GetAttachedFunctionError::ServerReturnedInvalidData
+                    })?,
+                ))
+            }
+        } else {
+            None
+        };
+
+    // Parse function_id from the dedicated UUID field
+    let function_id = uuid::Uuid::parse_str(&attached_function.function_id).map_err(|e| {
+        tracing::error!(
+            function_id = %attached_function.function_id,
+            error = %e,
+            "Server returned invalid function_id UUID"
+        );
+        GetAttachedFunctionError::ServerReturnedInvalidData
+    })?;
+
+    Ok(chroma_types::AttachedFunction {
+        id: attached_function_id,
+        name: attached_function.name,
+        function_id,
+        input_collection_id: parsed_input_collection_id,
+        output_collection_name: attached_function.output_collection_name,
+        output_collection_id: parsed_output_collection_id,
+        params: params_str,
+        tenant_id: attached_function.tenant_id,
+        database_id: attached_function.database_id,
+        last_run: None,
+        next_run,
+        lowest_live_nonce,
+        next_nonce,
+        completion_offset: attached_function.completion_offset,
+        min_records_for_invocation: attached_function.min_records_for_invocation,
+        is_deleted: false,
+        created_at: std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_micros(attached_function.created_at),
+        updated_at: std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_micros(attached_function.updated_at),
+    })
+}
 
     pub async fn get_attached_function_by_name(
         &mut self,
@@ -2435,8 +2426,8 @@ impl SysDb {
         input_collection_id: chroma_types::CollectionUuid,
         output_collection_name: String,
         params: serde_json::Value,
-        tenant_name: String,
-        database_name: String,
+        tenant_id: String,
+        database_id: String,
         min_records_for_invocation: u64,
     ) -> Result<chroma_types::AttachedFunctionUuid, AttachFunctionError> {
         match self {
@@ -2447,136 +2438,14 @@ impl SysDb {
                     input_collection_id,
                     output_collection_name,
                     params,
-                    tenant_name,
-                    database_name,
+                    tenant_id,
+                    database_id,
                     min_records_for_invocation,
                 )
                 .await
             }
-            SysDb::Sqlite(sqlite) => {
-                sqlite
-                    .create_attached_function(
-                        name,
-                        operator_name,
-                        input_collection_id,
-                        output_collection_name,
-                        params,
-                        tenant_name,
-                        database_name,
-                        min_records_for_invocation,
-                    )
-                    .await
-            }
-            SysDb::Test(_) => {
-                todo!()
-            }
-        }
-    }
-
-    pub async fn get_attached_function_by_name(
-        &mut self,
-        input_collection_id: chroma_types::CollectionUuid,
-        attached_function_name: String,
-    ) -> Result<chroma_types::AttachedFunction, GetAttachedFunctionError> {
-        match self {
-            SysDb::Grpc(grpc) => {
-                grpc.get_attached_function_by_name(input_collection_id, attached_function_name)
-                    .await
-            }
-            SysDb::Sqlite(sqlite) => {
-                sqlite
-                    .get_attached_function_by_name(input_collection_id, attached_function_name)
-                    .await
-            }
-            SysDb::Test(_) => {
-                todo!()
-            }
-        }
-    }
-
-    pub async fn get_attached_function_by_uuid(
-        &mut self,
-        attached_function_uuid: chroma_types::AttachedFunctionUuid,
-    ) -> Result<chroma_types::AttachedFunction, GetAttachedFunctionError> {
-        match self {
-            SysDb::Grpc(grpc) => {
-                grpc.get_attached_function_by_uuid(attached_function_uuid)
-                    .await
-            }
-            SysDb::Sqlite(_) => {
-                // TODO: Implement for Sqlite
-                Err(GetAttachedFunctionError::NotFound)
-            }
-            SysDb::Test(_) => {
-                // TODO: Implement for TestSysDb
-                Err(GetAttachedFunctionError::NotFound)
-            }
-        }
-    }
-
-    pub async fn create_output_collection_for_attached_function(
-        &mut self,
-        attached_function_id: chroma_types::AttachedFunctionUuid,
-        collection_name: String,
-        tenant_id: String,
-        database_id: String,
-    ) -> Result<CollectionUuid, CreateOutputCollectionForAttachedFunctionError> {
-        match self {
-            SysDb::Grpc(grpc) => {
-                grpc.create_output_collection_for_attached_function(
-                    attached_function_id,
-                    collection_name,
-                    tenant_id,
-                    database_id,
-                )
-                .await
-            }
-            SysDb::Sqlite(_) => todo!(),
-            SysDb::Test(_) => todo!(),
-        }
-    }
-
-    pub async fn soft_delete_attached_function(
-        &mut self,
-        attached_function_id: chroma_types::AttachedFunctionUuid,
-        delete_output: bool,
-    ) -> Result<(), DeleteAttachedFunctionError> {
-        match self {
-            SysDb::Grpc(grpc) => {
-                grpc.soft_delete_attached_function(attached_function_id, delete_output)
-                    .await
-            }
-            SysDb::Sqlite(_) => Err(DeleteAttachedFunctionError::NotImplemented),
-            SysDb::Test(_) => Err(DeleteAttachedFunctionError::NotImplemented),
-        }
-    }
-
-    pub async fn get_soft_deleted_attached_functions(
-        &mut self,
-        cutoff_time: SystemTime,
-        limit: i32,
-    ) -> Result<Vec<chroma_types::AttachedFunctionUuid>, GetSoftDeletedAttachedFunctionsError> {
-        match self {
-            SysDb::Grpc(grpc) => {
-                grpc.get_soft_deleted_attached_functions(cutoff_time, limit)
-                    .await
-            }
-            SysDb::Sqlite(_) => Err(GetSoftDeletedAttachedFunctionsError::NotImplemented),
-            SysDb::Test(_) => Err(GetSoftDeletedAttachedFunctionsError::NotImplemented),
-        }
-    }
-
-    pub async fn finish_attached_function_deletion(
-        &mut self,
-        attached_function_id: chroma_types::AttachedFunctionUuid,
-    ) -> Result<(), FinishAttachedFunctionDeletionError> {
-        match self {
-            SysDb::Grpc(grpc) => {
-                grpc.finish_attached_function_deletion(attached_function_id)
-                    .await
-            }
-            SysDb::Sqlite(_) => Err(FinishAttachedFunctionDeletionError::NotImplemented),
-            SysDb::Test(_) => Err(FinishAttachedFunctionDeletionError::NotImplemented),
+            SysDb::Sqlite(_) => Err(AttachFunctionError::NotImplemented),
+            SysDb::Test(_) => Err(AttachFunctionError::NotImplemented),
         }
     }
 }

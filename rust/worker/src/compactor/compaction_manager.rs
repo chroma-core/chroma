@@ -434,7 +434,7 @@ impl CompactionManagerContext {
             }
         };
 
-        let orchestrator = CompactOrchestrator::new(
+        let task_orchestrator = CompactOrchestrator::new_for_attached_function(
             collection_id, // input_collection_id
             rebuild,
             self.fetch_log_batch_size,
@@ -801,6 +801,7 @@ impl Debug for CompactionManager {
 }
 
 // ============== Handlers ==============
+// TODO(tanujnay112): Unify Comapction + AttachedFunction naming
 #[async_trait]
 impl Handler<ScheduledCompactMessage> for CompactionManager {
     type Result = ();

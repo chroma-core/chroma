@@ -147,8 +147,15 @@ pub(crate) struct CompactWriters {
     pub(crate) vector_writer: VectorSegmentWriter,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum ExecutionMode {
+    Compaction,
+    Function,
+}
+
 #[derive(Debug)]
 pub struct CompactOrchestrator {
+    mode: ExecutionMode,
     // === Compaction Configuration ===
     hnsw_index_uuid: Option<IndexUuid>,
     rebuild: bool,
@@ -208,6 +215,8 @@ pub struct CompactOrchestrator {
     /// Available if this orchestrator is for an attached function
     attached_function_context: Option<AttachedFunctionContext>,
     heap_service: Option<GrpcHeapService>,
+
+    materialized_logs: Vec<Chunk<MaterializedLogRecord>>,
 }
 
 #[derive(Error, Debug)]
@@ -437,7 +446,7 @@ impl CompactOrchestrator {
 
     async fn do_attached_function(
         &mut self,
-        log_records: Chunk<LogRecord>,
+        log_records: Vec<Chunk<MaterializedLogRecord>>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         // Get all needed data, cloning immediately to avoid borrow conflicts
@@ -946,16 +955,15 @@ impl Orchestrator for CompactOrchestrator {
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
         // For attached-function-based compaction, start with PrepareAttachedFunction to fetch the attached function
-        if let Some(attached_function_context) = self.attached_function_context.as_ref() {
+        if self.mode == ExecutionMode::Function {
             return vec![(
                 wrap(
                     Box::new(PrepareAttachedFunctionOperator {
                         sysdb: self.sysdb.clone(),
                         log: self.log.clone(),
-                        attached_function_uuid: attached_function_context.attached_function_id,
                     }),
                     PrepareAttachedFunctionInput {
-                        nonce: attached_function_context.execution_nonce,
+                        input_collection_id: self.input_collection_id,
                     },
                     ctx.receiver(),
                     self.context.task_cancellation_token.clone(),
@@ -1018,9 +1026,9 @@ impl Handler<TaskResult<PrepareAttachedFunctionOutput, PrepareAttachedFunctionEr
         };
 
         tracing::info!(
-            "[CompactOrchestrator] PrepareAttachedFunction completed, attached_function_id={}, execution_nonce={}",
+            "[CompactOrchestrator] PrepareAttachedFunction completed, attached_function_id={}, next_nonce={}",
             output.attached_function.id.0,
-            output.execution_nonce
+            output.attached_function.next_nonce.0
         );
 
         // Store the task and execution_nonce in attached_function_context
@@ -1031,8 +1039,22 @@ impl Handler<TaskResult<PrepareAttachedFunctionOutput, PrepareAttachedFunctionEr
                 return;
             }
         };
-        attached_function_context.attached_function = Some(output.attached_function.clone());
-        attached_function_context.execution_nonce = output.execution_nonce;
+        // Convert protobuf AttachedFunction to regular AttachedFunction
+        let converted_attached_function = chroma_sysdb::SysDb::attached_function_from_proto(
+            output.attached_function,
+        )
+        .map_err(|e| {
+            self.terminate_with_result(
+                Err(CompactionError::InvariantViolation(format!(
+                    "Failed to convert attached function: {}",
+                    e
+                ))),
+                ctx,
+            );
+            return;
+        })?;
+
+        attached_function_context.attached_function = Some(converted_attached_function);
         self.output_collection_id = output.output_collection_id.into();
 
         if output.should_skip_execution {
@@ -1215,7 +1237,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             None => return,
         };
 
-        let log_task = match self.rebuild || self.attached_function_context.is_some() {
+        let log_task = match self.rebuild || self.mode == ExecutionMode::Function {
             true => wrap(
                 Box::new(SourceRecordSegmentOperator {}),
                 SourceRecordSegmentInput {
@@ -1476,13 +1498,8 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
             }
         }
 
-        // For attached-function-based compaction, call ExecuteAttachedFunction to run attached function logic
-        if self.attached_function_context.is_some() {
-            self.do_attached_function(output, ctx).await;
-        } else {
-            // For regular compaction, go directly to partition
-            self.partition(output, ctx).await;
-        }
+        // For regular compaction, go directly to partition
+        self.partition(output, ctx).await;
     }
 }
 
@@ -1530,9 +1547,9 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
         tracing::info!("Sourced Records: {}", output.len());
         // Each record should corresond to a log
         self.total_records_post_compaction = output.len() as u64;
-        if output.is_empty() && self.attached_function_context.is_none() {
+        if output.is_empty() && self.mode == ExecutionMode::Compaction {
             self.register(ctx).await;
-        } else if self.attached_function_context.is_some() {
+        } else if self.mode == ExecutionMode::Function {
             let input_collection =
                 match self.ok_or_terminate(self.get_input_collection(), ctx).await {
                     Some(collection) => collection,
@@ -1586,6 +1603,11 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
             {
                 // There is nothing to flush, proceed to register
                 self.register(ctx).await;
+            }
+        } else if self.mode == ExecutionMode::Function {
+            self.materialized_logs.push(output.result.materialized);
+            if self.num_uncompleted_materialization_tasks == 1 {
+                self.do_attached_function(self.materialized_logs, ctx).await;
             }
         } else {
             self.collection_logical_size_delta_bytes += output.collection_logical_size_delta;

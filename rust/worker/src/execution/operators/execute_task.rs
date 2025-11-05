@@ -118,7 +118,7 @@ impl ExecuteAttachedFunctionOperator {
 #[derive(Debug)]
 pub struct ExecuteAttachedFunctionInput {
     /// The fetched log records to process
-    pub log_records: Chunk<LogRecord>,
+    pub log_records: Chunk<MaterializedLogRecord>,
     /// The tenant ID
     pub tenant_id: String,
     /// The output collection ID where results are written
