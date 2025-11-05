@@ -167,6 +167,7 @@ const sidebarConfig: AppSection[] = [
         pages: [
           { id: "overview", name: "Overview" },
           { id: "github", name: "GitHub" },
+          { id: "web", name: "Web" },
         ],
       },
       {
