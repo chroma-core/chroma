@@ -25,8 +25,10 @@ use futures::StreamExt;
 use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::trace::TraceContextExt;
 use parking_lot::Mutex;
+use s3heap_service::SysDbScheduler;
 use std::{
     fmt::{Debug, Formatter},
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 use thiserror::Error;
@@ -145,6 +147,167 @@ impl GarbageCollector {
             }
         };
         Ok(result)
+    }
+
+    async fn prune_heap_across_shards(&self, cutoff_time: chrono::DateTime<chrono::Utc>) {
+        tracing::info!(
+            "Pruning completed tasks from all heap shards (buckets_to_read={}, max_items={})",
+            self.config.heap_prune_buckets_to_read,
+            self.config.heap_prune_max_items
+        );
+
+        let prune_limits = s3heap::Limits::default()
+            .with_buckets(self.config.heap_prune_buckets_to_read as usize)
+            .with_items(self.config.heap_prune_max_items as usize)
+            .with_time_cut_off(cutoff_time);
+
+        let mut total_stats = s3heap::PruneStats::default();
+        let mut service_index = 0;
+
+        // Create scheduler for checking task completion status
+        let scheduler: Arc<dyn s3heap::HeapScheduler> =
+            Arc::new(SysDbScheduler::new(self.sysdb_client.clone()));
+
+        // Iterate over all log service shards (rust-log-service-0, rust-log-service-1, ...)
+        // Limit to 100 shards to prevent infinite loop if we get unexpected errors
+        const MAX_SHARDS: u32 = 100;
+        loop {
+            if service_index >= MAX_SHARDS {
+                tracing::warn!(
+                    "Reached max shard limit of {} during heap pruning",
+                    MAX_SHARDS
+                );
+                break;
+            }
+            let heap_prefix =
+                s3heap::heap_path_from_hostname(&format!("rust-log-service-{}", service_index));
+
+            let pruner = match s3heap::HeapPruner::new(
+                self.storage.clone(),
+                heap_prefix.clone(),
+                Arc::clone(&scheduler),
+            ) {
+                Ok(pruner) => pruner,
+                Err(s3heap::Error::UninitializedHeap(_)) => {
+                    tracing::debug!(
+                        "No heap found at shard {} - stopping iteration",
+                        service_index
+                    );
+                    break;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Error creating heap pruner for shard {}: {:?} - continuing",
+                        service_index,
+                        e
+                    );
+                    service_index += 1;
+                    continue;
+                }
+            };
+
+            match pruner.prune(prune_limits.clone()).await {
+                Ok(stats) => {
+                    tracing::debug!(
+                        "Pruned shard {}: {} items pruned, {} buckets deleted",
+                        service_index,
+                        stats.items_pruned,
+                        stats.buckets_deleted
+                    );
+                    total_stats.merge(&stats);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to prune heap shard {}: {}", service_index, e);
+                }
+            }
+
+            service_index += 1;
+        }
+
+        tracing::info!(
+            "Heap pruning complete: {} items pruned, {} items retained, {} buckets deleted, {} buckets updated across {} shards",
+            total_stats.items_pruned,
+            total_stats.items_retained,
+            total_stats.buckets_deleted,
+            total_stats.buckets_updated,
+            service_index
+        );
+    }
+
+    async fn garbage_collect_attached_functions(
+        &mut self,
+        attached_function_soft_delete_absolute_cutoff_time: SystemTime,
+    ) -> (u32, u32) {
+        tracing::info!("Checking for soft-deleted attached functions to hard delete");
+        match self
+            .sysdb_client
+            .get_soft_deleted_attached_functions(
+                attached_function_soft_delete_absolute_cutoff_time,
+                self.config.max_attached_functions_to_gc_per_run,
+            )
+            .await
+        {
+            Ok(attached_functions_to_delete) => {
+                if !attached_functions_to_delete.is_empty() {
+                    tracing::info!(
+                        "Found {} soft-deleted attached functions to hard delete",
+                        attached_functions_to_delete.len()
+                    );
+
+                    let deletion_jobs = attached_functions_to_delete.into_iter().map(|attached_function_id| {
+                        tracing::info!(
+                            "Hard deleting attached function: {}",
+                            attached_function_id
+                        );
+
+                        let instrumented_span = span!(parent: None, tracing::Level::INFO, "Hard delete attached function", attached_function_id = %attached_function_id);
+                        Span::current().add_link(instrumented_span.context().span().span_context().clone());
+
+                        let mut sysdb = self.sysdb_client.clone();
+                        Box::pin(async move {
+                            // tanujnay112: Could batch this but just following the pattern of collection deletion below.
+                            sysdb.finish_attached_function_deletion(attached_function_id).await
+                                .map(|_| attached_function_id)
+                        }.instrument(instrumented_span)) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<chroma_types::AttachedFunctionUuid, chroma_sysdb::FinishAttachedFunctionDeletionError>> + Send + '_>>
+                    });
+
+                    let mut deletion_stream =
+                        futures::stream::iter(deletion_jobs).buffer_unordered(10);
+
+                    let mut num_deleted = 0;
+                    let mut num_failed = 0;
+                    while let Some(result) = deletion_stream.next().await {
+                        match result {
+                            Ok(attached_function_id) => {
+                                tracing::info!(
+                                    "Successfully hard deleted attached function: {}",
+                                    attached_function_id
+                                );
+                                num_deleted += 1;
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to hard delete attached function: {}", e);
+                                num_failed += 1;
+                            }
+                        }
+                    }
+
+                    tracing::info!(
+                        "Attached function deletion completed: {} deleted, {} failed",
+                        num_deleted,
+                        num_failed
+                    );
+                    (num_deleted, num_failed)
+                } else {
+                    tracing::debug!("No soft-deleted attached functions found to hard delete");
+                    (0, 0)
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to get soft-deleted attached functions: {}", e);
+                (0, 0)
+            }
+        }
     }
 
     async fn garbage_collect_collection(
@@ -389,6 +552,30 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             collection_soft_delete_absolute_cutoff_time,
             self.config.collection_soft_delete_grace_period
         );
+
+        let attached_function_soft_delete_absolute_cutoff_time =
+            now - self.config.attached_function_soft_delete_grace_period;
+        tracing::debug!(
+            "Using absolute cutoff time: {:?} for soft deleted attached functions (grace period: {:?})",
+            attached_function_soft_delete_absolute_cutoff_time,
+            self.config.attached_function_soft_delete_grace_period
+        );
+
+        // Garbage collect soft-deleted attached functions that are past the grace period
+        let (num_attached_functions_deleted, num_attached_functions_failed) = self
+            .garbage_collect_attached_functions(attached_function_soft_delete_absolute_cutoff_time)
+            .await;
+        tracing::debug!(
+            "Garbage collected {} soft-deleted attached functions, {} failed",
+            num_attached_functions_deleted,
+            num_attached_functions_failed
+        );
+
+        // Prune heap of completed tasks across all log service shards
+        let cutoff_time = chrono::DateTime::<chrono::Utc>::from(
+            attached_function_soft_delete_absolute_cutoff_time,
+        );
+        self.prune_heap_across_shards(cutoff_time).await;
 
         // Get all collections to gc and create gc orchestrator for each.
         tracing::info!("Getting collections to gc");
@@ -840,6 +1027,7 @@ mod tests {
             }],
             version_cutoff_time: Duration::from_secs(1),
             collection_soft_delete_grace_period: Duration::from_secs(1),
+            attached_function_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
             max_collections_to_fetch: None,
             min_versions_to_keep: 2,
@@ -868,6 +1056,9 @@ mod tests {
             log: LogConfig::Grpc(GrpcLogConfig::default()),
             enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
             max_concurrent_list_files_operations_per_collection: 10,
+            heap_prune_buckets_to_read: 10,
+            heap_prune_max_items: 10000,
+            max_attached_functions_to_gc_per_run: 100,
         };
         let registry = Registry::new();
 
@@ -1045,6 +1236,7 @@ mod tests {
             otel_endpoint: "none".to_string(),
             version_cutoff_time: Duration::from_secs(1),
             collection_soft_delete_grace_period: Duration::from_secs(1),
+            attached_function_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
             min_versions_to_keep: 2,
             filter_min_versions_if_alive: None,
@@ -1193,6 +1385,247 @@ mod tests {
                 num_failed_jobs: 0,
                 num_hard_deleted_databases: 1, // The database should have been hard deleted
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_gc_prunes_heap_after_attached_function_deletion() {
+        use chroma_storage::Storage;
+        use chroma_sysdb::GrpcSysDb;
+        use s3heap::{HeapReader, HeapWriter, Limits, Schedule, Triggerable};
+        use s3heap_service::SysDbScheduler;
+
+        let tenant_id = format!("test-tenant-{}", Uuid::new_v4());
+
+        // Use actual log service shard naming for the heap
+        let log_service_index = 0;
+        let heap_prefix =
+            s3heap::heap_path_from_hostname(&format!("rust-log-service-{}", log_service_index));
+
+        let config = GarbageCollectorConfig {
+            service_name: "gc".to_string(),
+            otel_endpoint: "none".to_string(),
+            otel_filters: vec![],
+            version_cutoff_time: Duration::from_secs(1),
+            collection_soft_delete_grace_period: Duration::from_secs(1),
+            attached_function_soft_delete_grace_period: Duration::from_secs(1),
+            max_collections_to_gc: 0, // Don't GC collections in this test, only test heap pruning
+            max_collections_to_fetch: None,
+            min_versions_to_keep: 2,
+            filter_min_versions_if_alive: None,
+            gc_interval_mins: 10,
+            disallow_collections: HashSet::new(),
+            sysdb_config: GrpcSysDbConfig {
+                host: "localhost".to_string(),
+                port: 50051,
+                connect_timeout_ms: 5000,
+                request_timeout_ms: 10000,
+                num_channels: 1,
+            },
+            dispatcher_config: DispatcherConfig::default(),
+            storage_config: s3_config_for_localhost_with_bucket_name("chroma-storage").await,
+            default_mode: CleanupMode::DeleteV2,
+            tenant_mode_overrides: None,
+            assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
+            my_member_id: "test-gc-heap-pruning".to_string(),
+            memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
+            port: 50056,
+            root_cache_config: Default::default(),
+            jemalloc_pprof_server_port: None,
+            enable_log_gc_for_tenant: Vec::new(),
+            enable_log_gc_for_tenant_threshold: "tenant-threshold".to_string(),
+            log: LogConfig::Grpc(GrpcLogConfig::default()),
+            enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
+            max_concurrent_list_files_operations_per_collection: 10,
+            heap_prune_buckets_to_read: 10, // Reduce for faster test
+            heap_prune_max_items: 100,      // Reduce for faster test
+            max_attached_functions_to_gc_per_run: 100,
+        };
+
+        let registry = Registry::new();
+
+        // Initialize storage and sysdb
+        let storage = Storage::try_from_config(&config.storage_config, &registry)
+            .await
+            .unwrap();
+        let mut sysdb = GrpcSysDb::try_from_config(&config.sysdb_config, &registry)
+            .await
+            .unwrap();
+
+        // Create a test collection
+        let mut clients = ChromaGrpcClients::new().await.unwrap();
+        let collection_name = format!("test-collection-{}", Uuid::new_v4());
+        let database_name = format!("test-db-{}", Uuid::new_v4());
+        let collection_id_str = clients
+            .create_database_and_collection(&tenant_id, &database_name, &collection_name, false)
+            .await
+            .unwrap();
+        let collection_id = CollectionUuid::from_str(&collection_id_str).unwrap();
+
+        tracing::info!(%collection_id, "Created test collection");
+
+        // Create an attached function using the record_counter operator that exists
+        let attached_function_id = sysdb
+            .create_attached_function(
+                "test_function".to_string(),
+                "record_counter".to_string(), // Use existing operator
+                collection_id,
+                format!("test_output_{}", collection_id),
+                serde_json::json!({}),
+                tenant_id.clone(),
+                database_name.clone(),
+                1,
+            )
+            .await
+            .unwrap();
+
+        tracing::info!(
+            ?attached_function_id,
+            "Created attached function with record_counter operator"
+        );
+
+        // Write some scheduled tasks to the heap (using the actual log service heap path)
+        let scheduler: Arc<dyn s3heap::HeapScheduler> =
+            Arc::new(SysDbScheduler::new(SysDb::Grpc(sysdb.clone())));
+
+        let writer = HeapWriter::new(storage.clone(), heap_prefix.clone(), Arc::clone(&scheduler))
+            .await
+            .unwrap();
+
+        // Schedule 3 tasks
+        let now = chrono::Utc::now();
+        let schedules = vec![
+            Schedule {
+                triggerable: Triggerable {
+                    partitioning: collection_id.0.into(),
+                    scheduling: attached_function_id.0.into(),
+                },
+                nonce: uuid::Uuid::new_v4(),
+                next_scheduled: now + chrono::Duration::seconds(10),
+            },
+            Schedule {
+                triggerable: Triggerable {
+                    partitioning: collection_id.0.into(),
+                    scheduling: attached_function_id.0.into(),
+                },
+                nonce: uuid::Uuid::new_v4(),
+                next_scheduled: now + chrono::Duration::seconds(20),
+            },
+            Schedule {
+                triggerable: Triggerable {
+                    partitioning: collection_id.0.into(),
+                    scheduling: attached_function_id.0.into(),
+                },
+                nonce: uuid::Uuid::new_v4(),
+                next_scheduled: now + chrono::Duration::seconds(30),
+            },
+        ];
+
+        writer.push(&schedules).await.unwrap();
+        tracing::info!("Pushed {} schedules to heap", schedules.len());
+
+        // Verify tasks are in the heap before GC
+        let reader = HeapReader::new(storage.clone(), heap_prefix.clone(), Arc::clone(&scheduler))
+            .await
+            .unwrap();
+
+        let items_before = reader.peek(|_, _| true, Limits::default()).await.unwrap();
+        let items_before_count = items_before.len();
+        tracing::info!("Items in heap before GC: {}", items_before_count);
+        assert!(
+            items_before_count > 0,
+            "Should have at least 1 item in heap before GC"
+        );
+
+        // Count items for our specific attached function
+        let our_items_before = items_before
+            .iter()
+            .filter(|(_, item)| item.trigger.scheduling == attached_function_id.0.into())
+            .count();
+        tracing::info!(
+            "Items for our attached function before GC: {}",
+            our_items_before
+        );
+        assert!(
+            our_items_before > 0,
+            "Should have items for our attached function"
+        );
+
+        // Soft delete the attached function
+        sysdb
+            .soft_delete_attached_function(
+                attached_function_id,
+                false, // don't delete output
+            )
+            .await
+            .unwrap();
+        tracing::info!("Soft deleted attached function");
+
+        // Wait for grace period to expire
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        tracing::info!("Grace period expired, starting GC");
+
+        // Now run the garbage collector - it should both hard-delete the function AND prune the heap
+        let system = System::new();
+        let mut garbage_collector =
+            GarbageCollector::try_from_config(&(config.clone(), system.clone()), &registry)
+                .await
+                .unwrap();
+
+        // Don't set dispatcher - this test only cares about heap pruning
+        // Without a dispatcher, truncate_dirty_log will return early
+        garbage_collector.set_system(system.clone());
+
+        let mut gc_handle = system.start_component(garbage_collector);
+
+        // Send memberlist update (required for GC to start processing)
+        gc_handle
+            .send(
+                vec![Member {
+                    member_id: config.my_member_id.clone(),
+                    member_ip: "0.0.0.0".to_string(),
+                    member_node_name: format!("{}-node", config.my_member_id),
+                }],
+                None,
+            )
+            .await
+            .unwrap();
+
+        tracing::info!("Sending GC request...");
+
+        let result = gc_handle
+            .request(
+                GarbageCollectMessage { tenant: None },
+                Some(Span::current()),
+            )
+            .await
+            .unwrap();
+
+        tracing::info!(?result, "Garbage collection completed");
+
+        // The GC should have:
+        // 1. Hard deleted the attached function (grace period expired)
+        // 2. Pruned the heap items associated with it
+
+        // Verify heap items for our attached function were pruned - this is the key assertion
+        let items_after = reader.peek(|_, _| true, Limits::default()).await.unwrap();
+        let items_after_count = items_after.len();
+        tracing::info!("Items in heap after GC: {}", items_after_count);
+
+        // Count items for our specific attached function after GC
+        let our_items_after = items_after
+            .iter()
+            .filter(|(_, item)| item.trigger.scheduling == attached_function_id.0.into())
+            .count();
+        tracing::info!(
+            "Items for our attached function after GC: {}",
+            our_items_after
+        );
+
+        assert_eq!(
+            our_items_after, 0,
+            "GC should have pruned all heap items for the deleted attached function (before: {}, after: {})",
+            our_items_before, our_items_after
         );
     }
 }

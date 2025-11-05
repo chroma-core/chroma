@@ -54,6 +54,7 @@ def test_get_builtins_holds() -> None:
         "Bm25EmbeddingFunction",
         "ChromaCloudQwenEmbeddingFunction",
         "ChromaCloudSpladeEmbeddingFunction",
+        "ChromaBm25EmbeddingFunction",
     }
 
     assert expected_builtins == embedding_functions.get_builtins()

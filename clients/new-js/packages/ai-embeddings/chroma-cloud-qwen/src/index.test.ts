@@ -2,7 +2,6 @@ import {
 	CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
 	ChromaCloudQwenEmbeddingFunction,
 	ChromaCloudQwenEmbeddingModel,
-	ChromaCloudQwenEmbeddingTask,
 } from "./index";
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 
@@ -13,12 +12,11 @@ describe("ChromaCloudQwenEmbeddingFunction", () => {
 
 	const defaultParametersTest = "should initialize with default parameters";
 	if (!process.env.CHROMA_API_KEY) {
-		it.skip(defaultParametersTest, () => {});
+		it.skip(defaultParametersTest, () => { });
 	} else {
 		it(defaultParametersTest, () => {
 			const embedder = new ChromaCloudQwenEmbeddingFunction({
 				model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
-				task: ChromaCloudQwenEmbeddingTask.NL_TO_CODE,
 			});
 			expect(embedder.name).toBe("chroma-cloud-qwen");
 
@@ -37,7 +35,6 @@ describe("ChromaCloudQwenEmbeddingFunction", () => {
 			expect(() => {
 				new ChromaCloudQwenEmbeddingFunction({
 					model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
-					task: ChromaCloudQwenEmbeddingTask.NL_TO_CODE,
 				});
 			}).toThrow("Chroma Embedding API key is required");
 		} finally {
@@ -53,7 +50,6 @@ describe("ChromaCloudQwenEmbeddingFunction", () => {
 		try {
 			const embedder = new ChromaCloudQwenEmbeddingFunction({
 				model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
-				task: ChromaCloudQwenEmbeddingTask.NL_TO_CODE,
 				apiKeyEnvVar: "CUSTOM_CHROMA_API_KEY",
 			});
 
@@ -67,14 +63,14 @@ describe("ChromaCloudQwenEmbeddingFunction", () => {
 
 	const buildFromConfigTest = "should build from config";
 	if (!process.env.CHROMA_API_KEY) {
-		it.skip(buildFromConfigTest, () => {});
+		it.skip(buildFromConfigTest, () => { });
 	} else {
 		it(buildFromConfigTest, () => {
 			const config = {
 				api_key_env_var: "CHROMA_API_KEY",
 				model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
-				task: ChromaCloudQwenEmbeddingTask.NL_TO_CODE,
 				instructions: CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
+				task: "nl_to_code",
 			};
 
 			const embedder = ChromaCloudQwenEmbeddingFunction.buildFromConfig(config);
@@ -84,12 +80,11 @@ describe("ChromaCloudQwenEmbeddingFunction", () => {
 
 		const generateEmbeddingsTest = "should generate embeddings";
 		if (!process.env.CHROMA_API_KEY) {
-			it.skip(generateEmbeddingsTest, () => {});
+			it.skip(generateEmbeddingsTest, () => { });
 		} else {
 			it(generateEmbeddingsTest, async () => {
 				const embedder = new ChromaCloudQwenEmbeddingFunction({
 					model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
-					task: ChromaCloudQwenEmbeddingTask.NL_TO_CODE,
 				});
 				const texts = ["Hello world", "Test text"];
 				const embeddings = await embedder.generate(texts);

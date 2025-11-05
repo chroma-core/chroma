@@ -3,6 +3,8 @@
 package mocks
 
 import (
+	"time"
+
 	dbmodel "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	mock "github.com/stretchr/testify/mock"
 
@@ -396,6 +398,54 @@ func (_m *IAttachedFunctionDb) CleanupExpiredPartialAttachedFunctions(maxAgeSeco
 	}
 
 	return r0, r1
+}
+
+// GetSoftDeletedAttachedFunctions provides a mock function with given fields: cutoffTime, limit
+func (_m *IAttachedFunctionDb) GetSoftDeletedAttachedFunctions(cutoffTime time.Time, limit int32) ([]*dbmodel.AttachedFunction, error) {
+	ret := _m.Called(cutoffTime, limit)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSoftDeletedAttachedFunctions")
+	}
+
+	var r0 []*dbmodel.AttachedFunction
+	var r1 error
+	if rf, ok := ret.Get(0).(func(time.Time, int32) ([]*dbmodel.AttachedFunction, error)); ok {
+		return rf(cutoffTime, limit)
+	}
+	if rf, ok := ret.Get(0).(func(time.Time, int32) []*dbmodel.AttachedFunction); ok {
+		r0 = rf(cutoffTime, limit)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*dbmodel.AttachedFunction)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(time.Time, int32) error); ok {
+		r1 = rf(cutoffTime, limit)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// HardDeleteAttachedFunction provides a mock function with given fields: id
+func (_m *IAttachedFunctionDb) HardDeleteAttachedFunction(id uuid.UUID) error {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HardDeleteAttachedFunction")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(uuid.UUID) error); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
 }
 
 // NewIAttachedFunctionDb creates a new instance of IAttachedFunctionDb. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

@@ -2227,6 +2227,69 @@ impl GrpcSysDb {
             .collect::<Result<Vec<ScheduleEntry>, ScheduleEntryConversionError>>()
             .map_err(PeekScheduleError::Conversion)
     }
+
+    async fn get_soft_deleted_attached_functions(
+        &mut self,
+        cutoff_time: SystemTime,
+        limit: i32,
+    ) -> Result<Vec<chroma_types::AttachedFunctionUuid>, GetSoftDeletedAttachedFunctionsError> {
+        let cutoff_timestamp = prost_types::Timestamp {
+            seconds: cutoff_time
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64,
+            nanos: 0,
+        };
+
+        let req = chroma_proto::GetSoftDeletedAttachedFunctionsRequest {
+            cutoff_time: Some(cutoff_timestamp),
+            limit,
+        };
+
+        let res = self
+            .client
+            .get_soft_deleted_attached_functions(req)
+            .await
+            .map_err(|e| {
+                GetSoftDeletedAttachedFunctionsError::FailedToGetSoftDeletedAttachedFunctions(e)
+            })?;
+
+        let attached_function_ids: Result<Vec<chroma_types::AttachedFunctionUuid>, _> = res
+            .into_inner()
+            .attached_functions
+            .into_iter()
+            .map(|af| {
+                uuid::Uuid::parse_str(&af.id)
+                    .map(chroma_types::AttachedFunctionUuid)
+                    .map_err(|e| {
+                        tracing::error!(
+                            attached_function_id = %af.id,
+                            error = %e,
+                            "Server returned invalid attached_function_id UUID"
+                        );
+                        GetSoftDeletedAttachedFunctionsError::ServerReturnedInvalidData
+                    })
+            })
+            .collect();
+
+        attached_function_ids
+    }
+
+    async fn finish_attached_function_deletion(
+        &mut self,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
+    ) -> Result<(), FinishAttachedFunctionDeletionError> {
+        let req = chroma_proto::FinishAttachedFunctionDeletionRequest {
+            attached_function_id: attached_function_id.to_string(),
+        };
+
+        self.client
+            .finish_attached_function_deletion(req)
+            .await
+            .map_err(FinishAttachedFunctionDeletionError::FailedToFinishDeletion)?;
+
+        Ok(())
+    }
 }
 
 #[derive(Error, Debug)]
@@ -2243,6 +2306,36 @@ impl ChromaError for PeekScheduleError {
             PeekScheduleError::Internal(e) => e.code(),
             PeekScheduleError::Conversion(_) => ErrorCodes::Internal,
         }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum GetSoftDeletedAttachedFunctionsError {
+    #[error("Failed to get soft deleted attached functions: {0}")]
+    FailedToGetSoftDeletedAttachedFunctions(#[from] tonic::Status),
+    #[error("Server returned invalid data - response contains corrupt attached function IDs")]
+    ServerReturnedInvalidData,
+    #[error("Not implemented for this SysDb backend")]
+    NotImplemented,
+}
+
+impl ChromaError for GetSoftDeletedAttachedFunctionsError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum FinishAttachedFunctionDeletionError {
+    #[error("Failed to finish attached function deletion: {0}")]
+    FailedToFinishDeletion(#[from] tonic::Status),
+    #[error("Not implemented for this SysDb backend")]
+    NotImplemented,
+}
+
+impl ChromaError for FinishAttachedFunctionDeletionError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
     }
 }
 
@@ -2453,13 +2546,37 @@ impl SysDb {
                 grpc.soft_delete_attached_function(attached_function_id, delete_output)
                     .await
             }
-            SysDb::Sqlite(_) => {
-                // SQLite implementation doesn't support soft_delete_attached_function yet
-                todo!("soft_delete_attached_function not implemented for SQLite")
+            SysDb::Sqlite(_) => Err(DeleteAttachedFunctionError::NotImplemented),
+            SysDb::Test(_) => Err(DeleteAttachedFunctionError::NotImplemented),
+        }
+    }
+
+    pub async fn get_soft_deleted_attached_functions(
+        &mut self,
+        cutoff_time: SystemTime,
+        limit: i32,
+    ) -> Result<Vec<chroma_types::AttachedFunctionUuid>, GetSoftDeletedAttachedFunctionsError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.get_soft_deleted_attached_functions(cutoff_time, limit)
+                    .await
             }
-            SysDb::Test(_) => {
-                todo!()
+            SysDb::Sqlite(_) => Err(GetSoftDeletedAttachedFunctionsError::NotImplemented),
+            SysDb::Test(_) => Err(GetSoftDeletedAttachedFunctionsError::NotImplemented),
+        }
+    }
+
+    pub async fn finish_attached_function_deletion(
+        &mut self,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
+    ) -> Result<(), FinishAttachedFunctionDeletionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.finish_attached_function_deletion(attached_function_id)
+                    .await
             }
+            SysDb::Sqlite(_) => Err(FinishAttachedFunctionDeletionError::NotImplemented),
+            SysDb::Test(_) => Err(FinishAttachedFunctionDeletionError::NotImplemented),
         }
     }
 }
@@ -2542,6 +2659,8 @@ pub enum DeleteAttachedFunctionError {
     NotFound,
     #[error("Failed to delete attached function: {0}")]
     FailedToDeleteAttachedFunction(#[from] tonic::Status),
+    #[error("Not implemented for this SysDb backend")]
+    NotImplemented,
 }
 
 impl ChromaError for DeleteAttachedFunctionError {
@@ -2549,6 +2668,7 @@ impl ChromaError for DeleteAttachedFunctionError {
         match self {
             DeleteAttachedFunctionError::NotFound => ErrorCodes::NotFound,
             DeleteAttachedFunctionError::FailedToDeleteAttachedFunction(e) => e.code().into(),
+            DeleteAttachedFunctionError::NotImplemented => ErrorCodes::Internal,
         }
     }
 }

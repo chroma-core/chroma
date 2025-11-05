@@ -5,6 +5,7 @@ otel_filters:
     filter_level: "debug"
 relative_cutoff_time_seconds: 43200 # GC all versions created at time < now() - relative_cutoff_time_seconds (12 hours)
 max_collections_to_gc: 1000 # Maximum number of collections to GC in one run
+max_attached_functions_to_gc_per_run: 100 # Maximum number of attached functions to garbage collect per run
 gc_interval_mins: 120 # Run GC every x mins
 disallow_collections: [] # collection ids to disable GC on
 sysdb_config:

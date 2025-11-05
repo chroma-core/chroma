@@ -24,6 +24,8 @@ jobs:
         run: cargo build --bin chroma
       - name: Test
         run: cargo nextest run --profile ci
+      - name: Doc test
+        run: cargo test --doc
   test-long:
     runs-on: blacksmith-8vcpu-ubuntu-2404
     env:

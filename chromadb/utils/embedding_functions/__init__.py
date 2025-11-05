@@ -83,6 +83,9 @@ from chromadb.utils.embedding_functions.chroma_cloud_qwen_embedding_function imp
 from chromadb.utils.embedding_functions.chroma_cloud_splade_embedding_function import (
     ChromaCloudSpladeEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.chroma_bm25_embedding_function import (
+    ChromaBm25EmbeddingFunction,
+)
 
 
 # Get all the class names for backward compatibility
@@ -116,6 +119,7 @@ _all_classes: Set[str] = {
     "Bm25EmbeddingFunction",
     "ChromaCloudQwenEmbeddingFunction",
     "ChromaCloudSpladeEmbeddingFunction",
+    "ChromaBm25EmbeddingFunction",
 }
 
 
@@ -157,6 +161,7 @@ sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {  
     "fastembed_sparse": FastembedSparseEmbeddingFunction,
     "bm25": Bm25EmbeddingFunction,
     "chroma-cloud-splade": ChromaCloudSpladeEmbeddingFunction,
+    "chroma_bm25": ChromaBm25EmbeddingFunction,
 }
 
 
@@ -273,6 +278,7 @@ __all__ = [
     "Bm25EmbeddingFunction",
     "ChromaCloudQwenEmbeddingFunction",
     "ChromaCloudSpladeEmbeddingFunction",
+    "ChromaBm25EmbeddingFunction",
     "register_embedding_function",
     "config_to_embedding_function",
     "known_embedding_functions",
