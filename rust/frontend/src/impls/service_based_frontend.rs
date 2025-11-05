@@ -1974,6 +1974,11 @@ impl ServiceBasedFrontend {
                 chroma_sysdb::DeleteAttachedFunctionError::FailedToDeleteAttachedFunction(s) => {
                     DetachFunctionError::Internal(Box::new(chroma_error::TonicError(s)))
                 }
+                chroma_sysdb::DeleteAttachedFunctionError::NotImplemented => {
+                    DetachFunctionError::Internal(Box::new(chroma_error::TonicError(
+                        tonic::Status::unimplemented("Not implemented"),
+                    )))
+                }
             })?;
 
         Ok(DetachFunctionResponse { success: true })
