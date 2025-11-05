@@ -32,12 +32,16 @@ const resolveSchemaEmbeddingFunction = (
   }
 
   const embeddingOverride =
-    schema.keys[EMBEDDING_KEY]?.floatList?.vectorIndex?.config.embeddingFunction ?? undefined;
+    schema.keys[EMBEDDING_KEY]?.floatList?.vectorIndex?.config
+      .embeddingFunction ?? undefined;
   if (embeddingOverride) {
     return embeddingOverride;
   }
 
-  return schema.defaults.floatList?.vectorIndex?.config.embeddingFunction ?? undefined;
+  return (
+    schema.defaults.floatList?.vectorIndex?.config.embeddingFunction ??
+    undefined
+  );
 };
 
 /**
@@ -235,13 +239,15 @@ export class ChromaClient {
 
     return Promise.all(
       data.map(async (collection) => {
-        const schema = Schema.deserializeFromJSON(collection.schema ?? undefined);
+        const schema = await Schema.deserializeFromJSON(
+          collection.schema ?? undefined,
+        );
         const schemaEmbeddingFunction = resolveSchemaEmbeddingFunction(schema);
         const resolvedEmbeddingFunction =
-          getEmbeddingFunction(
+          (await getEmbeddingFunction(
             collection.name,
             collection.configuration_json.embedding_function ?? undefined,
-          ) ?? schemaEmbeddingFunction;
+          )) ?? schemaEmbeddingFunction;
 
         return new CollectionImpl({
           chromaClient: this,
@@ -312,14 +318,17 @@ export class ChromaClient {
       },
     });
 
-    const serverSchema = Schema.deserializeFromJSON(data.schema ?? undefined);
-    const schemaEmbeddingFunction = resolveSchemaEmbeddingFunction(serverSchema);
+    const serverSchema = await Schema.deserializeFromJSON(
+      data.schema ?? undefined,
+    );
+    const schemaEmbeddingFunction =
+      resolveSchemaEmbeddingFunction(serverSchema);
     const resolvedEmbeddingFunction =
       embeddingFunction ??
-      getEmbeddingFunction(
+      (await getEmbeddingFunction(
         data.name,
         data.configuration_json.embedding_function ?? undefined,
-      ) ??
+      )) ??
       schemaEmbeddingFunction;
 
     return new CollectionImpl({
@@ -354,14 +363,14 @@ export class ChromaClient {
       path: { ...(await this._path()), collection_id: name },
     });
 
-    const schema = Schema.deserializeFromJSON(data.schema ?? undefined);
+    const schema = await Schema.deserializeFromJSON(data.schema ?? undefined);
     const schemaEmbeddingFunction = resolveSchemaEmbeddingFunction(schema);
     const resolvedEmbeddingFunction =
       embeddingFunction ??
-      getEmbeddingFunction(
+      (await getEmbeddingFunction(
         data.name,
         data.configuration_json.embedding_function ?? undefined,
-      ) ??
+      )) ??
       schemaEmbeddingFunction;
 
     return new CollectionImpl({
@@ -445,14 +454,17 @@ export class ChromaClient {
       },
     });
 
-    const serverSchema = Schema.deserializeFromJSON(data.schema ?? undefined);
-    const schemaEmbeddingFunction = resolveSchemaEmbeddingFunction(serverSchema);
+    const serverSchema = await Schema.deserializeFromJSON(
+      data.schema ?? undefined,
+    );
+    const schemaEmbeddingFunction =
+      resolveSchemaEmbeddingFunction(serverSchema);
     const resolvedEmbeddingFunction =
       embeddingFunction ??
-      getEmbeddingFunction(
+      (await getEmbeddingFunction(
         name,
         data.configuration_json.embedding_function ?? undefined,
-      ) ??
+      )) ??
       schemaEmbeddingFunction;
 
     return new CollectionImpl({
