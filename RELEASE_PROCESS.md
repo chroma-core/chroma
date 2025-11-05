@@ -113,14 +113,14 @@ variable "chroma_version" {
 ```
 
 11. Make a new PR with your branch, and label it with the `release` label.
-12. Once the PR is merged, and the GitHub actions pass on `main`, tag your commit SHA with the **CLI version name** and push it. This will trigger a workflow that builds the CLI, its JS bindings, .
+12. Once the PR is merged, and the GitHub actions pass on `main`, tag your commit SHA with the **CLI version name**, `cli_<version>`, and push it. This will trigger a workflow that builds and releases the CLI and its JS bindings, as well as releasing both clients to PyPi and NPM.
 
 ```shell
-git tag <version> <SHA>
-git push origin <version>
+git tag cli_<version> <SHA>
+git push origin cli_<version>
 ```
 
-Once the release workflow is done, you should see the new release in on the right-hand side on the Chroma repo under "Releases".
+Once the release workflow is done, you should see the new CLI and Python releases on the right-hand side on the Chroma repo under "Releases".
 
 13. Upload the AWS CloudFormation template to our public S3 bucket to be the "latest" template: `s3://public.trychroma.com/cloudformation/latest/`
 
@@ -186,7 +186,7 @@ git tag <version> <SHA>
 git push origin <version>
 ```
 
-Once the release workflow is done, you should see the new release in on the right-hand side on the Chroma repo under "Releases".
+Once the release workflow is done, you should see the new release on the right-hand side on the Chroma repo under "Releases".
 
 6. Upload the AWS CloudFormation template to our public S3 bucket to be the "latest" template: `s3://public.trychroma.com/cloudformation/latest/` 
 
