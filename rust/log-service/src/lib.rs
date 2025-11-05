@@ -1388,10 +1388,7 @@ impl LogServer {
         if records.len() != pull_logs.batch_size as usize
             || (!records.is_empty() && records[0].log_offset != pull_logs.start_from_offset)
         {
-            return Err(Status::not_found(format!(
-                "Some entries have been purged {} versus {}",
-                records[0].log_offset, pull_logs.start_from_offset
-            )));
+            return Err(Status::not_found("Some entries have been purged"));
         }
         Ok(Response::new(PullLogsResponse { records }))
     }
