@@ -121,6 +121,24 @@ export const knownEmbeddingFunctions = new Map<
   EmbeddingFunctionClass
 >();
 
+const pythonEmbeddingFunctions: Record<string, string> = {
+  onnx_mini_lm_l6_v2: "default-embed",
+  together_ai: "together-ai",
+};
+
+const unsupportedEmbeddingFunctions: Set<string> = new Set([
+  "amazon_bedrock",
+  "baseten",
+  "langchain",
+  "google_palm",
+  "huggingface",
+  "instructor",
+  "open_clip",
+  "roboflow",
+  "sentence_transformer",
+  "text2vec",
+]);
+
 /**
  * Registry of available sparse embedding functions.
  * Maps function names to their constructor classes.
@@ -129,6 +147,16 @@ export const knownSparseEmbeddingFunctions = new Map<
   string,
   SparseEmbeddingFunctionClass
 >();
+
+const pythonSparseEmbeddingFunctions: Record<string, string> = {
+  chroma_bm25: "chroma-bm25",
+};
+
+const unsupportedSparseEmbeddingFunctions: Set<string> = new Set([
+  "bm25",
+  "fastembed_sparse",
+  "huggingface_sparse",
+]);
 
 /**
  * Union type covering both dense and sparse embedding functions.
@@ -206,7 +234,14 @@ export const getEmbeddingFunction = async (
     return undefined;
   }
 
-  const name = efConfig.name;
+  if (unsupportedEmbeddingFunctions.has(efConfig.name)) {
+    console.warn(
+      `Embedding function ${efConfig.name} is not supported in the JS/TS SDK. 'add' and 'query' will fail unless you provide them embeddings directly.`,
+    );
+    return undefined;
+  }
+
+  const name = pythonEmbeddingFunctions[efConfig.name] || efConfig.name;
 
   let embeddingFunction = knownEmbeddingFunctions.get(name);
   if (!embeddingFunction) {
@@ -268,7 +303,14 @@ export const getSparseEmbeddingFunction = async (
     return undefined;
   }
 
-  const name = efConfig.name;
+  if (unsupportedSparseEmbeddingFunctions.has(efConfig.name)) {
+    console.warn(
+      "Embedding function ${efConfig.name} is not supported in the JS/TS SDK. 'add' and 'query' will fail unless you provide them embeddings directly.",
+    );
+    return undefined;
+  }
+
+  const name = pythonSparseEmbeddingFunctions[efConfig.name] || efConfig.name;
 
   let sparseEmbeddingFunction = knownSparseEmbeddingFunctions.get(name);
   if (!sparseEmbeddingFunction) {
