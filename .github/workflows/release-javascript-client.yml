@@ -10,6 +10,7 @@ on:
       tag:
         description: 'Tag to release'
         required: true
+  workflow_call: {}
 env:
   PNPM_CACHE_FOLDER: .cache/pnpm
 jobs:

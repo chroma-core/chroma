@@ -3,12 +3,15 @@ name: Release CLI
 on:
   workflow_dispatch:
     inputs:
-      release_name:
+      version:
         description: "Release name to use (e.g. cli-1.2.3) when dispatching manually"
         required: false
-  push:
-    tags:
-      - 'cli_release_[0-9]*.[0-9]*.[0-9]*'
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to publish"
+        required: true
+        type: string
 
 jobs:
   build-linux:
@@ -139,20 +142,12 @@ jobs:
       - name: Determine release info
         id: release_info
         run: |
-          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
-            # The tag is available as refs/tags/cli_release_a.b.c.
-            TAG=${GITHUB_REF#refs/tags/}
-            VERSION=${TAG#cli_release_}
-            echo "release_name=cli-${VERSION}" >> $GITHUB_OUTPUT
-            echo "tag_name=${TAG}" >> $GITHUB_OUTPUT
-          else
-            if [ -z "${{ github.event.inputs.release_name }}" ]; then
-              echo "::error::Manual dispatch requires a release_name input."
-              exit 1
-            fi
-            echo "release_name=${{ github.event.inputs.release_name }}" >> $GITHUB_OUTPUT
-            echo "tag_name=${{ github.event.inputs.release_name }}" >> $GITHUB_OUTPUT
+          if [ -z "${{ github.event.inputs.release_name }}" ]; then
+            echo "::error::Manual dispatch requires a release_name input."
+            exit 1
           fi
+          echo "release_name=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          echo "tag_name=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         id: create_release
@@ -161,7 +156,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.release_info.outputs.tag_name }}
-          release_name: ${{ steps.release_info.outputs.release_name }}
+          release_name: ${{ steps.release_info.outputs.version }}
           body: "CLI release."
           draft: false
           prerelease: false
