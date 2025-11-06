@@ -147,6 +147,47 @@ pub(crate) struct CompactWriters {
     pub(crate) vector_writer: VectorSegmentWriter,
 }
 
+#[derive(Clone, Debug)]
+pub struct CollectionCompactionContext {
+    collection_id: CollectionUuid,
+    collection: OnceCell<Collection>,
+    segments: OnceCell<Vec<Segment>>,
+    pulled_log_offset: i64,
+
+    writers: OnceCell<CompactWriters>,
+    flush_results: Vec<SegmentFlushInfo>,
+
+    num_uncompleted_materialization_tasks: usize,
+    num_uncompleted_tasks_by_segment: HashMap<SegmentUuid, usize>,
+    collection_logical_size_delta_bytes: i64,
+    state: ExecutionState,
+
+    total_records_post_compaction: u64,
+    num_materialized_logs: u64,
+
+    schema: Option<Schema>,
+}
+
+impl CollectionCompactionContext {
+    pub fn new(collection_id: CollectionUuid) -> Self {
+        CollectionCompactionContext {
+            collection_id,
+            collection: OnceCell::new(),
+            segments: OnceCell::new(),
+            pulled_log_offset: -1,
+            writers: OnceCell::new(),
+            flush_results: Vec::new(),
+            num_uncompleted_materialization_tasks: 0,
+            num_uncompleted_tasks_by_segment: HashMap::new(),
+            collection_logical_size_delta_bytes: 0,
+            state: ExecutionState::Pending,
+            total_records_post_compaction: 0,
+            num_materialized_logs: 0,
+            schema: None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct CompactOrchestrator {
     // === Compaction Configuration ===
@@ -165,45 +206,16 @@ pub struct CompactOrchestrator {
     spann_provider: SpannProvider,
 
     // === Input Collection (read logs/segments from) ===
-    /// Collection to read logs and segments from
-    /// For regular compaction: input_collection_id == output_collection_id
-    /// For task compaction: input_collection_id != output_collection_id
-    input_collection_id: CollectionUuid,
-    input_collection: OnceCell<Collection>,
-    input_segments: OnceCell<Vec<Segment>>,
-    input_pulled_log_offset: i64,
-
-    // === Output Collection (write compacted data to) ===
-    /// Collection to write compacted segments to
-    output_collection_id: OnceCell<CollectionUuid>,
-    output_collection: OnceCell<Collection>,
-    output_segments: OnceCell<Vec<Segment>>,
-    output_pulled_log_offset: i64,
-
-    // === Writers & Results ===
-    writers: OnceCell<CompactWriters>,
-    flush_results: Vec<SegmentFlushInfo>,
-    result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
-
-    // === State Tracking ===
-    num_uncompleted_materialization_tasks: usize,
-    num_uncompleted_tasks_by_segment: HashMap<SegmentUuid, usize>,
-    collection_logical_size_delta_bytes: i64,
-    state: ExecutionState,
-
-    // Total number of records in the collection after the compaction
-    total_records_post_compaction: u64,
-
-    // Total number of materialized logs
-    num_materialized_logs: u64,
+    input_collection_context: CollectionCompactionContext,
+    output_collection_context: CollectionCompactionContext,
 
     // We track a parent span for each segment type so we can group all the spans for a given segment type (makes the resulting trace much easier to read)
     segment_spans: HashMap<SegmentUuid, Span>,
 
     metrics: CompactOrchestratorMetrics,
 
-    // schema after applying deltas
-    schema: Option<Schema>,
+    result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
+
     // === Attached Function Context (optional) ===
     /// Available if this orchestrator is for an attached function
     attached_function_context: Option<AttachedFunctionContext>,
