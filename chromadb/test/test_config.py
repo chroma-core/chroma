@@ -1,3 +1,5 @@
+import pytest
+
 from chromadb.config import Component, System, Settings
 from overrides import overrides
 from threading import local
@@ -189,3 +191,18 @@ def test_runtime_dependencies() -> None:
     assert data.starts == ["D", "C"]
     system.stop()
     assert data.stops == ["C", "D"]
+
+
+def test_warn_cors(caplog: pytest.LogCaptureFixture) -> None:
+    Settings(chroma_server_cors_allow_origins=["*"])
+    assert "CORS origin '*' is not recommended for production use" in caplog.text
+
+    Settings(chroma_server_cors_allow_origins=["localhost:3000", "*", "localhost:3001"])
+    assert "CORS origin '*' is not recommended for production use" in caplog.text
+
+
+def test_no_warn(caplog: pytest.LogCaptureFixture) -> None:
+    Settings(chroma_server_cors_allow_origins=["localhost:3000"])
+    assert "CORS origin '*' is not recommended for production use" not in caplog.text
+    Settings()
+    assert "CORS origin '*' is not recommended for production use" not in caplog.text
