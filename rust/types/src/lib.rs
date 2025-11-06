@@ -14,6 +14,8 @@ mod log;
 mod metadata;
 mod operation;
 pub mod operators;
+#[cfg(feature = "testing")]
+mod proptest_utils;
 mod record;
 mod scalar_encoding;
 mod segment;

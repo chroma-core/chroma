@@ -7,6 +7,8 @@ use crate::{
 use proptest::{collection, prelude::*, sample::SizeRange, string::string_regex};
 use regex_syntax::hir::{ClassUnicode, ClassUnicodeRange};
 
+pub const TEST_NAME_PATTERN: &str = "[a-z]{1,16}";
+
 /**
  * Strategy for valid metadata keys.
  * Keys cannot be empty and cannot start with '#' or '$'.
