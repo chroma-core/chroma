@@ -3,9 +3,7 @@ name: 📦 Release CLI, Python, and JS clients
 on:
   push:
     tags:
-      - "cli_*"
-    branches:
-      - main
+      - "cli_*_python_*_js_*"
 
 jobs:
   check-tag:
@@ -13,22 +11,30 @@ jobs:
     outputs:
       tag_matches: ${{ steps.check-tag.outputs.tag_matches }}
       cli_version: ${{ steps.check-tag.outputs.cli_version }}
+      python_version: ${{ steps.check-tag.outputs.python_version }}
+      js_version: ${{ steps.check-tag.outputs.js_version }}
     steps:
       - name: Check Tag
         id: check-tag
         run: |
-          if [[ ${{ github.event.ref }} =~ ^refs/tags/cli_[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [[ ${{ github.event.ref }} =~ ^refs/tags/cli_[0-9]+\.[0-9]+\.[0-9]+_python_[0-9]+\.[0-9]+\.[0-9]+_js_[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "tag_matches=true" >> $GITHUB_OUTPUT
-              # Extract version from cli_X.Y.Z format
-              CLI_VERSION=$(echo "${{ github.event.ref }}" | sed 's/refs\/tags\/cli_//')
+              # Extract versions from cli_X.Y.Z_python_A.B.C_js_D.E.F format
+              TAG=$(echo "${{ github.event.ref }}" | sed 's/refs\/tags\///')
+              CLI_VERSION=$(echo "$TAG" | sed -E 's/^cli_([0-9]+\.[0-9]+\.[0-9]+)_python_[0-9]+\.[0-9]+\.[0-9]+_js_[0-9]+\.[0-9]+\.[0-9]+$/\1/')
+              PYTHON_VERSION=$(echo "$TAG" | sed -E 's/^cli_[0-9]+\.[0-9]+\.[0-9]+_python_([0-9]+\.[0-9]+\.[0-9]+)_js_[0-9]+\.[0-9]+\.[0-9]+$/\1/')
+              JS_VERSION=$(echo "$TAG" | sed -E 's/^cli_[0-9]+\.[0-9]+\.[0-9]+_python_[0-9]+\.[0-9]+\.[0-9]+_js_([0-9]+\.[0-9]+\.[0-9]+)$/\1/')
               echo "cli_version=$CLI_VERSION" >> $GITHUB_OUTPUT
+              echo "python_version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+              echo "js_version=$JS_VERSION" >> $GITHUB_OUTPUT
           else
-            echo "Tag does not match the CLI release tag pattern (cli_[0-9]+\.[0-9]+\.[0-9]+), exiting workflow"
+            echo "Tag does not match the release tag pattern (cli_X.Y.Z_python_A.B.C_js_D.E.F), exiting workflow"
             echo "tag_matches=false" >> $GITHUB_OUTPUT
           fi
 
   get-python-version:
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [check-tag]
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -45,6 +51,17 @@ jobs:
       - name: Get Release Version
         id: version
         run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
+      - name: Validate Python version matches tag
+        if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
+        run: |
+          SETUPTOOLS_VERSION="${{ steps.version.outputs.version }}"
+          TAG_VERSION="${{ needs.check-tag.outputs.python_version }}"
+          if [ "$SETUPTOOLS_VERSION" != "$TAG_VERSION" ]; then
+            echo "ERROR: setuptools_scm version ($SETUPTOOLS_VERSION) does not match tag python version ($TAG_VERSION)"
+            exit 1
+          else
+            echo "✓ setuptools_scm version matches tag python version: $TAG_VERSION"
+          fi
 
   python-tests-linux:
     uses: ./.github/workflows/_python-tests.yml
@@ -90,7 +107,7 @@ jobs:
     uses: ./.github/workflows/_build_release_cli.yml
     secrets: inherit
     with:
-      version: ${{ needs.check-tag.outputs.cli_version }}
+      version: cli-${{ needs.check-tag.outputs.cli_version }}
 
   release-js-bindings:
     name: Release JS Bindings
@@ -108,8 +125,12 @@ jobs:
   release-js-client:
     name: Release JS Client
     needs:
+      - check-tag
       - release-js-bindings
     uses: ./.github/workflows/release-javascript-client.yml
+    secrets: inherit
+    with:
+      tag: js_release_${{ needs.check-tag.outputs.js_version }}
 
   release-docker:
     name: Publish to DockerHub and GHCR

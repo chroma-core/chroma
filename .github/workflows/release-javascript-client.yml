@@ -10,7 +10,12 @@ on:
       tag:
         description: 'Tag to release'
         required: true
-  workflow_call: {}
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to release'
+        required: true
+        type: string
 env:
   PNPM_CACHE_FOLDER: .cache/pnpm
 jobs:
@@ -27,7 +32,7 @@ jobs:
       shell: bash
       run: |
         # If the workflow was triggered by a push on a tag, use github.ref_name.
-        # If manually dispatched, use the tag value supplied in the workflow input.
+        # If manually dispatched or called from another workflow, use the tag value supplied in the workflow input.
         if [[ "${{ github.event_name }}" == "push" ]]; then
           echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
         else
@@ -96,7 +101,7 @@ jobs:
         shell: bash
         run: |
           # If the workflow was triggered by a push on a tag, use github.ref_name.
-          # If manually dispatched, use the tag value supplied in the workflow input.
+          # If manually dispatched or called from another workflow, use the tag value supplied in the workflow input.
           if [[ "${{ github.event_name }}" == "push" ]]; then
             echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
