@@ -1,0 +1,92 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Fastembed Sparse Embedding Function Schema",
+    "description": "Schema for the Fastembed sparse embedding function configuration",
+    "version": "1.0.0",
+    "type": "object",
+    "properties": {
+        "model_name": {
+            "type": "string",
+            "description": "Identifier of the Fastembed model. List of commonly used models: Qdrant/bm25, prithivida/Splade_PP_en_v1, Qdrant/minicoil-v1"
+        },
+        "task": {
+            "type": "string",
+            "enum": [
+                "document",
+                "query"
+            ],
+            "description": "Task to perform, can be 'document' or 'query'"
+        },
+        "query_config": {
+            "type": "object",
+            "description": "Configuration for the query",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "enum": [
+                        "document",
+                        "query"
+                    ],
+                    "description": "Task to perform for query embedding"
+                }
+            },
+            "additionalProperties": false
+        },
+        "cache_dir": {
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "The path to the cache directory"
+        },
+        "threads": {
+            "type": [
+                "integer",
+                "null"
+            ],
+            "description": "The number of threads to use for the model"
+        },
+        "cuda": {
+            "type": [
+                "boolean",
+                "null"
+            ],
+            "description": "Whether to use CUDA"
+        },
+        "device_ids": {
+            "type": [
+                "array",
+                "null"
+            ],
+            "description": "The device IDs to use for the model",
+            "items": {
+                "type": "integer"
+            }
+        },
+        "lazy_load": {
+            "type": [
+                "boolean",
+                "null"
+            ],
+            "description": "Whether to lazy load the model"
+        },
+        "kwargs": {
+            "type": "object",
+            "description": "Additional arguments to pass to the model",
+            "additionalProperties": {
+                "type": [
+                    "string",
+                    "integer",
+                    "number",
+                    "boolean",
+                    "array",
+                    "object"
+                ]
+            }
+        }
+    },
+    "required": [
+        "model_name"
+    ],
+    "additionalProperties": false
+}

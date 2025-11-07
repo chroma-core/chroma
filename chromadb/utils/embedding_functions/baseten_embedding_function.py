@@ -2,6 +2,7 @@ import os
 from chromadb.utils.embedding_functions.openai_embedding_function import (
     OpenAIEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import Dict, Any, Optional, List
 from chromadb.api.types import Space
 import warnings
@@ -100,3 +101,16 @@ class BasetenEmbeddingFunction(OpenAIEmbeddingFunction):
             api_base=api_base,
             api_key_env_var=api_key_env_var,
         )
+
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
+        """
+        Validate the configuration using the JSON schema.
+
+        Args:
+            config: Configuration to validate
+
+        Raises:
+            ValidationError: If the configuration does not match the schema
+        """
+        validate_config_schema(config, "baseten")
