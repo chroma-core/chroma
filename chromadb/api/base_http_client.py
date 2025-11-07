@@ -5,15 +5,47 @@ import orjson as json
 import httpx
 
 import chromadb.errors as errors
-from chromadb.config import Settings
+from chromadb.config import Component, Settings, System
 
 logger = logging.getLogger(__name__)
 
 
-class BaseHTTPClient:
+# inherits from Component so that it can create an init function to use system
+# this way it can build limits from the settings in System
+class BaseHTTPClient(Component):
     _settings: Settings
     pre_flight_checks: Any = None
-    keepalive_secs: int = 40
+    DEFAULT_KEEPALIVE_SECS: float = 40.0
+
+    def __init__(self, system: System):
+        super().__init__(system)
+        self._settings = system.settings
+        keepalive_setting = self._settings.chroma_http_keepalive_secs
+        self.keepalive_secs: Optional[float] = (
+            keepalive_setting
+            if keepalive_setting is not None
+            else BaseHTTPClient.DEFAULT_KEEPALIVE_SECS
+        )
+        self._http_limits = self._build_limits()
+
+    def _build_limits(self) -> httpx.Limits:
+        limit_kwargs: Dict[str, Any] = {}
+        if self.keepalive_secs is not None:
+            limit_kwargs["keepalive_expiry"] = self.keepalive_secs
+
+        max_connections = self._settings.chroma_http_max_connections
+        if max_connections is not None:
+            limit_kwargs["max_connections"] = max_connections
+
+        max_keepalive_connections = self._settings.chroma_http_max_keepalive_connections
+        if max_keepalive_connections is not None:
+            limit_kwargs["max_keepalive_connections"] = max_keepalive_connections
+
+        return httpx.Limits(**limit_kwargs)
+
+    @property
+    def http_limits(self) -> httpx.Limits:
+        return self._http_limits
 
     @staticmethod
     def _validate_host(host: str) -> None:
