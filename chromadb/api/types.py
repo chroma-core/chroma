@@ -1530,7 +1530,9 @@ class VectorIndexConfig(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
     space: Optional[Space] = None
     embedding_function: Optional[Any] = DefaultEmbeddingFunction()
-    source_key: Optional[str] = None  # key to source the vector from (accepts str or Key)
+    source_key: Optional[
+        str
+    ] = None  # key to source the vector from (accepts str or Key)
     hnsw: Optional[HnswIndexConfig] = None
     spann: Optional[SpannIndexConfig] = None
 
@@ -1542,6 +1544,7 @@ class VectorIndexConfig(BaseModel):
             return None
         # Import Key at runtime to avoid circular import
         from chromadb.execution.expression.operator import Key as KeyType
+
         if isinstance(v, KeyType):
             v = v.name  # Extract string from Key
         elif isinstance(v, str):
@@ -1577,7 +1580,9 @@ class SparseVectorIndexConfig(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
     # TODO(Sanket): Change this to the appropriate sparse ef and use a default here.
     embedding_function: Optional[Any] = None
-    source_key: Optional[str] = None  # key to source the sparse vector from (accepts str or Key)
+    source_key: Optional[
+        str
+    ] = None  # key to source the sparse vector from (accepts str or Key)
     bm25: Optional[bool] = None
 
     @field_validator("source_key", mode="before")
@@ -1588,6 +1593,7 @@ class SparseVectorIndexConfig(BaseModel):
             return None
         # Import Key at runtime to avoid circular import
         from chromadb.execution.expression.operator import Key as KeyType
+
         if isinstance(v, KeyType):
             v = v.name  # Extract string from Key
         elif isinstance(v, str):
@@ -1787,11 +1793,14 @@ class Schema:
         self._initialize_keys()
 
     def create_index(
-        self, config: Optional[IndexConfig] = None, key: Optional[Union[str, "Key"]] = None
+        self,
+        config: Optional[IndexConfig] = None,
+        key: Optional[Union[str, "Key"]] = None,
     ) -> "Schema":
         """Create an index configuration."""
         # Convert Key to string if provided
         from chromadb.execution.expression.operator import Key as KeyType
+
         if key is not None and isinstance(key, KeyType):
             key = key.name
 
@@ -1869,11 +1878,14 @@ class Schema:
         return self
 
     def delete_index(
-        self, config: Optional[IndexConfig] = None, key: Optional[Union[str, "Key"]] = None
+        self,
+        config: Optional[IndexConfig] = None,
+        key: Optional[Union[str, "Key"]] = None,
     ) -> "Schema":
         """Disable an index configuration (set enabled=False)."""
         # Convert Key to string if provided
         from chromadb.execution.expression.operator import Key as KeyType
+
         if key is not None and isinstance(key, KeyType):
             key = key.name
 
@@ -2410,6 +2422,10 @@ class Schema:
                         if embedding_func.is_legacy():
                             config_dict["embedding_function"] = {"type": "legacy"}
                         else:
+                            if hasattr(embedding_func, "validate_config"):
+                                embedding_func.validate_config(
+                                    embedding_func.get_config()
+                                )
                             config_dict["embedding_function"] = {
                                 "name": embedding_func.name(),
                                 "type": "known",
@@ -2439,6 +2455,8 @@ class Schema:
                     config_dict["embedding_function"] = {"type": "unknown"}
                 else:
                     embedding_func = cast(SparseEmbeddingFunction, embedding_func)  # type: ignore
+                    if hasattr(embedding_func, "validate_config"):
+                        embedding_func.validate_config(embedding_func.get_config())
                     config_dict["embedding_function"] = {
                         "name": embedding_func.name(),
                         "type": "known",
