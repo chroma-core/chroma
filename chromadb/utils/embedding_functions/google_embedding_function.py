@@ -7,6 +7,150 @@ from chromadb.utils.embedding_functions.schemas import validate_config_schema
 import warnings
 
 
+class GoogleGenaiEmbeddingFunction(EmbeddingFunction[Documents]):
+    def __init__(
+        self,
+        model_name: str,
+        vertexai: Optional[bool] = None,
+        project: Optional[str] = None,
+        location: Optional[str] = None,
+        api_key_env_var: str = "GOOGLE_API_KEY",
+    ):
+        """
+        Initialize the GoogleGenaiEmbeddingFunction.
+
+        Args:
+            model_name (str): The name of the model to use for text embeddings.
+            api_key_env_var (str, optional): Environment variable name that contains your API key for the Google GenAI API.
+                Defaults to "GOOGLE_API_KEY".
+        """
+        try:
+            import google.genai as genai
+        except ImportError:
+            raise ValueError(
+                "The google-genai python package is not installed. Please install it with `pip install google-genai`"
+            )
+
+        self.model_name = model_name
+        self.api_key_env_var = api_key_env_var
+        self.vertexai = vertexai
+        self.project = project
+        self.location = location
+        self.api_key = os.getenv(self.api_key_env_var)
+        if not self.api_key:
+            raise ValueError(
+                f"The {self.api_key_env_var} environment variable is not set."
+            )
+
+        self.client = genai.Client(
+            api_key=self.api_key, vertexai=vertexai, project=project, location=location
+        )
+
+    def __call__(self, input: Documents) -> Embeddings:
+        """
+        Generate embeddings for the given documents.
+
+        Args:
+            input: Documents or images to generate embeddings for.
+
+        Returns:
+            Embeddings for the documents.
+        """
+        if not input:
+            raise ValueError("Input documents cannot be empty")
+        if not isinstance(input, (list, tuple)):
+            raise ValueError("Input must be a list or tuple of documents")
+        if not all(isinstance(doc, str) for doc in input):
+            raise ValueError("All input documents must be strings")
+
+        try:
+            response = self.client.models.embed_content(
+                model=self.model_name, contents=input
+            )
+        except Exception as e:
+            raise ValueError(f"Failed to generate embeddings: {str(e)}") from e
+
+        # Validate response structure
+        if not hasattr(response, "embeddings") or not response.embeddings:
+            raise ValueError("No embeddings returned from the API")
+
+        embeddings_list = []
+        for ce in response.embeddings:
+            if not hasattr(ce, "values"):
+                raise ValueError("Malformed embedding response: missing 'values'")
+            embeddings_list.append(np.array(ce.values, dtype=np.float32))
+
+        return cast(Embeddings, embeddings_list)
+
+    @staticmethod
+    def name() -> str:
+        return "google_genai"
+
+    def default_space(self) -> Space:
+        return "cosine"
+
+    def supported_spaces(self) -> List[Space]:
+        return ["cosine", "l2", "ip"]
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+        model_name = config.get("model_name")
+        vertexai = config.get("vertexai")
+        project = config.get("project")
+        location = config.get("location")
+
+        if model_name is None:
+            raise ValueError("The model name is required.")
+
+        return GoogleGenaiEmbeddingFunction(
+            model_name=model_name,
+            vertexai=vertexai,
+            project=project,
+            location=location,
+        )
+
+    def get_config(self) -> Dict[str, Any]:
+        return {
+            "model_name": self.model_name,
+            "vertexai": self.vertexai,
+            "project": self.project,
+            "location": self.location,
+        }
+
+    def validate_config_update(
+        self, old_config: Dict[str, Any], new_config: Dict[str, Any]
+    ) -> None:
+        if "model_name" in new_config:
+            raise ValueError(
+                "The model name cannot be changed after the embedding function has been initialized."
+            )
+        if "vertexai" in new_config:
+            raise ValueError(
+                "The vertexai cannot be changed after the embedding function has been initialized."
+            )
+        if "project" in new_config:
+            raise ValueError(
+                "The project cannot be changed after the embedding function has been initialized."
+            )
+        if "location" in new_config:
+            raise ValueError(
+                "The location cannot be changed after the embedding function has been initialized."
+            )
+
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
+        """
+        Validate the configuration using the JSON schema.
+
+        Args:
+            config: Configuration to validate
+
+        Raises:
+            ValidationError: If the configuration does not match the schema
+        """
+        validate_config_schema(config, "google_genai")
+
+
 class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
     """To use this EmbeddingFunction, you must have the google.generativeai Python package installed and have a PaLM API key."""
 
