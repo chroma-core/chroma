@@ -207,7 +207,8 @@ schema.create_index(
 
 {% Tab label="typescript" %}
 ```typescript
-import { Schema, SparseVectorIndexConfig, ChromaCloudSpladeEmbeddingFunction, K } from 'chromadb';
+import { Schema, SparseVectorIndexConfig, K } from 'chromadb';
+import { ChromaCloudSpladeEmbeddingFunction } from '@chroma-core/chroma-cloud-splade';
 
 const schema = new Schema();
 
