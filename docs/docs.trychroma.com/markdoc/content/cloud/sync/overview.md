@@ -27,13 +27,9 @@ The direct tier requires you to install Chroma’s GitHub App into any repositor
 
 ### Platform Sync
 
-The platform tier requires you to grant Chroma access to a GitHub App that you own, which has been installed into the private repositories you wish to sync. This GitHub App must have read-only access to the “Contents” and “Metadata” permissions on the list of “Repository permissions”:
+The platform tier requires you to grant Chroma access to a GitHub App that you own, which has been installed into the private repositories you wish to sync. This GitHub App must have read-only access to the “Contents” and “Metadata” permissions on the list of “Repository permissions”.
 
-{% MarkdocImage lightSrc="/sync/gh-contents.png" darkSrc="/sync/gh-contents.png" alt="GitHub App contents" /%}
-
-{% MarkdocImage lightSrc="/sync/gh-metadata.png" darkSrc="/sync/gh-metadata.png" alt="GitHub App metadata" /%}
-
-The platform tier grants access to the Chroma Sync API and is ideal for companies and organizations that offer services which access their users’ codebases. The platform tier is available on Chroma’s Team plan. If you are interested in using it, please reach out to us at [engineering@trychroma.com](mailto:engineering@trychroma.com).
+The platform tier grants access to the Chroma Sync API and is ideal for companies and organizations that offer services which access their users’ codebases. For a detailed walkthrough, see [Platform Sync docs](/cloud/sync/github#platform-sync).
 
 ## Web
 

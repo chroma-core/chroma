@@ -7,7 +7,7 @@ name: GitHub
 
 ## Direct Sync
 
-Direct Sync is the default syncing method, which uses the Chroma Cloud GitHub app. To use your own custom GitHub app, use [Platform Sync](/cloud/sync/overview#platform-sync).
+Direct Sync is the default syncing method, which uses the Chroma Cloud GitHub app. To use your own custom GitHub app, use [Platform Sync](/cloud/sync/github#platform-sync).
 
 1. **Prerequisites**
 
@@ -57,9 +57,21 @@ Direct Sync is the default syncing method, which uses the Chroma Cloud GitHub ap
 
 ## Platform Sync
 
+{% Banner type="note" title="Team & Enterprise only" %}
+Platform Sync is only available on Chroma Cloud [Team and Enterprise plans](https://trychroma.com/pricing).
+{% /Banner %}
+
+
 1. **Prerequisites**
 
-    This walkthrough assumes that you have an existing GitHub App that has been installed into at least one non-empty GitHub account or organization.
+    This walkthrough assumes that you have already [created a GitHub App](https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps) and installed it into at least one GitHub account or organization.
+
+    The GitHub App must have read-only access to the “Contents” and “Metadata” permissions listed under “Repository permissions.” These permissions ensure Chroma can index repositories authorized on the GitHub app.
+
+    {% MarkdocImage lightSrc="/sync/gh-contents.png" darkSrc="/sync/gh-contents.png" alt="GitHub App contents" /%}
+
+    {% MarkdocImage lightSrc="/sync/gh-metadata.png" darkSrc="/sync/gh-metadata.png" alt="GitHub App metadata" /%}
+
 
 2. **Setup**
 
@@ -77,7 +89,11 @@ Direct Sync is the default syncing method, which uses the Chroma Cloud GitHub ap
 
     {% MarkdocImage lightSrc="/sync/github_secret_key.png" darkSrc="/sync/github_secret_key.png" alt="GitHub Secret Key" /%}
 
-    With these credentials, you can use the Chroma dashboard to register your GitHub App with Chroma. **Contact [support@trychroma.com](mailto:support@trychroma.com) for access to this feature.**
+    With these credentials, navigate to the "Sync" -> "New GitHub sync" -> "Register your GitHub app" to configure your GitHub App with Chroma.
+
+    {% MarkdocImage lightSrc="/sync/platform_setup.png" darkSrc="/sync/platform_setup.png" alt="Platform setup" /%}
+
+    On the "Connect your custom GitHub app" screen, submit the App ID and private key from GitHub:
 
     {% MarkdocImage lightSrc="/sync/custom-github-app-screen.png" darkSrc="/sync/custom-github-app-screen.png" alt="Creating a custom github app" /%}
 
