@@ -65,7 +65,7 @@ const result = await collection.search(search.rank(Knn({ query: queryEmbedding }
 
 // Option 2: Pass text query (embedding created using collection's schema configuration)
 const queryText = "What are the latest advances in quantum computing?";
-result = await collection.search(search.rank(Knn({ query: queryText })));
+const result2 = await collection.search(search.rank(Knn({ query: queryText })));
 ```
 {% /Tab %}
 
