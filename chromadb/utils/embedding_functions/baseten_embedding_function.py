@@ -35,12 +35,16 @@ class BasetenEmbeddingFunction(OpenAIEmbeddingFunction):
                 DeprecationWarning,
             )
 
-        self.api_key_env_var = api_key_env_var
+        if os.getenv("BASETEN_API_KEY") is not None:
+            self.api_key_env_var = "BASETEN_API_KEY"
+        else:
+            self.api_key_env_var = api_key_env_var
+
         # Prioritize api_key argument, then environment variable
-        resolved_api_key = api_key or os.getenv(api_key_env_var)
+        resolved_api_key = api_key or os.getenv(self.api_key_env_var)
         if not resolved_api_key:
             raise ValueError(
-                f"API key not provided and {api_key_env_var} environment variable is not set."
+                f"API key not provided and {self.api_key_env_var} environment variable is not set."
             )
         self.api_key = resolved_api_key
         if not api_base:
