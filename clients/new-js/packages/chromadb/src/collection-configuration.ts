@@ -13,6 +13,7 @@ import {
   serializeEmbeddingFunction,
 } from "./embedding-function";
 import { CollectionMetadata } from "./types";
+import { Schema } from "./schema";
 
 export interface CollectionConfiguration {
   embeddingFunction?: EmbeddingFunctionConfiguration | null;
@@ -57,11 +58,17 @@ export const processCreateCollectionConfig = async ({
   configuration,
   embeddingFunction,
   metadata,
+  schema,
 }: {
   configuration?: CreateCollectionConfiguration;
   embeddingFunction?: EmbeddingFunction | null;
   metadata?: CollectionMetadata;
+  schema?: Schema;
 }) => {
+  let schemaEmbeddingFunction: EmbeddingFunction | null | undefined = undefined;
+  if (schema) {
+    schemaEmbeddingFunction = schema.resolveEmbeddingFunction();
+  }
   if (configuration?.hnsw && configuration?.spann) {
     throw new ChromaValueError(
       "Cannot specify both HNSW and SPANN configurations",
@@ -73,7 +80,7 @@ export const processCreateCollectionConfig = async ({
     configEmbeddingFunction: configuration?.embeddingFunction,
   });
 
-  if (!embeddingFunctionConfiguration && embeddingFunction !== null) {
+  if (!embeddingFunctionConfiguration && embeddingFunction !== null && schemaEmbeddingFunction === undefined) {
     embeddingFunctionConfiguration = await getDefaultEFConfig();
   }
 
@@ -115,7 +122,7 @@ export const processCreateCollectionConfig = async ({
       ) {
         console.warn(
           `Space '${configuration.hnsw.space}' is not supported by embedding function '${overallEf.name || "unknown"}'. ` +
-            `Supported spaces: ${supportedSpaces.join(", ")}`,
+          `Supported spaces: ${supportedSpaces.join(", ")}`,
         );
       }
 
@@ -125,7 +132,7 @@ export const processCreateCollectionConfig = async ({
       ) {
         console.warn(
           `Space '${configuration.spann.space}' is not supported by embedding function '${overallEf.name || "unknown"}'. ` +
-            `Supported spaces: ${supportedSpaces.join(", ")}`,
+          `Supported spaces: ${supportedSpaces.join(", ")}`,
         );
       }
 
@@ -140,7 +147,7 @@ export const processCreateCollectionConfig = async ({
       ) {
         console.warn(
           `Space '${metadata["hnsw:space"]}' from metadata is not supported by embedding function '${overallEf.name || "unknown"}'. ` +
-            `Supported spaces: ${supportedSpaces.join(", ")}`,
+          `Supported spaces: ${supportedSpaces.join(", ")}`,
         );
       }
     }
