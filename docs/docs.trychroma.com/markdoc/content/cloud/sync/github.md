@@ -91,7 +91,7 @@ Platform Sync is only available on Chroma Cloud [Team and Enterprise plans](http
 
     With these credentials, navigate to the "Sync" -> "New GitHub sync" -> "Register your GitHub app" to configure your GitHub App with Chroma.
 
-    {% MarkdocImage lightSrc="/sync/platform_setup.png" darkSrc="/sync/platform_setup.png" alt="Pltatform setup" /%}
+    {% MarkdocImage lightSrc="/sync/platform_setup.png" darkSrc="/sync/platform_setup.png" alt="Platform setup" /%}
 
     On the "Connect your custom GitHub app" screen, submit the App ID and private key from GitHub:
 
