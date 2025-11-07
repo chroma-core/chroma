@@ -11,8 +11,8 @@ from chromadb.config import System
 from chromadb.errors import ChromaError, NotFoundError
 
 
-def test_task_create_and_remove(basic_http_client: System) -> None:
-    """Test creating and removing a task with the record_counter operator"""
+def test_function_attach_and_detach(basic_http_client: System) -> None:
+    """Test creating and removing a function with the record_counter operator"""
     client = ClientCreator.from_system(basic_http_client)
     client.reset()
 
@@ -37,17 +37,15 @@ def test_task_create_and_remove(basic_http_client: System) -> None:
     assert collection.count() == 3
 
     # Create a task that counts records in the collection
-    success, task_id = collection.create_task(
-        task_name="count_my_docs",
-        operator_name="record_counter",  # Built-in operator that counts records
-        output_collection_name="my_documents_counts",
+    attached_fn = collection.attach_function(
+        name="count_my_docs",
+        function_id="record_counter",  # Built-in operator that counts records
+        output_collection="my_documents_counts",
         params=None,
     )
 
     # Verify task creation succeeded
-    assert success is True
-    assert task_id is not None
-    assert len(task_id) > 0
+    assert attached_fn is not None
 
     # Add more documents
     collection.add(
@@ -62,35 +60,34 @@ def test_task_create_and_remove(basic_http_client: System) -> None:
     assert collection.count() == 5
 
     # Remove the task
-    success = collection.remove_task(
-        task_name="count_my_docs",
-        delete_output=True,
+    success = attached_fn.detach(
+        delete_output_collection=True,
     )
 
     # Verify task removal succeeded
     assert success is True
 
 
-def test_task_with_invalid_operator(basic_http_client: System) -> None:
-    """Test that creating a task with an invalid operator raises an error"""
+def test_task_with_invalid_function(basic_http_client: System) -> None:
+    """Test that creating a task with an invalid function raises an error"""
     client = ClientCreator.from_system(basic_http_client)
     client.reset()
 
-    collection = client.get_or_create_collection(name="test_invalid_operator")
+    collection = client.get_or_create_collection(name="test_invalid_function")
     collection.add(ids=["id1"], documents=["test document"])
 
-    # Attempt to create task with non-existent operator should raise ChromaError
-    with pytest.raises(ChromaError, match="operator not found"):
-        collection.create_task(
-            task_name="invalid_task",
-            operator_name="nonexistent_operator",
-            output_collection_name="output_collection",
+    # Attempt to create task with non-existent function should raise ChromaError
+    with pytest.raises(ChromaError, match="function not found"):
+        collection.attach_function(
+            name="invalid_task",
+            function_id="nonexistent_function",
+            output_collection="output_collection",
             params=None,
         )
 
 
-def test_task_multiple_collections(basic_http_client: System) -> None:
-    """Test creating tasks on multiple collections"""
+def test_function_multiple_collections(basic_http_client: System) -> None:
+    """Test attaching functions on multiple collections"""
     client = ClientCreator.from_system(basic_http_client)
     client.reset()
 
@@ -98,40 +95,38 @@ def test_task_multiple_collections(basic_http_client: System) -> None:
     collection1 = client.create_collection(name="collection_1")
     collection1.add(ids=["id1", "id2"], documents=["doc1", "doc2"])
 
-    success1, task_id1 = collection1.create_task(
-        task_name="task_1",
-        operator_name="record_counter",
-        output_collection_name="output_1",
+    attached_fn1 = collection1.attach_function(
+        name="task_1",
+        function_id="record_counter",
+        output_collection="output_1",
         params=None,
     )
 
-    assert success1 is True
-    assert task_id1 is not None
+    assert attached_fn1 is not None
 
     # Create second collection and task
     collection2 = client.create_collection(name="collection_2")
     collection2.add(ids=["id3", "id4"], documents=["doc3", "doc4"])
 
-    success2, task_id2 = collection2.create_task(
-        task_name="task_2",
-        operator_name="record_counter",
-        output_collection_name="output_2",
+    attached_fn2 = collection2.attach_function(
+        name="task_2",
+        function_id="record_counter",
+        output_collection="output_2",
         params=None,
     )
 
-    assert success2 is True
-    assert task_id2 is not None
+    assert attached_fn2 is not None
 
     # Task IDs should be different
-    assert task_id1 != task_id2
+    assert attached_fn1.id != attached_fn2.id
 
     # Clean up
-    assert collection1.remove_task(task_name="task_1", delete_output=True) is True
-    assert collection2.remove_task(task_name="task_2", delete_output=True) is True
+    assert attached_fn1.detach(delete_output_collection=True) is True
+    assert attached_fn2.detach(delete_output_collection=True) is True
 
 
-def test_task_multiple_tasks(basic_http_client: System) -> None:
-    """Test creating multiple tasks on the same collection"""
+def test_functions_multiple_attached_functions(basic_http_client: System) -> None:
+    """Test attaching multiple functions on the same collection"""
     client = ClientCreator.from_system(basic_http_client)
     client.reset()
 
@@ -140,69 +135,71 @@ def test_task_multiple_tasks(basic_http_client: System) -> None:
     collection.add(ids=["id1", "id2", "id3"], documents=["doc1", "doc2", "doc3"])
 
     # Create first task on the collection
-    success1, task_id1 = collection.create_task(
-        task_name="task_1",
-        operator_name="record_counter",
-        output_collection_name="output_1",
+    attached_fn1 = collection.attach_function(
+        name="task_1",
+        function_id="record_counter",
+        output_collection="output_1",
         params=None,
     )
 
-    assert success1 is True
-    assert task_id1 is not None
+    assert attached_fn1 is not None
 
     # Create second task on the SAME collection with a different name
-    success2, task_id2 = collection.create_task(
-        task_name="task_2",
-        operator_name="record_counter",
-        output_collection_name="output_2",
+    attached_fn2 = collection.attach_function(
+        name="task_2",
+        function_id="record_counter",
+        output_collection="output_2",
         params=None,
     )
 
-    assert success2 is True
-    assert task_id2 is not None
+    assert attached_fn2 is not None
 
     # Task IDs should be different even though they're on the same collection
-    assert task_id1 != task_id2
+    assert attached_fn1.id != attached_fn2.id
 
     # Create third task on the same collection
-    success3, task_id3 = collection.create_task(
-        task_name="task_3",
-        operator_name="record_counter",
-        output_collection_name="output_3",
+    attached_fn3 = collection.attach_function(
+        name="task_3",
+        function_id="record_counter",
+        output_collection="output_3",
         params=None,
     )
 
-    assert success3 is True
-    assert task_id3 is not None
-    assert task_id3 != task_id1
-    assert task_id3 != task_id2
+    assert attached_fn3 is not None
+    assert attached_fn3.id != attached_fn1.id
+    assert attached_fn3.id != attached_fn2.id
 
     # Attempt to create a task with duplicate name on same collection should fail
     with pytest.raises(ChromaError, match="already exists"):
-        collection.create_task(
-            task_name="task_1",  # Duplicate name
-            operator_name="record_counter",
-            output_collection_name="output_duplicate",
+        collection.attach_function(
+            name="task_1",  # Duplicate name
+            function_id="record_counter",
+            output_collection="output_duplicate",
             params=None,
         )
 
     # Clean up - remove each task individually
-    assert collection.remove_task(task_name="task_1", delete_output=True) is True
-    assert collection.remove_task(task_name="task_2", delete_output=True) is True
-    assert collection.remove_task(task_name="task_3", delete_output=True) is True
+    assert attached_fn1.detach(delete_output_collection=True) is True
+    assert attached_fn2.detach(delete_output_collection=True) is True
+    assert attached_fn3.detach(delete_output_collection=True) is True
 
 
-def test_task_remove_nonexistent(basic_http_client: System) -> None:
+def test_function_remove_nonexistent(basic_http_client: System) -> None:
     """Test removing a task that doesn't exist raises NotFoundError"""
     client = ClientCreator.from_system(basic_http_client)
     client.reset()
 
     collection = client.create_collection(name="test_collection")
     collection.add(ids=["id1"], documents=["test"])
+    attached_fn = collection.attach_function(
+        name="test_function",
+        function_id="record_counter",
+        output_collection="output_collection",
+        params=None,
+    )
 
-    # Try to remove a task that was never created should raise NotFoundError
+    attached_fn.detach(delete_output_collection=True)
+
+    # Trying to detach this function again should raise NotFoundError
     with pytest.raises(NotFoundError, match="does not exist"):
-        collection.remove_task(
-            task_name="nonexistent_task",
-            delete_output=False,
-        )
+        attached_fn.detach(delete_output_collection=True)

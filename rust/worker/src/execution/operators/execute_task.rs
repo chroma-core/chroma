@@ -6,15 +6,18 @@ use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentReaderC
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
     Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, Segment, UpdateMetadataValue,
+    FUNCTION_RECORD_COUNTER_ID, FUNCTION_STATISTICS_ID,
 };
 use std::sync::Arc;
 use thiserror::Error;
 
-/// Trait for task executors that process input records and produce output records.
+use crate::execution::functions::{CounterFunctionFactory, StatisticsFunctionExecutor};
+
+/// Trait for attached function executors that process input records and produce output records.
 /// Implementors can read from the output collection to maintain state across executions.
 #[async_trait]
-pub trait TaskExecutor: Send + Sync + std::fmt::Debug {
-    /// Execute the task logic on input records.
+pub trait AttachedFunctionExecutor: Send + Sync + std::fmt::Debug {
+    /// Execute the attached function logic on input records.
     ///
     /// # Arguments
     /// * `input_records` - The log records to process
@@ -29,13 +32,13 @@ pub trait TaskExecutor: Send + Sync + std::fmt::Debug {
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>>;
 }
 
-/// A simple counting task that maintains a running total of records processed.
+/// A simple counting attached function that maintains a running total of records processed.
 /// Stores the count in a metadata field called "total_count".
 #[derive(Debug)]
-pub struct CountTask;
+pub struct CountAttachedFunction;
 
 #[async_trait]
-impl TaskExecutor for CountTask {
+impl AttachedFunctionExecutor for CountAttachedFunction {
     async fn execute(
         &self,
         input_records: Chunk<LogRecord>,
@@ -53,7 +56,7 @@ impl TaskExecutor for CountTask {
         );
 
         let operation_record = OperationRecord {
-            id: "task_result".to_string(),
+            id: "attached_function_result".to_string(),
             embedding: Some(vec![0.0]),
             encoding: None,
             metadata: Some(metadata),
@@ -70,17 +73,50 @@ impl TaskExecutor for CountTask {
     }
 }
 
-/// The ExecuteTask operator executes task logic based on fetched logs.
-/// Uses a TaskExecutor trait to allow different task implementations.
+/// The ExecuteAttachedFunction operator executes attached function logic based on fetched logs.
+/// Uses an AttachedFunctionExecutor trait to allow different attached function implementations.
 #[derive(Debug)]
-pub struct ExecuteTaskOperator {
+pub struct ExecuteAttachedFunctionOperator {
     pub log_client: Log,
-    pub task_executor: Arc<dyn TaskExecutor>,
+    pub attached_function_executor: Arc<dyn AttachedFunctionExecutor>,
 }
 
-/// Input for the ExecuteTask operator
+impl ExecuteAttachedFunctionOperator {
+    /// Create a new ExecuteAttachedFunctionOperator from an AttachedFunction.
+    /// The executor is selected based on the function_id in the attached function.
+    pub(crate) fn from_attached_function(
+        attached_function: &chroma_types::AttachedFunction,
+        log_client: Log,
+    ) -> Result<Self, ExecuteAttachedFunctionError> {
+        let executor: Arc<dyn AttachedFunctionExecutor> = match attached_function.function_id {
+            // For the record counter, use CountAttachedFunction
+            FUNCTION_RECORD_COUNTER_ID => Arc::new(CountAttachedFunction),
+            // For statistics, use StatisticsFunctionExecutor with CounterFunctionFactory
+            FUNCTION_STATISTICS_ID => {
+                Arc::new(StatisticsFunctionExecutor(Box::new(CounterFunctionFactory)))
+            }
+            _ => {
+                tracing::error!(
+                    "Unknown function_id UUID: {}",
+                    attached_function.function_id
+                );
+                return Err(ExecuteAttachedFunctionError::InvalidUuid(format!(
+                    "Unknown function_id UUID: {}",
+                    attached_function.function_id
+                )));
+            }
+        };
+
+        Ok(ExecuteAttachedFunctionOperator {
+            log_client,
+            attached_function_executor: executor,
+        })
+    }
+}
+
+/// Input for the ExecuteAttachedFunction operator
 #[derive(Debug)]
-pub struct ExecuteTaskInput {
+pub struct ExecuteAttachedFunctionInput {
     /// The fetched log records to process
     pub log_records: Chunk<LogRecord>,
     /// The tenant ID
@@ -95,9 +131,9 @@ pub struct ExecuteTaskInput {
     pub blockfile_provider: BlockfileProvider,
 }
 
-/// Output from the ExecuteTask operator
+/// Output from the ExecuteAttachedFunction operator
 #[derive(Debug)]
-pub struct ExecuteTaskOutput {
+pub struct ExecuteAttachedFunctionOutput {
     /// The number of records processed in this execution
     pub records_processed: u64,
     /// The output log records to be partitioned and compacted
@@ -105,7 +141,7 @@ pub struct ExecuteTaskOutput {
 }
 
 #[derive(Debug, Error)]
-pub enum ExecuteTaskError {
+pub enum ExecuteAttachedFunctionError {
     #[error("Failed to read from segment: {0}")]
     SegmentRead(#[from] Box<dyn ChromaError>),
     #[error("Failed to create record segment reader: {0}")]
@@ -114,30 +150,44 @@ pub enum ExecuteTaskError {
     InvalidUuid(String),
     #[error("Log offset arithmetic overflow: base_offset={0}, record_index={1}")]
     LogOffsetOverflow(i64, usize),
+    #[error("Log offset overflow: base_offset={0}, record_index={1}")]
+    LogOffsetOverflowUnsignedToSigned(u64, usize),
 }
 
-impl ChromaError for ExecuteTaskError {
+impl ChromaError for ExecuteAttachedFunctionError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
-            ExecuteTaskError::SegmentRead(e) => e.code(),
-            ExecuteTaskError::RecordReader(e) => e.code(),
-            ExecuteTaskError::InvalidUuid(_) => chroma_error::ErrorCodes::InvalidArgument,
-            ExecuteTaskError::LogOffsetOverflow(_, _) => chroma_error::ErrorCodes::Internal,
+            ExecuteAttachedFunctionError::SegmentRead(e) => e.code(),
+            ExecuteAttachedFunctionError::RecordReader(e) => e.code(),
+            ExecuteAttachedFunctionError::InvalidUuid(_) => {
+                chroma_error::ErrorCodes::InvalidArgument
+            }
+            ExecuteAttachedFunctionError::LogOffsetOverflow(_, _) => {
+                chroma_error::ErrorCodes::Internal
+            }
+            ExecuteAttachedFunctionError::LogOffsetOverflowUnsignedToSigned(_, _) => {
+                chroma_error::ErrorCodes::Internal
+            }
         }
     }
 }
 
 #[async_trait]
-impl Operator<ExecuteTaskInput, ExecuteTaskOutput> for ExecuteTaskOperator {
-    type Error = ExecuteTaskError;
+impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
+    for ExecuteAttachedFunctionOperator
+{
+    type Error = ExecuteAttachedFunctionError;
 
     fn get_type(&self) -> OperatorType {
         OperatorType::IO
     }
 
-    async fn run(&self, input: &ExecuteTaskInput) -> Result<ExecuteTaskOutput, ExecuteTaskError> {
+    async fn run(
+        &self,
+        input: &ExecuteAttachedFunctionInput,
+    ) -> Result<ExecuteAttachedFunctionOutput, ExecuteAttachedFunctionError> {
         tracing::info!(
-            "[ExecuteTask]: Processing {} records for output collection {}",
+            "[ExecuteAttachedFunction]: Processing {} records for output collection {}",
             input.log_records.len(),
             input.output_collection_id
         );
@@ -154,49 +204,51 @@ impl Operator<ExecuteTaskInput, ExecuteTaskOutput> for ExecuteTaskOperator {
             Ok(reader) => Some(reader),
             Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
                 // Output collection has no data yet - this is the first run
-                tracing::info!("[ExecuteTask]: Output segment uninitialized - first task run");
+                tracing::info!("[ExecuteAttachedFunction]: Output segment uninitialized - first attached function run");
                 None
             }
             Err(e) => return Err((*e).into()),
         };
 
-        // Execute the task using the provided executor
+        // Execute the attached function using the provided executor
         let output_records = self
-            .task_executor
+            .attached_function_executor
             .execute(input.log_records.clone(), record_segment_reader.as_ref())
             .await
-            .map_err(ExecuteTaskError::SegmentRead)?;
+            .map_err(ExecuteAttachedFunctionError::SegmentRead)?;
 
         // Update log offsets for output records
         // Convert u64 completion_offset to i64 for LogRecord (which uses i64)
-        let base_offset: i64 = input
-            .completion_offset
-            .try_into()
-            .map_err(|_| ExecuteTaskError::LogOffsetOverflow(input.completion_offset as i64, 0))?;
+        let base_offset: i64 = input.completion_offset.try_into().map_err(|_| {
+            ExecuteAttachedFunctionError::LogOffsetOverflowUnsignedToSigned(
+                input.completion_offset,
+                0,
+            )
+        })?;
 
         let output_records_with_offsets: Vec<LogRecord> = output_records
             .iter()
             .enumerate()
             .map(|(i, (log_record, _))| {
                 let i_i64 = i64::try_from(i)
-                    .map_err(|_| ExecuteTaskError::LogOffsetOverflow(base_offset, i))?;
-                let offset = base_offset
-                    .checked_add(i_i64)
-                    .ok_or_else(|| ExecuteTaskError::LogOffsetOverflow(base_offset, i))?;
+                    .map_err(|_| ExecuteAttachedFunctionError::LogOffsetOverflow(base_offset, i))?;
+                let offset = base_offset.checked_add(i_i64).ok_or_else(|| {
+                    ExecuteAttachedFunctionError::LogOffsetOverflow(base_offset, i)
+                })?;
                 Ok(LogRecord {
                     log_offset: offset,
                     record: log_record.record.clone(),
                 })
             })
-            .collect::<Result<Vec<_>, ExecuteTaskError>>()?;
+            .collect::<Result<Vec<_>, ExecuteAttachedFunctionError>>()?;
 
         tracing::info!(
-            "[ExecuteTask]: Task executed successfully, produced {} output records",
+            "[ExecuteAttachedFunction]: Attached function executed successfully, produced {} output records",
             output_records_with_offsets.len()
         );
 
         // Return the output records to be partitioned
-        Ok(ExecuteTaskOutput {
+        Ok(ExecuteAttachedFunctionOutput {
             records_processed: records_count,
             output_records: Chunk::new(Arc::from(output_records_with_offsets)),
         })

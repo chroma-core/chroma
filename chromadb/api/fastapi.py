@@ -7,6 +7,8 @@ import httpx
 import urllib.parse
 from overrides import override
 
+from chromadb.api.models.AttachedFunction import AttachedFunction
+
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
@@ -77,8 +79,14 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             default_api_path=system.settings.chroma_server_api_default_path,
         )
 
-        limits = httpx.Limits(keepalive_expiry=self.keepalive_secs)
-        self._session = httpx.Client(timeout=None, limits=limits)
+        if self._settings.chroma_server_ssl_verify is not None:
+            self._session = httpx.Client(
+                timeout=None,
+                limits=self.http_limits,
+                verify=self._settings.chroma_server_ssl_verify,
+            )
+        else:
+            self._session = httpx.Client(timeout=None, limits=self.http_limits)
 
         self._header = system.settings.chroma_server_headers or {}
         self._header["Content-Type"] = "application/json"
@@ -88,8 +96,6 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             + " (https://github.com/chroma-core/chroma)"
         )
 
-        if self._settings.chroma_server_ssl_verify is not None:
-            self._session = httpx.Client(verify=self._settings.chroma_server_ssl_verify)
         if self._header is not None:
             self._session.headers.update(self._header)
 
@@ -490,7 +496,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         return GetResult(
             ids=resp_json["ids"],
             embeddings=resp_json.get("embeddings", None),
-            metadatas=metadatas,  # type: ignore
+            metadatas=metadatas,
             documents=resp_json.get("documents", None),
             data=None,
             uris=resp_json.get("uris", None),
@@ -698,7 +704,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             ids=resp_json["ids"],
             distances=resp_json.get("distances", None),
             embeddings=resp_json.get("embeddings", None),
-            metadatas=metadata_batches,  # type: ignore
+            metadatas=metadata_batches,
             documents=resp_json.get("documents", None),
             uris=resp_json.get("uris", None),
             data=None,
@@ -748,47 +754,56 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         max_batch_size = cast(int, pre_flight_checks.get("max_batch_size", -1))
         return max_batch_size
 
-    @trace_method("FastAPI.create_task", OpenTelemetryGranularity.ALL)
+    @trace_method("FastAPI.attach_function", OpenTelemetryGranularity.ALL)
     @override
-    def create_task(
+    def attach_function(
         self,
-        task_name: str,
-        operator_name: str,
+        function_id: str,
+        name: str,
         input_collection_id: UUID,
-        output_collection_name: str,
+        output_collection: str,
         params: Optional[Dict[str, Any]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> tuple[bool, str]:
-        """Register a recurring task on a collection."""
+    ) -> "AttachedFunction":
+        """Attach a function to a collection."""
         resp_json = self._make_request(
             "post",
-            f"/tenants/{tenant}/databases/{database}/collections/{input_collection_id}/tasks/create",
+            f"/tenants/{tenant}/databases/{database}/collections/{input_collection_id}/functions/attach",
             json={
-                "task_name": task_name,
-                "operator_name": operator_name,
-                "output_collection_name": output_collection_name,
+                "name": name,
+                "function_id": function_id,
+                "output_collection": output_collection,
                 "params": params,
             },
         )
-        return cast(bool, resp_json["success"]), cast(str, resp_json["task_id"])
 
-    @trace_method("FastAPI.remove_task", OpenTelemetryGranularity.ALL)
+        return AttachedFunction(
+            client=self,
+            id=UUID(resp_json["attached_function"]["id"]),
+            name=resp_json["attached_function"]["name"],
+            function_id=resp_json["attached_function"]["function_id"],
+            input_collection_id=input_collection_id,
+            output_collection=output_collection,
+            params=params,
+            tenant=tenant,
+            database=database,
+        )
+
+    @trace_method("FastAPI.detach_function", OpenTelemetryGranularity.ALL)
     @override
-    def remove_task(
+    def detach_function(
         self,
-        task_name: str,
-        input_collection_id: UUID,
+        attached_function_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        """Delete a task and prevent any further runs."""
+        """Detach a function and prevent any further runs."""
         resp_json = self._make_request(
             "post",
-            f"/tenants/{tenant}/databases/{database}/collections/{input_collection_id}/tasks/delete",
+            f"/tenants/{tenant}/databases/{database}/attached_functions/{attached_function_id}/detach",
             json={
-                "task_name": task_name,
                 "delete_output": delete_output,
             },
         )

@@ -41,7 +41,7 @@ use crate::{client::ChromaHttpClientError, ChromaHttpClient};
 /// # Examples
 ///
 /// ```
-/// # use chroma::collection::ChromaCollection;
+/// # use chroma::ChromaCollection;
 /// # use chroma::client::ChromaHttpClientError;
 /// # async fn example(collection: ChromaCollection) -> Result<(), ChromaHttpClientError> {
 /// let count = collection.count().await?;
@@ -97,7 +97,7 @@ impl ChromaCollection {
     /// # Examples
     ///
     /// ```
-    /// # use chroma::collection::ChromaCollection;
+    /// # use chroma::ChromaCollection;
     /// # fn example(collection: ChromaCollection) {
     /// assert_eq!(collection.name(), "my_collection");
     /// # }
@@ -111,7 +111,7 @@ impl ChromaCollection {
     /// # Examples
     ///
     /// ```
-    /// # use chroma::collection::ChromaCollection;
+    /// # use chroma::ChromaCollection;
     /// # fn example(collection: ChromaCollection) {
     /// let id = collection.id();
     /// println!("Collection ID: {}", id);
@@ -128,7 +128,7 @@ impl ChromaCollection {
     /// # Examples
     ///
     /// ```
-    /// # use chroma::collection::ChromaCollection;
+    /// # use chroma::ChromaCollection;
     /// # fn example(collection: ChromaCollection) {
     /// let version = collection.version();
     /// assert!(version >= 0);
@@ -147,7 +147,7 @@ impl ChromaCollection {
     /// # Examples
     ///
     /// ```
-    /// # use chroma::collection::ChromaCollection;
+    /// # use chroma::ChromaCollection;
     /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let count = collection.count().await?;
     /// assert!(count >= 0);
@@ -178,7 +178,7 @@ impl ChromaCollection {
     /// # Examples
     ///
     /// ```
-    /// # use chroma::collection::ChromaCollection;
+    /// # use chroma::ChromaCollection;
     /// # use chroma_types::Metadata;
     /// # async fn example(mut collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let mut metadata = Metadata::new();
@@ -237,7 +237,7 @@ impl ChromaCollection {
     /// # Examples
     ///
     /// ```
-    /// # use chroma::collection::ChromaCollection;
+    /// # use chroma::ChromaCollection;
     /// # use chroma_types::IncludeList;
     /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let response = collection.get(
@@ -289,7 +289,7 @@ impl ChromaCollection {
     /// # Examples
     ///
     /// ```
-    /// # use chroma::collection::ChromaCollection;
+    /// # use chroma::ChromaCollection;
     /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let query = vec![vec![0.1, 0.2, 0.3]];
     /// let results = collection.query(
@@ -350,7 +350,7 @@ impl ChromaCollection {
     /// use chroma_types::plan::SearchPayload;
     /// use chroma_types::operator::{RankExpr, QueryVector, Key};
     ///
-    /// # async fn example(collection: &chroma::collection::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(collection: &chroma::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// // Search with a query vector
     /// let search = SearchPayload::default()
     ///     .rank(RankExpr::Knn {
@@ -374,7 +374,7 @@ impl ChromaCollection {
     /// use chroma_types::plan::SearchPayload;
     /// use chroma_types::operator::{RankExpr, QueryVector, Key};
     ///
-    /// # async fn example(collection: &chroma::collection::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(collection: &chroma::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// // Filter by category and year, then rank by similarity
     /// let search = SearchPayload::default()
     ///     .r#where(
@@ -402,7 +402,7 @@ impl ChromaCollection {
     /// use chroma_types::plan::SearchPayload;
     /// use chroma_types::operator::{RankExpr, QueryVector, Key};
     ///
-    /// # async fn example(collection: &chroma::collection::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(collection: &chroma::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// // Combine two KNN searches with weights
     /// let dense_knn = RankExpr::Knn {
     ///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
@@ -439,7 +439,7 @@ impl ChromaCollection {
     /// use chroma_types::plan::SearchPayload;
     /// use chroma_types::operator::{RankExpr, QueryVector, Key};
     ///
-    /// # async fn example(collection: &chroma::collection::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(collection: &chroma::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// // Run multiple searches in one request
     /// let searches = vec![
     ///     SearchPayload::default()
@@ -500,7 +500,7 @@ impl ChromaCollection {
     /// # Examples
     ///
     /// ```
-    /// # use chroma::collection::ChromaCollection;
+    /// # use chroma::ChromaCollection;
     /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let response = collection.add(
     ///     vec!["doc1".to_string(), "doc2".to_string()],
@@ -550,7 +550,7 @@ impl ChromaCollection {
     /// # Examples
     ///
     /// ```
-    /// # use chroma::collection::ChromaCollection;
+    /// # use chroma::ChromaCollection;
     /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let response = collection.update(
     ///     vec!["doc1".to_string()],
@@ -601,7 +601,7 @@ impl ChromaCollection {
     /// # Examples
     ///
     /// ```
-    /// # use chroma::collection::ChromaCollection;
+    /// # use chroma::ChromaCollection;
     /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let response = collection.upsert(
     ///     vec!["doc1".to_string(), "doc2".to_string()],
@@ -651,7 +651,7 @@ impl ChromaCollection {
     /// # Examples
     ///
     /// ```
-    /// # use chroma::collection::ChromaCollection;
+    /// # use chroma::ChromaCollection;
     /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let response = collection.delete(
     ///     Some(vec!["doc1".to_string(), "doc2".to_string()]),
@@ -695,7 +695,7 @@ impl ChromaCollection {
     /// # Examples
     ///
     /// ```
-    /// # use chroma::collection::ChromaCollection;
+    /// # use chroma::ChromaCollection;
     /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let forked = collection.fork("experimental_version").await?;
     /// assert_eq!(forked.name(), "experimental_version");

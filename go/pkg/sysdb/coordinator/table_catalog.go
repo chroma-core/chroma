@@ -10,6 +10,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
+	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/chroma-core/chroma/go/pkg/types"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 const (
@@ -566,6 +568,7 @@ func (tc *Catalog) GetCollectionWithSegments(ctx context.Context, collectionID t
 		collection = collection_entry
 		return nil
 	})
+
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1678,7 +1681,7 @@ func (tc *Catalog) updateVersionFileInS3(ctx context.Context, versionFilePb *coo
 func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
 	// This is the core path now, since version files are enabled
 	if tc.versionFileEnabled {
-		return tc.FlushCollectionCompactionForVersionedCollection(ctx, flushCollectionCompaction)
+		return tc.FlushCollectionCompactionForVersionedCollection(ctx, flushCollectionCompaction, nil)
 	}
 	collectionID := types.FromUniqueID(flushCollectionCompaction.ID)
 
@@ -1686,6 +1689,7 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 		ID: flushCollectionCompaction.ID.String(),
 	}
 
+	// Use explicit transaction parameter to ensure both operations run in the same transaction
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// Check if collection exists.
 		collection, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionWithoutMetadata(collectionID, nil, nil)
@@ -1732,35 +1736,37 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 	return flushCollectionInfo, nil
 }
 
-// FlushCollectionCompactionAndTask atomically updates collection compaction data and task completion offset.
-// NOTE: This does NOT advance next_nonce - that is done separately by AdvanceTask in PrepareTask.
+// FlushCollectionCompactionAndAttachedFunction atomically updates collection compaction data and attached function completion offset.
+// NOTE: This does NOT advance next_nonce - that is done separately by AdvanceAttachedFunction.
 // This only updates the completion_offset to record how far we've processed.
 // This is only supported for versioned collections (the modern/default path).
-func (tc *Catalog) FlushCollectionCompactionAndTask(
+func (tc *Catalog) FlushCollectionCompactionAndAttachedFunction(
 	ctx context.Context,
 	flushCollectionCompaction *model.FlushCollectionCompaction,
-	taskID uuid.UUID,
-	taskRunNonce uuid.UUID,
+	attachedFunctionID uuid.UUID,
+	runNonce uuid.UUID,
 	completionOffset int64,
 ) (*model.FlushCollectionInfo, error) {
 	if !tc.versionFileEnabled {
-		// Task-based compactions are only supported with versioned collections
-		log.Error("FlushCollectionCompactionAndTask is only supported for versioned collections")
-		return nil, errors.New("task-based compaction requires versioned collections")
+		// Attached-function-based compactions are only supported with versioned collections
+		log.Error("FlushCollectionCompactionAndAttachedFunction is only supported for versioned collections")
+		return nil, errors.New("attached-function-based compaction requires versioned collections")
 	}
 
 	var flushCollectionInfo *model.FlushCollectionInfo
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		var err error
-		flushCollectionInfo, err = tc.FlushCollectionCompactionForVersionedCollection(txCtx, flushCollectionCompaction)
+		// Get the transaction from context to pass to FlushCollectionCompactionForVersionedCollection
+		tx := dbcore.GetDB(txCtx)
+		flushCollectionInfo, err = tc.FlushCollectionCompactionForVersionedCollection(txCtx, flushCollectionCompaction, tx)
 		if err != nil {
 			return err
 		}
 
-		// Update ONLY completion_offset - next_nonce was already advanced in PrepareTask
-		// We still validate taskRunNonce to ensure we're updating the correct nonce
-		err = tc.metaDomain.TaskDb(txCtx).UpdateCompletionOffset(taskID, taskRunNonce, completionOffset)
+		// Update ONLY completion_offset - next_nonce was already advanced by AdvanceAttachedFunction
+		// We still validate runNonce to ensure we're updating the correct nonce
+		err = tc.metaDomain.AttachedFunctionDb(txCtx).UpdateCompletionOffset(attachedFunctionID, runNonce, completionOffset)
 		if err != nil {
 			return err
 		}
@@ -1772,12 +1778,12 @@ func (tc *Catalog) FlushCollectionCompactionAndTask(
 		return nil, err
 	}
 
-	// Populate task fields with authoritative values from database
-	flushCollectionInfo.TaskCompletionOffset = &completionOffset
+	// Populate attached function fields with authoritative values from database
+	flushCollectionInfo.AttachedFunctionCompletionOffset = &completionOffset
 
-	log.Info("FlushCollectionCompactionAndTask",
+	log.Info("FlushCollectionCompactionAndAttachedFunction",
 		zap.String("collection_id", flushCollectionCompaction.ID.String()),
-		zap.String("task_id", taskID.String()),
+		zap.String("attached_function_id", attachedFunctionID.String()),
 		zap.Int64("completion_offset", completionOffset))
 
 	return flushCollectionInfo, nil
@@ -1845,13 +1851,20 @@ func (tc *Catalog) validateVersionFile(versionFile *coordinatorpb.CollectionVers
 // 4. Till the CAS operation succeeds, retry the operation (i.e. goto 1)
 // 5. 		If version CAS fails - then fail the operation to the Compactor.
 // 6. 		If version file name CAS fails - read updated file and write a new version file to S3.
-func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
+func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction, tx *gorm.DB) (*model.FlushCollectionInfo, error) {
 	// The result that is sent back to the Compactor.
 	flushCollectionInfo := &model.FlushCollectionInfo{
 		ID: flushCollectionCompaction.ID.String(),
 	}
 
 	log.Info("FlushCollectionCompaction", zap.String("collection_id", flushCollectionInfo.ID), zap.Int64("log_position", flushCollectionCompaction.LogPosition))
+
+	// If a transaction is provided, do a single attempt without retry - any failure should propagate up
+	// to let the outer transaction fail atomically.
+	maxAttemptsForThisCall := maxAttempts
+	if tx != nil {
+		maxAttemptsForThisCall = 1
+	}
 
 	// Do the operation in a loop until the CollectionEntry is updated,
 	// 		OR FAIL the operation if the version is stale
@@ -1863,7 +1876,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 	// to mark certain versions and then tries to update the VersionFileName in
 	// the table at the same time.
 	numAttempts := 0
-	for numAttempts < maxAttempts {
+	for numAttempts < maxAttemptsForThisCall {
 		numAttempts++
 		// Get the current version info and the version file from the table.
 		collectionEntry, segments, err := tc.GetCollectionWithSegments(ctx, flushCollectionCompaction.ID, true)
@@ -1946,7 +1959,10 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 
 		numActiveVersions := tc.getNumberOfActiveVersions(existingVersionFilePb)
 
-		txErr := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// Execute the database operations - either within provided transaction or new transaction
+		var txErr error
+
+		executeOperations := func(ctx context.Context, tx *gorm.DB) error {
 			// NOTE: DO NOT move UpdateTenantLastCompactionTime & RegisterFilePaths to the end of the transaction.
 			//		 Keep both these operations before the UpdateLogPositionAndVersionInfo.
 			//       UpdateLogPositionAndVersionInfo acts as a CAS operation whose failure will roll back the transaction.
@@ -1955,8 +1971,13 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			// The other approach is to use a "SELECT FOR UPDATE" to lock the Collection entry at the start of the transaction,
 			// which is costlier than the current approach that does not lock the Collection entry.
 
+			// Create context with transaction if provided
+			if tx != nil {
+				ctx = dbcore.CtxWithTransaction(ctx, tx)
+			}
+
 			// register files to Segment metadata
-			err = tc.metaDomain.SegmentDb(txCtx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
+			err := tc.metaDomain.SegmentDb(ctx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
 			if err != nil {
 				return err
 			}
@@ -1964,7 +1985,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			// TODO: add a system configuration to disable
 			// since this might cause resource contention if one tenant has a lot of collection compactions at the same time
 			lastCompactionTime := time.Now().Unix()
-			err = tc.metaDomain.TenantDb(txCtx).UpdateTenantLastCompactionTime(flushCollectionCompaction.TenantID, lastCompactionTime)
+			err = tc.metaDomain.TenantDb(ctx).UpdateTenantLastCompactionTime(flushCollectionCompaction.TenantID, lastCompactionTime)
 			if err != nil {
 				return err
 			}
@@ -1977,7 +1998,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			// if the Collection entry is updated by another Tx.
 
 			// Update collection log position and version
-			rowsAffected, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionAndVersionInfo(
+			rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateLogPositionAndVersionInfo(
 				flushCollectionCompaction.ID.String(),
 				flushCollectionCompaction.LogPosition,
 				flushCollectionCompaction.CurrentCollectionVersion,
@@ -2008,9 +2029,20 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			flushCollectionInfo.TenantLastCompactionTime = lastCompactionTime
 			flushCollectionInfo.CollectionVersion = flushCollectionCompaction.CurrentCollectionVersion + 1
 
-			// return nil will commit the transaction
+			// Success
 			return nil
-		}) // End of transaction
+		}
+
+		// Check if a transaction was provided - if so, use it directly instead of creating nested transaction
+		if tx != nil {
+			// Use provided transaction directly - no nested transaction
+			txErr = executeOperations(ctx, tx)
+		} else {
+			// Create new transaction
+			txErr = tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+				return executeOperations(txCtx, nil)
+			})
+		}
 
 		if txErr == nil {
 			// CAS operation succeeded.

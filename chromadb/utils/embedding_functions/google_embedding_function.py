@@ -38,10 +38,16 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
             )
-        self.api_key_env_var = api_key_env_var
-        self.api_key = api_key or os.getenv(api_key_env_var)
+        if os.getenv("GOOGLE_API_KEY") is not None:
+            self.api_key_env_var = "GOOGLE_API_KEY"
+        else:
+            self.api_key_env_var = api_key_env_var
+
+        self.api_key = api_key or os.getenv(self.api_key_env_var)
         if not self.api_key:
-            raise ValueError(f"The {api_key_env_var} environment variable is not set.")
+            raise ValueError(
+                f"The {self.api_key_env_var} environment variable is not set."
+            )
 
         self.model_name = model_name
 
@@ -154,10 +160,16 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
             )
-        self.api_key_env_var = api_key_env_var
-        self.api_key = api_key or os.getenv(api_key_env_var)
+        if os.getenv("GOOGLE_API_KEY") is not None:
+            self.api_key_env_var = "GOOGLE_API_KEY"
+        else:
+            self.api_key_env_var = api_key_env_var
+
+        self.api_key = api_key or os.getenv(self.api_key_env_var)
         if not self.api_key:
-            raise ValueError(f"The {api_key_env_var} environment variable is not set.")
+            raise ValueError(
+                f"The {self.api_key_env_var} environment variable is not set."
+            )
 
         self.model_name = model_name
         self.task_type = task_type
@@ -289,10 +301,16 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
             )
-        self.api_key_env_var = api_key_env_var
-        self.api_key = api_key or os.getenv(api_key_env_var)
+        if os.getenv("GOOGLE_API_KEY") is not None:
+            self.api_key_env_var = "GOOGLE_API_KEY"
+        else:
+            self.api_key_env_var = api_key_env_var
+
+        self.api_key = api_key or os.getenv(self.api_key_env_var)
         if not self.api_key:
-            raise ValueError(f"The {api_key_env_var} environment variable is not set.")
+            raise ValueError(
+                f"The {self.api_key_env_var} environment variable is not set."
+            )
 
         self.model_name = model_name
         self.project_id = project_id

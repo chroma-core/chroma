@@ -3,32 +3,35 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::Log;
 use chroma_sysdb::SysDb;
 use chroma_system::Operator;
-use chroma_types::{FinishTaskError as SysDbFinishTaskError, Task, TaskUuid};
+use chroma_types::{
+    AttachedFunction, AttachedFunctionUuid,
+    FinishAttachedFunctionError as SysDbFinishAttachedFunctionError,
+};
 use thiserror::Error;
 
-/// The finish task operator is responsible for updating task state in SysDB
-/// after a successful task execution run.
+/// The finish attached function operator is responsible for updating attached function state in SysDB
+/// after a successful attached function execution run.
 #[derive(Debug, Clone)]
-pub struct FinishTaskOperator {
+pub struct FinishAttachedFunctionOperator {
     log_client: Log,
     sysdb: SysDb,
     heap_service: s3heap_service::client::GrpcHeapService,
 }
 
-impl FinishTaskOperator {
-    /// Create a new finish task operator.
+impl FinishAttachedFunctionOperator {
+    /// Create a new finish attached function operator.
     ///
     /// # Parameters
     /// * `log_client` - Log client for scouting log records
-    /// * `sysdb` - SysDB client for task state management
-    /// * `heap_service` - Heap service client for scheduling next task runs (required)
+    /// * `sysdb` - SysDB client for attached function state management
+    /// * `heap_service` - Heap service client for scheduling next attached function runs (required)
     #[allow(dead_code)]
     pub fn new(
         log_client: Log,
         sysdb: SysDb,
         heap_service: s3heap_service::client::GrpcHeapService,
     ) -> Box<Self> {
-        Box::new(FinishTaskOperator {
+        Box::new(FinishAttachedFunctionOperator {
             log_client,
             sysdb,
             heap_service,
@@ -37,141 +40,159 @@ impl FinishTaskOperator {
 }
 
 #[derive(Debug)]
-/// The input for the finish task operator.
+/// The input for the finish attached function operator.
 /// # Parameters
-/// * `updated_task` - The updated task record from sysdb.
+/// * `updated_attached_function` - The updated attached function record from sysdb.
 /// * `records_processed` - The number of records processed in this run.
 /// * `sysdb` - The sysdb client.
-pub struct FinishTaskInput {
-    // Updated Task record from sysdb
-    updated_task: Task,
+pub struct FinishAttachedFunctionInput {
+    // Updated  Attached Function record from sysdb
+    updated_attached_function: AttachedFunction,
 }
 
-impl FinishTaskInput {
-    /// Create a new finish task input.
-    pub fn new(updated_task: Task) -> Self {
-        FinishTaskInput { updated_task }
+impl FinishAttachedFunctionInput {
+    /// Create a new finish attached function input.
+    pub fn new(updated_attached_function: AttachedFunction) -> Self {
+        FinishAttachedFunctionInput {
+            updated_attached_function,
+        }
     }
 }
 
-/// The output for the finish task operator.
+/// The output for the finish attached function operator.
 #[derive(Debug)]
-pub struct FinishTaskOutput {
-    pub _task_id: TaskUuid,
+pub struct FinishAttachedFunctionOutput {
+    pub _attached_function_id: AttachedFunctionUuid,
     pub _new_completion_offset: u64,
 }
 
 #[derive(Error, Debug)]
-pub enum FinishTaskError {
+pub enum FinishAttachedFunctionError {
     #[error("Failed to scout logs: {0}")]
     ScoutLogs(String),
-    #[error("Failed to finish task in SysDB: {0}")]
-    SysDb(#[from] SysDbFinishTaskError),
-    #[error("Failed to schedule task in heap service: {0}")]
+    #[error("Failed to finish attached function in SysDB: {0}")]
+    SysDb(#[from] SysDbFinishAttachedFunctionError),
+    #[error("Failed to schedule attached function in heap service: {0}")]
     HeapService(#[from] s3heap_service::client::GrpcHeapServiceError),
 }
 
-impl ChromaError for FinishTaskError {
+impl ChromaError for FinishAttachedFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            FinishTaskError::ScoutLogs(_) => ErrorCodes::Internal,
-            FinishTaskError::SysDb(e) => e.code(),
-            FinishTaskError::HeapService(e) => e.code(),
+            FinishAttachedFunctionError::ScoutLogs(_) => ErrorCodes::Internal,
+            FinishAttachedFunctionError::SysDb(e) => e.code(),
+            FinishAttachedFunctionError::HeapService(e) => e.code(),
         }
     }
 }
 
 #[async_trait]
-impl Operator<FinishTaskInput, FinishTaskOutput> for FinishTaskOperator {
-    type Error = FinishTaskError;
+impl Operator<FinishAttachedFunctionInput, FinishAttachedFunctionOutput>
+    for FinishAttachedFunctionOperator
+{
+    type Error = FinishAttachedFunctionError;
 
     fn get_name(&self) -> &'static str {
-        "FinishTaskOperator"
+        "FinishAttachedFunctionOperator"
     }
 
-    async fn run(&self, input: &FinishTaskInput) -> Result<FinishTaskOutput, FinishTaskError> {
+    async fn run(
+        &self,
+        input: &FinishAttachedFunctionInput,
+    ) -> Result<FinishAttachedFunctionOutput, FinishAttachedFunctionError> {
         // Step 1: Scout the logs to see if there are any new records written since we started processing
-        // This recheck ensures we don't miss any records that were written during our task execution
+        // This recheck ensures we don't miss any records that were written during our attached function execution
         tracing::info!(
-            "Rechecking logs for task {} with completion offset {}",
-            input.updated_task.id.0,
-            input.updated_task.completion_offset
+            "Rechecking logs for attached function {} with completion offset {}",
+            input.updated_attached_function.id.0,
+            input.updated_attached_function.completion_offset
         );
 
         // Scout the logs to check for new records written since we started processing
-        // This catches any records that were written during our task execution
+        // This catches any records that were written during our attached function execution
         // scout_logs returns the offset of the next record to be inserted
         let mut log_client = self.log_client.clone();
         let next_log_offset = log_client
             .scout_logs(
-                &input.updated_task.tenant_id,
-                input.updated_task.input_collection_id,
-                input.updated_task.completion_offset,
+                &input.updated_attached_function.tenant_id,
+                input.updated_attached_function.input_collection_id,
+                input.updated_attached_function.completion_offset,
             )
             .await
             .map_err(|e| {
                 tracing::error!(
-                    task_id = %input.updated_task.id.0,
+                    attached_function_id = %input.updated_attached_function.id.0,
                     error = %e,
-                    "Failed to scout logs during finish_task recheck"
+                    "Failed to scout logs during finish_attached_function recheck"
                 );
-                FinishTaskError::ScoutLogs(format!("Failed to scout logs: {}", e))
+                FinishAttachedFunctionError::ScoutLogs(format!("Failed to scout logs: {}", e))
             })?;
 
         // Calculate how many new records were written since we started processing
         let new_records_count =
-            next_log_offset.saturating_sub(input.updated_task.completion_offset);
-        let new_records_found = new_records_count >= input.updated_task.min_records_for_task;
+            next_log_offset.saturating_sub(input.updated_attached_function.completion_offset);
+        let new_records_found =
+            new_records_count >= input.updated_attached_function.min_records_for_invocation;
 
         if new_records_found {
             tracing::info!(
-                task_id = %input.updated_task.id.0,
+                attached_function_id = %input.updated_attached_function.id.0,
                 new_records_count = new_records_count,
-                min_records_threshold = input.updated_task.min_records_for_task,
-                "Detected new records written during task execution that exceed threshold"
+                min_records_threshold = input.updated_attached_function.min_records_for_invocation,
+                "Detected new records written during attached function execution that exceed threshold"
             );
 
-            // Schedule a new task for next nonce by pushing to the heap
+            // Schedule a new attached function run for next nonce by pushing to the heap
             let mut heap_service = self.heap_service.clone();
             let schedule = chroma_types::chroma_proto::Schedule {
                 triggerable: Some(chroma_types::chroma_proto::Triggerable {
-                    partitioning_uuid: input.updated_task.input_collection_id.to_string(),
-                    scheduling_uuid: input.updated_task.id.0.to_string(),
+                    partitioning_uuid: input
+                        .updated_attached_function
+                        .input_collection_id
+                        .to_string(),
+                    scheduling_uuid: input.updated_attached_function.id.0.to_string(),
                 }),
-                next_scheduled: Some(prost_types::Timestamp::from(input.updated_task.next_run)),
-                nonce: input.updated_task.next_nonce.0.to_string(),
+                next_scheduled: Some(prost_types::Timestamp::from(
+                    input.updated_attached_function.next_run,
+                )),
+                nonce: input.updated_attached_function.next_nonce.0.to_string(),
             };
 
             heap_service
                 .push(
                     vec![schedule],
-                    &input.updated_task.input_collection_id.to_string(),
+                    &input
+                        .updated_attached_function
+                        .input_collection_id
+                        .to_string(),
                 )
                 .await?;
 
             tracing::info!(
-                task_id = %input.updated_task.id.0,
-                collection_id = %input.updated_task.input_collection_id,
-                next_nonce = %input.updated_task.next_nonce.0,
-                "Successfully scheduled next task run in heap"
+                attached_function_id = %input.updated_attached_function.id.0,
+                collection_id = %input.updated_attached_function.input_collection_id,
+                next_nonce = %input.updated_attached_function.next_nonce.0,
+                "Successfully scheduled next attached function run in heap"
             );
         }
 
         // Step 2: Update lowest_live_nonce to equal next_nonce
-        // This indicates that finish_task completed successfully and this epoch is verified
+        // This indicates that finish_attached_function completed successfully and this epoch is verified
         // If this fails, lowest_live_nonce < next_nonce will indicate
         // that we should skip execution next time and only do the recheck phase
         let mut sysdb = self.sysdb.clone();
-        sysdb.finish_task(input.updated_task.id).await?;
+        sysdb
+            .finish_attached_function(input.updated_attached_function.id)
+            .await?;
 
         tracing::info!(
-            "Task {} finish_task completed. lowest_live_nonce updated",
-            input.updated_task.id.0,
+            " Attached Function {} finish_attached_function completed. lowest_live_nonce updated",
+            input.updated_attached_function.id.0,
         );
 
-        Ok(FinishTaskOutput {
-            _task_id: input.updated_task.id,
-            _new_completion_offset: input.updated_task.completion_offset,
+        Ok(FinishAttachedFunctionOutput {
+            _attached_function_id: input.updated_attached_function.id,
+            _new_completion_offset: input.updated_attached_function.completion_offset,
         })
     }
 }
@@ -263,17 +284,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_finish_task_updates_lowest_live_nonce() {
-        // Setup: Create a task and advance it once
+    async fn test_k8s_integration_finish_attached_function_updates_lowest_live_nonce() {
+        // Setup: Attach a function and advance it once
         let mut sysdb = get_grpc_sysdb().await;
         let log = Log::InMemory(InMemoryLog::new());
 
         let collection_id = setup_tenant_and_database(&mut sysdb, "test_tenant", "test_db").await;
 
-        // Create a task via SysDB
-        let task_id = sysdb
-            .create_task(
-                format!("test_task_{}", Uuid::new_v4()),
+        // Attach a function via SysDB
+        let attached_function_id = sysdb
+            .create_attached_function(
+                format!("test_function_{}", Uuid::new_v4()),
                 "record_counter".to_string(),
                 collection_id,
                 format!("test_output_{}", Uuid::new_v4()),
@@ -286,65 +307,95 @@ mod tests {
             .unwrap();
 
         let heap_service = get_test_heap_service().await;
-        let task_initial = sysdb.get_task_by_uuid(task_id).await.unwrap();
-
-        let operator1 = FinishTaskOperator::new(log.clone(), sysdb.clone(), heap_service.clone());
-        let res1 = operator1
-            .run(&FinishTaskInput::new(task_initial.clone()))
-            .await;
-        assert!(res1.is_ok());
-
-        let task_finished = sysdb.get_task_by_uuid(task_id).await.unwrap();
-        assert_eq!(
-            task_finished.lowest_live_nonce.unwrap(),
-            task_finished.next_nonce
-        );
-
-        let initial_nonce = task_finished.next_nonce;
-
-        // Advance the task once to set lowest_live_nonce
-        sysdb
-            .advance_task(task_id, task_finished.next_nonce.0, 0, 60)
+        let attached_function_initial = sysdb
+            .get_attached_function_by_uuid(attached_function_id)
             .await
             .unwrap();
 
-        let task_advanced = sysdb.get_task_by_uuid(task_id).await.unwrap();
+        let operator1 =
+            FinishAttachedFunctionOperator::new(log.clone(), sysdb.clone(), heap_service.clone());
+        let res1 = operator1
+            .run(&FinishAttachedFunctionInput::new(
+                attached_function_initial.clone(),
+            ))
+            .await;
+        assert!(res1.is_ok());
+
+        let attached_function_finished = sysdb
+            .get_attached_function_by_uuid(attached_function_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            attached_function_finished.lowest_live_nonce.unwrap(),
+            attached_function_finished.next_nonce
+        );
+
+        let initial_nonce = attached_function_finished.next_nonce;
+
+        // Advance the attached function once to set lowest_live_nonce
+        sysdb
+            .advance_attached_function(
+                attached_function_id,
+                attached_function_finished.next_nonce.0,
+                0,
+                60,
+            )
+            .await
+            .unwrap();
+
+        let attached_function_advanced = sysdb
+            .get_attached_function_by_uuid(attached_function_id)
+            .await
+            .unwrap();
 
         // Verify: lowest_live_nonce is set, next_nonce has advanced
-        assert_eq!(task_advanced.lowest_live_nonce, Some(initial_nonce));
-        assert_ne!(task_advanced.next_nonce, initial_nonce);
+        assert_eq!(
+            attached_function_advanced.lowest_live_nonce,
+            Some(initial_nonce)
+        );
+        assert_ne!(attached_function_advanced.next_nonce, initial_nonce);
 
-        let input = FinishTaskInput::new(task_advanced.clone());
-        let operator = FinishTaskOperator::new(log.clone(), sysdb.clone(), heap_service.clone());
+        let input = FinishAttachedFunctionInput::new(attached_function_advanced.clone());
+        let operator =
+            FinishAttachedFunctionOperator::new(log.clone(), sysdb.clone(), heap_service.clone());
 
-        // Run finish_task - should move lowest_live_nonce up to match next_nonce
+        // Run finish_attached_function - should move lowest_live_nonce up to match next_nonce
         let result = operator.run(&input).await;
 
         // Assert: Operation succeeded
         assert!(result.is_ok());
 
         // Assert: lowest_live_nonce was updated to equal next_nonce
-        let task_after = sysdb.get_task_by_uuid(task_id).await.unwrap();
-        assert_eq!(task_after.lowest_live_nonce, Some(task_advanced.next_nonce));
-        assert_eq!(task_after.next_nonce, task_advanced.next_nonce);
+        let attached_function_after = sysdb
+            .get_attached_function_by_uuid(attached_function_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            attached_function_after.lowest_live_nonce,
+            Some(attached_function_advanced.next_nonce)
+        );
+        assert_eq!(
+            attached_function_after.next_nonce,
+            attached_function_advanced.next_nonce
+        );
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_finish_task_error_when_task_not_found() {
+    async fn test_k8s_integration_finish_attached_function_error_when_task_not_found() {
         // Setup: Use a task ID that doesn't exist
         let sysdb = get_grpc_sysdb().await;
         let log = Log::InMemory(InMemoryLog::new());
 
         let collection_id = CollectionUuid::new();
 
-        // Create a fake task that's not in the database
-        use chroma_types::{NonceUuid, Task};
+        // Create a fake attached function that's not in the database
+        use chroma_types::{AttachedFunction, NonceUuid, FUNCTION_RECORD_COUNTER_ID};
         use std::time::SystemTime;
 
-        let fake_task = Task {
-            id: TaskUuid(Uuid::new_v4()),
-            name: "fake_task".to_string(),
-            operator_id: "record_counter".to_string(),
+        let fake_attached_function = AttachedFunction {
+            id: AttachedFunctionUuid(Uuid::new_v4()),
+            name: "fake_function".to_string(),
+            function_id: FUNCTION_RECORD_COUNTER_ID,
             input_collection_id: collection_id,
             output_collection_name: format!("test_output_{}", Uuid::new_v4()),
             output_collection_id: None,
@@ -354,7 +405,7 @@ mod tests {
             last_run: None,
             next_run: SystemTime::now(),
             completion_offset: 0,
-            min_records_for_task: 10,
+            min_records_for_invocation: 10,
             is_deleted: false,
             created_at: SystemTime::now(),
             updated_at: SystemTime::now(),
@@ -362,17 +413,18 @@ mod tests {
             lowest_live_nonce: None,
         };
 
-        let input = FinishTaskInput::new(fake_task.clone());
+        let input = FinishAttachedFunctionInput::new(fake_attached_function.clone());
         let heap_service = get_test_heap_service().await;
-        let operator = FinishTaskOperator::new(log.clone(), sysdb.clone(), heap_service);
+        let operator =
+            FinishAttachedFunctionOperator::new(log.clone(), sysdb.clone(), heap_service);
 
         // Run
         let result = operator.run(&input).await;
 
-        // Assert: Operation should fail with TaskNotFound error
+        // Assert: Operation should fail with AttachedFunctionNotFound error
         assert!(result.is_err());
         match result.unwrap_err() {
-            FinishTaskError::SysDb(_) => { /* expected */ }
+            FinishAttachedFunctionError::SysDb(_) => { /* expected */ }
             _ => panic!("Expected SysDbError"),
         }
     }

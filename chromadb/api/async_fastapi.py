@@ -130,12 +130,11 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 + " (https://github.com/chroma-core/chroma)"
             )
 
-            limits = httpx.Limits(keepalive_expiry=self.keepalive_secs)
             self._clients[loop_hash] = httpx.AsyncClient(
                 timeout=None,
                 headers=headers,
                 verify=self._settings.chroma_server_ssl_verify or False,
-                limits=limits,
+                limits=self.http_limits,
             )
 
         return self._clients[loop_hash]
@@ -527,7 +526,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         return GetResult(
             ids=resp_json["ids"],
             embeddings=resp_json.get("embeddings", None),
-            metadatas=metadatas,  # type: ignore
+            metadatas=metadatas,
             documents=resp_json.get("documents", None),
             data=None,
             uris=resp_json.get("uris", None),
@@ -723,7 +722,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             ids=resp_json["ids"],
             distances=resp_json.get("distances", None),
             embeddings=resp_json.get("embeddings", None),
-            metadatas=metadata_batches,  # type: ignore
+            metadatas=metadata_batches,
             documents=resp_json.get("documents", None),
             uris=resp_json.get("uris", None),
             data=None,

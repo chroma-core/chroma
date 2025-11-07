@@ -2,7 +2,7 @@ use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
 use super::OneOffCompactMessage;
 use super::RebuildMessage;
-use crate::compactor::tasks::SchedulableTask;
+use crate::compactor::tasks::SchedulableFunction;
 use crate::compactor::types::{ListDeadJobsMessage, ScheduledCompactMessage};
 use crate::config::CompactionServiceConfig;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLog;
@@ -64,7 +64,7 @@ type BoxedFuture = Pin<Box<dyn Future<Output = CompactionOutput> + Send>>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ExecutionMode {
     Compaction,
-    Task,
+    AttachedFunction,
 }
 
 struct CompactionTask {
@@ -167,7 +167,7 @@ impl CompactionManager {
             compact_awaiter_loop(compact_awaiter_rx, completion_tx).await;
         });
 
-        if mode == ExecutionMode::Task {
+        if mode == ExecutionMode::AttachedFunction {
             // Check to see if heap_service is Some
             if heap_service.is_none() {
                 tracing::error!(
@@ -244,9 +244,9 @@ impl CompactionManager {
                     }
                 }
             }
-            ExecutionMode::Task => {
-                let tasks = self.scheduler.get_tasks_scheduled_for_execution().clone();
-                for task in tasks {
+            ExecutionMode::AttachedFunction => {
+                let tasks_iter = self.scheduler.get_tasks_scheduled_for_execution().clone();
+                for task in tasks_iter {
                     let instrumented_span = span!(
                         parent: None,
                         tracing::Level::INFO,
@@ -463,7 +463,7 @@ impl CompactionManagerContext {
         }
     }
 
-    async fn execute_task(self, task: SchedulableTask) -> CompactionOutput {
+    async fn execute_task(self, task: SchedulableFunction) -> CompactionOutput {
         tracing::info!("Executing task {}", task.task_id);
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher.clone(),
@@ -473,7 +473,7 @@ impl CompactionManagerContext {
             }
         };
 
-        let orchestrator = CompactOrchestrator::new_for_task(
+        let orchestrator = CompactOrchestrator::new_for_attached_function(
             task.collection_id,
             false,
             self.fetch_log_batch_size,
@@ -494,12 +494,16 @@ impl CompactionManagerContext {
         );
         match orchestrator.run(self.system.clone()).await {
             Ok(result) => {
-                tracing::info!("Task {} completed: {:?}", task.task_id, result);
+                tracing::info!(
+                    " Attached Function {} completed: {:?}",
+                    task.task_id,
+                    result
+                );
                 Ok(result)
             }
             Err(e) => {
                 if e.should_trace_error() {
-                    tracing::error!("Task {} failed: {:?}", task.task_id, e);
+                    tracing::error!(" Attached Function {} failed: {:?}", task.task_id, e);
                 }
                 Err(Box::new(e))
             }
@@ -645,7 +649,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         )
     }
 }
-pub(crate) async fn create_taskrunner_manager(
+pub(crate) async fn attach_functionrunner_manager(
     config: &CompactionServiceConfig,
     task_config: &crate::compactor::config::TaskRunnerConfig,
     system: System,
@@ -674,7 +678,7 @@ pub(crate) async fn create_taskrunner_manager(
     };
 
     let scheduler = Scheduler::new(
-        ExecutionMode::Task, // Taskrunner mode
+        ExecutionMode::AttachedFunction, // Taskrunner mode
         my_ip,
         log.clone(),
         sysdb.clone(),
@@ -711,7 +715,7 @@ pub(crate) async fn create_taskrunner_manager(
     .await?;
 
     CompactionManager::new(
-        ExecutionMode::Task, // Taskrunner mode
+        ExecutionMode::AttachedFunction, // AttachedFunction mode
         system.clone(),
         scheduler,
         log,

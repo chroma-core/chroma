@@ -142,7 +142,7 @@ pub async fn compaction_service_entrypoint() {
         if !task_config.enabled {
             None
         } else {
-            match crate::compactor::create_taskrunner_manager(
+            match crate::compactor::attach_functionrunner_manager(
                 &config,
                 task_config,
                 system.clone(),

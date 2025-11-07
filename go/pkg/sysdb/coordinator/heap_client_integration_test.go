@@ -126,8 +126,8 @@ func (suite *HeapClientIntegrationTestSuite) TearDownTest() {
 	// Resources are uniquely named with timestamps so repeated runs won't conflict
 }
 
-// TestCreateTaskPushesScheduleToHeap verifies that creating a task pushes a schedule to the heap
-func (suite *HeapClientIntegrationTestSuite) TestCreateTaskPushesScheduleToHeap() {
+// TestAttachFunctionPushesScheduleToHeap verifies that attaching a function pushes a schedule to the heap
+func (suite *HeapClientIntegrationTestSuite) TestAttachFunctionPushesScheduleToHeap() {
 	ctx := context.Background()
 
 	// Get initial heap summary
@@ -164,20 +164,19 @@ func (suite *HeapClientIntegrationTestSuite) TestCreateTaskPushesScheduleToHeap(
 	})
 	suite.NoError(err, "Should create collection")
 
-	// Create task (this should push to heap service)
-	taskResp, err := suite.sysdbClient.CreateTask(ctx, &coordinatorpb.CreateTaskRequest{
-		InputCollectionId:    collectionID,
-		TenantId:             suite.tenantName,
-		Database:             suite.databaseName,
-		Name:                 "test_record_counter_task",
-		OperatorName:         "record_counter",
-		OutputCollectionName: "output_collection_" + collectionID,
-		MinRecordsForTask:    10,
+	// Attach function using record_counter function
+	response, err := suite.sysdbClient.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
+		InputCollectionId:       collectionID,
+		TenantId:                suite.tenantName,
+		Database:                suite.databaseName,
+		Name:                    "test_record_counter_function",
+		FunctionName:            "record_counter",
+		OutputCollectionName:    "output_collection_" + collectionID,
+		MinRecordsForInvocation: 10,
 	})
-	suite.NoError(err, "Should create task successfully")
-	suite.NotNil(taskResp)
-	suite.NotEmpty(taskResp.TaskId)
-	suite.T().Logf("Created task: %s", taskResp.TaskId)
+	suite.NoError(err, "Should attached function successfully")
+	suite.NotNil(response)
+	suite.NotEmpty(response.Id, "Attached function ID should be returned")
 
 	// Get updated heap summary
 	updatedSummary, err := suite.heapClient.Summary(ctx, &coordinatorpb.HeapSummaryRequest{})
@@ -249,22 +248,22 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskRecovery_HybridAppro
 	defer db.Close()
 
 	// STEP 1: Create a task normally (fully initialized)
-	taskResp, err := suite.sysdbClient.CreateTask(ctx, &coordinatorpb.CreateTaskRequest{
+	taskResp, err := suite.sysdbClient.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
 		InputCollectionId:    collectionID,
 		TenantId:             suite.tenantName,
 		Database:             suite.databaseName,
 		Name:                 taskName,
-		OperatorName:         "record_counter",
+		FunctionName:         "record_counter",
 		OutputCollectionName: outputCollectionName,
-		MinRecordsForTask:    100,
+		MinRecordsForInvocation: 100,
 	})
 
 	if err != nil {
-		suite.T().Skipf("CreateTask failed (heap service may be unavailable): %v", err)
+		suite.T().Skipf("AttachFunction failed (heap service may be unavailable): %v", err)
 		return
 	}
 	suite.NotNil(taskResp)
-	originalTaskID := taskResp.TaskId
+	originalTaskID := taskResp.Id
 	suite.T().Logf("Created fully initialized task: %s", originalTaskID)
 
 	// STEP 2: Directly UPDATE database to make task partial (simulate Phase 3 failure)
@@ -274,14 +273,14 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskRecovery_HybridAppro
 	suite.T().Logf("Made task partial by setting lowest_live_nonce = NULL")
 
 	// STEP 3: Try to create task with same name but DIFFERENT parameters → should fail
-	_, err = suite.sysdbClient.CreateTask(ctx, &coordinatorpb.CreateTaskRequest{
+	_, err = suite.sysdbClient.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
 		InputCollectionId:    collectionID,
 		TenantId:             suite.tenantName,
 		Database:             suite.databaseName,
 		Name:                 taskName,
-		OperatorName:         "record_counter",                    // SAME
+		FunctionName:         "record_counter",                    // SAME
 		OutputCollectionName: outputCollectionName + "_different", // DIFFERENT
-		MinRecordsForTask:    200,                                 // DIFFERENT
+		MinRecordsForInvocation:    200,                                 // DIFFERENT
 	})
 	suite.Error(err, "Should fail when creating task with different parameters")
 	suite.Contains(err.Error(), "still initializing", "Error should indicate task is still initializing")
@@ -289,18 +288,18 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskRecovery_HybridAppro
 	// STEP 4: Try to create task with SAME parameters
 	// NOTE: This will also fail with "still initializing" because:
 	// - We manually corrupted the task (lowest_live_nonce = NULL)
-	// - But the heap entry still exists from the successful first CreateTask
+	// - But the heap entry still exists from the successful first AttachFunction
 	// - So the heap push in Phase 2 fails (duplicate entry)
 	// - Recovery can't complete
-	// This demonstrates that partial tasks need CleanupExpiredPartialTasks to fully recover
-	_, err = suite.sysdbClient.CreateTask(ctx, &coordinatorpb.CreateTaskRequest{
+	// This demonstrates that partial tasks need CleanupExpiredPartialAttachedFunctions to fully recover
+	_, err = suite.sysdbClient.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
 		InputCollectionId:    collectionID,
 		TenantId:             suite.tenantName,
 		Database:             suite.databaseName,
 		Name:                 taskName,
-		OperatorName:         "record_counter",
+		FunctionName:         "record_counter",
 		OutputCollectionName: outputCollectionName,
-		MinRecordsForTask:    100,
+		MinRecordsForInvocation:    100,
 	})
 	suite.Error(err, "Will also fail because heap entry already exists (recovery blocked)")
 	suite.Contains(err.Error(), "still initializing")
@@ -309,7 +308,7 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskRecovery_HybridAppro
 
 // TestPartialTaskCleanup_ThenRecreate tests cleanup and recreation flow:
 // 1. Manually create partial task (simulating Phase 2 failure)
-// 2. Call CleanupExpiredPartialTasks to remove stuck task
+// 2. Call CleanupExpiredPartialAttachedFunctions to remove stuck task
 // 3. Create task again → should succeed
 //
 // NOTE: This test is simplified since we can't easily create a truly partial task via API
@@ -349,14 +348,14 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskCleanup_ThenRecreate
 	outputCollectionName := "output_cleanup_" + timestamp
 
 	// STEP 1: Create a task (if this succeeds, it's fully initialized, not partial)
-	taskResp, err := suite.sysdbClient.CreateTask(ctx, &coordinatorpb.CreateTaskRequest{
+	taskResp, err := suite.sysdbClient.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
 		InputCollectionId:    collectionID,
 		TenantId:             suite.tenantName,
 		Database:             suite.databaseName,
 		Name:                 taskName,
-		OperatorName:         "record_counter",
+		FunctionName:         "record_counter",
 		OutputCollectionName: outputCollectionName,
-		MinRecordsForTask:    100,
+		MinRecordsForInvocation:    100,
 	})
 
 	if err != nil {
@@ -364,10 +363,10 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskCleanup_ThenRecreate
 		return
 	}
 	suite.NotNil(taskResp)
-	suite.T().Logf("Created task: %s", taskResp.TaskId)
+	suite.T().Logf("Created task: %s", taskResp.Id)
 
-	// STEP 2: Call CleanupExpiredPartialTasks (with short timeout to test it doesn't affect complete tasks)
-	cleanupResp, err := suite.sysdbClient.CleanupExpiredPartialTasks(ctx, &coordinatorpb.CleanupExpiredPartialTasksRequest{
+	// STEP 2: Call CleanupExpiredPartialAttachedFunctions (with short timeout to test it doesn't affect complete tasks)
+	cleanupResp, err := suite.sysdbClient.CleanupExpiredPartialAttachedFunctions(ctx, &coordinatorpb.CleanupExpiredPartialAttachedFunctionsRequest{
 		MaxAgeSeconds: 1, // 1 second - very aggressive
 	})
 	suite.NoError(err, "Cleanup should succeed")
@@ -376,37 +375,36 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskCleanup_ThenRecreate
 	suite.T().Logf("Cleanup completed, removed %d tasks", cleanupResp.CleanedUpCount)
 
 	// STEP 3: Verify task still exists and can be retrieved
-	getResp, err := suite.sysdbClient.GetTaskByName(ctx, &coordinatorpb.GetTaskByNameRequest{
+	getResp, err := suite.sysdbClient.GetAttachedFunctionByName(ctx, &coordinatorpb.GetAttachedFunctionByNameRequest{
 		InputCollectionId: collectionID,
-		TaskName:          taskName,
+		Name:              taskName,
 	})
 	suite.NoError(err, "Task should still exist after cleanup")
 	suite.NotNil(getResp)
-	suite.Equal(taskResp.TaskId, getResp.Task.TaskId)
-	suite.T().Logf("Task still exists after cleanup: %s", getResp.Task.TaskId)
+	suite.Equal(taskResp.Id, getResp.AttachedFunction.Id)
+	suite.T().Logf("Task still exists after cleanup: %s", getResp.AttachedFunction.Id)
 
 	// STEP 4: Delete the task
-	_, err = suite.sysdbClient.DeleteTask(ctx, &coordinatorpb.DeleteTaskRequest{
-		InputCollectionId: collectionID,
-		TaskName:          taskName,
-		DeleteOutput:      true,
+	_, err = suite.sysdbClient.DetachFunction(ctx, &coordinatorpb.DetachFunctionRequest{
+		AttachedFunctionId: taskResp.Id,
+		DeleteOutput:       true,
 	})
 	suite.NoError(err, "Should delete task")
 
 	// STEP 5: Recreate task with same name → should succeed
-	taskResp2, err := suite.sysdbClient.CreateTask(ctx, &coordinatorpb.CreateTaskRequest{
+	taskResp2, err := suite.sysdbClient.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
 		InputCollectionId:    collectionID,
 		TenantId:             suite.tenantName,
 		Database:             suite.databaseName,
 		Name:                 taskName,
-		OperatorName:         "record_counter",
+		FunctionName:         "record_counter",
 		OutputCollectionName: outputCollectionName,
-		MinRecordsForTask:    100,
+		MinRecordsForInvocation:    100,
 	})
 	suite.NoError(err, "Should be able to recreate task after deletion")
 	suite.NotNil(taskResp2)
-	suite.NotEqual(taskResp.TaskId, taskResp2.TaskId, "New task should have different ID")
-	suite.T().Logf("Successfully recreated task: %s", taskResp2.TaskId)
+	suite.NotEqual(taskResp.Id, taskResp2.Id, "New task should have different ID")
+	suite.T().Logf("Successfully recreated task: %s", taskResp2.Id)
 }
 
 func TestHeapClientIntegrationSuite(t *testing.T) {

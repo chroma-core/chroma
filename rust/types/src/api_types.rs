@@ -1088,6 +1088,26 @@ impl ChromaError for CountForksError {
 }
 
 #[derive(Debug, Error)]
+pub enum ListAttachedFunctionsError {
+    #[error("Collection [{0}] does not exist")]
+    NotFound(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("List attached functions is not implemented")]
+    NotImplemented,
+}
+
+impl ChromaError for ListAttachedFunctionsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ListAttachedFunctionsError::NotFound(_) => ErrorCodes::NotFound,
+            ListAttachedFunctionsError::Internal(chroma_error) => chroma_error.code(),
+            ListAttachedFunctionsError::NotImplemented => ErrorCodes::Unimplemented,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
 pub enum GetCollectionSizeError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
@@ -2256,16 +2276,16 @@ impl ChromaError for ExecutorError {
     }
 }
 
-////////////////////////// Task Operations //////////////////////////
+//////////////////////////  Attached Function Operations //////////////////////////
 
 #[non_exhaustive]
 #[derive(Clone, Debug, Deserialize, Serialize, Validate)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct CreateTaskRequest {
+pub struct AttachFunctionRequest {
     #[validate(length(min = 1))]
-    pub task_name: String,
-    pub operator_name: String,
-    pub output_collection_name: String,
+    pub name: String,
+    pub function_id: String,
+    pub output_collection: String,
     #[serde(default = "default_empty_json_object")]
     pub params: serde_json::Value,
 }
@@ -2274,17 +2294,17 @@ fn default_empty_json_object() -> serde_json::Value {
     serde_json::json!({})
 }
 
-impl CreateTaskRequest {
+impl AttachFunctionRequest {
     pub fn try_new(
-        task_name: String,
-        operator_name: String,
-        output_collection_name: String,
+        name: String,
+        function_id: String,
+        output_collection: String,
         params: serde_json::Value,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
-            task_name,
-            operator_name,
-            output_collection_name,
+            name,
+            function_id,
+            output_collection,
             params,
         };
         request.validate().map_err(ChromaValidationError::from)?;
@@ -2294,14 +2314,21 @@ impl CreateTaskRequest {
 
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct CreateTaskResponse {
-    pub success: bool,
-    pub task_id: String,
+pub struct AttachedFunctionInfo {
+    pub id: String,
+    pub name: String,
+    pub function_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AttachFunctionResponse {
+    pub attached_function: AttachedFunctionInfo,
 }
 
 #[derive(Error, Debug)]
-pub enum AddTaskError {
-    #[error("Task with name [{0}] already exists")]
+pub enum AttachFunctionError {
+    #[error(" Attached Function with name [{0}] already exists")]
     AlreadyExists(String),
     #[error("Input collection [{0}] does not exist")]
     InputCollectionNotFound(String),
@@ -2313,14 +2340,14 @@ pub enum AddTaskError {
     Internal(#[from] Box<dyn ChromaError>),
 }
 
-impl ChromaError for AddTaskError {
+impl ChromaError for AttachFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            AddTaskError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
-            AddTaskError::InputCollectionNotFound(_) => ErrorCodes::NotFound,
-            AddTaskError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
-            AddTaskError::Validation(err) => err.code(),
-            AddTaskError::Internal(err) => err.code(),
+            AttachFunctionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            AttachFunctionError::InputCollectionNotFound(_) => ErrorCodes::NotFound,
+            AttachFunctionError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
+            AttachFunctionError::Validation(err) => err.code(),
+            AttachFunctionError::Internal(err) => err.code(),
         }
     }
 }
@@ -2328,20 +2355,15 @@ impl ChromaError for AddTaskError {
 #[non_exhaustive]
 #[derive(Clone, Debug, Deserialize, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct RemoveTaskRequest {
-    #[validate(length(min = 1))]
-    pub task_name: String,
+pub struct DetachFunctionRequest {
     /// Whether to delete the output collection as well
     #[serde(default)]
     pub delete_output: bool,
 }
 
-impl RemoveTaskRequest {
-    pub fn try_new(task_name: String, delete_output: bool) -> Result<Self, ChromaValidationError> {
-        let request = Self {
-            task_name,
-            delete_output,
-        };
+impl DetachFunctionRequest {
+    pub fn try_new(delete_output: bool) -> Result<Self, ChromaValidationError> {
+        let request = Self { delete_output };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
@@ -2349,13 +2371,13 @@ impl RemoveTaskRequest {
 
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct RemoveTaskResponse {
+pub struct DetachFunctionResponse {
     pub success: bool,
 }
 
 #[derive(Error, Debug)]
-pub enum RemoveTaskError {
-    #[error("Task with name [{0}] does not exist")]
+pub enum DetachFunctionError {
+    #[error(" Attached Function with ID [{0}] does not exist")]
     NotFound(String),
     #[error(transparent)]
     Validation(#[from] ChromaValidationError),
@@ -2363,12 +2385,12 @@ pub enum RemoveTaskError {
     Internal(#[from] Box<dyn ChromaError>),
 }
 
-impl ChromaError for RemoveTaskError {
+impl ChromaError for DetachFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            RemoveTaskError::NotFound(_) => ErrorCodes::NotFound,
-            RemoveTaskError::Validation(err) => err.code(),
-            RemoveTaskError::Internal(err) => err.code(),
+            DetachFunctionError::NotFound(_) => ErrorCodes::NotFound,
+            DetachFunctionError::Validation(err) => err.code(),
+            DetachFunctionError::Internal(err) => err.code(),
         }
     }
 }

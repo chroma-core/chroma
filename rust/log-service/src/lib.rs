@@ -1388,10 +1388,7 @@ impl LogServer {
         if records.len() != pull_logs.batch_size as usize
             || (!records.is_empty() && records[0].log_offset != pull_logs.start_from_offset)
         {
-            return Err(Status::not_found(format!(
-                "Some entries have been purged {} versus {}",
-                records[0].log_offset, pull_logs.start_from_offset
-            )));
+            return Err(Status::not_found("Some entries have been purged"));
         }
         Ok(Response::new(PullLogsResponse { records }))
     }
@@ -1434,15 +1431,13 @@ impl LogServer {
             Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
         })?;
         // This is the existing compaction_offset, which is the next record to compact.
-        let offset = witness
-            .map(|x| x.cursor.position)
-            .unwrap_or(LogPosition::from_offset(1));
-        tracing::event!(Level::INFO, offset = ?offset);
+        let cursor = witness.map(|x| x.cursor.position);
+        tracing::event!(Level::INFO, offset = ?cursor);
         wal3::copy(
             &storage,
             &options,
             &log_reader,
-            offset,
+            cursor.unwrap_or(LogPosition::from_offset(1)),
             target_prefix.clone(),
         )
         .await
@@ -1452,34 +1447,58 @@ impl LogServer {
             Arc::clone(&storage),
             target_prefix,
         );
+        let new_manifest = log_reader
+            .manifest()
+            .await
+            .map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("Unable to read copied manifest: {}", err),
+                )
+            })?
+            .ok_or_else(|| Status::internal("Unable to find copied manifest"))?;
+        let first_copied_offset = new_manifest.oldest_timestamp();
         // This is the next record to insert, so we'll have to adjust downwards.
-        let max_offset = log_reader.next_write_timestamp().await.map_err(|err| {
-            Status::new(
-                err.code().into(),
-                format!("Failed to read copied log: {}", err),
-            )
-        })?;
-        if max_offset < offset {
-            return Err(Status::new(
-                chroma_error::ErrorCodes::Internal.into(),
-                format!("max_offset={:?} < offset={:?}", max_offset, offset),
-            ));
+        let max_offset = new_manifest.next_write_timestamp();
+        if let Some(cursor) = cursor {
+            if cursor < first_copied_offset {
+                return Err(Status::internal(format!(
+                    "Compaction cursor {} is behind start of manifest {}",
+                    cursor.offset(),
+                    first_copied_offset.offset()
+                )));
+            }
+            if max_offset < cursor {
+                return Err(Status::new(
+                    chroma_error::ErrorCodes::Internal.into(),
+                    format!(
+                        "Compaction cursor {} is after end of manifest {}",
+                        cursor.offset(),
+                        max_offset.offset()
+                    ),
+                ));
+            }
         }
-        if offset != max_offset {
+
+        let cursor = cursor.unwrap_or(LogPosition::from_offset(1));
+        if cursor != max_offset {
             let mark_dirty = MarkDirty {
                 collection_id: target_collection_id,
                 dirty_log: self.dirty_log.clone(),
             };
             let _ = mark_dirty
-                .mark_dirty(offset, (max_offset - offset) as usize)
+                .mark_dirty(cursor, (max_offset - cursor) as usize)
                 .await;
         }
-        tracing::event!(Level::INFO, compaction_offset =? offset.offset() - 1, enumeration_offset =? (max_offset - 1u64).offset());
+
+        let compaction_offset = (cursor - 1u64).offset();
+        let enumeration_offset = (max_offset - 1u64).offset();
+        tracing::event!(Level::INFO, compaction_offset, enumeration_offset);
         Ok(Response::new(ForkLogsResponse {
             // NOTE: The upstream service expects the last compacted offset as compaction offset
-            compaction_offset: (offset - 1u64).offset(),
+            compaction_offset,
             // NOTE: The upstream service expects the last uncompacted offset as enumeration offset
-            enumeration_offset: (max_offset - 1u64).offset(),
+            enumeration_offset,
         }))
     }
 
@@ -1999,6 +2018,7 @@ impl LogServerWrapper {
 
         let max_encoding_message_size = log_server.config.max_encoding_message_size;
         let max_decoding_message_size = log_server.config.max_decoding_message_size;
+        let max_concurrent_streams = log_server.config.grpc_max_concurrent_streams;
         let shutdown_grace_period = log_server.config.grpc_shutdown_grace_period;
 
         let wrapper = LogServerWrapper {
@@ -2008,6 +2028,7 @@ impl LogServerWrapper {
         let background =
             tokio::task::spawn(async move { background_server.background_task().await });
         let server = Server::builder()
+            .max_concurrent_streams(Some(max_concurrent_streams))
             .layer(chroma_tracing::GrpcServerTraceLayer)
             .add_service(health_service)
             .add_service(
@@ -2186,6 +2207,8 @@ pub struct LogServerConfig {
         default = "LogServerConfig::default_grpc_shutdown_grace_period"
     )]
     pub grpc_shutdown_grace_period: Duration,
+    #[serde(default = "LogServerConfig::default_grpc_max_concurrent_streams")]
+    pub grpc_max_concurrent_streams: u32,
 }
 
 impl LogServerConfig {
@@ -2234,6 +2257,9 @@ impl LogServerConfig {
     fn default_grpc_shutdown_grace_period() -> Duration {
         Duration::from_secs(1)
     }
+    fn default_grpc_max_concurrent_streams() -> u32 {
+        1000
+    }
 }
 
 impl Default for LogServerConfig {
@@ -2256,6 +2282,7 @@ impl Default for LogServerConfig {
             max_encoding_message_size: Self::default_max_encoding_message_size(),
             max_decoding_message_size: Self::default_max_decoding_message_size(),
             grpc_shutdown_grace_period: Self::default_grpc_shutdown_grace_period(),
+            grpc_max_concurrent_streams: Self::default_grpc_max_concurrent_streams(),
         }
     }
 }

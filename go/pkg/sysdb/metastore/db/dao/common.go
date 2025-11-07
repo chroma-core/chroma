@@ -37,10 +37,10 @@ func (*MetaDomain) SegmentMetadataDb(ctx context.Context) dbmodel.ISegmentMetada
 	return &segmentMetadataDb{dbcore.GetDB(ctx)}
 }
 
-func (*MetaDomain) TaskDb(ctx context.Context) dbmodel.ITaskDb {
-	return &taskDb{dbcore.GetDB(ctx)}
+func (*MetaDomain) AttachedFunctionDb(ctx context.Context) dbmodel.IAttachedFunctionDb {
+	return &attachedFunctionDb{dbcore.GetDB(ctx)}
 }
 
-func (*MetaDomain) OperatorDb(ctx context.Context) dbmodel.IOperatorDb {
-	return &operatorDb{dbcore.GetDB(ctx)}
+func (*MetaDomain) FunctionDb(ctx context.Context) dbmodel.IFunctionDb {
+	return &functionDb{dbcore.GetDB(ctx)}
 }

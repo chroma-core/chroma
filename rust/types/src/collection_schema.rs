@@ -1547,8 +1547,13 @@ impl Schema {
                 if vector_index.enabled {
                     return false;
                 }
+                if !is_embedding_function_default(&vector_index.config.embedding_function) {
+                    return false;
+                }
+                if !is_space_default(&vector_index.config.space) {
+                    return false;
+                }
                 // Check that the config has default structure
-                // We allow space and embedding_function to vary, but check structure
                 if vector_index.config.source_key.is_some() {
                     return false;
                 }
@@ -1611,6 +1616,9 @@ impl Schema {
         if let Some(float_list) = &value_types.float_list {
             if let Some(vector_index) = &float_list.vector_index {
                 if !vector_index.enabled {
+                    return false;
+                }
+                if !is_space_default(&vector_index.config.space) {
                     return false;
                 }
                 // Check that embedding_function is default
@@ -1988,7 +1996,7 @@ impl Schema {
     ///
     /// # Examples
     /// ```
-    /// use chroma_types::{Schema, VectorIndexConfig, StringInvertedIndexConfig, Space};
+    /// use chroma_types::{Schema, VectorIndexConfig, StringInvertedIndexConfig, Space, SchemaBuilderError};
     ///
     /// # fn main() -> Result<(), SchemaBuilderError> {
     /// let schema = Schema::default()
@@ -2069,7 +2077,7 @@ impl Schema {
     ///
     /// # Examples
     /// ```
-    /// use chroma_types::{Schema, StringInvertedIndexConfig};
+    /// use chroma_types::{Schema, StringInvertedIndexConfig, SchemaBuilderError};
     ///
     /// # fn main() -> Result<(), SchemaBuilderError> {
     /// let schema = Schema::default()
@@ -3802,6 +3810,63 @@ mod tests {
             .keys
             .insert("custom_key".to_string(), ValueTypes::default());
         assert!(!schema_with_extra_overrides.is_default());
+    }
+
+    #[test]
+    fn test_is_schema_default_with_space() {
+        let schema = Schema::new_default(KnnIndex::Hnsw);
+        assert!(schema.is_default());
+
+        let mut schema_with_space = Schema::new_default(KnnIndex::Hnsw);
+        if let Some(ref mut float_list) = schema_with_space.defaults.float_list {
+            if let Some(ref mut vector_index) = float_list.vector_index {
+                vector_index.config.space = Some(Space::Cosine);
+            }
+        }
+        assert!(!schema_with_space.is_default());
+
+        let mut schema_with_space_in_embedding_key = Schema::new_default(KnnIndex::Spann);
+        if let Some(ref mut embedding_key) = schema_with_space_in_embedding_key
+            .keys
+            .get_mut(EMBEDDING_KEY)
+        {
+            if let Some(ref mut float_list) = embedding_key.float_list {
+                if let Some(ref mut vector_index) = float_list.vector_index {
+                    vector_index.config.space = Some(Space::Cosine);
+                }
+            }
+        }
+        assert!(!schema_with_space_in_embedding_key.is_default());
+    }
+
+    #[test]
+    fn test_is_schema_default_with_embedding_function() {
+        let schema = Schema::new_default(KnnIndex::Hnsw);
+        assert!(schema.is_default());
+
+        let mut schema_with_embedding_function = Schema::new_default(KnnIndex::Hnsw);
+        if let Some(ref mut float_list) = schema_with_embedding_function.defaults.float_list {
+            if let Some(ref mut vector_index) = float_list.vector_index {
+                vector_index.config.embedding_function =
+                    Some(EmbeddingFunctionConfiguration::Legacy);
+            }
+        }
+        assert!(!schema_with_embedding_function.is_default());
+
+        let mut schema_with_embedding_function_in_embedding_key =
+            Schema::new_default(KnnIndex::Spann);
+        if let Some(ref mut embedding_key) = schema_with_embedding_function_in_embedding_key
+            .keys
+            .get_mut(EMBEDDING_KEY)
+        {
+            if let Some(ref mut float_list) = embedding_key.float_list {
+                if let Some(ref mut vector_index) = float_list.vector_index {
+                    vector_index.config.embedding_function =
+                        Some(EmbeddingFunctionConfiguration::Legacy);
+                }
+            }
+        }
+        assert!(!schema_with_embedding_function_in_embedding_key.is_default());
     }
 
     #[test]

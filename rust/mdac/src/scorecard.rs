@@ -408,6 +408,28 @@ impl Bucket {
     }
 }
 
+////////////////////////////////////////// ScorecardGuard //////////////////////////////////////////
+
+#[derive(Debug)]
+pub struct ScorecardGuard {
+    scorecard: Arc<Scorecard<'static>>,
+    ticket: Option<ScorecardTicket>,
+}
+
+impl ScorecardGuard {
+    pub fn new(scorecard: Arc<Scorecard<'static>>, ticket: Option<ScorecardTicket>) -> Self {
+        Self { scorecard, ticket }
+    }
+}
+
+impl Drop for ScorecardGuard {
+    fn drop(&mut self) {
+        if let Some(ticket) = self.ticket.take() {
+            self.scorecard.untrack(ticket);
+        }
+    }
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]

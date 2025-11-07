@@ -80,35 +80,52 @@ export const processCreateCollectionConfig = async ({
   const overallEf = embeddingFunction || configuration?.embeddingFunction;
 
   if (overallEf && overallEf.defaultSpace && overallEf.supportedSpaces) {
-    if (configuration?.hnsw === undefined && configuration?.spann === undefined) {
+    if (
+      configuration?.hnsw === undefined &&
+      configuration?.spann === undefined
+    ) {
       if (metadata === undefined || metadata?.["hnsw:space"] === undefined) {
         if (!configuration) configuration = {};
         configuration.hnsw = { space: overallEf.defaultSpace() };
       }
     }
 
-    if (configuration?.hnsw && !configuration.hnsw.space && overallEf.defaultSpace) {
+    if (
+      configuration?.hnsw &&
+      !configuration.hnsw.space &&
+      overallEf.defaultSpace
+    ) {
       configuration.hnsw.space = overallEf.defaultSpace();
     }
 
-    if (configuration?.spann && !configuration.spann.space && overallEf.defaultSpace) {
+    if (
+      configuration?.spann &&
+      !configuration.spann.space &&
+      overallEf.defaultSpace
+    ) {
       configuration.spann.space = overallEf.defaultSpace();
     }
 
     if (overallEf.supportedSpaces) {
       const supportedSpaces = overallEf.supportedSpaces();
 
-      if (configuration?.hnsw?.space && !supportedSpaces.includes(configuration.hnsw.space)) {
+      if (
+        configuration?.hnsw?.space &&
+        !supportedSpaces.includes(configuration.hnsw.space)
+      ) {
         console.warn(
-          `Space '${configuration.hnsw.space}' is not supported by embedding function '${overallEf.name || 'unknown'}'. ` +
-          `Supported spaces: ${supportedSpaces.join(', ')}`
+          `Space '${configuration.hnsw.space}' is not supported by embedding function '${overallEf.name || "unknown"}'. ` +
+            `Supported spaces: ${supportedSpaces.join(", ")}`,
         );
       }
 
-      if (configuration?.spann?.space && !supportedSpaces.includes(configuration.spann.space)) {
+      if (
+        configuration?.spann?.space &&
+        !supportedSpaces.includes(configuration.spann.space)
+      ) {
         console.warn(
-          `Space '${configuration.spann.space}' is not supported by embedding function '${overallEf.name || 'unknown'}'. ` +
-          `Supported spaces: ${supportedSpaces.join(', ')}`
+          `Space '${configuration.spann.space}' is not supported by embedding function '${overallEf.name || "unknown"}'. ` +
+            `Supported spaces: ${supportedSpaces.join(", ")}`,
         );
       }
 
@@ -117,11 +134,13 @@ export const processCreateCollectionConfig = async ({
         !configuration?.spann &&
         metadata &&
         typeof metadata["hnsw:space"] === "string" &&
-        !supportedSpaces.includes(metadata["hnsw:space"] as EmbeddingFunctionSpace)
+        !supportedSpaces.includes(
+          metadata["hnsw:space"] as EmbeddingFunctionSpace,
+        )
       ) {
         console.warn(
-          `Space '${metadata["hnsw:space"]}' from metadata is not supported by embedding function '${overallEf.name || 'unknown'}'. ` +
-          `Supported spaces: ${supportedSpaces.join(', ')}`
+          `Space '${metadata["hnsw:space"]}' from metadata is not supported by embedding function '${overallEf.name || "unknown"}'. ` +
+            `Supported spaces: ${supportedSpaces.join(", ")}`,
         );
       }
     }
@@ -164,10 +183,10 @@ export const processUpdateCollectionConfig = async ({
 
   const embeddingFunction =
     currentEmbeddingFunction ||
-    getEmbeddingFunction(
+    (await getEmbeddingFunction(
       collectionName,
       currentConfiguration.embeddingFunction ?? undefined,
-    );
+    ));
 
   const newEmbeddingFunction = newConfiguration.embeddingFunction;
 
