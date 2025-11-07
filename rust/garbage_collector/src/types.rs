@@ -79,6 +79,7 @@ pub struct GarbageCollectorResponse {
 pub struct FilePathSet {
     // prefix -> set of block UUIDs
     blocks: HashMap<String, HashSet<Uuid>>,
+    // any non-block path, e.g. sparse index files, HNSW files, etc.
     other: HashSet<String>,
 }
 
