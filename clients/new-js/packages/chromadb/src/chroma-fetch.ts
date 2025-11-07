@@ -12,9 +12,9 @@ import {
 const offlineError = (error: any): boolean => {
   return Boolean(
     (error?.name === "TypeError" || error?.name === "FetchError") &&
-      (error.message?.includes("fetch failed") ||
-        error.message?.includes("Failed to fetch") ||
-        error.message?.includes("ENOTFOUND")),
+    (error.message?.includes("fetch failed") ||
+      error.message?.includes("Failed to fetch") ||
+      error.message?.includes("ENOTFOUND")),
   );
 };
 
@@ -41,10 +41,9 @@ export const chromaFetch: typeof fetch = async (input, init) => {
       try {
         const responseBody = await response.json();
         status = responseBody.message || status;
-      } catch {}
+      } catch { }
       throw new ChromaClientError(
-        `Bad request to ${
-          (input as Request).url || "Chroma"
+        `Bad request to ${(input as Request).url || "Chroma"
         } with status: ${status}`,
       );
     case 401:

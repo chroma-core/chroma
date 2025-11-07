@@ -63,14 +63,14 @@ export interface VectorIndexConfigOptions {
 export class VectorIndexConfig {
   readonly type = "VectorIndexConfig";
   space: Space | null;
-  embeddingFunction: EmbeddingFunction | null;
+  embeddingFunction?: EmbeddingFunction | null;
   sourceKey: string | null;
   hnsw: ApiHnswIndexConfig | null;
   spann: ApiSpannIndexConfig | null;
 
   constructor(options: VectorIndexConfigOptions = {}) {
     this.space = options.space ?? null;
-    this.embeddingFunction = options.embeddingFunction ?? null;
+    this.embeddingFunction = options.embeddingFunction;
     this.sourceKey = options.sourceKey ?? null;
     this.hnsw = options.hnsw ?? null;
     this.spann = options.spann ?? null;
@@ -85,12 +85,12 @@ export interface SparseVectorIndexConfigOptions {
 
 export class SparseVectorIndexConfig {
   readonly type = "SparseVectorIndexConfig";
-  embeddingFunction: SparseEmbeddingFunction | null;
+  embeddingFunction?: SparseEmbeddingFunction | null;
   sourceKey: string | null;
   bm25: boolean | null;
 
   constructor(options: SparseVectorIndexConfigOptions = {}) {
-    this.embeddingFunction = options.embeddingFunction ?? null;
+    this.embeddingFunction = options.embeddingFunction;
     this.sourceKey = options.sourceKey ?? null;
     this.bm25 = options.bm25 ?? null;
   }
@@ -100,78 +100,78 @@ export class FtsIndexType {
   constructor(
     public enabled: boolean,
     public config: FtsIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class StringInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: StringInvertedIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class VectorIndexType {
   constructor(
     public enabled: boolean,
     public config: VectorIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class SparseVectorIndexType {
   constructor(
     public enabled: boolean,
     public config: SparseVectorIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class IntInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: IntInvertedIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class FloatInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: FloatInvertedIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class BoolInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: BoolInvertedIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class StringValueType {
   constructor(
     public ftsIndex: FtsIndexType | null = null,
     public stringInvertedIndex: StringInvertedIndexType | null = null,
-  ) {}
+  ) { }
 }
 
 export class FloatListValueType {
-  constructor(public vectorIndex: VectorIndexType | null = null) {}
+  constructor(public vectorIndex: VectorIndexType | null = null) { }
 }
 
 export class SparseVectorValueType {
-  constructor(public sparseVectorIndex: SparseVectorIndexType | null = null) {}
+  constructor(public sparseVectorIndex: SparseVectorIndexType | null = null) { }
 }
 
 export class IntValueType {
-  constructor(public intInvertedIndex: IntInvertedIndexType | null = null) {}
+  constructor(public intInvertedIndex: IntInvertedIndexType | null = null) { }
 }
 
 export class FloatValueType {
   constructor(
     public floatInvertedIndex: FloatInvertedIndexType | null = null,
-  ) {}
+  ) { }
 }
 
 export class BoolValueType {
-  constructor(public boolInvertedIndex: BoolInvertedIndexType | null = null) {}
+  constructor(public boolInvertedIndex: BoolInvertedIndexType | null = null) { }
 }
 
 export class ValueTypes {
@@ -206,11 +206,11 @@ const cloneObject = <T>(value: T): T => {
   return Array.isArray(value)
     ? (value.map((item) => cloneObject(item)) as T)
     : (Object.fromEntries(
-        Object.entries(value as Record<string, unknown>).map(([k, v]) => [
-          k,
-          cloneObject(v),
-        ]),
-      ) as T);
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        k,
+        cloneObject(v),
+      ]),
+    ) as T);
 };
 
 const resolveEmbeddingFunctionName = (
@@ -463,7 +463,7 @@ export class Schema {
       currentDefaultsVector.enabled,
       new VectorIndexConfig({
         space: config.space ?? null,
-        embeddingFunction: config.embeddingFunction ?? null,
+        embeddingFunction: config.embeddingFunction,
         sourceKey: config.sourceKey ?? null,
         hnsw: config.hnsw ? cloneObject(config.hnsw) : null,
         spann: config.spann ? cloneObject(config.spann) : null,
@@ -485,7 +485,7 @@ export class Schema {
       currentOverrideVector.enabled,
       new VectorIndexConfig({
         space: config.space ?? null,
-        embeddingFunction: config.embeddingFunction ?? null,
+        embeddingFunction: config.embeddingFunction,
         sourceKey: preservedSourceKey,
         hnsw: config.hnsw ? cloneObject(config.hnsw) : null,
         spann: config.spann ? cloneObject(config.spann) : null,
@@ -1039,11 +1039,8 @@ export class Schema {
       (await getEmbeddingFunction(
         "schema deserialization",
         json.embedding_function as EmbeddingFunctionConfiguration,
-      )) ??
-      (config.embeddingFunction as EmbeddingFunction | null | undefined) ??
-      undefined;
-
-    config.embeddingFunction = embeddingFunction ?? null;
+      ));
+    config.embeddingFunction = embeddingFunction;
     if (!config.space && config.embeddingFunction?.defaultSpace) {
       config.space = config.embeddingFunction.defaultSpace();
     }
@@ -1072,5 +1069,15 @@ export class Schema {
 
     config.embeddingFunction = embeddingFunction ?? null;
     return config;
+  }
+
+  public resolveEmbeddingFunction(): EmbeddingFunction | null | undefined {
+    const embeddingOverride =
+      this.keys[EMBEDDING_KEY]?.floatList?.vectorIndex?.config
+        .embeddingFunction;
+    if (embeddingOverride !== undefined) {
+      return embeddingOverride;
+    }
+    return this.defaults.floatList?.vectorIndex?.config.embeddingFunction;
   }
 }

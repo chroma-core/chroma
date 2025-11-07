@@ -92,7 +92,7 @@ export interface SparseEmbeddingFunction {
  */
 export interface EmbeddingFunctionClass {
   /** Constructor for creating new instances */
-  new (...args: any[]): EmbeddingFunction;
+  new(...args: any[]): EmbeddingFunction;
   /** Name identifier for the embedding function */
   name: string;
   /** Static method to build instance from configuration */
@@ -105,7 +105,7 @@ export interface EmbeddingFunctionClass {
  */
 export interface SparseEmbeddingFunctionClass {
   /** Constructor for creating new instances */
-  new (...args: any[]): SparseEmbeddingFunction;
+  new(...args: any[]): SparseEmbeddingFunction;
   /** Name identifier for the embedding function */
   name: string;
   /** Static method to build instance from configuration */
@@ -408,8 +408,7 @@ export const getDefaultEFConfig =
         registerEmbeddingFunction("default", DefaultEmbeddingFunction);
       }
     } catch (e) {
-      console.error(e);
-      throw new Error(
+      console.warn(
         "Cannot instantiate a collection with the DefaultEmbeddingFunction. Please install @chroma-core/default-embed, or provide a different embedding function",
       );
     }

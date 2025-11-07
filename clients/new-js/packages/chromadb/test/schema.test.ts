@@ -24,7 +24,7 @@ import type { ChromaClient } from "../src/chroma-client";
 class MockEmbedding implements EmbeddingFunction {
   public readonly name = "mock_embedding";
 
-  constructor(private readonly modelName = "mock_model") {}
+  constructor(private readonly modelName = "mock_model") { }
 
   async generate(texts: string[]): Promise<number[][]> {
     return texts.map(() => [1, 2, 3]);
@@ -50,7 +50,7 @@ class MockEmbedding implements EmbeddingFunction {
 class MockSparseEmbedding implements SparseEmbeddingFunction {
   public readonly name = "mock_sparse";
 
-  constructor(private readonly identifier = "mock_sparse") {}
+  constructor(private readonly identifier = "mock_sparse") { }
 
   async generate(texts: string[]) {
     return texts.map(() => ({ indices: [0, 1], values: [1, 1] }));
@@ -68,7 +68,7 @@ class MockSparseEmbedding implements SparseEmbeddingFunction {
 class DeterministicSparseEmbedding implements SparseEmbeddingFunction {
   public readonly name = "deterministic_sparse";
 
-  constructor(private readonly label = "det") {}
+  constructor(private readonly label = "det") { }
 
   async generate(texts: string[]) {
     return texts.map((text, index) => {
@@ -196,7 +196,7 @@ describe("Schema", () => {
     );
     expect(
       schema.defaults.sparseVector?.sparseVectorIndex?.config.embeddingFunction,
-    ).toBeNull();
+    ).toBeUndefined();
   });
 
   it("delete string inverted index on key", () => {
@@ -569,14 +569,14 @@ describe("Schema", () => {
     );
     expect(
       deserialized?.defaults.floatList?.vectorIndex?.config.embeddingFunction,
-    ).toBeNull();
+    ).toBeUndefined();
     expect(
       deserialized?.keys[EMBEDDING_KEY].floatList?.vectorIndex?.config.space,
     ).toBe("cosine");
     expect(
       deserialized?.keys[EMBEDDING_KEY].floatList?.vectorIndex?.config
         .embeddingFunction,
-    ).toBeNull();
+    ).toBeUndefined();
   });
 
   it("serialize and deserialize with custom embedding function", async () => {
@@ -1094,7 +1094,7 @@ describe("Schema", () => {
     );
     expect(
       deserialized?.defaults.floatList?.vectorIndex?.config.embeddingFunction,
-    ).toBeNull();
+    ).toBeUndefined();
   });
 
   it("space inference remains stable across roundtrips", async () => {
