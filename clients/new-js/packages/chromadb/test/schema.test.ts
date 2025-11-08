@@ -1709,4 +1709,60 @@ describe("Schema", () => {
     expect(capturedRecords.metadatas[2]).not.toHaveProperty("field_sparse");
     expect(capturedRecords.metadatas[3]).toBeNull();
   });
+
+  it("accepts Key instance for VectorIndexConfig sourceKey", () => {
+    const { K } = require("../src/execution");
+    const schema = new Schema();
+    const vectorConfig = new VectorIndexConfig({
+      sourceKey: K.DOCUMENT,
+    });
+
+    expect(vectorConfig.sourceKey).toBe("#document");
+
+    // Also test with custom key
+    const customKey = K("myfield");
+    const vectorConfig2 = new VectorIndexConfig({
+      sourceKey: customKey,
+    });
+
+    expect(vectorConfig2.sourceKey).toBe("myfield");
+  });
+
+  it("accepts Key instance for SparseVectorIndexConfig sourceKey", () => {
+    const { K } = require("../src/execution");
+    const schema = new Schema();
+    const sparseConfig = new SparseVectorIndexConfig({
+      sourceKey: K.DOCUMENT,
+    });
+
+    expect(sparseConfig.sourceKey).toBe("#document");
+
+    // Also test with custom key
+    const customKey = K("myfield");
+    const sparseConfig2 = new SparseVectorIndexConfig({
+      sourceKey: customKey,
+    });
+
+    expect(sparseConfig2.sourceKey).toBe("myfield");
+  });
+
+  it("serializes Key sourceKey correctly", async () => {
+    const { K } = require("../src/execution");
+    const schema = new Schema();
+    const sparseEf = new MockSparseEmbedding("key_test");
+    
+    schema.createIndex(
+      new SparseVectorIndexConfig({
+        embeddingFunction: sparseEf,
+        sourceKey: K.DOCUMENT,
+      }),
+      "sparse_field"
+    );
+
+    const json = schema.serializeToJSON();
+    expect(json.keys["sparse_field"]?.["sparse_vector"]?.["sparse_vector_index"]?.config?.source_key).toBe("#document");
+
+    const deserialized = await Schema.deserializeFromJSON(json);
+    expect(deserialized?.keys["sparse_field"].sparseVector?.sparseVectorIndex?.config.sourceKey).toBe("#document");
+  });
 });

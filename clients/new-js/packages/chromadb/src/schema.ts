@@ -13,6 +13,7 @@ import {
   getEmbeddingFunction,
   getSparseEmbeddingFunction,
 } from "./embedding-function";
+import { Key } from "./execution";
 
 export const DOCUMENT_KEY = "#document";
 export const EMBEDDING_KEY = "#embedding";
@@ -55,7 +56,7 @@ export class BoolInvertedIndexConfig {
 export interface VectorIndexConfigOptions {
   space?: Space | null;
   embeddingFunction?: EmbeddingFunction | null;
-  sourceKey?: string | null;
+  sourceKey?: string | Key | null;
   hnsw?: ApiHnswIndexConfig | null;
   spann?: ApiSpannIndexConfig | null;
 }
@@ -71,7 +72,7 @@ export class VectorIndexConfig {
   constructor(options: VectorIndexConfigOptions = {}) {
     this.space = options.space ?? null;
     this.embeddingFunction = options.embeddingFunction;
-    this.sourceKey = options.sourceKey ?? null;
+    this.sourceKey = options.sourceKey instanceof Key ? options.sourceKey.name : options.sourceKey ?? null;
     this.hnsw = options.hnsw ?? null;
     this.spann = options.spann ?? null;
   }
@@ -79,7 +80,7 @@ export class VectorIndexConfig {
 
 export interface SparseVectorIndexConfigOptions {
   embeddingFunction?: SparseEmbeddingFunction | null;
-  sourceKey?: string | null;
+  sourceKey?: string | Key | null;
   bm25?: boolean | null;
 }
 
@@ -91,7 +92,7 @@ export class SparseVectorIndexConfig {
 
   constructor(options: SparseVectorIndexConfigOptions = {}) {
     this.embeddingFunction = options.embeddingFunction;
-    this.sourceKey = options.sourceKey ?? null;
+    this.sourceKey = options.sourceKey instanceof Key ? options.sourceKey.name : options.sourceKey ?? null;
     this.bm25 = options.bm25 ?? null;
   }
 }
