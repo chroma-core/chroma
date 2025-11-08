@@ -41,7 +41,7 @@ async fn test_k8s_integration_85_copy_race_condition() {
 
     if race_detected_count > 0 {
         panic!(
-            "Race condition detected in {} out of {} attempts! The fix should prevent this bug.",
+            "Race condition detected in {} out of {} attempts!",
             race_detected_count, total_attempts
         );
     }
