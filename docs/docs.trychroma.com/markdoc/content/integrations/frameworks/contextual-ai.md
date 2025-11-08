@@ -66,10 +66,9 @@ openai_ef = embedding_functions.OpenAIEmbeddingFunction(
 )
 
 # Create or get existing collection
-collection = chroma_client.create_collection(
+collection = chroma_client.get_or_create_collection(
     name="documents",
-    embedding_function=openai_ef,
-    get_or_create=True
+    embedding_function=openai_ef
 )
 
 # Add parsed content to Chroma
