@@ -1760,7 +1760,7 @@ describe("Schema", () => {
     );
 
     const json = schema.serializeToJSON();
-    expect(json.keys["sparse_field"]["sparse_vector"]["sparse_vector_index"].config.source_key).toBe("#document");
+    expect(json.keys["sparse_field"]?.["sparse_vector"]?.["sparse_vector_index"]?.config?.source_key).toBe("#document");
 
     const deserialized = await Schema.deserializeFromJSON(json);
     expect(deserialized?.keys["sparse_field"].sparseVector?.sparseVectorIndex?.config.sourceKey).toBe("#document");
