@@ -12,16 +12,8 @@ from overrides import override
 from typing_extensions import Literal
 import platform
 
-in_pydantic_v2 = False
-try:
-    from pydantic import BaseSettings
-except ImportError:
-    in_pydantic_v2 = True
-    from pydantic.v1 import BaseSettings
-    from pydantic.v1 import validator
-
-if not in_pydantic_v2:
-    from pydantic import validator  # type: ignore # noqa
+from pydantic_settings import BaseSettings
+from pydantic import field_validator
 
 # The thin client will have a flag to control which implementations to use
 is_thin_client = False
@@ -117,7 +109,13 @@ class RoutingMode(Enum):
     ID = "id"
 
 
-class Settings(BaseSettings):  # type: ignore
+class Settings(BaseSettings):
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",  # Ignore extra environment variables not defined in model
+    }
+
     # ==============
     # Generic config
     # ==============
@@ -127,7 +125,8 @@ class Settings(BaseSettings):  # type: ignore
     # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI" or "chromadb.api.rust.RustBindingsAPI"
     chroma_api_impl: str = "chromadb.api.rust.RustBindingsAPI"
 
-    @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
+    @field_validator("chroma_server_nofile", mode="before")
+    @classmethod
     def empty_str_to_none(cls, v: str) -> Optional[str]:
         if type(v) is str and v.strip() == "":
             return None
@@ -256,7 +255,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
     worker_memberlist_name: str = "query-service-memberlist"
 
-    chroma_coordinator_host = "localhost"
+    chroma_coordinator_host: str = "localhost"
     # TODO this is the sysdb port. Should probably rename it.
     chroma_server_grpc_port: Optional[int] = None
     chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
@@ -270,8 +269,8 @@ class Settings(BaseSettings):  # type: ignore
     chroma_executor_impl: str = "chromadb.execution.executor.local.LocalExecutor"
     chroma_query_replication_factor: int = 2
 
-    chroma_logservice_host = "localhost"
-    chroma_logservice_port = 50052
+    chroma_logservice_host: str = "localhost"
+    chroma_logservice_port: int = 50052
 
     chroma_quota_provider_impl: Optional[str] = None
     chroma_rate_limiting_provider_impl: Optional[str] = None
@@ -322,10 +321,6 @@ class Settings(BaseSettings):  # type: ignore
         if isinstance(val, str) and val in _legacy_config_values:
             raise ValueError(LEGACY_ERROR)
         return val
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
 
 T = TypeVar("T", bound="Component")
