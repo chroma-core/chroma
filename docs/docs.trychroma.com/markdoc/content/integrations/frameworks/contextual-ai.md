@@ -44,14 +44,20 @@ with open("document.pdf", "rb") as f:
     )
 
 # Monitor job status (Parse API is asynchronous)
-from time import sleep
-while True:
-    status = contextual_client.parse.job_status(parse_response.job_id)
-    if status.status == "completed":
-        break
-    elif status.status == "failed":
-        raise Exception("Parse job failed")
-    sleep(30)  # Wait 30 seconds before checking again
+import asyncio
+
+async def wait_for_job_async(job_id, max_attempts=20, interval=30.0):
+    """Asynchronously poll until job is ready, exiting early if possible."""
+    for attempt in range(max_attempts):
+        status = await asyncio.to_thread(contextual_client.parse.job_status, job_id)
+        if status.status == "completed":
+            return True
+        elif status.status == "failed":
+            raise Exception("Parse job failed")
+        await asyncio.sleep(interval)
+    return True  # give up but don't fail hard
+
+asyncio.run(wait_for_job_async(parse_response.job_id))
 
 # Get results after job completion
 results = contextual_client.parse.job_results(
@@ -117,12 +123,20 @@ const parseRes = await contextual.parse.create({
 });
 
 // Monitor job status (Parse API is asynchronous)
-while (true) {
-  const s = await contextual.parse.jobStatus(parseRes.job_id);
-  if (s.status === "completed") break;
-  if (s.status === "failed") throw new Error("Parse job failed");
-  await new Promise((r) => setTimeout(r, 30000));
+async function waitForJob(
+  jobId: string,
+  maxAttempts = 20,
+  interval = 30000
+): Promise<void> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const s = await contextual.parse.jobStatus(jobId);
+    if (s.status === "completed") return;
+    if (s.status === "failed") throw new Error("Parse job failed");
+    await new Promise((r) => setTimeout(r, interval));
+  }
 }
+
+await waitForJob(parseRes.job_id);
 
 // Get results after job completion
 const results = await contextual.parse.jobResults(parseRes.job_id, {
