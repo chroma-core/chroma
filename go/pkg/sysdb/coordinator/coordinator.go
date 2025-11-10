@@ -297,6 +297,16 @@ func (s *Coordinator) FlushCollectionCompactionAndAttachedFunction(
 	return s.catalog.FlushCollectionCompactionAndAttachedFunction(ctx, flushCollectionCompaction, attachedFunctionID, runNonce, completionOffset)
 }
 
+func (s *Coordinator) FlushCollectionCompactionAndAttachedFunctionExtended(
+	ctx context.Context,
+	collectionCompactions []*model.FlushCollectionCompaction,
+	attachedFunctionID uuid.UUID,
+	runNonce uuid.UUID,
+	completionOffset int64,
+) (*model.ExtendedFlushCollectionInfo, error) {
+	return s.catalog.FlushCollectionCompactionAndAttachedFunctionExtended(ctx, collectionCompactions, attachedFunctionID, runNonce, completionOffset)
+}
+
 func (s *Coordinator) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64) ([]*model.CollectionToGc, error) {
 	return s.catalog.ListCollectionsToGc(ctx, cutoffTimeSecs, limit, tenantID, minVersionsIfAlive)
 }

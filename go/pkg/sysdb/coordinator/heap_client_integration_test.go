@@ -176,7 +176,8 @@ func (suite *HeapClientIntegrationTestSuite) TestAttachFunctionPushesScheduleToH
 	})
 	suite.NoError(err, "Should attached function successfully")
 	suite.NotNil(response)
-	suite.NotEmpty(response.Id, "Attached function ID should be returned")
+	suite.NotNil(response.AttachedFunction)
+	suite.NotEmpty(response.AttachedFunction.Id, "Attached function ID should be returned")
 
 	// Get updated heap summary
 	updatedSummary, err := suite.heapClient.Summary(ctx, &coordinatorpb.HeapSummaryRequest{})
@@ -263,7 +264,8 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskRecovery_HybridAppro
 		return
 	}
 	suite.NotNil(taskResp)
-	originalTaskID := taskResp.Id
+	suite.NotNil(taskResp.AttachedFunction)
+	originalTaskID := taskResp.AttachedFunction.Id
 	suite.T().Logf("Created fully initialized task: %s", originalTaskID)
 
 	// STEP 2: Directly UPDATE database to make task partial (simulate Phase 3 failure)
@@ -363,7 +365,8 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskCleanup_ThenRecreate
 		return
 	}
 	suite.NotNil(taskResp)
-	suite.T().Logf("Created task: %s", taskResp.Id)
+	suite.NotNil(taskResp.AttachedFunction)
+	suite.T().Logf("Created task: %s", taskResp.AttachedFunction.Id)
 
 	// STEP 2: Call CleanupExpiredPartialAttachedFunctions (with short timeout to test it doesn't affect complete tasks)
 	cleanupResp, err := suite.sysdbClient.CleanupExpiredPartialAttachedFunctions(ctx, &coordinatorpb.CleanupExpiredPartialAttachedFunctionsRequest{
@@ -381,12 +384,12 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskCleanup_ThenRecreate
 	})
 	suite.NoError(err, "Task should still exist after cleanup")
 	suite.NotNil(getResp)
-	suite.Equal(taskResp.Id, getResp.AttachedFunction.Id)
+	suite.Equal(taskResp.AttachedFunction.Id, getResp.AttachedFunction.Id)
 	suite.T().Logf("Task still exists after cleanup: %s", getResp.AttachedFunction.Id)
 
 	// STEP 4: Delete the task
 	_, err = suite.sysdbClient.DetachFunction(ctx, &coordinatorpb.DetachFunctionRequest{
-		AttachedFunctionId: taskResp.Id,
+		AttachedFunctionId: taskResp.AttachedFunction.Id,
 		DeleteOutput:       true,
 	})
 	suite.NoError(err, "Should delete task")
@@ -403,8 +406,9 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskCleanup_ThenRecreate
 	})
 	suite.NoError(err, "Should be able to recreate task after deletion")
 	suite.NotNil(taskResp2)
-	suite.NotEqual(taskResp.Id, taskResp2.Id, "New task should have different ID")
-	suite.T().Logf("Successfully recreated task: %s", taskResp2.Id)
+	suite.NotNil(taskResp2.AttachedFunction)
+	suite.NotEqual(taskResp.AttachedFunction.Id, taskResp2.AttachedFunction.Id, "New task should have different ID")
+	suite.T().Logf("Successfully recreated task: %s", taskResp2.AttachedFunction.Id)
 }
 
 func TestHeapClientIntegrationSuite(t *testing.T) {

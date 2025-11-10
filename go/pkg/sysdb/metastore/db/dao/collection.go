@@ -586,6 +586,7 @@ func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collec
 	}
 	if collection.Version < currentCollectionVersion {
 		// this should not happen, potentially a bug
+		log.Error("TANUJ: 589 collection version is less than current collection version", zap.String("collectionID", collectionID), zap.Int32("currentCollectionVersion", currentCollectionVersion), zap.Int32("collectionVersion", collection.Version))
 		return 0, common.ErrCollectionVersionInvalid
 	}
 

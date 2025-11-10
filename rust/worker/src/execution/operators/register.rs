@@ -9,6 +9,9 @@ use chroma_types::{CollectionUuid, FlushCompactionResponse, SegmentFlushInfo};
 use std::sync::Arc;
 use thiserror::Error;
 
+// Import for the From implementation
+use crate::execution::operators::finish_attached_function::FinishAttachedFunctionError;
+
 /// The register  operator is responsible for flushing compaction data to the sysdb
 /// as well as updating the log offset in the log service.
 #[derive(Debug)]
@@ -109,6 +112,12 @@ impl ChromaError for RegisterError {
             RegisterError::FlushCompactionError(e) => e.should_trace_error(),
             RegisterError::UpdateLogOffsetError(e) => e.should_trace_error(),
         }
+    }
+}
+
+impl From<FinishAttachedFunctionError> for RegisterError {
+    fn from(value: FinishAttachedFunctionError) -> Self {
+        RegisterError::UpdateLogOffsetError(Box::new(value))
     }
 }
 

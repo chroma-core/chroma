@@ -22,6 +22,15 @@ pub struct GetCollectionAndSegmentsOperator {
     pub collection_id: CollectionUuid,
 }
 
+impl GetCollectionAndSegmentsOperator {
+    pub fn new(sysdb: SysDb, collection_id: CollectionUuid) -> Self {
+        Self {
+            sysdb,
+            collection_id,
+        }
+    }
+}
+
 type GetCollectionAndSegmentsInput = ();
 
 pub type GetCollectionAndSegmentsOutput = CollectionAndSegments;

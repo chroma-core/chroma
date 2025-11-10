@@ -11,10 +11,17 @@ use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::oneshot::Sender;
 use tracing::Span;
 
+use crate::execution::operators::finish_attached_function::{
+    FinishAttachedFunctionError, FinishAttachedFunctionInput, FinishAttachedFunctionOperator,
+    FinishAttachedFunctionOutput,
+};
 use crate::execution::operators::register::{
     RegisterError, RegisterInput, RegisterOperator, RegisterOutput,
 };
+use crate::execution::orchestration::attached_function_orchestrator::FunctionContext;
+use crate::execution::orchestration::compact::CollectionCompactInfo;
 use crate::execution::orchestration::compact::CompactionContextError;
+use chroma_types::NonceUuid;
 
 use super::compact::{CompactionContext, ExecutionState};
 
@@ -24,8 +31,35 @@ pub struct RegisterOrchestrator {
     dispatcher: ComponentHandle<Dispatcher>,
     result_channel: Option<Sender<Result<RegisterOrchestratorResponse, RegisterOrchestratorError>>>,
     _state: ExecutionState,
-    flush_results: Vec<SegmentFlushInfo>,
-    collection_logical_size_bytes: u64,
+    // Attached function fields
+    input_collection_register_info: Option<CollectionRegisterInfo>,
+    output_collection_register_info: CollectionRegisterInfo,
+    function_context: Option<FunctionContext>,
+}
+
+#[derive(Debug)]
+pub struct CollectionRegisterInfo {
+    pub collection_info: CollectionCompactInfo,
+    pub flush_results: Vec<SegmentFlushInfo>,
+    pub collection_logical_size_bytes: u64,
+}
+
+impl From<&CollectionRegisterInfo> for chroma_types::CollectionFlushInfo {
+    fn from(info: &CollectionRegisterInfo) -> Self {
+        chroma_types::CollectionFlushInfo {
+            tenant_id: info.collection_info.collection.tenant.clone(),
+            collection_id: info.collection_info.collection_id,
+            log_position: info.collection_info.pulled_log_offset,
+            collection_version: info.collection_info.collection.version,
+            segment_flush_info: info.flush_results.clone().into(),
+            total_records_post_compaction: info
+                .collection_info
+                .collection
+                .total_records_post_compaction,
+            size_bytes_post_compaction: info.collection_logical_size_bytes,
+            schema: info.collection_info.schema.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -91,20 +125,44 @@ where
     }
 }
 
+impl From<FinishAttachedFunctionError> for RegisterOrchestratorError {
+    fn from(value: FinishAttachedFunctionError) -> Self {
+        RegisterOrchestratorError::Register(value.into())
+    }
+}
+
 impl RegisterOrchestrator {
     pub fn new(
         context: &CompactionContext,
         dispatcher: ComponentHandle<Dispatcher>,
-        flush_results: Vec<SegmentFlushInfo>,
-        collection_logical_size_bytes: u64,
+        collection_register_info: CollectionRegisterInfo,
     ) -> Self {
         RegisterOrchestrator {
             context: context.clone(),
             dispatcher,
             result_channel: None,
             _state: ExecutionState::Register,
-            flush_results,
-            collection_logical_size_bytes,
+            input_collection_register_info: None,
+            output_collection_register_info: collection_register_info,
+            function_context: None,
+        }
+    }
+
+    pub fn new_with_attached_function(
+        context: CompactionContext,
+        dispatcher: ComponentHandle<Dispatcher>,
+        input_collection_register_info: CollectionRegisterInfo,
+        output_collection_register_info: CollectionRegisterInfo,
+        function_context: FunctionContext,
+    ) -> Self {
+        RegisterOrchestrator {
+            context,
+            dispatcher,
+            result_channel: None,
+            _state: ExecutionState::Register,
+            input_collection_register_info: Some(input_collection_register_info),
+            output_collection_register_info,
+            function_context: Some(function_context),
         }
     }
 }
@@ -134,38 +192,88 @@ impl Orchestrator for RegisterOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        // Check if collection is set before proceeding
-        let collection_info = match self.context.get_collection_info() {
-            Ok(collection_info) => collection_info,
-            Err(e) => {
-                self.terminate_with_result(Err(e.into()), ctx).await;
-                return vec![];
-            }
-        };
+        // Check if we have attached function context
+        if let (
+            Some(input_collection_register_info),
+            output_collection_register_info,
+            Some(function_context),
+        ) = (
+            &self.input_collection_register_info,
+            &self.output_collection_register_info,
+            &self.function_context,
+        ) {
+            // Use FinishAttachedFunctionOperator for attached function workflow
+            // Build collections vector with output and input collections
+            let collection_flush_infos = vec![
+                output_collection_register_info.into(),
+                input_collection_register_info.into(),
+            ];
 
-        vec![(
-            wrap(
-                RegisterOperator::new(),
-                RegisterInput::new(
-                    collection_info.collection.tenant.clone(),
-                    collection_info.collection_id,
-                    collection_info.pulled_log_offset,
-                    collection_info.collection.version,
-                    self.flush_results.clone().into(),
-                    collection_info.collection.total_records_post_compaction,
-                    self.collection_logical_size_bytes,
-                    self.context.sysdb.clone(),
-                    self.context.log.clone(),
-                    collection_info.schema.clone(),
+            vec![(
+                wrap(
+                    FinishAttachedFunctionOperator::new(),
+                    FinishAttachedFunctionInput::new(
+                        collection_flush_infos,
+                        function_context.attached_function_id,
+                        NonceUuid::new(),
+                        input_collection_register_info
+                            .collection_info
+                            .pulled_log_offset as u64,
+                        self.context.sysdb.clone(),
+                        self.context.log.clone(),
+                    ),
+                    ctx.receiver(),
+                    self.context
+                        .orchestrator_context
+                        .task_cancellation_token
+                        .clone(),
                 ),
-                ctx.receiver(),
-                self.context
-                    .orchestrator_context
-                    .task_cancellation_token
-                    .clone(),
-            ),
-            Some(Span::current()),
-        )]
+                Some(Span::current()),
+            )]
+        } else {
+            // Use regular RegisterOperator for normal compaction
+            let output_collection_register_info = &self.output_collection_register_info;
+            vec![(
+                wrap(
+                    RegisterOperator::new(),
+                    RegisterInput::new(
+                        output_collection_register_info
+                            .collection_info
+                            .collection
+                            .tenant
+                            .clone(),
+                        output_collection_register_info
+                            .collection_info
+                            .collection_id,
+                        output_collection_register_info
+                            .collection_info
+                            .pulled_log_offset,
+                        output_collection_register_info
+                            .collection_info
+                            .collection
+                            .version,
+                        output_collection_register_info.flush_results.clone().into(),
+                        output_collection_register_info
+                            .collection_info
+                            .collection
+                            .total_records_post_compaction,
+                        output_collection_register_info.collection_logical_size_bytes,
+                        self.context.sysdb.clone(),
+                        self.context.log.clone(),
+                        output_collection_register_info
+                            .collection_info
+                            .schema
+                            .clone(),
+                    ),
+                    ctx.receiver(),
+                    self.context
+                        .orchestrator_context
+                        .task_cancellation_token
+                        .clone(),
+                ),
+                Some(Span::current()),
+            )]
+        }
     }
 }
 
@@ -178,7 +286,7 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for RegisterOrchestrator
         message: TaskResult<RegisterOutput, RegisterError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let collection_info = match self.context.get_collection_info() {
+        let collection_info = match self.context.get_input_collection_info() {
             Ok(collection_info) => collection_info,
             Err(e) => {
                 self.terminate_with_result(Err(e.into()), ctx).await;
@@ -191,6 +299,43 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for RegisterOrchestrator
                 .into_inner()
                 .map_err(|e| e.into())
                 .map(|_| RegisterOrchestratorResponse::new(collection_info.collection_id.into())),
+            ctx,
+        )
+        .await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<FinishAttachedFunctionOutput, FinishAttachedFunctionError>>
+    for RegisterOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<FinishAttachedFunctionOutput, FinishAttachedFunctionError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let collection_info = match self.context.get_input_collection_info() {
+            Ok(collection_info) => collection_info,
+            Err(e) => {
+                self.terminate_with_result(Err(e.into()), ctx).await;
+                return;
+            }
+        };
+
+        self.terminate_with_result(
+            message
+                .into_inner()
+                .map_err(|e| match e {
+                    TaskError::TaskFailed(inner_error) => {
+                        RegisterOrchestratorError::Register(inner_error.into())
+                    }
+                    other_error => other_error.into(),
+                })
+                .map(|_| RegisterOrchestratorResponse {
+                    job_id: collection_info.collection_id.into(),
+                }),
             ctx,
         )
         .await;

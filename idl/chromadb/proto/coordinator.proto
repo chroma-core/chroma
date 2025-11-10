@@ -330,18 +330,25 @@ message AttachedFunctionUpdateInfo {
 
 // Combined request to flush collection compaction and update attached function atomically in a single transaction
 message FlushCollectionCompactionAndAttachedFunctionRequest {
-  FlushCollectionCompactionRequest flush_compaction = 1;
+  repeated FlushCollectionCompactionRequest flush_compactions = 1;
   AttachedFunctionUpdateInfo attached_function_update = 2;
 }
 
-message FlushCollectionCompactionAndAttachedFunctionResponse {
+message CollectionCompactionInfo {
   string collection_id = 1;
   int32 collection_version = 2;
   int64 last_compaction_time = 3;
-  // Updated attached function fields from database (authoritative)
-  string next_nonce = 4;
-  google.protobuf.Timestamp next_run = 5;
-  uint64 completion_offset = 6;
+}
+
+message AttachedFunctionState {
+  string next_nonce = 1;
+  google.protobuf.Timestamp next_run = 2;
+  uint64 completion_offset = 3;
+}
+
+message FlushCollectionCompactionAndAttachedFunctionResponse {
+  repeated CollectionCompactionInfo collections = 1;
+  AttachedFunctionState attached_function_state = 2;
 }
 
 // Used for serializing contents in collection version history file.
@@ -561,7 +568,7 @@ message AttachFunctionRequest {
 }
 
 message AttachFunctionResponse {
-  string id = 1;
+  AttachedFunction attached_function = 1;
 }
 
 message CreateOutputCollectionForAttachedFunctionRequest {
