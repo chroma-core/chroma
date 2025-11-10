@@ -6,7 +6,7 @@ Chroma's docs are designed to be as extensible as possible with little-to-no mag
 
 This repo is a [NextJS](https://nextjs.org/) + [Markdoc](https://markdoc.dev/) project.
 
-It also incldues [Shadcn](https://ui.shadcn.com/) with [Tailwind](https://tailwindcss.com/) for components and styling.
+It also includes [Shadcn](https://ui.shadcn.com/) with [Tailwind](https://tailwindcss.com/) for components and styling.
 
 # Features todo
 - [ ] add accordion for troubleshooting
