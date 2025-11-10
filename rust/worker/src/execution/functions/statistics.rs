@@ -11,8 +11,10 @@ use std::hash::{Hash, Hasher};
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_segment::blockfile_record::RecordSegmentReader;
+use chroma_segment::types::HydratedMaterializedLogRecord;
 use chroma_types::{
-    Chunk, LogRecord, MetadataValue, Operation, OperationRecord, UpdateMetadataValue,
+    Chunk, LogRecord, MaterializedLogOperation, MetadataValue, Operation, OperationRecord,
+    UpdateMetadataValue,
 };
 use futures::StreamExt;
 
@@ -25,7 +27,7 @@ pub trait StatisticsFunctionFactory: std::fmt::Debug + Send + Sync {
 
 /// Accumulate statistics.  Must be an associative and commutative over a sequence of `observe` calls.
 pub trait StatisticsFunction: std::fmt::Debug + Send {
-    fn observe(&mut self, log_record: &LogRecord);
+    fn observe(&mut self, hydrated_record: &HydratedMaterializedLogRecord<'_, '_>);
     fn output(&self) -> UpdateMetadataValue;
 }
 
@@ -44,7 +46,7 @@ pub struct CounterFunction {
 }
 
 impl StatisticsFunction for CounterFunction {
-    fn observe(&mut self, _: &LogRecord) {
+    fn observe(&mut self, _: &HydratedMaterializedLogRecord<'_, '_>) {
         self.acc = self.acc.saturating_add(1);
     }
 
@@ -173,28 +175,26 @@ pub struct StatisticsFunctionExecutor(pub Box<dyn StatisticsFunctionFactory>);
 impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
     async fn execute(
         &self,
-        input_records: Chunk<LogRecord>,
+        input_records: Chunk<HydratedMaterializedLogRecord<'_, '_>>,
         output_reader: Option<&RecordSegmentReader<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
         let mut counts: HashMap<String, HashMap<StatisticsValue, Box<dyn StatisticsFunction>>> =
             HashMap::default();
-        for (log_record, _) in input_records.iter() {
-            if matches!(log_record.record.operation, Operation::Delete) {
+        for (hydrated_record, _index) in input_records.iter() {
+            // Skip delete operations - they should not be counted in statistics
+            if hydrated_record.get_operation() == MaterializedLogOperation::DeleteExisting {
                 continue;
             }
 
-            if let Some(update_metadata) = log_record.record.metadata.as_ref() {
-                for (key, update_value) in update_metadata.iter() {
-                    let value: Option<MetadataValue> = update_value.try_into().ok();
-                    if let Some(value) = value {
-                        let inner_map = counts.entry(key.clone()).or_default();
-                        for stats_value in StatisticsValue::from_metadata_value(&value) {
-                            inner_map
-                                .entry(stats_value)
-                                .or_insert_with(|| self.0.create())
-                                .observe(log_record);
-                        }
-                    }
+            // Use merged_metadata to get the metadata from the hydrated record
+            let metadata = hydrated_record.merged_metadata();
+            for (key, value) in metadata.iter() {
+                let inner_map = counts.entry(key.clone()).or_default();
+                for stats_value in StatisticsValue::from_metadata_value(value) {
+                    inner_map
+                        .entry(stats_value)
+                        .or_insert_with(|| self.0.create())
+                        .observe(hydrated_record);
                 }
             }
         }
@@ -261,11 +261,16 @@ impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
 mod tests {
     use std::collections::HashMap;
 
-    use chroma_segment::{blockfile_record::RecordSegmentReader, test::TestDistributedSegment};
+    use chroma_segment::{
+        blockfile_record::RecordSegmentReader, test::TestDistributedSegment,
+        types::MaterializeLogsResult,
+    };
     use chroma_types::{
         Chunk, LogRecord, Operation, OperationRecord, SparseVector, UpdateMetadata,
         UpdateMetadataValue,
     };
+
+    use crate::execution::orchestration::compact;
 
     use super::*;
 
@@ -282,13 +287,28 @@ mod tests {
             log_offset: 0,
             record: OperationRecord {
                 id: id.to_string(),
-                embedding: None,
+                embedding: Some(vec![0.0]),
                 encoding: None,
                 metadata: Some(metadata),
                 document: None,
                 operation,
             },
         }
+    }
+
+    async fn hydrate_records<'a>(
+        materialized: &'a MaterializeLogsResult,
+        record_reader: Option<&'a RecordSegmentReader<'a>>,
+    ) -> Vec<HydratedMaterializedLogRecord<'a, 'a>> {
+        let mut hydrated_records = Vec::new();
+        for borrowed_record in materialized.iter() {
+            let hydrated = borrowed_record
+                .hydrate(record_reader)
+                .await
+                .expect("hydration should succeed");
+            hydrated_records.push(hydrated);
+        }
+        hydrated_records
     }
 
     fn extract_metadata_tuple(metadata: &UpdateMetadata) -> (i64, String, String, String) {
@@ -460,7 +480,11 @@ mod tests {
             ]),
         );
 
-        let input = Chunk::new(vec![record_one, record_two].into());
+        let logs = Chunk::new(vec![record_one, record_two].into());
+        let materialized = MaterializeLogsResult::from_logs_for_test(logs)
+            .expect("materialization should succeed");
+        let hydrated = hydrate_records(&materialized, None).await;
+        let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
             .execute(input, None)
@@ -558,7 +582,12 @@ mod tests {
             )]),
         );
 
-        let input = Chunk::new(vec![record_one, record_two].into());
+        let logs = Chunk::new(vec![record_one, record_two].into());
+        let materialized = MaterializeLogsResult::from_logs_for_test(logs)
+            .expect("materialization should succeed");
+        let hydrated = hydrate_records(&materialized, None).await;
+        let input = Chunk::new(std::sync::Arc::from(hydrated));
+
         let output = executor
             .execute(input, None)
             .await
@@ -597,7 +626,12 @@ mod tests {
             HashMap::from([("bool_key".to_string(), UpdateMetadataValue::Bool(false))]),
         );
 
-        let input = Chunk::new(vec![upsert_record, delete_record].into());
+        let logs = Chunk::new(vec![upsert_record, delete_record].into());
+        let materialized = MaterializeLogsResult::from_logs_for_test(logs)
+            .expect("materialization should succeed");
+        let hydrated = hydrate_records(&materialized, None).await;
+        let input = Chunk::new(std::sync::Arc::from(hydrated));
+
         let output = executor
             .execute(input, None)
             .await
@@ -634,7 +668,12 @@ mod tests {
             )]),
         );
 
-        let input = Chunk::new(vec![record].into());
+        let logs = Chunk::new(vec![record].into());
+        let materialized = MaterializeLogsResult::from_logs_for_test(logs)
+            .expect("materialization should succeed");
+        let hydrated = hydrate_records(&materialized, None).await;
+        let input = Chunk::new(std::sync::Arc::from(hydrated));
+
         let output = executor
             .execute(input, None)
             .await
@@ -652,7 +691,11 @@ mod tests {
             HashMap::from([("skip".to_string(), UpdateMetadataValue::None)]),
         );
 
-        let input = Chunk::new(vec![record].into());
+        let logs = Chunk::new(vec![record].into());
+        let materialized = MaterializeLogsResult::from_logs_for_test(logs)
+            .expect("materialization should succeed");
+        let hydrated = hydrate_records(&materialized, None).await;
+        let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
             .execute(input, None)
@@ -685,13 +728,17 @@ mod tests {
         .await
         .expect("record segment reader creation succeeds");
 
-        let input = Chunk::new(
+        let logs = Chunk::new(
             vec![build_record(
                 "input-1",
                 HashMap::from([("fresh_key".to_string(), UpdateMetadataValue::Int(1))]),
             )]
             .into(),
         );
+        let materialized = MaterializeLogsResult::from_logs_for_test(logs)
+            .expect("materialization should succeed");
+        let hydrated = hydrate_records(&materialized, Some(&record_reader)).await;
+        let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
             .execute(input, Some(&record_reader))
@@ -736,7 +783,11 @@ mod tests {
         .await
         .expect("record segment reader creation succeeds");
 
-        let empty_input: Chunk<LogRecord> = Chunk::new(Vec::<LogRecord>::new().into());
+        let empty_logs: Chunk<LogRecord> = Chunk::new(Vec::<LogRecord>::new().into());
+        let materialized = MaterializeLogsResult::from_logs_for_test(empty_logs)
+            .expect("materialization should succeed");
+        let hydrated = hydrate_records(&materialized, Some(&record_reader)).await;
+        let empty_input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
             .execute(empty_input, Some(&record_reader))
@@ -749,19 +800,16 @@ mod tests {
     }
 
     // TODO(tanujnay112): Reenable this after function compaction is brought back
-    /*
     #[tokio::test]
     async fn test_k8s_integration_statistics_function() {
         use crate::config::RootConfig;
-        use crate::execution::orchestration::CompactOrchestrator;
         use chroma_config::{registry::Registry, Configurable};
         use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
         use chroma_log::Log;
         use chroma_segment::test::TestDistributedSegment;
         use chroma_sysdb::SysDb;
-        use chroma_system::{Dispatcher, Orchestrator, System};
+        use chroma_system::{Dispatcher, System};
         use chroma_types::{CollectionUuid, Operation, OperationRecord, UpdateMetadataValue};
-        use s3heap_service::client::{GrpcHeapService, GrpcHeapServiceConfig};
         use std::collections::HashMap;
 
         // Setup test environment
@@ -787,14 +835,6 @@ mod tests {
         .await
         .expect("Should connect to grpc sysdb");
         let mut sysdb = SysDb::Grpc(grpc_sysdb);
-
-        // Connect to Grpc Heap Service (requires Tilt running)
-        let heap_service = GrpcHeapService::try_from_config(
-            &(GrpcHeapServiceConfig::default(), system.clone()),
-            &registry,
-        )
-        .await
-        .expect("Should connect to grpc heap service");
 
         let test_segments = TestDistributedSegment::new().await;
         let mut in_memory_log = InMemoryLog::new();
@@ -886,8 +926,9 @@ mod tests {
         }
 
         let log = Log::InMemory(in_memory_log);
-        let attached_function_name = "test_statistics";
-        let output_collection_name = format!("test_stats_output_{}", uuid::Uuid::new_v4());
+        let test_run_id = uuid::Uuid::new_v4();
+        let attached_function_name = format!("test_statistics_{}", test_run_id);
+        let output_collection_name = format!("test_stats_output_{}", test_run_id);
 
         // Create statistics attached function via sysdb
         let attached_function_id = sysdb
@@ -895,7 +936,7 @@ mod tests {
                 attached_function_name.to_string(),
                 "statistics".to_string(),
                 collection_id,
-                output_collection_name,
+                output_collection_name.clone(),
                 serde_json::Value::Null,
                 tenant.clone(),
                 db.clone(),
@@ -903,9 +944,13 @@ mod tests {
             )
             .await
             .expect("Attached function creation should succeed");
+        sysdb
+            .finish_create_attached_function(attached_function_id)
+            .await
+            .expect("Attached function creation finish should succeed");
 
-        // Initial compaction
-        let compact_orchestrator = CompactOrchestrator::new(
+        Box::pin(compact::compact(
+            system.clone(),
             collection_id,
             false,
             50,
@@ -918,58 +963,20 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             None,
-        );
-
-        let result = compact_orchestrator.run(system.clone()).await;
-        assert!(
-            result.is_ok(),
-            "Initial compaction should succeed: {:?}",
-            result.err()
-        );
-
-        // Get nonce for attached function run
-        let attached_function = sysdb
-            .get_attached_function_by_name(collection_id, attached_function_name.to_string())
-            .await
-            .expect("Attached function should be found");
-        let execution_nonce = attached_function.lowest_live_nonce.unwrap();
-
-        // Run statistics function
-        let compact_orchestrator = CompactOrchestrator::new_for_attached_function(
-            collection_id,
-            false,
-            50,
-            1000,
-            50,
-            log.clone(),
-            sysdb.clone(),
-            heap_service,
-            test_segments.blockfile_provider.clone(),
-            test_segments.hnsw_provider.clone(),
-            test_segments.spann_provider.clone(),
-            dispatcher_handle,
-            None,
-            attached_function_id,
-            execution_nonce,
-        );
-
-        let result = compact_orchestrator.run(system).await;
-        assert!(
-            result.is_ok(),
-            "Statistics function execution should succeed: {:?}",
-            result.err()
-        );
+        ))
+        .await
+        .expect("Compaction should succeed");
 
         // Verify statistics were generated
         let updated_attached_function = sysdb
-            .get_attached_function_by_name(collection_id, attached_function_name.to_string())
+            .get_attached_function_by_name(collection_id, attached_function_name.clone())
             .await
             .expect("Attached function should be found");
 
-        // Note: completion_offset is 13, but all 15 records (0-14) were processed
+        // Note: completion_offset is 14, all 15 records (0-14) were processed
         assert_eq!(
-            updated_attached_function.completion_offset, 13,
-            "Completion offset should be 13"
+            updated_attached_function.completion_offset, 14,
+            "Completion offset should be 14 (last processed record)"
         );
 
         let output_collection_id = updated_attached_function.output_collection_id.unwrap();
@@ -1073,5 +1080,4 @@ mod tests {
             stats_by_key_value.len()
         );
     }
-    */
 }

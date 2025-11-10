@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -60,7 +60,7 @@ pub struct ApplyLogsOrchestrator {
     segment_spans: HashMap<SegmentUuid, Span>,
 
     // Store the materialized outputs from LogFetchOrchestrator
-    materialized_log_data: Option<Vec<MaterializeLogOutput>>,
+    materialized_log_data: Option<Arc<Vec<MaterializeLogOutput>>>,
 
     metrics: CompactionMetrics,
 }
@@ -181,7 +181,7 @@ impl ApplyLogsOrchestratorResponse {
 impl ApplyLogsOrchestrator {
     pub fn new(
         context: &CompactionContext,
-        materialized_log_data: Option<Vec<MaterializeLogOutput>>,
+        materialized_log_data: Option<Arc<Vec<MaterializeLogOutput>>>,
     ) -> Self {
         ApplyLogsOrchestrator {
             context: context.clone(),
@@ -206,7 +206,7 @@ impl ApplyLogsOrchestrator {
         let mut tasks_to_run = Vec::new();
         self.num_materialized_logs += materialized_logs.len() as u64;
 
-        let writers = self.context.get_segment_writers()?;
+        let writers = self.context.get_output_segment_writers()?;
 
         {
             self.num_uncompleted_tasks_by_segment
@@ -255,7 +255,7 @@ impl ApplyLogsOrchestrator {
                 materialized_logs.clone(),
                 writers.record_reader.clone(),
                 self.context
-                    .get_collection_info()?
+                    .get_output_collection_info()?
                     .collection
                     .schema
                     .clone(),
@@ -356,7 +356,7 @@ impl ApplyLogsOrchestrator {
             .add(self.num_materialized_logs, &[]);
 
         self.state = ExecutionState::Register;
-        let collection_info = match self.context.get_collection_info() {
+        let collection_info = match self.context.get_output_collection_info() {
             Ok(collection_info) => collection_info,
             Err(err) => {
                 self.terminate_with_result(Err(err.into()), ctx).await;
@@ -461,7 +461,7 @@ impl Orchestrator for ApplyLogsOrchestrator {
             }
         };
 
-        for materialized_output in materialized_outputs {
+        for materialized_output in materialized_outputs.iter() {
             if materialized_output.result.is_empty() {
                 self.terminate_with_result(
                     Err(ApplyLogsOrchestratorError::InvariantViolation(
@@ -477,7 +477,7 @@ impl Orchestrator for ApplyLogsOrchestrator {
 
             // Create tasks for each materialized output
             let result = self
-                .create_apply_log_to_segment_writer_tasks(materialized_output.result, ctx)
+                .create_apply_log_to_segment_writer_tasks(materialized_output.result.clone(), ctx)
                 .await;
 
             let mut new_tasks = match result {
@@ -525,15 +525,10 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
 
         if message.segment_type == "MetadataSegmentWriter" {
             if let Some(update) = message.schema_update {
-                let collection_info_cell = self.context.collection_info.get_mut();
-                let collection_info = match collection_info_cell {
-                    Some(collection_info) => collection_info,
-                    None => {
-                        let err = ApplyLogsOrchestratorError::InvariantViolation(
-                            "Collection info should have been set",
-                        );
-                        self.terminate_with_result(Err(err), ctx).await;
-                        return;
+                let collection_info = match self.context.get_output_collection_info_mut() {
+                    Ok(info) => info,
+                    Err(err) => {
+                        return self.terminate_with_result(Err(err.into()), ctx).await;
                     }
                 };
 
@@ -587,7 +582,9 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
         };
 
         if num_tasks_left == 0 && self.num_uncompleted_materialization_tasks == 0 {
-            let segment_writer = self.context.get_segment_writer_by_id(message.segment_id);
+            let segment_writer = self
+                .context
+                .get_output_segment_writer_by_id(message.segment_id);
             let segment_writer = match self.ok_or_terminate(segment_writer, ctx).await {
                 Some(writer) => writer,
                 None => return,
@@ -617,7 +614,7 @@ impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorEr
 
         // If the flusher received is a record segment flusher, get the number of keys for the blockfile and set it on the orchestrator
         if let ChromaSegmentFlusher::RecordSegment(record_segment_flusher) = &message.flusher {
-            let collection_info = match self.context.get_collection_info_mut() {
+            let collection_info = match self.context.get_output_collection_info_mut() {
                 Ok(info) => info,
                 Err(err) => {
                     self.terminate_with_result(Err(err.into()), ctx).await;

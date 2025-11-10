@@ -1736,6 +1736,73 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 	return flushCollectionInfo, nil
 }
 
+// FlushCollectionCompactionsAndAttachedFunction atomically updates multiple collection compaction data
+// and attached function completion offset in a single transaction.
+func (tc *Catalog) FlushCollectionCompactionsAndAttachedFunction(
+	ctx context.Context,
+	collectionCompactions []*model.FlushCollectionCompaction,
+	attachedFunctionID uuid.UUID,
+	completionOffset int64,
+) (*model.ExtendedFlushCollectionInfo, error) {
+	if !tc.versionFileEnabled {
+		// Attached-function-based compactions are only supported with versioned collections
+		log.Error("FlushCollectionCompactionsAndAttachedFunction is only supported for versioned collections")
+		return nil, errors.New("attached-function-based compaction requires versioned collections")
+	}
+
+	if len(collectionCompactions) == 0 {
+		return nil, errors.New("at least one collection compaction is required")
+	}
+
+	flushInfos := make([]*model.FlushCollectionInfo, 0, len(collectionCompactions))
+
+	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		var err error
+		// Get the transaction from context to pass to FlushCollectionCompactionForVersionedCollection
+		tx := dbcore.GetDB(txCtx)
+
+		// Handle all collection compactions
+		for _, collectionCompaction := range collectionCompactions {
+			log.Info("FlushCollectionCompactionsAndAttachedFunction", zap.String("collection_id", collectionCompaction.ID.String()))
+			flushInfo, err := tc.FlushCollectionCompactionForVersionedCollection(txCtx, collectionCompaction, tx)
+			if err != nil {
+				return err
+			}
+			flushInfos = append(flushInfos, flushInfo)
+		}
+
+		err = tc.metaDomain.AttachedFunctionDb(txCtx).Update(&dbmodel.AttachedFunction{
+			ID:               attachedFunctionID,
+			CompletionOffset: completionOffset,
+		})
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Populate attached function fields with authoritative values from database
+	for _, flushInfo := range flushInfos {
+		flushInfo.AttachedFunctionCompletionOffset = &completionOffset
+	}
+
+	// Log with first collection ID (typically the output collection)
+	log.Info("FlushCollectionCompactionsAndAttachedFunction",
+		zap.String("first_collection_id", collectionCompactions[0].ID.String()),
+		zap.Int("collection_count", len(collectionCompactions)),
+		zap.String("attached_function_id", attachedFunctionID.String()),
+		zap.Int64("completion_offset", completionOffset))
+
+	return &model.ExtendedFlushCollectionInfo{
+		Collections: flushInfos,
+	}, nil
+}
+
 func (tc *Catalog) validateVersionFile(versionFile *coordinatorpb.CollectionVersionFile, collectionID string, version int64) error {
 	if versionFile.GetCollectionInfoImmutable().GetCollectionId() != collectionID {
 		log.Error("collection id mismatch", zap.String("collection_id", collectionID), zap.String("version_file_collection_id", versionFile.GetCollectionInfoImmutable().GetCollectionId()))

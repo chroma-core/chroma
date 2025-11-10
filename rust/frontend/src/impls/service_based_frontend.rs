@@ -1964,7 +1964,7 @@ impl ServiceBasedFrontend {
     // Stub method for backfill - will be implemented later
     async fn start_backfill(&self, _attached_function_id: chroma_types::AttachedFunctionUuid) {
         tracing::info!("start_backfill stub called - not yet implemented");
-        // TODO: Implement backfill logic
+        // TODO(tanujnay112): Implement backfill logic
     }
 
     pub async fn detach_function(

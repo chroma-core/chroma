@@ -191,12 +191,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 		[]string{inputCollectionID}, (*string)(nil), tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
 		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: inputCollectionID}}}, nil).Once()
 
-	// Check output collection doesn't exist
-	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
-	suite.mockCollectionDb.On("GetCollections",
-		[]string(nil), &outputCollectionName, tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
-		Return([]*dbmodel.CollectionAndMetadata{}, nil).Once()
-
 	// Insert attached function with lowest_live_nonce = NULL
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
 	suite.mockAttachedFunctionDb.On("Insert", mock.MatchedBy(func(attachedFunction *dbmodel.AttachedFunction) bool {
@@ -225,7 +219,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 
 	suite.NoError(err)
 	suite.NotNil(response)
-	suite.NotEmpty(response.Id)
+	suite.NotEmpty(response.AttachedFunction.Id)
 
 	// Verify all mocks were called as expected
 	suite.mockMetaDomain.AssertExpectations(suite.T())
@@ -317,7 +311,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 	// Assertions
 	suite.NoError(err)
 	suite.NotNil(response)
-	suite.Equal(existingAttachedFunctionID.String(), response.Id)
+	suite.Equal(existingAttachedFunctionID.String(), response.AttachedFunction.Id)
 
 	// Verify no writes occurred (no Insert, no heap Push)
 	// Note: Transaction IS called for idempotency check, but no writes happen inside it
@@ -390,11 +384,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 		[]string{inputCollectionID}, (*string)(nil), tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
 		Return([]*dbmodel.CollectionAndMetadata{{Collection: &dbmodel.Collection{ID: inputCollectionID}}}, nil).Once()
 
-	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Once()
-	suite.mockCollectionDb.On("GetCollections",
-		[]string(nil), &outputCollectionName, tenantID, databaseName, (*int32)(nil), (*int32)(nil), false).
-		Return([]*dbmodel.CollectionAndMetadata{}, nil).Once()
-
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
 	suite.mockAttachedFunctionDb.On("Insert", mock.Anything).Return(nil).Once()
 
@@ -408,7 +397,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 	response1, err1 := suite.coordinator.AttachFunction(ctx, request)
 	suite.NoError(err1)
 	suite.NotNil(response1)
-	suite.NotEmpty(response1.Id)
+	suite.NotEmpty(response1.AttachedFunction.Id)
 
 	// ========== GetAttachedFunctionByName: Should Return ErrAttachedFunctionNotReady ==========
 
@@ -453,7 +442,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 	response2, err2 := suite.coordinator.AttachFunction(ctx, request)
 	suite.NoError(err2)
 	suite.NotNil(response2)
-	suite.Equal(incompleteAttachedFunctionID.String(), response2.Id)
+	suite.Equal(incompleteAttachedFunctionID.String(), response2.AttachedFunction.Id)
 
 	// Verify transaction was called in both attempts (idempotency check happens in transaction)
 	suite.mockTxImpl.AssertNumberOfCalls(suite.T(), "Transaction", 2) // First attempt + recovery attempt

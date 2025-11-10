@@ -102,6 +102,10 @@ type FlushCollectionInfo struct {
 	AttachedFunctionCompletionOffset *int64
 }
 
+type ExtendedFlushCollectionInfo struct {
+	Collections []*FlushCollectionInfo
+}
+
 func FilterCollection(collection *Collection, collectionID types.UniqueID, collectionName *string) bool {
 	if collectionID != types.NilUniqueID() && collectionID != collection.ID {
 		return false
