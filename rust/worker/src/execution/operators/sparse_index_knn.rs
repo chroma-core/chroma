@@ -63,17 +63,21 @@ impl Operator<SparseIndexKnnInput, SparseIndexKnnOutput> for SparseIndexKnn {
             });
         };
 
-        Ok(SparseIndexKnnOutput {
-            records: sparse_reader
-                .wand(self.query.iter(), self.limit, input.mask.clone())
-                .await?
-                .into_iter()
-                .map(|score| RecordMeasure {
-                    offset_id: score.offset,
-                    // NOTE: We use `1 - query · document` as similarity metrics
-                    measure: 1.0 - score.score,
-                })
-                .collect(),
-        })
+        let mut records = sparse_reader
+            .wand(self.query.iter(), self.limit, input.mask.clone())
+            .await?
+            .into_iter()
+            .map(|score| RecordMeasure {
+                offset_id: score.offset,
+                // NOTE: We use `1 - query · document` as similarity metrics
+                measure: 1.0 - score.score,
+            })
+            .collect::<Vec<_>>();
+
+        // NOTE: Sort results to ensure they're in ascending order by measure (then offset_id for ties)
+        // This is required for KnnMerge which expects sorted inputs
+        records.sort_unstable();
+
+        Ok(SparseIndexKnnOutput { records })
     }
 }

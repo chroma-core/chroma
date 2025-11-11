@@ -412,7 +412,9 @@ impl Eq for RecordMeasure {}
 
 impl Ord for RecordMeasure {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.measure.total_cmp(&other.measure)
+        self.measure
+            .total_cmp(&other.measure)
+            .then_with(|| self.offset_id.cmp(&other.offset_id))
     }
 }
 
