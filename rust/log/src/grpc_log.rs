@@ -692,6 +692,7 @@ mod tests {
                 collection_id: collection_id.to_string(),
                 first_log_offset: 100,
                 first_log_ts: 1000,
+                backfill: false,
             }],
         };
 
@@ -700,6 +701,7 @@ mod tests {
                 collection_id: collection_id.to_string(),
                 first_log_offset: 50,
                 first_log_ts: 2000,
+                backfill: false,
             }],
         };
 
