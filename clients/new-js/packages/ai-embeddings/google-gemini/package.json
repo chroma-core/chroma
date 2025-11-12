@@ -43,7 +43,7 @@
     "chromadb": "workspace:^"
   },
   "dependencies": {
-    "@chroma-core/ai-embeddings-common": "workspace:^0.1.0",
+    "@chroma-core/ai-embeddings-common": "workspace:^",
     "@google/genai": "^0.14.1"
   },
   "engines": {
