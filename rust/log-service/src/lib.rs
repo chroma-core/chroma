@@ -4300,6 +4300,23 @@ mod tests {
         );
 
         validate_dirty_log_on_server(&log_server, &[collection_id]).await;
+
+        let dirty_collections = log_server
+            .cached_get_all_collection_info_to_compact(GetAllCollectionInfoToCompactRequest {
+                min_compaction_size: 0,
+            })
+            .await
+            .unwrap()
+            .into_inner()
+            .all_collection_info;
+        let collection_info = dirty_collections
+            .iter()
+            .find(|c| c.collection_id == collection_id.to_string())
+            .expect("collection should be in dirty list");
+        assert!(
+            collection_info.backfill,
+            "The backfill flag should be set for the collection"
+        );
     }
 
     #[tokio::test]
