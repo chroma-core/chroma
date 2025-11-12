@@ -1,6 +1,6 @@
 {
   "name": "@chroma-core/voyageai",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": false,
   "description": "Voyage AI embedding provider for Chroma",
   "main": "dist/cjs/voyageai.cjs",
