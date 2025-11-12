@@ -1027,7 +1027,7 @@ class Knn(Rank):
              - "#embedding" (default) - searches the main embedding field
              - A metadata field name (e.g., "my_custom_field") - searches that metadata field
         limit: Maximum number of results to consider (default: 16)
-        default: Default score for records not in KNN results (default: None)
+        default: Default score for records not in KNN results (default: 0)
         return_rank: If True, return the rank position (0, 1, 2, ...) instead of distance (default: False)
 
     Examples:
@@ -1056,7 +1056,7 @@ class Knn(Rank):
     ]
     key: str = "#embedding"
     limit: int = 16
-    default: Optional[float] = None
+    default: Optional[float] = 0
     return_rank: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
