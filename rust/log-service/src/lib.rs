@@ -506,11 +506,12 @@ impl MarkDirty {
         dirty_log_path_from_hostname(hostname)
     }
 
-    pub async fn mark_dirty_with_epoch_us(
+    pub async fn mark_dirty_with_epoch_us_and_backfill(
         &self,
         log_position: LogPosition,
         num_records: usize,
         initial_insertion_epoch_us: u64,
+        backfill: bool,
     ) -> Result<(), wal3::Error> {
         if let Some(dirty_log) = self.dirty_log.as_ref() {
             let num_records = num_records as u64;
@@ -520,7 +521,7 @@ impl MarkDirty {
                 num_records,
                 reinsert_count: 0,
                 initial_insertion_epoch_us,
-                backfill: false,
+                backfill,
             };
             let dirty_marker_json = serde_json::to_string(&dirty_marker).map_err(|err| {
                 tracing::error!("Failed to serialize dirty marker: {}", err);
@@ -546,8 +547,13 @@ impl wal3::MarkDirty for MarkDirty {
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_err(|_| wal3::Error::Internal)?
             .as_micros() as u64;
-        self.mark_dirty_with_epoch_us(log_position, num_records, initial_insertion_epoch_us)
-            .await
+        self.mark_dirty_with_epoch_us_and_backfill(
+            log_position,
+            num_records,
+            initial_insertion_epoch_us,
+            false,
+        )
+        .await
     }
 }
 
@@ -1875,7 +1881,12 @@ impl LogServer {
             dirty_log: self.dirty_log.clone(),
         };
         mark_dirty
-            .mark_dirty_with_epoch_us(offset, 1usize, request.initial_insertion_epoch_us)
+            .mark_dirty_with_epoch_us_and_backfill(
+                offset,
+                1usize,
+                request.initial_insertion_epoch_us,
+                true,
+            )
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         Ok(Response::new(BackfillResponse {}))
@@ -4301,6 +4312,11 @@ mod tests {
 
         validate_dirty_log_on_server(&log_server, &[collection_id]).await;
 
+        log_server
+            .roll_dirty_log()
+            .await
+            .expect("Roll Dirty Logs should not fail");
+
         let dirty_collections = log_server
             .cached_get_all_collection_info_to_compact(GetAllCollectionInfoToCompactRequest {
                 min_compaction_size: 0,
@@ -4378,7 +4394,12 @@ mod tests {
 
             let custom_epoch_us = 5555555555000000u64;
             let result = mark_dirty
-                .mark_dirty_with_epoch_us(LogPosition::from_offset(0), 1, custom_epoch_us)
+                .mark_dirty_with_epoch_us_and_backfill(
+                    LogPosition::from_offset(0),
+                    1,
+                    custom_epoch_us,
+                    false,
+                )
                 .await;
 
             assert!(result.is_ok(), "mark_dirty_with_epoch_us should succeed");
