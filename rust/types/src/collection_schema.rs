@@ -1403,15 +1403,31 @@ impl Schema {
     pub fn reconcile_with_collection_config(
         schema: &Schema,
         collection_config: &InternalCollectionConfiguration,
+        default_knn_index: KnnIndex,
     ) -> Result<Schema, SchemaError> {
         // 1. Check if collection config is default
         if collection_config.is_default() {
             if schema.is_default() {
-                // if both are default, use collection config to create schema
-                // this handles the case where user did not provide schema or config.
-                // since default schema doesnt have an ef, we need to use the coll config to create
-                // a schema with the ef.
-                let new_schema = Self::convert_collection_config_to_schema(collection_config)?;
+                // if both are default, use the schema, and apply the ef from config if available
+                // for both defaults and #embedding key
+                let mut new_schema = Schema::new_default(default_knn_index);
+
+                if collection_config.embedding_function.is_some() {
+                    if let Some(float_list) = &mut new_schema.defaults.float_list {
+                        if let Some(vector_index) = &mut float_list.vector_index {
+                            vector_index.config.embedding_function =
+                                collection_config.embedding_function.clone();
+                        }
+                    }
+                    if let Some(embedding_types) = new_schema.keys.get_mut(EMBEDDING_KEY) {
+                        if let Some(float_list) = &mut embedding_types.float_list {
+                            if let Some(vector_index) = &mut float_list.vector_index {
+                                vector_index.config.embedding_function =
+                                    collection_config.embedding_function.clone();
+                            }
+                        }
+                    }
+                }
                 return Ok(new_schema);
             } else {
                 // Collection config is default and schema is non-default → schema is source of truth
@@ -1421,7 +1437,7 @@ impl Schema {
 
         // 2. Collection config is non-default, schema must be default (already validated earlier)
         // Convert collection config to schema
-        Self::convert_collection_config_to_schema(collection_config)
+        Self::try_from(collection_config)
     }
 
     pub fn reconcile_schema_and_config(
@@ -1438,7 +1454,7 @@ impl Schema {
 
         let reconciled_schema = Self::reconcile_with_defaults(schema, knn_index)?;
         if let Some(config) = configuration {
-            Self::reconcile_with_collection_config(&reconciled_schema, config)
+            Self::reconcile_with_collection_config(&reconciled_schema, config, knn_index)
         } else {
             Ok(reconciled_schema)
         }
@@ -1680,77 +1696,6 @@ impl Schema {
         }
 
         true
-    }
-
-    /// Convert InternalCollectionConfiguration to Schema
-    fn convert_collection_config_to_schema(
-        collection_config: &InternalCollectionConfiguration,
-    ) -> Result<Schema, SchemaError> {
-        // Start with a default schema structure
-        let mut schema = Schema::new_default(KnnIndex::Spann); // Default to HNSW, will be overridden
-
-        // Convert vector index configuration
-        let vector_config = match &collection_config.vector_index {
-            VectorIndexConfiguration::Hnsw(hnsw_config) => VectorIndexConfig {
-                space: Some(hnsw_config.space.clone()),
-                embedding_function: collection_config.embedding_function.clone(),
-                source_key: Some(DOCUMENT_KEY.to_string()), // Default source key
-                hnsw: Some(HnswIndexConfig {
-                    ef_construction: Some(hnsw_config.ef_construction),
-                    max_neighbors: Some(hnsw_config.max_neighbors),
-                    ef_search: Some(hnsw_config.ef_search),
-                    num_threads: Some(hnsw_config.num_threads),
-                    batch_size: Some(hnsw_config.batch_size),
-                    sync_threshold: Some(hnsw_config.sync_threshold),
-                    resize_factor: Some(hnsw_config.resize_factor),
-                }),
-                spann: None,
-            },
-            VectorIndexConfiguration::Spann(spann_config) => VectorIndexConfig {
-                space: Some(spann_config.space.clone()),
-                embedding_function: collection_config.embedding_function.clone(),
-                source_key: Some(DOCUMENT_KEY.to_string()), // Default source key
-                hnsw: None,
-                spann: Some(SpannIndexConfig {
-                    search_nprobe: Some(spann_config.search_nprobe),
-                    search_rng_factor: Some(spann_config.search_rng_factor),
-                    search_rng_epsilon: Some(spann_config.search_rng_epsilon),
-                    nreplica_count: Some(spann_config.nreplica_count),
-                    write_rng_factor: Some(spann_config.write_rng_factor),
-                    write_rng_epsilon: Some(spann_config.write_rng_epsilon),
-                    split_threshold: Some(spann_config.split_threshold),
-                    num_samples_kmeans: Some(spann_config.num_samples_kmeans),
-                    initial_lambda: Some(spann_config.initial_lambda),
-                    reassign_neighbor_count: Some(spann_config.reassign_neighbor_count),
-                    merge_threshold: Some(spann_config.merge_threshold),
-                    num_centers_to_merge_to: Some(spann_config.num_centers_to_merge_to),
-                    write_nprobe: Some(spann_config.write_nprobe),
-                    ef_construction: Some(spann_config.ef_construction),
-                    ef_search: Some(spann_config.ef_search),
-                    max_neighbors: Some(spann_config.max_neighbors),
-                }),
-            },
-        };
-
-        // Update defaults (keep enabled=false, just update the config)
-        // This serves as the template for any new float_list fields
-        if let Some(float_list) = &mut schema.defaults.float_list {
-            if let Some(vector_index) = &mut float_list.vector_index {
-                vector_index.config = vector_config.clone();
-            }
-        }
-
-        // Update the vector_index in the existing #embedding key override
-        // Keep enabled=true (already set by new_default) and update the config
-        if let Some(embedding_types) = schema.keys.get_mut(EMBEDDING_KEY) {
-            if let Some(float_list) = &mut embedding_types.float_list {
-                if let Some(vector_index) = &mut float_list.vector_index {
-                    vector_index.config = vector_config;
-                }
-            }
-        }
-
-        Ok(schema)
     }
 
     /// Check if a specific metadata key-value should be indexed based on schema configuration
@@ -2666,6 +2611,83 @@ impl From<BoolInvertedIndexConfig> for IndexConfig {
     }
 }
 
+impl TryFrom<&InternalCollectionConfiguration> for Schema {
+    type Error = SchemaError;
+
+    fn try_from(config: &InternalCollectionConfiguration) -> Result<Self, Self::Error> {
+        // Start with a default schema structure
+        let mut schema = match &config.vector_index {
+            VectorIndexConfiguration::Hnsw(_) => Schema::new_default(KnnIndex::Hnsw),
+            VectorIndexConfiguration::Spann(_) => Schema::new_default(KnnIndex::Spann),
+        };
+        // Convert vector index configuration
+        let vector_config = match &config.vector_index {
+            VectorIndexConfiguration::Hnsw(hnsw_config) => VectorIndexConfig {
+                space: Some(hnsw_config.space.clone()),
+                embedding_function: config.embedding_function.clone(),
+                source_key: None,
+                hnsw: Some(HnswIndexConfig {
+                    ef_construction: Some(hnsw_config.ef_construction),
+                    max_neighbors: Some(hnsw_config.max_neighbors),
+                    ef_search: Some(hnsw_config.ef_search),
+                    num_threads: Some(hnsw_config.num_threads),
+                    batch_size: Some(hnsw_config.batch_size),
+                    sync_threshold: Some(hnsw_config.sync_threshold),
+                    resize_factor: Some(hnsw_config.resize_factor),
+                }),
+                spann: None,
+            },
+            VectorIndexConfiguration::Spann(spann_config) => VectorIndexConfig {
+                space: Some(spann_config.space.clone()),
+                embedding_function: config.embedding_function.clone(),
+                source_key: None,
+                hnsw: None,
+                spann: Some(SpannIndexConfig {
+                    search_nprobe: Some(spann_config.search_nprobe),
+                    search_rng_factor: Some(spann_config.search_rng_factor),
+                    search_rng_epsilon: Some(spann_config.search_rng_epsilon),
+                    nreplica_count: Some(spann_config.nreplica_count),
+                    write_rng_factor: Some(spann_config.write_rng_factor),
+                    write_rng_epsilon: Some(spann_config.write_rng_epsilon),
+                    split_threshold: Some(spann_config.split_threshold),
+                    num_samples_kmeans: Some(spann_config.num_samples_kmeans),
+                    initial_lambda: Some(spann_config.initial_lambda),
+                    reassign_neighbor_count: Some(spann_config.reassign_neighbor_count),
+                    merge_threshold: Some(spann_config.merge_threshold),
+                    num_centers_to_merge_to: Some(spann_config.num_centers_to_merge_to),
+                    write_nprobe: Some(spann_config.write_nprobe),
+                    ef_construction: Some(spann_config.ef_construction),
+                    ef_search: Some(spann_config.ef_search),
+                    max_neighbors: Some(spann_config.max_neighbors),
+                }),
+            },
+        };
+
+        // Update defaults (keep enabled=false, just update the config)
+        // This serves as the template for any new float_list fields
+        if let Some(float_list) = &mut schema.defaults.float_list {
+            if let Some(vector_index) = &mut float_list.vector_index {
+                vector_index.config = vector_config.clone();
+            }
+        }
+
+        // Update the vector_index in the existing #embedding key override
+        // Keep enabled=true (already set by new_default) and update the config
+        // Set source_key to DOCUMENT_KEY for the embedding key
+        if let Some(embedding_types) = schema.keys.get_mut(EMBEDDING_KEY) {
+            if let Some(float_list) = &mut embedding_types.float_list {
+                if let Some(vector_index) = &mut float_list.vector_index {
+                    let mut vector_config = vector_config;
+                    vector_config.source_key = Some(DOCUMENT_KEY.to_string());
+                    vector_index.config = vector_config;
+                }
+            }
+        }
+
+        Ok(schema)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2933,7 +2955,7 @@ mod tests {
             )),
         };
 
-        let schema = Schema::convert_collection_config_to_schema(&collection_config).unwrap();
+        let schema = Schema::try_from(&collection_config).unwrap();
         let reconstructed = InternalCollectionConfiguration::try_from(&schema).unwrap();
 
         assert_eq!(reconstructed, collection_config);
@@ -2965,7 +2987,7 @@ mod tests {
             )),
         };
 
-        let schema = Schema::convert_collection_config_to_schema(&collection_config).unwrap();
+        let schema = Schema::try_from(&collection_config).unwrap();
         let reconstructed = InternalCollectionConfiguration::try_from(&schema).unwrap();
 
         assert_eq!(reconstructed, collection_config);
@@ -3549,10 +3571,597 @@ mod tests {
     fn test_reconcile_with_collection_config_default_config() {
         // Test that when collection config is default, schema is returned as-is
         let collection_config = InternalCollectionConfiguration::default_hnsw();
-        let schema = Schema::convert_collection_config_to_schema(&collection_config).unwrap();
+        let schema = Schema::try_from(&collection_config).unwrap();
 
-        let result = Schema::reconcile_with_collection_config(&schema, &collection_config).unwrap();
+        let result =
+            Schema::reconcile_with_collection_config(&schema, &collection_config, KnnIndex::Hnsw)
+                .unwrap();
         assert_eq!(result, schema);
+    }
+
+    // Test all 8 cases of double default scenarios
+    #[test]
+    fn test_reconcile_double_default_hnsw_config_hnsw_schema_default_knn_hnsw() {
+        let collection_config = InternalCollectionConfiguration::default_hnsw();
+        let schema = Schema::new_default(KnnIndex::Hnsw);
+        let result =
+            Schema::reconcile_with_collection_config(&schema, &collection_config, KnnIndex::Hnsw)
+                .unwrap();
+
+        // Should create new schema with default_knn_index (Hnsw)
+        assert!(result.defaults.float_list.is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .hnsw
+            .is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .spann
+            .is_none());
+    }
+
+    #[test]
+    fn test_reconcile_double_default_hnsw_config_hnsw_schema_default_knn_spann() {
+        let collection_config = InternalCollectionConfiguration::default_hnsw();
+        let schema = Schema::new_default(KnnIndex::Hnsw);
+        let result =
+            Schema::reconcile_with_collection_config(&schema, &collection_config, KnnIndex::Spann)
+                .unwrap();
+
+        // Should create new schema with default_knn_index (Spann)
+        assert!(result.defaults.float_list.is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .spann
+            .is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .hnsw
+            .is_none());
+    }
+
+    #[test]
+    fn test_reconcile_double_default_hnsw_config_spann_schema_default_knn_hnsw() {
+        let collection_config = InternalCollectionConfiguration::default_hnsw();
+        let schema = Schema::new_default(KnnIndex::Spann);
+        let result =
+            Schema::reconcile_with_collection_config(&schema, &collection_config, KnnIndex::Hnsw)
+                .unwrap();
+
+        // Should create new schema with default_knn_index (Hnsw)
+        assert!(result.defaults.float_list.is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .hnsw
+            .is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .spann
+            .is_none());
+    }
+
+    #[test]
+    fn test_reconcile_double_default_hnsw_config_spann_schema_default_knn_spann() {
+        let collection_config = InternalCollectionConfiguration::default_hnsw();
+        let schema = Schema::new_default(KnnIndex::Spann);
+        let result =
+            Schema::reconcile_with_collection_config(&schema, &collection_config, KnnIndex::Spann)
+                .unwrap();
+
+        // Should create new schema with default_knn_index (Spann)
+        assert!(result.defaults.float_list.is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .spann
+            .is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .hnsw
+            .is_none());
+    }
+
+    #[test]
+    fn test_reconcile_double_default_spann_config_spann_schema_default_knn_hnsw() {
+        let collection_config = InternalCollectionConfiguration::default_spann();
+        let schema = Schema::new_default(KnnIndex::Spann);
+        let result =
+            Schema::reconcile_with_collection_config(&schema, &collection_config, KnnIndex::Hnsw)
+                .unwrap();
+
+        // Should create new schema with default_knn_index (Hnsw)
+        assert!(result.defaults.float_list.is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .hnsw
+            .is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .spann
+            .is_none());
+    }
+
+    #[test]
+    fn test_reconcile_double_default_spann_config_spann_schema_default_knn_spann() {
+        let collection_config = InternalCollectionConfiguration::default_spann();
+        let schema = Schema::new_default(KnnIndex::Spann);
+        let result =
+            Schema::reconcile_with_collection_config(&schema, &collection_config, KnnIndex::Spann)
+                .unwrap();
+
+        // Should create new schema with default_knn_index (Spann)
+        assert!(result.defaults.float_list.is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .spann
+            .is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .hnsw
+            .is_none());
+        // Defaults should have source_key=None
+        assert_eq!(
+            result
+                .defaults
+                .float_list
+                .as_ref()
+                .unwrap()
+                .vector_index
+                .as_ref()
+                .unwrap()
+                .config
+                .source_key,
+            None
+        );
+    }
+
+    #[test]
+    fn test_reconcile_double_default_spann_config_hnsw_schema_default_knn_hnsw() {
+        let collection_config = InternalCollectionConfiguration::default_spann();
+        let schema = Schema::new_default(KnnIndex::Hnsw);
+        let result =
+            Schema::reconcile_with_collection_config(&schema, &collection_config, KnnIndex::Hnsw)
+                .unwrap();
+
+        // Should create new schema with default_knn_index (Hnsw)
+        assert!(result.defaults.float_list.is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .hnsw
+            .is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .spann
+            .is_none());
+    }
+
+    #[test]
+    fn test_reconcile_double_default_spann_config_hnsw_schema_default_knn_spann() {
+        let collection_config = InternalCollectionConfiguration::default_spann();
+        let schema = Schema::new_default(KnnIndex::Hnsw);
+        let result =
+            Schema::reconcile_with_collection_config(&schema, &collection_config, KnnIndex::Spann)
+                .unwrap();
+
+        // Should create new schema with default_knn_index (Spann)
+        assert!(result.defaults.float_list.is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .spann
+            .is_some());
+        assert!(result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap()
+            .config
+            .hnsw
+            .is_none());
+    }
+
+    #[test]
+    fn test_defaults_source_key_not_document() {
+        // Test that defaults.float_list.vector_index.config.source_key is None, not DOCUMENT_KEY
+        let schema_hnsw = Schema::new_default(KnnIndex::Hnsw);
+        let schema_spann = Schema::new_default(KnnIndex::Spann);
+
+        // Check HNSW default schema
+        let defaults_hnsw = schema_hnsw
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+        assert_eq!(defaults_hnsw.config.source_key, None);
+
+        // Check Spann default schema
+        let defaults_spann = schema_spann
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+        assert_eq!(defaults_spann.config.source_key, None);
+
+        // Test after reconcile with NON-default collection config
+        // This path calls try_from where our fix is
+        let collection_config_hnsw = InternalCollectionConfiguration {
+            vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
+                ef_construction: 300,
+                max_neighbors: 32,
+                ef_search: 50,
+                num_threads: 8,
+                batch_size: 200,
+                sync_threshold: 2000,
+                resize_factor: 1.5,
+                space: Space::L2,
+            }),
+            embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+        };
+        let result_hnsw = Schema::reconcile_with_collection_config(
+            &schema_hnsw,
+            &collection_config_hnsw,
+            KnnIndex::Hnsw,
+        )
+        .unwrap();
+        let reconciled_defaults_hnsw = result_hnsw
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+        assert_eq!(reconciled_defaults_hnsw.config.source_key, None);
+
+        let collection_config_spann = InternalCollectionConfiguration {
+            vector_index: VectorIndexConfiguration::Spann(InternalSpannConfiguration {
+                search_nprobe: 20,
+                search_rng_factor: 3.0,
+                search_rng_epsilon: 0.2,
+                nreplica_count: 5,
+                write_rng_factor: 2.0,
+                write_rng_epsilon: 0.1,
+                split_threshold: 2000,
+                num_samples_kmeans: 200,
+                initial_lambda: 0.8,
+                reassign_neighbor_count: 100,
+                merge_threshold: 800,
+                num_centers_to_merge_to: 20,
+                write_nprobe: 10,
+                ef_construction: 400,
+                ef_search: 60,
+                max_neighbors: 24,
+                space: Space::Cosine,
+            }),
+            embedding_function: None,
+        };
+        let result_spann = Schema::reconcile_with_collection_config(
+            &schema_spann,
+            &collection_config_spann,
+            KnnIndex::Spann,
+        )
+        .unwrap();
+        let reconciled_defaults_spann = result_spann
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+        assert_eq!(reconciled_defaults_spann.config.source_key, None);
+
+        // Verify that #embedding key DOES have source_key set to DOCUMENT_KEY
+        let embedding_hnsw = result_hnsw.keys.get(EMBEDDING_KEY).unwrap();
+        let embedding_vector_index_hnsw = embedding_hnsw
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            embedding_vector_index_hnsw.config.source_key,
+            Some(DOCUMENT_KEY.to_string())
+        );
+
+        let embedding_spann = result_spann.keys.get(EMBEDDING_KEY).unwrap();
+        let embedding_vector_index_spann = embedding_spann
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            embedding_vector_index_spann.config.source_key,
+            Some(DOCUMENT_KEY.to_string())
+        );
+    }
+
+    #[test]
+    fn test_try_from_source_key() {
+        // Direct test of try_from to verify source_key behavior
+        // Defaults should have source_key=None, #embedding should have source_key=DOCUMENT_KEY
+
+        // Test with HNSW config
+        let collection_config_hnsw = InternalCollectionConfiguration {
+            vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
+                ef_construction: 300,
+                max_neighbors: 32,
+                ef_search: 50,
+                num_threads: 8,
+                batch_size: 200,
+                sync_threshold: 2000,
+                resize_factor: 1.5,
+                space: Space::L2,
+            }),
+            embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+        };
+        let schema_hnsw = Schema::try_from(&collection_config_hnsw).unwrap();
+
+        // Check defaults have source_key=None
+        let defaults_hnsw = schema_hnsw
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+        assert_eq!(defaults_hnsw.config.source_key, None);
+
+        // Check #embedding has source_key=DOCUMENT_KEY
+        let embedding_hnsw = schema_hnsw.keys.get(EMBEDDING_KEY).unwrap();
+        let embedding_vector_index_hnsw = embedding_hnsw
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            embedding_vector_index_hnsw.config.source_key,
+            Some(DOCUMENT_KEY.to_string())
+        );
+
+        // Test with Spann config
+        let collection_config_spann = InternalCollectionConfiguration {
+            vector_index: VectorIndexConfiguration::Spann(InternalSpannConfiguration {
+                search_nprobe: 20,
+                search_rng_factor: 3.0,
+                search_rng_epsilon: 0.2,
+                nreplica_count: 5,
+                write_rng_factor: 2.0,
+                write_rng_epsilon: 0.1,
+                split_threshold: 2000,
+                num_samples_kmeans: 200,
+                initial_lambda: 0.8,
+                reassign_neighbor_count: 100,
+                merge_threshold: 800,
+                num_centers_to_merge_to: 20,
+                write_nprobe: 10,
+                ef_construction: 400,
+                ef_search: 60,
+                max_neighbors: 24,
+                space: Space::Cosine,
+            }),
+            embedding_function: None,
+        };
+        let schema_spann = Schema::try_from(&collection_config_spann).unwrap();
+
+        // Check defaults have source_key=None
+        let defaults_spann = schema_spann
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+        assert_eq!(defaults_spann.config.source_key, None);
+
+        // Check #embedding has source_key=DOCUMENT_KEY
+        let embedding_spann = schema_spann.keys.get(EMBEDDING_KEY).unwrap();
+        let embedding_vector_index_spann = embedding_spann
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            embedding_vector_index_spann.config.source_key,
+            Some(DOCUMENT_KEY.to_string())
+        );
+    }
+
+    #[test]
+    fn test_default_hnsw_with_default_embedding_function() {
+        // Test that when InternalCollectionConfiguration is default HNSW but has
+        // an embedding function with name "default" and config as {}, it still
+        // goes through the double default path and preserves source_key behavior
+        use crate::collection_configuration::EmbeddingFunctionNewConfiguration;
+
+        let collection_config = InternalCollectionConfiguration {
+            vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration::default()),
+            embedding_function: Some(EmbeddingFunctionConfiguration::Known(
+                EmbeddingFunctionNewConfiguration {
+                    name: "default".to_string(),
+                    config: serde_json::json!({}),
+                },
+            )),
+        };
+
+        // Verify it's still considered default
+        assert!(collection_config.is_default());
+
+        let schema = Schema::new_default(KnnIndex::Hnsw);
+        let result =
+            Schema::reconcile_with_collection_config(&schema, &collection_config, KnnIndex::Spann)
+                .unwrap();
+
+        // Check that defaults have source_key=None
+        let defaults = result
+            .defaults
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+        assert_eq!(defaults.config.source_key, None);
+
+        // Check that #embedding has source_key=DOCUMENT_KEY
+        let embedding = result.keys.get(EMBEDDING_KEY).unwrap();
+        let embedding_vector_index = embedding
+            .float_list
+            .as_ref()
+            .unwrap()
+            .vector_index
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            embedding_vector_index.config.source_key,
+            Some(DOCUMENT_KEY.to_string())
+        );
+
+        // verify vector index config is set to spann
+        let vector_index_config = defaults.config.clone();
+        assert!(vector_index_config.spann.is_some());
+        assert!(vector_index_config.hnsw.is_none());
+
+        // Verify embedding function was set correctly
+        assert_eq!(
+            embedding_vector_index.config.embedding_function,
+            Some(EmbeddingFunctionConfiguration::Known(
+                EmbeddingFunctionNewConfiguration {
+                    name: "default".to_string(),
+                    config: serde_json::json!({}),
+                },
+            ))
+        );
+        assert_eq!(
+            defaults.config.embedding_function,
+            Some(EmbeddingFunctionConfiguration::Known(
+                EmbeddingFunctionNewConfiguration {
+                    name: "default".to_string(),
+                    config: serde_json::json!({}),
+                },
+            ))
+        );
     }
 
     #[test]
@@ -3606,7 +4215,9 @@ mod tests {
             embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
         };
 
-        let result = Schema::reconcile_with_collection_config(&schema, &collection_config).unwrap();
+        let result =
+            Schema::reconcile_with_collection_config(&schema, &collection_config, KnnIndex::Hnsw)
+                .unwrap();
 
         // Check that #embedding key override was created with the collection config settings
         let embedding_override = result.keys.get(EMBEDDING_KEY).unwrap();
@@ -3669,7 +4280,9 @@ mod tests {
             embedding_function: None,
         };
 
-        let result = Schema::reconcile_with_collection_config(&schema, &collection_config).unwrap();
+        let result =
+            Schema::reconcile_with_collection_config(&schema, &collection_config, KnnIndex::Spann)
+                .unwrap();
 
         // Check that #embedding key override was created with the collection config settings
         let embedding_override = result.keys.get(EMBEDDING_KEY).unwrap();
@@ -3730,7 +4343,9 @@ mod tests {
             embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
         };
 
-        let result = Schema::reconcile_with_collection_config(&schema, &collection_config).unwrap();
+        let result =
+            Schema::reconcile_with_collection_config(&schema, &collection_config, KnnIndex::Hnsw)
+                .unwrap();
 
         // Check that defaults.float_list.vector_index was updated
         let defaults_vector_index = result
@@ -3750,10 +4365,7 @@ mod tests {
             defaults_vector_index.config.embedding_function,
             Some(EmbeddingFunctionConfiguration::Legacy)
         );
-        assert_eq!(
-            defaults_vector_index.config.source_key,
-            Some(DOCUMENT_KEY.to_string())
-        );
+        assert_eq!(defaults_vector_index.config.source_key, None);
         let defaults_hnsw = defaults_vector_index.config.hnsw.as_ref().unwrap();
         assert_eq!(defaults_hnsw.ef_construction, Some(300));
         assert_eq!(defaults_hnsw.max_neighbors, Some(32));

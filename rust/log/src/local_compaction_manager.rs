@@ -15,7 +15,7 @@ use chroma_sysdb::SysDb;
 use chroma_system::Handler;
 use chroma_system::{Component, ComponentContext};
 use chroma_types::{
-    Chunk, CollectionUuid, GetCollectionWithSegmentsError, KnnIndex, LogRecord, SchemaError,
+    Chunk, CollectionUuid, GetCollectionWithSegmentsError, LogRecord, Schema, SchemaError,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -141,9 +141,12 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             .get_collection_with_segments(message.collection_id)
             .await?;
         let schema_previously_persisted = collection_and_segments.collection.schema.is_some();
-        collection_and_segments
-            .collection
-            .reconcile_schema_with_config(KnnIndex::Hnsw)?;
+        if !schema_previously_persisted {
+            collection_and_segments.collection.schema = Some(
+                Schema::try_from(&collection_and_segments.collection.config)
+                    .map_err(CompactionManagerError::SchemaReconcileError)?,
+            );
+        }
         // If collection is uninitialized, that means nothing has been written yet.
         let dim = match collection_and_segments.collection.dimension {
             Some(dim) => dim,
@@ -267,7 +270,12 @@ impl Handler<PurgeLogsMessage> for LocalCompactionManager {
             .get_collection_with_segments(message.collection_id)
             .await?;
         let mut collection = collection_segments.collection.clone();
-        collection.reconcile_schema_with_config(KnnIndex::Hnsw)?;
+        if collection.schema.is_none() {
+            collection.schema = Some(
+                Schema::try_from(&collection.config)
+                    .map_err(CompactionManagerError::SchemaReconcileError)?,
+            );
+        }
         // If dimension is None, that means nothing has been written yet.
         let dim = match collection.dimension {
             Some(dim) => dim,
