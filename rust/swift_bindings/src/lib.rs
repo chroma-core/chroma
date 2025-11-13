@@ -616,7 +616,6 @@ pub struct CollectionInfo {
 #[uniffi::export]
 pub fn get_collection(collection_name: String) -> FfiResult<CollectionInfo> {
     
-    let mut frontend_lock = FRONTEND.lock().unwrap();
     let frontend = {
         let frontend_lock = FRONTEND.lock().unwrap();
         frontend_lock
