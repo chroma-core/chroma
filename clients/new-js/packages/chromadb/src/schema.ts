@@ -1,17 +1,17 @@
 import type {
   EmbeddingFunctionConfiguration,
+  HnswIndexConfig as ApiHnswIndexConfig,
   Schema as InternalSchema,
   Space,
-  HnswIndexConfig as ApiHnswIndexConfig,
   SpannIndexConfig as ApiSpannIndexConfig,
   ValueTypes as ApiValueTypes,
 } from "./api";
 import {
   AnyEmbeddingFunction,
   EmbeddingFunction,
-  SparseEmbeddingFunction,
   getEmbeddingFunction,
   getSparseEmbeddingFunction,
+  SparseEmbeddingFunction,
 } from "./embedding-function";
 import { Key } from "./execution";
 
@@ -72,7 +72,10 @@ export class VectorIndexConfig {
   constructor(options: VectorIndexConfigOptions = {}) {
     this.space = options.space ?? null;
     this.embeddingFunction = options.embeddingFunction;
-    this.sourceKey = options.sourceKey instanceof Key ? options.sourceKey.name : options.sourceKey ?? null;
+    this.sourceKey =
+      options.sourceKey instanceof Key
+        ? options.sourceKey.name
+        : (options.sourceKey ?? null);
     this.hnsw = options.hnsw ?? null;
     this.spann = options.spann ?? null;
   }
@@ -92,7 +95,10 @@ export class SparseVectorIndexConfig {
 
   constructor(options: SparseVectorIndexConfigOptions = {}) {
     this.embeddingFunction = options.embeddingFunction;
-    this.sourceKey = options.sourceKey instanceof Key ? options.sourceKey.name : options.sourceKey ?? null;
+    this.sourceKey =
+      options.sourceKey instanceof Key
+        ? options.sourceKey.name
+        : (options.sourceKey ?? null);
     this.bm25 = options.bm25 ?? null;
   }
 }
@@ -101,78 +107,78 @@ export class FtsIndexType {
   constructor(
     public enabled: boolean,
     public config: FtsIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class StringInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: StringInvertedIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class VectorIndexType {
   constructor(
     public enabled: boolean,
     public config: VectorIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class SparseVectorIndexType {
   constructor(
     public enabled: boolean,
     public config: SparseVectorIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class IntInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: IntInvertedIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class FloatInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: FloatInvertedIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class BoolInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: BoolInvertedIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class StringValueType {
   constructor(
     public ftsIndex: FtsIndexType | null = null,
     public stringInvertedIndex: StringInvertedIndexType | null = null,
-  ) { }
+  ) {}
 }
 
 export class FloatListValueType {
-  constructor(public vectorIndex: VectorIndexType | null = null) { }
+  constructor(public vectorIndex: VectorIndexType | null = null) {}
 }
 
 export class SparseVectorValueType {
-  constructor(public sparseVectorIndex: SparseVectorIndexType | null = null) { }
+  constructor(public sparseVectorIndex: SparseVectorIndexType | null = null) {}
 }
 
 export class IntValueType {
-  constructor(public intInvertedIndex: IntInvertedIndexType | null = null) { }
+  constructor(public intInvertedIndex: IntInvertedIndexType | null = null) {}
 }
 
 export class FloatValueType {
   constructor(
     public floatInvertedIndex: FloatInvertedIndexType | null = null,
-  ) { }
+  ) {}
 }
 
 export class BoolValueType {
-  constructor(public boolInvertedIndex: BoolInvertedIndexType | null = null) { }
+  constructor(public boolInvertedIndex: BoolInvertedIndexType | null = null) {}
 }
 
 export class ValueTypes {
@@ -207,11 +213,11 @@ const cloneObject = <T>(value: T): T => {
   return Array.isArray(value)
     ? (value.map((item) => cloneObject(item)) as T)
     : (Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
-        k,
-        cloneObject(v),
-      ]),
-    ) as T);
+        Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+          k,
+          cloneObject(v),
+        ]),
+      ) as T);
 };
 
 const resolveEmbeddingFunctionName = (
@@ -1036,12 +1042,10 @@ export class Schema {
       spann: json.spann ? cloneObject(json.spann) : null,
     });
 
-    const embeddingFunction =
-      (await getEmbeddingFunction(
-        "schema deserialization",
-        json.embedding_function as EmbeddingFunctionConfiguration,
-      ));
-    config.embeddingFunction = embeddingFunction;
+    config.embeddingFunction = await getEmbeddingFunction(
+      "schema deserialization",
+      json.embedding_function as EmbeddingFunctionConfiguration,
+    );
     if (!config.space && config.embeddingFunction?.defaultSpace) {
       config.space = config.embeddingFunction.defaultSpace();
     }

@@ -1,10 +1,12 @@
 import {
   ChromaClientError,
   ChromaConnectionError,
+  ChromaError,
   ChromaForbiddenError,
   ChromaNotFoundError,
   ChromaQuotaExceededError,
   ChromaRateLimitError,
+  ChromaServerError,
   ChromaUnauthorizedError,
   ChromaUniqueError,
 } from "./errors";
@@ -12,9 +14,9 @@ import {
 const offlineError = (error: any): boolean => {
   return Boolean(
     (error?.name === "TypeError" || error?.name === "FetchError") &&
-    (error.message?.includes("fetch failed") ||
-      error.message?.includes("Failed to fetch") ||
-      error.message?.includes("ENOTFOUND")),
+      (error.message?.includes("fetch failed") ||
+        error.message?.includes("Failed to fetch") ||
+        error.message?.includes("ENOTFOUND")),
   );
 };
 
@@ -41,9 +43,10 @@ export const chromaFetch: typeof fetch = async (input, init) => {
       try {
         const responseBody = await response.json();
         status = responseBody.message || status;
-      } catch { }
+      } catch {}
       throw new ChromaClientError(
-        `Bad request to ${(input as Request).url || "Chroma"
+        `Bad request to ${
+          (input as Request).url || "Chroma"
         } with status: ${status}`,
       );
     case 401:
@@ -73,7 +76,5 @@ export const chromaFetch: typeof fetch = async (input, init) => {
       throw new ChromaRateLimitError("Rate limit exceeded");
   }
 
-  throw new ChromaConnectionError(
-    `Unable to connect to the chromadb server (status: ${response.status}). Please try again later.`,
-  );
+  throw new ChromaServerError(`${response.status}: ${response.statusText}`);
 };

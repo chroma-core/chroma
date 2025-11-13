@@ -1,5 +1,6 @@
 import { EmbeddingFunctionConfiguration, SparseVector } from "./api";
 import { ChromaValueError } from "./errors";
+import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
 
 /**
  * Supported vector space types.
@@ -92,7 +93,7 @@ export interface SparseEmbeddingFunction {
  */
 export interface EmbeddingFunctionClass {
   /** Constructor for creating new instances */
-  new(...args: any[]): EmbeddingFunction;
+  new (...args: any[]): EmbeddingFunction;
   /** Name identifier for the embedding function */
   name: string;
   /** Static method to build instance from configuration */
@@ -105,7 +106,7 @@ export interface EmbeddingFunctionClass {
  */
 export interface SparseEmbeddingFunctionClass {
   /** Constructor for creating new instances */
-  new(...args: any[]): SparseEmbeddingFunction;
+  new (...args: any[]): SparseEmbeddingFunction;
   /** Name identifier for the embedding function */
   name: string;
   /** Static method to build instance from configuration */
@@ -244,6 +245,10 @@ export const getEmbeddingFunction = async (
 
   const packageName = pythonEmbeddingFunctions[efConfig.name] || efConfig.name;
 
+  if (packageName === "default-embed") {
+    await getDefaultEFConfig();
+  }
+
   let embeddingFunction = knownEmbeddingFunctions.get(packageName);
   if (!embeddingFunction) {
     try {
@@ -256,7 +261,7 @@ export const getEmbeddingFunction = async (
 
     if (!embeddingFunction) {
       console.warn(
-        `Collection ${collectionName} was created with the ${packageName} embedding function. However, the @chroma-core/${packageName} package is not install. 'add' and 'query' will fail unless you provide them embeddings directly, or install the @chroma-core/${packageName} package.`,
+        `Collection ${collectionName} was created with the ${packageName} embedding function. However, the @chroma-core/${packageName} package is not installed. 'add' and 'query' will fail unless you provide them embeddings directly, or install the @chroma-core/${packageName} package.`,
       );
       return undefined;
     }
@@ -404,8 +409,8 @@ export const getDefaultEFConfig =
       const { DefaultEmbeddingFunction } = await import(
         "@chroma-core/default-embed"
       );
-      if (!knownEmbeddingFunctions.has(new DefaultEmbeddingFunction().name)) {
-        registerEmbeddingFunction("default", DefaultEmbeddingFunction);
+      if (!knownEmbeddingFunctions.has("default-embed")) {
+        registerEmbeddingFunction("default-embed", DefaultEmbeddingFunction);
       }
     } catch (e) {
       console.warn(
