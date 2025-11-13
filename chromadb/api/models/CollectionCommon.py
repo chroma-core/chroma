@@ -278,8 +278,8 @@ class CollectionCommon(Generic[ClientT]):
                 "You must set a data loader on the collection if loading from URIs."
             )
 
-        # Prepare
-        request_include = include
+        # Copy the list before any in-place modifications.
+        request_include = list(include) if include else []
         # We need to include uris in the result from the API to load datas
         if "data" in include and "uris" not in include:
             request_include.append("uris")
