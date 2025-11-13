@@ -100,8 +100,6 @@ class Client(SharedSystemClient, ClientAPI):
         self._admin_client = AdminClient.from_system(self._system)
         self._validate_tenant_database(tenant=self.tenant, database=self.database)
 
-        self._submit_client_start_event()
-
     @classmethod
     @override
     def from_system(

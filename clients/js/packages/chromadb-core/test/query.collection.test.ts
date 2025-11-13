@@ -7,7 +7,7 @@ import { ChromaNotFoundError } from "../src/Errors";
 import { ChromaClient } from "../src/ChromaClient";
 
 class TestEmbeddingFunction implements IEmbeddingFunction {
-  constructor() {}
+  constructor() { }
 
   public async generate(texts: string[]): Promise<number[][]> {
     let embeddings: number[][] = [];

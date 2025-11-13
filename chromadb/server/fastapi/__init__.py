@@ -71,7 +71,6 @@ from chromadb.server.fastapi.types import (
 from starlette.datastructures import Headers
 import logging
 
-from chromadb.telemetry.product.events import ServerStartEvent
 from chromadb.utils.fastapi import fastapi_json_response, string_to_uuid as _uuid
 from opentelemetry import trace
 
@@ -240,8 +239,6 @@ class FastAPI(Server):
 
         use_route_names_as_operation_ids(self._app)
         instrument_fastapi(self._app)
-        telemetry_client = self._system.instance(ProductTelemetryClient)
-        telemetry_client.capture(ServerStartEvent())
 
     def generate_openapi(self) -> Dict[str, Any]:
         """Used instead of the default openapi() generation handler to include manually-populated schemas."""

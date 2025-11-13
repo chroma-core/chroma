@@ -57,7 +57,6 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
-from chromadb.telemetry.product import ProductTelemetryClient
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +68,6 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         system.settings.require("chroma_server_http_port")
 
         self._opentelemetry_client = self.require(OpenTelemetryClient)
-        self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._settings = system.settings
 
         self._api_url = FastAPI.resolve_url(

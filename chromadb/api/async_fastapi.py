@@ -22,7 +22,6 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
-from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.utils.async_to_sync import async_to_sync
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.execution.expression.plan import Search
@@ -76,7 +75,6 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         system.settings.require("chroma_server_http_port")
 
         self._opentelemetry_client = self.require(OpenTelemetryClient)
-        self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._settings = system.settings
 
         self._api_url = AsyncFastAPI.resolve_url(

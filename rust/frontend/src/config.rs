@@ -73,6 +73,22 @@ pub struct FrontendConfig {
     pub enable_schema: bool,
     #[serde(default = "default_min_records_for_invocation")]
     pub min_records_for_invocation: u64,
+    #[serde(default)]
+    pub telemetry: Option<TelemetryConfig>,
+}
+
+// Define TelemetryConfig struct
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct TelemetryConfig {
+    pub user_id: Option<String>,
+    pub is_server: bool,
+    pub chroma_version: Option<String>,
+    #[serde(default = "default_anonymized_telemetry")]
+    pub anonymized_telemetry: Option<bool>,
+}
+
+fn default_anonymized_telemetry() -> Option<bool> {
+    Some(true)
 }
 
 impl FrontendConfig {
@@ -93,6 +109,7 @@ impl FrontendConfig {
             tenants_to_migrate_immediately_threshold: None,
             enable_schema: default_enable_schema(),
             min_records_for_invocation: default_min_records_for_invocation(),
+            telemetry: None,
         }
     }
 }
