@@ -748,6 +748,8 @@ mod tests {
         assert_eq!(deletes, vec!["empty_key::s:initial".to_string()]);
     }
 
+    // TODO(tanujnay112): Reenable this after function compaction is brought back
+    /*
     #[tokio::test]
     async fn test_k8s_integration_statistics_function() {
         use crate::config::RootConfig;
@@ -1071,4 +1073,5 @@ mod tests {
             stats_by_key_value.len()
         );
     }
+    */
 }

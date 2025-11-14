@@ -166,8 +166,7 @@ impl Log {
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(log) => {
                 log.update_collection_log_offset(collection_id, new_offset)
-                    .await;
-                Ok(())
+                    .await
             }
         }
     }

@@ -84,6 +84,7 @@ pub struct ExecuteAttachedFunctionOperator {
 impl ExecuteAttachedFunctionOperator {
     /// Create a new ExecuteAttachedFunctionOperator from an AttachedFunction.
     /// The executor is selected based on the function_id in the attached function.
+    #[allow(dead_code)]
     pub(crate) fn from_attached_function(
         attached_function: &chroma_types::AttachedFunction,
         log_client: Log,

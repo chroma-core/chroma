@@ -115,6 +115,33 @@ pub fn add_delete_generator(offset: usize) -> OperationRecord {
     }
 }
 
+/// Adds new record and deletes from the start every 6 records`
+///
+/// # Illustration for head of log
+/// [Add 1], [Del 1], [Add 2], [Del 2], [Add 3], [Del 3], [Add 4] ...
+pub fn add_delete_net_zero_generator(offset: usize) -> OperationRecord {
+    if offset % 2 == 1 {
+        OperationRecord {
+            id: int_as_id(offset / 2),
+            embedding: None,
+            encoding: None,
+            metadata: None,
+            document: None,
+            operation: Operation::Delete,
+        }
+    } else {
+        let int_id = offset / 2;
+        OperationRecord {
+            id: int_as_id(int_id),
+            embedding: Some(random_embedding(TEST_EMBEDDING_DIMENSION)),
+            encoding: None,
+            metadata: Some(modulo_metadata(int_id)),
+            document: Some(modulo_document(int_id)),
+            operation: Operation::Add,
+        }
+    }
+}
+
 #[async_trait]
 pub trait LoadFromGenerator<L: LogGenerator> {
     async fn populate_with_generator(&mut self, log_count: usize, generator: L);
