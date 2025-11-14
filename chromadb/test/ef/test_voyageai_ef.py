@@ -1,5 +1,7 @@
 import os
 import pytest
+from typing import Any, Optional
+from unittest.mock import Mock, patch
 from chromadb.utils.embedding_functions.voyageai_embedding_function import (
     VoyageAIEmbeddingFunction,
 )
@@ -171,20 +173,44 @@ def test_batching_with_batch_size() -> None:
 
 
 def test_build_batches() -> None:
-    """Test the _build_batches method."""
-    if os.environ.get("CHROMA_VOYAGE_API_KEY") is None:
-        pytest.skip("CHROMA_VOYAGE_API_KEY not set")
-    ef = VoyageAIEmbeddingFunction(
-        api_key=os.environ["CHROMA_VOYAGE_API_KEY"],
-        model_name="voyage-2",
-        batch_size=2,
-    )
-    texts = ["short", "text", "here", "now"]
-    batches = list(ef._build_batches(texts))
-    # Should create 2 batches of 2 texts each
-    assert len(batches) == 2
-    assert len(batches[0]) == 2
-    assert len(batches[1]) == 2
+    """Test batching behavior through the public API without requiring API key."""
+    with patch("voyageai.Client") as mock_client_class:
+        # Create mock client instance
+        mock_client = Mock()
+        mock_client_class.return_value = mock_client
+
+        # Mock tokenize to return token lists
+        mock_client.tokenize.return_value = [[1, 2], [3, 4], [5, 6], [7, 8]]
+
+        # Mock embed to return embeddings
+        def mock_embed(
+            texts: list[str],
+            model: str,
+            input_type: Optional[str] = None,
+            truncation: bool = True,
+            output_dimension: Optional[int] = None,
+        ) -> Mock:
+            result = Mock()
+            result.embeddings = [[0.1] * 1024 for _ in texts]
+            return result
+
+        mock_client.embed.side_effect = mock_embed
+
+        ef = VoyageAIEmbeddingFunction(
+            api_key="test-key",
+            model_name="voyage-2",
+            batch_size=2,
+        )
+
+        texts = ["short", "text", "here", "now"]
+        embeddings = ef(texts)
+
+        # Should return correct number of embeddings
+        assert len(embeddings) == 4
+        assert all(len(emb) > 0 for emb in embeddings)
+
+        # Verify embed was called with batches of size 2
+        assert mock_client.embed.call_count == 2
 
 
 def test_batching_with_large_texts() -> None:
@@ -233,20 +259,49 @@ def test_contextual_batching() -> None:
 
 
 def test_contextual_build_batches() -> None:
-    """Test that contextual models use _build_batches correctly."""
-    if os.environ.get("CHROMA_VOYAGE_API_KEY") is None:
-        pytest.skip("CHROMA_VOYAGE_API_KEY not set")
-    ef = VoyageAIEmbeddingFunction(
-        api_key=os.environ["CHROMA_VOYAGE_API_KEY"],
-        model_name="voyage-context-3",
-        batch_size=3,
-    )
-    texts = ["short", "text", "here", "now", "more"]
-    batches = list(ef._build_batches(texts))
-    # Should create batches respecting batch_size=3
-    assert len(batches) >= 2
-    # First batch should have at most 3 items
-    assert len(batches[0]) <= 3
+    """Test that contextual models handle batching correctly through the public API without requiring API key."""
+    with patch("voyageai.Client") as mock_client_class:
+        # Create mock client instance
+        mock_client = Mock()
+        mock_client_class.return_value = mock_client
+
+        # Mock tokenize to return token lists
+        mock_client.tokenize.return_value = [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]
+
+        # Mock contextualized_embed to return embeddings
+        def mock_contextualized_embed(
+            inputs: list[Any],
+            model: str,
+            input_type: Optional[str] = None,
+            output_dimension: Optional[int] = None,
+        ) -> Mock:
+            result = Mock()
+            # For contextual models, inputs is a list of batches
+            batch_results = []
+            for batch in inputs:
+                batch_result = Mock()
+                batch_result.embeddings = [[0.1] * 2048 for _ in batch]
+                batch_results.append(batch_result)
+            result.results = batch_results
+            return result
+
+        mock_client.contextualized_embed.side_effect = mock_contextualized_embed
+
+        ef = VoyageAIEmbeddingFunction(
+            api_key="test-key",
+            model_name="voyage-context-3",
+            batch_size=3,
+        )
+
+        texts = ["short", "text", "here", "now", "more"]
+        embeddings = ef(texts)
+
+        # Should return correct number of embeddings
+        assert len(embeddings) == 5
+        assert all(len(emb) > 0 for emb in embeddings)
+
+        # Verify contextualized_embed was called (should batch into 3+2)
+        assert mock_client.contextualized_embed.call_count == 2
 
 
 def test_multimodal_text_only_batching() -> None:

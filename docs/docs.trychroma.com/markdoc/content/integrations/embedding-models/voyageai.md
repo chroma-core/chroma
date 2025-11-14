@@ -8,7 +8,7 @@ name: VoyageAI
 Chroma provides a convenient wrapper around VoyageAI's embedding API. This embedding function runs remotely on VoyageAI's servers, and requires an API key. You can get an API key by signing up for an account at [VoyageAI](https://dash.voyageai.com/).
 
 VoyageAI offers various embedding models including:
-- **General-purpose models** (e.g., `voyage-3-large`, `voyage-3`, `voyage-2`)
+- **General-purpose models** (e.g., `voyage-3.5`, `voyage-3.5-lite`, `voyage-3-large`, `voyage-3`, `voyage-2`)
 - **Contextual embedding models** (e.g., `voyage-context-3`)
 - **Multimodal models** (e.g., `voyage-multimodal-3`)
 - **Domain-specific models** (e.g., `voyage-code-3`, `voyage-finance-2`, `voyage-law-2`)
