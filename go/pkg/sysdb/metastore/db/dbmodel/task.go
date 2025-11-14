@@ -26,20 +26,11 @@ type AttachedFunction struct {
 	CreatedAt               time.Time  `gorm:"column:created_at;type:timestamp;not null;default:CURRENT_TIMESTAMP"`
 	UpdatedAt               time.Time  `gorm:"column:updated_at;type:timestamp;not null;default:CURRENT_TIMESTAMP"`
 	GlobalParent            *uuid.UUID `gorm:"column:global_parent;type:uuid;default:null"`
-	NextNonce               uuid.UUID  `gorm:"column:next_nonce;type:uuid;not null"`
-	LowestLiveNonce         *uuid.UUID `gorm:"column:lowest_live_nonce;type:uuid;default:null"`
 	OldestWrittenNonce      *uuid.UUID `gorm:"column:oldest_written_nonce;type:uuid;default:null"`
 }
 
 func (v AttachedFunction) TableName() string {
 	return "attached_functions"
-}
-
-// AdvanceAttachedFunction contains the authoritative attached function data after AdvanceAttachedFunction
-type AdvanceAttachedFunction struct {
-	NextNonce        uuid.UUID
-	NextRun          time.Time
-	CompletionOffset int64
 }
 
 //go:generate mockery --name=IAttachedFunctionDb
@@ -48,15 +39,10 @@ type IAttachedFunctionDb interface {
 	GetByName(inputCollectionID string, name string) (*AttachedFunction, error)
 	GetByID(id uuid.UUID) (*AttachedFunction, error)
 	GetByCollectionID(inputCollectionID string) ([]*AttachedFunction, error)
-	Advance(id uuid.UUID, nextRunNonce uuid.UUID, completionOffset int64, nextRunDelaySecs uint64) (*AdvanceAttachedFunction, error)
-	UpdateCompletionOffset(id uuid.UUID, runNonce uuid.UUID, completionOffset int64) error
-	UpdateLowestLiveNonce(id uuid.UUID, lowestLiveNonce uuid.UUID) error
-	Finish(id uuid.UUID) error
 	UpdateOutputCollectionID(id uuid.UUID, outputCollectionID *string) error
 	SoftDelete(inputCollectionID string, name string) error
 	SoftDeleteByID(id uuid.UUID) error
 	DeleteAll() error
-	PeekScheduleByCollectionId(collectionIDs []string) ([]*AttachedFunction, error)
 	GetMinCompletionOffsetForCollection(inputCollectionID string) (*int64, error)
 	CleanupExpiredPartial(maxAgeSeconds uint64) ([]uuid.UUID, error)
 	GetSoftDeletedAttachedFunctions(cutoffTime time.Time, limit int32) ([]*AttachedFunction, error)

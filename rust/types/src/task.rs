@@ -1,8 +1,5 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use std::time::SystemTime;
-use uuid::Uuid;
 
 use crate::CollectionUuid;
 
@@ -31,12 +28,6 @@ define_uuid_newtype!(
     #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
     AttachedFunctionUuid,
     new_v4
-);
-
-define_uuid_newtype!(
-    /// NonceUuid is a wrapper around Uuid to provide a type for attached function execution nonces.
-    NonceUuid,
-    now_v7
 );
 
 /// AttachedFunction represents an asynchronous function that is triggered by collection writes
@@ -84,87 +75,4 @@ pub struct AttachedFunction {
     /// Timestamp when the attached function was last updated
     #[serde(default = "default_systemtime")]
     pub updated_at: SystemTime,
-    /// Next nonce (UUIDv7) for execution tracking
-    pub next_nonce: NonceUuid,
-    /// Lowest live nonce (UUIDv7) - marks the earliest epoch that still needs verification
-    /// When lowest_live_nonce is Some and < next_nonce, it indicates finish failed and we should
-    /// skip execution and only run the scout_logs recheck phase
-    /// None indicates the attached function has never been scheduled (brand new)
-    pub lowest_live_nonce: Option<NonceUuid>,
-}
-
-/// ScheduleEntry represents a scheduled attached function run for a collection.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ScheduleEntry {
-    pub collection_id: CollectionUuid,
-    pub attached_function_id: Uuid,
-    pub attached_function_run_nonce: NonceUuid,
-    pub when_to_run: Option<DateTime<Utc>>,
-    /// Lowest live nonce - marks the earliest nonce that still needs verification.
-    /// Nonces less than this value are considered complete.
-    pub lowest_live_nonce: Option<Uuid>,
-}
-
-impl TryFrom<crate::chroma_proto::ScheduleEntry> for ScheduleEntry {
-    type Error = ScheduleEntryConversionError;
-
-    fn try_from(proto: crate::chroma_proto::ScheduleEntry) -> Result<Self, Self::Error> {
-        let collection_id = proto
-            .collection_id
-            .ok_or(ScheduleEntryConversionError::MissingField(
-                "collection_id".to_string(),
-            ))
-            .and_then(|id| {
-                CollectionUuid::from_str(&id).map_err(|_| {
-                    ScheduleEntryConversionError::InvalidUuid("collection_id".to_string())
-                })
-            })?;
-
-        let attached_function_id = proto
-            .attached_function_id
-            .ok_or(ScheduleEntryConversionError::MissingField(
-                "attached_function_id".to_string(),
-            ))
-            .and_then(|id| {
-                Uuid::parse_str(&id).map_err(|_| {
-                    ScheduleEntryConversionError::InvalidUuid("attached_function_id".to_string())
-                })
-            })?;
-
-        let attached_function_run_nonce = proto
-            .run_nonce
-            .ok_or(ScheduleEntryConversionError::MissingField(
-                "run_nonce".to_string(),
-            ))
-            .and_then(|nonce| {
-                Uuid::parse_str(&nonce)
-                    .map(NonceUuid)
-                    .map_err(|_| ScheduleEntryConversionError::InvalidUuid("run_nonce".to_string()))
-            })?;
-
-        let when_to_run = proto
-            .when_to_run
-            .and_then(|ms| DateTime::from_timestamp_millis(ms as i64));
-
-        let lowest_live_nonce = proto
-            .lowest_live_nonce
-            .as_ref()
-            .and_then(|nonce_str| Uuid::parse_str(nonce_str).ok());
-
-        Ok(ScheduleEntry {
-            collection_id,
-            attached_function_id,
-            attached_function_run_nonce,
-            when_to_run,
-            lowest_live_nonce,
-        })
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ScheduleEntryConversionError {
-    #[error("Missing required field: {0}")]
-    MissingField(String),
-    #[error("Invalid UUID for field: {0}")]
-    InvalidUuid(String),
 }

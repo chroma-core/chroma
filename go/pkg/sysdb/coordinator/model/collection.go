@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/types"
-	"github.com/google/uuid"
 )
 
 type Collection struct {
@@ -100,7 +99,6 @@ type FlushCollectionInfo struct {
 	CollectionVersion        int32
 	TenantLastCompactionTime int64
 	// Optional attached function fields (only populated for attached-function-based compactions)
-	AttachedFunctionNextNonce        *uuid.UUID
 	AttachedFunctionNextRun          *time.Time
 	AttachedFunctionCompletionOffset *int64
 }
