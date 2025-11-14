@@ -168,3 +168,148 @@ pub enum ScheduleEntryConversionError {
     #[error("Invalid UUID for field: {0}")]
     InvalidUuid(String),
 }
+
+#[derive(Debug, thiserror::Error)]
+pub enum AttachedFunctionConversionError {
+    #[error("Invalid UUID: {0}")]
+    InvalidUuid(String),
+}
+
+fn prost_struct_to_json_string(
+    prost_struct: &prost_types::Struct,
+) -> Result<String, serde_json::Error> {
+    use prost_types::value::Kind;
+
+    let mut map = serde_json::Map::new();
+    for (key, value) in &prost_struct.fields {
+        if let Some(kind) = &value.kind {
+            let json_value = match kind {
+                Kind::NullValue(_) => serde_json::Value::Null,
+                Kind::NumberValue(n) => serde_json::Value::Number(
+                    serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)),
+                ),
+                Kind::StringValue(s) => serde_json::Value::String(s.clone()),
+                Kind::BoolValue(b) => serde_json::Value::Bool(*b),
+                Kind::StructValue(s) => serde_json::Value::Object(
+                    prost_struct_to_json_string(s)?
+                        .parse::<serde_json::Value>()?
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                ),
+                Kind::ListValue(list) => serde_json::Value::Array(
+                    list.values
+                        .iter()
+                        .map(|v| {
+                            if let Some(kind) = &v.kind {
+                                match kind {
+                                    Kind::NullValue(_) => serde_json::Value::Null,
+                                    Kind::NumberValue(n) => serde_json::Value::Number(
+                                        serde_json::Number::from_f64(*n)
+                                            .unwrap_or_else(|| serde_json::Number::from(0)),
+                                    ),
+                                    Kind::StringValue(s) => serde_json::Value::String(s.clone()),
+                                    Kind::BoolValue(b) => serde_json::Value::Bool(*b),
+                                    _ => serde_json::Value::Null, // Simplified for now
+                                }
+                            } else {
+                                serde_json::Value::Null
+                            }
+                        })
+                        .collect(),
+                ),
+            };
+            map.insert(key.clone(), json_value);
+        }
+    }
+
+    serde_json::to_string(&serde_json::Value::Object(map))
+}
+
+impl TryFrom<crate::chroma_proto::AttachedFunction> for AttachedFunction {
+    type Error = AttachedFunctionConversionError;
+
+    fn try_from(
+        attached_function: crate::chroma_proto::AttachedFunction,
+    ) -> Result<Self, Self::Error> {
+        // Parse attached_function_id
+        let attached_function_id = attached_function
+            .id
+            .parse::<AttachedFunctionUuid>()
+            .map_err(|_| {
+                AttachedFunctionConversionError::InvalidUuid("attached_function_id".to_string())
+            })?;
+
+        // Parse function_id
+        let function_id = attached_function
+            .function_id
+            .parse::<uuid::Uuid>()
+            .map_err(|_| AttachedFunctionConversionError::InvalidUuid("function_id".to_string()))?;
+
+        // Parse input_collection_id
+        let input_collection_id = attached_function
+            .input_collection_id
+            .parse::<CollectionUuid>()
+            .map_err(|_| {
+                AttachedFunctionConversionError::InvalidUuid("input_collection_id".to_string())
+            })?;
+
+        // Parse output_collection_id if available
+        let output_collection_id = attached_function
+            .output_collection_id
+            .map(|id| id.parse::<CollectionUuid>())
+            .transpose()
+            .map_err(|_| {
+                AttachedFunctionConversionError::InvalidUuid("output_collection_id".to_string())
+            })?;
+
+        // Parse params if available
+        let params = attached_function
+            .params
+            .map(|p| prost_struct_to_json_string(&p))
+            .transpose()
+            .map_err(|_| AttachedFunctionConversionError::InvalidUuid("params".to_string()))?;
+
+        // Parse timestamps
+        let created_at = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_micros(attached_function.created_at);
+        let updated_at = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_micros(attached_function.updated_at);
+        let next_run = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_micros(attached_function.next_run_at);
+
+        // Parse nonces
+        let next_nonce = attached_function
+            .next_nonce
+            .parse::<NonceUuid>()
+            .map_err(|_| AttachedFunctionConversionError::InvalidUuid("next_nonce".to_string()))?;
+        let lowest_live_nonce = attached_function
+            .lowest_live_nonce
+            .map(|nonce| nonce.parse::<NonceUuid>())
+            .transpose()
+            .map_err(|_| {
+                AttachedFunctionConversionError::InvalidUuid("lowest_live_nonce".to_string())
+            })?;
+
+        Ok(AttachedFunction {
+            id: attached_function_id,
+            name: attached_function.name,
+            function_id,
+            input_collection_id,
+            output_collection_name: attached_function.output_collection_name,
+            output_collection_id,
+            params,
+            tenant_id: attached_function.tenant_id,
+            database_id: attached_function.database_id,
+            last_run: None, // Not available in proto
+            next_run,
+            completion_offset: attached_function.completion_offset,
+            min_records_for_invocation: attached_function.min_records_for_invocation,
+            is_deleted: false, // Not available in proto, would need to be fetched separately
+            created_at,
+            updated_at,
+            next_nonce,
+            lowest_live_nonce,
+        })
+    }
+}

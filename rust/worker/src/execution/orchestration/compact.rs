@@ -1,4 +1,4 @@
-use std::cell::OnceCell;
+use std::{cell::OnceCell, sync::Arc};
 
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -14,20 +14,25 @@ use chroma_sysdb::SysDb;
 use chroma_system::{
     ComponentHandle, Dispatcher, Orchestrator, OrchestratorContext, PanicError, System, TaskError,
 };
-use chroma_types::{Collection, CollectionUuid, JobId, Schema, SegmentFlushInfo, SegmentUuid};
+use chroma_types::{Collection, CollectionUuid, JobId, Schema, SegmentUuid};
 use opentelemetry::metrics::Counter;
 use thiserror::Error;
 
 use super::apply_logs_orchestrator::{ApplyLogsOrchestrator, ApplyLogsOrchestratorError};
+use super::attached_function_orchestrator::{
+    AttachedFunctionOrchestrator, AttachedFunctionOrchestratorError,
+    AttachedFunctionOrchestratorResponse,
+};
 use super::log_fetch_orchestrator::{
     LogFetchOrchestrator, LogFetchOrchestratorResponse, RequireCompactionOffsetRepair, Success,
 };
-use super::register_orchestrator::RegisterOrchestrator;
+use super::register_orchestrator::{CollectionRegisterInfo, RegisterOrchestrator};
 
 use crate::execution::{
     operators::materialize_logs::MaterializeLogOutput,
     orchestration::{
         apply_logs_orchestrator::ApplyLogsOrchestratorResponse,
+        attached_function_orchestrator::FunctionContext,
         log_fetch_orchestrator::LogFetchOrchestratorError,
         register_orchestrator::{RegisterOrchestratorError, RegisterOrchestratorResponse},
     },
@@ -97,9 +102,16 @@ pub struct CollectionCompactInfo {
     pub schema: Option<Schema>,
 }
 
+pub struct CompactionState {
+    pub collection_info: OnceCell<CollectionCompactInfo>,
+    pub context: CompactionContext,
+}
+
 #[derive(Debug)]
 pub struct CompactionContext {
-    pub collection_info: OnceCell<CollectionCompactInfo>,
+    pub input_collection_info: OnceCell<CollectionCompactInfo>,
+    pub output_collection_info: OnceCell<CollectionCompactInfo>,
+    pub attached_function_context: OnceCell<FunctionContext>,
     pub log: Log,
     pub sysdb: SysDb,
     pub blockfile_provider: BlockfileProvider,
@@ -119,7 +131,9 @@ impl Clone for CompactionContext {
     fn clone(&self) -> Self {
         let orchestrator_context = OrchestratorContext::new(self.dispatcher.clone());
         Self {
-            collection_info: self.collection_info.clone(),
+            input_collection_info: self.input_collection_info.clone(),
+            output_collection_info: self.output_collection_info.clone(),
+            attached_function_context: self.attached_function_context.clone(),
             log: self.log.clone(),
             sysdb: self.sysdb.clone(),
             blockfile_provider: self.blockfile_provider.clone(),
@@ -143,6 +157,8 @@ pub enum CompactionError {
     Aborted,
     #[error("Error applying data to segment writers: {0}")]
     ApplyDataError(#[from] ApplyLogsOrchestratorError),
+    #[error("Error executing attached function: {0}")]
+    AttachedFunction(#[from] AttachedFunctionOrchestratorError),
     #[error("Error fetching compaction context: {0}")]
     CompactionContextError(#[from] CompactionContextError),
     #[error("Error fetching logs: {0}")]
@@ -172,7 +188,13 @@ impl ChromaError for CompactionError {
     fn code(&self) -> ErrorCodes {
         match self {
             CompactionError::Aborted => ErrorCodes::Aborted,
-            _ => ErrorCodes::Internal,
+            CompactionError::ApplyDataError(e) => e.code(),
+            CompactionError::AttachedFunction(e) => e.code(),
+            CompactionError::CompactionContextError(e) => e.code(),
+            CompactionError::DataFetchError(e) => e.code(),
+            CompactionError::RegisterError(e) => e.code(),
+            CompactionError::PanicError(e) => e.code(),
+            CompactionError::InvariantViolation(_) => ErrorCodes::Internal,
         }
     }
 
@@ -180,6 +202,7 @@ impl ChromaError for CompactionError {
         match self {
             Self::Aborted => true,
             Self::ApplyDataError(e) => e.should_trace_error(),
+            Self::AttachedFunction(e) => e.should_trace_error(),
             Self::CompactionContextError(e) => e.should_trace_error(),
             Self::DataFetchError(e) => e.should_trace_error(),
             Self::PanicError(e) => e.should_trace_error(),
@@ -225,7 +248,9 @@ impl CompactionContext {
     ) -> Self {
         let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
         CompactionContext {
-            collection_info: OnceCell::new(),
+            input_collection_info: OnceCell::new(),
+            output_collection_info: OnceCell::new(),
+            attached_function_context: OnceCell::new(),
             is_rebuild,
             fetch_log_batch_size,
             max_compaction_size,
@@ -247,35 +272,67 @@ impl CompactionContext {
         self.poison_offset = Some(offset);
     }
 
-    pub fn get_segment_writers(&self) -> Result<CompactWriters, CompactionContextError> {
-        self.get_collection_info()?.writers.clone().ok_or(
-            CompactionContextError::InvariantViolation("Segment writers should have been set"),
+    pub fn get_output_segment_writers(&self) -> Result<CompactWriters, CompactionContextError> {
+        self.get_output_collection_info()?.writers.clone().ok_or(
+            CompactionContextError::InvariantViolation(
+                "Output segment writers should have been set",
+            ),
         )
     }
 
-    pub fn get_collection_info(&self) -> Result<&CollectionCompactInfo, CompactionContextError> {
-        self.collection_info
+    pub fn get_input_segment_writers(&self) -> Result<CompactWriters, CompactionContextError> {
+        self.get_input_collection_info()?.writers.clone().ok_or(
+            CompactionContextError::InvariantViolation(
+                "Input segment writers should have been set",
+            ),
+        )
+    }
+
+    pub fn get_input_collection_info(
+        &self,
+    ) -> Result<&CollectionCompactInfo, CompactionContextError> {
+        self.input_collection_info
             .get()
             .ok_or(CompactionContextError::InvariantViolation(
                 "Collection info should have been set",
             ))
     }
 
-    pub fn get_collection_info_mut(
+    pub fn get_output_collection_info(
+        &self,
+    ) -> Result<&CollectionCompactInfo, CompactionContextError> {
+        self.output_collection_info
+            .get()
+            .ok_or(CompactionContextError::InvariantViolation(
+                "Collection info should have been set",
+            ))
+    }
+
+    pub fn get_input_collection_info_mut(
         &mut self,
     ) -> Result<&mut CollectionCompactInfo, CompactionContextError> {
-        self.collection_info
+        self.input_collection_info
             .get_mut()
             .ok_or(CompactionContextError::InvariantViolation(
                 "Collection info mut should have been set",
             ))
     }
 
-    pub fn get_segment_writer_by_id(
+    pub fn get_output_collection_info_mut(
+        &mut self,
+    ) -> Result<&mut CollectionCompactInfo, CompactionContextError> {
+        self.output_collection_info
+            .get_mut()
+            .ok_or(CompactionContextError::InvariantViolation(
+                "Collection info mut should have been set",
+            ))
+    }
+
+    pub fn get_output_segment_writer_by_id(
         &self,
         segment_id: SegmentUuid,
     ) -> Result<ChromaSegmentWriter<'static>, CompactionContextError> {
-        let writers = self.get_segment_writers()?;
+        let writers = self.get_output_segment_writers()?;
 
         if writers.metadata_writer.id == segment_id {
             return Ok(ChromaSegmentWriter::MetadataSegment(
@@ -330,7 +387,7 @@ impl CompactionContext {
                 let materialized = success.materialized;
                 let collection_info = success.collection_info;
 
-                self.collection_info
+                self.input_collection_info
                     .set(collection_info.clone())
                     .map_err(|_| {
                         CompactionContextError::InvariantViolation("Collection info already set")
@@ -347,10 +404,10 @@ impl CompactionContext {
 
     pub(crate) async fn run_apply_logs(
         &mut self,
-        log_fetch_records: Vec<MaterializeLogOutput>,
+        log_fetch_records: Arc<Vec<MaterializeLogOutput>>,
         system: System,
     ) -> Result<ApplyLogsOrchestratorResponse, ApplyLogsOrchestratorError> {
-        let collection_info = self.get_collection_info()?;
+        let collection_info = self.get_input_collection_info()?;
         if log_fetch_records.is_empty() {
             return Ok(ApplyLogsOrchestratorResponse::new_with_empty_results(
                 collection_info.collection_id.into(),
@@ -359,7 +416,7 @@ impl CompactionContext {
         }
 
         // INVARIANT: Every element of log_fetch_records should be non-empty
-        for mat_logs in &log_fetch_records {
+        for mat_logs in log_fetch_records.iter() {
             if mat_logs.result.is_empty() {
                 return Err(ApplyLogsOrchestratorError::InvariantViolation(
                     "Every element of log_fetch_records should be non-empty",
@@ -379,7 +436,7 @@ impl CompactionContext {
             }
         };
 
-        let collection_info = self.collection_info.get_mut().ok_or(
+        let collection_info = self.output_collection_info.get_mut().ok_or(
             ApplyLogsOrchestratorError::InvariantViolation("Collection info should have been set"),
         )?;
         collection_info.schema = apply_logs_response.schema.clone();
@@ -389,19 +446,159 @@ impl CompactionContext {
         Ok(apply_logs_response)
     }
 
+    // Should be invoked on output collection context
+    pub(crate) async fn run_attached_function(
+        &mut self,
+        data_fetch_records: Arc<Vec<MaterializeLogOutput>>,
+        system: System,
+    ) -> Result<AttachedFunctionOrchestratorResponse, AttachedFunctionOrchestratorError> {
+        let input_collection_info = self.get_input_collection_info()?.clone();
+        let input_collection_info_clone = input_collection_info.clone();
+        println!("num records {}", data_fetch_records.len());
+        let attached_function_orchestrator = AttachedFunctionOrchestrator::new(
+            input_collection_info,
+            self.clone(),
+            self.dispatcher.clone(),
+            data_fetch_records,
+        );
+
+        let attached_function_response = match attached_function_orchestrator.run(system).await {
+            Ok(response) => response,
+            Err(e) => {
+                if e.should_trace_error() {
+                    tracing::error!("Attached function phase failed: {e}");
+                }
+                return Err(e);
+            }
+        };
+
+        // Set the output collection info based on the response
+        match &attached_function_response {
+            AttachedFunctionOrchestratorResponse::NoAttachedFunction { .. } => {
+                self.output_collection_info
+                    .set(input_collection_info_clone)
+                    .map_err(|_| {
+                        AttachedFunctionOrchestratorError::InvariantViolation(
+                            "Collection info should not have been already set".to_string(),
+                        )
+                    })?;
+            }
+            AttachedFunctionOrchestratorResponse::Success {
+                output_collection_info,
+                ..
+            } => {
+                self.output_collection_info
+                    .set(output_collection_info.clone())
+                    .map_err(|_| {
+                        AttachedFunctionOrchestratorError::InvariantViolation(
+                            "Collection info should not have been already set".to_string(),
+                        )
+                    })?;
+            }
+        }
+
+        Ok(attached_function_response)
+    }
+
+    async fn run_attached_function_workflow(
+        mut self,
+        log_fetch_records: Arc<Vec<MaterializeLogOutput>>,
+        system: System,
+    ) -> Result<Option<(FunctionContext, CollectionRegisterInfo)>, CompactionError> {
+        let attached_function_result = self
+            .run_attached_function(log_fetch_records, system.clone())
+            .await?;
+
+        match attached_function_result {
+            AttachedFunctionOrchestratorResponse::NoAttachedFunction { .. } => Ok(None),
+            AttachedFunctionOrchestratorResponse::Success {
+                output_collection_info,
+                job_id,
+                materialized_output,
+                attached_function_id,
+                attached_function_run_nonce,
+                completion_offset,
+            } => {
+                // Update self to use the output collection for apply_logs
+                self.output_collection_info = OnceCell::from(output_collection_info.clone());
+
+                // Apply materialized output to output collection
+                let apply_logs_response = self
+                    .run_apply_logs(Arc::new(materialized_output), system.clone())
+                    .await?;
+
+                let function_context = FunctionContext {
+                    attached_function_id,
+                    function_id: attached_function_id.0,
+                    updated_completion_offset: completion_offset,
+                };
+
+                let collection_register_info = CollectionRegisterInfo {
+                    collection_info: output_collection_info,
+                    flush_results: apply_logs_response.flush_results,
+                    collection_logical_size_bytes: apply_logs_response
+                        .collection_logical_size_bytes,
+                };
+
+                Ok(Some((function_context, collection_register_info)))
+            }
+        }
+    }
+
     pub(crate) async fn run_register(
         &mut self,
-        flush_results: Vec<SegmentFlushInfo>,
-        collection_logical_size_bytes: u64,
+        collection_register_infos: Vec<CollectionRegisterInfo>,
+        function_register_info: Option<FunctionContext>,
         system: System,
     ) -> Result<RegisterOrchestratorResponse, RegisterOrchestratorError> {
         let dispatcher = self.dispatcher.clone();
-        let register_orchestrator = RegisterOrchestrator::new(
-            self,
-            dispatcher,
-            flush_results,
-            collection_logical_size_bytes,
-        );
+
+        if collection_register_infos.is_empty() || collection_register_infos.len() > 2 {
+            return Err(RegisterOrchestratorError::InvariantViolation(
+                "Invalid number of collection register infos",
+            ));
+        }
+
+        if collection_register_infos.len() == 2 {
+            match function_register_info {
+                Some(function_info) => {
+                    let mut iter = collection_register_infos.into_iter();
+                    let first_collection =
+                        iter.next()
+                            .ok_or(RegisterOrchestratorError::InvariantViolation(
+                                "Expected first collection register info",
+                            ))?;
+                    let second_collection =
+                        iter.next()
+                            .ok_or(RegisterOrchestratorError::InvariantViolation(
+                                "Expected second collection register info",
+                            ))?;
+
+                    let register_orchestrator = RegisterOrchestrator::new_with_attached_function(
+                        self.clone(),
+                        dispatcher,
+                        first_collection,
+                        second_collection,
+                        function_info,
+                    );
+                    return register_orchestrator.run(system).await;
+                }
+                None => {
+                    return Err(RegisterOrchestratorError::InvariantViolation(
+                        "Invalid number of function register infos",
+                    ));
+                }
+            }
+        }
+
+        let collection_register_info = collection_register_infos.into_iter().next().ok_or(
+            RegisterOrchestratorError::InvariantViolation(
+                "Expected at least one collection register info",
+            ),
+        )?;
+
+        let register_orchestrator =
+            RegisterOrchestrator::new(self, dispatcher, collection_register_info);
 
         match register_orchestrator.run(system).await {
             Ok(response) => Ok(response),
@@ -433,15 +630,69 @@ impl CompactionContext {
             }
         };
 
-        let apply_logs_response = self
-            .run_apply_logs(log_fetch_records, system.clone())
-            .await?;
+        // Wrap in Arc to avoid cloning large MaterializeLogOutput data
+        let log_fetch_records = Arc::new(log_fetch_records);
+        let log_fetch_records_clone = Arc::clone(&log_fetch_records);
 
+        let mut self_clone_attached = self.clone();
+        let mut self_clone_input = self.clone();
+        let system_clone1 = system.clone();
+        let system_clone2 = system.clone();
+
+        let input_collection_info =
+            self.input_collection_info
+                .get()
+                .ok_or(CompactionError::InvariantViolation(
+                    "Input collection info should not be None",
+                ))?;
+
+        self.output_collection_info
+            .set(input_collection_info.clone())
+            .map_err(|_| {
+                CompactionError::InvariantViolation(
+                    "Collection info should not have been already set",
+                )
+            })?;
+
+        // Parallelize two independent workflows using tokio::spawn to avoid stack overflow
+        // (tokio::join! polls futures on the stack, but these orchestrators are large)
+        // 1. Attached function execution + apply output to output collection
+        // 2. Apply input logs to input collection
+        let attached_handle = tokio::spawn(async move {
+            self_clone_attached
+                .run_attached_function_workflow(log_fetch_records_clone, system_clone1)
+                .await
+        });
+
+        let input_handle = tokio::spawn(async move {
+            self_clone_input
+                .run_apply_logs(log_fetch_records, system_clone2)
+                .await
+        });
+
+        let (attached_result, apply_logs_response) = tokio::join!(attached_handle, input_handle);
+
+        let attached_result = attached_result.map_err(|_| {
+            CompactionError::InvariantViolation("Attached function task panicked")
+        })??;
+        let apply_logs_response = apply_logs_response
+            .map_err(|_| CompactionError::InvariantViolation("Input compaction task panicked"))??;
+
+        // Collect results
+        let mut attached_function_context = None;
+        let mut results: Vec<CollectionRegisterInfo> = Vec::new();
+
+        if let Some((function_context, collection_register_info)) = attached_result {
+            attached_function_context = Some(function_context);
+            results.push(collection_register_info);
+        }
+
+        // Process input collection result
         // Invariant: flush_results is empty => collection_logical_size_bytes == collection_info.collection.size_bytes_post_compaction
         if apply_logs_response.flush_results.is_empty()
             && apply_logs_response.collection_logical_size_bytes
                 != self
-                    .get_collection_info()?
+                    .get_output_collection_info()?
                     .collection
                     .size_bytes_post_compaction
         {
@@ -450,12 +701,14 @@ impl CompactionContext {
             ));
         }
 
-        let _ = Box::pin(self.run_register(
-            apply_logs_response.flush_results,
-            apply_logs_response.collection_logical_size_bytes,
-            system.clone(),
-        ))
-        .await?;
+        results.push(CollectionRegisterInfo {
+            collection_info: self.get_output_collection_info()?.clone(),
+            flush_results: apply_logs_response.flush_results,
+            collection_logical_size_bytes: apply_logs_response.collection_logical_size_bytes,
+        });
+
+        let _ =
+            Box::pin(self.run_register(results, attached_function_context, system.clone())).await?;
 
         Ok(CompactionResponse::Success {
             job_id: collection_id.into(),
@@ -463,7 +716,17 @@ impl CompactionContext {
     }
 
     pub(crate) async fn cleanup(self) {
-        if let Some(collection_info) = self.collection_info.get() {
+        if let Some(collection_info) = self.input_collection_info.get() {
+            if let Some(hnsw_index_uuid) = collection_info.hnsw_index_uuid {
+                let _ = HnswIndexProvider::purge_one_id(
+                    self.hnsw_provider.temporary_storage_path.as_path(),
+                    hnsw_index_uuid,
+                )
+                .await;
+            }
+        }
+
+        if let Some(collection_info) = self.output_collection_info.get() {
             if let Some(hnsw_index_uuid) = collection_info.hnsw_index_uuid {
                 let _ = HnswIndexProvider::purge_one_id(
                     self.hnsw_provider.temporary_storage_path.as_path(),
@@ -533,6 +796,7 @@ mod tests {
     use chroma_log::test::{upsert_generator, TEST_EMBEDDING_DIMENSION};
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
     use tokio::fs;
 
     use chroma_blockstore::arrow::config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES};
@@ -565,6 +829,7 @@ mod tests {
     };
 
     use super::{compact, CompactionContext, CompactionResponse, LogFetchOrchestratorResponse};
+    use crate::execution::orchestration::register_orchestrator::CollectionRegisterInfo;
 
     #[tokio::test]
     async fn test_rebuild() {
@@ -1782,17 +2047,24 @@ mod tests {
             compaction_1_log_records.len()
         );
         let compaction_1_apply_response = compaction_context_1
-            .run_apply_logs(compaction_1_log_records, system.clone())
+            .run_apply_logs(Arc::new(compaction_1_log_records), system.clone())
             .await
             .expect("Apply should have succeeded.");
 
-        let _register_result = Box::pin(compaction_context_1.run_register(
-            compaction_1_apply_response.flush_results,
-            compaction_1_apply_response.collection_logical_size_bytes,
-            system.clone(),
-        ))
-        .await
-        .expect_err("Register should have failed.");
+        let register_info = vec![CollectionRegisterInfo {
+            collection_info: compaction_context_1
+                .get_input_collection_info()
+                .unwrap()
+                .clone(),
+            flush_results: compaction_1_apply_response.flush_results,
+            collection_logical_size_bytes: compaction_1_apply_response
+                .collection_logical_size_bytes,
+        }];
+
+        let _register_result =
+            Box::pin(compaction_context_1.run_register(register_info, None, system.clone()))
+                .await
+                .expect_err("Register should have failed.");
 
         // Verify that the collection was successfully compacted (by whichever succeeded)
         let collection_after_compaction = sysdb

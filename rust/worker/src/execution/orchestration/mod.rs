@@ -1,4 +1,5 @@
 pub mod apply_logs_orchestrator;
+pub mod attached_function_orchestrator;
 pub(crate) mod compact;
 pub(crate) mod count;
 pub mod get;

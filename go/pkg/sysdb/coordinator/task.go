@@ -19,7 +19,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // minimalUUIDv7 represents the smallest possible UUIDv7.
@@ -88,7 +87,7 @@ func (s *Coordinator) validateAttachedFunctionMatchesRequest(ctx context.Context
 	return nil
 }
 
-// AttachFunction creates a new attached function in the database
+// AttachFunction creates an output collection and attached function in a single transaction
 func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.AttachFunctionRequest) (*coordinatorpb.AttachFunctionResponse, error) {
 	log := log.With(zap.String("method", "AttachFunction"))
 
@@ -99,46 +98,10 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 	}
 
 	var attachedFunctionID uuid.UUID = uuid.New()
-	var nextNonce uuid.UUID       // Store next_nonce to avoid re-fetching from DB
-	var lowestLiveNonce uuid.UUID // Store lowest_live_nonce to set in Phase 3
-	var nextRun time.Time
-	var skipPhase2And3 bool // Flag to skip Phase 2 & 3 if task is already fully initialized
+	var nextNonce uuid.UUID
 
-	// ===== Phase 1: Create attached function with lowest_live_nonce = NULL (if needed) =====
+	// ===== Single Transaction: Create output collection and attached function =====
 	err := s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		// Double-check attached function doesn't exist (race condition protection)
-		concurrentAttachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetByName(req.InputCollectionId, req.Name)
-		if err != nil {
-			log.Error("AttachFunction: failed to double-check attached function", zap.Error(err))
-			return err
-		}
-		if concurrentAttachedFunction != nil {
-			// Attached function was created concurrently, validate it matches our request
-			log.Info("AttachFunction: attached function created concurrently, validating parameters",
-				zap.String("attached_function_id", concurrentAttachedFunction.ID.String()))
-
-			// Validate that concurrent attached function matches our request
-			if err := s.validateAttachedFunctionMatchesRequest(txCtx, concurrentAttachedFunction, req); err != nil {
-				return err
-			}
-
-			// Validation passed, reuse the concurrent attached function's data
-			attachedFunctionID = concurrentAttachedFunction.ID
-			nextNonce = concurrentAttachedFunction.NextNonce
-			nextRun = concurrentAttachedFunction.NextRun
-
-			// Set lowestLiveNonce for the concurrent case
-			if concurrentAttachedFunction.LowestLiveNonce != nil {
-				// Already initialized, skip Phase 2 & 3
-				lowestLiveNonce = *concurrentAttachedFunction.LowestLiveNonce
-				skipPhase2And3 = true
-			} else {
-				// Not initialized yet, generate minimal UUIDv7 and continue to Phase 2 & 3
-				lowestLiveNonce = minimalUUIDv7
-			}
-			return nil
-		}
-
 		// Look up database_id
 		databases, err := s.catalog.metaDomain.DatabaseDb(txCtx).GetDatabases(req.TenantId, req.Database)
 		if err != nil {
@@ -161,14 +124,37 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			return common.ErrFunctionNotFound
 		}
 
-		// Generate next_nonce as UUIDv7 with current time
-		nextNonce, err = uuid.NewV7()
-		if err != nil {
+		// Check if attached function already exists (idempotency)
+		existingAttachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetByName(req.InputCollectionId, req.Name)
+		if err != nil && !errors.Is(err, common.ErrAttachedFunctionNotReady) {
+			log.Error("AttachFunction: failed to check for existing attached function", zap.Error(err))
 			return err
 		}
+		if existingAttachedFunction != nil {
+			// Validate that the existing attached function matches the request
+			if err := s.validateAttachedFunctionMatchesRequest(txCtx, existingAttachedFunction, req); err != nil {
+				log.Error("AttachFunction: existing attached function does not match request", zap.Error(err))
+				return err
+			}
 
-		// Set lowest_live_nonce to minimal UUIDv7 (guaranteed < nextNonce)
-		lowestLiveNonce = minimalUUIDv7
+			// If attached function is fully initialized (no error), return it (idempotent)
+			if err == nil {
+				attachedFunctionID = existingAttachedFunction.ID
+				log.Info("AttachFunction: attached function already exists and is complete, returning existing",
+					zap.String("attached_function_id", attachedFunctionID.String()),
+					zap.String("name", req.Name),
+					zap.String("input_collection_id", req.InputCollectionId))
+				return nil
+			}
+
+			// If we got ErrAttachedFunctionNotReady, the attached function is incomplete
+			// Continue with initialization (Phases 2 & 3) to complete it
+			attachedFunctionID = existingAttachedFunction.ID
+			log.Info("AttachFunction: found incomplete attached function, will complete initialization",
+				zap.String("attached_function_id", attachedFunctionID.String()),
+				zap.String("name", req.Name))
+			return nil // Exit transaction, continue with heap push and nonce update
+		}
 
 		// Check if input collection exists
 		collections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections([]string{req.InputCollectionId}, nil, req.TenantId, req.Database, nil, nil, false)
@@ -181,16 +167,65 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			return common.ErrCollectionNotFound
 		}
 
-		// Check if output collection already exists
-		outputCollectionName := req.OutputCollectionName
-		existingOutputCollections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections(nil, &outputCollectionName, req.TenantId, req.Database, nil, nil, false)
+		// Create output collection with segments
+		outputCollectionID := types.NewUniqueID()
+
+		// Set a default dimension to ensure segment writers can be initialized
+		dimension := int32(1) // Default dimension for attached function output collections
+
+		createCollection := &model.CreateCollection{
+			ID:                   outputCollectionID,
+			Name:                 req.OutputCollectionName,
+			ConfigurationJsonStr: `{"hnsw": {"space": "cosine", "M": 16, "ef_construction": 64}}`,
+			DatabaseName:         req.Database,
+			TenantID:             req.TenantId,
+			GetOrCreate:          false, // We want to fail if it already exists
+			Dimension:            &dimension,
+			Metadata:             nil,
+		}
+
+		// Create segments for the collection (distributed setup)
+		segments := []*model.Segment{
+			{
+				ID:           types.NewUniqueID(),
+				Type:         "urn:chroma:segment/vector/hnsw-distributed",
+				Scope:        "VECTOR",
+				CollectionID: outputCollectionID,
+			},
+			{
+				ID:           types.NewUniqueID(),
+				Type:         "urn:chroma:segment/metadata/blockfile",
+				Scope:        "METADATA",
+				CollectionID: outputCollectionID,
+			},
+			{
+				ID:           types.NewUniqueID(),
+				Type:         "urn:chroma:segment/record/blockfile",
+				Scope:        "RECORD",
+				CollectionID: outputCollectionID,
+			},
+		}
+
+		// Create output collection and segments directly to avoid nested transaction
+		outputCollection, _, err := s.catalog.createCollectionImpl(txCtx, createCollection, "", 0)
 		if err != nil {
-			log.Error("AttachFunction: failed to check output collection", zap.Error(err))
+			log.Error("AttachFunction: failed to create output collection", zap.Error(err))
 			return err
 		}
-		if len(existingOutputCollections) > 0 {
-			log.Error("AttachFunction: output collection already exists")
-			return common.ErrCollectionUniqueConstraintViolation
+
+		// Create segments for the collection
+		for _, segment := range segments {
+			_, err := s.catalog.createSegmentImpl(txCtx, segment, 0)
+			if err != nil {
+				log.Error("AttachFunction: failed to create segment", zap.Error(err))
+				return err
+			}
+		}
+
+		// Generate next_nonce as UUIDv7 with current time
+		nextNonce, err = uuid.NewV7()
+		if err != nil {
+			return err
 		}
 
 		// Serialize params
@@ -206,6 +241,7 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			paramsJSON = "{}"
 		}
 
+		// Create attached function with NULL lowest_live_nonce (2-phase commit Phase 1)
 		now := time.Now()
 		attachedFunction := &dbmodel.AttachedFunction{
 			ID:                      attachedFunctionID,
@@ -214,6 +250,7 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			DatabaseID:              databases[0].ID,
 			InputCollectionID:       req.InputCollectionId,
 			OutputCollectionName:    req.OutputCollectionName,
+			OutputCollectionID:      &[]string{outputCollection.ID.String()}[0],
 			FunctionID:              function.ID,
 			FunctionParams:          paramsJSON,
 			CompletionOffset:        0,
@@ -224,11 +261,9 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			CreatedAt:               now,
 			UpdatedAt:               now,
 			NextNonce:               nextNonce,
-			LowestLiveNonce:         nil, // **KEY: Set to NULL for 2PC**
+			LowestLiveNonce:         nil, // NULL in Phase 1, set in Phase 3
 			OldestWrittenNonce:      nil,
 		}
-
-		nextRun = attachedFunction.NextRun
 
 		err = s.catalog.metaDomain.AttachedFunctionDb(txCtx).Insert(attachedFunction)
 		if err != nil {
@@ -236,8 +271,10 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			return err
 		}
 
-		log.Debug("AttachFunction: Phase 1: attached function created with lowest_live_nonce=NULL",
+		log.Debug("AttachFunction: created output collection and attached function in single transaction",
 			zap.String("attached_function_id", attachedFunctionID.String()),
+			zap.String("output_collection_id", outputCollection.ID.String()),
+			zap.String("output_collection_name", req.OutputCollectionName),
 			zap.String("name", req.Name))
 		return nil
 	})
@@ -246,62 +283,10 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 		return nil, err
 	}
 
-	// If function is already fully attached, return immediately (idempotency)
-	if skipPhase2And3 {
-		log.Info("AttachFunction: function already fully attached, skipping Phase 2 & 3",
-			zap.String("attached_function_id", attachedFunctionID.String()))
-		return &coordinatorpb.AttachFunctionResponse{
-			Id: attachedFunctionID.String(),
-		}, nil
-	}
-
-	// ===== Phase 2 =====
-	// This phase runs for both new attached functions and recovered incomplete attached functions
-	log.Debug("AttachFunction: Phase 2: doing initialization work",
-		zap.String("attached_function_id", attachedFunctionID.String()))
-	// Push initial schedule to heap service if enabled
-	if s.heapClient == nil {
-		return nil, common.ErrHeapServiceNotEnabled
-	}
-
-	// Create schedule for the attached function
-	schedule := &coordinatorpb.Schedule{
-		Triggerable: &coordinatorpb.Triggerable{
-			PartitioningUuid: req.InputCollectionId,
-			SchedulingUuid:   attachedFunctionID.String(),
-		},
-		NextScheduled: timestamppb.New(nextRun),
-		Nonce:         lowestLiveNonce.String(),
-	}
-
-	err = s.heapClient.Push(ctx, req.InputCollectionId, []*coordinatorpb.Schedule{schedule})
-	if err != nil {
-		log.Error("AttachFunction: Phase 2: failed to push schedule to heap service",
-			zap.Error(err),
-			zap.String("attached_function_id", attachedFunctionID.String()),
-			zap.String("collection_id", req.InputCollectionId))
-		return nil, err
-	}
-
-	log.Debug("AttachFunction: Phase 2: pushed schedule to heap service",
-		zap.String("attached_function_id", attachedFunctionID.String()),
-		zap.String("collection_id", req.InputCollectionId))
-
-	// ===== Phase 3: Update lowest_live_nonce to complete initialization =====
-	// No database fetch needed - we already have lowestLiveNonce and nextNonce from Phase 1/Recovery
-	err = s.catalog.metaDomain.AttachedFunctionDb(ctx).UpdateLowestLiveNonce(attachedFunctionID, lowestLiveNonce)
-	if err != nil {
-		log.Error("AttachFunction: Phase 3: failed to update lowest_live_nonce", zap.Error(err), zap.String("attached_function_id", attachedFunctionID.String()), zap.String("lowest_live_nonce", lowestLiveNonce.String()))
-		return nil, err
-	}
-
-	log.Debug("AttachFunction: Phase 3: attached function initialization completed",
-		zap.String("attached_function_id", attachedFunctionID.String()),
-		zap.String("lowest_live_nonce", lowestLiveNonce.String()),
-		zap.String("next_nonce", nextNonce.String()))
-
 	return &coordinatorpb.AttachFunctionResponse{
-		Id: attachedFunctionID.String(),
+		AttachedFunction: &coordinatorpb.AttachedFunction{
+			Id: attachedFunctionID.String(),
+		},
 	}, nil
 }
 
@@ -851,76 +836,4 @@ func (s *Coordinator) CleanupExpiredPartialAttachedFunctions(ctx context.Context
 		CleanedUpCount: uint64(len(cleanedAttachedFunctionIDs)),
 		CleanedUpIds:   cleanedAttachedFunctionIDStrings,
 	}, nil
-}
-
-// GetSoftDeletedAttachedFunctions retrieves attached functions that are soft deleted and were updated before the cutoff time
-func (s *Coordinator) GetSoftDeletedAttachedFunctions(ctx context.Context, req *coordinatorpb.GetSoftDeletedAttachedFunctionsRequest) (*coordinatorpb.GetSoftDeletedAttachedFunctionsResponse, error) {
-	log := log.With(zap.String("method", "GetSoftDeletedAttachedFunctions"))
-
-	if req.CutoffTime == nil {
-		log.Error("GetSoftDeletedAttachedFunctions: cutoff_time is required")
-		return nil, status.Errorf(codes.InvalidArgument, "cutoff_time is required")
-	}
-
-	if req.Limit <= 0 {
-		log.Error("GetSoftDeletedAttachedFunctions: limit must be greater than 0")
-		return nil, status.Errorf(codes.InvalidArgument, "limit must be greater than 0")
-	}
-
-	cutoffTime := req.CutoffTime.AsTime()
-	attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetSoftDeletedAttachedFunctions(cutoffTime, req.Limit)
-	if err != nil {
-		log.Error("GetSoftDeletedAttachedFunctions: failed to get soft deleted attached functions", zap.Error(err))
-		return nil, err
-	}
-
-	// Convert to proto response
-	protoAttachedFunctions := make([]*coordinatorpb.AttachedFunction, len(attachedFunctions))
-	for i, af := range attachedFunctions {
-		protoAttachedFunctions[i] = &coordinatorpb.AttachedFunction{
-			Id:                      af.ID.String(),
-			Name:                    af.Name,
-			InputCollectionId:       af.InputCollectionID,
-			OutputCollectionName:    af.OutputCollectionName,
-			CompletionOffset:        uint64(af.CompletionOffset),
-			MinRecordsForInvocation: uint64(af.MinRecordsForInvocation),
-			CreatedAt:               uint64(af.CreatedAt.UnixMicro()),
-			UpdatedAt:               uint64(af.UpdatedAt.UnixMicro()),
-		}
-
-		protoAttachedFunctions[i].NextRunAt = uint64(af.NextRun.UnixMicro())
-		if af.OutputCollectionID != nil {
-			protoAttachedFunctions[i].OutputCollectionId = proto.String(*af.OutputCollectionID)
-		}
-	}
-
-	log.Info("GetSoftDeletedAttachedFunctions: completed successfully",
-		zap.Int("count", len(attachedFunctions)))
-
-	return &coordinatorpb.GetSoftDeletedAttachedFunctionsResponse{
-		AttachedFunctions: protoAttachedFunctions,
-	}, nil
-}
-
-// FinishAttachedFunctionDeletion permanently deletes an attached function from the database (hard delete)
-// This should only be called after the soft delete grace period has passed
-func (s *Coordinator) FinishAttachedFunctionDeletion(ctx context.Context, req *coordinatorpb.FinishAttachedFunctionDeletionRequest) (*coordinatorpb.FinishAttachedFunctionDeletionResponse, error) {
-	log := log.With(zap.String("method", "FinishAttachedFunctionDeletion"))
-
-	attachedFunctionID, err := uuid.Parse(req.AttachedFunctionId)
-	if err != nil {
-		log.Error("FinishAttachedFunctionDeletion: invalid attached_function_id", zap.Error(err))
-		return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
-	}
-
-	err = s.catalog.metaDomain.AttachedFunctionDb(ctx).HardDeleteAttachedFunction(attachedFunctionID)
-	if err != nil {
-		log.Error("FinishAttachedFunctionDeletion: failed to hard delete attached function", zap.Error(err))
-		return nil, err
-	}
-
-	log.Info("FinishAttachedFunctionDeletion: completed successfully",
-		zap.String("attached_function_id", attachedFunctionID.String()))
-
-	return &coordinatorpb.FinishAttachedFunctionDeletionResponse{}, nil
 }

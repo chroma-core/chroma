@@ -10,7 +10,7 @@ use chroma_types::chroma_proto::AdvanceAttachedFunctionRequest;
 use chroma_types::chroma_proto::FinishAttachedFunctionRequest;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments,
+    chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments, CollectionFlushInfo,
     CollectionMetadataUpdate, CountCollectionsError, CreateCollectionError, CreateDatabaseError,
     CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
     DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionByCrnError,
@@ -634,30 +634,13 @@ impl SysDb {
     #[allow(clippy::too_many_arguments)]
     pub async fn flush_compaction_and_attached_function(
         &mut self,
-        tenant_id: String,
-        collection_id: CollectionUuid,
-        log_position: i64,
-        collection_version: i32,
-        segment_flush_info: Arc<[SegmentFlushInfo]>,
-        total_records_post_compaction: u64,
-        size_bytes_post_compaction: u64,
-        schema: Option<Schema>,
+        collections: Vec<CollectionFlushInfo>,
         attached_function_update: AttachedFunctionUpdateInfo,
     ) -> Result<FlushCompactionAndAttachedFunctionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.flush_compaction_and_attached_function(
-                    tenant_id,
-                    collection_id,
-                    log_position,
-                    collection_version,
-                    segment_flush_info,
-                    total_records_post_compaction,
-                    size_bytes_post_compaction,
-                    schema,
-                    attached_function_update,
-                )
-                .await
+                grpc.flush_compaction_and_attached_function(collections, attached_function_update)
+                    .await
             }
             SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
@@ -1702,54 +1685,44 @@ impl GrpcSysDb {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn flush_compaction_and_attached_function(
         &mut self,
-        tenant_id: String,
-        collection_id: CollectionUuid,
-        log_position: i64,
-        collection_version: i32,
-        segment_flush_info: Arc<[SegmentFlushInfo]>,
-        total_records_post_compaction: u64,
-        size_bytes_post_compaction: u64,
-        schema: Option<Schema>,
+        collections: Vec<CollectionFlushInfo>,
         attached_function_update: AttachedFunctionUpdateInfo,
     ) -> Result<FlushCompactionAndAttachedFunctionResponse, FlushCompactionError> {
-        let segment_compaction_info =
-            segment_flush_info
+        // Process all collections into flush compaction requests
+        let mut flush_compactions = Vec::with_capacity(collections.len());
+
+        for collection in collections {
+            let segment_compaction_info = collection
+                .segment_flush_info
                 .iter()
                 .map(|segment_flush_info| segment_flush_info.try_into())
                 .collect::<Result<
                     Vec<chroma_proto::FlushSegmentCompactionInfo>,
                     SegmentFlushInfoConversionError,
-                >>();
+                >>()?;
 
-        let segment_compaction_info = match segment_compaction_info {
-            Ok(segment_compaction_info) => segment_compaction_info,
-            Err(e) => {
-                return Err(FlushCompactionError::SegmentFlushInfoConversionError(e));
-            }
-        };
+            let schema_str = collection.schema.and_then(|s| {
+                serde_json::to_string(&s).ok().or_else(|| {
+                    tracing::error!(
+                        "Failed to serialize schema for flush_compaction_and_attached_function"
+                    );
+                    None
+                })
+            });
 
-        let schema_str = schema.and_then(|s| {
-            serde_json::to_string(&s).ok().or_else(|| {
-                tracing::error!(
-                    "Failed to serialize schema for flush_compaction_and_attached_function"
-                );
-                None
-            })
-        });
-
-        let flush_compaction = Some(chroma_proto::FlushCollectionCompactionRequest {
-            tenant_id,
-            collection_id: collection_id.0.to_string(),
-            log_position,
-            collection_version,
-            segment_compaction_info,
-            total_records_post_compaction,
-            size_bytes_post_compaction,
-            schema_str,
-        });
+            flush_compactions.push(chroma_proto::FlushCollectionCompactionRequest {
+                tenant_id: collection.tenant_id,
+                collection_id: collection.collection_id.0.to_string(),
+                log_position: collection.log_position,
+                collection_version: collection.collection_version,
+                segment_compaction_info,
+                total_records_post_compaction: collection.total_records_post_compaction,
+                size_bytes_post_compaction: collection.size_bytes_post_compaction,
+                schema_str,
+            });
+        }
 
         let attached_function_update_proto = Some(chroma_proto::AttachedFunctionUpdateInfo {
             id: attached_function_update.attached_function_id.0.to_string(),
@@ -1760,7 +1733,7 @@ impl GrpcSysDb {
         });
 
         let req = chroma_proto::FlushCollectionCompactionAndAttachedFunctionRequest {
-            flush_compaction,
+            flush_compactions,
             attached_function_update: attached_function_update_proto,
         };
 
@@ -1943,10 +1916,15 @@ impl GrpcSysDb {
         let response = self.client.attach_function(req).await?.into_inner();
         // Parse the returned attached_function_id - this should always succeed since the server generated it
         // If this fails, it indicates a serious server bug or protocol corruption
+        let attached_function = response.attached_function.ok_or_else(|| {
+            tracing::error!("Server did not return attached function in response");
+            AttachFunctionError::ServerReturnedInvalidData
+        })?;
+
         let attached_function_id = chroma_types::AttachedFunctionUuid(
-            uuid::Uuid::parse_str(&response.id).map_err(|e| {
+            uuid::Uuid::parse_str(&attached_function.id).map_err(|e| {
                 tracing::error!(
-                    attached_function_id = %response.id,
+                    attached_function_id = %attached_function.id,
                     error = %e,
                     "Server returned invalid attached_function_id UUID - attached function was created but response is corrupt"
                 );

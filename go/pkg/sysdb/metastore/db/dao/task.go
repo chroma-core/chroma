@@ -231,7 +231,6 @@ func (s *attachedFunctionDb) UpdateCompletionOffset(id uuid.UUID, runNonce uuid.
 	result := s.db.Model(&dbmodel.AttachedFunction{}).
 		Where("id = ?", id).
 		Where("is_deleted = false").
-		Where("lowest_live_nonce = ?", runNonce). // Ensure we're updating the correct nonce
 		UpdateColumns(map[string]interface{}{
 			"completion_offset": completionOffset,
 			"last_run":          now,
