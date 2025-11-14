@@ -575,7 +575,6 @@ message AttachedFunction {
   uint64 min_records_for_invocation = 9;
   string tenant_id = 10;
   string database_id = 11;
-  uint64 next_run_at = 12;
   uint64 created_at = 15;
   uint64 updated_at = 16;
   string function_id = 17;

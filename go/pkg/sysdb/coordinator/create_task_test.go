@@ -286,7 +286,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 		OutputCollectionName:    outputCollectionName,
 		FunctionID:              functionID,
 		MinRecordsForInvocation: int64(MinRecordsForInvocation),
-		NextRun:                 now,
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}
@@ -425,7 +424,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 		OutputCollectionName:    outputCollectionName,
 		FunctionID:              functionID,
 		MinRecordsForInvocation: int64(MinRecordsForInvocation),
-		NextRun:                 now,
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}
@@ -516,7 +514,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 		OutputCollectionName:    outputCollectionName,
 		FunctionID:              existingOperatorID,
 		MinRecordsForInvocation: int64(MinRecordsForInvocation),
-		NextRun:                 now,
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}
@@ -595,7 +592,6 @@ func TestGetSoftDeletedAttachedFunctions_TimestampConsistency(t *testing.T) {
 			MinRecordsForInvocation: 10,
 			CreatedAt:               testTime,
 			UpdatedAt:               testTime,
-			NextRun:                 testTime,
 		},
 	}
 
@@ -632,9 +628,6 @@ func TestGetSoftDeletedAttachedFunctions_TimestampConsistency(t *testing.T) {
 	if af.UpdatedAt != expectedMicros {
 		t.Errorf("UpdatedAt timestamp mismatch: expected %d microseconds, got %d", expectedMicros, af.UpdatedAt)
 	}
-	if af.NextRunAt != expectedMicros {
-		t.Errorf("NextRunAt timestamp mismatch: expected %d microseconds, got %d", expectedMicros, af.NextRunAt)
-	}
 
 	// Verify these are NOT in seconds (would be ~1000x smaller)
 	expectedSeconds := uint64(testTime.Unix())
@@ -643,9 +636,6 @@ func TestGetSoftDeletedAttachedFunctions_TimestampConsistency(t *testing.T) {
 	}
 	if af.UpdatedAt == expectedSeconds {
 		t.Error("UpdatedAt appears to be in seconds instead of microseconds")
-	}
-	if af.NextRunAt == expectedSeconds {
-		t.Error("NextRunAt appears to be in seconds instead of microseconds")
 	}
 
 	mockMetaDomain.AssertExpectations(t)

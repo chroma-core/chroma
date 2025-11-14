@@ -702,7 +702,6 @@ fn attached_function_to_proto(
         id: attached_function.id.0.to_string(),
         name: attached_function.name.clone(),
         function_name: attached_function.function_id.to_string(),
-        function_id: attached_function.function_id.to_string(),
         input_collection_id: attached_function.input_collection_id.0.to_string(),
         output_collection_name: attached_function.output_collection_name.clone(),
         output_collection_id: attached_function
@@ -714,9 +713,9 @@ fn attached_function_to_proto(
         min_records_for_invocation: attached_function.min_records_for_invocation,
         tenant_id: attached_function.tenant_id.clone(),
         database_id: attached_function.database_id.clone(),
-        next_run_at: system_time_to_micros(attached_function.next_run),
         created_at: system_time_to_micros(attached_function.created_at),
         updated_at: system_time_to_micros(attached_function.updated_at),
+        function_id: attached_function.function_id.to_string(),
     }
 }
 

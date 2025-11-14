@@ -64,7 +64,6 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_Success()
 			DatabaseID:              "db",
 			CompletionOffset:        10,
 			MinRecordsForInvocation: 5,
-			NextRun:                 now,
 			CreatedAt:               now,
 			UpdatedAt:               now,
 		},
@@ -79,7 +78,6 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_Success()
 			DatabaseID:              "db",
 			CompletionOffset:        20,
 			MinRecordsForInvocation: 15,
-			NextRun:                 now,
 			CreatedAt:               now,
 			UpdatedAt:               now,
 		},
@@ -157,7 +155,6 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_FunctionD
 		DatabaseID:              "db",
 		CompletionOffset:        0,
 		MinRecordsForInvocation: 1,
-		NextRun:                 now,
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}
@@ -192,7 +189,6 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_InvalidPa
 		DatabaseID:              "db",
 		CompletionOffset:        0,
 		MinRecordsForInvocation: 1,
-		NextRun:                 now,
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}

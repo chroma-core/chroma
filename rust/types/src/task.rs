@@ -59,9 +59,6 @@ pub struct AttachedFunction {
     /// Timestamp of the last successful function run
     #[serde(skip, default)]
     pub last_run: Option<SystemTime>,
-    /// Timestamp when the attached function should next run
-    #[serde(skip, default = "default_systemtime")]
-    pub next_run: SystemTime,
     /// Completion offset: the WAL position up to which the attached function has processed records
     pub completion_offset: u64,
     /// Minimum number of new records required before the attached function runs again

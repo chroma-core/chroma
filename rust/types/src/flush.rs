@@ -69,7 +69,6 @@ impl ChromaError for AdvanceAttachedFunctionError {
 
 #[derive(Debug, Clone)]
 pub struct AdvanceAttachedFunctionResponse {
-    pub next_run: std::time::SystemTime,
     pub completion_offset: u64,
 }
 
@@ -126,8 +125,6 @@ pub enum FlushCompactionResponseConversionError {
     InvalidUuid,
     #[error("Invalid attached function nonce, valid UUID required")]
     InvalidAttachedFunctionNonce,
-    #[error("Missing next_run timestamp")]
-    MissingNextRun,
     #[error("Invalid timestamp format")]
     InvalidTimestamp,
 }
@@ -139,7 +136,6 @@ impl ChromaError for FlushCompactionResponseConversionError {
             FlushCompactionResponseConversionError::InvalidAttachedFunctionNonce => {
                 ErrorCodes::InvalidArgument
             }
-            FlushCompactionResponseConversionError::MissingNextRun => ErrorCodes::InvalidArgument,
             FlushCompactionResponseConversionError::InvalidTimestamp => ErrorCodes::InvalidArgument,
             FlushCompactionResponseConversionError::DecodeError(e) => e.code(),
         }

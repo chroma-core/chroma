@@ -1743,10 +1743,6 @@ impl GrpcSysDb {
             })?,
         );
 
-        // Parse next_run timestamp from microseconds
-        let next_run = std::time::SystemTime::UNIX_EPOCH
-            + std::time::Duration::from_micros(attached_function.next_run_at);
-
         // Convert params from Struct to JSON string
         let params_str = attached_function.params.map(|s| {
             let json_value = prost_struct_to_json(s);
@@ -1795,7 +1791,6 @@ impl GrpcSysDb {
             tenant_id: attached_function.tenant_id,
             database_id: attached_function.database_id,
             last_run: None,
-            next_run,
             completion_offset: attached_function.completion_offset,
             min_records_for_invocation: attached_function.min_records_for_invocation,
             is_deleted: false,

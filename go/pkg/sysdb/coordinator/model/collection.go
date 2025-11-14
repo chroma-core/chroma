@@ -99,7 +99,6 @@ type FlushCollectionInfo struct {
 	CollectionVersion        int32
 	TenantLastCompactionTime int64
 	// Optional attached function fields (only populated for attached-function-based compactions)
-	AttachedFunctionNextRun          *time.Time
 	AttachedFunctionCompletionOffset *int64
 }
 
