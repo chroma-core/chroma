@@ -122,7 +122,7 @@ func (suite *AttachFunctionTestSuite) setupAttachFunctionMocks(ctx context.Conte
 
 	// Return a matcher function that can be used to capture attached function data
 	return func(attachedFunction *dbmodel.AttachedFunction) bool {
-		return attachedFunction.LowestLiveNonce == nil
+		return true
 	}
 }
 
@@ -236,9 +236,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation_With
 			attachedFunction.FunctionID == functionID &&
 			attachedFunction.TenantID == tenantID &&
 			attachedFunction.DatabaseID == databaseID &&
-			attachedFunction.MinRecordsForInvocation == int64(MinRecordsForInvocation) &&
-			attachedFunction.LowestLiveNonce == nil && // KEY: Must be NULL for 2PC
-			attachedFunction.NextNonce != uuid.Nil
+			attachedFunction.MinRecordsForInvocation == int64(MinRecordsForInvocation)
 	})).Return(nil).Once()
 
 	// Mock the Transaction call itself - it will execute the function
@@ -264,10 +262,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation_With
 			schedule.NextScheduled != nil
 	})).Return(nil).Once()
 
-	// ===== Phase 3: Update lowest_live_nonce =====
-	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("UpdateLowestLiveNonce", mock.AnythingOfType("uuid.UUID"), testMinimalUUIDv7).
-		Return(nil).Once()
 
 	// Execute AttachFunction
 	response, err := suite.coordinator.AttachFunction(ctx, request)
@@ -310,8 +304,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 	databaseID := "database-uuid"
 	functionID := uuid.New()
 	MinRecordsForInvocation := uint64(100)
-	nextNonce := uuid.Must(uuid.NewV7())
-	lowestLiveNonce := uuid.Must(uuid.NewV7())
 
 	params := &structpb.Struct{
 		Fields: map[string]*structpb.Value{
@@ -341,8 +333,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 		OutputCollectionName:    outputCollectionName,
 		FunctionID:              functionID,
 		MinRecordsForInvocation: int64(MinRecordsForInvocation),
-		NextNonce:               nextNonce,
-		LowestLiveNonce:         &lowestLiveNonce, // KEY: Already initialized
 		NextRun:                 now,
 		CreatedAt:               now,
 		UpdatedAt:               now,
@@ -380,11 +370,10 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 	suite.NotNil(response)
 	suite.Equal(existingAttachedFunctionID.String(), response.Id)
 
-	// Verify no writes occurred (no Insert, no UpdateLowestLiveNonce, no heap Push)
+	// Verify no writes occurred (no Insert, no heap Push)
 	// Note: Transaction IS called for idempotency check, but no writes happen inside it
 	suite.mockTxImpl.AssertNumberOfCalls(suite.T(), "Transaction", 1)
 	suite.mockAttachedFunctionDb.AssertNotCalled(suite.T(), "Insert")
-	suite.mockAttachedFunctionDb.AssertNotCalled(suite.T(), "UpdateLowestLiveNonce")
 
 	suite.mockHeapClient.AssertNotCalled(suite.T(), "Push")
 
@@ -415,7 +404,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow_HeapFailur
 	databaseID := "database-uuid"
 	functionID := uuid.New()
 	MinRecordsForInvocation := uint64(100)
-	nextNonce := uuid.Must(uuid.NewV7())
 	now := time.Now()
 
 	params := &structpb.Struct{
@@ -461,9 +449,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow_HeapFailur
 		Return([]*dbmodel.CollectionAndMetadata{}, nil).Once()
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("Insert", mock.MatchedBy(func(attachedFunction *dbmodel.AttachedFunction) bool {
-		return attachedFunction.LowestLiveNonce == nil
-	})).Return(nil).Once()
+	suite.mockAttachedFunctionDb.On("Insert", mock.Anything).Return(nil).Once()
 
 	suite.mockTxImpl.On("Transaction", ctx, mock.AnythingOfType("func(context.Context) error")).
 		Run(func(args mock.Arguments) {
@@ -494,8 +480,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow_HeapFailur
 		OutputCollectionName:    outputCollectionName,
 		FunctionID:              functionID,
 		MinRecordsForInvocation: int64(MinRecordsForInvocation),
-		NextNonce:               nextNonce,
-		LowestLiveNonce:         nil,
 		NextRun:                 now,
 		CreatedAt:               now,
 		UpdatedAt:               now,
@@ -537,10 +521,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow_HeapFailur
 			schedule.NextScheduled != nil
 	})).Return(nil).Once()
 
-	// Phase 3: Update lowest_live_nonce to complete initialization
-	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("UpdateLowestLiveNonce", incompleteAttachedFunctionID, testMinimalUUIDv7).
-		Return(nil).Once()
 
 	// Second AttachFunction call - should succeed
 	response2, err2 := suite.coordinator.AttachFunction(ctx, request)
@@ -576,8 +556,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	databaseID := "database-uuid"
 	existingOperatorID := uuid.New()
 	MinRecordsForInvocation := uint64(100)
-	nextNonce := uuid.Must(uuid.NewV7())
-	lowestLiveNonce := uuid.Must(uuid.NewV7())
 	now := time.Now()
 
 	params := &structpb.Struct{
@@ -607,8 +585,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 		OutputCollectionName:    outputCollectionName,
 		FunctionID:              existingOperatorID,
 		MinRecordsForInvocation: int64(MinRecordsForInvocation),
-		NextNonce:               nextNonce,
-		LowestLiveNonce:         &lowestLiveNonce, // Already initialized
 		NextRun:                 now,
 		CreatedAt:               now,
 		UpdatedAt:               now,
@@ -649,10 +625,9 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	suite.Contains(err.Error(), existingOperatorName)
 	suite.Contains(err.Error(), requestedOperatorName)
 
-	// Verify no writes occurred (Transaction IS called but Insert/Update/Push are not)
+	// Verify no writes occurred (Transaction IS called but Insert/Push are not)
 	suite.mockTxImpl.AssertNumberOfCalls(suite.T(), "Transaction", 1)
 	suite.mockAttachedFunctionDb.AssertNotCalled(suite.T(), "Insert")
-	suite.mockAttachedFunctionDb.AssertNotCalled(suite.T(), "UpdateLowestLiveNonce")
 	suite.mockHeapClient.AssertNotCalled(suite.T(), "Push")
 
 	// Verify read mocks were called

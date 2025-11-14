@@ -34,22 +34,6 @@ else:
 
 if config.tilt_subcommand == "ci":
   custom_build(
-    'heap-tender-service',
-    'docker image tag heap-tender-service:ci $EXPECTED_REF',
-    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
-    disable_push=True
-  )
-else:
-  docker_build(
-    'heap-tender-service',
-    '.',
-    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-    dockerfile='./rust/Dockerfile',
-    target='heap_tender_service'
-  )
-
-if config.tilt_subcommand == "ci":
-  custom_build(
     'sysdb',
     'docker image tag sysdb:ci $EXPECTED_REF',
     ['./go/', './idl/'],

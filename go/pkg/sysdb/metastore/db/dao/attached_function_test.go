@@ -52,7 +52,6 @@ func (suite *AttachedFunctionDbTestSuite) TearDownTest() {
 func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Insert() {
 	attachedFunctionID := uuid.New()
 	functionID := dbmodel.FunctionRecordCounter
-	nextNonce, _ := uuid.NewV7()
 
 	attachedFunction := &dbmodel.AttachedFunction{
 		ID:                      attachedFunctionID,
@@ -64,8 +63,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Insert() {
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
-		NextNonce:               nextNonce,
-		LowestLiveNonce:         &nextNonce,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -86,7 +83,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Insert() {
 func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Insert_DuplicateName() {
 	attachedFunctionID1 := uuid.New()
 	functionID1 := dbmodel.FunctionRecordCounter
-	nextNonce1, _ := uuid.NewV7()
 
 	attachedFunction1 := &dbmodel.AttachedFunction{
 		ID:                      attachedFunctionID1,
@@ -98,8 +94,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Insert_Duplicat
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
-		NextNonce:               nextNonce1,
-		LowestLiveNonce:         &nextNonce1,
 	}
 
 	err := suite.Db.Insert(attachedFunction1)
@@ -108,7 +102,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Insert_Duplicat
 	// Try to insert duplicate (same tenant, database, and name)
 	attachedFunctionID2 := uuid.New()
 	functionID2 := dbmodel.FunctionRecordCounter
-	nextNonce2, _ := uuid.NewV7()
 
 	attachedFunction2 := &dbmodel.AttachedFunction{
 		ID:                      attachedFunctionID2,
@@ -120,8 +113,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Insert_Duplicat
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
-		NextNonce:               nextNonce2,
-		LowestLiveNonce:         &nextNonce2,
 	}
 
 	err = suite.Db.Insert(attachedFunction2)
@@ -135,7 +126,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Insert_Duplicat
 func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName() {
 	attachedFunctionID := uuid.New()
 	functionID := dbmodel.FunctionRecordCounter
-	nextNonce, _ := uuid.NewV7()
 
 	// Insert an attached function
 	attachedFunction := &dbmodel.AttachedFunction{
@@ -148,8 +138,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName() {
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
-		NextNonce:               nextNonce,
-		LowestLiveNonce:         &nextNonce,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -177,7 +165,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName_NotFo
 func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName_IgnoresDeleted() {
 	attachedFunctionID := uuid.New()
 	functionID := dbmodel.FunctionRecordCounter
-	nextNonce, _ := uuid.NewV7()
 
 	// Insert an attached function
 	attachedFunction := &dbmodel.AttachedFunction{
@@ -190,8 +177,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName_Ignor
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
-		NextNonce:               nextNonce,
-		LowestLiveNonce:         &nextNonce,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -213,7 +198,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName_Ignor
 func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_SoftDelete() {
 	attachedFunctionID := uuid.New()
 	functionID := dbmodel.FunctionRecordCounter
-	nextNonce, _ := uuid.NewV7()
 
 	// Insert an attached function
 	attachedFunction := &dbmodel.AttachedFunction{
@@ -226,8 +210,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_SoftDelete() {
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
-		NextNonce:               nextNonce,
-		LowestLiveNonce:         &nextNonce,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -255,9 +237,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_SoftDelete_NotF
 
 func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_DeleteAll() {
 	functionID := dbmodel.FunctionRecordCounter
-	nonce1 := uuid.Must(uuid.NewV7())
-	nonce2 := uuid.Must(uuid.NewV7())
-	nonce3 := uuid.Must(uuid.NewV7())
 
 	// Insert multiple attached functions
 	attachedFunctions := []*dbmodel.AttachedFunction{
@@ -271,8 +250,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_DeleteAll() {
 			TenantID:                "tenant1",
 			DatabaseID:              "db-delete-all",
 			MinRecordsForInvocation: 100,
-			NextNonce:               nonce1,
-			LowestLiveNonce:         &nonce1,
 		},
 		{
 			ID:                      uuid.New(),
@@ -284,8 +261,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_DeleteAll() {
 			TenantID:                "tenant1",
 			DatabaseID:              "db-delete-all",
 			MinRecordsForInvocation: 100,
-			NextNonce:               nonce2,
-			LowestLiveNonce:         &nonce2,
 		},
 		{
 			ID:                      uuid.New(),
@@ -297,8 +272,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_DeleteAll() {
 			TenantID:                "tenant1",
 			DatabaseID:              "db-delete-all",
 			MinRecordsForInvocation: 100,
-			NextNonce:               nonce3,
-			LowestLiveNonce:         &nonce3,
 		},
 	}
 
@@ -327,7 +300,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_DeleteAll() {
 func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID() {
 	attachedFunctionID := uuid.New()
 	functionID := dbmodel.FunctionRecordCounter
-	nextNonce, _ := uuid.NewV7()
 
 	attachedFunction := &dbmodel.AttachedFunction{
 		ID:                      attachedFunctionID,
@@ -339,8 +311,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID() {
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
-		NextNonce:               nextNonce,
-		LowestLiveNonce:         &nextNonce,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -365,7 +335,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID_NotFoun
 func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID_IgnoresDeleted() {
 	attachedFunctionID := uuid.New()
 	functionID := dbmodel.FunctionRecordCounter
-	nextNonce, _ := uuid.NewV7()
 
 	attachedFunction := &dbmodel.AttachedFunction{
 		ID:                      attachedFunctionID,
@@ -377,8 +346,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID_Ignores
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
-		NextNonce:               nextNonce,
-		LowestLiveNonce:         &nextNonce,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -390,150 +357,6 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID_Ignores
 	retrieved, err := suite.Db.GetByID(attachedFunctionID)
 	suite.Require().NoError(err)
 	suite.Require().Nil(retrieved)
-
-	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction.ID)
-}
-
-func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Advance() {
-	attachedFunctionID := uuid.New()
-	functionID := dbmodel.FunctionRecordCounter
-	originalNonce, _ := uuid.NewV7()
-
-	attachedFunction := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test-advance-attachedFunction",
-		FunctionID:              functionID,
-		InputCollectionID:       "input_col_id",
-		OutputCollectionName:    "output_col_name",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		NextNonce:               originalNonce,
-		LowestLiveNonce:         &originalNonce,
-		CurrentAttempts:         3,
-	}
-
-	err := suite.Db.Insert(attachedFunction)
-	suite.Require().NoError(err)
-
-	_, err = suite.Db.Advance(attachedFunctionID, originalNonce, 100, 0)
-	suite.Require().NoError(err)
-
-	retrieved, err := suite.Db.GetByID(attachedFunctionID)
-	suite.Require().NoError(err)
-	suite.Require().NotNil(retrieved)
-	suite.Require().NotEqual(originalNonce, retrieved.NextNonce)
-	suite.Require().NotNil(retrieved.LastRun)
-	suite.Require().Equal(int32(0), retrieved.CurrentAttempts)
-	suite.Require().Equal(int64(100), retrieved.CompletionOffset)
-
-	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction.ID)
-}
-
-func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Advance_InvalidNonce() {
-	attachedFunctionID := uuid.New()
-	functionID := dbmodel.FunctionRecordCounter
-	correctNonce, _ := uuid.NewV7()
-	wrongNonce, _ := uuid.NewV7()
-
-	attachedFunction := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test-advance-attachedFunction-wrong-nonce",
-		FunctionID:              functionID,
-		InputCollectionID:       "input_col_id",
-		OutputCollectionName:    "output_col_name",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		NextNonce:               correctNonce,
-		LowestLiveNonce:         &correctNonce,
-	}
-
-	err := suite.Db.Insert(attachedFunction)
-	suite.Require().NoError(err)
-
-	_, err = suite.Db.Advance(attachedFunctionID, wrongNonce, 0, 0)
-	suite.Require().Error(err)
-	suite.Require().Equal(common.ErrAttachedFunctionNotFound, err)
-
-	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction.ID)
-}
-
-func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Advance_NotFound() {
-	_, err := suite.Db.Advance(uuid.New(), uuid.Must(uuid.NewV7()), 0, 0)
-	suite.Require().Error(err)
-	suite.Require().Equal(common.ErrAttachedFunctionNotFound, err)
-}
-
-func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_UpdateCompletionOffset() {
-	attachedFunctionID := uuid.New()
-	functionID := dbmodel.FunctionRecordCounter
-	originalNonce, _ := uuid.NewV7()
-
-	attachedFunction := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test_update_completion_attachedFunction",
-		FunctionID:              functionID,
-		FunctionParams:          "{}",
-		InputCollectionID:       "input_collection_1",
-		OutputCollectionID:      nil,
-		OutputCollectionName:    "output_collection_1",
-		TenantID:                "tenant_1",
-		DatabaseID:              "database_1",
-		CompletionOffset:        100,
-		MinRecordsForInvocation: 10,
-		NextNonce:               originalNonce,
-		LowestLiveNonce:         &originalNonce,
-	}
-
-	err := suite.Db.Insert(attachedFunction)
-	suite.Require().NoError(err)
-
-	// Update completion offset to 200
-	err = suite.Db.UpdateCompletionOffset(attachedFunctionID, originalNonce, 200)
-	suite.Require().NoError(err)
-
-	// Verify the update
-	retrieved, err := suite.Db.GetByID(attachedFunctionID)
-	suite.Require().NoError(err)
-	suite.Require().Equal(int64(200), retrieved.CompletionOffset)
-	// next_nonce should remain unchanged
-	suite.Require().Equal(originalNonce, retrieved.NextNonce)
-
-	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction.ID)
-}
-
-func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_UpdateCompletionOffset_InvalidNonce() {
-	attachedFunctionID := uuid.New()
-	functionID := dbmodel.FunctionRecordCounter
-	correctNonce, _ := uuid.NewV7()
-	wrongNonce, _ := uuid.NewV7()
-
-	attachedFunction := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test_update_wrong_nonce_attachedFunction",
-		FunctionID:              functionID,
-		FunctionParams:          "{}",
-		InputCollectionID:       "input_collection_1",
-		OutputCollectionID:      nil,
-		OutputCollectionName:    "output_collection_1",
-		TenantID:                "tenant_1",
-		DatabaseID:              "database_1",
-		CompletionOffset:        100,
-		MinRecordsForInvocation: 10,
-		NextNonce:               correctNonce,
-		LowestLiveNonce:         &correctNonce,
-	}
-
-	err := suite.Db.Insert(attachedFunction)
-	suite.Require().NoError(err)
-
-	// Try to update with wrong nonce
-	err = suite.Db.UpdateCompletionOffset(attachedFunctionID, wrongNonce, 200)
-	suite.Require().Error(err)
-	suite.Require().Equal(common.ErrAttachedFunctionNotFound, err)
 
 	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction.ID)
 }

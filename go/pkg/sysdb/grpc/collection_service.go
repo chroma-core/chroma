@@ -3,7 +3,6 @@ package grpc
 import (
 	"context"
 	"encoding/json"
-	"math"
 
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 
@@ -11,11 +10,9 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/types"
-	"github.com/google/uuid"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/emptypb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func (s *Server) ResetState(context.Context, *emptypb.Empty) (*coordinatorpb.ResetStateResponse, error) {
@@ -570,121 +567,6 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		CollectionVersion:  flushCollectionInfo.CollectionVersion,
 		LastCompactionTime: flushCollectionInfo.TenantLastCompactionTime,
 	}
-	return res, nil
-}
-
-func (s *Server) FlushCollectionCompactionAndAttachedFunction(ctx context.Context, req *coordinatorpb.FlushCollectionCompactionAndAttachedFunctionRequest) (*coordinatorpb.FlushCollectionCompactionAndAttachedFunctionResponse, error) {
-	// Parse the flush compaction request (nested message)
-	flushReq := req.GetFlushCompaction()
-	if flushReq == nil {
-		log.Error("FlushCollectionCompactionAndAttachedFunction failed. flush_compaction is nil")
-		return nil, grpcutils.BuildInternalGrpcError("flush_compaction is required")
-	}
-
-	// Parse attached function update info
-	attachedFunctionUpdate := req.GetAttachedFunctionUpdate()
-	if attachedFunctionUpdate == nil {
-		log.Error("FlushCollectionCompactionAndAttachedFunction failed. attached_function_update is nil")
-		return nil, grpcutils.BuildInternalGrpcError("attached_function_update is required")
-	}
-
-	attachedFunctionID, err := uuid.Parse(attachedFunctionUpdate.Id)
-	if err != nil {
-		log.Error("FlushCollectionCompactionAndAttachedFunction failed. error parsing attached_function_id", zap.Error(err), zap.String("attached_function_id", attachedFunctionUpdate.Id))
-		return nil, grpcutils.BuildInternalGrpcError("invalid attached_function_id: " + err.Error())
-	}
-
-	runNonce, err := uuid.Parse(attachedFunctionUpdate.RunNonce)
-	if err != nil {
-		log.Error("FlushCollectionCompactionAndAttachedFunction failed. error parsing run_nonce", zap.Error(err), zap.String("run_nonce", attachedFunctionUpdate.RunNonce))
-		return nil, grpcutils.BuildInternalGrpcError("invalid run_nonce: " + err.Error())
-	}
-
-	// Parse collection and segment info (reuse logic from FlushCollectionCompaction)
-	collectionID, err := types.ToUniqueID(&flushReq.CollectionId)
-	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
-	if err != nil {
-		log.Error("FlushCollectionCompactionAndAttachedFunction failed. error parsing collection id", zap.Error(err), zap.String("collection_id", flushReq.CollectionId))
-		return nil, grpcutils.BuildInternalGrpcError(err.Error())
-	}
-
-	// Validate completion_offset fits in int64 before storing in database
-	if attachedFunctionUpdate.CompletionOffset > uint64(math.MaxInt64) {
-		log.Error("FlushCollectionCompactionAndAttachedFunction: completion_offset too large",
-			zap.Uint64("completion_offset", attachedFunctionUpdate.CompletionOffset))
-		return nil, grpcutils.BuildInternalGrpcError("completion_offset too large")
-	}
-	completionOffsetSigned := int64(attachedFunctionUpdate.CompletionOffset)
-
-	segmentCompactionInfo := make([]*model.FlushSegmentCompaction, 0, len(flushReq.SegmentCompactionInfo))
-	for _, flushSegmentCompaction := range flushReq.SegmentCompactionInfo {
-		segmentID, err := types.ToUniqueID(&flushSegmentCompaction.SegmentId)
-		err = grpcutils.BuildErrorForUUID(segmentID, "segment", err)
-		if err != nil {
-			log.Error("FlushCollectionCompactionAndAttachedFunction failed. error parsing segment id", zap.Error(err), zap.String("collection_id", flushReq.CollectionId))
-			return nil, grpcutils.BuildInternalGrpcError(err.Error())
-		}
-		filePaths := make(map[string][]string)
-		for key, filePath := range flushSegmentCompaction.FilePaths {
-			filePaths[key] = filePath.Paths
-		}
-		segmentCompactionInfo = append(segmentCompactionInfo, &model.FlushSegmentCompaction{
-			ID:        segmentID,
-			FilePaths: filePaths,
-		})
-	}
-
-	flushCollectionCompaction := &model.FlushCollectionCompaction{
-		ID:                         collectionID,
-		TenantID:                   flushReq.TenantId,
-		LogPosition:                flushReq.LogPosition,
-		CurrentCollectionVersion:   flushReq.CollectionVersion,
-		FlushSegmentCompactions:    segmentCompactionInfo,
-		TotalRecordsPostCompaction: flushReq.TotalRecordsPostCompaction,
-		SizeBytesPostCompaction:    flushReq.SizeBytesPostCompaction,
-	}
-
-	flushCollectionInfo, err := s.coordinator.FlushCollectionCompactionAndAttachedFunction(
-		ctx,
-		flushCollectionCompaction,
-		attachedFunctionID,
-		runNonce,
-		completionOffsetSigned,
-	)
-	if err != nil {
-		log.Error("FlushCollectionCompactionAndAttachedFunction failed", zap.Error(err), zap.String("collection_id", flushReq.CollectionId), zap.String("attached_function_id", attachedFunctionUpdate.Id))
-		if err == common.ErrCollectionSoftDeleted {
-			return nil, grpcutils.BuildFailedPreconditionGrpcError(err.Error())
-		}
-		if err == common.ErrAttachedFunctionNotFound {
-			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
-		}
-		return nil, grpcutils.BuildInternalGrpcError(err.Error())
-	}
-
-	res := &coordinatorpb.FlushCollectionCompactionAndAttachedFunctionResponse{
-		CollectionId:       flushCollectionInfo.ID,
-		CollectionVersion:  flushCollectionInfo.CollectionVersion,
-		LastCompactionTime: flushCollectionInfo.TenantLastCompactionTime,
-	}
-
-	// Populate attached function fields with authoritative values from database
-	if flushCollectionInfo.AttachedFunctionNextNonce != nil {
-		res.NextNonce = flushCollectionInfo.AttachedFunctionNextNonce.String()
-	}
-	if flushCollectionInfo.AttachedFunctionNextRun != nil {
-		res.NextRun = timestamppb.New(*flushCollectionInfo.AttachedFunctionNextRun)
-	}
-	if flushCollectionInfo.AttachedFunctionCompletionOffset != nil {
-		// Validate completion_offset is non-negative before converting to uint64
-		if *flushCollectionInfo.AttachedFunctionCompletionOffset < 0 {
-			log.Error("FlushCollectionCompactionAndAttachedFunction: invalid completion_offset",
-				zap.Int64("completion_offset", *flushCollectionInfo.AttachedFunctionCompletionOffset))
-			return nil, grpcutils.BuildInternalGrpcError("attached function has invalid completion_offset")
-		}
-		res.CompletionOffset = uint64(*flushCollectionInfo.AttachedFunctionCompletionOffset)
-	}
-
 	return res, nil
 }
 

@@ -58,14 +58,6 @@ func (s *attachedFunctionDb) GetByName(inputCollectionID string, name string) (*
 		return nil, err
 	}
 
-	// Check if attached function is initialized (lowest_live_nonce must be set after 2PC completion)
-	if attachedFunction.LowestLiveNonce == nil {
-		log.Debug("GetByName: attached function exists but not ready",
-			zap.String("input_collection_id", inputCollectionID),
-			zap.String("name", name))
-		return &attachedFunction, common.ErrAttachedFunctionNotReady
-	}
-
 	return &attachedFunction, nil
 }
 
@@ -84,13 +76,6 @@ func (s *attachedFunctionDb) GetByID(id uuid.UUID) (*dbmodel.AttachedFunction, e
 		return nil, err
 	}
 
-	// Check if attached function is initialized (lowest_live_nonce must be set after 2PC completion)
-	if attachedFunction.LowestLiveNonce == nil {
-		log.Debug("GetByID: attached function exists but not ready",
-			zap.String("id", id.String()))
-		return &attachedFunction, common.ErrAttachedFunctionNotReady
-	}
-
 	return &attachedFunction, nil
 }
 
@@ -99,7 +84,6 @@ func (s *attachedFunctionDb) GetByCollectionID(inputCollectionID string) ([]*dbm
 	err := s.db.
 		Where("input_collection_id = ?", inputCollectionID).
 		Where("is_deleted = ?", false).
-		Where("lowest_live_nonce IS NOT NULL").
 		Find(&attachedFunctions).Error
 
 	if err != nil {
@@ -180,118 +164,15 @@ func (s *attachedFunctionDb) SoftDeleteByID(id uuid.UUID) error {
 	return nil
 }
 
-// Advance updates attached function progress after register function completes
-// This bumps next_nonce and updates completion_offset/next_run
-// Returns the authoritative values from the database
-func (s *attachedFunctionDb) Advance(id uuid.UUID, runNonce uuid.UUID, completionOffset int64, nextRunDelaySecs uint64) (*dbmodel.AdvanceAttachedFunction, error) {
-	nextNonce, err := uuid.NewV7()
-	if err != nil {
-		log.Error("Advance: failed to generate next nonce", zap.Error(err))
-		return nil, err
-	}
-	now := time.Now()
-	// Bump next_nonce to mark a new run, but don't touch lowest_live_nonce yet
-	// lowest_live_nonce will be updated later by finish when verification completes
-	next_run := now.Add(time.Duration(nextRunDelaySecs) * time.Second)
-	result := s.db.Model(&dbmodel.AttachedFunction{}).Where("id = ?", id).Where("is_deleted = false").Where("next_nonce = ?", runNonce).Where("completion_offset <= ?", completionOffset).UpdateColumns(map[string]interface{}{
-		"completion_offset": completionOffset,
-		"next_run":          next_run,
-		"last_run":          now,
-		"next_nonce":        nextNonce,
-		"current_attempts":  0,
-		"updated_at":        gorm.Expr("GREATEST(updated_at, GREATEST(last_run, ?))", now),
-	})
-
-	if result.Error != nil {
-		log.Error("Advance failed", zap.Error(result.Error), zap.String("id", id.String()))
-		return nil, result.Error
-	}
-
-	if result.RowsAffected == 0 {
-		log.Error("Advance: no rows affected", zap.String("id", id.String()))
-		return nil, common.ErrAttachedFunctionNotFound
-	}
-
-	// Return the authoritative values that were written to the database
-	return &dbmodel.AdvanceAttachedFunction{
-		NextNonce:        nextNonce,
-		NextRun:          next_run,
-		CompletionOffset: completionOffset,
-	}, nil
-}
-
-// UpdateCompletionOffset updates ONLY the completion_offset for an attached function
-// This is called during flush_compaction_and_attached_function after work is done
-// NOTE: Does NOT update next_nonce (that was done earlier by Advance)
-func (s *attachedFunctionDb) UpdateCompletionOffset(id uuid.UUID, runNonce uuid.UUID, completionOffset int64) error {
-	now := time.Now()
-	// Update only completion_offset and last_run
-	// Validate that we're updating the correct run by checking lowest_live_nonce = runNonce
-	// This ensures we're updating the completion offset for the exact nonce we're working on
-	result := s.db.Model(&dbmodel.AttachedFunction{}).
-		Where("id = ?", id).
-		Where("is_deleted = false").
-		Where("lowest_live_nonce = ?", runNonce). // Ensure we're updating the correct nonce
-		UpdateColumns(map[string]interface{}{
-			"completion_offset": completionOffset,
-			"last_run":          now,
-			"updated_at":        now,
-		})
-
-	if result.Error != nil {
-		log.Error("UpdateCompletionOffset failed", zap.Error(result.Error), zap.String("id", id.String()))
-		return result.Error
-	}
-
-	if result.RowsAffected == 0 {
-		log.Error("UpdateCompletionOffset: no rows affected - attached function not found or wrong nonce", zap.String("id", id.String()), zap.String("run_nonce", runNonce.String()))
-		return common.ErrAttachedFunctionNotFound
-	}
-
-	return nil
-}
-
-// UpdateLowestLiveNonce updates the lowest_live_nonce for an attached function
-// This is used during initialization (Phase 3 of 2PC create)
-// Only updates if lowest_live_nonce is currently NULL (2PC safety)
-func (s *attachedFunctionDb) UpdateLowestLiveNonce(id uuid.UUID, lowestLiveNonce uuid.UUID) error {
-	now := time.Now()
-	result := s.db.Model(&dbmodel.AttachedFunction{}).
-		Where("id = ?", id).
-		Where("is_deleted = false").
-		Where("lowest_live_nonce IS NULL"). // Only update if still NULL (2PC marker)
-		UpdateColumns(map[string]interface{}{
-			"lowest_live_nonce": lowestLiveNonce,
-			"updated_at":        now,
-		})
-
-	if result.Error != nil {
-		log.Error("UpdateLowestLiveNonce failed", zap.Error(result.Error), zap.String("id", id.String()))
-		return result.Error
-	}
-
-	if result.RowsAffected == 0 {
-		log.Error("UpdateLowestLiveNonce: no rows affected - attached function not found or already initialized", zap.String("id", id.String()))
-		return common.ErrAttachedFunctionNotFound
-	}
-
-	return nil
-}
-
-// Finish updates lowest_live_nonce to mark the current nonce as verified
-// This is called after scout_logs recheck completes
+// Finish marks work as complete
 func (s *attachedFunctionDb) Finish(id uuid.UUID) error {
 	now := time.Now()
-	// Set lowest_live_nonce = next_nonce to indicate this nonce is fully verified
-	// If this fails, lowest_live_nonce < next_nonce will signal that we should skip
-	// execution next time and only run the recheck phase
-	result := s.db.Exec(`
-		UPDATE attached_functions
-		SET lowest_live_nonce = next_nonce,
-			updated_at = ?
-		WHERE id = ?
-			AND is_deleted = false
-	`, now, id)
+	result := s.db.Model(&dbmodel.AttachedFunction{}).
+		Where("id = ?", id).
+		Where("is_deleted = false").
+		UpdateColumns(map[string]interface{}{
+			"updated_at": now,
+		})
 
 	if result.Error != nil {
 		log.Error("Finish failed", zap.Error(result.Error), zap.String("id", id.String()))
@@ -306,21 +187,6 @@ func (s *attachedFunctionDb) Finish(id uuid.UUID) error {
 	return nil
 }
 
-func (s *attachedFunctionDb) PeekScheduleByCollectionId(collectionIDs []string) ([]*dbmodel.AttachedFunction, error) {
-	var attachedFunctions []*dbmodel.AttachedFunction
-	err := s.db.
-		Where("input_collection_id IN ?", collectionIDs).
-		Where("is_deleted = ?", false).
-		Where("lowest_live_nonce IS NOT NULL").
-		Find(&attachedFunctions).Error
-
-	if err != nil {
-		log.Error("PeekScheduleByCollectionId failed", zap.Error(err))
-		return nil, err
-	}
-	return attachedFunctions, nil
-}
-
 // GetMinCompletionOffsetForCollection returns the minimum completion_offset for all non-deleted attached functions
 // with the given input_collection_id. Returns nil if no attached functions exist for the collection.
 func (s *attachedFunctionDb) GetMinCompletionOffsetForCollection(inputCollectionID string) (*int64, error) {
@@ -332,7 +198,6 @@ func (s *attachedFunctionDb) GetMinCompletionOffsetForCollection(inputCollection
 		Select("MIN(completion_offset) as min_offset").
 		Where("input_collection_id = ?", inputCollectionID).
 		Where("is_deleted = ?", false).
-		Where("lowest_live_nonce IS NOT NULL").
 		Scan(&result).Error
 
 	if err != nil {
@@ -355,7 +220,7 @@ func (s *attachedFunctionDb) CleanupExpiredPartial(maxAgeSeconds uint64) ([]uuid
 	// First, find attached functions that match the criteria
 	var attachedFunctions []dbmodel.AttachedFunction
 	err := s.db.
-		Where("lowest_live_nonce IS NULL").
+		Where("output_collection_id IS NULL").
 		Where("is_deleted = ?", false).
 		Where("updated_at < ?", cutoffTime).
 		Find(&attachedFunctions).Error
@@ -398,7 +263,7 @@ func (s *attachedFunctionDb) CleanupExpiredPartial(maxAgeSeconds uint64) ([]uuid
 				is_deleted = true,
 				updated_at = ?
 			WHERE id IN ?
-				AND lowest_live_nonce IS NULL
+				AND output_collection_id IS NULL
 				AND is_deleted = false
 		`, now, batch)
 

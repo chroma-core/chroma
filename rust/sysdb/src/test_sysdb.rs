@@ -693,29 +693,6 @@ impl TestSysDb {
         inner.tenant_resource_names.insert(tenant_id, resource_name);
         Ok(UpdateTenantResponse {})
     }
-
-    pub(crate) async fn peek_schedule_by_collection_id(
-        &mut self,
-        _collection_ids: &[CollectionUuid],
-    ) -> Result<Vec<chroma_types::ScheduleEntry>, crate::sysdb::PeekScheduleError> {
-        Ok(vec![])
-    }
-
-    pub(crate) async fn finish_attached_function(
-        &mut self,
-        task_id: chroma_types::AttachedFunctionUuid,
-    ) -> Result<(), chroma_types::FinishAttachedFunctionError> {
-        let mut inner = self.inner.lock();
-        let attached_function = inner
-            .tasks
-            .get_mut(&task_id)
-            .ok_or(chroma_types::FinishAttachedFunctionError::AttachedFunctionNotFound)?;
-
-        // Update lowest_live_nonce to equal next_nonce
-        // This marks the current epoch as verified and complete
-        attached_function.lowest_live_nonce = Some(attached_function.next_nonce);
-        Ok(())
-    }
 }
 
 fn attached_function_to_proto(
@@ -738,11 +715,6 @@ fn attached_function_to_proto(
         tenant_id: attached_function.tenant_id.clone(),
         database_id: attached_function.database_id.clone(),
         next_run_at: system_time_to_micros(attached_function.next_run),
-        lowest_live_nonce: attached_function
-            .lowest_live_nonce
-            .as_ref()
-            .map(|nonce| nonce.0.to_string()),
-        next_nonce: attached_function.next_nonce.0.to_string(),
         created_at: system_time_to_micros(attached_function.created_at),
         updated_at: system_time_to_micros(attached_function.updated_at),
     }
