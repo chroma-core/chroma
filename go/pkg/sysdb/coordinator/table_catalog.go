@@ -1736,59 +1736,6 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 	return flushCollectionInfo, nil
 }
 
-// FlushCollectionCompactionAndAttachedFunction atomically updates collection compaction data and attached function completion offset.
-// NOTE: This does NOT advance next_nonce - that is done separately by AdvanceAttachedFunction.
-// This only updates the completion_offset to record how far we've processed.
-// This is only supported for versioned collections (the modern/default path).
-func (tc *Catalog) FlushCollectionCompactionAndAttachedFunction(
-	ctx context.Context,
-	flushCollectionCompaction *model.FlushCollectionCompaction,
-	attachedFunctionID uuid.UUID,
-	runNonce uuid.UUID,
-	completionOffset int64,
-) (*model.FlushCollectionInfo, error) {
-	if !tc.versionFileEnabled {
-		// Attached-function-based compactions are only supported with versioned collections
-		log.Error("FlushCollectionCompactionAndAttachedFunction is only supported for versioned collections")
-		return nil, errors.New("attached-function-based compaction requires versioned collections")
-	}
-
-	var flushCollectionInfo *model.FlushCollectionInfo
-
-	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		var err error
-		// Get the transaction from context to pass to FlushCollectionCompactionForVersionedCollection
-		tx := dbcore.GetDB(txCtx)
-		flushCollectionInfo, err = tc.FlushCollectionCompactionForVersionedCollection(txCtx, flushCollectionCompaction, tx)
-		if err != nil {
-			return err
-		}
-
-		// Update ONLY completion_offset - next_nonce was already advanced by AdvanceAttachedFunction
-		// We still validate runNonce to ensure we're updating the correct nonce
-		err = tc.metaDomain.AttachedFunctionDb(txCtx).UpdateCompletionOffset(attachedFunctionID, runNonce, completionOffset)
-		if err != nil {
-			return err
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	// Populate attached function fields with authoritative values from database
-	flushCollectionInfo.AttachedFunctionCompletionOffset = &completionOffset
-
-	log.Info("FlushCollectionCompactionAndAttachedFunction",
-		zap.String("collection_id", flushCollectionCompaction.ID.String()),
-		zap.String("attached_function_id", attachedFunctionID.String()),
-		zap.Int64("completion_offset", completionOffset))
-
-	return flushCollectionInfo, nil
-}
-
 func (tc *Catalog) validateVersionFile(versionFile *coordinatorpb.CollectionVersionFile, collectionID string, version int64) error {
 	if versionFile.GetCollectionInfoImmutable().GetCollectionId() != collectionID {
 		log.Error("collection id mismatch", zap.String("collection_id", collectionID), zap.String("version_file_collection_id", versionFile.GetCollectionInfoImmutable().GetCollectionId()))

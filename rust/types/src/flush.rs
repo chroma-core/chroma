@@ -1,14 +1,11 @@
 use super::{AttachedFunctionUuid, CollectionUuid, ConversionError};
 use crate::{
-    chroma_proto::{
-        FilePaths, FlushCollectionCompactionAndAttachedFunctionResponse, FlushSegmentCompactionInfo,
-    },
+    chroma_proto::{FilePaths, FlushSegmentCompactionInfo},
     SegmentUuid,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use std::collections::HashMap;
 use thiserror::Error;
-use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct SegmentFlushInfo {
@@ -19,7 +16,6 @@ pub struct SegmentFlushInfo {
 #[derive(Debug, Clone)]
 pub struct AttachedFunctionUpdateInfo {
     pub attached_function_id: AttachedFunctionUuid,
-    pub attached_function_run_nonce: uuid::Uuid,
     pub completion_offset: u64,
 }
 
@@ -73,7 +69,6 @@ impl ChromaError for AdvanceAttachedFunctionError {
 
 #[derive(Debug, Clone)]
 pub struct AdvanceAttachedFunctionResponse {
-    pub next_nonce: uuid::Uuid,
     pub next_run: std::time::SystemTime,
     pub completion_offset: u64,
 }
@@ -109,17 +104,6 @@ pub struct FlushCompactionResponse {
     pub last_compaction_time: i64,
 }
 
-#[derive(Debug)]
-pub struct FlushCompactionAndAttachedFunctionResponse {
-    pub collection_id: CollectionUuid,
-    pub collection_version: i32,
-    pub last_compaction_time: i64,
-    // Completion offset updated during register
-    pub completion_offset: u64,
-    // NOTE: next_nonce and next_run are no longer returned
-    // They were already set by PrepareAttachedFunction via advance_attached_function()
-}
-
 impl FlushCompactionResponse {
     pub fn new(
         collection_id: CollectionUuid,
@@ -131,46 +115,6 @@ impl FlushCompactionResponse {
             collection_version,
             last_compaction_time,
         }
-    }
-}
-
-impl TryFrom<FlushCollectionCompactionAndAttachedFunctionResponse> for FlushCompactionResponse {
-    type Error = FlushCompactionResponseConversionError;
-
-    fn try_from(
-        value: FlushCollectionCompactionAndAttachedFunctionResponse,
-    ) -> Result<Self, Self::Error> {
-        let id = Uuid::parse_str(&value.collection_id)
-            .map_err(|_| FlushCompactionResponseConversionError::InvalidUuid)?;
-        Ok(FlushCompactionResponse {
-            collection_id: CollectionUuid(id),
-            collection_version: value.collection_version,
-            last_compaction_time: value.last_compaction_time,
-        })
-    }
-}
-
-impl TryFrom<FlushCollectionCompactionAndAttachedFunctionResponse>
-    for FlushCompactionAndAttachedFunctionResponse
-{
-    type Error = FlushCompactionResponseConversionError;
-
-    fn try_from(
-        value: FlushCollectionCompactionAndAttachedFunctionResponse,
-    ) -> Result<Self, Self::Error> {
-        let id = Uuid::parse_str(&value.collection_id)
-            .map_err(|_| FlushCompactionResponseConversionError::InvalidUuid)?;
-
-        // Note: next_nonce and next_run are no longer populated by the server
-        // They were already set by PrepareAttachedFunction via advance_attached_function()
-        // We only use completion_offset from the response
-
-        Ok(FlushCompactionAndAttachedFunctionResponse {
-            collection_id: CollectionUuid(id),
-            collection_version: value.collection_version,
-            last_compaction_time: value.last_compaction_time,
-            completion_offset: value.completion_offset,
-        })
     }
 }
 

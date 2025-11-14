@@ -6,8 +6,6 @@ use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
-use chroma_types::chroma_proto::AdvanceAttachedFunctionRequest;
-use chroma_types::chroma_proto::FinishAttachedFunctionRequest;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
     chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments,
@@ -18,18 +16,16 @@ use chroma_types::{
     GetDatabaseResponse, GetSegmentsError, GetTenantError, GetTenantResponse,
     InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
     ListAttachedFunctionsError, ListCollectionVersionsError, ListDatabasesError,
-    ListDatabasesResponse, Metadata, ResetError, ResetResponse, ScheduleEntry,
-    ScheduleEntryConversionError, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
-    UpdateCollectionError, UpdateTenantError, UpdateTenantResponse,
+    ListDatabasesResponse, Metadata, ResetError, ResetResponse, SegmentFlushInfo,
+    SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError, UpdateTenantError,
+    UpdateTenantResponse,
 };
 use chroma_types::{
-    AdvanceAttachedFunctionError, AdvanceAttachedFunctionResponse, AttachedFunctionUpdateInfo,
-    AttachedFunctionUuid, BatchGetCollectionSoftDeleteStatusError,
-    BatchGetCollectionVersionFilePathsError, Collection, CollectionConversionError, CollectionUuid,
-    CountForksError, DatabaseUuid, FinishAttachedFunctionError, FinishDatabaseDeletionError,
-    FlushCompactionAndAttachedFunctionResponse, FlushCompactionResponse,
-    FlushCompactionResponseConversionError, ForkCollectionError, Schema, SchemaError, Segment,
-    SegmentConversionError, SegmentScope, Tenant,
+    BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
+    CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
+    FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
+    ForkCollectionError, Schema, SchemaError, Segment, SegmentConversionError, SegmentScope,
+    Tenant,
 };
 use prost_types;
 use std::collections::HashMap;
@@ -631,39 +627,6 @@ impl SysDb {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn flush_compaction_and_attached_function(
-        &mut self,
-        tenant_id: String,
-        collection_id: CollectionUuid,
-        log_position: i64,
-        collection_version: i32,
-        segment_flush_info: Arc<[SegmentFlushInfo]>,
-        total_records_post_compaction: u64,
-        size_bytes_post_compaction: u64,
-        schema: Option<Schema>,
-        attached_function_update: AttachedFunctionUpdateInfo,
-    ) -> Result<FlushCompactionAndAttachedFunctionResponse, FlushCompactionError> {
-        match self {
-            SysDb::Grpc(grpc) => {
-                grpc.flush_compaction_and_attached_function(
-                    tenant_id,
-                    collection_id,
-                    log_position,
-                    collection_version,
-                    segment_flush_info,
-                    total_records_post_compaction,
-                    size_bytes_post_compaction,
-                    schema,
-                    attached_function_update,
-                )
-                .await
-            }
-            SysDb::Sqlite(_) => todo!(),
-            SysDb::Test(_) => todo!(),
-        }
-    }
-
     pub async fn list_collection_versions(
         &mut self,
         collection_id: CollectionUuid,
@@ -720,50 +683,6 @@ impl SysDb {
             SysDb::Grpc(grpc) => grpc.reset().await,
             SysDb::Sqlite(sqlite) => sqlite.reset().await,
             SysDb::Test(_) => todo!(),
-        }
-    }
-
-    pub async fn peek_schedule_by_collection_id(
-        &mut self,
-        collection_ids: &[CollectionUuid],
-    ) -> Result<Vec<ScheduleEntry>, PeekScheduleError> {
-        match self {
-            SysDb::Grpc(grpc) => grpc.peek_schedule_by_collection_id(collection_ids).await,
-            SysDb::Sqlite(_) => unimplemented!(),
-            SysDb::Test(test) => test.peek_schedule_by_collection_id(collection_ids).await,
-        }
-    }
-
-    pub async fn finish_attached_function(
-        &mut self,
-        attached_function_id: AttachedFunctionUuid,
-    ) -> Result<(), FinishAttachedFunctionError> {
-        match self {
-            SysDb::Grpc(grpc) => grpc.finish_attached_function(attached_function_id).await,
-            SysDb::Sqlite(_) => unimplemented!(),
-            SysDb::Test(test) => test.finish_attached_function(attached_function_id).await,
-        }
-    }
-
-    pub async fn advance_attached_function(
-        &mut self,
-        attached_function_id: AttachedFunctionUuid,
-        attached_function_run_nonce: uuid::Uuid,
-        completion_offset: u64,
-        next_run_delay_secs: u64,
-    ) -> Result<AdvanceAttachedFunctionResponse, AdvanceAttachedFunctionError> {
-        match self {
-            SysDb::Grpc(grpc) => {
-                grpc.advance_attached_function(
-                    attached_function_id,
-                    attached_function_run_nonce,
-                    completion_offset,
-                    next_run_delay_secs,
-                )
-                .await
-            }
-            SysDb::Sqlite(_) => unimplemented!(),
-            SysDb::Test(_) => unimplemented!(),
         }
     }
 }
@@ -1702,94 +1621,6 @@ impl GrpcSysDb {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn flush_compaction_and_attached_function(
-        &mut self,
-        tenant_id: String,
-        collection_id: CollectionUuid,
-        log_position: i64,
-        collection_version: i32,
-        segment_flush_info: Arc<[SegmentFlushInfo]>,
-        total_records_post_compaction: u64,
-        size_bytes_post_compaction: u64,
-        schema: Option<Schema>,
-        attached_function_update: AttachedFunctionUpdateInfo,
-    ) -> Result<FlushCompactionAndAttachedFunctionResponse, FlushCompactionError> {
-        let segment_compaction_info =
-            segment_flush_info
-                .iter()
-                .map(|segment_flush_info| segment_flush_info.try_into())
-                .collect::<Result<
-                    Vec<chroma_proto::FlushSegmentCompactionInfo>,
-                    SegmentFlushInfoConversionError,
-                >>();
-
-        let segment_compaction_info = match segment_compaction_info {
-            Ok(segment_compaction_info) => segment_compaction_info,
-            Err(e) => {
-                return Err(FlushCompactionError::SegmentFlushInfoConversionError(e));
-            }
-        };
-
-        let schema_str = schema.and_then(|s| {
-            serde_json::to_string(&s).ok().or_else(|| {
-                tracing::error!(
-                    "Failed to serialize schema for flush_compaction_and_attached_function"
-                );
-                None
-            })
-        });
-
-        let flush_compaction = Some(chroma_proto::FlushCollectionCompactionRequest {
-            tenant_id,
-            collection_id: collection_id.0.to_string(),
-            log_position,
-            collection_version,
-            segment_compaction_info,
-            total_records_post_compaction,
-            size_bytes_post_compaction,
-            schema_str,
-        });
-
-        let attached_function_update_proto = Some(chroma_proto::AttachedFunctionUpdateInfo {
-            id: attached_function_update.attached_function_id.0.to_string(),
-            run_nonce: attached_function_update
-                .attached_function_run_nonce
-                .to_string(),
-            completion_offset: attached_function_update.completion_offset,
-        });
-
-        let req = chroma_proto::FlushCollectionCompactionAndAttachedFunctionRequest {
-            flush_compaction,
-            attached_function_update: attached_function_update_proto,
-        };
-
-        let res = self
-            .client
-            .flush_collection_compaction_and_attached_function(req)
-            .await;
-        match res {
-            Ok(res) => {
-                let res = res.into_inner();
-                let res = match res.try_into() {
-                    Ok(res) => res,
-                    Err(e) => {
-                        return Err(
-                            FlushCompactionError::FlushCompactionResponseConversionError(e),
-                        );
-                    }
-                };
-                Ok(res)
-            }
-            Err(e) => {
-                if e.code() == Code::FailedPrecondition {
-                    return Err(FlushCompactionError::FailedToFlushCompaction(e));
-                }
-                Err(FlushCompactionError::FailedToFlushCompaction(e))
-            }
-        }
-    }
-
     async fn mark_version_for_deletion(
         &mut self,
         epoch_id: i64,
@@ -1834,78 +1665,6 @@ impl GrpcSysDb {
             .await
             .map_err(|e| TonicError(e).boxed())?;
         Ok(ResetResponse {})
-    }
-
-    async fn finish_attached_function(
-        &mut self,
-        attached_function_id: AttachedFunctionUuid,
-    ) -> Result<(), FinishAttachedFunctionError> {
-        let req = FinishAttachedFunctionRequest {
-            id: attached_function_id.0.to_string(),
-        };
-        self.client
-            .finish_attached_function(req)
-            .await
-            .map_err(|e| {
-                if e.code() == Code::NotFound {
-                    FinishAttachedFunctionError::AttachedFunctionNotFound
-                } else {
-                    FinishAttachedFunctionError::FailedToFinishAttachedFunction(e)
-                }
-            })?;
-        Ok(())
-    }
-
-    async fn advance_attached_function(
-        &mut self,
-        attached_function_id: AttachedFunctionUuid,
-        attached_function_run_nonce: uuid::Uuid,
-        completion_offset: u64,
-        next_run_delay_secs: u64,
-    ) -> Result<AdvanceAttachedFunctionResponse, AdvanceAttachedFunctionError> {
-        let req = AdvanceAttachedFunctionRequest {
-            collection_id: None, // Not used by coordinator
-            id: Some(attached_function_id.0.to_string()),
-            run_nonce: Some(attached_function_run_nonce.to_string()),
-            completion_offset: Some(completion_offset),
-            next_run_delay_secs: Some(next_run_delay_secs),
-        };
-
-        let response = self
-            .client
-            .advance_attached_function(req)
-            .await
-            .map_err(|e| {
-                if e.code() == Code::NotFound {
-                    AdvanceAttachedFunctionError::AttachedFunctionNotFound
-                } else {
-                    AdvanceAttachedFunctionError::FailedToAdvanceAttachedFunction(e)
-                }
-            })?;
-
-        let response = response.into_inner();
-
-        // Parse next_nonce
-        let next_nonce = uuid::Uuid::parse_str(&response.next_run_nonce).map_err(|e| {
-            tracing::error!(
-                next_nonce = %response.next_run_nonce,
-                error = %e,
-                "Server returned invalid next_nonce UUID"
-            );
-            AdvanceAttachedFunctionError::FailedToAdvanceAttachedFunction(tonic::Status::internal(
-                "Invalid next_nonce in response",
-            ))
-        })?;
-
-        // Parse next_run timestamp
-        let next_run =
-            std::time::UNIX_EPOCH + std::time::Duration::from_millis(response.next_run_at);
-
-        Ok(AdvanceAttachedFunctionResponse {
-            next_nonce,
-            next_run,
-            completion_offset: response.completion_offset,
-        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1988,34 +1747,6 @@ impl GrpcSysDb {
         let next_run = std::time::SystemTime::UNIX_EPOCH
             + std::time::Duration::from_micros(attached_function.next_run_at);
 
-        // Parse nonces
-        let lowest_live_nonce = match &attached_function.lowest_live_nonce {
-            Some(nonce_str) if !nonce_str.is_empty() => Some(
-                uuid::Uuid::parse_str(nonce_str)
-                    .map(chroma_types::NonceUuid)
-                    .map_err(|e| {
-                        tracing::error!(
-                            lowest_live_nonce = %nonce_str,
-                            error = %e,
-                            "Server returned invalid lowest_live_nonce UUID"
-                        );
-                        GetAttachedFunctionError::ServerReturnedInvalidData
-                    })?,
-            ),
-            _ => None,
-        };
-
-        let next_nonce = uuid::Uuid::parse_str(&attached_function.next_nonce)
-            .map(chroma_types::NonceUuid)
-            .map_err(|e| {
-                tracing::error!(
-                    next_nonce = %attached_function.next_nonce,
-                    error = %e,
-                    "Server returned invalid next_nonce UUID"
-                );
-                GetAttachedFunctionError::ServerReturnedInvalidData
-            })?;
-
         // Convert params from Struct to JSON string
         let params_str = attached_function.params.map(|s| {
             let json_value = prost_struct_to_json(s);
@@ -2065,8 +1796,6 @@ impl GrpcSysDb {
             database_id: attached_function.database_id,
             last_run: None,
             next_run,
-            lowest_live_nonce,
-            next_nonce,
             completion_offset: attached_function.completion_offset,
             min_records_for_invocation: attached_function.min_records_for_invocation,
             is_deleted: false,
@@ -2208,26 +1937,6 @@ impl GrpcSysDb {
         }
     }
 
-    async fn peek_schedule_by_collection_id(
-        &mut self,
-        collection_ids: &[CollectionUuid],
-    ) -> Result<Vec<ScheduleEntry>, PeekScheduleError> {
-        let req = chroma_proto::PeekScheduleByCollectionIdRequest {
-            collection_id: collection_ids.iter().map(|id| id.0.to_string()).collect(),
-        };
-        let res = self
-            .client
-            .peek_schedule_by_collection_id(req)
-            .await
-            .map_err(|e| TonicError(e).boxed())?;
-        res.into_inner()
-            .schedule
-            .into_iter()
-            .map(|entry| entry.try_into())
-            .collect::<Result<Vec<ScheduleEntry>, ScheduleEntryConversionError>>()
-            .map_err(PeekScheduleError::Conversion)
-    }
-
     async fn get_soft_deleted_attached_functions(
         &mut self,
         cutoff_time: SystemTime,
@@ -2289,23 +1998,6 @@ impl GrpcSysDb {
             .map_err(FinishAttachedFunctionDeletionError::FailedToFinishDeletion)?;
 
         Ok(())
-    }
-}
-
-#[derive(Error, Debug)]
-pub enum PeekScheduleError {
-    #[error("Failed to peek schedule")]
-    Internal(#[from] Box<dyn ChromaError>),
-    #[error("Failed to convert schedule entry")]
-    Conversion(#[from] ScheduleEntryConversionError),
-}
-
-impl ChromaError for PeekScheduleError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            PeekScheduleError::Internal(e) => e.code(),
-            PeekScheduleError::Conversion(_) => ErrorCodes::Internal,
-        }
     }
 }
 

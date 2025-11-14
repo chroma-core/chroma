@@ -35,11 +35,6 @@ rustLogService:
   cache:
     hostPath: '/local/cache/chroma-log-service'
     mountPath: '/cache/'
-heapTenderService:
-  enabled: false
-  image:
-    repository: 'heap-tender-service'
-    tag: 'latest'
 queryService:
   image:
     repository: 'query-service'
