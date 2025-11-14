@@ -56,6 +56,8 @@ pub enum IdfError {
     RecordReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error using sparse reader: {0}")]
     SparseReader(#[from] SparseReaderError),
+    #[error("Query tokens length ({tokens}) does not match query indices length ({indices})")]
+    TokenLengthMismatch { tokens: usize, indices: usize },
 }
 
 impl ChromaError for IdfError {
@@ -66,6 +68,7 @@ impl ChromaError for IdfError {
             IdfError::MetadataReader(err) => err.code(),
             IdfError::RecordReader(err) => err.code(),
             IdfError::SparseReader(err) => err.code(),
+            IdfError::TokenLengthMismatch { .. } => chroma_error::ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -164,13 +167,33 @@ impl Operator<IdfInput, IdfOutput> for Idf {
             };
         }
 
-        let scaled_query = SparseVector::from_pairs(self.query.iter().map(|(index, value)| {
-            let nt = nts.get(&index).cloned().unwrap_or_default() as f32;
-            let scale = ((n as f32 - nt + 0.5) / (nt + 0.5)).ln_1p();
-            (index, scale * value)
-        }));
+        fn scale(n: f32, nt: f32) -> f32 {
+            ((n - nt + 0.5) / (nt + 0.5)).ln_1p()
+        }
 
-        Ok(IdfOutput { scaled_query })
+        if let Some(tokens) = self.query.tokens.as_ref() {
+            if tokens.len() != self.query.indices.len() {
+                return Err(IdfError::TokenLengthMismatch {
+                    tokens: tokens.len(),
+                    indices: self.query.indices.len(),
+                });
+            }
+            let scaled_query = SparseVector::from_triples(self.query.iter().enumerate().map(
+                |(token_position, (index, value))| {
+                    let nt = nts.get(&index).cloned().unwrap_or_default() as f32;
+                    let scale = scale(n as f32, nt);
+                    (tokens[token_position].clone(), index, scale * value)
+                },
+            ));
+            Ok(IdfOutput { scaled_query })
+        } else {
+            let scaled_query = SparseVector::from_pairs(self.query.iter().map(|(index, value)| {
+                let nt = nts.get(&index).cloned().unwrap_or_default() as f32;
+                let scale = scale(n as f32, nt);
+                (index, scale * value)
+            }));
+            Ok(IdfOutput { scaled_query })
+        }
     }
 }
 
@@ -201,7 +224,11 @@ mod tests {
 
         metadata.insert(
             "sparse_embedding".to_string(),
-            UpdateMetadataValue::SparseVector(SparseVector { indices, values }),
+            UpdateMetadataValue::SparseVector(SparseVector {
+                indices,
+                values,
+                tokens: None,
+            }),
         );
 
         // Add dummy embedding for materialization (required by TestDistributedSegment)
@@ -258,6 +285,7 @@ mod tests {
         let query_vector = SparseVector {
             indices: vec![0, 1, 2, 3, 4],
             values: vec![1.0, 1.0, 1.0, 1.0, 1.0],
+            tokens: None,
         };
 
         let idf_operator = Idf {
@@ -328,6 +356,7 @@ mod tests {
         let query_vector = SparseVector {
             indices: vec![0, 1, 2],
             values: vec![1.0, 1.0, 1.0],
+            tokens: None,
         };
 
         let idf_operator = Idf {
@@ -383,6 +412,7 @@ mod tests {
                     UpdateMetadataValue::SparseVector(SparseVector {
                         indices: vec![1, 2], // Now has terms 1 and 2 instead
                         values: vec![2.0, 3.0],
+                        tokens: None,
                     }),
                 )])),
                 document: None,
@@ -397,6 +427,7 @@ mod tests {
                     UpdateMetadataValue::SparseVector(SparseVector {
                         indices: vec![0], // Now has term 0 instead
                         values: vec![1.5],
+                        tokens: None,
                     }),
                 )])),
                 document: None,
@@ -409,6 +440,7 @@ mod tests {
         let query_vector = SparseVector {
             indices: vec![0, 1, 2, 3],
             values: vec![1.0, 1.0, 1.0, 1.0],
+            tokens: None,
         };
 
         let idf_operator = Idf {
@@ -456,6 +488,7 @@ mod tests {
                     UpdateMetadataValue::SparseVector(SparseVector {
                         indices: vec![0, 5], // New term 5
                         values: vec![1.0, 2.0],
+                        tokens: None,
                     }),
                 )])),
                 document: Some("Document 11".to_string()),
@@ -470,6 +503,7 @@ mod tests {
                     UpdateMetadataValue::SparseVector(SparseVector {
                         indices: vec![5], // Another doc with term 5
                         values: vec![3.0],
+                        tokens: None,
                     }),
                 )])),
                 document: Some("Document 12".to_string()),
@@ -482,6 +516,7 @@ mod tests {
         let query_vector = SparseVector {
             indices: vec![0, 5],
             values: vec![1.0, 1.0],
+            tokens: None,
         };
 
         let idf_operator = Idf {
@@ -524,6 +559,7 @@ mod tests {
         let query_vector = SparseVector {
             indices: vec![],
             values: vec![],
+            tokens: None,
         };
 
         let idf_operator = Idf {
@@ -549,6 +585,7 @@ mod tests {
         let query_vector = SparseVector {
             indices: vec![99, 100],
             values: vec![1.0, 2.0],
+            tokens: None,
         };
 
         let idf_operator = Idf {
@@ -567,5 +604,30 @@ mod tests {
         assert_eq!(scaled.indices.len(), 2);
         assert!((scaled.values[0] - 3.091).abs() < 0.01);
         assert!((scaled.values[1] - 6.182).abs() < 0.01); // 2.0 * 3.091
+    }
+
+    #[tokio::test]
+    async fn test_idf_tokens_length_mismatch_returns_error() {
+        let (_test_segment, input) = Box::pin(setup_idf_input(1, vec![])).await;
+
+        let query_vector = SparseVector {
+            indices: vec![0, 1],
+            values: vec![1.0, 1.0],
+            tokens: Some(vec!["only_one_token".to_string()]),
+        };
+
+        let idf_operator = Idf {
+            query: query_vector,
+            key: "sparse_embedding".to_string(),
+        };
+
+        let result = idf_operator.run(&input).await;
+        assert!(matches!(
+            result,
+            Err(IdfError::TokenLengthMismatch {
+                tokens: 1,
+                indices: 2
+            })
+        ));
     }
 }

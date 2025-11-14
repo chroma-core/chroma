@@ -2669,6 +2669,7 @@ mod test {
                 UpdateMetadataValue::SparseVector(chroma_types::SparseVector::new(
                     vec![0, 5, 10],
                     vec![0.1, 0.5, 0.9],
+                    None,
                 )),
             );
             update_metadata1.insert(
