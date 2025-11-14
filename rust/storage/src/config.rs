@@ -4,12 +4,17 @@ use serde::{Deserialize, Serialize};
 /// The configuration for the chosen storage.
 /// # Options
 /// - S3: The configuration for the s3 storage.
+/// - GCS: The configuration for the Google Cloud Storage.
+/// - Local: The configuration for local filesystem storage.
+/// - AdmissionControlledS3: S3 with rate limiting and request coalescing.
 /// # Notes
 /// See config.rs in the root of the worker crate for an example of how to use
 /// config files to configure the worker.
 pub enum StorageConfig {
     #[serde(alias = "s3")]
     S3(S3StorageConfig),
+    #[serde(alias = "gcs")]
+    GCS(GcsStorageConfig),
     #[serde(alias = "local")]
     Local(LocalStorageConfig),
     #[serde(alias = "admissioncontrolleds3")]
@@ -154,5 +159,78 @@ pub enum RateLimitingConfig {
 impl Default for RateLimitingConfig {
     fn default() -> Self {
         RateLimitingConfig::CountBasedPolicy(CountBasedPolicyConfig::default())
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+/// The configuration for the GCS storage type
+/// # Fields
+/// - bucket: The name of the bucket to use.
+/// - project_id: GCS project ID. Defaults to "_" which lets GCS infer from the globally unique bucket name.
+/// - connect_timeout_ms: Connection timeout in milliseconds.
+/// - request_timeout_ms: Request timeout in milliseconds.
+/// - request_retry_count: Number of retry attempts for failed requests.
+/// - resumable_upload_threshold_bytes: Size threshold for switching to resumable uploads.
+/// - resumable_upload_buffer_size_bytes: Buffer size for resumable uploads.
+/// # Notes
+/// - Authentication uses Application Default Credentials (ADC) automatically.
+pub struct GcsStorageConfig {
+    #[serde(default = "GcsStorageConfig::default_bucket")]
+    pub bucket: String,
+    #[serde(default = "GcsStorageConfig::default_project_id")]
+    pub project_id: String,
+    #[serde(default = "GcsStorageConfig::default_connect_timeout_ms")]
+    pub connect_timeout_ms: u64,
+    #[serde(default = "GcsStorageConfig::default_request_timeout_ms")]
+    pub request_timeout_ms: u64,
+    #[serde(default = "GcsStorageConfig::default_request_retry_count")]
+    pub request_retry_count: u32,
+    #[serde(default = "GcsStorageConfig::default_resumable_upload_threshold_bytes")]
+    pub resumable_upload_threshold_bytes: usize,
+    #[serde(default = "GcsStorageConfig::default_resumable_upload_buffer_size_bytes")]
+    pub resumable_upload_buffer_size_bytes: usize,
+}
+
+impl GcsStorageConfig {
+    fn default_bucket() -> String {
+        "chroma-storage".to_string()
+    }
+
+    fn default_project_id() -> String {
+        "_".to_string()
+    }
+
+    fn default_connect_timeout_ms() -> u64 {
+        5000
+    }
+
+    fn default_request_timeout_ms() -> u64 {
+        60000
+    }
+
+    fn default_request_retry_count() -> u32 {
+        3
+    }
+
+    fn default_resumable_upload_threshold_bytes() -> usize {
+        8 * 1024 * 1024
+    }
+
+    fn default_resumable_upload_buffer_size_bytes() -> usize {
+        16 * 1024 * 1024
+    }
+}
+
+impl Default for GcsStorageConfig {
+    fn default() -> Self {
+        GcsStorageConfig {
+            bucket: Self::default_bucket(),
+            project_id: Self::default_project_id(),
+            connect_timeout_ms: Self::default_connect_timeout_ms(),
+            request_timeout_ms: Self::default_request_timeout_ms(),
+            request_retry_count: Self::default_request_retry_count(),
+            resumable_upload_threshold_bytes: Self::default_resumable_upload_threshold_bytes(),
+            resumable_upload_buffer_size_bytes: Self::default_resumable_upload_buffer_size_bytes(),
+        }
     }
 }
