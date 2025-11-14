@@ -1,9 +1,19 @@
+//! Google Cloud Storage (GCS) backend implementation.
+//!
+//! ## ETag Implementation Note
+//!
+//! GCS uses generation numbers (i64) for versioning and conditional operations, not ETags.
+//! This implementation stores generation numbers as ETags by converting them to strings.
+//! This allows conditional operations like `if_match` to work correctly with GCS's API,
+//! which requires generation numbers for preconditions (`set_if_generation_match`).
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use google_cloud_gax::{
+    error::rpc::Code,
     exponential_backoff::ExponentialBackoff,
     retry_policy::{AlwaysRetry, RetryPolicyExt},
 };
@@ -14,6 +24,48 @@ use crate::{
     s3::DeletedObjects,
     DeleteOptions, ETag, GetOptions, PutOptions, StorageConfigError, StorageError,
 };
+
+fn from_gcs_error_with_path(e: google_cloud_storage::Error, path: &str) -> StorageError {
+    if let Some(status) = e.status() {
+        match status.code {
+            Code::NotFound => {
+                return StorageError::NotFound {
+                    path: path.to_string(),
+                    source: Arc::new(e),
+                }
+            }
+            Code::AlreadyExists => {
+                return StorageError::AlreadyExists {
+                    path: path.to_string(),
+                    source: Arc::new(e),
+                }
+            }
+            Code::FailedPrecondition => {
+                return StorageError::Precondition {
+                    path: path.to_string(),
+                    source: Arc::new(e),
+                }
+            }
+            Code::ResourceExhausted => return StorageError::Backoff,
+            Code::PermissionDenied => {
+                return StorageError::PermissionDenied {
+                    path: path.to_string(),
+                    source: Arc::new(e),
+                }
+            }
+            Code::Unauthenticated => {
+                return StorageError::Unauthenticated {
+                    path: path.to_string(),
+                    source: Arc::new(e),
+                }
+            }
+            _ => {}
+        }
+    }
+    StorageError::Generic {
+        source: Arc::new(e),
+    }
+}
 
 #[derive(Clone)]
 pub struct GcsStorage {
@@ -65,8 +117,19 @@ impl GcsStorage {
         })
     }
 
-    pub async fn confirm_same(&self, _key: &str, _e_tag: &ETag) -> Result<bool, StorageError> {
-        Err(StorageError::NotImplemented)
+    pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
+        let object = self
+            .control_client
+            .get_object()
+            .set_bucket(&self.bucket_path)
+            .set_object(key)
+            .send()
+            .await
+            .map_err(|e| from_gcs_error_with_path(e, key))?;
+
+        // ETag is stored as generation number (see module docs)
+        let generation_str = object.generation.to_string();
+        Ok(generation_str == e_tag.0)
     }
 
     pub async fn get(&self, key: &str, _options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
@@ -82,34 +145,22 @@ impl GcsStorage {
             .read_object(&self.bucket_path, key)
             .send()
             .await
-            .map_err(|e| {
-                let err_string = e.to_string();
-                if err_string.contains("404") || err_string.contains("NotFound") {
-                    StorageError::NotFound {
-                        path: key.to_string(),
-                        source: Arc::new(e),
-                    }
-                } else {
-                    StorageError::Generic {
-                        source: Arc::new(e),
-                    }
-                }
-            })?;
+            .map_err(|e| from_gcs_error_with_path(e, key))?;
+
+        // Store generation number as ETag (see module docs)
+        let generation = response.object().generation;
 
         let mut contents = Vec::new();
-        while let Some(chunk) =
-            response
-                .next()
-                .await
-                .transpose()
-                .map_err(|e| StorageError::Generic {
-                    source: Arc::new(e),
-                })?
+        while let Some(chunk) = response
+            .next()
+            .await
+            .transpose()
+            .map_err(|e| from_gcs_error_with_path(e, key))?
         {
             contents.extend_from_slice(&chunk);
         }
 
-        Ok((Arc::new(contents), None))
+        Ok((Arc::new(contents), Some(ETag(generation.to_string()))))
     }
 
     pub async fn put_bytes(
@@ -119,17 +170,15 @@ impl GcsStorage {
         _options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
         let bytes_data = bytes::Bytes::from(bytes);
-        let _response = self
+        let response = self
             .client
             .write_object(&self.bucket_path, key, bytes_data)
             .send_buffered()
             .await
-            .map_err(|e| StorageError::Generic {
-                source: Arc::new(e),
-            })?;
+            .map_err(|e| from_gcs_error_with_path(e, key))?;
 
-        // Note: generation/metageneration would be in response but not easily accessible
-        Ok(None)
+        // Store generation number as ETag (see module docs)
+        Ok(Some(ETag(response.generation.to_string())))
     }
 
     pub async fn put_file(
@@ -153,19 +202,7 @@ impl GcsStorage {
             .set_object(key)
             .send()
             .await
-            .map_err(|e| {
-                let err_string = e.to_string();
-                if err_string.contains("404") || err_string.contains("NotFound") {
-                    StorageError::NotFound {
-                        path: key.to_string(),
-                        source: Arc::new(e),
-                    }
-                } else {
-                    StorageError::Generic {
-                        source: Arc::new(e),
-                    }
-                }
-            })?;
+            .map_err(|e| from_gcs_error_with_path(e, key))?;
         Ok(())
     }
 
@@ -210,9 +247,7 @@ impl GcsStorage {
             .set_prefix(prefix)
             .send()
             .await
-            .map_err(|e| StorageError::Generic {
-                source: Arc::new(e),
-            })?;
+            .map_err(|e| from_gcs_error_with_path(e, prefix))?;
 
         let keys: Vec<String> = response.objects.into_iter().map(|obj| obj.name).collect();
 
