@@ -174,8 +174,61 @@ impl ChromaError for StorageError {
             StorageError::PermissionDenied { .. } => ErrorCodes::PermissionDenied,
             StorageError::Unauthenticated { .. } => ErrorCodes::Unauthenticated,
             StorageError::UnknownConfigurationKey { .. } => ErrorCodes::InvalidArgument,
-            StorageError::Backoff { .. } => ErrorCodes::ResourceExhausted,
+            StorageError::Backoff => ErrorCodes::ResourceExhausted,
             StorageError::CallbackError { .. } => ErrorCodes::Internal,
+        }
+    }
+}
+
+impl From<object_store::Error> for StorageError {
+    fn from(e: object_store::Error) -> Self {
+        match e {
+            object_store::Error::NotFound { path, source } => StorageError::NotFound {
+                path,
+                source: source.into(),
+            },
+            object_store::Error::AlreadyExists { path, source } => StorageError::AlreadyExists {
+                path,
+                source: source.into(),
+            },
+            object_store::Error::Precondition { path, source } => StorageError::Precondition {
+                path,
+                source: source.into(),
+            },
+            object_store::Error::NotModified { path, source } => StorageError::NotModified {
+                path,
+                source: source.into(),
+            },
+            object_store::Error::PermissionDenied { path, source } => {
+                StorageError::PermissionDenied {
+                    path,
+                    source: source.into(),
+                }
+            }
+            object_store::Error::Unauthenticated { path, source } => {
+                StorageError::Unauthenticated {
+                    path,
+                    source: source.into(),
+                }
+            }
+            object_store::Error::NotSupported { source } => StorageError::NotSupported {
+                source: source.into(),
+            },
+            object_store::Error::InvalidPath { source } => StorageError::Generic {
+                source: Arc::new(source),
+            },
+            object_store::Error::Generic { store, source } => StorageError::Generic {
+                source: Arc::new(std::io::Error::other(format!("{}: {}", store, source))),
+            },
+            object_store::Error::JoinError { source } => StorageError::Generic {
+                source: Arc::new(source),
+            },
+            object_store::Error::UnknownConfigurationKey { store, key } => {
+                StorageError::UnknownConfigurationKey { store, key }
+            }
+            _ => StorageError::Generic {
+                source: Arc::new(e),
+            },
         }
     }
 }
@@ -193,8 +246,6 @@ pub enum PathError {
         source: std::str::Utf8Error,
     },
 }
-
-// END BORROWED CODE
 
 #[derive(Error, Debug)]
 pub enum StorageConfigError {

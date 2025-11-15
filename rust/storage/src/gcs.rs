@@ -1,24 +1,21 @@
-//! Google Cloud Storage (GCS) backend implementation.
+//! Google Cloud Storage (GCS) backend implementation using object_store.
 //!
 //! ## ETag Implementation Note
-//!
-//! GCS uses generation numbers (i64) for versioning and conditional operations, not ETags.
-//! This implementation stores generation numbers as ETags by converting them to strings.
-//! This allows conditional operations like `if_match` to work correctly with GCS's API,
-//! which requires generation numbers for preconditions (`set_if_generation_match`).
-
+//! The `UpdateVersion` struct is serialized to JSON and stored as an ETag string.
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
-use futures::stream::{self, StreamExt};
-use google_cloud_gax::{
-    error::rpc::Code,
-    exponential_backoff::ExponentialBackoff,
-    retry_policy::{AlwaysRetry, RetryPolicyExt},
+use futures::stream::{self, StreamExt, TryStreamExt};
+use object_store::{
+    gcp::{GoogleCloudStorage, GoogleCloudStorageBuilder},
+    path::Path as ObjectPath,
+    ObjectStore, PutMode, PutOptions as ObjectStorePutOptions, PutPayload, UpdateVersion,
 };
-use google_cloud_storage::client::{Storage, StorageControl};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{GcsStorageConfig, StorageConfig},
@@ -26,65 +23,82 @@ use crate::{
     DeleteOptions, ETag, GetOptions, PutOptions, StorageConfigError, StorageError,
 };
 
-fn from_gcs_error_with_path(e: google_cloud_storage::Error, path: &str) -> StorageError {
-    if let Some(status) = e.status() {
-        match status.code {
-            Code::NotFound => {
-                return StorageError::NotFound {
-                    path: path.to_string(),
-                    source: Arc::new(e),
-                }
-            }
-            Code::AlreadyExists => {
-                return StorageError::AlreadyExists {
-                    path: path.to_string(),
-                    source: Arc::new(e),
-                }
-            }
-            Code::FailedPrecondition => {
-                return StorageError::Precondition {
-                    path: path.to_string(),
-                    source: Arc::new(e),
-                }
-            }
-            Code::ResourceExhausted => return StorageError::Backoff,
-            Code::PermissionDenied => {
-                return StorageError::PermissionDenied {
-                    path: path.to_string(),
-                    source: Arc::new(e),
-                }
-            }
-            Code::Unauthenticated => {
-                return StorageError::Unauthenticated {
-                    path: path.to_string(),
-                    source: Arc::new(e),
-                }
-            }
-            _ => {}
+/// Serializable wrapper for UpdateVersion
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SerializableUpdateVersion {
+    e_tag: Option<String>,
+    version: Option<String>,
+}
+
+impl From<UpdateVersion> for SerializableUpdateVersion {
+    fn from(uv: UpdateVersion) -> Self {
+        Self {
+            e_tag: uv.e_tag,
+            version: uv.version,
         }
     }
-    StorageError::Generic {
-        source: Arc::new(e),
+}
+
+impl From<SerializableUpdateVersion> for UpdateVersion {
+    fn from(suv: SerializableUpdateVersion) -> Self {
+        Self {
+            e_tag: suv.e_tag,
+            version: suv.version,
+        }
+    }
+}
+
+/// Convert UpdateVersion to ETag via serialization
+impl TryFrom<&UpdateVersion> for ETag {
+    type Error = StorageError;
+
+    fn try_from(uv: &UpdateVersion) -> Result<Self, Self::Error> {
+        let serializable: SerializableUpdateVersion = uv.clone().into();
+        serde_json::to_string(&serializable)
+            .map(ETag)
+            .map_err(|e| StorageError::Generic {
+                source: Arc::new(e),
+            })
+    }
+}
+
+/// Convert ETag to UpdateVersion via deserialization
+impl TryFrom<&ETag> for UpdateVersion {
+    type Error = StorageError;
+
+    fn try_from(etag: &ETag) -> Result<Self, Self::Error> {
+        let serializable: SerializableUpdateVersion =
+            serde_json::from_str(&etag.0).map_err(|e| StorageError::Generic {
+                source: Arc::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("Invalid ETag format: {}", e),
+                )),
+            })?;
+        Ok(serializable.into())
     }
 }
 
 #[derive(Clone)]
 pub struct GcsStorage {
     pub(crate) bucket: String,
-    pub(crate) bucket_path: String, // Full path: projects/{project}/buckets/{bucket}
-    pub(super) client: Storage,
-    pub(super) control_client: StorageControl,
+    pub(super) store: Arc<GoogleCloudStorage>,
 }
 
 impl GcsStorage {
     pub async fn new(config: &GcsStorageConfig) -> Result<Self, Box<dyn ChromaError>> {
-        let client = Storage::builder()
-            .with_retry_policy(AlwaysRetry.with_attempt_limit(config.request_retry_count))
-            .with_backoff_policy(ExponentialBackoff::default())
-            .with_resumable_upload_threshold(config.resumable_upload_threshold_bytes)
-            .with_resumable_upload_buffer_size(config.resumable_upload_buffer_size_bytes)
+        let store = GoogleCloudStorageBuilder::new()
+            .with_bucket_name(&config.bucket)
+            .with_retry(object_store::RetryConfig {
+                max_retries: config.request_retry_count,
+                retry_timeout: Duration::from_millis(config.request_timeout_ms),
+                ..Default::default()
+            })
+            .with_client_options(
+                object_store::ClientOptions::new()
+                    .with_timeout(Duration::from_millis(config.request_timeout_ms))
+                    .with_connect_timeout(Duration::from_millis(config.connect_timeout_ms)),
+            )
             .build()
-            .await
             .map_err(|e| {
                 Box::new(StorageConfigError::FailedToCreateBucket(format!(
                     "Failed to create GCS client: {}",
@@ -92,45 +106,24 @@ impl GcsStorage {
                 ))) as Box<dyn ChromaError>
             })?;
 
-        let control_client = StorageControl::builder()
-            .with_retry_policy(AlwaysRetry.with_attempt_limit(config.request_retry_count))
-            .with_backoff_policy(ExponentialBackoff::default())
-            .build()
-            .await
-            .map_err(|e| {
-                Box::new(StorageConfigError::FailedToCreateBucket(format!(
-                    "Failed to create GCS control client: {}",
-                    e
-                ))) as Box<dyn ChromaError>
-            })?;
-
-        let bucket_path = if config.project_id == "_" {
-            format!("projects/_/buckets/{}", config.bucket)
-        } else {
-            format!("projects/{}/buckets/{}", config.project_id, config.bucket)
-        };
-
         Ok(GcsStorage {
             bucket: config.bucket.clone(),
-            bucket_path,
-            client,
-            control_client,
+            store: Arc::new(store),
         })
     }
 
     pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
-        let object = self
-            .control_client
-            .get_object()
-            .set_bucket(&self.bucket_path)
-            .set_object(key)
-            .send()
-            .await
-            .map_err(|e| from_gcs_error_with_path(e, key))?;
+        let path = ObjectPath::from(key);
+        let metadata = self.store.head(&path).await?;
 
-        // ETag is stored as generation number (see module docs)
-        let generation_str = object.generation.to_string();
-        Ok(generation_str == e_tag.0)
+        // Serialize metadata's e_tag/version into UpdateVersion for comparison
+        let current_update_version = UpdateVersion {
+            e_tag: metadata.e_tag.clone(),
+            version: metadata.version.clone(),
+        };
+
+        let current_etag: ETag = (&current_update_version).try_into()?;
+        Ok(current_etag.0 == e_tag.0)
     }
 
     pub async fn get(&self, key: &str, _options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
@@ -141,27 +134,20 @@ impl GcsStorage {
         &self,
         key: &str,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        let mut response = self
-            .client
-            .read_object(&self.bucket_path, key)
-            .send()
-            .await
-            .map_err(|e| from_gcs_error_with_path(e, key))?;
+        let path = ObjectPath::from(key);
+        let result = self.store.get(&path).await?;
 
-        // Store generation number as ETag (see module docs)
-        let generation = response.object().generation;
+        // Serialize e_tag and version from metadata
+        let update_version = UpdateVersion {
+            e_tag: result.meta.e_tag.clone(),
+            version: result.meta.version.clone(),
+        };
 
-        let mut contents = Vec::new();
-        while let Some(chunk) = response
-            .next()
-            .await
-            .transpose()
-            .map_err(|e| from_gcs_error_with_path(e, key))?
-        {
-            contents.extend_from_slice(&chunk);
-        }
+        let etag: ETag = (&update_version).try_into()?;
 
-        Ok((Arc::new(contents), Some(ETag(generation.to_string()))))
+        let bytes = result.bytes().await?;
+
+        Ok((Arc::new(bytes.to_vec()), Some(etag)))
     }
 
     pub async fn put_bytes(
@@ -170,34 +156,28 @@ impl GcsStorage {
         bytes: Vec<u8>,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
-        let bytes_data = bytes::Bytes::from(bytes);
-        let mut req = self.client.write_object(&self.bucket_path, key, bytes_data);
+        let path = ObjectPath::from(key);
+        let payload = PutPayload::from(Bytes::from(bytes));
 
-        // Apply conditional operations using generation numbers
+        let mut put_options = ObjectStorePutOptions::default();
+
+        // Apply conditional operations
         if options.if_not_exists {
-            // if_not_exists: only create if object doesn't exist (generation = 0)
-            req = req.set_if_generation_match(0);
+            put_options.mode = PutMode::Create;
         } else if let Some(etag) = &options.if_match {
-            // if_match: only update if generation matches the provided ETag
-            let generation = etag.0.parse::<i64>().map_err(|_| StorageError::Generic {
-                source: Arc::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!(
-                        "Invalid ETag format for GCS: expected generation number, got '{}'",
-                        etag.0
-                    ),
-                )),
-            })?;
-            req = req.set_if_generation_match(generation);
+            let update_version: UpdateVersion = etag.try_into()?;
+            put_options.mode = PutMode::Update(update_version);
         }
 
-        let response = req
-            .send_buffered()
-            .await
-            .map_err(|e| from_gcs_error_with_path(e, key))?;
+        let result = self.store.put_opts(&path, payload, put_options).await?;
 
-        // Store generation number as ETag (see module docs)
-        Ok(Some(ETag(response.generation.to_string())))
+        // Serialize result's e_tag and version
+        let update_version = UpdateVersion {
+            e_tag: result.e_tag,
+            version: result.version,
+        };
+
+        Ok(Some((&update_version).try_into()?))
     }
 
     pub async fn put_file(
@@ -215,29 +195,33 @@ impl GcsStorage {
     }
 
     pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
-        let mut req = self
-            .control_client
-            .delete_object()
-            .set_bucket(&self.bucket_path)
-            .set_object(key);
+        let path = ObjectPath::from(key);
 
-        // Apply conditional delete using generation number
+        // Handle conditional delete
         if let Some(etag) = &options.if_match {
-            let generation = etag.0.parse::<i64>().map_err(|_| StorageError::Generic {
-                source: Arc::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!(
-                        "Invalid ETag format for GCS: expected generation number, got '{}'",
-                        etag.0
-                    ),
-                )),
-            })?;
-            req = req.set_if_generation_match(generation);
+            // For conditional delete, we need to verify the version matches
+            // object_store doesn't have native conditional delete, so we implement it manually
+            let metadata = self.store.head(&path).await?;
+
+            let current_update_version = UpdateVersion {
+                e_tag: metadata.e_tag.clone(),
+                version: metadata.version.clone(),
+            };
+
+            let current_etag: ETag = (&current_update_version).try_into()?;
+
+            if current_etag.0 != etag.0 {
+                return Err(StorageError::Precondition {
+                    path: key.to_string(),
+                    source: Arc::new(std::io::Error::other(
+                        "ETag mismatch for conditional delete",
+                    )),
+                });
+            }
         }
 
-        req.send()
-            .await
-            .map_err(|e| from_gcs_error_with_path(e, key))?;
+        self.store.delete(&path).await?;
+
         Ok(())
     }
 
@@ -247,7 +231,7 @@ impl GcsStorage {
     ) -> Result<DeletedObjects, StorageError> {
         let keys: Vec<_> = keys.into_iter().collect();
 
-        // Execute deletes in parallel
+        // Execute deletes in parallel (50 concurrent as in previous implementation)
         let results: Vec<_> = stream::iter(keys)
             .map(|key| async move {
                 let key_str = key.as_ref().to_string();
@@ -256,7 +240,7 @@ impl GcsStorage {
                     self.delete(key.as_ref(), DeleteOptions::default()).await,
                 )
             })
-            .buffer_unordered(32)
+            .buffer_unordered(50)
             .collect()
             .await;
 
@@ -272,33 +256,36 @@ impl GcsStorage {
     }
 
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
-        // GCS doesn't have native rename, so copy then delete
-        self.copy(src_key, dst_key).await?;
-        self.delete(src_key, DeleteOptions::default()).await
+        let src_path = ObjectPath::from(src_key);
+        let dst_path = ObjectPath::from(dst_key);
+
+        self.store.rename(&src_path, &dst_path).await?;
+
+        Ok(())
     }
 
     pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
-        // Read source object
-        let (data, _) = self.get_with_e_tag(src_key).await?;
+        let src_path = ObjectPath::from(src_key);
+        let dst_path = ObjectPath::from(dst_key);
 
-        // Write to destination
-        self.put_bytes(dst_key, (*data).clone(), PutOptions::default())
-            .await?;
+        self.store.copy(&src_path, &dst_path).await?;
 
         Ok(())
     }
 
     pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
-        let response = self
-            .control_client
-            .list_objects()
-            .set_parent(&self.bucket_path)
-            .set_prefix(prefix)
-            .send()
-            .await
-            .map_err(|e| from_gcs_error_with_path(e, prefix))?;
+        let prefix_path = if prefix.is_empty() {
+            None
+        } else {
+            Some(ObjectPath::from(prefix))
+        };
 
-        let keys: Vec<String> = response.objects.into_iter().map(|obj| obj.name).collect();
+        let list_stream = self.store.list(prefix_path.as_ref());
+
+        let keys: Vec<String> = list_stream
+            .map_ok(|meta| meta.location.to_string())
+            .try_collect()
+            .await?;
 
         Ok(keys)
     }
