@@ -2314,16 +2314,54 @@ impl AttachFunctionRequest {
 
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct AttachedFunctionInfo {
-    pub id: String,
-    pub name: String,
-    pub function_id: String,
+pub struct AttachFunctionResponse {
+    pub attached_function: AttachedFunctionInfo,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct AttachFunctionResponse {
+pub struct GetAttachedFunctionResponse {
     pub attached_function: AttachedFunctionInfo,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AttachedFunctionInfo {
+    pub id: String,
+    pub name: String,
+    pub function_name: String,  // Human-readable function name
+    pub input_collection: String,
+    pub output_collection: String,
+    pub last_run: Option<String>,
+    pub next_run: String,
+    pub params: Option<String>,
+    pub global_function_parent: Option<String>,
+}
+
+#[derive(Error, Debug)]
+pub enum GetAttachedFunctionError {
+    #[error("Attached function not found")]
+    NotFound,
+    #[error("Attached function not ready - still initializing")]
+    NotReady,
+    #[error("Failed to get attached function: {0}")]
+    FailedToGetAttachedFunction(#[from] Box<dyn ChromaError>),
+    #[error("Server returned invalid data")]
+    ServerReturnedInvalidData,
+    #[error(transparent)]
+    Validation(#[from] ChromaValidationError),
+}
+
+impl ChromaError for GetAttachedFunctionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetAttachedFunctionError::NotFound => ErrorCodes::NotFound,
+            GetAttachedFunctionError::NotReady => ErrorCodes::FailedPrecondition,
+            GetAttachedFunctionError::FailedToGetAttachedFunction(err) => err.code(),
+            GetAttachedFunctionError::ServerReturnedInvalidData => ErrorCodes::Internal,
+            GetAttachedFunctionError::Validation(err) => err.code(),
+        }
+    }
 }
 
 #[derive(Error, Debug)]

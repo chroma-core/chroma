@@ -533,3 +533,23 @@ class Collection(CollectionCommon["ServerAPI"]):
             tenant=self.tenant,
             database=self.database,
         )
+
+    def get_attached_function(self, name: str) -> "AttachedFunction":
+        """Get metadata for a specific attached function by name.
+
+        Args:
+            name: The name of the attached function to retrieve
+
+        Returns:
+            AttachedFunction: Object representing the attached function with metadata
+
+        Example:
+            >>> attached_fn = collection.get_attached_function("mycoll_stats_fn")
+            >>> print(f"Function ID: {attached_fn.function_id}")
+            >>> print(f"Last run: {attached_fn.last_run}")
+        """
+        return self._client.get_attached_function(
+            attached_function_name=name,
+            tenant=self.tenant,
+            database=self.database,
+        )

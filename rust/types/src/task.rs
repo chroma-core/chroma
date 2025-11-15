@@ -39,6 +39,18 @@ define_uuid_newtype!(
     now_v7
 );
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Function {
+    /// Unique identifier for the function
+    pub id: uuid::Uuid,
+    /// Human-readable name for the function (unique)
+    pub name: String,
+    /// Whether the function supports incremental processing
+    pub is_incremental: bool,
+    /// JSON schema describing the function's return type
+    pub return_type: serde_json::Value,
+}
+
 /// AttachedFunction represents an asynchronous function that is triggered by collection writes
 /// to map records from a source collection to a target collection.
 fn default_systemtime() -> SystemTime {
@@ -84,13 +96,22 @@ pub struct AttachedFunction {
     /// Timestamp when the attached function was last updated
     #[serde(default = "default_systemtime")]
     pub updated_at: SystemTime,
-    /// Next nonce (UUIDv7) for execution tracking
+    /// Global function parent ID (for hierarchical function relationships)
+    pub global_parent: Option<uuid::Uuid>,
+    /// Next nonce for function execution
     pub next_nonce: NonceUuid,
-    /// Lowest live nonce (UUIDv7) - marks the earliest epoch that still needs verification
-    /// When lowest_live_nonce is Some and < next_nonce, it indicates finish failed and we should
-    /// skip execution and only run the scout_logs recheck phase
-    /// None indicates the attached function has never been scheduled (brand new)
+    /// Oldest written nonce for tracking execution state
+    pub oldest_written_nonce: Option<NonceUuid>,
+    /// Lowest live nonce for tracking active executions
     pub lowest_live_nonce: Option<NonceUuid>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AttachedFunctionWithInfo {
+    /// The attached function metadata
+    pub attached_function: AttachedFunction,
+    /// The function definition metadata
+    pub function: Function,
 }
 
 /// ScheduleEntry represents a scheduled attached function run for a collection.
