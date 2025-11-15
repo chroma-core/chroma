@@ -2,6 +2,7 @@
 //!
 //! ## ETag Implementation Note
 //! The `UpdateVersion` struct is serialized to JSON and stored as an ETag string.
+use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,10 +11,11 @@ use bytes::Bytes;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::FutureExt;
 use object_store::{
     gcp::{GoogleCloudStorage, GoogleCloudStorageBuilder},
     path::Path as ObjectPath,
-    ObjectStore, PutMode, PutOptions as ObjectStorePutOptions, PutPayload, UpdateVersion,
+    GetRange, ObjectStore, PutMode, PutOptions as ObjectStorePutOptions, PutPayload, UpdateVersion,
 };
 use serde::{Deserialize, Serialize};
 
@@ -82,6 +84,8 @@ impl TryFrom<&ETag> for UpdateVersion {
 pub struct GcsStorage {
     pub(crate) bucket: String,
     pub(super) store: Arc<GoogleCloudStorage>,
+    pub(super) upload_part_size_bytes: usize,
+    pub(super) download_part_size_bytes: usize,
 }
 
 impl GcsStorage {
@@ -109,6 +113,8 @@ impl GcsStorage {
         Ok(GcsStorage {
             bucket: config.bucket.clone(),
             store: Arc::new(store),
+            upload_part_size_bytes: config.upload_part_size_bytes,
+            download_part_size_bytes: config.download_part_size_bytes,
         })
     }
 
@@ -126,8 +132,121 @@ impl GcsStorage {
         Ok(current_etag.0 == e_tag.0)
     }
 
-    pub async fn get(&self, key: &str, _options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
-        self.get_with_e_tag(key).await.map(|(buf, _)| buf)
+    /// Calculate byte ranges for parallel download
+    pub(super) async fn get_key_ranges(
+        &self,
+        key: &str,
+    ) -> Result<(usize, Vec<Range<usize>>, Option<ETag>), StorageError> {
+        let path = ObjectPath::from(key);
+        let part_size = self.download_part_size_bytes;
+
+        // Get object metadata
+        let metadata = self.store.head(&path).await?;
+        let content_length = metadata.size;
+
+        // Serialize e_tag and version
+        let update_version = UpdateVersion {
+            e_tag: metadata.e_tag.clone(),
+            version: metadata.version.clone(),
+        };
+        let etag: ETag = (&update_version).try_into()?;
+
+        // Calculate ranges
+        let num_parts = (content_length as f64 / part_size as f64).ceil() as usize;
+        let mut ranges = Vec::new();
+        for i in 0..num_parts {
+            let start = i * part_size;
+            let end = if i == num_parts - 1 {
+                content_length
+            } else {
+                (i + 1) * part_size
+            };
+            ranges.push(start..end);
+        }
+
+        Ok((content_length, ranges, Some(etag)))
+    }
+
+    /// Fetch a specific byte range from GCS
+    pub(super) async fn fetch_range(
+        &self,
+        key: String,
+        range: Range<usize>,
+    ) -> Result<Bytes, StorageError> {
+        let path = ObjectPath::from(key.as_str());
+        let get_range = GetRange::Bounded(range.start..range.end);
+
+        let result = self
+            .store
+            .get_opts(
+                &path,
+                object_store::GetOptions {
+                    range: Some(get_range),
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+        let bytes = result.bytes().await?;
+        Ok(bytes)
+    }
+
+    /// Download object in parallel using multiple range requests
+    async fn get_parallel(&self, key: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        let (content_length, ranges, e_tag) = self.get_key_ranges(key).await?;
+
+        // Short-circuit for empty files
+        if content_length == 0 {
+            return Ok((Arc::new(Vec::new()), None));
+        }
+
+        let part_size = self.download_part_size_bytes;
+
+        // Pre-allocate output buffer
+        let mut output_buffer: Vec<u8> = vec![0; content_length];
+        let mut output_slices = output_buffer.chunks_mut(part_size).collect::<Vec<_>>();
+        let range_and_output_slices = ranges.iter().zip(output_slices.drain(..));
+
+        let mut get_futures = Vec::new();
+        let num_parts = range_and_output_slices.len();
+
+        for (range, output_slice) in range_and_output_slices {
+            let key = key.to_string();
+            let range = range.clone();
+            let fut = self.fetch_range(key, range).then(|res| async move {
+                match res {
+                    Ok(bytes) => {
+                        // Copy bytes into the output slice
+                        let len = bytes.len().min(output_slice.len());
+                        output_slice[..len].copy_from_slice(&bytes[..len]);
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                }
+            });
+            get_futures.push(fut);
+        }
+
+        // Execute all fetches in parallel
+        let results: Vec<_> = stream::iter(get_futures)
+            .buffer_unordered(num_parts)
+            .collect()
+            .await;
+
+        // Check for errors
+        for result in results {
+            result?;
+        }
+
+        Ok((Arc::new(output_buffer), e_tag))
+    }
+
+    pub async fn get(&self, key: &str, options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
+        if options.request_parallelism {
+            self.get_parallel(key).await.map(|(buf, _)| buf)
+        } else {
+            self.get_with_e_tag(key).await.map(|(buf, _)| buf)
+        }
     }
 
     pub async fn get_with_e_tag(
