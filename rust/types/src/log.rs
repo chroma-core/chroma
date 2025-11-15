@@ -16,7 +16,6 @@ pub fn dirty_log_path_from_hostname(hostname: &str) -> String {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 // NOTE(rescrv):  This is intentionally an enum for easy forwards/backwards compatibility.  Add a
 // new variant, handle both variants, cycle logs, stop handling old variant.
-// TODO(rescrv):  Dedupe with log-service crate.
 pub enum DirtyMarker {
     /// Marks a collection as needing compaction due to new records.
     #[serde(rename = "mark_dirty")]
@@ -31,6 +30,9 @@ pub enum DirtyMarker {
         reinsert_count: u64,
         /// The epoch time in microseconds when this collection was first marked dirty.
         initial_insertion_epoch_us: u64,
+        /// Is this marker from a backfill?
+        #[serde(skip_serializing_if = "is_false", default)]
+        backfill: bool,
     },
     /// Removes all compaction scheduling for a collection.
     #[serde(rename = "purge")]
@@ -66,9 +68,14 @@ impl DirtyMarker {
             num_records: _,
             reinsert_count,
             initial_insertion_epoch_us: _,
+            backfill: _,
         } = self
         {
             *reinsert_count = reinsert_count.saturating_add(1);
         }
     }
+}
+
+fn is_false(x: &bool) -> bool {
+    !x
 }

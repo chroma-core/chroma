@@ -20,15 +20,16 @@ use chroma_tracing::OtelFilter;
 use chroma_tracing::OtelFilterLevel;
 use chroma_types::chroma_proto::{
     garbage_collect_phase2_request::LogToCollect, log_service_server::LogService,
-    purge_from_cache_request::EntryToEvict, CollectionInfo, GarbageCollectPhase2Request,
-    GarbageCollectPhase2Response, GetAllCollectionInfoToCompactRequest,
-    GetAllCollectionInfoToCompactResponse, InspectDirtyLogRequest, InspectDirtyLogResponse,
-    InspectLogStateRequest, InspectLogStateResponse, LogRecord, MigrateLogRequest,
-    MigrateLogResponse, OperationRecord, PullLogsRequest, PullLogsResponse,
-    PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse, PurgeFromCacheRequest,
-    PurgeFromCacheResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
-    ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
-    UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
+    purge_from_cache_request::EntryToEvict, BackfillRequest, BackfillResponse, CollectionInfo,
+    GarbageCollectPhase2Request, GarbageCollectPhase2Response,
+    GetAllCollectionInfoToCompactRequest, GetAllCollectionInfoToCompactResponse,
+    InspectDirtyLogRequest, InspectDirtyLogResponse, InspectLogStateRequest,
+    InspectLogStateResponse, LogRecord, MigrateLogRequest, MigrateLogResponse, OperationRecord,
+    PullLogsRequest, PullLogsResponse, PurgeDirtyForCollectionRequest,
+    PurgeDirtyForCollectionResponse, PurgeFromCacheRequest, PurgeFromCacheResponse,
+    PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse, ScrubLogRequest,
+    ScrubLogResponse, SealLogRequest, SealLogResponse, UpdateCollectionLogOffsetRequest,
+    UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::dirty_log_path_from_hostname;
@@ -346,6 +347,7 @@ struct RollupPerCollection {
     limit_log_position: LogPosition,
     reinsert_count: u64,
     initial_insertion_epoch_us: u64,
+    backfill: bool,
 }
 
 impl RollupPerCollection {
@@ -353,6 +355,7 @@ impl RollupPerCollection {
         first_observation: LogPosition,
         num_records: u64,
         initial_insertion_epoch_us: u64,
+        backfill: bool,
     ) -> Self {
         Self {
             start_log_position: first_observation,
@@ -361,6 +364,7 @@ impl RollupPerCollection {
             ),
             reinsert_count: 0,
             initial_insertion_epoch_us,
+            backfill,
         }
     }
 
@@ -370,6 +374,7 @@ impl RollupPerCollection {
         num_records: u64,
         reinsert_count: u64,
         initial_insertion_epoch_us: u64,
+        backfill: bool,
     ) {
         if log_position < self.start_log_position {
             self.start_log_position = log_position;
@@ -383,6 +388,7 @@ impl RollupPerCollection {
         // Consider the most recent initial insertion time so if we've compacted earlier we drop.
         self.initial_insertion_epoch_us =
             std::cmp::min(self.initial_insertion_epoch_us, initial_insertion_epoch_us);
+        self.backfill = self.backfill || backfill;
     }
 
     fn witness_cursor(&mut self, witness: Option<&Witness>) {
@@ -421,6 +427,7 @@ impl RollupPerCollection {
                 .saturating_sub(self.start_log_position.offset()),
             reinsert_count: self.reinsert_count.saturating_add(1),
             initial_insertion_epoch_us: self.initial_insertion_epoch_us,
+            backfill: self.backfill,
         }
     }
 
@@ -456,12 +463,14 @@ fn coalesce_markers(
                 num_records,
                 reinsert_count,
                 initial_insertion_epoch_us,
+                backfill,
             } => {
                 let position = rollups.entry(*collection_id).or_insert_with(|| {
                     RollupPerCollection::new(
                         LogPosition::from_offset(*log_position),
                         *num_records,
                         *initial_insertion_epoch_us,
+                        false,
                     )
                 });
                 position.observe_dirty_marker(
@@ -469,6 +478,7 @@ fn coalesce_markers(
                     *num_records,
                     *reinsert_count,
                     *initial_insertion_epoch_us,
+                    *backfill,
                 );
             }
             DirtyMarker::Purge { collection_id } => {
@@ -495,27 +505,23 @@ impl MarkDirty {
     pub fn path_for_hostname(hostname: &str) -> String {
         dirty_log_path_from_hostname(hostname)
     }
-}
 
-#[async_trait::async_trait]
-impl wal3::MarkDirty for MarkDirty {
-    async fn mark_dirty(
+    pub async fn mark_dirty_with_epoch_us_and_backfill(
         &self,
         log_position: LogPosition,
         num_records: usize,
+        initial_insertion_epoch_us: u64,
+        backfill: bool,
     ) -> Result<(), wal3::Error> {
         if let Some(dirty_log) = self.dirty_log.as_ref() {
             let num_records = num_records as u64;
-            let initial_insertion_epoch_us = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map_err(|_| wal3::Error::Internal)?
-                .as_micros() as u64;
             let dirty_marker = DirtyMarker::MarkDirty {
                 collection_id: self.collection_id,
                 log_position: log_position.offset(),
                 num_records,
                 reinsert_count: 0,
                 initial_insertion_epoch_us,
+                backfill,
             };
             let dirty_marker_json = serde_json::to_string(&dirty_marker).map_err(|err| {
                 tracing::error!("Failed to serialize dirty marker: {}", err);
@@ -527,6 +533,27 @@ impl wal3::MarkDirty for MarkDirty {
             tracing::error!("asked to mark dirty with no dirty log");
             Err(wal3::Error::Internal)
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl wal3::MarkDirty for MarkDirty {
+    async fn mark_dirty(
+        &self,
+        log_position: LogPosition,
+        num_records: usize,
+    ) -> Result<(), wal3::Error> {
+        let initial_insertion_epoch_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::Internal)?
+            .as_micros() as u64;
+        self.mark_dirty_with_epoch_us_and_backfill(
+            log_position,
+            num_records,
+            initial_insertion_epoch_us,
+            false,
+        )
+        .await
     }
 }
 
@@ -771,6 +798,7 @@ impl LogServer {
                 collection_id: collection_id.to_string(),
                 first_log_offset: rollup.start_log_position.offset() as i64,
                 first_log_ts: rollup.start_log_position.offset() as i64,
+                backfill: rollup.backfill,
             });
         }
         Ok(Response::new(GetAllCollectionInfoToCompactResponse {
@@ -1823,6 +1851,41 @@ impl LogServer {
         }
         Ok(Response::new(PurgeFromCacheResponse {}))
     }
+
+    async fn backfill(
+        &self,
+        request: Request<BackfillRequest>,
+    ) -> Result<Response<BackfillResponse>, Status> {
+        let request = request.into_inner();
+        let collection_id = Uuid::parse_str(&request.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let target_epoch_us = request
+            .initial_insertion_epoch_us
+            .saturating_sub(self.config.timeout_us);
+        tracing::info!("backfill for {collection_id} at {}", target_epoch_us);
+        let storage_prefix = collection_id.storage_prefix_for_log();
+        let log_reader = LogReader::new(
+            self.config.reader.clone(),
+            Arc::clone(&self.storage),
+            storage_prefix.clone(),
+        );
+        let mani = log_reader.manifest().await;
+        let mani = mani
+            .map_err(|err| Status::unknown(err.to_string()))?
+            .ok_or_else(|| Status::unknown("cannot read manifest from initialized log"))?;
+        let offset =
+            LogPosition::from_offset(mani.next_write_timestamp().offset().saturating_sub(1));
+        let mark_dirty = MarkDirty {
+            collection_id,
+            dirty_log: self.dirty_log.clone(),
+        };
+        mark_dirty
+            .mark_dirty_with_epoch_us_and_backfill(offset, 1usize, target_epoch_us, true)
+            .await
+            .map_err(|err| Status::unknown(err.to_string()))?;
+        Ok(Response::new(BackfillResponse {}))
+    }
 }
 
 struct LogServerWrapper {
@@ -1938,6 +2001,13 @@ impl LogService for LogServerWrapper {
         request: Request<PurgeFromCacheRequest>,
     ) -> Result<Response<PurgeFromCacheResponse>, Status> {
         self.log_server.purge_from_cache(request).await
+    }
+
+    async fn backfill(
+        &self,
+        request: Request<BackfillRequest>,
+    ) -> Result<Response<BackfillResponse>, Status> {
+        self.log_server.backfill(request).await
     }
 }
 
@@ -2411,6 +2481,7 @@ mod tests {
                     num_records: 1,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now,
+                    backfill: false,
                 },
             ),
             (
@@ -2421,6 +2492,7 @@ mod tests {
                     num_records: 1,
                     reinsert_count: 2,
                     initial_insertion_epoch_us: now,
+                    backfill: false,
                 },
             ),
         ];
@@ -2455,6 +2527,7 @@ mod tests {
                     num_records: 1,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now,
+                    backfill: false,
                 },
             ),
             (
@@ -2465,6 +2538,7 @@ mod tests {
                     num_records: 100,
                     reinsert_count: 1,
                     initial_insertion_epoch_us: now,
+                    backfill: false,
                 },
             ),
         ];
@@ -2512,6 +2586,7 @@ mod tests {
             num_records: 100,
             reinsert_count: 5,
             initial_insertion_epoch_us: now,
+            backfill: false,
         };
 
         let serialized = serde_json::to_string(&mark_dirty).unwrap();
@@ -2539,6 +2614,7 @@ mod tests {
             num_records: 1,
             reinsert_count: 0,
             initial_insertion_epoch_us: now,
+            backfill: false,
         };
         assert_eq!(collection_id, mark_dirty.collection_id());
 
@@ -2560,6 +2636,7 @@ mod tests {
             num_records: 1,
             reinsert_count: 0,
             initial_insertion_epoch_us: now,
+            backfill: false,
         };
 
         // Test incrementing reinsert count
@@ -2592,6 +2669,7 @@ mod tests {
                     num_records: 10,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now,
+                    backfill: false,
                 },
             ),
             (
@@ -2606,6 +2684,7 @@ mod tests {
                     num_records: 5,
                     reinsert_count: 1,
                     initial_insertion_epoch_us: now + 1000,
+                    backfill: false,
                 },
             ),
         ];
@@ -2641,6 +2720,7 @@ mod tests {
                     num_records: 10,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now,
+                    backfill: false,
                 },
             ),
             (
@@ -2651,6 +2731,7 @@ mod tests {
                     num_records: 5,
                     reinsert_count: 1,
                     initial_insertion_epoch_us: now,
+                    backfill: false,
                 },
             ),
             (
@@ -2667,6 +2748,7 @@ mod tests {
                     num_records: 3,
                     reinsert_count: 2,
                     initial_insertion_epoch_us: now + 1000,
+                    backfill: false,
                 },
             ),
         ];
@@ -2694,7 +2776,7 @@ mod tests {
     fn rollup_per_collection_new() {
         let start_position = LogPosition::from_offset(10);
         let num_records = 5;
-        let rollup = RollupPerCollection::new(start_position, num_records, 0);
+        let rollup = RollupPerCollection::new(start_position, num_records, 0, false);
 
         assert_eq!(start_position, rollup.start_log_position);
         assert_eq!(LogPosition::from_offset(15), rollup.limit_log_position);
@@ -2708,17 +2790,17 @@ mod tests {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_micros() as u64;
-        let mut rollup = RollupPerCollection::new(start_position, 5, now);
+        let mut rollup = RollupPerCollection::new(start_position, 5, now, false);
 
         // Observe a marker that extends the range
-        rollup.observe_dirty_marker(LogPosition::from_offset(20), 10, 3, now);
+        rollup.observe_dirty_marker(LogPosition::from_offset(20), 10, 3, now, false);
         assert_eq!(LogPosition::from_offset(10), rollup.start_log_position);
         assert_eq!(LogPosition::from_offset(30), rollup.limit_log_position);
         assert_eq!(3, rollup.reinsert_count);
         assert_eq!(now, rollup.initial_insertion_epoch_us);
 
         // Observe a marker that comes before the start
-        rollup.observe_dirty_marker(LogPosition::from_offset(5), 2, 1, now - 1000);
+        rollup.observe_dirty_marker(LogPosition::from_offset(5), 2, 1, now - 1000, false);
         assert_eq!(LogPosition::from_offset(5), rollup.start_log_position);
         assert_eq!(LogPosition::from_offset(30), rollup.limit_log_position);
         assert_eq!(3, rollup.reinsert_count); // Same
@@ -2727,16 +2809,16 @@ mod tests {
 
     #[test]
     fn rollup_per_collection_is_empty() {
-        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 0, 42);
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 0, 42, false);
         assert!(rollup.is_empty());
 
-        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, 42);
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, 42, false);
         assert!(!rollup.is_empty());
     }
 
     #[test]
     fn rollup_per_collection_requires_backpressure() {
-        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 100, 42);
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 100, 42, false);
         assert!(rollup.requires_backpressure(50));
         assert!(!rollup.requires_backpressure(150));
         assert!(rollup.requires_backpressure(100)); // Equal case
@@ -2750,8 +2832,8 @@ mod tests {
             .unwrap()
             .as_micros() as u64;
 
-        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, now);
-        rollup.observe_dirty_marker(LogPosition::from_offset(10), 5, 2, now);
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, now, false);
+        rollup.observe_dirty_marker(LogPosition::from_offset(10), 5, 2, now, false);
 
         let marker = rollup.dirty_marker(collection_id);
         match marker {
@@ -2761,6 +2843,7 @@ mod tests {
                 num_records,
                 reinsert_count,
                 initial_insertion_epoch_us,
+                backfill: _,
             } => {
                 assert_eq!(collection_id, cid);
                 assert_eq!(10, log_position);
@@ -2822,6 +2905,7 @@ mod tests {
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
                 .as_micros() as u64,
+            backfill: false,
         };
 
         // Verify the marker can be serialized (this is what MarkDirty::mark_dirty does)
@@ -2877,6 +2961,7 @@ mod tests {
                     num_records: 5,
                     reinsert_count: 1,
                     initial_insertion_epoch_us: now,
+                    backfill: false,
                 },
             ),
             (
@@ -2887,6 +2972,7 @@ mod tests {
                     num_records: 10,
                     reinsert_count: 2,
                     initial_insertion_epoch_us: now + 1000,
+                    backfill: false,
                 },
             ),
             (
@@ -2897,6 +2983,7 @@ mod tests {
                     num_records: 3,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now - 1000,
+                    backfill: false,
                 },
             ),
         ];
@@ -2980,6 +3067,7 @@ mod tests {
                 num_records: 100,
                 reinsert_count: 0,
                 initial_insertion_epoch_us: now,
+                backfill: false,
             },
         )];
 
@@ -3014,6 +3102,7 @@ mod tests {
                 num_records: 0,
                 reinsert_count: 0,
                 initial_insertion_epoch_us: now,
+                backfill: false,
             },
         )];
 
@@ -3050,6 +3139,7 @@ mod tests {
                     num_records: 1,
                     reinsert_count: u64::MAX,
                     initial_insertion_epoch_us: now,
+                    backfill: false,
                 },
             ),
             (
@@ -3060,6 +3150,7 @@ mod tests {
                     num_records: 1,
                     reinsert_count: 5,
                     initial_insertion_epoch_us: now,
+                    backfill: false,
                 },
             ),
         ];
@@ -3074,7 +3165,7 @@ mod tests {
 
     #[test]
     fn rollup_per_collection_witness_functionality() {
-        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, 42);
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, 42, false);
 
         // Test that the rollup can handle boundary conditions
         assert_eq!(LogPosition::from_offset(10), rollup.start_log_position);
@@ -3084,11 +3175,12 @@ mod tests {
 
     #[test]
     fn rollup_per_collection_backpressure_boundary_conditions() {
-        let rollup = RollupPerCollection::new(LogPosition::from_offset(0), u64::MAX, 42);
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(0), u64::MAX, 42, false);
         assert!(rollup.requires_backpressure(u64::MAX - 1));
         assert!(rollup.requires_backpressure(u64::MAX));
 
-        let rollup = RollupPerCollection::new(LogPosition::from_offset(u64::MAX - 100), 50, 42);
+        let rollup =
+            RollupPerCollection::new(LogPosition::from_offset(u64::MAX - 100), 50, 42, false);
         assert!(!rollup.requires_backpressure(100));
         assert!(rollup.requires_backpressure(25));
     }
@@ -3180,6 +3272,7 @@ mod tests {
                     num_records: 10,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now,
+                    backfill: false,
                 },
             ),
             (
@@ -3190,6 +3283,7 @@ mod tests {
                     num_records: 10,
                     reinsert_count: 1,
                     initial_insertion_epoch_us: now + 1000,
+                    backfill: false,
                 },
             ),
             (
@@ -3200,6 +3294,7 @@ mod tests {
                     num_records: 10,
                     reinsert_count: 2,
                     initial_insertion_epoch_us: now + 2000,
+                    backfill: false,
                 },
             ),
             (
@@ -3233,6 +3328,7 @@ mod tests {
             num_records: 1,
             reinsert_count: u64::MAX - 1,
             initial_insertion_epoch_us: now,
+            backfill: false,
         };
 
         mark_dirty.reinsert();
@@ -3256,9 +3352,9 @@ mod tests {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_micros() as u64;
-        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, now + 1);
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, now + 1, false);
 
-        rollup.observe_dirty_marker(LogPosition::from_offset(20), 5, 1, now);
+        rollup.observe_dirty_marker(LogPosition::from_offset(20), 5, 1, now, false);
 
         assert_eq!(LogPosition::from_offset(10), rollup.start_log_position);
         assert_eq!(LogPosition::from_offset(25), rollup.limit_log_position);
@@ -3298,6 +3394,7 @@ mod tests {
                     num_records: 1,
                     reinsert_count: i % 100,
                     initial_insertion_epoch_us: now + i,
+                    backfill: false,
                 },
             ));
         }
@@ -3337,6 +3434,7 @@ mod tests {
                     num_records: 10,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now,
+                    backfill: false,
                 },
             ),
             (
@@ -3351,6 +3449,7 @@ mod tests {
                     num_records: 5,
                     reinsert_count: 1,
                     initial_insertion_epoch_us: now + 1000,
+                    backfill: false,
                 },
             ),
             (
@@ -3365,6 +3464,7 @@ mod tests {
                     num_records: 3,
                     reinsert_count: 2,
                     initial_insertion_epoch_us: now + 2000,
+                    backfill: false,
                 },
             ),
         ];
@@ -3383,7 +3483,7 @@ mod tests {
     #[test]
     fn rollup_per_collection_extreme_positions() {
         let start_position = LogPosition::from_offset(u64::MAX - 10);
-        let rollup = RollupPerCollection::new(start_position, 5, 42);
+        let rollup = RollupPerCollection::new(start_position, 5, 42, false);
 
         assert_eq!(start_position, rollup.start_log_position);
         assert!(!rollup.is_empty());
@@ -3392,9 +3492,9 @@ mod tests {
 
     #[test]
     fn rollup_per_collection_zero_epoch() {
-        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, u64::MAX);
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, u64::MAX, false);
 
-        rollup.observe_dirty_marker(LogPosition::from_offset(15), 5, 1, 0);
+        rollup.observe_dirty_marker(LogPosition::from_offset(15), 5, 1, 0, false);
 
         assert_eq!(0, rollup.initial_insertion_epoch_us);
     }
@@ -3458,9 +3558,9 @@ mod tests {
 
     #[test]
     fn rollup_per_collection_edge_case_positions() {
-        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(100), 0, 1042);
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(100), 0, 1042, false);
 
-        rollup.observe_dirty_marker(LogPosition::from_offset(50), 25, 1, 1000);
+        rollup.observe_dirty_marker(LogPosition::from_offset(50), 25, 1, 1000, false);
 
         assert_eq!(LogPosition::from_offset(50), rollup.start_log_position);
         assert_eq!(LogPosition::from_offset(100), rollup.limit_log_position);
@@ -3469,13 +3569,13 @@ mod tests {
 
     #[test]
     fn backpressure_threshold_verification() {
-        let rollup = RollupPerCollection::new(LogPosition::from_offset(0), 100, 42);
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(0), 100, 42, false);
 
         assert!(rollup.requires_backpressure(99));
         assert!(rollup.requires_backpressure(100));
         assert!(!rollup.requires_backpressure(101));
 
-        let zero_rollup = RollupPerCollection::new(LogPosition::from_offset(10), 0, 42);
+        let zero_rollup = RollupPerCollection::new(LogPosition::from_offset(10), 0, 42, false);
         assert!(!zero_rollup.requires_backpressure(1));
         assert!(zero_rollup.requires_backpressure(0));
     }
@@ -4175,5 +4275,131 @@ mod tests {
             response.is_ok(),
             "Forward movement after backward attempt should succeed"
         );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_backfill_basic() {
+        let log_server = setup_log_server().await;
+        let collection_id = CollectionUuid::new();
+
+        let operation_record = OperationRecord {
+            id: "test-id-1".to_string(),
+            embedding: None,
+            encoding: None,
+            metadata: None,
+            document: None,
+            operation: Operation::Add,
+        };
+        push_log_to_server(&log_server, collection_id, &[operation_record]).await;
+
+        let custom_epoch_us = 1234567890000000u64;
+        let request = BackfillRequest {
+            collection_id: collection_id.to_string(),
+            initial_insertion_epoch_us: custom_epoch_us,
+        };
+
+        let response = log_server.backfill(Request::new(request)).await;
+        assert!(
+            response.is_ok(),
+            "backfill should succeed: {:?}",
+            response.err()
+        );
+
+        validate_dirty_log_on_server(&log_server, &[collection_id]).await;
+
+        log_server
+            .roll_dirty_log()
+            .await
+            .expect("Roll Dirty Logs should not fail");
+
+        let dirty_collections = log_server
+            .cached_get_all_collection_info_to_compact(GetAllCollectionInfoToCompactRequest {
+                min_compaction_size: 0,
+            })
+            .await
+            .unwrap()
+            .into_inner()
+            .all_collection_info;
+        let collection_info = dirty_collections
+            .iter()
+            .find(|c| c.collection_id == collection_id.to_string())
+            .expect("collection should be in dirty list");
+        assert!(
+            collection_info.backfill,
+            "The backfill flag should be set for the collection"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_backfill_invalid_collection_id() {
+        let log_server = setup_log_server().await;
+
+        let request = BackfillRequest {
+            collection_id: "invalid-uuid".to_string(),
+            initial_insertion_epoch_us: 1000000u64,
+        };
+
+        let response = log_server.backfill(Request::new(request)).await;
+        assert!(
+            response.is_err(),
+            "backfill should fail with invalid collection_id"
+        );
+        assert_eq!(response.unwrap_err().code(), Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_backfill_nonexistent_collection() {
+        let log_server = setup_log_server().await;
+        let collection_id = CollectionUuid::new();
+
+        let request = BackfillRequest {
+            collection_id: collection_id.to_string(),
+            initial_insertion_epoch_us: 1000000u64,
+        };
+
+        let response = log_server.backfill(Request::new(request)).await;
+        assert!(
+            response.is_err(),
+            "backfill should fail for nonexistent collection"
+        );
+        assert_eq!(response.unwrap_err().code(), Code::Unknown);
+    }
+
+    #[test]
+    fn test_k8s_integration_mark_dirty_with_epoch_us() {
+        let runtime = Runtime::new().unwrap();
+        runtime.block_on(async {
+            let log_server = setup_log_server().await;
+            let collection_id = CollectionUuid::new();
+
+            let operation_record = OperationRecord {
+                id: "test-id-2".to_string(),
+                embedding: None,
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation: Operation::Add,
+            };
+            push_log_to_server(&log_server, collection_id, &[operation_record]).await;
+
+            let mark_dirty = MarkDirty {
+                collection_id,
+                dirty_log: log_server.dirty_log.clone(),
+            };
+
+            let custom_epoch_us = 5555555555000000u64;
+            let result = mark_dirty
+                .mark_dirty_with_epoch_us_and_backfill(
+                    LogPosition::from_offset(0),
+                    1,
+                    custom_epoch_us,
+                    false,
+                )
+                .await;
+
+            assert!(result.is_ok(), "mark_dirty_with_epoch_us should succeed");
+
+            validate_dirty_log_on_server(&log_server, &[collection_id]).await;
+        });
     }
 }
