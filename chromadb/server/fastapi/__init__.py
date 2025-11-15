@@ -1123,8 +1123,7 @@ class FastAPI(Server):
 
         if get_result["embeddings"] is not None:
             get_result["embeddings"] = [
-                cast(Embedding, embedding).tolist()
-                for embedding in get_result["embeddings"]
+                cast(Embedding, embedding) for embedding in get_result["embeddings"]
             ]
 
         return get_result
