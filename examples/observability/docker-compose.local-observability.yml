@@ -3,11 +3,26 @@ networks:
   net:
 
 services:
+  # https://github.com/openzipkin/zipkin/blob/master/zipkin-server/README.md#configuration
+  # https://github.com/openzipkin/zipkin/blob/master/docker/README.md
   zipkin:
-    image: openzipkin/zipkin
+    image: openzipkin/zipkin:latest
+    environment:
+      - STORAGE_TYPE=mysql # type of storage engine/DB to use
+      - MYSQL_HOST=zipkin-storage # hostname of the MySQL server
+      - MYSQL_USER=zipkin # username to use when connecting to MySQL (this is the default)
+      - MYSQL_PASS=zipkin # password to use when connecting to MySQL (this is the default)
+      - JAVA_OPTS=-Xms1g -Xmx1g -XX:+ExitOnOutOfMemoryError # configure the JVM min and max heap size to be 1GB as well as tell the JVM to exit if an OutOfMemoryError is encountered
     ports:
-      - "9411:9411" # you can access Zipkin UI at http://localhost:9411
-    depends_on: [otel-collector]
+      - "9411:9411"
+    restart: unless-stopped
+    networks:
+      - net
+  zipkin-storage:
+    image: openzipkin/zipkin-mysql:${TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
     networks:
       - net
   otel-collector:
