@@ -12,6 +12,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
+use futures::stream::{self, StreamExt};
 use google_cloud_gax::{
     error::rpc::Code,
     exponential_backoff::ExponentialBackoff,
@@ -244,11 +245,25 @@ impl GcsStorage {
         &self,
         keys: I,
     ) -> Result<DeletedObjects, StorageError> {
-        let mut result = DeletedObjects::default();
+        let keys: Vec<_> = keys.into_iter().collect();
 
-        for key in keys {
-            match self.delete(key.as_ref(), DeleteOptions::default()).await {
-                Ok(_) => result.deleted.push(key.as_ref().to_string()),
+        // Execute deletes in parallel
+        let results: Vec<_> = stream::iter(keys)
+            .map(|key| async move {
+                let key_str = key.as_ref().to_string();
+                (
+                    key_str,
+                    self.delete(key.as_ref(), DeleteOptions::default()).await,
+                )
+            })
+            .buffer_unordered(32)
+            .collect()
+            .await;
+
+        let mut result = DeletedObjects::default();
+        for (key, res) in results {
+            match res {
+                Ok(_) => result.deleted.push(key),
                 Err(e) => result.errors.push(e),
             }
         }
