@@ -186,13 +186,13 @@ pub struct ObjectStorageConfig {
     #[serde(default = "ObjectStorageConfig::default_credentials")]
     pub credentials: ObjectStorageCredentials,
     #[serde(default = "ObjectStorageConfig::default_download_part_size_bytes")]
-    pub download_part_size_bytes: usize,
+    pub download_part_size_bytes: u64,
     #[serde(default = "ObjectStorageConfig::default_request_retry_count")]
     pub request_retry_count: usize,
     #[serde(default = "ObjectStorageConfig::default_request_timeout_ms")]
     pub request_timeout_ms: u64,
     #[serde(default = "ObjectStorageConfig::default_upload_part_size_bytes")]
-    pub upload_part_size_bytes: usize,
+    pub upload_part_size_bytes: u64,
 }
 
 impl ObjectStorageConfig {
@@ -216,11 +216,11 @@ impl ObjectStorageConfig {
         3
     }
 
-    fn default_upload_part_size_bytes() -> usize {
-        5 * 1024 * 1024 // 5 MB
+    fn default_upload_part_size_bytes() -> u64 {
+        512 * 1024 * 1024 // 512 MB
     }
 
-    fn default_download_part_size_bytes() -> usize {
+    fn default_download_part_size_bytes() -> u64 {
         8 * 1024 * 1024 // 8 MB
     }
 }

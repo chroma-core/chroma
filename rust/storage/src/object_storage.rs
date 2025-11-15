@@ -2,7 +2,6 @@
 //!
 //! ## ETag Implementation Note
 //! The `UpdateVersion` struct is serialized to JSON and stored as an ETag string.
-use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,7 +9,6 @@ use async_trait::async_trait;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use futures::stream::{self, StreamExt, TryStreamExt};
-use object_store::GetResult;
 use object_store::{gcp::GoogleCloudStorageBuilder, GetRange, ObjectStore, PutMode, UpdateVersion};
 use serde::{Deserialize, Serialize};
 
@@ -132,15 +130,21 @@ impl TryFrom<&ETag> for UpdateVersion {
 #[derive(Clone)]
 pub struct ObjectStorage {
     pub(crate) bucket: String,
-    pub(super) download_part_size_bytes: usize,
+    pub(super) download_part_size_bytes: u64,
     pub(super) store: Arc<dyn ObjectStore>,
-    pub(super) upload_part_size_bytes: usize,
+    pub(super) upload_part_size_bytes: u64,
 }
 
 impl ObjectStorage {
     pub async fn new(config: &ObjectStorageConfig) -> Result<Self, Box<dyn ChromaError>> {
+        if config.download_part_size_bytes == 0 || config.upload_part_size_bytes == 0 {
+            return Err(StorageError::Message {
+                message: "Cannot partition with zero chunk size".to_string(),
+            }
+            .boxed());
+        }
         let store = match config.credentials {
-            ObjectStorageCredentials::GCS => GoogleCloudStorageBuilder::new()
+            ObjectStorageCredentials::GCS => GoogleCloudStorageBuilder::from_env()
                 .with_bucket_name(&config.bucket)
                 .with_retry(object_store::RetryConfig {
                     max_retries: config.request_retry_count,
@@ -182,32 +186,7 @@ impl ObjectStorage {
         Ok(current_etag.0 == e_tag.0)
     }
 
-    fn partition(
-        total: usize,
-        chunk_size: usize,
-    ) -> Result<impl Iterator<Item = Range<usize>>, StorageError> {
-        if chunk_size == 0 {
-            return Err(StorageError::Message {
-                message: "Cannot partition with zero chunk size".to_string(),
-            });
-        }
-        let chunk_count = (total + chunk_size - 1) / chunk_size;
-        let chunk_start = (0..chunk_count).map(move |i| i * chunk_size);
-        Ok(chunk_start
-            .clone()
-            .zip(chunk_start.skip(1).chain([total]))
-            .map(|(start, end)| start..end))
-    }
-
-    async fn get_bytes_with_opts(
-        &self,
-        key: &str,
-        opts: object_store::GetOptions,
-    ) -> Result<GetResult, StorageError> {
-        Ok(self.store.get_opts(&key.into(), opts).await?)
-    }
-
-    async fn multi_part_get(&self, key: &str) -> Result<(Vec<u8>, ETag), StorageError> {
+    async fn multipart_get(&self, key: &str) -> Result<(Vec<u8>, ETag), StorageError> {
         let metadata = self.store.head(&key.into()).await?;
         let object_size = metadata.size;
         let etag = (&UpdateVersion {
@@ -219,23 +198,32 @@ impl ObjectStorage {
             return Ok((Vec::new(), etag));
         }
 
-        let mut buffer = vec![0_u8; object_size];
-        let get_part_futures = Self::partition(object_size, self.download_part_size_bytes)?
-            .zip(buffer.chunks_mut(self.download_part_size_bytes))
-            .map(|(bytes_range, bytes_buffer)| async move {
+        let chunk_count = object_size.div_ceil(self.download_part_size_bytes);
+        let chunk_start = (0..chunk_count).map(|i| i * self.download_part_size_bytes);
+        let chunk_ranges = chunk_start
+            .clone()
+            .zip(chunk_start.skip(1).chain([object_size]))
+            .map(|(start, end)| start..end);
+
+        let mut buffer = vec![0_u8; object_size as usize];
+        let get_part_futures = buffer
+            .chunks_mut(self.download_part_size_bytes as usize)
+            .zip(chunk_ranges)
+            .map(|(byte_buffer, byte_range)| async move {
                 let bytes = self
-                    .get_bytes_with_opts(
-                        key,
+                    .store
+                    .get_opts(
+                        &key.into(),
                         object_store::GetOptions {
-                            range: Some(GetRange::Bounded(bytes_range)),
+                            range: Some(GetRange::Bounded(byte_range)),
                             ..Default::default()
                         },
                     )
                     .await?
                     .bytes()
                     .await?;
-                let copy_length = bytes.len().min(bytes_buffer.len());
-                bytes_buffer[..copy_length].copy_from_slice(&bytes[..copy_length]);
+                let copy_length = bytes.len().min(byte_buffer.len());
+                byte_buffer[..copy_length].copy_from_slice(&bytes[..copy_length]);
                 Ok::<_, StorageError>(())
             })
             .collect::<Vec<_>>();
@@ -250,7 +238,7 @@ impl ObjectStorage {
     }
 
     async fn oneshot_get(&self, key: &str) -> Result<(Vec<u8>, ETag), StorageError> {
-        let result = self.get_bytes_with_opts(key, Default::default()).await?;
+        let result = self.store.get_opts(&key.into(), Default::default()).await?;
         let update_version = UpdateVersion {
             e_tag: result.meta.e_tag.clone(),
             version: result.meta.version.clone(),
@@ -268,13 +256,49 @@ impl ObjectStorage {
         options: GetOptions,
     ) -> Result<(Vec<u8>, ETag), StorageError> {
         if options.request_parallelism {
-            self.multi_part_get(key).await
+            self.multipart_get(key).await
         } else {
             self.oneshot_get(key).await
         }
     }
 
-    pub async fn oneshot_put(
+    pub async fn multipart_put(
+        &self,
+        key: &str,
+        mut bytes: Vec<u8>,
+        _options: PutOptions,
+    ) -> Result<ETag, StorageError> {
+        let chunk_size = self.upload_part_size_bytes as usize;
+        let chunk_count = bytes.len().div_ceil(chunk_size);
+        let mut upload_handle = self.store.put_multipart(&key.into()).await?;
+        let mut upload_parts = Vec::with_capacity(chunk_count);
+        while !bytes.is_empty() {
+            upload_parts.push(
+                upload_handle.put_part(
+                    bytes
+                        .drain(..bytes.len().min(chunk_size))
+                        .collect::<Vec<_>>()
+                        .into(),
+                ),
+            );
+        }
+
+        stream::iter(upload_parts)
+            .buffer_unordered(chunk_count)
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        let result = upload_handle.complete().await?;
+
+        let update_version = UpdateVersion {
+            e_tag: result.e_tag,
+            version: result.version,
+        };
+
+        (&update_version).try_into()
+    }
+
+    async fn oneshot_put(
         &self,
         key: &str,
         bytes: Vec<u8>,
@@ -294,13 +318,29 @@ impl ObjectStorage {
             .put_opts(&key.into(), bytes.into(), put_options)
             .await?;
 
-        // Serialize result's e_tag and version
         let update_version = UpdateVersion {
             e_tag: result.e_tag,
             version: result.version,
         };
 
-        Ok((&update_version).try_into()?)
+        (&update_version).try_into()
+    }
+
+    pub async fn put(
+        &self,
+        key: &str,
+        bytes: Vec<u8>,
+        options: PutOptions,
+    ) -> Result<ETag, StorageError> {
+        // TODO(sicheng): Figure out how to perform conditional multipart upload
+        if bytes.len() > self.upload_part_size_bytes as usize
+            && options.if_match.is_none()
+            && !options.if_not_exists
+        {
+            self.multipart_put(key, bytes, options).await
+        } else {
+            self.oneshot_put(key, bytes, options).await
+        }
     }
 
     pub async fn put_file(
@@ -355,7 +395,7 @@ impl ObjectStorage {
     }
 
     pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
-        self.store.rename(&src_key.into(), &dst_key.into()).await?;
+        self.store.copy(&src_key.into(), &dst_key.into()).await?;
         Ok(())
     }
 
