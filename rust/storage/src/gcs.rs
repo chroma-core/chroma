@@ -167,12 +167,30 @@ impl GcsStorage {
         &self,
         key: &str,
         bytes: Vec<u8>,
-        _options: PutOptions,
+        options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
         let bytes_data = bytes::Bytes::from(bytes);
-        let response = self
-            .client
-            .write_object(&self.bucket_path, key, bytes_data)
+        let mut req = self.client.write_object(&self.bucket_path, key, bytes_data);
+
+        // Apply conditional operations using generation numbers
+        if options.if_not_exists {
+            // if_not_exists: only create if object doesn't exist (generation = 0)
+            req = req.set_if_generation_match(0);
+        } else if let Some(etag) = &options.if_match {
+            // if_match: only update if generation matches the provided ETag
+            let generation = etag.0.parse::<i64>().map_err(|_| StorageError::Generic {
+                source: Arc::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "Invalid ETag format for GCS: expected generation number, got '{}'",
+                        etag.0
+                    ),
+                )),
+            })?;
+            req = req.set_if_generation_match(generation);
+        }
+
+        let response = req
             .send_buffered()
             .await
             .map_err(|e| from_gcs_error_with_path(e, key))?;
@@ -195,12 +213,28 @@ impl GcsStorage {
         self.put_bytes(key, bytes, options).await
     }
 
-    pub async fn delete(&self, key: &str, _options: DeleteOptions) -> Result<(), StorageError> {
-        self.control_client
+    pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
+        let mut req = self
+            .control_client
             .delete_object()
             .set_bucket(&self.bucket_path)
-            .set_object(key)
-            .send()
+            .set_object(key);
+
+        // Apply conditional delete using generation number
+        if let Some(etag) = &options.if_match {
+            let generation = etag.0.parse::<i64>().map_err(|_| StorageError::Generic {
+                source: Arc::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "Invalid ETag format for GCS: expected generation number, got '{}'",
+                        etag.0
+                    ),
+                )),
+            })?;
+            req = req.set_if_generation_match(generation);
+        }
+
+        req.send()
             .await
             .map_err(|e| from_gcs_error_with_path(e, key))?;
         Ok(())
