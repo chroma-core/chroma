@@ -8,8 +8,8 @@ use chroma_error::{ChromaError, ErrorCodes};
 
 pub mod admissioncontrolleds3;
 pub mod config;
-pub mod gcs;
 pub mod local;
+pub mod object_storage;
 pub mod s3;
 pub mod stream;
 use local::LocalStorage;
@@ -180,59 +180,6 @@ impl ChromaError for StorageError {
     }
 }
 
-impl From<object_store::Error> for StorageError {
-    fn from(e: object_store::Error) -> Self {
-        match e {
-            object_store::Error::NotFound { path, source } => StorageError::NotFound {
-                path,
-                source: source.into(),
-            },
-            object_store::Error::AlreadyExists { path, source } => StorageError::AlreadyExists {
-                path,
-                source: source.into(),
-            },
-            object_store::Error::Precondition { path, source } => StorageError::Precondition {
-                path,
-                source: source.into(),
-            },
-            object_store::Error::NotModified { path, source } => StorageError::NotModified {
-                path,
-                source: source.into(),
-            },
-            object_store::Error::PermissionDenied { path, source } => {
-                StorageError::PermissionDenied {
-                    path,
-                    source: source.into(),
-                }
-            }
-            object_store::Error::Unauthenticated { path, source } => {
-                StorageError::Unauthenticated {
-                    path,
-                    source: source.into(),
-                }
-            }
-            object_store::Error::NotSupported { source } => StorageError::NotSupported {
-                source: source.into(),
-            },
-            object_store::Error::InvalidPath { source } => StorageError::Generic {
-                source: Arc::new(source),
-            },
-            object_store::Error::Generic { store, source } => StorageError::Generic {
-                source: Arc::new(std::io::Error::other(format!("{}: {}", store, source))),
-            },
-            object_store::Error::JoinError { source } => StorageError::Generic {
-                source: Arc::new(source),
-            },
-            object_store::Error::UnknownConfigurationKey { store, key } => {
-                StorageError::UnknownConfigurationKey { store, key }
-            }
-            _ => StorageError::Generic {
-                source: Arc::new(e),
-            },
-        }
-    }
-}
-
 /// Error returned by [`Path::parse`]
 #[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -259,7 +206,7 @@ pub enum StorageConfigError {
 #[allow(clippy::large_enum_variant)]
 pub enum Storage {
     S3(s3::S3Storage),
-    GCS(gcs::GcsStorage),
+    Object(object_storage::ObjectStorage),
     Local(local::LocalStorage),
     AdmissionControlledS3(admissioncontrolleds3::AdmissionControlledS3Storage),
 }
@@ -268,7 +215,7 @@ impl std::fmt::Debug for Storage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Storage::S3(_) => f.debug_tuple("S3").finish(),
-            Storage::GCS(_) => f.debug_tuple("GCS").finish(),
+            Storage::Object(_) => f.debug_tuple("Object").finish(),
             Storage::Local(_) => f.debug_tuple("Local").finish(),
             Storage::AdmissionControlledS3(_) => f.debug_tuple("AdmissionControlledS3").finish(),
         }
@@ -289,7 +236,7 @@ impl Storage {
     pub fn bucket_name(&self) -> Option<&str> {
         match self {
             Storage::S3(s3) => Some(&s3.bucket),
-            Storage::GCS(gcs) => Some(&gcs.bucket),
+            Storage::Object(obj) => Some(&obj.bucket),
             Storage::AdmissionControlledS3(ac_s3) => Some(&ac_s3.storage.bucket),
             Storage::Local(_) => None,
         }
@@ -298,7 +245,7 @@ impl Storage {
     pub async fn get(&self, key: &str, options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
         match self {
             Storage::S3(s3) => s3.get(key, options).await,
-            Storage::GCS(gcs) => gcs.get(key, options).await,
+            Storage::Object(obj) => obj.get(key, options).await.map(|(bytes, _)| bytes.into()),
             Storage::Local(local) => local.get(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage.get(key, options).await
@@ -323,10 +270,10 @@ impl Storage {
                 let fetch_result = fetch_fn(Ok(res.0)).await?;
                 Ok((fetch_result, res.1))
             }
-            Storage::GCS(gcs) => {
-                let res = gcs.get_with_e_tag(key).await?;
-                let fetch_result = fetch_fn(Ok(res.0)).await?;
-                Ok((fetch_result, res.1))
+            Storage::Object(obj) => {
+                let (bytes, etag) = obj.get(key, options).await?;
+                let fetch_result = fetch_fn(Ok(bytes.into())).await?;
+                Ok((fetch_result, Some(etag)))
             }
             Storage::Local(local) => {
                 let res = local.get_with_e_tag(key).await?;
@@ -379,7 +326,7 @@ impl Storage {
     {
         match self {
             Storage::S3(_) => self.fetch_batch_generic(keys, options, fetch_fn).await,
-            Storage::GCS(_) => self.fetch_batch_generic(keys, options, fetch_fn).await,
+            Storage::Object(_) => self.fetch_batch_generic(keys, options, fetch_fn).await,
             Storage::Local(_) => self.fetch_batch_generic(keys, options, fetch_fn).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage
@@ -396,7 +343,10 @@ impl Storage {
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         match self {
             Storage::S3(s3) => s3.get_with_e_tag(key).await,
-            Storage::GCS(gcs) => gcs.get_with_e_tag(key).await,
+            Storage::Object(obj) => {
+                let (bytes, etag) = obj.get(key, options).await?;
+                Ok((bytes.into(), Some(etag)))
+            }
             Storage::Local(local) => local.get_with_e_tag(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage
@@ -413,7 +363,7 @@ impl Storage {
     pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
         match self {
             Storage::S3(s3) => s3.confirm_same(key, e_tag).await,
-            Storage::GCS(gcs) => gcs.confirm_same(key, e_tag).await,
+            Storage::Object(obj) => obj.confirm_same(key, e_tag).await,
             Storage::Local(local) => local.confirm_same(key, e_tag).await,
             Storage::AdmissionControlledS3(as3) => as3.confirm_same(key, e_tag).await,
         }
@@ -427,7 +377,7 @@ impl Storage {
     ) -> Result<Option<ETag>, StorageError> {
         match self {
             Storage::S3(s3) => s3.put_file(key, path, options).await,
-            Storage::GCS(gcs) => gcs.put_file(key, path, options).await,
+            Storage::Object(obj) => obj.put_file(key, path, options).await.map(Some),
             Storage::Local(local) => local.put_file(key, path, options).await,
             Storage::AdmissionControlledS3(as3) => as3.put_file(key, path, options).await,
         }
@@ -441,7 +391,7 @@ impl Storage {
     ) -> Result<Option<ETag>, StorageError> {
         match self {
             Storage::S3(s3) => s3.put_bytes(key, bytes, options).await,
-            Storage::GCS(gcs) => gcs.put_bytes(key, bytes.clone(), options).await,
+            Storage::Object(obj) => obj.oneshot_put(key, bytes.clone(), options).await.map(Some),
             Storage::Local(local) => local.put_bytes(key, &bytes, options).await,
             Storage::AdmissionControlledS3(as3) => as3.put_bytes(key, bytes, options).await,
         }
@@ -450,7 +400,7 @@ impl Storage {
     pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
         match self {
             Storage::S3(s3) => s3.delete(key, options).await,
-            Storage::GCS(gcs) => gcs.delete(key, options).await,
+            Storage::Object(obj) => obj.delete(key).await,
             Storage::Local(local) => {
                 if options.if_match.is_some() {
                     return Err(StorageError::Message {
@@ -469,7 +419,7 @@ impl Storage {
     ) -> Result<crate::s3::DeletedObjects, StorageError> {
         match self {
             Storage::S3(s3) => s3.delete_many(keys).await,
-            Storage::GCS(gcs) => gcs.delete_many(keys).await,
+            Storage::Object(obj) => obj.delete_many(keys).await,
             Storage::Local(local) => local.delete_many(keys).await,
             Storage::AdmissionControlledS3(ac) => ac.delete_many(keys).await,
         }
@@ -478,7 +428,7 @@ impl Storage {
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         match self {
             Storage::S3(s3) => s3.rename(src_key, dst_key).await,
-            Storage::GCS(gcs) => gcs.rename(src_key, dst_key).await,
+            Storage::Object(obj) => obj.rename(src_key, dst_key).await,
             Storage::Local(local) => local.rename(src_key, dst_key).await,
             Storage::AdmissionControlledS3(_) => Err(StorageError::NotImplemented),
         }
@@ -487,7 +437,7 @@ impl Storage {
     pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         match self {
             Storage::S3(s3) => s3.copy(src_key, dst_key).await,
-            Storage::GCS(gcs) => gcs.copy(src_key, dst_key).await,
+            Storage::Object(obj) => obj.copy(src_key, dst_key).await,
             Storage::Local(local) => local.copy(src_key, dst_key).await,
             Storage::AdmissionControlledS3(ac) => ac.copy(src_key, dst_key).await,
         }
@@ -501,7 +451,7 @@ impl Storage {
         match self {
             Storage::Local(local) => local.list_prefix(prefix).await,
             Storage::S3(s3) => s3.list_prefix(prefix).await,
-            Storage::GCS(gcs) => gcs.list_prefix(prefix).await,
+            Storage::Object(obj) => obj.list_prefix(prefix).await,
             Storage::AdmissionControlledS3(acs3) => acs3.list_prefix(prefix, options).await,
         }
     }
@@ -517,8 +467,8 @@ impl Configurable<StorageConfig> for Storage {
             StorageConfig::S3(_) => Ok(Storage::S3(
                 s3::S3Storage::try_from_config(config, registry).await?,
             )),
-            StorageConfig::GCS(_) => Ok(Storage::GCS(
-                gcs::GcsStorage::try_from_config(config, registry).await?,
+            StorageConfig::Object(_) => Ok(Storage::Object(
+                object_storage::ObjectStorage::try_from_config(config, registry).await?,
             )),
             StorageConfig::Local(_) => Ok(Storage::Local(
                 local::LocalStorage::try_from_config(config, registry).await?,

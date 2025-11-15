@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 /// The configuration for the chosen storage.
 /// # Options
 /// - S3: The configuration for the s3 storage.
-/// - GCS: The configuration for the Google Cloud Storage.
+/// - Object: The configuration for the object storage.
 /// - Local: The configuration for local filesystem storage.
 /// - AdmissionControlledS3: S3 with rate limiting and request coalescing.
 /// # Notes
@@ -14,7 +14,7 @@ pub enum StorageConfig {
     #[serde(alias = "s3")]
     S3(S3StorageConfig),
     #[serde(alias = "gcs")]
-    GCS(GcsStorageConfig),
+    Object(ObjectStorageConfig),
     #[serde(alias = "local")]
     Local(LocalStorageConfig),
     #[serde(alias = "admissioncontrolleds3")]
@@ -163,38 +163,49 @@ impl Default for RateLimitingConfig {
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
-/// The configuration for the GCS storage type
+pub enum ObjectStorageCredentials {
+    /// GCS uses Application Default Credentials (ADC) automatically
+    GCS,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+/// The configuration for the ObjectStorage type
 /// # Fields
 /// - bucket: The name of the bucket to use.
 /// - connect_timeout_ms: Connection timeout in milliseconds.
-/// - request_timeout_ms: Request timeout in milliseconds.
-/// - request_retry_count: Number of retry attempts for failed requests.
-/// - upload_part_size_bytes: Size of each part in multipart uploads.
+/// - credentials: Credentials for connection.
 /// - download_part_size_bytes: Size of each part for parallel range downloads.
-/// # Notes
-/// - Authentication uses Application Default Credentials (ADC) automatically via object_store.
-pub struct GcsStorageConfig {
-    #[serde(default = "GcsStorageConfig::default_bucket")]
+/// - request_retry_count: Number of retry attempts for failed requests.
+/// - request_timeout_ms: Request timeout in milliseconds.
+/// - upload_part_size_bytes: Size of each part in multipart uploads.
+pub struct ObjectStorageConfig {
+    #[serde(default = "ObjectStorageConfig::default_bucket")]
     pub bucket: String,
-    #[serde(default = "GcsStorageConfig::default_connect_timeout_ms")]
+    #[serde(default = "ObjectStorageConfig::default_connect_timeout_ms")]
     pub connect_timeout_ms: u64,
-    #[serde(default = "GcsStorageConfig::default_request_timeout_ms")]
-    pub request_timeout_ms: u64,
-    #[serde(default = "GcsStorageConfig::default_request_retry_count")]
-    pub request_retry_count: usize,
-    #[serde(default = "GcsStorageConfig::default_upload_part_size_bytes")]
-    pub upload_part_size_bytes: usize,
-    #[serde(default = "GcsStorageConfig::default_download_part_size_bytes")]
+    #[serde(default = "ObjectStorageConfig::default_credentials")]
+    pub credentials: ObjectStorageCredentials,
+    #[serde(default = "ObjectStorageConfig::default_download_part_size_bytes")]
     pub download_part_size_bytes: usize,
+    #[serde(default = "ObjectStorageConfig::default_request_retry_count")]
+    pub request_retry_count: usize,
+    #[serde(default = "ObjectStorageConfig::default_request_timeout_ms")]
+    pub request_timeout_ms: u64,
+    #[serde(default = "ObjectStorageConfig::default_upload_part_size_bytes")]
+    pub upload_part_size_bytes: usize,
 }
 
-impl GcsStorageConfig {
+impl ObjectStorageConfig {
     fn default_bucket() -> String {
         "chroma-storage".to_string()
     }
 
     fn default_connect_timeout_ms() -> u64 {
         5000
+    }
+
+    fn default_credentials() -> ObjectStorageCredentials {
+        ObjectStorageCredentials::GCS
     }
 
     fn default_request_timeout_ms() -> u64 {
@@ -206,23 +217,24 @@ impl GcsStorageConfig {
     }
 
     fn default_upload_part_size_bytes() -> usize {
-        5 * 1024 * 1024 // 5 MB (matches S3, minimum GCS multipart part size)
+        5 * 1024 * 1024 // 5 MB
     }
 
     fn default_download_part_size_bytes() -> usize {
-        8 * 1024 * 1024 // 8 MB (matches S3)
+        8 * 1024 * 1024 // 8 MB
     }
 }
 
-impl Default for GcsStorageConfig {
+impl Default for ObjectStorageConfig {
     fn default() -> Self {
-        GcsStorageConfig {
+        ObjectStorageConfig {
             bucket: Self::default_bucket(),
             connect_timeout_ms: Self::default_connect_timeout_ms(),
-            request_timeout_ms: Self::default_request_timeout_ms(),
-            request_retry_count: Self::default_request_retry_count(),
-            upload_part_size_bytes: Self::default_upload_part_size_bytes(),
+            credentials: Self::default_credentials(),
             download_part_size_bytes: Self::default_download_part_size_bytes(),
+            request_retry_count: Self::default_request_retry_count(),
+            request_timeout_ms: Self::default_request_timeout_ms(),
+            upload_part_size_bytes: Self::default_upload_part_size_bytes(),
         }
     }
 }
