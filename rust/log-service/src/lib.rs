@@ -1860,7 +1860,9 @@ impl LogServer {
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        let target_epoch_us = request.initial_insertion_epoch_us - self.config.timeout_us;
+        let target_epoch_us = request
+            .initial_insertion_epoch_us
+            .saturating_sub(self.config.timeout_us);
         tracing::info!("backfill for {collection_id} at {}", target_epoch_us);
         let storage_prefix = collection_id.storage_prefix_for_log();
         let log_reader = LogReader::new(
