@@ -1,16 +1,20 @@
-use chroma_types::SparseVector;
+use chroma_types::{
+    EmbeddingFunctionConfiguration, EmbeddingFunctionNewConfiguration, SparseVector,
+};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::embed::bm25_tokenizer::Bm25Tokenizer;
 use crate::embed::murmur3_abs_hasher::Murmur3AbsHasher;
-use crate::embed::{EmbeddingFunction, TokenHasher, Tokenizer};
+use crate::embed::{SparseEmbeddingFunction, TokenHasher, Tokenizer};
 
 /// Error type for BM25 sparse embedding.
-///
-/// This is an empty enum (uninhabited type), meaning it can never be constructed.
-/// BM25 encoding with infallible tokenizers and hashers cannot fail.
 #[derive(Debug, Error)]
-pub enum BM25SparseEmbeddingError {}
+pub enum BM25SparseEmbeddingError {
+    /// JSON serialization or deserialization error.
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
+}
 
 /// BM25 sparse embedding function parameterized by tokenizer and hasher.
 ///
@@ -70,7 +74,7 @@ where
     H: TokenHasher,
 {
     /// Encode a single text string into a sparse vector.
-    pub fn encode(&self, text: &str) -> Result<SparseVector, BM25SparseEmbeddingError> {
+    pub fn encode(&self, text: &str) -> SparseVector {
         let tokens = self.tokenizer.tokenize(text);
 
         let doc_len = tokens.len() as f32;
@@ -94,21 +98,74 @@ where
             (id, score)
         });
 
-        Ok(SparseVector::from_pairs(sparse_pairs))
+        SparseVector::from_pairs(sparse_pairs)
+    }
+}
+
+/// Configuration for BM25 sparse embedding function.
+#[derive(Serialize, Deserialize)]
+pub struct BM25Config {
+    k: f32,
+    b: f32,
+    avg_doc_length: f32,
+    token_max_length: usize,
+}
+
+impl TryFrom<BM25Config> for EmbeddingFunctionConfiguration {
+    type Error = BM25SparseEmbeddingError;
+
+    fn try_from(value: BM25Config) -> Result<Self, Self::Error> {
+        Ok(EmbeddingFunctionConfiguration::Known(
+            EmbeddingFunctionNewConfiguration {
+                name: BM25SparseEmbeddingFunction::<Bm25Tokenizer, Murmur3AbsHasher>::get_name()
+                    .to_string(),
+                config: serde_json::to_value(value)?,
+            },
+        ))
     }
 }
 
 #[async_trait::async_trait]
-impl<T, H> EmbeddingFunction for BM25SparseEmbeddingFunction<T, H>
-where
-    T: Tokenizer + Send + Sync + 'static,
-    H: TokenHasher + Send + Sync + 'static,
-{
-    type Embedding = SparseVector;
+impl SparseEmbeddingFunction for BM25SparseEmbeddingFunction<Bm25Tokenizer, Murmur3AbsHasher> {
     type Error = BM25SparseEmbeddingError;
+    type Config = BM25Config;
 
-    async fn embed_strs(&self, batches: &[&str]) -> Result<Vec<Self::Embedding>, Self::Error> {
-        batches.iter().map(|text| self.encode(text)).collect()
+    async fn embed_strs(&self, batches: &[&str]) -> Result<Vec<SparseVector>, Self::Error> {
+        Ok(batches
+            .iter()
+            .map(|text| self.encode(text))
+            .collect::<Vec<_>>())
+    }
+
+    fn get_name() -> &'static str {
+        "chroma_bm25"
+    }
+
+    fn build_from_config(config: Self::Config) -> Result<Self, Self::Error>
+    where
+        Self: Sized,
+    {
+        let tokenizer = Bm25Tokenizer {
+            token_max_length: config.token_max_length,
+            ..Default::default()
+        };
+
+        Ok(Self {
+            tokenizer,
+            hasher: Murmur3AbsHasher::default(),
+            k: config.k,
+            b: config.b,
+            avg_len: config.avg_doc_length,
+        })
+    }
+
+    fn get_config(&self) -> Result<Self::Config, Self::Error> {
+        Ok(BM25Config {
+            k: self.k,
+            b: self.b,
+            avg_doc_length: self.avg_len,
+            token_max_length: self.tokenizer.token_max_length,
+        })
     }
 }
 
@@ -128,7 +185,7 @@ mod tests {
         let bm25 = BM25SparseEmbeddingFunction::default_murmur3_abs();
         let text = "Usain Bolt's top speed reached ~27.8 mph (44.72 km/h)";
 
-        let result = bm25.encode(text).unwrap();
+        let result = bm25.encode(text);
 
         let expected_indices = vec![
             230246813, 395514983, 458027949, 488165615, 729632045, 734978415, 997512866,
@@ -156,7 +213,7 @@ mod tests {
         let bm25 = BM25SparseEmbeddingFunction::default_murmur3_abs();
         let text = "The   space-time   continuum   WARPS   near   massive   objects...";
 
-        let result = bm25.encode(text).unwrap();
+        let result = bm25.encode(text);
 
         let expected_indices = vec![
             90097469, 519064992, 737893654, 1110755108, 1950894484, 2031641008, 2058513491,

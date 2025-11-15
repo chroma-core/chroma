@@ -4,9 +4,11 @@
 //! Ollama instance to generate embeddings using models like `nomic-embed-text` or `mxbai-embed-large`.
 //! Ollama enables privacy-preserving embeddings without sending data to external APIs.
 
+use chroma_types::{EmbeddingFunctionConfiguration, EmbeddingFunctionNewConfiguration};
 use reqwest::RequestBuilder;
+use serde::{Deserialize, Serialize};
 
-use super::EmbeddingFunction;
+use crate::embed::DenseEmbeddingFunction;
 
 /////////////////////////////////////// OllamaEmbeddingError ///////////////////////////////////////
 
@@ -18,6 +20,9 @@ pub enum OllamaEmbeddingError {
     /// This includes connection errors, timeouts, and invalid responses from the Ollama API.
     #[error("request failed: {0}")]
     Reqwest(#[from] reqwest::Error),
+    /// Serialization or deserialization of JSON data failed.
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
 }
 
 ////////////////////////////////////// OllamaEmbeddingFunction /////////////////////////////////////
@@ -108,17 +113,11 @@ impl OllamaEmbeddingFunction {
     /// # }
     /// ```
     pub async fn heartbeat(&self) -> Result<(), OllamaEmbeddingError> {
-        self.embed_strs(&["heartbeat"]).await?;
+        self.embed(&["heartbeat"]).await?;
         Ok(())
     }
-}
 
-#[async_trait::async_trait]
-impl EmbeddingFunction for OllamaEmbeddingFunction {
-    type Embedding = Vec<f32>;
-    type Error = OllamaEmbeddingError;
-
-    async fn embed_strs(&self, batches: &[&str]) -> Result<Vec<Vec<f32>>, Self::Error> {
+    async fn embed(&self, batches: &[&str]) -> Result<Vec<Vec<f32>>, OllamaEmbeddingError> {
         let model = &self.model;
         let input = batches;
         let req = EmbedRequest { model, input };
@@ -130,6 +129,60 @@ impl EmbeddingFunction for OllamaEmbeddingFunction {
             .json::<EmbedResponse>()
             .await?;
         Ok(resp.embeddings)
+    }
+}
+
+/// Configuration for the Ollama embedding function.
+#[derive(Serialize, Deserialize)]
+pub struct OllamaEmbeddingFunctionConfig {
+    url: String,
+    model_name: String,
+    timeout: u64,
+}
+
+impl TryFrom<OllamaEmbeddingFunctionConfig> for EmbeddingFunctionConfiguration {
+    type Error = OllamaEmbeddingError;
+
+    fn try_from(value: OllamaEmbeddingFunctionConfig) -> Result<Self, Self::Error> {
+        Ok(EmbeddingFunctionConfiguration::Known(
+            EmbeddingFunctionNewConfiguration {
+                name: OllamaEmbeddingFunction::get_name().to_string(),
+                config: serde_json::to_value(value)?,
+            },
+        ))
+    }
+}
+
+#[async_trait::async_trait]
+impl DenseEmbeddingFunction for OllamaEmbeddingFunction {
+    type Error = OllamaEmbeddingError;
+    type Config = OllamaEmbeddingFunctionConfig;
+
+    async fn embed_strs(&self, batches: &[&str]) -> Result<Vec<Vec<f32>>, Self::Error> {
+        let embeddings = self.embed(batches).await?;
+        Ok(embeddings)
+    }
+
+    fn build_from_config(config: Self::Config) -> Result<Self, Self::Error> {
+        Ok(Self {
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(config.timeout))
+                .build()?,
+            host: config.url,
+            model: config.model_name,
+        })
+    }
+
+    fn get_config(&self) -> Result<Self::Config, Self::Error> {
+        Ok(OllamaEmbeddingFunctionConfig {
+            url: self.host.clone(),
+            model_name: self.model.clone(),
+            timeout: 60,
+        })
+    }
+
+    fn get_name() -> &'static str {
+        "ollama"
     }
 }
 

@@ -72,6 +72,13 @@ impl std::fmt::Debug for ChromaCollection {
 }
 
 impl ChromaCollection {
+    pub(crate) fn new(client: ChromaHttpClient, collection: Collection) -> Self {
+        Self {
+            client,
+            collection: Arc::new(collection),
+        }
+    }
+
     /// Returns the database ID that contains this collection.
     pub fn database(&self) -> &str {
         &self.collection.database
@@ -712,10 +719,7 @@ impl ChromaCollection {
         let collection: Collection = self
             .send("fork", "fork", Method::POST, Some(request))
             .await?;
-        Ok(ChromaCollection {
-            client: self.client.clone(),
-            collection: Arc::new(collection),
-        })
+        Ok(ChromaCollection::new(self.client.clone(), collection))
     }
 
     /// Internal transport method that constructs collection-specific API paths and delegates to the client.
