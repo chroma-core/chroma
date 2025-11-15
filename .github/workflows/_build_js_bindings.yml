@@ -2,11 +2,11 @@ name: JS Bindings CI
 env:
   DEBUG: napi:*
   APP_NAME: "chromadb-js-bindings"
-  MACOSX_DEPLOYMENT_TARGET: '10.13'
+  MACOSX_DEPLOYMENT_TARGET: "10.13"
 permissions:
   contents: write
   id-token: write
-'on':
+"on":
   workflow_dispatch: {}
   workflow_call: {}
 jobs:
@@ -75,7 +75,7 @@ jobs:
 
   build-windows:
     name: Build Windows bindings
-    runs-on: 8core-32gb-windows-latest
+    runs-on: blacksmith-8vcpu-windows-2025
     defaults:
       run:
         working-directory: rust/js_bindings
