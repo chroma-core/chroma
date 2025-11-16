@@ -175,7 +175,7 @@ const collection = await client.createCollection({
 
 ### Collection Metadata
 
-When creating collections, you can pass the optional `metadata` argument to add a mapping of metadata key-value pairs to your collections. This can be useful for adding general about the collection like creation time, description of the data stored in the collection, and more.
+When creating collections, you can pass the optional `metadata` argument to add a mapping of metadata key-value pairs to your collections. This can be useful for adding general information about the collection like creation time, description of the data stored in the collection, and more.
 
 {% TabbedCodeBlock %}
 
