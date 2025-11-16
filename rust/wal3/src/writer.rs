@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::{GetOptions, PutOptions, Storage, StorageError};
+use chroma_storage::{PutOptions, Storage, StorageError};
 use opentelemetry::trace::TraceContextExt;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
@@ -1127,44 +1127,6 @@ pub async fn upload_parquet(
                 let mut backoff = exp_backoff.next();
                 if backoff > Duration::from_secs(60) {
                     backoff = Duration::from_secs(60);
-                }
-                tokio::time::sleep(backoff).await;
-            }
-        }
-    }
-}
-
-#[tracing::instrument(skip(options, storage))]
-pub async fn copy_parquet(
-    options: &LogWriterOptions,
-    storage: &Storage,
-    source: &str,
-    target: &str,
-) -> Result<(), Error> {
-    let parquet = storage
-        .get(source, GetOptions::new(StorageRequestPriority::P0))
-        .await
-        .map_err(Arc::new)?;
-    let exp_backoff: ExponentialBackoff = options.throttle_fragment.into();
-    let start = Instant::now();
-    loop {
-        match storage
-            .put_bytes(
-                target,
-                parquet.to_vec(),
-                PutOptions::if_not_exists(StorageRequestPriority::P0),
-            )
-            .await
-        {
-            Ok(_) => return Ok(()),
-            Err(StorageError::Precondition { path: _, source: _ }) => return Ok(()),
-            Err(err) => {
-                if start.elapsed() > Duration::from_secs(60) {
-                    return Err(Error::StorageError(Arc::new(err)));
-                }
-                let mut backoff = exp_backoff.next();
-                if backoff > Duration::from_secs(3_600) {
-                    backoff = Duration::from_secs(3_600);
                 }
                 tokio::time::sleep(backoff).await;
             }
