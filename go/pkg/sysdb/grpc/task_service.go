@@ -67,18 +67,6 @@ func (s *Server) GetAttachedFunctionByUuid(ctx context.Context, req *coordinator
 	return res, nil
 }
 
-func (s *Server) CreateOutputCollectionForAttachedFunction(ctx context.Context, req *coordinatorpb.CreateOutputCollectionForAttachedFunctionRequest) (*coordinatorpb.CreateOutputCollectionForAttachedFunctionResponse, error) {
-	log.Info("CreateOutputCollectionForAttachedFunction", zap.String("attached_function_id", req.AttachedFunctionId), zap.String("collection_name", req.CollectionName))
-
-	res, err := s.coordinator.CreateOutputCollectionForAttachedFunction(ctx, req)
-	if err != nil {
-		log.Error("CreateOutputCollectionForAttachedFunction failed", zap.Error(err))
-		return nil, err
-	}
-
-	return res, nil
-}
-
 func (s *Server) DetachFunction(ctx context.Context, req *coordinatorpb.DetachFunctionRequest) (*coordinatorpb.DetachFunctionResponse, error) {
 	log.Info("DetachFunction", zap.String("attached_function_id", req.AttachedFunctionId))
 
@@ -126,6 +114,19 @@ func (s *Server) GetSoftDeletedAttachedFunctions(ctx context.Context, req *coord
 	}
 
 	log.Info("GetSoftDeletedAttachedFunctions succeeded", zap.Int("count", len(res.AttachedFunctions)))
+	return res, nil
+}
+
+func (s *Server) FinishCreateAttachedFunction(ctx context.Context, req *coordinatorpb.FinishCreateAttachedFunctionRequest) (*coordinatorpb.FinishCreateAttachedFunctionResponse, error) {
+	log.Info("FinishCreateAttachedFunction", zap.String("id", req.Id))
+
+	res, err := s.coordinator.FinishCreateAttachedFunction(ctx, req)
+	if err != nil {
+		log.Error("FinishCreateAttachedFunction failed", zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	log.Info("FinishCreateAttachedFunction succeeded", zap.String("id", req.Id))
 	return res, nil
 }
 

@@ -63,6 +63,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Insert() {
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
+		IsReady:                 true,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -94,6 +95,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Insert_Duplicat
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
+		IsReady:                 true,
 	}
 
 	err := suite.Db.Insert(attachedFunction1)
@@ -113,6 +115,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Insert_Duplicat
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
+		IsReady:                 true,
 	}
 
 	err = suite.Db.Insert(attachedFunction2)
@@ -138,6 +141,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName() {
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
+		IsReady:                 true,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -150,6 +154,36 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName() {
 	suite.Require().Equal(attachedFunction.ID, retrieved.ID)
 	suite.Require().Equal(attachedFunction.Name, retrieved.Name)
 	suite.Require().Equal(attachedFunction.FunctionID, retrieved.FunctionID)
+
+	// Cleanup
+	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction.ID)
+}
+
+func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName_NotReady() {
+	attachedFunctionID := uuid.New()
+	functionID := dbmodel.FunctionRecordCounter
+
+	// Insert an attached function
+	attachedFunction := &dbmodel.AttachedFunction{
+		ID:                      attachedFunctionID,
+		Name:                    "test-get-attachedFunction",
+		FunctionID:              functionID,
+		InputCollectionID:       "input_col_id",
+		OutputCollectionName:    "output_col_name",
+		FunctionParams:          "{}",
+		TenantID:                "tenant1",
+		DatabaseID:              "db1",
+		MinRecordsForInvocation: 100,
+		IsReady:                 false,
+	}
+
+	err := suite.Db.Insert(attachedFunction)
+	suite.Require().NoError(err)
+
+	// Retrieve by name
+	retrieved, err := suite.Db.GetByName("input_col_id", "test-get-attachedFunction")
+	suite.Require().NoError(err)
+	suite.Require().Nil(retrieved)
 
 	// Cleanup
 	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction.ID)
@@ -177,6 +211,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName_Ignor
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
+		IsReady:                 true,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -210,6 +245,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_SoftDelete() {
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
+		IsReady:                 true,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -250,6 +286,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_DeleteAll() {
 			TenantID:                "tenant1",
 			DatabaseID:              "db-delete-all",
 			MinRecordsForInvocation: 100,
+			IsReady:                 true,
 		},
 		{
 			ID:                      uuid.New(),
@@ -261,6 +298,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_DeleteAll() {
 			TenantID:                "tenant1",
 			DatabaseID:              "db-delete-all",
 			MinRecordsForInvocation: 100,
+			IsReady:                 true,
 		},
 		{
 			ID:                      uuid.New(),
@@ -272,6 +310,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_DeleteAll() {
 			TenantID:                "tenant1",
 			DatabaseID:              "db-delete-all",
 			MinRecordsForInvocation: 100,
+			IsReady:                 true,
 		},
 	}
 
@@ -311,6 +350,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID() {
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
+		IsReady:                 true,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -322,6 +362,33 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID() {
 	suite.Require().Equal(attachedFunction.ID, retrieved.ID)
 	suite.Require().Equal(attachedFunction.Name, retrieved.Name)
 	suite.Require().Equal(attachedFunction.FunctionID, retrieved.FunctionID)
+
+	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction.ID)
+}
+
+func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID_NoReady() {
+	attachedFunctionID := uuid.New()
+	functionID := dbmodel.FunctionRecordCounter
+
+	attachedFunction := &dbmodel.AttachedFunction{
+		ID:                      attachedFunctionID,
+		Name:                    "test-get-by-id-attachedFunction",
+		FunctionID:              functionID,
+		InputCollectionID:       "input_col_id",
+		OutputCollectionName:    "output_col_name",
+		FunctionParams:          "{}",
+		TenantID:                "tenant1",
+		DatabaseID:              "db1",
+		MinRecordsForInvocation: 100,
+		IsReady:                 false,
+	}
+
+	err := suite.Db.Insert(attachedFunction)
+	suite.Require().NoError(err)
+
+	retrieved, err := suite.Db.GetByID(attachedFunctionID)
+	suite.Require().NoError(err)
+	suite.Require().Nil(retrieved)
 
 	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction.ID)
 }
@@ -346,6 +413,7 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID_Ignores
 		TenantID:                "tenant1",
 		DatabaseID:              "db1",
 		MinRecordsForInvocation: 100,
+		IsReady:                 true,
 	}
 
 	err := suite.Db.Insert(attachedFunction)

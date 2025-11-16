@@ -172,6 +172,66 @@ func (_m *IAttachedFunctionDb) GetByName(inputCollectionID string, attachedFunct
 	return r0, r1
 }
 
+// GetAnyByName provides a mock function with given fields: inputCollectionID, name
+func (_m *IAttachedFunctionDb) GetAnyByName(inputCollectionID string, name string) (*dbmodel.AttachedFunction, error) {
+	ret := _m.Called(inputCollectionID, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAnyByName")
+	}
+
+	var r0 *dbmodel.AttachedFunction
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string) (*dbmodel.AttachedFunction, error)); ok {
+		return rf(inputCollectionID, name)
+	}
+	if rf, ok := ret.Get(0).(func(string, string) *dbmodel.AttachedFunction); ok {
+		r0 = rf(inputCollectionID, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*dbmodel.AttachedFunction)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(inputCollectionID, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetAnyByID provides a mock function with given fields: id
+func (_m *IAttachedFunctionDb) GetAnyByID(id uuid.UUID) (*dbmodel.AttachedFunction, error) {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAnyByID")
+	}
+
+	var r0 *dbmodel.AttachedFunction
+	var r1 error
+	if rf, ok := ret.Get(0).(func(uuid.UUID) (*dbmodel.AttachedFunction, error)); ok {
+		return rf(id)
+	}
+	if rf, ok := ret.Get(0).(func(uuid.UUID) *dbmodel.AttachedFunction); ok {
+		r0 = rf(id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*dbmodel.AttachedFunction)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(uuid.UUID) error); ok {
+		r1 = rf(id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // Insert provides a mock function with given fields: attachedFunction
 func (_m *IAttachedFunctionDb) Insert(attachedFunction *dbmodel.AttachedFunction) error {
 	ret := _m.Called(attachedFunction)
@@ -304,17 +364,17 @@ func (_m *IAttachedFunctionDb) UpdateLowestLiveNonce(attachedFunctionID uuid.UUI
 	return r0
 }
 
-// UpdateOutputCollectionID provides a mock function with given fields: attachedFunctionID, outputCollectionID
-func (_m *IAttachedFunctionDb) UpdateOutputCollectionID(attachedFunctionID uuid.UUID, outputCollectionID *string) error {
-	ret := _m.Called(attachedFunctionID, outputCollectionID)
+// Update provides a mock function with given fields: attachedFunction
+func (_m *IAttachedFunctionDb) Update(attachedFunction *dbmodel.AttachedFunction) error {
+	ret := _m.Called(attachedFunction)
 
 	if len(ret) == 0 {
-		panic("no return value specified for UpdateOutputCollectionID")
+		panic("no return value specified for Update")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(uuid.UUID, *string) error); ok {
-		r0 = rf(attachedFunctionID, outputCollectionID)
+	if rf, ok := ret.Get(0).(func(*dbmodel.AttachedFunction) error); ok {
+		r0 = rf(attachedFunction)
 	} else {
 		r0 = ret.Error(0)
 	}

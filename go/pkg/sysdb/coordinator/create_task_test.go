@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chroma-core/chroma/go/pkg/common"
-
 	"github.com/chroma-core/chroma/go/pkg/memberlist_manager"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
@@ -71,12 +69,12 @@ func (suite *AttachFunctionTestSuite) setupAttachFunctionMocks(ctx context.Conte
 
 	// Phase 0: No existing attached function
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetByName", inputCollectionID, attachedFunctionName).
+	suite.mockAttachedFunctionDb.On("GetAnyByName", inputCollectionID, attachedFunctionName).
 		Return(nil, nil).Once()
 
 	// Phase 1: Create attached function in transaction
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetByName", inputCollectionID, attachedFunctionName).
+	suite.mockAttachedFunctionDb.On("GetAnyByName", inputCollectionID, attachedFunctionName).
 		Return(nil, nil).Once()
 
 	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
@@ -174,7 +172,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 	// Setup mocks that will be called within the transaction (using mock.Anything for context)
 	// Check if attached function exists (idempotency check inside transaction)
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetByName", inputCollectionID, attachedFunctionName).
+	suite.mockAttachedFunctionDb.On("GetAnyByName", inputCollectionID, attachedFunctionName).
 		Return(nil, nil).Once()
 
 	// Look up database
@@ -225,10 +223,9 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 	// Execute AttachFunction
 	response, err := suite.coordinator.AttachFunction(ctx, request)
 
-	// Assertions - heap service is not enabled in this test setup
-	suite.Error(err)
-	suite.Nil(response)
-	suite.ErrorIs(err, common.ErrHeapServiceNotEnabled)
+	suite.NoError(err)
+	suite.NotNil(response)
+	suite.NotEmpty(response.Id)
 
 	// Verify all mocks were called as expected
 	suite.mockMetaDomain.AssertExpectations(suite.T())
@@ -292,7 +289,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 
 	// ===== Phase 1: Transaction checks if attached function exists =====
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetByName", inputCollectionID, attachedFunctionName).
+	suite.mockAttachedFunctionDb.On("GetAnyByName", inputCollectionID, attachedFunctionName).
 		Return(existingAttachedFunction, nil).Once()
 
 	// Mock transaction call
@@ -377,7 +374,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 
 	// Phase 1: Create attached function in transaction
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetByName", inputCollectionID, attachedFunctionName).
+	suite.mockAttachedFunctionDb.On("GetAnyByName", inputCollectionID, attachedFunctionName).
 		Return(nil, nil).Once()
 
 	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
@@ -407,11 +404,11 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 			_ = txFunc(context.Background())
 		}).Return(nil).Once()
 
-	// First AttachFunction call - should fail at heap push
+	// First AttachFunction call - should succeed, creating attached function with is_ready=false
 	response1, err1 := suite.coordinator.AttachFunction(ctx, request)
-	suite.Error(err1)
-	suite.Nil(response1)
-	suite.Contains(err1.Error(), "heap service")
+	suite.NoError(err1)
+	suite.NotNil(response1)
+	suite.NotEmpty(response1.Id)
 
 	// ========== GetAttachedFunctionByName: Should Return ErrAttachedFunctionNotReady ==========
 
@@ -432,7 +429,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 
 	// Phase 0: GetByName returns incomplete attached function (with ErrAttachedFunctionNotReady, which AttachFunction handles)
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetByName", inputCollectionID, attachedFunctionName).
+	suite.mockAttachedFunctionDb.On("GetAnyByName", inputCollectionID, attachedFunctionName).
 		Return(incompleteAttachedFunction, nil).Once()
 
 	// Validate function matches
@@ -520,7 +517,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 
 	// ===== Phase 1: Transaction checks if task exists - finds task with different params =====
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetByName", inputCollectionID, attachedFunctionName).
+	suite.mockAttachedFunctionDb.On("GetAnyByName", inputCollectionID, attachedFunctionName).
 		Return(existingAttachedFunction, nil).Once()
 
 	// Validate function - returns DIFFERENT function name

@@ -26,6 +26,7 @@ type AttachedFunction struct {
 	UpdatedAt               time.Time  `gorm:"column:updated_at;type:timestamp;not null;default:CURRENT_TIMESTAMP"`
 	GlobalParent            *uuid.UUID `gorm:"column:global_parent;type:uuid;default:null"`
 	OldestWrittenNonce      *uuid.UUID `gorm:"column:oldest_written_nonce;type:uuid;default:null"`
+	IsReady                 bool       `gorm:"column:is_ready;type:boolean;not null;default:false"`
 }
 
 func (v AttachedFunction) TableName() string {
@@ -36,9 +37,12 @@ func (v AttachedFunction) TableName() string {
 type IAttachedFunctionDb interface {
 	Insert(attachedFunction *AttachedFunction) error
 	GetByName(inputCollectionID string, name string) (*AttachedFunction, error)
+	GetAnyByName(inputCollectionID string, name string) (*AttachedFunction, error)
 	GetByID(id uuid.UUID) (*AttachedFunction, error)
+	GetAnyByID(id uuid.UUID) (*AttachedFunction, error) // TODO(tanujnay112): Consolidate all the getters.
 	GetByCollectionID(inputCollectionID string) ([]*AttachedFunction, error)
-	UpdateOutputCollectionID(id uuid.UUID, outputCollectionID *string) error
+	Update(attachedFunction *AttachedFunction) error
+	Finish(id uuid.UUID) error
 	SoftDelete(inputCollectionID string, name string) error
 	SoftDeleteByID(id uuid.UUID) error
 	DeleteAll() error
