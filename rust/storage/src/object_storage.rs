@@ -1,3 +1,4 @@
+// NOTE: This is mostly a copy paste from the standalone s3 impl, which will be cleaned up later
 //! Object storage backend implementation using object_store.
 //!
 //! ## ETag Implementation Note
@@ -74,12 +75,12 @@ impl From<object_store::Error> for StorageError {
 
 /// Serializable wrapper for UpdateVersion
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SerializableUpdateVersion {
+struct ObjectVersionTag {
     e_tag: Option<String>,
     version: Option<String>,
 }
 
-impl From<UpdateVersion> for SerializableUpdateVersion {
+impl From<UpdateVersion> for ObjectVersionTag {
     fn from(uv: UpdateVersion) -> Self {
         Self {
             e_tag: uv.e_tag,
@@ -88,8 +89,8 @@ impl From<UpdateVersion> for SerializableUpdateVersion {
     }
 }
 
-impl From<SerializableUpdateVersion> for UpdateVersion {
-    fn from(suv: SerializableUpdateVersion) -> Self {
+impl From<ObjectVersionTag> for UpdateVersion {
+    fn from(suv: ObjectVersionTag) -> Self {
         Self {
             e_tag: suv.e_tag,
             version: suv.version,
@@ -102,7 +103,7 @@ impl TryFrom<&UpdateVersion> for ETag {
     type Error = StorageError;
 
     fn try_from(uv: &UpdateVersion) -> Result<Self, Self::Error> {
-        let serializable: SerializableUpdateVersion = uv.clone().into();
+        let serializable: ObjectVersionTag = uv.clone().into();
         serde_json::to_string(&serializable)
             .map(ETag)
             .map_err(|e| StorageError::Generic {
@@ -116,7 +117,7 @@ impl TryFrom<&ETag> for UpdateVersion {
     type Error = StorageError;
 
     fn try_from(etag: &ETag) -> Result<Self, Self::Error> {
-        let serializable: SerializableUpdateVersion =
+        let serializable: ObjectVersionTag =
             serde_json::from_str(&etag.0).map_err(|e| StorageError::Generic {
                 source: Arc::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
@@ -222,9 +223,17 @@ impl ObjectStorage {
                     .await?
                     .bytes()
                     .await?;
-                let copy_length = bytes.len().min(byte_buffer.len());
-                byte_buffer[..copy_length].copy_from_slice(&bytes[..copy_length]);
-                Ok::<_, StorageError>(())
+                if bytes.len() != byte_buffer.len() {
+                    return Err(StorageError::Message {
+                        message: format!(
+                            "Expected {} bytes in part, got {} bytes",
+                            byte_buffer.len(),
+                            bytes.len()
+                        ),
+                    });
+                }
+                byte_buffer.copy_from_slice(&bytes);
+                Ok(())
             })
             .collect::<Vec<_>>();
 
@@ -343,6 +352,8 @@ impl ObjectStorage {
         }
     }
 
+    // TODO(sicheng): This was used for hnsw files on disk and should be cleaned up
+    // because we directly load hnsw to memory now
     pub async fn put_file(
         &self,
         key: &str,
