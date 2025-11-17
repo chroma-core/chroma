@@ -30,10 +30,7 @@ use uuid::Uuid;
 
 use crate::execution::{
     operators::{
-        execute_task::{
-            ExecuteAttachedFunctionError, ExecuteAttachedFunctionInput,
-            ExecuteAttachedFunctionOperator, ExecuteAttachedFunctionOutput,
-        },
+        execute_task::{ExecuteAttachedFunctionError, ExecuteAttachedFunctionOutput},
         get_attached_function::{
             GetAttachedFunctionInput, GetAttachedFunctionOperator,
             GetAttachedFunctionOperatorError, GetAttachedFunctionOutput,
@@ -44,6 +41,10 @@ use crate::execution::{
         materialize_logs::{
             MaterializeLogInput, MaterializeLogOperator, MaterializeLogOperatorError,
             MaterializeLogOutput,
+        },
+        source_record_segment::{
+            SourceRecordSegmentError, SourceRecordSegmentInput, SourceRecordSegmentOperator,
+            SourceRecordSegmentOutput,
         },
     },
     orchestration::compact::{CompactionContextError, ExecutionState},
@@ -70,6 +71,9 @@ pub struct AttachedFunctionOrchestrator {
     // Store the materialized outputs from DataFetchOrchestrator
     materialized_log_data: Vec<MaterializeLogOutput>,
 
+    // Store source record segment output (for backfill)
+    source_records: OnceCell<Chunk<LogRecord>>,
+
     // Function context
     function_context: OnceCell<FunctionContext>,
 
@@ -79,6 +83,8 @@ pub struct AttachedFunctionOrchestrator {
     orchestrator_context: OrchestratorContext,
 
     dispatcher: ComponentHandle<Dispatcher>,
+
+    is_backfill: bool,
 }
 
 #[derive(Error, Debug)]
@@ -123,6 +129,8 @@ pub enum AttachedFunctionOrchestratorError {
     HnswSegment(#[from] DistributedHNSWSegmentFromSegmentError),
     #[error("Error creating spann writer: {0}")]
     SpannSegment(#[from] SpannSegmentWriterError),
+    #[error("Error sourcing records from segment: {0}")]
+    SourceRecordSegment(#[from] SourceRecordSegmentError),
 }
 
 impl ChromaError for AttachedFunctionOrchestratorError {
@@ -148,6 +156,7 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             AttachedFunctionOrchestratorError::RecordSegmentReader(e) => e.code(),
             AttachedFunctionOrchestratorError::HnswSegment(e) => e.code(),
             AttachedFunctionOrchestratorError::SpannSegment(e) => e.code(),
+            AttachedFunctionOrchestratorError::SourceRecordSegment(e) => e.code(),
         }
     }
 
@@ -158,6 +167,7 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             AttachedFunctionOrchestratorError::GetCollectionAndSegments(e) => {
                 e.should_trace_error()
             }
+            AttachedFunctionOrchestratorError::SourceRecordSegment(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::NoAttachedFunction => false,
             AttachedFunctionOrchestratorError::ExecuteAttachedFunction(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::AdvanceAttachedFunction(e) => e.should_trace_error(),
@@ -220,10 +230,12 @@ impl AttachedFunctionOrchestrator {
             output_context,
             result_channel: None,
             materialized_log_data: data_fetch_records,
+            source_records: OnceCell::new(),
             function_context: OnceCell::new(),
             state: ExecutionState::MaterializeApplyCommitFlush,
             orchestrator_context,
             dispatcher,
+            is_backfill,
         }
     }
 
@@ -252,6 +264,56 @@ impl AttachedFunctionOrchestrator {
     }
 
     /// Set the output collection info
+    /// Try to dispatch execute task if both source records and output collection are ready
+    async fn try_dispatch_execute_task(&mut self, ctx: &ComponentContext<Self>) {
+        // Check if we have both prerequisites
+        let source_records = match self.source_records.get() {
+            Some(records) => records,
+            None => {
+                tracing::debug!("[AttachedFunctionOrchestrator]: Source records not ready yet");
+                return; // Not ready yet
+            }
+        };
+
+        let _output_collection_info = match self.get_output_collection_info() {
+            Ok(info) => info,
+            Err(_) => {
+                tracing::debug!("[AttachedFunctionOrchestrator]: Output collection not ready yet");
+                return; // Not ready yet
+            }
+        };
+
+        let _function_context = match self.function_context.get() {
+            Some(ctx) => ctx,
+            None => {
+                self.terminate_with_result(
+                    Err(AttachedFunctionOrchestratorError::FunctionContextNotSet),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+        };
+
+        tracing::info!(
+            "[AttachedFunctionOrchestrator]: Both prerequisites ready, dispatching execute task with {} source records",
+            source_records.len()
+        );
+
+        // TODO: Convert source_records (Chunk<LogRecord>) to the format needed by ExecuteAttachedFunctionInput
+        // This likely needs to be converted to materialized logs format
+        // For now, this is a placeholder - you'll need to implement the conversion logic
+
+        self.terminate_with_result(
+            Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                "Execute task dispatch not yet implemented - need to convert source records"
+                    .to_string(),
+            )),
+            ctx,
+        )
+        .await;
+    }
+
     pub fn set_output_collection_info(
         &mut self,
         collection_info: CollectionCompactInfo,
@@ -429,6 +491,26 @@ impl Orchestrator for AttachedFunctionOrchestrator {
     ) -> Vec<(TaskMessage, Option<Span>)> {
         // Start by getting the attached function for this collection
         let collection_info = self.get_input_collection_info();
+
+        if self.is_backfill {
+            let record_reader = self
+                .output_context
+                .get_output_segment_writers()
+                .ok()
+                .and_then(|writers| writers.record_reader);
+            let operator = Box::new(SourceRecordSegmentOperator {});
+            let input = SourceRecordSegmentInput {
+                record_segment_reader: record_reader,
+            };
+            let task = wrap(
+                operator,
+                input,
+                ctx.receiver(),
+                self.context().task_cancellation_token.clone(),
+            );
+            return vec![(task, Some(Span::current()))];
+        }
+
         let operator = Box::new(GetAttachedFunctionOperator::new(
             self.output_context.sysdb.clone(),
             collection_info.collection_id,
@@ -460,6 +542,44 @@ impl Orchestrator for AttachedFunctionOrchestrator {
         Sender<Result<AttachedFunctionOrchestratorResponse, AttachedFunctionOrchestratorError>>,
     > {
         self.result_channel.take()
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
+    for AttachedFunctionOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let message = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(message) => message,
+            None => return,
+        };
+
+        tracing::debug!(
+            "[AttachedFunctionOrchestrator]: Received {} source records",
+            message.len()
+        );
+
+        // Store the source records
+        if self.source_records.set(message).is_err() {
+            self.terminate_with_result(
+                Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                    "Source records already set".to_string(),
+                )),
+                ctx,
+            )
+            .await;
+            return;
+        }
+
+        // Try to dispatch execute task if output collection is ready
+        self.try_dispatch_execute_task(ctx).await;
     }
 }
 
@@ -786,8 +906,9 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             ctx.receiver(),
             self.context().task_cancellation_token.clone(),
         );
-        let res = self.dispatcher().send(task, None).await;
-        self.ok_or_terminate(res, ctx).await;
+
+        // Try to dispatch execute task if source records are also ready
+        self.try_dispatch_execute_task(ctx).await;
     }
 }
 

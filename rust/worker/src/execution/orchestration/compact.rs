@@ -444,6 +444,7 @@ impl CompactionContext {
         &mut self,
         data_fetch_records: Vec<MaterializeLogOutput>,
         system: System,
+        is_backfill: bool,
     ) -> Result<AttachedFunctionOrchestratorResponse, AttachedFunctionOrchestratorError> {
         let collection_info = self.get_collection_info()?.clone();
         let attached_function_orchestrator = AttachedFunctionOrchestrator::new(
@@ -451,6 +452,7 @@ impl CompactionContext {
             self.clone_for_new_collection(),
             self.dispatcher.clone(),
             data_fetch_records,
+            is_backfill,
         );
 
         let attached_function_response =
@@ -507,9 +509,11 @@ impl CompactionContext {
         &mut self,
         log_fetch_records: Vec<MaterializeLogOutput>,
         system: System,
+        is_backfill: bool,
     ) -> Result<Option<(FunctionContext, CollectionRegisterInfo)>, CompactionError> {
         let attached_function_result =
-            Box::pin(self.run_attached_function(log_fetch_records, system.clone())).await?;
+            Box::pin(self.run_attached_function(log_fetch_records, system.clone(), is_backfill))
+                .await?;
 
         match attached_function_result {
             AttachedFunctionOrchestratorResponse::NoAttachedFunction { .. } => Ok(None),
@@ -613,10 +617,11 @@ impl CompactionContext {
         // 2. Apply input logs to input collection
         // Box the futures to avoid stack overflow with large state machines
         let fn_future = async move {
-            Box::pin(
-                self_clone_fn
-                    .run_attached_function_workflow(log_fetch_records_clone, system_clone_fn),
-            )
+            Box::pin(self_clone_fn.run_attached_function_workflow(
+                log_fetch_records_clone,
+                system_clone_fn,
+                false,
+            ))
             .await
         };
 
@@ -660,6 +665,42 @@ impl CompactionContext {
         Ok(CompactionResponse::Success {
             job_id: collection_id.into(),
         })
+    }
+
+    pub(crate) async fn run_function_backfill(
+        &mut self,
+        system: System,
+    ) -> Result<(), CompactionError> {
+        let collection_id = self.get_input_collection_info()?.collection_id;
+        let log_fetch_response = self.run_get_logs(collection_id, system.clone()).await?;
+
+        let materialized = match log_fetch_response {
+            LogFetchOrchestratorResponse::Success(Success {
+                materialized,
+                collection_info: _,
+                ..
+            }) => materialized,
+            LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_repair) => {
+                return Err(CompactionError::InvariantViolation(
+                    "Unexpected compaction offset repair during backfill",
+                ));
+            }
+        };
+
+        let log_fetch_records = Arc::new(materialized);
+        let log_fetch_records_clone = Arc::clone(&log_fetch_records);
+        let mut self_clone_fn = self.clone();
+        let system_clone_fn = system.clone();
+        let fn_future = async move {
+            self_clone_fn
+                .run_attached_function_workflow(log_fetch_records_clone, system_clone_fn, true)
+                .await
+        };
+        let fn_result = fn_future.await?;
+        if let Some((_function_context, _collection_register_info)) = fn_result {
+            // TODO: Handle the successful backfill result
+        }
+        Ok(())
     }
 
     pub(crate) async fn cleanup(self) {
