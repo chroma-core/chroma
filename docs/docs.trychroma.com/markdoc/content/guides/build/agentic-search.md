@@ -90,8 +90,6 @@ For example, an agentic search system might handle our example question above as
 ```
 {% /CollapsibleCodeBlock %}
 
-Everything is deep research.
-
 Agentic search is the technique that powers most production AI applications.
 
 * Legal assistants search across case law databases, statutes, regulatory documents, and internal firm precedents.
@@ -107,15 +105,22 @@ In more technical terms, an agentic search system implements several key capabil
 * **Reflection and Evaluation** - at each step, we use an LLM to evaluate the retrieved results, determining if they're sufficient, relevant, or if we need to revise the rest of our plan.
 * **State Management and Memory** - the agent maintains context across all steps, tracking retrieved information, remaining sub-queries, and intermediate findings that inform subsequent retrieval decisions.
 
-## Building a Search Agent
+## BrowseComp-Plus
 
-{% Banner type="tip" %}
-We will build a Search Agent step-by-step. You can find the full implementation at the [Chroma Cookbooks Repo](/)
-{% /Banner %}
+In this guide we will build a Search Agent from scratch. Our agent will be
+able to answer queries from the [BrowseComp-Plus](https://github.com/texttron/BrowseComp-Plus/tree/main) dataset, which is
+based on OpenAI's [BrowseComp](https://openai.com/index/browsecomp/) benchmark. The dataset contains
+challenging questions that need multiple rounds of searching and reasoning
+to answer correctly.
 
-### BrowseComp-Plus
+This makes it ideal for demonstrating how to build an agentic search system and
+how tuning each of its components (retrieval, reasoning, model selection, and more) affects
+overall performance.
 
-In this guide we will build a Search Agent from scratch. Our agent will be able to answer queries from the [BrowseComp-Plus](https://github.com/texttron/BrowseComp-Plus/tree/main) dataset. This is a benchmark dataset designed for evaluating deep-research agentic systems. It sources complex, reasoning-intensive queries from OpenAI's [BrowseComp](https://openai.com/index/browsecomp/) benchmark—questions that require iterative retrieval and synthesis to answer correctly. Unlike the original BrowseComp, which requires live web search, BrowseComp-Plus provides a curated corpus of approximately 100,000 human-verified documents that contain the information needed to answer these queries. This makes it ideal for building and testing retrieval systems without depending on external APIs.
+Every query in the BrowseComp-Plus dataset has
+* Gold docs - that are needed to compile the final correct answer for the query.
+* Evidence docs - are needed to answer the query but may not directly contain the final answer themselves. They provide supporting information required for reasoning through the problem. The gold docs are a subset of the evidence docs.
+* Negative docs - included to deliberately make answering the query more difficult. They are introduced to distract the agent, and force it to distinguish between relevant and irrelevant information.
 
 For example, here is query `770`:
 
@@ -129,7 +134,7 @@ Could you provide the name of the individual who:
 - Completed their PhD on the writings of an English writer.
 ```
 
-And the documents in the dataset necessary for answering this question are:
+And the evidence documents in the dataset needed for answering this question:
 
 {% TabbedUseCaseCodeBlock language="terminal" scrollable=true %}
 
@@ -337,4 +342,96 @@ PREVIOUS PUBLICATIONS
 
 {% /TabbedUseCaseCodeBlock %}
 
-For this guide, we prepared collections with the BrowseComp-Plus data on Chroma Cloud, which you can get when you create a new database on Chroma Cloud. 
+For this guide, we prepared a collection with a subset of the BrowseComp-Plus data. It includes the first 10 queries, their associated evidence and negative documents.
+
+In this collection there are 10 query records. Each has the following metadata fields:
+* `query_id`: The BrowseComp-Plus query ID.
+* `query`: Set to `true`, indicating this is a query record.
+* `gold_docs`: The list of gold doc IDs needed to answer this query
+
+Most BrowseComp-Plus documents are too large to embed and store as they are, so we chunked them into discrete pieces. Each document record has the following metadata fields:
+* `doc_id`: The original BrowsComp-Plus document ID this record was chunked from.
+* `index`: The order in which this chunk appears in the original document. This is useful if we want to reconstruct the original documents.
+
+Chunking the documents not only allows us to store them efficiently, but it is also a good context engineering practice. When the agent issues a search a smaller relevant chunk is more economical than a very large document.
+
+## Running the Agent
+
+Before we start walking through the implementation, let's run the agent to get a sense of what we're going to build.
+
+{% Steps %}
+
+{% Step %}
+[Login](https://trychroma.com/login) to your Chroma Cloud account. If you don't have one yet, you can [signup](https://trychroma.com/signup). You will get free credits that should be more than enough for running this project.
+{% /Step %}
+
+{% Step %}
+Use the "Create Database" button on the top right of the Chroma Cloud dashboard, and name your DB `agentic-search` (or any name of your choice). If you're a first time user, you will  be greeted with the "Create Database" modal after creating your account. 
+{% /Step %}
+
+{% Step %}
+Choose the "Load sample dataset" option, and then choose the BrowseCompPlus dataset. This will copy the data into a collection in your own Chroma DB. 
+{% /Step %}
+
+{% Step %}
+Once your collection loads, choose the "Setting" tab. On the bottom of the page, choose the `.env` tab. Create an API key, and copy the environment variables you will need for running the project: `CHROMA_API_KEY`, `CHROMA_TENANT`, and `CHROMA_DATABASE`.
+{% /Step %}
+
+{% Step %}
+Clone the [Chroma Cookbooks](https://github.com/chroma-core/chroma-cookbooks) repo:
+
+```terminal
+git clone https://github.com/chroma-core/chroma-cookbooks.git
+```
+
+{% /Step %}
+
+{% Step %}
+Navigate to the `agentic-search` directory, and create a `.env` file at its root with the values you obtained in the previous step:
+
+```terminal
+cd chroma-cookbooks/agentic-search
+touch .env
+```
+
+{% /Step %}
+
+{% Step %}
+To run this project, you will also need an [OpenAI API key](https://platform.openai.com/api-keys). Set it in your `.env` file:
+
+```text
+CHROMA_API_KEY=<YOUR CHROMA API KEY>
+CHROMA_TENANT=<YOUR CHROMA TENANT>
+CHROMA_DATABASE=agentic-search
+OPENAI_API_KEY=<YOU OPENAI API KEY>
+```
+
+{% /Step %}
+
+{% Step %}
+
+This project uses [pnpm](https://pnpm.io/installation) workspaces. In the root directory, install the dependencies:
+
+```terminal
+pnpm install
+```
+
+{% /Step %}
+
+{% /Steps %}
+
+The project includes a CLI interface that lets you interact with the search agent. You can run in it development to get started. The CLI expects one argument - the query ID to solve. From the root directory you can run
+
+```terminal
+pnpm cli:dev 770
+```
+
+To see the agent in action. It will go through the steps for solving query 770 - query planning, tool calling, and outcome evaluation, until it can solve the input query. The tools in this case, are different search capabilities over the Chroma collection containing the dataset.
+
+Other arguments you can provide:
+* `--provider`: The LLM provider you want to use. Defaults to OpenAI (currently only OpenAI is supported).
+* `--model`: The model you want the agent to use. Default to `gpt-5-nano`.
+* `--max-plan-size`: The maximum query plan steps the agent will go through to solve the query. Defaults to 10. When set to 1, the query planning step is skipped.
+* `--max-step-iterations`: The maximum number of tool-call interactions the agent will issue when solving each step. Defaults to 5.
+
+Experiment with different configurations of the agent. For example, stronger reasoning models are slower, but may not need a query plan, or many iterations to solve a query correctly. They are more likely to be better at selecting the correct search tools, providing them with the best arguments, and reasoning through the results. Smaller or older models are faster and may not excel at tool calling. However, with a query plan and the intermiediate evaluation steps, they might still produce the correct answer. 
