@@ -7,13 +7,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use bytes::{Bytes, BytesMut};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use object_store::{gcp::GoogleCloudStorageBuilder, GetRange, ObjectStore, PutMode, UpdateVersion};
 use serde::{Deserialize, Serialize};
 
-use crate::config::ObjectStorageCredentials;
+use crate::config::ObjectStorageProvider;
 use crate::{
     config::{ObjectStorageConfig, StorageConfig},
     s3::DeletedObjects,
@@ -90,10 +91,10 @@ impl From<UpdateVersion> for ObjectVersionTag {
 }
 
 impl From<ObjectVersionTag> for UpdateVersion {
-    fn from(suv: ObjectVersionTag) -> Self {
+    fn from(ovt: ObjectVersionTag) -> Self {
         Self {
-            e_tag: suv.e_tag,
-            version: suv.version,
+            e_tag: ovt.e_tag,
+            version: ovt.version,
         }
     }
 }
@@ -144,8 +145,8 @@ impl ObjectStorage {
             }
             .boxed());
         }
-        let store = match config.credentials {
-            ObjectStorageCredentials::GCS => GoogleCloudStorageBuilder::from_env()
+        let store = match config.provider {
+            ObjectStorageProvider::GCS => GoogleCloudStorageBuilder::from_env()
                 .with_bucket_name(&config.bucket)
                 .with_retry(object_store::RetryConfig {
                     max_retries: config.request_retry_count,
@@ -187,7 +188,15 @@ impl ObjectStorage {
         Ok(current_etag.0 == e_tag.0)
     }
 
-    async fn multipart_get(&self, key: &str) -> Result<(Vec<u8>, ETag), StorageError> {
+    fn partition(total_size: u64, chunk_size: u64) -> impl Iterator<Item = (u64, u64)> {
+        let chunk_count = total_size.div_ceil(chunk_size);
+        let chunk_start = (0..chunk_count).map(move |i| i * chunk_size);
+        chunk_start
+            .clone()
+            .zip(chunk_start.skip(1).chain([total_size]))
+    }
+
+    async fn multipart_get(&self, key: &str) -> Result<(Bytes, ETag), StorageError> {
         let metadata = self.store.head(&key.into()).await?;
         let object_size = metadata.size;
         let etag = (&UpdateVersion {
@@ -196,17 +205,13 @@ impl ObjectStorage {
         })
             .try_into()?;
         if object_size == 0 {
-            return Ok((Vec::new(), etag));
+            return Ok((Bytes::new(), etag));
         }
 
-        let chunk_count = object_size.div_ceil(self.download_part_size_bytes);
-        let chunk_start = (0..chunk_count).map(|i| i * self.download_part_size_bytes);
-        let chunk_ranges = chunk_start
-            .clone()
-            .zip(chunk_start.skip(1).chain([object_size]))
+        let chunk_ranges = Self::partition(object_size, self.download_part_size_bytes)
             .map(|(start, end)| start..end);
 
-        let mut buffer = vec![0_u8; object_size as usize];
+        let mut buffer = BytesMut::zeroed(object_size as usize);
         let get_part_futures = buffer
             .chunks_mut(self.download_part_size_bytes as usize)
             .zip(chunk_ranges)
@@ -243,27 +248,20 @@ impl ObjectStorage {
             .try_collect::<Vec<_>>()
             .await?;
 
-        Ok((buffer, etag))
+        Ok((buffer.freeze(), etag))
     }
 
-    async fn oneshot_get(&self, key: &str) -> Result<(Vec<u8>, ETag), StorageError> {
+    async fn oneshot_get(&self, key: &str) -> Result<(Bytes, ETag), StorageError> {
         let result = self.store.get_opts(&key.into(), Default::default()).await?;
         let update_version = UpdateVersion {
             e_tag: result.meta.e_tag.clone(),
             version: result.meta.version.clone(),
         };
         let etag = (&update_version).try_into()?;
-
-        let bytes = result.bytes().await?;
-
-        Ok((bytes.to_vec(), etag))
+        Ok((result.bytes().await?, etag))
     }
 
-    pub async fn get(
-        &self,
-        key: &str,
-        options: GetOptions,
-    ) -> Result<(Vec<u8>, ETag), StorageError> {
+    pub async fn get(&self, key: &str, options: GetOptions) -> Result<(Bytes, ETag), StorageError> {
         if options.request_parallelism {
             self.multipart_get(key).await
         } else {
@@ -274,23 +272,16 @@ impl ObjectStorage {
     async fn multipart_put(
         &self,
         key: &str,
-        mut bytes: Vec<u8>,
+        bytes: Bytes,
         _options: PutOptions,
     ) -> Result<ETag, StorageError> {
-        let chunk_size = self.upload_part_size_bytes as usize;
-        let chunk_count = bytes.len().div_ceil(chunk_size);
+        let chunk_ranges = Self::partition(bytes.len() as u64, self.upload_part_size_bytes)
+            .map(|(start, end)| (start as usize..end as usize));
         let mut upload_handle = self.store.put_multipart(&key.into()).await?;
-        let mut upload_parts = Vec::with_capacity(chunk_count);
-        while !bytes.is_empty() {
-            upload_parts.push(
-                upload_handle.put_part(
-                    bytes
-                        .drain(..bytes.len().min(chunk_size))
-                        .collect::<Vec<_>>()
-                        .into(),
-                ),
-            );
-        }
+        let upload_parts = chunk_ranges
+            .map(|range| upload_handle.put_part(bytes.slice(range).into()))
+            .collect::<Vec<_>>();
+        let chunk_count = upload_parts.len();
 
         stream::iter(upload_parts)
             .buffer_unordered(chunk_count)
@@ -310,7 +301,7 @@ impl ObjectStorage {
     async fn oneshot_put(
         &self,
         key: &str,
-        bytes: Vec<u8>,
+        bytes: Bytes,
         options: PutOptions,
     ) -> Result<ETag, StorageError> {
         let mut put_options = object_store::PutOptions::default();
@@ -338,7 +329,7 @@ impl ObjectStorage {
     pub async fn put(
         &self,
         key: &str,
-        bytes: Vec<u8>,
+        bytes: Bytes,
         options: PutOptions,
     ) -> Result<ETag, StorageError> {
         // TODO(sicheng): Figure out how to perform conditional multipart upload
@@ -365,7 +356,7 @@ impl ObjectStorage {
             .map_err(|e| StorageError::Generic {
                 source: Arc::new(e),
             })?;
-        self.oneshot_put(key, bytes, options).await
+        self.oneshot_put(key, bytes.into(), options).await
     }
 
     pub async fn delete(&self, key: &str) -> Result<(), StorageError> {

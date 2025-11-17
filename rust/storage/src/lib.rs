@@ -245,7 +245,10 @@ impl Storage {
     pub async fn get(&self, key: &str, options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
         match self {
             Storage::S3(s3) => s3.get(key, options).await,
-            Storage::Object(obj) => obj.get(key, options).await.map(|(bytes, _)| bytes.into()),
+            Storage::Object(obj) => obj
+                .get(key, options)
+                .await
+                .map(|(bytes, _)| bytes.to_vec().into()),
             Storage::Local(local) => local.get(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage.get(key, options).await
@@ -272,7 +275,7 @@ impl Storage {
             }
             Storage::Object(obj) => {
                 let (bytes, etag) = obj.get(key, options).await?;
-                let fetch_result = fetch_fn(Ok(bytes.into())).await?;
+                let fetch_result = fetch_fn(Ok(bytes.to_vec().into())).await?;
                 Ok((fetch_result, Some(etag)))
             }
             Storage::Local(local) => {
@@ -345,7 +348,7 @@ impl Storage {
             Storage::S3(s3) => s3.get_with_e_tag(key).await,
             Storage::Object(obj) => {
                 let (bytes, etag) = obj.get(key, options).await?;
-                Ok((bytes.into(), Some(etag)))
+                Ok((bytes.to_vec().into(), Some(etag)))
             }
             Storage::Local(local) => local.get_with_e_tag(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
@@ -391,7 +394,7 @@ impl Storage {
     ) -> Result<Option<ETag>, StorageError> {
         match self {
             Storage::S3(s3) => s3.put_bytes(key, bytes, options).await,
-            Storage::Object(obj) => obj.put(key, bytes, options).await.map(Some),
+            Storage::Object(obj) => obj.put(key, bytes.into(), options).await.map(Some),
             Storage::Local(local) => local.put_bytes(key, &bytes, options).await,
             Storage::AdmissionControlledS3(as3) => as3.put_bytes(key, bytes, options).await,
         }

@@ -27,7 +27,7 @@
 
 mod utils;
 
-use chroma_storage::config::{ObjectStorageConfig, ObjectStorageCredentials};
+use chroma_storage::config::{ObjectStorageConfig, ObjectStorageProvider};
 use chroma_storage::object_storage::ObjectStorage;
 
 // ============================================================================
@@ -48,7 +48,7 @@ const TEST_PREFIX: &str = "chroma-storage-test/";
 async fn create_gcs_storage() -> ObjectStorage {
     let config = ObjectStorageConfig {
         bucket: GCS_BUCKET_NAME.to_string(),
-        credentials: ObjectStorageCredentials::GCS,
+        provider: ObjectStorageProvider::GCS,
         connect_timeout_ms: 5000,
         request_timeout_ms: 60000,
         request_retry_count: 3,

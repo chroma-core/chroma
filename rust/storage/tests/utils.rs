@@ -43,7 +43,7 @@ pub async fn test_basic_operations(storage: &ObjectStorage, test_prefix: &str) {
 
     for key in &test_keys {
         storage
-            .put(key, key.as_bytes().to_vec(), PutOptions::default())
+            .put(key, key.as_bytes().to_vec().into(), PutOptions::default())
             .await
             .unwrap_or_else(|e| panic!("Failed to put {}: {}", key, e));
 
@@ -145,7 +145,7 @@ pub async fn test_multipart_operations(storage: &ObjectStorage, test_prefix: &st
     storage
         .put(
             &small_key,
-            small_content.as_bytes().to_vec(),
+            small_content.as_bytes().to_vec().into(),
             PutOptions::default(),
         )
         .await
@@ -168,7 +168,7 @@ pub async fn test_multipart_operations(storage: &ObjectStorage, test_prefix: &st
     storage
         .put(
             &large_key,
-            large_content.as_bytes().to_vec(),
+            large_content.as_bytes().to_vec().into(),
             PutOptions::default(),
         )
         .await
@@ -227,7 +227,7 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
     let _etag1 = storage
         .put(
             &key1,
-            content1.as_bytes().to_vec(),
+            content1.as_bytes().to_vec().into(),
             PutOptions::if_not_exists(Default::default()),
         )
         .await
@@ -243,7 +243,7 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
     let result = storage
         .put(
             &key1,
-            "different".as_bytes().to_vec(),
+            "different".as_bytes().to_vec().into(),
             PutOptions::if_not_exists(Default::default()),
         )
         .await;
@@ -255,7 +255,11 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
     let content_v2 = format!("{}-v2", key2);
 
     let etag_v1 = storage
-        .put(&key2, content_v1.as_bytes().to_vec(), PutOptions::default())
+        .put(
+            &key2,
+            content_v1.as_bytes().to_vec().into(),
+            PutOptions::default(),
+        )
         .await
         .expect("Initial put failed");
 
@@ -263,7 +267,7 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
     let _etag_v2 = storage
         .put(
             &key2,
-            content_v2.as_bytes().to_vec(),
+            content_v2.as_bytes().to_vec().into(),
             PutOptions::if_matches(&etag_v1, Default::default()),
         )
         .await
@@ -279,7 +283,7 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
     let result = storage
         .put(
             &key2,
-            "v3".as_bytes().to_vec(),
+            "v3".as_bytes().to_vec().into(),
             PutOptions::if_matches(&etag_v1, Default::default()),
         )
         .await;
@@ -293,7 +297,7 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
     let etag3_v1 = storage
         .put(
             &key3,
-            content3_v1.as_bytes().to_vec(),
+            content3_v1.as_bytes().to_vec().into(),
             PutOptions::default(),
         )
         .await
@@ -309,7 +313,7 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
     let _etag3_v2 = storage
         .put(
             &key3,
-            content3_v2.as_bytes().to_vec(),
+            content3_v2.as_bytes().to_vec().into(),
             PutOptions::default(),
         )
         .await
@@ -362,7 +366,11 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
     let initial = "initial-data-".repeat(500_000); // ~6.5 MB - over 5MB threshold
 
     let race_etag = storage
-        .put(&key5, initial.as_bytes().to_vec(), PutOptions::default())
+        .put(
+            &key5,
+            initial.as_bytes().to_vec().into(),
+            PutOptions::default(),
+        )
         .await
         .expect("Initial put failed");
 
@@ -384,7 +392,7 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
         storage_a
             .put(
                 &key5_a,
-                writer_a_content.as_bytes().to_vec(),
+                writer_a_content.as_bytes().to_vec().into(),
                 PutOptions::if_matches(&etag_a, Default::default()),
             )
             .await
@@ -394,7 +402,7 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
         storage_b
             .put(
                 &key5_b,
-                writer_b_content.as_bytes().to_vec(),
+                writer_b_content.as_bytes().to_vec().into(),
                 PutOptions::if_matches(&etag_b, Default::default()),
             )
             .await
