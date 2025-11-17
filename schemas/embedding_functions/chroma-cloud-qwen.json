@@ -7,13 +7,17 @@
     "properties": {
         "model": {
             "type": "string",
-            "enum": ["Qwen/Qwen3-Embedding-0.6B"],
+            "enum": [
+                "Qwen/Qwen3-Embedding-0.6B"
+            ],
             "description": "The specific Qwen model to use for embeddings"
         },
         "task": {
-            "type": "string",
-            "enum": ["nl_to_code"],
-            "description": "The task for which embeddings are being generated"
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "The task for which embeddings are being generated. If null or empty, empty instructions will be used."
         },
         "instructions": {
             "type": "object",
@@ -31,11 +35,16 @@
                             "description": "Instructions for embedding queries"
                         }
                     },
-                    "required": ["documents", "query"],
+                    "required": [
+                        "documents",
+                        "query"
+                    ],
                     "additionalProperties": false
                 }
             },
-            "required": ["nl_to_code"],
+            "required": [
+                "nl_to_code"
+            ],
             "additionalProperties": false
         },
         "api_key_env_var": {
