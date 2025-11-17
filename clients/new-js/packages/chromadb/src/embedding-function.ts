@@ -93,7 +93,7 @@ export interface SparseEmbeddingFunction {
  */
 export interface EmbeddingFunctionClass {
   /** Constructor for creating new instances */
-  new (...args: any[]): EmbeddingFunction;
+  new(...args: any[]): EmbeddingFunction;
   /** Name identifier for the embedding function */
   name: string;
   /** Static method to build instance from configuration */
@@ -106,7 +106,7 @@ export interface EmbeddingFunctionClass {
  */
 export interface SparseEmbeddingFunctionClass {
   /** Constructor for creating new instances */
-  new (...args: any[]): SparseEmbeddingFunction;
+  new(...args: any[]): SparseEmbeddingFunction;
   /** Name identifier for the embedding function */
   name: string;
   /** Static method to build instance from configuration */
@@ -126,6 +126,7 @@ const pythonEmbeddingFunctions: Record<string, string> = {
   onnx_mini_lm_l6_v2: "default-embed",
   default: "default-embed",
   together_ai: "together-ai",
+  sentence_transformer: "sentence-transformer",
 };
 
 const unsupportedEmbeddingFunctions: Set<string> = new Set([
@@ -137,7 +138,6 @@ const unsupportedEmbeddingFunctions: Set<string> = new Set([
   "instructor",
   "open_clip",
   "roboflow",
-  "sentence_transformer",
   "text2vec",
 ]);
 

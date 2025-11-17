@@ -7,7 +7,7 @@ name: Sentence Transformer
 
 Chroma provides a convenient wrapper around the Sentence Transformers library. This embedding function runs locally and uses pre-trained models from Hugging Face.
 
-{% Tabs %}
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 
@@ -35,7 +35,26 @@ For a full list of available models, visit [Hugging Face Sentence Transformers](
 
 {% /Tab %}
 
-{% /Tabs %}
+{% Tab label="typescript" %}
+
+```typescript
+// npm install @chroma-core/sentence-transformer
+
+import { SentenceTransformersEmbeddingFunction } from "@chroma-core/sentence-transformer";
+
+const sentenceTransformerEF = new SentenceTransformersEmbeddingFunction({
+  modelName: "all-MiniLM-L6-v2",
+  device: "cpu",
+  normalizeEmbeddings: false,
+});
+
+const texts = ["Hello, world!", "How are you?"];
+const embeddings = await sentenceTransformerEF.generate(texts);
+```
+
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
 
 {% Banner type="tip" %}
 Sentence Transformers are great for semantic search tasks. Popular models include `all-MiniLM-L6-v2` (fast and efficient) and `all-mpnet-base-v2` (higher quality). Visit [SBERT documentation](https://www.sbert.net/docs/pretrained_models.html) for more model recommendations.
