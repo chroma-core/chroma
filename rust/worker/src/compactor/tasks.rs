@@ -1,28 +1,25 @@
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
-
 use chroma_storage::Storage;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid, NonceUuid};
 use s3heap::{heap_path_from_hostname, Error, HeapReader, HeapScheduler, Limits};
 
 /// A task that has been scheduled for execution.
 #[derive(Clone, Debug)]
-pub struct SchedulableTask {
+pub struct SchedulableFunction {
     pub collection_id: CollectionUuid,
     pub task_id: AttachedFunctionUuid,
     pub nonce: NonceUuid,
-    pub bucket: DateTime<Utc>,
 }
 
 /// Reader for fetching scheduled tasks from multiple heap instances.
-pub struct TaskHeapReader {
+pub struct FunctionHeapReader {
     storage: Storage,
     heap_scheduler: Arc<dyn HeapScheduler>,
 }
 
-impl TaskHeapReader {
-    /// Create a new TaskHeapReader with the given dependencies.
+impl FunctionHeapReader {
+    /// Create a new FunctionHeapReader with the given dependencies.
     pub fn new(storage: Storage, heap_scheduler: Arc<dyn HeapScheduler>) -> Self {
         Self {
             storage,
@@ -34,7 +31,10 @@ impl TaskHeapReader {
     ///
     /// This method queries heap/rust-log-service-0, heap/rust-log-service-1, etc.,
     /// until it encounters an empty heap or error, collecting up to `limit` tasks.
-    pub async fn get_tasks_scheduled_for_execution(&self, limits: Limits) -> Vec<SchedulableTask> {
+    pub async fn get_tasks_scheduled_for_execution(
+        &self,
+        limits: Limits,
+    ) -> Vec<SchedulableFunction> {
         let mut all_tasks = Vec::new();
         let mut service_index = 0;
         let max_items = limits.max_items.unwrap_or(1000);
@@ -69,13 +69,12 @@ impl TaskHeapReader {
             match reader.peek(|_, _| true, limits.clone()).await {
                 Ok(items) => {
                     tracing::trace!("Found {} tasks in {}", items.len(), heap_prefix);
-                    for (bucket, item) in items {
+                    for (_bucket, item) in items {
                         let collection_id = CollectionUuid(*item.trigger.partitioning.as_uuid());
-                        all_tasks.push(SchedulableTask {
+                        all_tasks.push(SchedulableFunction {
                             collection_id,
                             task_id: AttachedFunctionUuid(*item.trigger.scheduling.as_uuid()),
                             nonce: NonceUuid(item.nonce),
-                            bucket,
                         });
                     }
                 }

@@ -94,6 +94,22 @@ func (s *attachedFunctionDb) GetByID(id uuid.UUID) (*dbmodel.AttachedFunction, e
 	return &attachedFunction, nil
 }
 
+func (s *attachedFunctionDb) GetByCollectionID(inputCollectionID string) ([]*dbmodel.AttachedFunction, error) {
+	var attachedFunctions []*dbmodel.AttachedFunction
+	err := s.db.
+		Where("input_collection_id = ?", inputCollectionID).
+		Where("is_deleted = ?", false).
+		Where("lowest_live_nonce IS NOT NULL").
+		Find(&attachedFunctions).Error
+
+	if err != nil {
+		log.Error("GetByCollectionID failed", zap.Error(err), zap.String("input_collection_id", inputCollectionID))
+		return nil, err
+	}
+
+	return attachedFunctions, nil
+}
+
 func (s *attachedFunctionDb) UpdateOutputCollectionID(id uuid.UUID, outputCollectionID *string) error {
 	now := time.Now()
 	result := s.db.Model(&dbmodel.AttachedFunction{}).
@@ -402,4 +418,52 @@ func (s *attachedFunctionDb) CleanupExpiredPartial(maxAgeSeconds uint64) ([]uuid
 		zap.Uint64("max_age_seconds", maxAgeSeconds))
 
 	return ids, nil
+}
+
+// GetSoftDeletedAttachedFunctions returns attached functions that are soft deleted
+// and were updated before the cutoff time (eligible for hard deletion)
+func (s *attachedFunctionDb) GetSoftDeletedAttachedFunctions(cutoffTime time.Time, limit int32) ([]*dbmodel.AttachedFunction, error) {
+	var attachedFunctions []*dbmodel.AttachedFunction
+	err := s.db.
+		Where("is_deleted = ?", true).
+		Where("updated_at < ?", cutoffTime).
+		Limit(int(limit)).
+		Find(&attachedFunctions).Error
+
+	if err != nil {
+		log.Error("GetSoftDeletedAttachedFunctions failed",
+			zap.Error(err),
+			zap.Time("cutoff_time", cutoffTime))
+		return nil, err
+	}
+
+	log.Debug("GetSoftDeletedAttachedFunctions found attached functions",
+		zap.Int("count", len(attachedFunctions)),
+		zap.Time("cutoff_time", cutoffTime))
+
+	return attachedFunctions, nil
+}
+
+// HardDeleteAttachedFunction permanently deletes an attached function from the database
+// This should only be called after the soft delete grace period has passed
+func (s *attachedFunctionDb) HardDeleteAttachedFunction(id uuid.UUID) error {
+	result := s.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ? AND is_deleted = true", id)
+
+	if result.Error != nil {
+		log.Error("HardDeleteAttachedFunction failed",
+			zap.Error(result.Error),
+			zap.String("id", id.String()))
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		log.Warn("HardDeleteAttachedFunction: no rows affected (attached function not found)",
+			zap.String("id", id.String()))
+		return nil // Idempotent - no error if not found
+	}
+
+	log.Info("HardDeleteAttachedFunction succeeded",
+		zap.String("id", id.String()))
+
+	return nil
 }

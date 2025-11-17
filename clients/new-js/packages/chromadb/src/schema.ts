@@ -1,18 +1,19 @@
 import type {
   EmbeddingFunctionConfiguration,
+  HnswIndexConfig as ApiHnswIndexConfig,
   Schema as InternalSchema,
   Space,
-  HnswIndexConfig as ApiHnswIndexConfig,
   SpannIndexConfig as ApiSpannIndexConfig,
   ValueTypes as ApiValueTypes,
 } from "./api";
 import {
   AnyEmbeddingFunction,
   EmbeddingFunction,
-  SparseEmbeddingFunction,
   getEmbeddingFunction,
   getSparseEmbeddingFunction,
+  SparseEmbeddingFunction,
 } from "./embedding-function";
+import { Key } from "./execution";
 
 export const DOCUMENT_KEY = "#document";
 export const EMBEDDING_KEY = "#embedding";
@@ -55,7 +56,7 @@ export class BoolInvertedIndexConfig {
 export interface VectorIndexConfigOptions {
   space?: Space | null;
   embeddingFunction?: EmbeddingFunction | null;
-  sourceKey?: string | null;
+  sourceKey?: string | Key | null;
   hnsw?: ApiHnswIndexConfig | null;
   spann?: ApiSpannIndexConfig | null;
 }
@@ -63,15 +64,18 @@ export interface VectorIndexConfigOptions {
 export class VectorIndexConfig {
   readonly type = "VectorIndexConfig";
   space: Space | null;
-  embeddingFunction: EmbeddingFunction | null;
+  embeddingFunction?: EmbeddingFunction | null;
   sourceKey: string | null;
   hnsw: ApiHnswIndexConfig | null;
   spann: ApiSpannIndexConfig | null;
 
   constructor(options: VectorIndexConfigOptions = {}) {
     this.space = options.space ?? null;
-    this.embeddingFunction = options.embeddingFunction ?? null;
-    this.sourceKey = options.sourceKey ?? null;
+    this.embeddingFunction = options.embeddingFunction;
+    this.sourceKey =
+      options.sourceKey instanceof Key
+        ? options.sourceKey.name
+        : (options.sourceKey ?? null);
     this.hnsw = options.hnsw ?? null;
     this.spann = options.spann ?? null;
   }
@@ -79,76 +83,102 @@ export class VectorIndexConfig {
 
 export interface SparseVectorIndexConfigOptions {
   embeddingFunction?: SparseEmbeddingFunction | null;
-  sourceKey?: string | null;
+  sourceKey?: string | Key | null;
   bm25?: boolean | null;
 }
 
 export class SparseVectorIndexConfig {
   readonly type = "SparseVectorIndexConfig";
-  embeddingFunction: SparseEmbeddingFunction | null;
+  embeddingFunction?: SparseEmbeddingFunction | null;
   sourceKey: string | null;
   bm25: boolean | null;
 
   constructor(options: SparseVectorIndexConfigOptions = {}) {
-    this.embeddingFunction = options.embeddingFunction ?? null;
-    this.sourceKey = options.sourceKey ?? null;
+    this.embeddingFunction = options.embeddingFunction;
+    this.sourceKey =
+      options.sourceKey instanceof Key
+        ? options.sourceKey.name
+        : (options.sourceKey ?? null);
     this.bm25 = options.bm25 ?? null;
   }
 }
 
 export class FtsIndexType {
-  constructor(public enabled: boolean, public config: FtsIndexConfig) { }
+  constructor(
+    public enabled: boolean,
+    public config: FtsIndexConfig,
+  ) {}
 }
 
 export class StringInvertedIndexType {
-  constructor(public enabled: boolean, public config: StringInvertedIndexConfig) { }
+  constructor(
+    public enabled: boolean,
+    public config: StringInvertedIndexConfig,
+  ) {}
 }
 
 export class VectorIndexType {
-  constructor(public enabled: boolean, public config: VectorIndexConfig) { }
+  constructor(
+    public enabled: boolean,
+    public config: VectorIndexConfig,
+  ) {}
 }
 
 export class SparseVectorIndexType {
-  constructor(public enabled: boolean, public config: SparseVectorIndexConfig) { }
+  constructor(
+    public enabled: boolean,
+    public config: SparseVectorIndexConfig,
+  ) {}
 }
 
 export class IntInvertedIndexType {
-  constructor(public enabled: boolean, public config: IntInvertedIndexConfig) { }
+  constructor(
+    public enabled: boolean,
+    public config: IntInvertedIndexConfig,
+  ) {}
 }
 
 export class FloatInvertedIndexType {
-  constructor(public enabled: boolean, public config: FloatInvertedIndexConfig) { }
+  constructor(
+    public enabled: boolean,
+    public config: FloatInvertedIndexConfig,
+  ) {}
 }
 
 export class BoolInvertedIndexType {
-  constructor(public enabled: boolean, public config: BoolInvertedIndexConfig) { }
+  constructor(
+    public enabled: boolean,
+    public config: BoolInvertedIndexConfig,
+  ) {}
 }
 
 export class StringValueType {
   constructor(
     public ftsIndex: FtsIndexType | null = null,
     public stringInvertedIndex: StringInvertedIndexType | null = null,
-  ) { }
+  ) {}
 }
 
 export class FloatListValueType {
-  constructor(public vectorIndex: VectorIndexType | null = null) { }
+  constructor(public vectorIndex: VectorIndexType | null = null) {}
 }
 
 export class SparseVectorValueType {
-  constructor(public sparseVectorIndex: SparseVectorIndexType | null = null) { }
+  constructor(public sparseVectorIndex: SparseVectorIndexType | null = null) {}
 }
 
 export class IntValueType {
-  constructor(public intInvertedIndex: IntInvertedIndexType | null = null) { }
+  constructor(public intInvertedIndex: IntInvertedIndexType | null = null) {}
 }
 
 export class FloatValueType {
-  constructor(public floatInvertedIndex: FloatInvertedIndexType | null = null) { }
+  constructor(
+    public floatInvertedIndex: FloatInvertedIndexType | null = null,
+  ) {}
 }
 
 export class BoolValueType {
-  constructor(public boolInvertedIndex: BoolInvertedIndexType | null = null) { }
+  constructor(public boolInvertedIndex: BoolInvertedIndexType | null = null) {}
 }
 
 export class ValueTypes {
@@ -183,11 +213,11 @@ const cloneObject = <T>(value: T): T => {
   return Array.isArray(value)
     ? (value.map((item) => cloneObject(item)) as T)
     : (Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
-        k,
-        cloneObject(v),
-      ]),
-    ) as T);
+        Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+          k,
+          cloneObject(v),
+        ]),
+      ) as T);
 };
 
 const resolveEmbeddingFunctionName = (
@@ -216,7 +246,8 @@ const prepareEmbeddingFunctionConfig = (
   }
 
   const name = resolveEmbeddingFunctionName(fn);
-  const getConfig = typeof fn.getConfig === "function" ? fn.getConfig.bind(fn) : undefined;
+  const getConfig =
+    typeof fn.getConfig === "function" ? fn.getConfig.bind(fn) : undefined;
   const buildFromConfig = (fn.constructor as any)?.buildFromConfig;
 
   if (!name || !getConfig || typeof buildFromConfig !== "function") {
@@ -237,11 +268,9 @@ const prepareEmbeddingFunctionConfig = (
 
 const ensureValueTypes = (
   valueTypes: ValueTypes | null | undefined,
-): ValueTypes => (valueTypes ?? new ValueTypes());
+): ValueTypes => valueTypes ?? new ValueTypes();
 
-const ensureStringValueType = (
-  valueTypes: ValueTypes,
-): StringValueType => {
+const ensureStringValueType = (valueTypes: ValueTypes): StringValueType => {
   if (!valueTypes.string) {
     valueTypes.string = new StringValueType();
   }
@@ -266,27 +295,21 @@ const ensureSparseVectorValueType = (
   return valueTypes.sparseVector;
 };
 
-const ensureIntValueType = (
-  valueTypes: ValueTypes,
-): IntValueType => {
+const ensureIntValueType = (valueTypes: ValueTypes): IntValueType => {
   if (!valueTypes.intValue) {
     valueTypes.intValue = new IntValueType();
   }
   return valueTypes.intValue;
 };
 
-const ensureFloatValueType = (
-  valueTypes: ValueTypes,
-): FloatValueType => {
+const ensureFloatValueType = (valueTypes: ValueTypes): FloatValueType => {
   if (!valueTypes.floatValue) {
     valueTypes.floatValue = new FloatValueType();
   }
   return valueTypes.floatValue;
 };
 
-const ensureBoolValueType = (
-  valueTypes: ValueTypes,
-): BoolValueType => {
+const ensureBoolValueType = (valueTypes: ValueTypes): BoolValueType => {
   if (!valueTypes.boolean) {
     valueTypes.boolean = new BoolValueType();
   }
@@ -365,7 +388,9 @@ export class Schema {
     const keyProvided = key !== undefined && key !== null;
 
     if (!configProvided && !keyProvided) {
-      throw new Error("Cannot disable all indexes. Must specify either config or key.");
+      throw new Error(
+        "Cannot disable all indexes. Must specify either config or key.",
+      );
     }
 
     if (keyProvided && key && (key === EMBEDDING_KEY || key === DOCUMENT_KEY)) {
@@ -383,7 +408,9 @@ export class Schema {
     }
 
     if (config instanceof SparseVectorIndexConfig) {
-      throw new Error("Deleting sparse vector index is not currently supported.");
+      throw new Error(
+        "Deleting sparse vector index is not currently supported.",
+      );
     }
 
     if (keyProvided && !configProvided && key) {
@@ -414,20 +441,22 @@ export class Schema {
     };
   }
 
-  static deserializeFromJSON(json?: InternalSchema | JsonDict | null): Schema | undefined {
+  static async deserializeFromJSON(
+    json?: InternalSchema | JsonDict | null,
+  ): Promise<Schema | undefined> {
     if (json == null) {
       return undefined;
     }
 
     const data = json as JsonDict;
     const instance = Object.create(Schema.prototype) as Schema;
-    instance.defaults = Schema.deserializeValueTypes(
+    instance.defaults = await Schema.deserializeValueTypes(
       (data.defaults ?? {}) as Record<string, any>,
     );
     instance.keys = {};
     const keys = (data.keys ?? {}) as Record<string, Record<string, any>>;
     for (const [keyName, value] of Object.entries(keys)) {
-      instance.keys[keyName] = Schema.deserializeValueTypes(value);
+      instance.keys[keyName] = await Schema.deserializeValueTypes(value);
     }
     return instance;
   }
@@ -435,12 +464,13 @@ export class Schema {
   private setVectorIndexConfig(config: VectorIndexConfig): void {
     const defaultsFloatList = ensureFloatListValueType(this.defaults);
     const currentDefaultsVector =
-      defaultsFloatList.vectorIndex ?? new VectorIndexType(false, new VectorIndexConfig());
+      defaultsFloatList.vectorIndex ??
+      new VectorIndexType(false, new VectorIndexConfig());
     defaultsFloatList.vectorIndex = new VectorIndexType(
       currentDefaultsVector.enabled,
       new VectorIndexConfig({
         space: config.space ?? null,
-        embeddingFunction: config.embeddingFunction ?? null,
+        embeddingFunction: config.embeddingFunction,
         sourceKey: config.sourceKey ?? null,
         hnsw: config.hnsw ? cloneObject(config.hnsw) : null,
         spann: config.spann ? cloneObject(config.spann) : null,
@@ -451,13 +481,18 @@ export class Schema {
     this.keys[EMBEDDING_KEY] = embeddingValueTypes;
     const overrideFloatList = ensureFloatListValueType(embeddingValueTypes);
     const currentOverrideVector =
-      overrideFloatList.vectorIndex ?? new VectorIndexType(true, new VectorIndexConfig({ sourceKey: DOCUMENT_KEY }));
-    const preservedSourceKey = currentOverrideVector.config.sourceKey ?? DOCUMENT_KEY;
+      overrideFloatList.vectorIndex ??
+      new VectorIndexType(
+        true,
+        new VectorIndexConfig({ sourceKey: DOCUMENT_KEY }),
+      );
+    const preservedSourceKey =
+      currentOverrideVector.config.sourceKey ?? DOCUMENT_KEY;
     overrideFloatList.vectorIndex = new VectorIndexType(
       currentOverrideVector.enabled,
       new VectorIndexConfig({
         space: config.space ?? null,
-        embeddingFunction: config.embeddingFunction ?? null,
+        embeddingFunction: config.embeddingFunction,
         sourceKey: preservedSourceKey,
         hnsw: config.hnsw ? cloneObject(config.hnsw) : null,
         spann: config.spann ? cloneObject(config.spann) : null,
@@ -469,14 +504,20 @@ export class Schema {
     const defaultsString = ensureStringValueType(this.defaults);
     const currentDefaultsFts =
       defaultsString.ftsIndex ?? new FtsIndexType(false, new FtsIndexConfig());
-    defaultsString.ftsIndex = new FtsIndexType(currentDefaultsFts.enabled, config);
+    defaultsString.ftsIndex = new FtsIndexType(
+      currentDefaultsFts.enabled,
+      config,
+    );
 
     const documentValueTypes = ensureValueTypes(this.keys[DOCUMENT_KEY]);
     this.keys[DOCUMENT_KEY] = documentValueTypes;
     const overrideString = ensureStringValueType(documentValueTypes);
     const currentOverrideFts =
       overrideString.ftsIndex ?? new FtsIndexType(true, new FtsIndexConfig());
-    overrideString.ftsIndex = new FtsIndexType(currentOverrideFts.enabled, config);
+    overrideString.ftsIndex = new FtsIndexType(
+      currentOverrideFts.enabled,
+      config,
+    );
   }
 
   private setIndexInDefaults(config: IndexConfig, enabled: boolean): void {
@@ -485,7 +526,10 @@ export class Schema {
       valueType.ftsIndex = new FtsIndexType(enabled, config);
     } else if (config instanceof StringInvertedIndexConfig) {
       const valueType = ensureStringValueType(this.defaults);
-      valueType.stringInvertedIndex = new StringInvertedIndexType(enabled, config);
+      valueType.stringInvertedIndex = new StringInvertedIndexType(
+        enabled,
+        config,
+      );
     } else if (config instanceof VectorIndexConfig) {
       const valueType = ensureFloatListValueType(this.defaults);
       valueType.vectorIndex = new VectorIndexType(enabled, config);
@@ -497,14 +541,21 @@ export class Schema {
       valueType.intInvertedIndex = new IntInvertedIndexType(enabled, config);
     } else if (config instanceof FloatInvertedIndexConfig) {
       const valueType = ensureFloatValueType(this.defaults);
-      valueType.floatInvertedIndex = new FloatInvertedIndexType(enabled, config);
+      valueType.floatInvertedIndex = new FloatInvertedIndexType(
+        enabled,
+        config,
+      );
     } else if (config instanceof BoolInvertedIndexConfig) {
       const valueType = ensureBoolValueType(this.defaults);
       valueType.boolInvertedIndex = new BoolInvertedIndexType(enabled, config);
     }
   }
 
-  private setIndexForKey(key: string, config: IndexConfig, enabled: boolean): void {
+  private setIndexForKey(
+    key: string,
+    config: IndexConfig,
+    enabled: boolean,
+  ): void {
     if (config instanceof SparseVectorIndexConfig && enabled) {
       this.validateSingleSparseVectorIndex(key);
     }
@@ -513,7 +564,10 @@ export class Schema {
 
     if (config instanceof StringInvertedIndexConfig) {
       const valueType = ensureStringValueType(current);
-      valueType.stringInvertedIndex = new StringInvertedIndexType(enabled, config);
+      valueType.stringInvertedIndex = new StringInvertedIndexType(
+        enabled,
+        config,
+      );
     } else if (config instanceof FtsIndexConfig) {
       const valueType = ensureStringValueType(current);
       valueType.ftsIndex = new FtsIndexType(enabled, config);
@@ -528,7 +582,10 @@ export class Schema {
       valueType.intInvertedIndex = new IntInvertedIndexType(enabled, config);
     } else if (config instanceof FloatInvertedIndexConfig) {
       const valueType = ensureFloatValueType(current);
-      valueType.floatInvertedIndex = new FloatInvertedIndexType(enabled, config);
+      valueType.floatInvertedIndex = new FloatInvertedIndexType(
+        enabled,
+        config,
+      );
     } else if (config instanceof BoolInvertedIndexConfig) {
       const valueType = ensureBoolValueType(current);
       valueType.boolInvertedIndex = new BoolInvertedIndexType(enabled, config);
@@ -666,7 +723,9 @@ export class Schema {
     }
 
     if (valueTypes.sparseVector) {
-      const serialized = this.serializeSparseVectorValueType(valueTypes.sparseVector);
+      const serialized = this.serializeSparseVectorValueType(
+        valueTypes.sparseVector,
+      );
       if (Object.keys(serialized).length > 0) {
         result[SPARSE_VECTOR_VALUE_NAME] = serialized;
       }
@@ -724,7 +783,9 @@ export class Schema {
     return result;
   }
 
-  private serializeSparseVectorValueType(valueType: SparseVectorValueType): JsonDict {
+  private serializeSparseVectorValueType(
+    valueType: SparseVectorValueType,
+  ): JsonDict {
     const result: JsonDict = {};
     if (valueType.sparseVectorIndex) {
       result[SPARSE_VECTOR_INDEX_NAME] = {
@@ -820,10 +881,13 @@ export class Schema {
     return serialized;
   }
 
-  private serializeSparseVectorConfig(config: SparseVectorIndexConfig): JsonDict {
+  private serializeSparseVectorConfig(
+    config: SparseVectorIndexConfig,
+  ): JsonDict {
     const serialized: JsonDict = {};
     const embeddingFunction = config.embeddingFunction;
-    serialized["embedding_function"] = prepareEmbeddingFunctionConfig(embeddingFunction);
+    serialized["embedding_function"] =
+      prepareEmbeddingFunctionConfig(embeddingFunction);
 
     if (config.sourceKey) {
       serialized.source_key = config.sourceKey;
@@ -836,19 +900,27 @@ export class Schema {
     return serialized;
   }
 
-  private static deserializeValueTypes(json: Record<string, any>): ValueTypes {
+  private static async deserializeValueTypes(
+    json: Record<string, any>,
+  ): Promise<ValueTypes> {
     const result = new ValueTypes();
 
     if (json[STRING_VALUE_NAME]) {
-      result.string = Schema.deserializeStringValueType(json[STRING_VALUE_NAME]);
+      result.string = Schema.deserializeStringValueType(
+        json[STRING_VALUE_NAME],
+      );
     }
 
     if (json[FLOAT_LIST_VALUE_NAME]) {
-      result.floatList = Schema.deserializeFloatListValueType(json[FLOAT_LIST_VALUE_NAME]);
+      result.floatList = await Schema.deserializeFloatListValueType(
+        json[FLOAT_LIST_VALUE_NAME],
+      );
     }
 
     if (json[SPARSE_VECTOR_VALUE_NAME]) {
-      result.sparseVector = Schema.deserializeSparseVectorValueType(json[SPARSE_VECTOR_VALUE_NAME]);
+      result.sparseVector = await Schema.deserializeSparseVectorValueType(
+        json[SPARSE_VECTOR_VALUE_NAME],
+      );
     }
 
     if (json[INT_VALUE_NAME]) {
@@ -856,7 +928,9 @@ export class Schema {
     }
 
     if (json[FLOAT_VALUE_NAME]) {
-      result.floatValue = Schema.deserializeFloatValueType(json[FLOAT_VALUE_NAME]);
+      result.floatValue = Schema.deserializeFloatValueType(
+        json[FLOAT_VALUE_NAME],
+      );
     }
 
     if (json[BOOL_VALUE_NAME]) {
@@ -866,7 +940,9 @@ export class Schema {
     return result;
   }
 
-  private static deserializeStringValueType(json: Record<string, any>): StringValueType {
+  private static deserializeStringValueType(
+    json: Record<string, any>,
+  ): StringValueType {
     let ftsIndex: FtsIndexType | null = null;
     let stringIndex: StringInvertedIndexType | null = null;
 
@@ -886,56 +962,79 @@ export class Schema {
     return new StringValueType(ftsIndex, stringIndex);
   }
 
-  private static deserializeFloatListValueType(json: Record<string, any>): FloatListValueType {
+  private static async deserializeFloatListValueType(
+    json: Record<string, any>,
+  ): Promise<FloatListValueType> {
     let vectorIndex: VectorIndexType | null = null;
     if (json[VECTOR_INDEX_NAME]) {
       const data = json[VECTOR_INDEX_NAME];
       const enabled = Boolean(data.enabled);
-      const config = Schema.deserializeVectorConfig(data.config ?? {});
+      const config = await Schema.deserializeVectorConfig(data.config ?? {});
       vectorIndex = new VectorIndexType(enabled, config);
     }
     return new FloatListValueType(vectorIndex);
   }
 
-  private static deserializeSparseVectorValueType(json: Record<string, any>): SparseVectorValueType {
+  private static async deserializeSparseVectorValueType(
+    json: Record<string, any>,
+  ): Promise<SparseVectorValueType> {
     let sparseIndex: SparseVectorIndexType | null = null;
     if (json[SPARSE_VECTOR_INDEX_NAME]) {
       const data = json[SPARSE_VECTOR_INDEX_NAME];
       const enabled = Boolean(data.enabled);
-      const config = Schema.deserializeSparseVectorConfig(data.config ?? {});
+      const config = await Schema.deserializeSparseVectorConfig(
+        data.config ?? {},
+      );
       sparseIndex = new SparseVectorIndexType(enabled, config);
     }
     return new SparseVectorValueType(sparseIndex);
   }
 
-  private static deserializeIntValueType(json: Record<string, any>): IntValueType {
+  private static deserializeIntValueType(
+    json: Record<string, any>,
+  ): IntValueType {
     let index: IntInvertedIndexType | null = null;
     if (json[INT_INVERTED_INDEX_NAME]) {
       const data = json[INT_INVERTED_INDEX_NAME];
-      index = new IntInvertedIndexType(Boolean(data.enabled), new IntInvertedIndexConfig());
+      index = new IntInvertedIndexType(
+        Boolean(data.enabled),
+        new IntInvertedIndexConfig(),
+      );
     }
     return new IntValueType(index);
   }
 
-  private static deserializeFloatValueType(json: Record<string, any>): FloatValueType {
+  private static deserializeFloatValueType(
+    json: Record<string, any>,
+  ): FloatValueType {
     let index: FloatInvertedIndexType | null = null;
     if (json[FLOAT_INVERTED_INDEX_NAME]) {
       const data = json[FLOAT_INVERTED_INDEX_NAME];
-      index = new FloatInvertedIndexType(Boolean(data.enabled), new FloatInvertedIndexConfig());
+      index = new FloatInvertedIndexType(
+        Boolean(data.enabled),
+        new FloatInvertedIndexConfig(),
+      );
     }
     return new FloatValueType(index);
   }
 
-  private static deserializeBoolValueType(json: Record<string, any>): BoolValueType {
+  private static deserializeBoolValueType(
+    json: Record<string, any>,
+  ): BoolValueType {
     let index: BoolInvertedIndexType | null = null;
     if (json[BOOL_INVERTED_INDEX_NAME]) {
       const data = json[BOOL_INVERTED_INDEX_NAME];
-      index = new BoolInvertedIndexType(Boolean(data.enabled), new BoolInvertedIndexConfig());
+      index = new BoolInvertedIndexType(
+        Boolean(data.enabled),
+        new BoolInvertedIndexConfig(),
+      );
     }
     return new BoolValueType(index);
   }
 
-  private static deserializeVectorConfig(json: Record<string, any>): VectorIndexConfig {
+  private static async deserializeVectorConfig(
+    json: Record<string, any>,
+  ): Promise<VectorIndexConfig> {
     const config = new VectorIndexConfig({
       space: (json.space as Space | null | undefined) ?? null,
       sourceKey: (json.source_key as string | null | undefined) ?? null,
@@ -943,13 +1042,10 @@ export class Schema {
       spann: json.spann ? cloneObject(json.spann) : null,
     });
 
-    const embeddingFunction =
-      getEmbeddingFunction(
-        "schema deserialization",
-        json.embedding_function as EmbeddingFunctionConfiguration,
-      ) ?? (config.embeddingFunction as EmbeddingFunction | null | undefined) ?? undefined;
-
-    config.embeddingFunction = embeddingFunction ?? null;
+    config.embeddingFunction = await getEmbeddingFunction(
+      "schema deserialization",
+      json.embedding_function as EmbeddingFunctionConfiguration,
+    );
     if (!config.space && config.embeddingFunction?.defaultSpace) {
       config.space = config.embeddingFunction.defaultSpace();
     }
@@ -957,21 +1053,36 @@ export class Schema {
     return config;
   }
 
-  private static deserializeSparseVectorConfig(json: Record<string, any>): SparseVectorIndexConfig {
+  private static async deserializeSparseVectorConfig(
+    json: Record<string, any>,
+  ): Promise<SparseVectorIndexConfig> {
     const config = new SparseVectorIndexConfig({
       sourceKey: (json.source_key as string | null | undefined) ?? null,
       bm25: typeof json.bm25 === "boolean" ? json.bm25 : null,
     });
 
     const embeddingFunction =
-      getSparseEmbeddingFunction(
+      (await getSparseEmbeddingFunction(
         "schema deserialization",
         json.embedding_function as EmbeddingFunctionConfiguration,
-      ) ??
-      (config.embeddingFunction as SparseEmbeddingFunction | null | undefined) ??
+      )) ??
+      (config.embeddingFunction as
+        | SparseEmbeddingFunction
+        | null
+        | undefined) ??
       undefined;
 
     config.embeddingFunction = embeddingFunction ?? null;
     return config;
+  }
+
+  public resolveEmbeddingFunction(): EmbeddingFunction | null | undefined {
+    const embeddingOverride =
+      this.keys[EMBEDDING_KEY]?.floatList?.vectorIndex?.config
+        .embeddingFunction;
+    if (embeddingOverride !== undefined) {
+      return embeddingOverride;
+    }
+    return this.defaults.floatList?.vectorIndex?.config.embeddingFunction;
   }
 }

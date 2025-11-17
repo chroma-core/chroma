@@ -6,7 +6,8 @@ use chroma_types::operator::{Filter, KnnBatch, KnnProjection, Limit, Projection,
 use chroma_types::plan::{Count, Get, Knn};
 use chroma_types::{
     test_segment, Collection, CollectionAndSegments, CreateCollectionError, Database, Include,
-    IncludeList, InternalCollectionConfiguration, KnnIndex, Segment, VectorIndexConfiguration,
+    IncludeList, InternalCollectionConfiguration, KnnIndex, Schema, SchemaError, Segment,
+    VectorIndexConfiguration,
 };
 use std::collections::HashSet;
 
@@ -221,21 +222,26 @@ impl InMemoryFrontend {
             ));
         }
 
-        let mut collection = Collection {
+        let schema = Schema::reconcile_schema_and_config(
+            request.schema.as_ref(),
+            request.configuration.as_ref(),
+            KnnIndex::Hnsw,
+        )
+        .map_err(CreateCollectionError::InvalidSchema)?;
+
+        let config = InternalCollectionConfiguration::try_from(&schema).map_err(|e| {
+            CreateCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason: e })
+        })?;
+
+        let collection = Collection {
             name: request.name.clone(),
             tenant: request.tenant_id.clone(),
             database: request.database_name.clone(),
             metadata: request.metadata,
-            config: request
-                .configuration
-                .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
-            schema: request.schema,
+            config,
+            schema: Some(schema),
             ..Default::default()
         };
-
-        collection
-            .reconcile_schema_with_config(KnnIndex::Hnsw)
-            .map_err(CreateCollectionError::InvalidSchema)?;
 
         // Prevent SPANN usage in InMemoryFrontend
         if matches!(

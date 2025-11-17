@@ -7,6 +7,7 @@ httpx
 hypothesis==6.112.2 # TODO: Resolve breaking changes and bump version
 hypothesis[numpy]==6.112.2 # TODO: Resolve breaking changes and bump version
 maturin>=1.0
+mmh3
 mypy-protobuf
 opentelemetry-instrumentation-fastapi>=0.41b0
 pandas
@@ -18,4 +19,5 @@ pytest-asyncio
 pytest-rerunfailures
 pytest-xdist
 setuptools_scm
+snowballstemmer
 types-protobuf

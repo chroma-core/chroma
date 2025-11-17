@@ -8,7 +8,7 @@ use chroma_index::hnsw_provider::{
     HnswIndexProviderOpenError, HnswIndexRef,
 };
 use chroma_index::{Index, IndexUuid};
-use chroma_types::{Collection, HnswParametersFromSegmentError, SegmentUuid};
+use chroma_types::{Collection, HnswParametersFromSegmentError, Schema, SchemaError, SegmentUuid};
 use chroma_types::{MaterializedLogOperation, Segment};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -55,6 +55,8 @@ pub enum DistributedHNSWSegmentFromSegmentError {
     MissingHnswConfiguration,
     #[error("Could not parse HNSW configuration: {0}")]
     InvalidHnswConfiguration(#[from] HnswParametersFromSegmentError),
+    #[error("Invalid schema: {0}")]
+    InvalidSchema(#[source] SchemaError),
 }
 
 impl ChromaError for DistributedHNSWSegmentFromSegmentError {
@@ -72,6 +74,7 @@ impl ChromaError for DistributedHNSWSegmentFromSegmentError {
             DistributedHNSWSegmentFromSegmentError::InvalidHnswConfiguration(_) => {
                 ErrorCodes::Internal
             }
+            DistributedHNSWSegmentFromSegmentError::InvalidSchema(e) => e.code(),
         }
     }
 }
@@ -96,13 +99,15 @@ impl DistributedHNSWSegmentWriter {
         hnsw_index_provider: HnswIndexProvider,
     ) -> Result<Box<DistributedHNSWSegmentWriter>, Box<DistributedHNSWSegmentFromSegmentError>>
     {
-        let hnsw_configuration = collection
-            .schema
-            .as_ref()
-            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(segment))
-            .transpose()
+        let schema = if let Some(schema) = &collection.schema {
+            schema
+        } else {
+            &Schema::try_from(&collection.config)
+                .map_err(DistributedHNSWSegmentFromSegmentError::InvalidSchema)?
+        };
+        let hnsw_configuration = schema
+            .get_internal_hnsw_config_with_legacy_fallback(segment)
             .map_err(DistributedHNSWSegmentFromSegmentError::InvalidHnswConfiguration)?
-            .flatten()
             .ok_or(DistributedHNSWSegmentFromSegmentError::MissingHnswConfiguration)?;
 
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
@@ -316,13 +321,14 @@ impl DistributedHNSWSegmentReader {
         hnsw_index_provider: HnswIndexProvider,
     ) -> Result<Box<DistributedHNSWSegmentReader>, Box<DistributedHNSWSegmentFromSegmentError>>
     {
-        let hnsw_configuration = collection
-            .schema
-            .as_ref()
-            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(segment))
-            .transpose()
+        let schema = collection.schema.as_ref().ok_or_else(|| {
+            DistributedHNSWSegmentFromSegmentError::InvalidSchema(SchemaError::InvalidSchema {
+                reason: "Schema is None".to_string(),
+            })
+        })?;
+        let hnsw_configuration = schema
+            .get_internal_hnsw_config_with_legacy_fallback(segment)
             .map_err(DistributedHNSWSegmentFromSegmentError::InvalidHnswConfiguration)?
-            .flatten()
             .ok_or(DistributedHNSWSegmentFromSegmentError::MissingHnswConfiguration)?;
 
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
@@ -400,7 +406,7 @@ pub mod test {
     use chroma_index::{HnswIndexConfig, DEFAULT_MAX_ELEMENTS};
     use chroma_types::{
         Collection, CollectionUuid, InternalCollectionConfiguration, InternalHnswConfiguration,
-        Segment, SegmentUuid,
+        Schema, Segment, SegmentUuid,
     };
     use tempfile::tempdir;
     use uuid::Uuid;
@@ -429,18 +435,18 @@ pub mod test {
             config.persist_path,
             Some(persist_path.to_str().unwrap().to_string())
         );
+        let config = InternalCollectionConfiguration {
+            vector_index: chroma_types::VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
+                max_neighbors: 10,
+                ..Default::default()
+            }),
+            embedding_function: None,
+        };
 
         // Try partial override
         let collection = Collection {
-            config: InternalCollectionConfiguration {
-                vector_index: chroma_types::VectorIndexConfiguration::Hnsw(
-                    InternalHnswConfiguration {
-                        max_neighbors: 10,
-                        ..Default::default()
-                    },
-                ),
-                embedding_function: None,
-            },
+            config: config.clone(),
+            schema: Some(Schema::try_from(&config).unwrap()),
             ..Default::default()
         };
 
@@ -454,9 +460,12 @@ pub mod test {
         };
 
         let hnsw_params = collection
-            .config
-            .get_hnsw_config_with_legacy_fallback(&segment)
+            .schema
+            .as_ref()
+            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(&segment))
+            .transpose()
             .unwrap()
+            .flatten()
             .unwrap();
         let config = HnswIndexConfig::new_persistent(
             hnsw_params.max_neighbors,

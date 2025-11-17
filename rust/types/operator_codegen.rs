@@ -6,19 +6,32 @@ use std::fs;
 use std::path::Path;
 
 pub fn generate_operator_constants() -> Result<(), Box<dyn std::error::Error>> {
-    // Get the workspace root (two levels up from rust/types)
+    // Get the workspace root - try multiple strategies for local vs Docker builds
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")?;
-    let workspace_root = Path::new(&manifest_dir)
-        .parent()
-        .and_then(|p| p.parent())
-        .ok_or("Failed to find workspace root")?;
 
-    let go_constants_path = workspace_root.join("go/pkg/sysdb/metastore/db/dbmodel/constants.go");
+    // Strategy 1: Two levels up from rust/types (works for local builds)
+    let workspace_root_local = Path::new(&manifest_dir).parent().and_then(|p| p.parent());
+
+    // Strategy 2: Check if we're in a Docker container at /chroma
+    let workspace_root_docker = Path::new("/chroma");
+
+    // Try local path first, fall back to Docker path
+    let go_constants_path = if let Some(root) = workspace_root_local {
+        let local_path = root.join("go/pkg/sysdb/metastore/db/dbmodel/constants.go");
+        if local_path.exists() {
+            local_path
+        } else {
+            workspace_root_docker.join("go/pkg/sysdb/metastore/db/dbmodel/constants.go")
+        }
+    } else {
+        workspace_root_docker.join("go/pkg/sysdb/metastore/db/dbmodel/constants.go")
+    };
+
     let out_dir = std::env::var("OUT_DIR")?;
     let dest_path = Path::new(&out_dir).join("operators_generated.rs");
 
-    // Tell Cargo to rerun if the Go file changes
-    println!("cargo:rerun-if-changed={}", go_constants_path.display());
+    // Tell Cargo to rerun if the Go file changes (use relative path for portability)
+    println!("cargo:rerun-if-changed=go/pkg/sysdb/metastore/db/dbmodel/constants.go");
 
     // Read the Go constants file
     let go_content = fs::read_to_string(&go_constants_path)
@@ -28,15 +41,15 @@ pub fn generate_operator_constants() -> Result<(), Box<dyn std::error::Error>> {
     let mut operators = Vec::new();
 
     // Parse UUID constants like:
-    // OperatorRecordCounter = uuid.MustParse("ccf2e3ba-633e-43ba-9394-46b0c54c61e3")
+    // FunctionRecordCounter = uuid.MustParse("ccf2e3ba-633e-43ba-9394-46b0c54c61e3")
     for line in go_content.lines() {
         let trimmed = line.trim();
-        // Only match lines that contain uuid.MustParse to avoid parsing other operator constants
-        if trimmed.starts_with("Operator") && trimmed.contains("uuid.MustParse") {
-            if let Some(uuid_line) = trimmed.strip_prefix("Operator") {
+        // Only match lines that contain uuid.MustParse to avoid parsing other function constants
+        if trimmed.starts_with("Function") && trimmed.contains("uuid.MustParse") {
+            if let Some(uuid_line) = trimmed.strip_prefix("Function") {
                 if let Some(uuid_str) = extract_uuid_from_line(uuid_line) {
-                    // Extract the operator name from the Go constant name
-                    // OperatorRecordCounter -> RecordCounter -> record_counter
+                    // Extract the function name from the Go constant name
+                    // FunctionRecordCounter -> RecordCounter -> record_counter
                     if let Some(name_part) = uuid_line.split('=').next() {
                         let const_name = name_part.trim();
                         let operator_name = camel_to_snake_case(const_name);
@@ -48,10 +61,10 @@ pub fn generate_operator_constants() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Also parse name constants like:
-    // OperatorNameRecordCounter = "record_counter"
+    // FunctionNameRecordCounter = "record_counter"
     let mut name_map = std::collections::HashMap::new();
     for line in go_content.lines() {
-        if let Some(name_line) = line.trim().strip_prefix("OperatorName") {
+        if let Some(name_line) = line.trim().strip_prefix("FunctionName") {
             if let Some((const_name, name_str)) = extract_name_from_line(name_line) {
                 name_map.insert(const_name, name_str);
             }
@@ -60,7 +73,7 @@ pub fn generate_operator_constants() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generate Rust code
     let mut rust_code = String::from(
-        "/// Well-known operator IDs and names that are pre-populated in the database\n",
+        "/// Well-known function IDs and names that are pre-populated in the database\n",
     );
     rust_code.push_str("/// \n");
     rust_code.push_str("/// GENERATED CODE - DO NOT EDIT MANUALLY\n");
@@ -81,22 +94,22 @@ pub fn generate_operator_constants() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(rust_name_base.as_str());
 
         rust_code.push_str(&format!(
-            "/// UUID for the built-in {} operator\n",
+            "/// UUID for the built-in {} function\n",
             name_value
         ));
         rust_code.push_str(&format!(
-            "pub const OPERATOR_{}_ID: Uuid = Uuid::from_bytes([\n",
+            "pub const FUNCTION_{}_ID: Uuid = Uuid::from_bytes([\n",
             rust_name_base.to_uppercase()
         ));
         rust_code.push_str(&format!("    {}\n", format_uuid_bytes(&uuid_bytes)));
         rust_code.push_str("]);\n");
 
         rust_code.push_str(&format!(
-            "/// Name of the built-in {} operator\n",
+            "/// Name of the built-in {} function\n",
             name_value
         ));
         rust_code.push_str(&format!(
-            "pub const OPERATOR_{}_NAME: &str = \"{}\";\n\n",
+            "pub const FUNCTION_{}_NAME: &str = \"{}\";\n\n",
             rust_name_base.to_uppercase(),
             name_value
         ));

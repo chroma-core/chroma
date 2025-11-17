@@ -1,10 +1,12 @@
 import {
   ChromaClientError,
   ChromaConnectionError,
+  ChromaError,
   ChromaForbiddenError,
   ChromaNotFoundError,
   ChromaQuotaExceededError,
   ChromaRateLimitError,
+  ChromaServerError,
   ChromaUnauthorizedError,
   ChromaUniqueError,
 } from "./errors";
@@ -74,7 +76,5 @@ export const chromaFetch: typeof fetch = async (input, init) => {
       throw new ChromaRateLimitError("Rate limit exceeded");
   }
 
-  throw new ChromaConnectionError(
-    `Unable to connect to the chromadb server (status: ${response.status}). Please try again later.`,
-  );
+  throw new ChromaServerError(`${response.status}: ${response.statusText}`);
 };

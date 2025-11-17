@@ -1,0 +1,21 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Nomic Embedding Function Schema",
+    "description": "Schema for the Nomic embedding function configuration",
+    "version": "1.0.0",
+    "type": "object",
+    "properties": {
+        "model": {
+            "type": "string",
+            "description": "Parameter model for the Nomic embedding function"
+        },
+        "api_key_env_var": {
+            "type": "string",
+            "description": "Parameter api_key_env_var for the Nomic embedding function"
+        },
+        "task_type": {
+            "type": "string",
+            "description": "Parameter task_type for the Nomic embedding function"
+        }
+    }
+}

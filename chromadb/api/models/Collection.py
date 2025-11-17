@@ -371,7 +371,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         return self._client._search(
             collection_id=self.id,
-            searches=searches_list,
+            searches=cast(List[Search], embedded_searches),
             tenant=self.tenant,
             database=self.database,
         )

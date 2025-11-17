@@ -11,9 +11,10 @@ import {
 
 const NAME = "chroma-cloud-qwen";
 
+
 export interface ChromaCloudQwenConfig {
 	model: ChromaCloudQwenEmbeddingModel;
-	task: ChromaCloudQwenEmbeddingTask;
+	task: string;
 	instructions: ChromaCloudQwenEmbeddingInstructions;
 	api_key_env_var: string;
 }
@@ -22,33 +23,29 @@ export enum ChromaCloudQwenEmbeddingModel {
 	QWEN3_EMBEDDING_0p6B = "Qwen/Qwen3-Embedding-0.6B",
 }
 
-export enum ChromaCloudQwenEmbeddingTask {
-	NL_TO_CODE = "nl_to_code", // Queries are in natural language, documents are code
-}
-
 export enum ChromaCloudQwenEmbeddingTarget {
 	DOCUMENTS = "documents",
 	QUERY = "query",
 }
 
 export type ChromaCloudQwenEmbeddingInstructions = Record<
-	ChromaCloudQwenEmbeddingTask,
+	string,
 	Record<ChromaCloudQwenEmbeddingTarget, string>
 >;
 
 export const CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS: ChromaCloudQwenEmbeddingInstructions =
-	{
-		[ChromaCloudQwenEmbeddingTask.NL_TO_CODE]: {
-			[ChromaCloudQwenEmbeddingTarget.DOCUMENTS]: "",
-			[ChromaCloudQwenEmbeddingTarget.QUERY]:
-				// Taken from https://github.com/QwenLM/Qwen3-Embedding/blob/main/evaluation/task_prompts.json
-				"Given a question about coding, retrieval code or passage that can solve user's question",
-		},
-	};
+{
+	"nl_to_code": {
+		[ChromaCloudQwenEmbeddingTarget.DOCUMENTS]: "",
+		[ChromaCloudQwenEmbeddingTarget.QUERY]:
+			// Taken from https://github.com/QwenLM/Qwen3-Embedding/blob/main/evaluation/task_prompts.json
+			"Given a question about coding, retrieval code or passage that can solve user's question",
+	},
+};
 
 export interface ChromaCloudQwenArgs {
 	model: ChromaCloudQwenEmbeddingModel;
-	task: ChromaCloudQwenEmbeddingTask;
+	task?: string;
 	instructions?: ChromaCloudQwenEmbeddingInstructions;
 	apiKeyEnvVar?: string;
 }
@@ -70,13 +67,13 @@ export class ChromaCloudQwenEmbeddingFunction implements EmbeddingFunction {
 	private readonly model: ChromaCloudQwenEmbeddingModel;
 	private readonly url: string;
 	private readonly headers: { [key: string]: string };
-	private readonly task: ChromaCloudQwenEmbeddingTask;
+	private readonly task: string;
 	private readonly instructions: ChromaCloudQwenEmbeddingInstructions;
 
 	constructor(args: ChromaCloudQwenArgs) {
 		const {
 			model,
-			task,
+			task = "nl_to_code",
 			instructions = CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
 			apiKeyEnvVar = "CHROMA_API_KEY",
 		} = args;
@@ -185,16 +182,14 @@ export class ChromaCloudQwenEmbeddingFunction implements EmbeddingFunction {
 		if (config.instructions) {
 			deserializedInstructions = {} as ChromaCloudQwenEmbeddingInstructions;
 			for (const [taskKey, targets] of Object.entries(config.instructions)) {
-				// taskKey is the enum value string like "nl_to_code"
-				const taskEnum = taskKey as ChromaCloudQwenEmbeddingTask;
-				deserializedInstructions[taskEnum] = {} as Record<
+				deserializedInstructions[taskKey] = {} as Record<
 					ChromaCloudQwenEmbeddingTarget,
 					string
 				>;
 				for (const [targetKey, instruction] of Object.entries(targets)) {
 					// targetKey is the enum value string like "documents" or "query"
 					const targetEnum = targetKey as ChromaCloudQwenEmbeddingTarget;
-					deserializedInstructions[taskEnum][targetEnum] = instruction;
+					deserializedInstructions[taskKey][targetEnum] = instruction;
 				}
 			}
 		} else {

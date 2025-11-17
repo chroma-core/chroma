@@ -29,7 +29,7 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    AttachedFunction, AttachedFunctionUuid, Chunk, Collection, CollectionUuid, KnnIndex, LogRecord,
+    AttachedFunction, AttachedFunctionUuid, Chunk, Collection, CollectionUuid, LogRecord,
     NonceUuid, Schema, SchemaError, Segment, SegmentFlushInfo, SegmentType, SegmentUuid,
 };
 use opentelemetry::trace::TraceContextExt;
@@ -50,7 +50,7 @@ use crate::execution::operators::{
         CommitSegmentWriterOutput,
     },
     execute_task::{
-        CountAttachedFunction, ExecuteAttachedFunctionError, ExecuteAttachedFunctionInput,
+        ExecuteAttachedFunctionError, ExecuteAttachedFunctionInput,
         ExecuteAttachedFunctionOperator, ExecuteAttachedFunctionOutput,
     },
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
@@ -171,14 +171,14 @@ pub struct CompactOrchestrator {
     input_collection_id: CollectionUuid,
     input_collection: OnceCell<Collection>,
     input_segments: OnceCell<Vec<Segment>>,
-    /// How much to pull from fetch_logs for INPUT collection
-    pulled_log_offset: i64,
+    input_pulled_log_offset: i64,
 
     // === Output Collection (write compacted data to) ===
     /// Collection to write compacted segments to
     output_collection_id: OnceCell<CollectionUuid>,
     output_collection: OnceCell<Collection>,
     output_segments: OnceCell<Vec<Segment>>,
+    output_pulled_log_offset: i64,
 
     // === Writers & Results ===
     writers: OnceCell<CompactWriters>,
@@ -366,10 +366,11 @@ impl CompactOrchestrator {
             input_collection_id,
             input_collection: OnceCell::new(),
             input_segments: OnceCell::new(),
-            pulled_log_offset: 0,
+            input_pulled_log_offset: 0,
             output_collection_id: output_collection_cell,
             output_collection: OnceCell::new(),
             output_segments: OnceCell::new(),
+            output_pulled_log_offset: 0,
             writers: OnceCell::new(),
             flush_results: Vec::new(),
             result_channel,
@@ -472,14 +473,21 @@ impl CompactOrchestrator {
             None => return,
         };
 
-        // TODO(tanujnay112): Get the actual attached function executor based on function_id
-        // For now, hardcode CountAttachedFunction as a placeholder
-        let attached_function_executor = Arc::new(CountAttachedFunction);
-
-        let execute_attached_function_op = ExecuteAttachedFunctionOperator {
-            log_client: self.log.clone(),
-            attached_function_executor,
-        };
+        let execute_attached_function_op =
+            match ExecuteAttachedFunctionOperator::from_attached_function(
+                &attached_function,
+                self.log.clone(),
+            ) {
+                Ok(op) => op,
+                Err(e) => {
+                    self.terminate_with_result(
+                        Err(CompactionError::ExecuteAttachedFunction(e)),
+                        ctx,
+                    )
+                    .await;
+                    return;
+                }
+            };
 
         let execute_attached_function_input = ExecuteAttachedFunctionInput {
             log_records,
@@ -742,7 +750,7 @@ impl CompactOrchestrator {
         let input = RegisterInput::new(
             collection.tenant,
             collection.collection_id,
-            self.pulled_log_offset,
+            self.output_pulled_log_offset,
             collection.version,
             self.flush_results.clone().into(),
             self.total_records_post_compaction,
@@ -751,6 +759,7 @@ impl CompactOrchestrator {
             self.log.clone(),
             self.schema.clone(),
             self.attached_function_context.clone(),
+            self.input_pulled_log_offset,
         );
 
         let task = wrap(
@@ -871,6 +880,17 @@ impl CompactOrchestrator {
             .ok_or(CompactionError::InvariantViolation(
                 "Output collection ID should be set",
             ))
+    }
+
+    /// Set input_pulled_log_offset to the given position.
+    /// For regular compaction (input == output), also updates output_pulled_log_offset.
+    /// For task compaction (input != output), output collection keeps its own log position.
+    fn set_input_log_offset(&mut self, log_offset: i64) {
+        self.input_pulled_log_offset = log_offset;
+        // Only update output offset if input and output are the same collection
+        if Some(self.input_collection_id) == self.output_collection_id.get().copied() {
+            self.output_pulled_log_offset = log_offset;
+        }
     }
 
     /// Get output_segments or return error
@@ -1104,7 +1124,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         }
 
         // Store output collection
-        let mut output_collection = output.output.collection.clone();
+        let output_collection = output.output.collection.clone();
         if self
             .output_collection
             .set(output_collection.clone())
@@ -1119,6 +1139,9 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             .await;
             return;
         }
+
+        // Initialize output_pulled_log_offset from OUTPUT collection's log position
+        self.output_pulled_log_offset = output_collection.log_position;
 
         // Create output segments vec from individual segment fields
         let output_segments = vec![
@@ -1166,8 +1189,8 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             input_collection.log_position = result;
         }
 
-        // Set pulled_log_offset from INPUT collection's log position
-        self.pulled_log_offset = input_collection.log_position;
+        // Initialize input_pulled_log_offset from INPUT collection's log position (last compacted offset)
+        self.input_pulled_log_offset = input_collection.log_position;
 
         // Create record reader from INPUT segments (for reading existing data)
         let input_record_reader = match self
@@ -1272,23 +1295,6 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             Some(writer) => writer,
             None => return,
         };
-        if self
-            .ok_or_terminate(
-                match vector_segment.r#type {
-                    SegmentType::Spann => output_collection
-                        .reconcile_schema_with_config(KnnIndex::Spann)
-                        .map_err(CompactionError::from),
-                    _ => output_collection
-                        .reconcile_schema_with_config(KnnIndex::Hnsw)
-                        .map_err(CompactionError::from),
-                },
-                ctx,
-            )
-            .await
-            .is_none()
-        {
-            return;
-        }
         let (hnsw_index_uuid, vector_writer, is_vector_segment_spann) = match vector_segment.r#type
         {
             SegmentType::Spann => match self
@@ -1440,8 +1446,11 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
         tracing::info!("Pulled Records: {}", output.len());
         match output.iter().last() {
             Some((rec, _)) => {
-                self.pulled_log_offset = rec.log_offset;
-                tracing::info!("Pulled Logs Up To Offset: {:?}", self.pulled_log_offset);
+                self.set_input_log_offset(rec.log_offset);
+                tracing::info!(
+                    "Pulled Logs Up To Offset: {:?}",
+                    self.input_pulled_log_offset
+                );
             }
             None => {
                 tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behing the sysdb.");
@@ -1522,27 +1531,14 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
         // Each record should corresond to a log
         self.total_records_post_compaction = output.len() as u64;
         if output.is_empty() && self.attached_function_context.is_none() {
-            let writers = match self.ok_or_terminate(self.get_segment_writers(), ctx).await {
-                Some(writer) => writer,
-                None => return,
-            };
-            self.dispatch_segment_writer_commit(
-                ChromaSegmentWriter::MetadataSegment(writers.metadata_writer),
-                ctx,
-            )
-            .await;
-            self.dispatch_segment_writer_commit(
-                ChromaSegmentWriter::VectorSegment(writers.vector_writer),
-                ctx,
-            )
-            .await;
+            self.register(ctx).await;
         } else if self.attached_function_context.is_some() {
             let input_collection =
                 match self.ok_or_terminate(self.get_input_collection(), ctx).await {
                     Some(collection) => collection,
                     None => return,
                 };
-            self.pulled_log_offset = input_collection.log_position;
+            self.set_input_log_offset(input_collection.log_position);
             self.do_attached_function(output, ctx).await;
         } else {
             self.partition(output, ctx).await;
@@ -2069,6 +2065,66 @@ mod tests {
             .expect("Get orchestrator should not fail");
 
         assert_eq!(new_vals, old_vals);
+    }
+
+    #[tokio::test]
+    async fn test_rebuild_empty_filepath() {
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        let test_segments = TestDistributedSegment::new().await;
+        let collection_id = test_segments.collection.collection_id;
+        sysdb
+            .create_collection(
+                test_segments.collection.tenant,
+                test_segments.collection.database,
+                collection_id,
+                test_segments.collection.name,
+                vec![
+                    test_segments.record_segment.clone(),
+                    test_segments.metadata_segment.clone(),
+                    test_segments.vector_segment.clone(),
+                ],
+                None,
+                None,
+                None,
+                test_segments.collection.dimension,
+                false,
+            )
+            .await
+            .expect("Colleciton create should be successful");
+        let in_memory_log = InMemoryLog::new();
+        let log = Log::InMemory(in_memory_log);
+
+        let rebuild_orchestrator = CompactOrchestrator::new(
+            collection_id,
+            true,
+            5000,
+            10000,
+            1000,
+            log,
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            None,
+        );
+        assert!(rebuild_orchestrator.run(system.clone()).await.is_ok());
+
+        let new_cas = sysdb
+            .get_collection_with_segments(collection_id)
+            .await
+            .expect("Collection and segment information should be present");
+
+        assert!(new_cas.metadata_segment.file_path.is_empty());
+        assert!(new_cas.record_segment.file_path.is_empty());
+        assert!(new_cas.vector_segment.file_path.is_empty());
     }
 
     // Helper to read total_count from attached function result metadata

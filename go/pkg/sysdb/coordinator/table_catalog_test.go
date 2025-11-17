@@ -1555,7 +1555,7 @@ func TestUpdateCollection_WithSchema(t *testing.T) {
 					"config": {}
 				}
 			},
-			"boolean": {
+			"bool": {
 				"bool_inverted_index": {
 					"enabled": true,
 					"config": {}

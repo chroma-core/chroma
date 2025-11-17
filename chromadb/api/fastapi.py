@@ -79,8 +79,14 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             default_api_path=system.settings.chroma_server_api_default_path,
         )
 
-        limits = httpx.Limits(keepalive_expiry=self.keepalive_secs)
-        self._session = httpx.Client(timeout=None, limits=limits)
+        if self._settings.chroma_server_ssl_verify is not None:
+            self._session = httpx.Client(
+                timeout=None,
+                limits=self.http_limits,
+                verify=self._settings.chroma_server_ssl_verify,
+            )
+        else:
+            self._session = httpx.Client(timeout=None, limits=self.http_limits)
 
         self._header = system.settings.chroma_server_headers or {}
         self._header["Content-Type"] = "application/json"
@@ -90,8 +96,6 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             + " (https://github.com/chroma-core/chroma)"
         )
 
-        if self._settings.chroma_server_ssl_verify is not None:
-            self._session = httpx.Client(verify=self._settings.chroma_server_ssl_verify)
         if self._header is not None:
             self._session.headers.update(self._header)
 
@@ -492,7 +496,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         return GetResult(
             ids=resp_json["ids"],
             embeddings=resp_json.get("embeddings", None),
-            metadatas=metadatas,  # type: ignore
+            metadatas=metadatas,
             documents=resp_json.get("documents", None),
             data=None,
             uris=resp_json.get("uris", None),
@@ -700,7 +704,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             ids=resp_json["ids"],
             distances=resp_json.get("distances", None),
             embeddings=resp_json.get("embeddings", None),
-            metadatas=metadata_batches,  # type: ignore
+            metadatas=metadata_batches,
             documents=resp_json.get("documents", None),
             uris=resp_json.get("uris", None),
             data=None,

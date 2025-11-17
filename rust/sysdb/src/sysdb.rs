@@ -17,10 +17,10 @@ use chroma_types::{
     GetCollectionSizeError, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
     GetDatabaseResponse, GetSegmentsError, GetTenantError, GetTenantResponse,
     InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
-    ListCollectionVersionsError, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
-    ResetResponse, ScheduleEntry, ScheduleEntryConversionError, SegmentFlushInfo,
-    SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError, UpdateTenantError,
-    UpdateTenantResponse,
+    ListAttachedFunctionsError, ListCollectionVersionsError, ListDatabasesError,
+    ListDatabasesResponse, Metadata, ResetError, ResetResponse, ScheduleEntry,
+    ScheduleEntryConversionError, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    UpdateCollectionError, UpdateTenantError, UpdateTenantResponse,
 };
 use chroma_types::{
     AdvanceAttachedFunctionError, AdvanceAttachedFunctionResponse, AttachedFunctionUpdateInfo,
@@ -45,7 +45,7 @@ use uuid::{Error, Uuid};
 pub const VERSION_FILE_S3_PREFIX: &str = "sysdb/version_files/";
 
 // Helper function to convert serde_json::Value to prost_types::Value
-fn json_to_prost_value(json: serde_json::Value) -> prost_types::Value {
+pub(crate) fn json_to_prost_value(json: serde_json::Value) -> prost_types::Value {
     use prost_types::value::Kind;
     let kind = match json {
         serde_json::Value::Null => Kind::NullValue(0),
@@ -461,6 +461,17 @@ impl SysDb {
         }
     }
 
+    pub async fn list_attached_functions(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Vec<chroma_proto::AttachedFunction>, ListAttachedFunctionsError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.list_attached_functions(collection_id).await,
+            SysDb::Sqlite(_) => Err(ListAttachedFunctionsError::NotImplemented),
+            SysDb::Test(test) => test.list_attached_functions(collection_id).await,
+        }
+    }
+
     pub async fn get_collections_to_gc(
         &mut self,
         cutoff_time: Option<SystemTime>,
@@ -523,13 +534,13 @@ impl SysDb {
     }
 
     // Only meant for testing.
-    pub async fn get_all_operators(
+    pub async fn get_all_functions(
         &mut self,
     ) -> Result<Vec<(String, uuid::Uuid)>, Box<dyn std::error::Error>> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_all_operators().await,
-            SysDb::Sqlite(_) => unimplemented!("get_all_operators not implemented for sqlite"),
-            SysDb::Test(_) => unimplemented!("get_all_operators not implemented for test"),
+            SysDb::Grpc(grpc) => grpc.get_all_functions().await,
+            SysDb::Sqlite(_) => unimplemented!("get_all_functions not implemented for sqlite"),
+            SysDb::Test(_) => unimplemented!("get_all_functions not implemented for test"),
         }
     }
 
@@ -1362,6 +1373,25 @@ impl GrpcSysDb {
         Ok(res.count as usize)
     }
 
+    pub async fn list_attached_functions(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Vec<chroma_proto::AttachedFunction>, ListAttachedFunctionsError> {
+        let res = self
+            .client
+            .list_attached_functions(chroma_proto::ListAttachedFunctionsRequest {
+                input_collection_id: collection_id.0.to_string(),
+            })
+            .await
+            .map_err(|err| match err.code() {
+                Code::NotFound => ListAttachedFunctionsError::NotFound(collection_id.0.to_string()),
+                _ => ListAttachedFunctionsError::Internal(err.into()),
+            })?
+            .into_inner();
+
+        Ok(res.attached_functions)
+    }
+
     pub async fn get_collections_to_gc(
         &mut self,
         cutoff_time: Option<SystemTime>,
@@ -1508,7 +1538,7 @@ impl GrpcSysDb {
         })
     }
 
-    async fn get_all_operators(
+    async fn get_all_functions(
         &mut self,
     ) -> Result<Vec<(String, uuid::Uuid)>, Box<dyn std::error::Error>> {
         let res = self
@@ -1959,21 +1989,20 @@ impl GrpcSysDb {
             + std::time::Duration::from_micros(attached_function.next_run_at);
 
         // Parse nonces
-        let lowest_live_nonce = if attached_function.lowest_live_nonce.is_empty() {
-            None
-        } else {
-            Some(
-                uuid::Uuid::parse_str(&attached_function.lowest_live_nonce)
+        let lowest_live_nonce = match &attached_function.lowest_live_nonce {
+            Some(nonce_str) if !nonce_str.is_empty() => Some(
+                uuid::Uuid::parse_str(nonce_str)
                     .map(chroma_types::NonceUuid)
                     .map_err(|e| {
                         tracing::error!(
-                            lowest_live_nonce = %attached_function.lowest_live_nonce,
+                            lowest_live_nonce = %nonce_str,
                             error = %e,
                             "Server returned invalid lowest_live_nonce UUID"
                         );
                         GetAttachedFunctionError::ServerReturnedInvalidData
                     })?,
-            )
+            ),
+            _ => None,
         };
 
         let next_nonce = uuid::Uuid::parse_str(&attached_function.next_nonce)
@@ -2014,10 +2043,20 @@ impl GrpcSysDb {
                 None
             };
 
+        // Parse function_id from the dedicated UUID field
+        let function_id = uuid::Uuid::parse_str(&attached_function.function_id).map_err(|e| {
+            tracing::error!(
+                function_id = %attached_function.function_id,
+                error = %e,
+                "Server returned invalid function_id UUID"
+            );
+            GetAttachedFunctionError::ServerReturnedInvalidData
+        })?;
+
         Ok(chroma_types::AttachedFunction {
             id: attached_function_id,
             name: attached_function.name,
-            function_id: attached_function.function_name,
+            function_id,
             input_collection_id: parsed_input_collection_id,
             output_collection_name: attached_function.output_collection_name,
             output_collection_id: parsed_output_collection_id,
@@ -2188,6 +2227,69 @@ impl GrpcSysDb {
             .collect::<Result<Vec<ScheduleEntry>, ScheduleEntryConversionError>>()
             .map_err(PeekScheduleError::Conversion)
     }
+
+    async fn get_soft_deleted_attached_functions(
+        &mut self,
+        cutoff_time: SystemTime,
+        limit: i32,
+    ) -> Result<Vec<chroma_types::AttachedFunctionUuid>, GetSoftDeletedAttachedFunctionsError> {
+        let cutoff_timestamp = prost_types::Timestamp {
+            seconds: cutoff_time
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64,
+            nanos: 0,
+        };
+
+        let req = chroma_proto::GetSoftDeletedAttachedFunctionsRequest {
+            cutoff_time: Some(cutoff_timestamp),
+            limit,
+        };
+
+        let res = self
+            .client
+            .get_soft_deleted_attached_functions(req)
+            .await
+            .map_err(|e| {
+                GetSoftDeletedAttachedFunctionsError::FailedToGetSoftDeletedAttachedFunctions(e)
+            })?;
+
+        let attached_function_ids: Result<Vec<chroma_types::AttachedFunctionUuid>, _> = res
+            .into_inner()
+            .attached_functions
+            .into_iter()
+            .map(|af| {
+                uuid::Uuid::parse_str(&af.id)
+                    .map(chroma_types::AttachedFunctionUuid)
+                    .map_err(|e| {
+                        tracing::error!(
+                            attached_function_id = %af.id,
+                            error = %e,
+                            "Server returned invalid attached_function_id UUID"
+                        );
+                        GetSoftDeletedAttachedFunctionsError::ServerReturnedInvalidData
+                    })
+            })
+            .collect();
+
+        attached_function_ids
+    }
+
+    async fn finish_attached_function_deletion(
+        &mut self,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
+    ) -> Result<(), FinishAttachedFunctionDeletionError> {
+        let req = chroma_proto::FinishAttachedFunctionDeletionRequest {
+            attached_function_id: attached_function_id.to_string(),
+        };
+
+        self.client
+            .finish_attached_function_deletion(req)
+            .await
+            .map_err(FinishAttachedFunctionDeletionError::FailedToFinishDeletion)?;
+
+        Ok(())
+    }
 }
 
 #[derive(Error, Debug)]
@@ -2204,6 +2306,36 @@ impl ChromaError for PeekScheduleError {
             PeekScheduleError::Internal(e) => e.code(),
             PeekScheduleError::Conversion(_) => ErrorCodes::Internal,
         }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum GetSoftDeletedAttachedFunctionsError {
+    #[error("Failed to get soft deleted attached functions: {0}")]
+    FailedToGetSoftDeletedAttachedFunctions(#[from] tonic::Status),
+    #[error("Server returned invalid data - response contains corrupt attached function IDs")]
+    ServerReturnedInvalidData,
+    #[error("Not implemented for this SysDb backend")]
+    NotImplemented,
+}
+
+impl ChromaError for GetSoftDeletedAttachedFunctionsError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum FinishAttachedFunctionDeletionError {
+    #[error("Failed to finish attached function deletion: {0}")]
+    FailedToFinishDeletion(#[from] tonic::Status),
+    #[error("Not implemented for this SysDb backend")]
+    NotImplemented,
+}
+
+impl ChromaError for FinishAttachedFunctionDeletionError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
     }
 }
 
@@ -2414,13 +2546,37 @@ impl SysDb {
                 grpc.soft_delete_attached_function(attached_function_id, delete_output)
                     .await
             }
-            SysDb::Sqlite(_) => {
-                // SQLite implementation doesn't support soft_delete_attached_function yet
-                todo!("soft_delete_attached_function not implemented for SQLite")
+            SysDb::Sqlite(_) => Err(DeleteAttachedFunctionError::NotImplemented),
+            SysDb::Test(_) => Err(DeleteAttachedFunctionError::NotImplemented),
+        }
+    }
+
+    pub async fn get_soft_deleted_attached_functions(
+        &mut self,
+        cutoff_time: SystemTime,
+        limit: i32,
+    ) -> Result<Vec<chroma_types::AttachedFunctionUuid>, GetSoftDeletedAttachedFunctionsError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.get_soft_deleted_attached_functions(cutoff_time, limit)
+                    .await
             }
-            SysDb::Test(_) => {
-                todo!()
+            SysDb::Sqlite(_) => Err(GetSoftDeletedAttachedFunctionsError::NotImplemented),
+            SysDb::Test(_) => Err(GetSoftDeletedAttachedFunctionsError::NotImplemented),
+        }
+    }
+
+    pub async fn finish_attached_function_deletion(
+        &mut self,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
+    ) -> Result<(), FinishAttachedFunctionDeletionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.finish_attached_function_deletion(attached_function_id)
+                    .await
             }
+            SysDb::Sqlite(_) => Err(FinishAttachedFunctionDeletionError::NotImplemented),
+            SysDb::Test(_) => Err(FinishAttachedFunctionDeletionError::NotImplemented),
         }
     }
 }
@@ -2503,6 +2659,8 @@ pub enum DeleteAttachedFunctionError {
     NotFound,
     #[error("Failed to delete attached function: {0}")]
     FailedToDeleteAttachedFunction(#[from] tonic::Status),
+    #[error("Not implemented for this SysDb backend")]
+    NotImplemented,
 }
 
 impl ChromaError for DeleteAttachedFunctionError {
@@ -2510,6 +2668,7 @@ impl ChromaError for DeleteAttachedFunctionError {
         match self {
             DeleteAttachedFunctionError::NotFound => ErrorCodes::NotFound,
             DeleteAttachedFunctionError::FailedToDeleteAttachedFunction(e) => e.code().into(),
+            DeleteAttachedFunctionError::NotImplemented => ErrorCodes::Internal,
         }
     }
 }

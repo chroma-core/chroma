@@ -40,6 +40,18 @@ func (s *Server) GetAttachedFunctionByName(ctx context.Context, req *coordinator
 	return res, nil
 }
 
+func (s *Server) ListAttachedFunctions(ctx context.Context, req *coordinatorpb.ListAttachedFunctionsRequest) (*coordinatorpb.ListAttachedFunctionsResponse, error) {
+	log.Info("ListAttachedFunctions", zap.String("input_collection_id", req.InputCollectionId))
+
+	res, err := s.coordinator.ListAttachedFunctions(ctx, req)
+	if err != nil {
+		log.Error("ListAttachedFunctions failed", zap.Error(err))
+		return nil, err
+	}
+
+	return res, nil
+}
+
 func (s *Server) GetAttachedFunctionByUuid(ctx context.Context, req *coordinatorpb.GetAttachedFunctionByUuidRequest) (*coordinatorpb.GetAttachedFunctionByUuidResponse, error) {
 	log.Info("GetAttachedFunctionByUuid", zap.String("id", req.Id))
 
@@ -137,5 +149,31 @@ func (s *Server) CleanupExpiredPartialAttachedFunctions(ctx context.Context, req
 	}
 
 	log.Info("CleanupExpiredPartialAttachedFunctions succeeded", zap.Uint64("cleaned_up_count", res.CleanedUpCount))
+	return res, nil
+}
+
+func (s *Server) GetSoftDeletedAttachedFunctions(ctx context.Context, req *coordinatorpb.GetSoftDeletedAttachedFunctionsRequest) (*coordinatorpb.GetSoftDeletedAttachedFunctionsResponse, error) {
+	log.Info("GetSoftDeletedAttachedFunctions", zap.Time("cutoff_time", req.CutoffTime.AsTime()), zap.Int32("limit", req.Limit))
+
+	res, err := s.coordinator.GetSoftDeletedAttachedFunctions(ctx, req)
+	if err != nil {
+		log.Error("GetSoftDeletedAttachedFunctions failed", zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	log.Info("GetSoftDeletedAttachedFunctions succeeded", zap.Int("count", len(res.AttachedFunctions)))
+	return res, nil
+}
+
+func (s *Server) FinishAttachedFunctionDeletion(ctx context.Context, req *coordinatorpb.FinishAttachedFunctionDeletionRequest) (*coordinatorpb.FinishAttachedFunctionDeletionResponse, error) {
+	log.Info("FinishAttachedFunctionDeletion", zap.String("id", req.AttachedFunctionId))
+
+	res, err := s.coordinator.FinishAttachedFunctionDeletion(ctx, req)
+	if err != nil {
+		log.Error("FinishAttachedFunctionDeletion failed", zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	log.Info("FinishAttachedFunctionDeletion succeeded", zap.String("id", req.AttachedFunctionId))
 	return res, nil
 }

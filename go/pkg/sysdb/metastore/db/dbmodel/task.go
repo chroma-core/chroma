@@ -47,6 +47,7 @@ type IAttachedFunctionDb interface {
 	Insert(attachedFunction *AttachedFunction) error
 	GetByName(inputCollectionID string, name string) (*AttachedFunction, error)
 	GetByID(id uuid.UUID) (*AttachedFunction, error)
+	GetByCollectionID(inputCollectionID string) ([]*AttachedFunction, error)
 	Advance(id uuid.UUID, nextRunNonce uuid.UUID, completionOffset int64, nextRunDelaySecs uint64) (*AdvanceAttachedFunction, error)
 	UpdateCompletionOffset(id uuid.UUID, runNonce uuid.UUID, completionOffset int64) error
 	UpdateLowestLiveNonce(id uuid.UUID, lowestLiveNonce uuid.UUID) error
@@ -58,4 +59,6 @@ type IAttachedFunctionDb interface {
 	PeekScheduleByCollectionId(collectionIDs []string) ([]*AttachedFunction, error)
 	GetMinCompletionOffsetForCollection(inputCollectionID string) (*int64, error)
 	CleanupExpiredPartial(maxAgeSeconds uint64) ([]uuid.UUID, error)
+	GetSoftDeletedAttachedFunctions(cutoffTime time.Time, limit int32) ([]*AttachedFunction, error)
+	HardDeleteAttachedFunction(id uuid.UUID) error
 }

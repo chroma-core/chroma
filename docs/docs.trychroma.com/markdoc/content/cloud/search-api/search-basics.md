@@ -191,14 +191,14 @@ search = Search(rank=Knn(query="artificial intelligence"))
 
 {% Tab label="typescript" %}
 ```typescript
-import { Search, K, Knn, Limit, Select } from 'chromadb';
+import { Search, K, Knn } from 'chromadb';
 
 // With expression objects
 const search1 = new Search({
   where: K("status").eq("active"),
   rank: Knn({ query: "latest research papers" }),
-  limit: new Limit({ limit: 10, offset: 0 }),
-  select: new Select([K.DOCUMENT, K.SCORE])
+  limit: { limit: 10, offset: 0 },
+  select: [K.DOCUMENT, K.SCORE]
 });
 
 // With dictionaries (MongoDB-style)

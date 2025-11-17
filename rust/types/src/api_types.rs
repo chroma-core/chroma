@@ -1088,6 +1088,26 @@ impl ChromaError for CountForksError {
 }
 
 #[derive(Debug, Error)]
+pub enum ListAttachedFunctionsError {
+    #[error("Collection [{0}] does not exist")]
+    NotFound(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("List attached functions is not implemented")]
+    NotImplemented,
+}
+
+impl ChromaError for ListAttachedFunctionsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ListAttachedFunctionsError::NotFound(_) => ErrorCodes::NotFound,
+            ListAttachedFunctionsError::Internal(chroma_error) => chroma_error.code(),
+            ListAttachedFunctionsError::NotImplemented => ErrorCodes::Unimplemented,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
 pub enum GetCollectionSizeError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),

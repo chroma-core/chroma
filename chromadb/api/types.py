@@ -12,6 +12,7 @@ from typing import (
     get_args,
     TYPE_CHECKING,
     Final,
+    Type,
 )
 from copy import deepcopy
 from typing_extensions import TypeAlias
@@ -20,7 +21,8 @@ from numpy.typing import NDArray
 import numpy as np
 import warnings
 from typing_extensions import TypedDict, Protocol, runtime_checkable
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 
 import chromadb.errors as errors
 from chromadb.base_types import (
@@ -1493,14 +1495,56 @@ def validate_sparse_embedding_function(
 
 
 # Index Configuration Types for Collection Schema
+def _create_extra_fields_validator(valid_fields: list[str]) -> Any:
+    """Create a model validator that provides helpful error messages for invalid fields."""
+
+    @model_validator(mode="before")
+    def validate_extra_fields(cls: Type[BaseModel], data: Any) -> Any:
+        if isinstance(data, dict):
+            invalid_fields = [k for k in data.keys() if k not in valid_fields]
+            if invalid_fields:
+                invalid_fields_str = ", ".join(f"'{f}'" for f in invalid_fields)
+                class_name = cls.__name__
+                # Create a clear, actionable error message
+                if len(invalid_fields) == 1:
+                    msg = (
+                        f"'{invalid_fields[0]}' is not a valid field for {class_name}. "
+                    )
+                else:
+                    msg = f"Invalid fields for {class_name}: {invalid_fields_str}. "
+
+                raise PydanticCustomError(
+                    "invalid_field",
+                    msg,
+                    {"invalid_fields": invalid_fields},
+                )
+        return data
+
+    return validate_extra_fields
+
+
 class FtsIndexConfig(BaseModel):
     """Configuration for Full-Text Search index. No parameters required."""
+
+    model_config = {"extra": "forbid"}
 
     pass
 
 
 class HnswIndexConfig(BaseModel):
     """Configuration for HNSW vector index."""
+
+    _validate_extra_fields = _create_extra_fields_validator(
+        [
+            "ef_construction",
+            "max_neighbors",
+            "ef_search",
+            "num_threads",
+            "batch_size",
+            "sync_threshold",
+            "resize_factor",
+        ]
+    )
 
     ef_construction: Optional[int] = None
     max_neighbors: Optional[int] = None
@@ -1513,6 +1557,27 @@ class HnswIndexConfig(BaseModel):
 
 class SpannIndexConfig(BaseModel):
     """Configuration for SPANN vector index."""
+
+    _validate_extra_fields = _create_extra_fields_validator(
+        [
+            "search_nprobe",
+            "search_rng_factor",
+            "search_rng_epsilon",
+            "nreplica_count",
+            "write_nprobe",
+            "write_rng_factor",
+            "write_rng_epsilon",
+            "split_threshold",
+            "num_samples_kmeans",
+            "initial_lambda",
+            "reassign_neighbor_count",
+            "merge_threshold",
+            "num_centers_to_merge_to",
+            "ef_construction",
+            "ef_search",
+            "max_neighbors",
+        ]
+    )
 
     search_nprobe: Optional[int] = None
     write_nprobe: Optional[int] = None
@@ -1527,10 +1592,13 @@ class SpannIndexConfig(BaseModel):
 class VectorIndexConfig(BaseModel):
     """Configuration for vector index with space, embedding function, and algorithm config."""
 
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = {"arbitrary_types_allowed": True, "extra": "forbid"}
+
     space: Optional[Space] = None
     embedding_function: Optional[Any] = DefaultEmbeddingFunction()
-    source_key: Optional[str] = None  # key to source the vector from (accepts str or Key)
+    source_key: Optional[
+        str
+    ] = None  # key to source the vector from (accepts str or Key)
     hnsw: Optional[HnswIndexConfig] = None
     spann: Optional[SpannIndexConfig] = None
 
@@ -1542,6 +1610,7 @@ class VectorIndexConfig(BaseModel):
             return None
         # Import Key at runtime to avoid circular import
         from chromadb.execution.expression.operator import Key as KeyType
+
         if isinstance(v, KeyType):
             v = v.name  # Extract string from Key
         elif isinstance(v, str):
@@ -1574,10 +1643,13 @@ class VectorIndexConfig(BaseModel):
 class SparseVectorIndexConfig(BaseModel):
     """Configuration for sparse vector index."""
 
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = {"arbitrary_types_allowed": True, "extra": "forbid"}
+
     # TODO(Sanket): Change this to the appropriate sparse ef and use a default here.
     embedding_function: Optional[Any] = None
-    source_key: Optional[str] = None  # key to source the sparse vector from (accepts str or Key)
+    source_key: Optional[
+        str
+    ] = None  # key to source the sparse vector from (accepts str or Key)
     bm25: Optional[bool] = None
 
     @field_validator("source_key", mode="before")
@@ -1588,6 +1660,7 @@ class SparseVectorIndexConfig(BaseModel):
             return None
         # Import Key at runtime to avoid circular import
         from chromadb.execution.expression.operator import Key as KeyType
+
         if isinstance(v, KeyType):
             v = v.name  # Extract string from Key
         elif isinstance(v, str):
@@ -1622,11 +1695,15 @@ class SparseVectorIndexConfig(BaseModel):
 class StringInvertedIndexConfig(BaseModel):
     """Configuration for string inverted index."""
 
+    model_config = {"extra": "forbid"}
+
     pass
 
 
 class IntInvertedIndexConfig(BaseModel):
     """Configuration for integer inverted index."""
+
+    model_config = {"extra": "forbid"}
 
     pass
 
@@ -1634,11 +1711,15 @@ class IntInvertedIndexConfig(BaseModel):
 class FloatInvertedIndexConfig(BaseModel):
     """Configuration for float inverted index."""
 
+    model_config = {"extra": "forbid"}
+
     pass
 
 
 class BoolInvertedIndexConfig(BaseModel):
     """Configuration for boolean inverted index."""
+
+    model_config = {"extra": "forbid"}
 
     pass
 
@@ -1787,11 +1868,14 @@ class Schema:
         self._initialize_keys()
 
     def create_index(
-        self, config: Optional[IndexConfig] = None, key: Optional[Union[str, "Key"]] = None
+        self,
+        config: Optional[IndexConfig] = None,
+        key: Optional[Union[str, "Key"]] = None,
     ) -> "Schema":
         """Create an index configuration."""
         # Convert Key to string if provided
         from chromadb.execution.expression.operator import Key as KeyType
+
         if key is not None and isinstance(key, KeyType):
             key = key.name
 
@@ -1869,11 +1953,14 @@ class Schema:
         return self
 
     def delete_index(
-        self, config: Optional[IndexConfig] = None, key: Optional[Union[str, "Key"]] = None
+        self,
+        config: Optional[IndexConfig] = None,
+        key: Optional[Union[str, "Key"]] = None,
     ) -> "Schema":
         """Disable an index configuration (set enabled=False)."""
         # Convert Key to string if provided
         from chromadb.execution.expression.operator import Key as KeyType
+
         if key is not None and isinstance(key, KeyType):
             key = key.name
 
@@ -2410,6 +2497,10 @@ class Schema:
                         if embedding_func.is_legacy():
                             config_dict["embedding_function"] = {"type": "legacy"}
                         else:
+                            if hasattr(embedding_func, "validate_config"):
+                                embedding_func.validate_config(
+                                    embedding_func.get_config()
+                                )
                             config_dict["embedding_function"] = {
                                 "name": embedding_func.name(),
                                 "type": "known",
@@ -2439,6 +2530,8 @@ class Schema:
                     config_dict["embedding_function"] = {"type": "unknown"}
                 else:
                     embedding_func = cast(SparseEmbeddingFunction, embedding_func)  # type: ignore
+                    if hasattr(embedding_func, "validate_config"):
+                        embedding_func.validate_config(embedding_func.get_config())
                     config_dict["embedding_function"] = {
                         "name": embedding_func.name(),
                         "type": "known",

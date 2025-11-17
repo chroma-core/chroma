@@ -1,0 +1,59 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "HuggingFace Sparse Embedding Function Schema",
+    "description": "Schema for the HuggingFace sparse embedding function configuration",
+    "version": "1.0.0",
+    "type": "object",
+    "properties": {
+        "model_name": {
+            "type": "string",
+            "description": "Identifier of the Huggingface SparseEncoder model. Some common models: prithivida/Splade_PP_en_v1, naver/splade-cocondenser-ensembledistil, naver/splade-v3"
+        },
+        "device": {
+            "type": "string",
+            "description": "Device used for computation"
+        },
+        "task": {
+            "type": "string",
+            "enum": [
+                "document",
+                "query"
+            ],
+            "description": "Task to perform, can be 'document' or 'query'"
+        },
+        "query_config": {
+            "type": "object",
+            "description": "Configuration for the query",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "enum": [
+                        "document",
+                        "query"
+                    ],
+                    "description": "Task to perform for query embedding"
+                }
+            },
+            "additionalProperties": false
+        },
+        "kwargs": {
+            "type": "object",
+            "description": "Additional arguments to pass to the Splade model",
+            "additionalProperties": {
+                "type": [
+                    "string",
+                    "integer",
+                    "number",
+                    "boolean",
+                    "array",
+                    "object"
+                ]
+            }
+        }
+    },
+    "required": [
+        "model_name",
+        "device"
+    ],
+    "additionalProperties": false
+}

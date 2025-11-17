@@ -176,7 +176,7 @@ impl ServiceBasedFrontend {
     ) -> Result<Collection, GetCollectionError> {
         Ok(self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id, self.default_knn_index)
+            .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?
             .collection)
@@ -188,7 +188,7 @@ impl ServiceBasedFrontend {
     ) -> Result<Option<u32>, GetCollectionError> {
         Ok(self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id, self.default_knn_index)
+            .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?
             .collection
@@ -381,7 +381,7 @@ impl ServiceBasedFrontend {
         if self.enable_schema {
             for collection in collections.iter_mut() {
                 collection
-                    .reconcile_schema_with_config(self.default_knn_index)
+                    .reconcile_schema_for_read()
                     .map_err(GetCollectionsError::InvalidSchema)?;
             }
         }
@@ -425,7 +425,7 @@ impl ServiceBasedFrontend {
         if self.enable_schema {
             for collection in &mut collections {
                 collection
-                    .reconcile_schema_with_config(self.default_knn_index)
+                    .reconcile_schema_for_read()
                     .map_err(GetCollectionError::InvalidSchema)?;
             }
         }
@@ -450,7 +450,7 @@ impl ServiceBasedFrontend {
 
         if self.enable_schema {
             collection
-                .reconcile_schema_with_config(self.default_knn_index)
+                .reconcile_schema_for_read()
                 .map_err(GetCollectionByCrnError::InvalidSchema)?;
         }
         Ok(collection)
@@ -630,9 +630,10 @@ impl ServiceBasedFrontend {
         // that was retrieved from sysdb, rather than the one that was passed in
         if self.enable_schema {
             collection
-                .reconcile_schema_with_config(self.default_knn_index)
+                .reconcile_schema_for_read()
                 .map_err(CreateCollectionError::InvalidSchema)?;
         }
+
         Ok(collection)
     }
 
@@ -735,7 +736,7 @@ impl ServiceBasedFrontend {
             .await?;
         collection_and_segments
             .collection
-            .reconcile_schema_with_config(self.default_knn_index)
+            .reconcile_schema_for_read()
             .map_err(ForkCollectionError::InvalidSchema)?;
         let collection = collection_and_segments.collection.clone();
         let latest_collection_logical_size_bytes = collection_and_segments
@@ -1099,7 +1100,7 @@ impl ServiceBasedFrontend {
         let read_event = if let Some(where_clause) = r#where {
             let collection_and_segments = self
                 .collections_with_segments_provider
-                .get_collection_with_segments(collection_id, self.default_knn_index)
+                .get_collection_with_segments(collection_id)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
             if self.enable_schema {
@@ -1309,7 +1310,7 @@ impl ServiceBasedFrontend {
     ) -> Result<CountResponse, QueryError> {
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id, self.default_knn_index)
+            .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         let latest_collection_logical_size_bytes = collection_and_segments
@@ -1424,7 +1425,7 @@ impl ServiceBasedFrontend {
     ) -> Result<GetResponse, QueryError> {
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id, self.default_knn_index)
+            .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
@@ -1569,7 +1570,7 @@ impl ServiceBasedFrontend {
     ) -> Result<QueryResponse, QueryError> {
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id, self.default_knn_index)
+            .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
@@ -1726,7 +1727,7 @@ impl ServiceBasedFrontend {
         // Get collection and segments once for all queries
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(request.collection_id, self.default_knn_index)
+            .get_collection_with_segments(request.collection_id)
             .await
             .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
         if self.enable_schema {
@@ -1974,6 +1975,11 @@ impl ServiceBasedFrontend {
                 chroma_sysdb::DeleteAttachedFunctionError::FailedToDeleteAttachedFunction(s) => {
                     DetachFunctionError::Internal(Box::new(chroma_error::TonicError(s)))
                 }
+                chroma_sysdb::DeleteAttachedFunctionError::NotImplemented => {
+                    DetachFunctionError::Internal(Box::new(chroma_error::TonicError(
+                        tonic::Status::unimplemented("Not implemented"),
+                    )))
+                }
             })?;
 
         Ok(DetachFunctionResponse { success: true })
@@ -2148,19 +2154,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_operator_constants() {
-        // Validate that hardcoded Rust operator constants match the live database.
+    async fn test_k8s_integration_function_constants() {
+        // Validate that hardcoded Rust function constants match the live database.
         // This prevents drift between constants and database migrations.
-        use chroma_types::{OPERATOR_RECORD_COUNTER_ID, OPERATOR_RECORD_COUNTER_NAME};
+        use chroma_types::{
+            FUNCTION_RECORD_COUNTER_ID, FUNCTION_RECORD_COUNTER_NAME, FUNCTION_STATISTICS_ID,
+            FUNCTION_STATISTICS_NAME,
+        };
         use std::collections::HashMap;
 
-        // Map of operator names to their expected UUID constants
-        // Add new operators here as they are added to rust/types/src/operators.rs
-        let expected_operators: HashMap<&str, uuid::Uuid> =
-            [(OPERATOR_RECORD_COUNTER_NAME, OPERATOR_RECORD_COUNTER_ID)]
-                .iter()
-                .cloned()
-                .collect();
+        // Map of function names to their expected UUID constants
+        // Add new functions here as they are added to rust/types/src/functions.rs
+        let expected_functions: HashMap<&str, uuid::Uuid> = [
+            (FUNCTION_RECORD_COUNTER_NAME, FUNCTION_RECORD_COUNTER_ID),
+            (FUNCTION_STATISTICS_NAME, FUNCTION_STATISTICS_ID),
+        ]
+        .iter()
+        .cloned()
+        .collect();
 
         // Connect to sysdb via gRPC
         let registry = Registry::new();
@@ -2173,37 +2184,37 @@ mod tests {
             .await
             .unwrap();
 
-        // Get all operators from the database via gRPC
-        let operators = sysdb.get_all_operators().await.unwrap();
+        // Get all functions from the database via gRPC
+        let functions = sysdb.get_all_functions().await.unwrap();
 
         // Verify count matches expectations
         assert_eq!(
-            operators.len(),
-            expected_operators.len(),
-            "Operator count mismatch. If you added a new operator to migrations, \
+            functions.len(),
+            expected_functions.len(),
+            "Function count mismatch. If you added a new function to migrations, \
              rebuild Rust (cargo build -p chroma-types) to auto-generate constants and update this test. \
              Expected: {}, Actual: {}",
-            expected_operators.len(),
-            operators.len()
+            expected_functions.len(),
+            functions.len()
         );
 
-        // Verify each operator constant matches the database
-        for (operator_name, expected_uuid) in &expected_operators {
-            let db_operator = operators
+        // Verify each function constant matches the database
+        for (function_name, expected_uuid) in &expected_functions {
+            let db_function = functions
                 .iter()
-                .find(|(name, _)| name == operator_name)
-                .unwrap_or_else(|| panic!("Operator '{}' not found in database", operator_name));
+                .find(|(name, _)| name == function_name)
+                .unwrap_or_else(|| panic!("Function '{}' not found in database", function_name));
 
             assert_eq!(
-                *expected_uuid, db_operator.1,
-                "Operator '{}' UUID mismatch. Code: {}, DB: {}",
-                operator_name, expected_uuid, db_operator.1
+                *expected_uuid, db_function.1,
+                "Function '{}' UUID mismatch. Code: {}, DB: {}",
+                function_name, expected_uuid, db_function.1
             );
         }
 
         println!(
-            "Verified {} operator(s) match database",
-            expected_operators.len()
+            "Verified {} function(s) match database",
+            expected_functions.len()
         );
     }
 

@@ -51,8 +51,8 @@ pub struct AttachedFunction {
     pub id: AttachedFunctionUuid,
     /// Human-readable name for the attached function instance
     pub name: String,
-    /// Name of the function/built-in definition this attached function uses
-    pub function_id: String,
+    /// UUID of the function/built-in definition this attached function uses
+    pub function_id: uuid::Uuid,
     /// Source collection that triggers the attached function
     pub input_collection_id: CollectionUuid,
     /// Name of target collection where attached function output is stored

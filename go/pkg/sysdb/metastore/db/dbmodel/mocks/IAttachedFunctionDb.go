@@ -3,6 +3,8 @@
 package mocks
 
 import (
+	"time"
+
 	dbmodel "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	mock "github.com/stretchr/testify/mock"
 
@@ -133,6 +135,36 @@ func (_m *IAttachedFunctionDb) GetByID(attachedFunctionID uuid.UUID) (*dbmodel.A
 
 	if rf, ok := ret.Get(1).(func(uuid.UUID) error); ok {
 		r1 = rf(attachedFunctionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetByCollectionID provides a mock function with given fields: inputCollectionID
+func (_m *IAttachedFunctionDb) GetByCollectionID(inputCollectionID string) ([]*dbmodel.AttachedFunction, error) {
+	ret := _m.Called(inputCollectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetByCollectionID")
+	}
+
+	var r0 []*dbmodel.AttachedFunction
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) ([]*dbmodel.AttachedFunction, error)); ok {
+		return rf(inputCollectionID)
+	}
+	if rf, ok := ret.Get(0).(func(string) []*dbmodel.AttachedFunction); ok {
+		r0 = rf(inputCollectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*dbmodel.AttachedFunction)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(inputCollectionID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -366,6 +398,54 @@ func (_m *IAttachedFunctionDb) CleanupExpiredPartialAttachedFunctions(maxAgeSeco
 	}
 
 	return r0, r1
+}
+
+// GetSoftDeletedAttachedFunctions provides a mock function with given fields: cutoffTime, limit
+func (_m *IAttachedFunctionDb) GetSoftDeletedAttachedFunctions(cutoffTime time.Time, limit int32) ([]*dbmodel.AttachedFunction, error) {
+	ret := _m.Called(cutoffTime, limit)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSoftDeletedAttachedFunctions")
+	}
+
+	var r0 []*dbmodel.AttachedFunction
+	var r1 error
+	if rf, ok := ret.Get(0).(func(time.Time, int32) ([]*dbmodel.AttachedFunction, error)); ok {
+		return rf(cutoffTime, limit)
+	}
+	if rf, ok := ret.Get(0).(func(time.Time, int32) []*dbmodel.AttachedFunction); ok {
+		r0 = rf(cutoffTime, limit)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*dbmodel.AttachedFunction)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(time.Time, int32) error); ok {
+		r1 = rf(cutoffTime, limit)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// HardDeleteAttachedFunction provides a mock function with given fields: id
+func (_m *IAttachedFunctionDb) HardDeleteAttachedFunction(id uuid.UUID) error {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HardDeleteAttachedFunction")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(uuid.UUID) error); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
 }
 
 // NewIAttachedFunctionDb creates a new instance of IAttachedFunctionDb. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

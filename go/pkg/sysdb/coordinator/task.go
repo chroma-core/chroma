@@ -305,6 +305,55 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 	}, nil
 }
 
+func attachedFunctionToProto(attachedFunction *dbmodel.AttachedFunction, function *dbmodel.Function) (*coordinatorpb.AttachedFunction, error) {
+	if attachedFunction == nil {
+		return nil, status.Error(codes.Internal, "attached function is nil")
+	}
+	if function == nil {
+		return nil, status.Error(codes.Internal, "function is nil")
+	}
+
+	var paramsStruct *structpb.Struct
+	if attachedFunction.FunctionParams != "" {
+		paramsStruct = &structpb.Struct{}
+		if err := paramsStruct.UnmarshalJSON([]byte(attachedFunction.FunctionParams)); err != nil {
+			return nil, err
+		}
+	}
+
+	if attachedFunction.CompletionOffset < 0 {
+		return nil, status.Errorf(codes.Internal, "attached function has invalid completion_offset: %d", attachedFunction.CompletionOffset)
+	}
+
+	attachedFunctionProto := &coordinatorpb.AttachedFunction{
+		Id:                      attachedFunction.ID.String(),
+		Name:                    attachedFunction.Name,
+		FunctionName:            function.Name,        // Human-readable name for user-facing API
+		FunctionId:              function.ID.String(), // UUID for internal use
+		InputCollectionId:       attachedFunction.InputCollectionID,
+		OutputCollectionName:    attachedFunction.OutputCollectionName,
+		Params:                  paramsStruct,
+		CompletionOffset:        uint64(attachedFunction.CompletionOffset),
+		MinRecordsForInvocation: uint64(attachedFunction.MinRecordsForInvocation),
+		TenantId:                attachedFunction.TenantID,
+		DatabaseId:              attachedFunction.DatabaseID,
+		NextRunAt:               uint64(attachedFunction.NextRun.UnixMicro()),
+		NextNonce:               attachedFunction.NextNonce.String(),
+		CreatedAt:               uint64(attachedFunction.CreatedAt.UnixMicro()),
+		UpdatedAt:               uint64(attachedFunction.UpdatedAt.UnixMicro()),
+	}
+
+	if attachedFunction.LowestLiveNonce != nil {
+		val := attachedFunction.LowestLiveNonce.String()
+		attachedFunctionProto.LowestLiveNonce = &val
+	}
+	if attachedFunction.OutputCollectionID != nil {
+		attachedFunctionProto.OutputCollectionId = attachedFunction.OutputCollectionID
+	}
+
+	return attachedFunctionProto, nil
+}
+
 // GetAttachedFunctionByName retrieves an attached function by name from the database
 func (s *Coordinator) GetAttachedFunctionByName(ctx context.Context, req *coordinatorpb.GetAttachedFunctionByNameRequest) (*coordinatorpb.GetAttachedFunctionByNameResponse, error) {
 	// Can do both calls with a JOIN
@@ -332,54 +381,77 @@ func (s *Coordinator) GetAttachedFunctionByName(ctx context.Context, req *coordi
 	// Debug logging
 	log.Info("Found attached function", zap.String("attached_function_id", attachedFunction.ID.String()), zap.String("name", attachedFunction.Name), zap.String("input_collection_id", attachedFunction.InputCollectionID), zap.String("output_collection_name", attachedFunction.OutputCollectionName))
 
-	// Deserialize params from JSON string to protobuf Struct
-	var paramsStruct *structpb.Struct
-	if attachedFunction.FunctionParams != "" {
-		paramsStruct = &structpb.Struct{}
-		if err := paramsStruct.UnmarshalJSON([]byte(attachedFunction.FunctionParams)); err != nil {
-			log.Error("GetAttachedFunctionByName: failed to unmarshal params", zap.Error(err))
-			return nil, err
-		}
-	}
-
-	// Validate completion_offset is non-negative before converting to uint64
-	if attachedFunction.CompletionOffset < 0 {
-		log.Error("GetAttachedFunctionByName: invalid completion_offset",
-			zap.String("attached_function_id", attachedFunction.ID.String()),
-			zap.Int64("completion_offset", attachedFunction.CompletionOffset))
-		return nil, status.Errorf(codes.Internal,
-			"attached function has invalid completion_offset: %d", attachedFunction.CompletionOffset)
-	}
-
-	// Convert attached function to response
-	attachedFunctionProto := &coordinatorpb.AttachedFunction{
-		Id:                      attachedFunction.ID.String(),
-		Name:                    attachedFunction.Name,
-		FunctionName:            function.Name,
-		InputCollectionId:       attachedFunction.InputCollectionID,
-		OutputCollectionName:    attachedFunction.OutputCollectionName,
-		Params:                  paramsStruct,
-		CompletionOffset:        uint64(attachedFunction.CompletionOffset),
-		MinRecordsForInvocation: uint64(attachedFunction.MinRecordsForInvocation),
-		TenantId:                attachedFunction.TenantID,
-		DatabaseId:              attachedFunction.DatabaseID,
-		NextRunAt:               uint64(attachedFunction.NextRun.UnixMicro()),
-		LowestLiveNonce:         "",
-		NextNonce:               attachedFunction.NextNonce.String(),
-		CreatedAt:               uint64(attachedFunction.CreatedAt.UnixMicro()),
-		UpdatedAt:               uint64(attachedFunction.UpdatedAt.UnixMicro()),
-	}
-	// Add lowest_live_nonce if it's set
-	if attachedFunction.LowestLiveNonce != nil {
-		attachedFunctionProto.LowestLiveNonce = attachedFunction.LowestLiveNonce.String()
-	}
-	// Add output_collection_id if it's set
-	if attachedFunction.OutputCollectionID != nil {
-		attachedFunctionProto.OutputCollectionId = attachedFunction.OutputCollectionID
+	attachedFunctionProto, err := attachedFunctionToProto(attachedFunction, function)
+	if err != nil {
+		log.Error("GetAttachedFunctionByName: failed to convert attached function to proto", zap.Error(err), zap.String("attached_function_id", attachedFunction.ID.String()))
+		return nil, err
 	}
 
 	return &coordinatorpb.GetAttachedFunctionByNameResponse{
 		AttachedFunction: attachedFunctionProto,
+	}, nil
+}
+
+// ListAttachedFunctions retrieves all attached functions for a given collection
+func (s *Coordinator) ListAttachedFunctions(ctx context.Context, req *coordinatorpb.ListAttachedFunctionsRequest) (*coordinatorpb.ListAttachedFunctionsResponse, error) {
+	attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetByCollectionID(req.InputCollectionId)
+	if err != nil {
+		log.Error("ListAttachedFunctions: failed to get attached functions", zap.Error(err))
+		return nil, err
+	}
+
+	if len(attachedFunctions) == 0 {
+		return &coordinatorpb.ListAttachedFunctionsResponse{AttachedFunctions: []*coordinatorpb.AttachedFunction{}}, nil
+	}
+
+	functionIDsSet := make(map[uuid.UUID]struct{})
+	functionIDs := make([]uuid.UUID, 0, len(attachedFunctions))
+	for _, attachedFunction := range attachedFunctions {
+		if _, exists := functionIDsSet[attachedFunction.FunctionID]; !exists {
+			functionIDsSet[attachedFunction.FunctionID] = struct{}{}
+			functionIDs = append(functionIDs, attachedFunction.FunctionID)
+		}
+	}
+
+	functions, err := s.catalog.metaDomain.FunctionDb(ctx).GetByIDs(functionIDs)
+	if err != nil {
+		log.Error("ListAttachedFunctions: failed to get functions", zap.Error(err))
+		return nil, err
+	}
+
+	functionsByID := make(map[uuid.UUID]*dbmodel.Function, len(functions))
+	for _, function := range functions {
+		if function == nil {
+			continue
+		}
+		functionsByID[function.ID] = function
+	}
+
+	for _, functionID := range functionIDs {
+		if _, ok := functionsByID[functionID]; !ok {
+			log.Error("ListAttachedFunctions: function not found", zap.String("function_id", functionID.String()))
+			return nil, common.ErrFunctionNotFound
+		}
+	}
+
+	protoFunctions := make([]*coordinatorpb.AttachedFunction, 0, len(attachedFunctions))
+
+	for _, attachedFunction := range attachedFunctions {
+		function := functionsByID[attachedFunction.FunctionID]
+
+		attachedFunctionProto, err := attachedFunctionToProto(attachedFunction, function)
+		if err != nil {
+			log.Error("ListAttachedFunctions: failed to convert attached function to proto", zap.Error(err), zap.String("attached_function_id", attachedFunction.ID.String()))
+			return nil, err
+		}
+
+		protoFunctions = append(protoFunctions, attachedFunctionProto)
+	}
+
+	log.Info("ListAttachedFunctions succeeded", zap.String("input_collection_id", req.InputCollectionId), zap.Int("count", len(protoFunctions)))
+
+	return &coordinatorpb.ListAttachedFunctionsResponse{
+		AttachedFunctions: protoFunctions,
 	}, nil
 }
 
@@ -421,50 +493,10 @@ func (s *Coordinator) GetAttachedFunctionByUuid(ctx context.Context, req *coordi
 	// Debug logging
 	log.Info("Found attached function by UUID", zap.String("attached_function_id", attachedFunction.ID.String()), zap.String("name", attachedFunction.Name), zap.String("input_collection_id", attachedFunction.InputCollectionID), zap.String("output_collection_name", attachedFunction.OutputCollectionName))
 
-	// Deserialize params from JSON string to protobuf Struct
-	var paramsStruct *structpb.Struct
-	if attachedFunction.FunctionParams != "" {
-		paramsStruct = &structpb.Struct{}
-		if err := paramsStruct.UnmarshalJSON([]byte(attachedFunction.FunctionParams)); err != nil {
-			log.Error("GetAttachedFunctionByUuid: failed to unmarshal params", zap.Error(err))
-			return nil, err
-		}
-	}
-
-	// Validate completion_offset is non-negative before converting to uint64
-	if attachedFunction.CompletionOffset < 0 {
-		log.Error("GetAttachedFunctionByUuid: invalid completion_offset",
-			zap.String("attached_function_id", attachedFunction.ID.String()),
-			zap.Int64("completion_offset", attachedFunction.CompletionOffset))
-		return nil, status.Errorf(codes.Internal,
-			"attached function has invalid completion_offset: %d", attachedFunction.CompletionOffset)
-	}
-
-	// Convert attached function to response
-	attachedFunctionProto := &coordinatorpb.AttachedFunction{
-		Id:                      attachedFunction.ID.String(),
-		Name:                    attachedFunction.Name,
-		FunctionName:            function.Name,
-		InputCollectionId:       attachedFunction.InputCollectionID,
-		OutputCollectionName:    attachedFunction.OutputCollectionName,
-		Params:                  paramsStruct,
-		CompletionOffset:        uint64(attachedFunction.CompletionOffset),
-		MinRecordsForInvocation: uint64(attachedFunction.MinRecordsForInvocation),
-		TenantId:                attachedFunction.TenantID,
-		DatabaseId:              attachedFunction.DatabaseID,
-		NextRunAt:               uint64(attachedFunction.NextRun.UnixMicro()),
-		LowestLiveNonce:         "",
-		NextNonce:               attachedFunction.NextNonce.String(),
-		CreatedAt:               uint64(attachedFunction.CreatedAt.UnixMicro()),
-		UpdatedAt:               uint64(attachedFunction.UpdatedAt.UnixMicro()),
-	}
-	// Add lowest_live_nonce if it's set
-	if attachedFunction.LowestLiveNonce != nil {
-		attachedFunctionProto.LowestLiveNonce = attachedFunction.LowestLiveNonce.String()
-	}
-	// Add output_collection_id if it's set
-	if attachedFunction.OutputCollectionID != nil {
-		attachedFunctionProto.OutputCollectionId = attachedFunction.OutputCollectionID
+	attachedFunctionProto, err := attachedFunctionToProto(attachedFunction, function)
+	if err != nil {
+		log.Error("GetAttachedFunctionByUuid: failed to convert attached function to proto", zap.Error(err), zap.String("attached_function_id", attachedFunction.ID.String()))
+		return nil, err
 	}
 
 	return &coordinatorpb.GetAttachedFunctionByUuidResponse{
@@ -819,4 +851,76 @@ func (s *Coordinator) CleanupExpiredPartialAttachedFunctions(ctx context.Context
 		CleanedUpCount: uint64(len(cleanedAttachedFunctionIDs)),
 		CleanedUpIds:   cleanedAttachedFunctionIDStrings,
 	}, nil
+}
+
+// GetSoftDeletedAttachedFunctions retrieves attached functions that are soft deleted and were updated before the cutoff time
+func (s *Coordinator) GetSoftDeletedAttachedFunctions(ctx context.Context, req *coordinatorpb.GetSoftDeletedAttachedFunctionsRequest) (*coordinatorpb.GetSoftDeletedAttachedFunctionsResponse, error) {
+	log := log.With(zap.String("method", "GetSoftDeletedAttachedFunctions"))
+
+	if req.CutoffTime == nil {
+		log.Error("GetSoftDeletedAttachedFunctions: cutoff_time is required")
+		return nil, status.Errorf(codes.InvalidArgument, "cutoff_time is required")
+	}
+
+	if req.Limit <= 0 {
+		log.Error("GetSoftDeletedAttachedFunctions: limit must be greater than 0")
+		return nil, status.Errorf(codes.InvalidArgument, "limit must be greater than 0")
+	}
+
+	cutoffTime := req.CutoffTime.AsTime()
+	attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetSoftDeletedAttachedFunctions(cutoffTime, req.Limit)
+	if err != nil {
+		log.Error("GetSoftDeletedAttachedFunctions: failed to get soft deleted attached functions", zap.Error(err))
+		return nil, err
+	}
+
+	// Convert to proto response
+	protoAttachedFunctions := make([]*coordinatorpb.AttachedFunction, len(attachedFunctions))
+	for i, af := range attachedFunctions {
+		protoAttachedFunctions[i] = &coordinatorpb.AttachedFunction{
+			Id:                      af.ID.String(),
+			Name:                    af.Name,
+			InputCollectionId:       af.InputCollectionID,
+			OutputCollectionName:    af.OutputCollectionName,
+			CompletionOffset:        uint64(af.CompletionOffset),
+			MinRecordsForInvocation: uint64(af.MinRecordsForInvocation),
+			CreatedAt:               uint64(af.CreatedAt.UnixMicro()),
+			UpdatedAt:               uint64(af.UpdatedAt.UnixMicro()),
+		}
+
+		protoAttachedFunctions[i].NextRunAt = uint64(af.NextRun.UnixMicro())
+		if af.OutputCollectionID != nil {
+			protoAttachedFunctions[i].OutputCollectionId = proto.String(*af.OutputCollectionID)
+		}
+	}
+
+	log.Info("GetSoftDeletedAttachedFunctions: completed successfully",
+		zap.Int("count", len(attachedFunctions)))
+
+	return &coordinatorpb.GetSoftDeletedAttachedFunctionsResponse{
+		AttachedFunctions: protoAttachedFunctions,
+	}, nil
+}
+
+// FinishAttachedFunctionDeletion permanently deletes an attached function from the database (hard delete)
+// This should only be called after the soft delete grace period has passed
+func (s *Coordinator) FinishAttachedFunctionDeletion(ctx context.Context, req *coordinatorpb.FinishAttachedFunctionDeletionRequest) (*coordinatorpb.FinishAttachedFunctionDeletionResponse, error) {
+	log := log.With(zap.String("method", "FinishAttachedFunctionDeletion"))
+
+	attachedFunctionID, err := uuid.Parse(req.AttachedFunctionId)
+	if err != nil {
+		log.Error("FinishAttachedFunctionDeletion: invalid attached_function_id", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
+	}
+
+	err = s.catalog.metaDomain.AttachedFunctionDb(ctx).HardDeleteAttachedFunction(attachedFunctionID)
+	if err != nil {
+		log.Error("FinishAttachedFunctionDeletion: failed to hard delete attached function", zap.Error(err))
+		return nil, err
+	}
+
+	log.Info("FinishAttachedFunctionDeletion: completed successfully",
+		zap.String("attached_function_id", attachedFunctionID.String()))
+
+	return &coordinatorpb.FinishAttachedFunctionDeletionResponse{}, nil
 }

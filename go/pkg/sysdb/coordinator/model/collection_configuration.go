@@ -249,7 +249,7 @@ type ValueTypes struct {
 	SparseVector *SparseVectorValueType `json:"sparse_vector,omitempty"`
 	Int          *IntValueType          `json:"int,omitempty"`
 	Float        *FloatValueType        `json:"float,omitempty"`
-	Boolean      *BoolValueType         `json:"boolean,omitempty"`
+	Boolean      *BoolValueType         `json:"bool,omitempty"`
 }
 
 type Schema struct {

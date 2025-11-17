@@ -1,8 +1,6 @@
+use crate::types::FilePathSet;
 use async_trait::async_trait;
-use chroma_blockstore::{
-    arrow::provider::{BlockManager, RootManagerError},
-    RootManager,
-};
+use chroma_blockstore::{arrow::provider::RootManagerError, RootManager};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{
     hnsw_provider::{HnswIndexProvider, FILES},
@@ -12,11 +10,7 @@ use chroma_storage::StorageError;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{chroma_proto::CollectionVersionFile, CollectionUuid, Segment, HNSW_PATH};
 use futures::stream::StreamExt;
-use std::{
-    collections::{HashMap, HashSet},
-    str::FromStr,
-    sync::Arc,
-};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 use thiserror::Error;
 
 #[derive(Debug)]
@@ -44,7 +38,7 @@ impl ListFilesAtVersionInput {
 pub struct ListFilesAtVersionOutput {
     pub collection_id: CollectionUuid,
     pub version: i64,
-    pub file_paths: HashSet<String>,
+    pub file_paths: FilePathSet,
 }
 
 #[derive(Debug, Error)]
@@ -108,7 +102,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
             .as_ref()
             .ok_or_else(|| ListFilesAtVersionError::VersionHistoryMissing)?;
 
-        let mut file_paths = HashSet::new();
+        let mut file_paths = FilePathSet::new();
         let mut sparse_index_ids = HashMap::new();
 
         let version = version_history
@@ -141,7 +135,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                                     &IndexUuid(hnsw_index_uuid),
                                     hnsw_file,
                                 );
-                                file_paths.insert(s3_key);
+                                file_paths.insert_path(s3_key);
                             }
                         }
                     } else {
@@ -152,7 +146,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                             let file_path =
                                 RootManager::get_storage_key(prefix, &sparse_index_uuid);
 
-                            file_paths.insert(file_path);
+                            file_paths.insert_path(file_path);
                             sparse_index_ids.insert(sparse_index_uuid, prefix.to_string());
                         }
                     }
@@ -181,8 +175,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                 let block_ids = res.map_err(ListFilesAtVersionError::FetchBlockIdsError)?;
 
                 for block_id in block_ids.0 {
-                    let s3_key = BlockManager::format_key(&block_ids.1, &block_id);
-                    file_paths.insert(s3_key);
+                    file_paths.insert_block(&block_ids.1, block_id);
                 }
             }
         }

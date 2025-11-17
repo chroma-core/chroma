@@ -21,8 +21,8 @@ use crate::operators::list_files_at_version::{
     ListFilesAtVersionsOperator,
 };
 use crate::types::{
-    version_graph_to_collection_dependency_graph, CleanupMode, GarbageCollectorResponse,
-    VersionGraph, VersionGraphNode,
+    version_graph_to_collection_dependency_graph, CleanupMode, FilePathRefCountSet,
+    GarbageCollectorResponse, VersionGraph, VersionGraphNode,
 };
 use async_trait::async_trait;
 use chroma_blockstore::RootManager;
@@ -68,7 +68,7 @@ pub struct GarbageCollectorOrchestrator {
     versions_to_delete_output: Option<ComputeVersionsToDeleteOutput>,
     delete_unused_file_output: Option<DeleteUnusedFilesOutput>,
     delete_unused_log_output: Option<DeleteUnusedLogsOutput>,
-    file_ref_counts: HashMap<String, u32>,
+    file_ref_counts: FilePathRefCountSet,
     num_pending_tasks: usize,
     min_versions_to_keep: u32,
     enable_log_gc: bool,
@@ -119,7 +119,7 @@ impl GarbageCollectorOrchestrator {
             cleanup_mode,
             result_channel: None,
             version_files: HashMap::new(),
-            file_ref_counts: HashMap::new(),
+            file_ref_counts: FilePathRefCountSet::new(),
             versions_to_delete_output: None,
             delete_unused_file_output: None,
             delete_unused_log_output: None,
@@ -705,10 +705,8 @@ impl GarbageCollectorOrchestrator {
                     output.version
                 );
 
-                for file_path in output.file_paths {
-                    let count = self.file_ref_counts.entry(file_path).or_insert(0);
-                    *count += 1;
-                }
+                self.file_ref_counts
+                    .merge(FilePathRefCountSet::from_set(output.file_paths, 1));
             }
             CollectionVersionAction::Delete => {
                 tracing::debug!(
@@ -718,9 +716,8 @@ impl GarbageCollectorOrchestrator {
                     output.version
                 );
 
-                for file_path in output.file_paths {
-                    self.file_ref_counts.entry(file_path).or_insert(0);
-                }
+                self.file_ref_counts
+                    .merge(FilePathRefCountSet::from_set(output.file_paths, 0));
             }
         }
 
@@ -733,17 +730,8 @@ impl GarbageCollectorOrchestrator {
     ) -> Result<(), GarbageCollectorError> {
         // We now have results for all ListFilesAtVersionsOperator tasks that we spawned
         tracing::trace!("File ref counts: {:#?}", self.file_ref_counts);
-        let file_paths_to_delete = self
-            .file_ref_counts
-            .iter()
-            .filter_map(|(path, count)| {
-                if *count == 0 {
-                    Some(path.clone())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
+
+        let file_paths_to_delete = self.file_ref_counts.as_set(0);
 
         let delete_percentage =
             file_paths_to_delete.len() as f32 / self.file_ref_counts.len() as f32 * 100.0;
@@ -785,7 +773,6 @@ impl GarbageCollectorOrchestrator {
             )),
             DeleteUnusedFilesInput {
                 unused_s3_files: file_paths_to_delete,
-                hnsw_prefixes_for_deletion: vec![],
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -822,7 +809,7 @@ impl GarbageCollectorOrchestrator {
             return Ok(());
         }
 
-        self.num_files_deleted += output.deleted_files.len() as u32;
+        self.num_files_deleted += output.num_files_deleted as u32;
 
         let versions_to_delete = self.versions_to_delete_output.as_ref().ok_or(
             GarbageCollectorError::InvariantViolation(

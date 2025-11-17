@@ -6,9 +6,12 @@ use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentReaderC
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
     Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, Segment, UpdateMetadataValue,
+    FUNCTION_RECORD_COUNTER_ID, FUNCTION_STATISTICS_ID,
 };
 use std::sync::Arc;
 use thiserror::Error;
+
+use crate::execution::functions::{CounterFunctionFactory, StatisticsFunctionExecutor};
 
 /// Trait for attached function executors that process input records and produce output records.
 /// Implementors can read from the output collection to maintain state across executions.
@@ -76,6 +79,39 @@ impl AttachedFunctionExecutor for CountAttachedFunction {
 pub struct ExecuteAttachedFunctionOperator {
     pub log_client: Log,
     pub attached_function_executor: Arc<dyn AttachedFunctionExecutor>,
+}
+
+impl ExecuteAttachedFunctionOperator {
+    /// Create a new ExecuteAttachedFunctionOperator from an AttachedFunction.
+    /// The executor is selected based on the function_id in the attached function.
+    pub(crate) fn from_attached_function(
+        attached_function: &chroma_types::AttachedFunction,
+        log_client: Log,
+    ) -> Result<Self, ExecuteAttachedFunctionError> {
+        let executor: Arc<dyn AttachedFunctionExecutor> = match attached_function.function_id {
+            // For the record counter, use CountAttachedFunction
+            FUNCTION_RECORD_COUNTER_ID => Arc::new(CountAttachedFunction),
+            // For statistics, use StatisticsFunctionExecutor with CounterFunctionFactory
+            FUNCTION_STATISTICS_ID => {
+                Arc::new(StatisticsFunctionExecutor(Box::new(CounterFunctionFactory)))
+            }
+            _ => {
+                tracing::error!(
+                    "Unknown function_id UUID: {}",
+                    attached_function.function_id
+                );
+                return Err(ExecuteAttachedFunctionError::InvalidUuid(format!(
+                    "Unknown function_id UUID: {}",
+                    attached_function.function_id
+                )));
+            }
+        };
+
+        Ok(ExecuteAttachedFunctionOperator {
+            log_client,
+            attached_function_executor: executor,
+        })
+    }
 }
 
 /// Input for the ExecuteAttachedFunction operator
