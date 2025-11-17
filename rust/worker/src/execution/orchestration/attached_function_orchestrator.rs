@@ -7,7 +7,10 @@ use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
-    blockfile_record::{RecordSegmentWriter, RecordSegmentWriterCreationError},
+    blockfile_record::{
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
+        RecordSegmentWriterCreationError,
+    },
     distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter},
     distributed_spann::SpannSegmentWriterError,
     types::VectorSegmentWriter,
@@ -114,6 +117,8 @@ pub enum AttachedFunctionOrchestratorError {
     MetadataSegment(#[from] MetadataSegmentError),
     #[error("Error creating record segment writer: {0}")]
     RecordSegmentWriter(#[from] RecordSegmentWriterCreationError),
+    #[error("Error creating record segment reader: {0}")]
+    RecordSegmentReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error creating hnsw writer: {0}")]
     HnswSegment(#[from] DistributedHNSWSegmentFromSegmentError),
     #[error("Error creating spann writer: {0}")]
@@ -140,6 +145,7 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             AttachedFunctionOrchestratorError::PanicError(e) => e.code(),
             AttachedFunctionOrchestratorError::MetadataSegment(e) => e.code(),
             AttachedFunctionOrchestratorError::RecordSegmentWriter(e) => e.code(),
+            AttachedFunctionOrchestratorError::RecordSegmentReader(e) => e.code(),
             AttachedFunctionOrchestratorError::HnswSegment(e) => e.code(),
             AttachedFunctionOrchestratorError::SpannSegment(e) => e.code(),
         }
@@ -166,6 +172,7 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             AttachedFunctionOrchestratorError::PanicError(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::MetadataSegment(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::RecordSegmentWriter(e) => e.should_trace_error(),
+            AttachedFunctionOrchestratorError::RecordSegmentReader(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::HnswSegment(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::SpannSegment(e) => e.should_trace_error(),
         }
@@ -345,6 +352,13 @@ impl AttachedFunctionOrchestrator {
             .get_segment_writers()
             .ok()
             .and_then(|writers| writers.record_reader);
+        tracing::info!(
+            "Materializing to collection: {:?}",
+            self.output_context
+                .get_collection_info()
+                .unwrap()
+                .collection_id
+        );
 
         let next_max_offset_id = Arc::new(
             record_reader
@@ -657,8 +671,31 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             },
         };
 
+        // Create record reader for the output collection to load existing statistics
+        let record_reader = match self
+            .ok_or_terminate(
+                match Box::pin(RecordSegmentReader::from_segment(
+                    &message.record_segment,
+                    &self.output_context.blockfile_provider,
+                ))
+                .await
+                {
+                    Ok(reader) => Ok(Some(reader)),
+                    Err(err) => match *err {
+                        RecordSegmentReaderCreationError::UninitializedSegment => Ok(None),
+                        _ => Err(*err),
+                    },
+                },
+                ctx,
+            )
+            .await
+        {
+            Some(reader) => reader,
+            None => return,
+        };
+
         let writers = CompactWriters {
-            record_reader: None, // Output collection doesn't need a reader
+            record_reader: record_reader.filter(|_| !self.output_context.is_rebuild),
             metadata_writer,
             record_writer,
             vector_writer,
@@ -724,13 +761,23 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
         // Get the input collection info to access pulled_log_offset
         let collection_info = self.get_input_collection_info();
 
+        // Get the input collection's record segment reader
+        // This can be None if the input collection is uninitialized or in rebuild mode
+        let input_record_segment = self
+            .input_collection_info
+            .writers
+            .as_ref()
+            .and_then(|writers| writers.record_reader.clone());
+
         let input = ExecuteAttachedFunctionInput {
             materialized_logs: self.materialized_log_data.clone(), // Use the actual materialized logs from data fetch
-            tenant_id: "default".to_string(),                      // TODO: Get actual tenant ID
+            tenant_id: "default".to_string(), // TODOItanujnay112): Get actual tenant ID
+            input_record_segment,
             output_collection_id: message.collection.collection_id,
             completion_offset: collection_info.pulled_log_offset as u64, // Use the completion offset from input collection
             output_record_segment: message.record_segment.clone(),
             blockfile_provider: self.output_context.blockfile_provider.clone(),
+            is_rebuild: self.output_context.is_rebuild,
         };
 
         let task = wrap(

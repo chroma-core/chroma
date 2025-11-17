@@ -6,8 +6,8 @@ use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentReaderC
 use chroma_segment::types::HydratedMaterializedLogRecord;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
-    Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, Segment, UpdateMetadataValue,
-    FUNCTION_RECORD_COUNTER_ID, FUNCTION_STATISTICS_ID,
+    Chunk, CollectionUuid, LogRecord, MaterializedLogOperation, Operation, OperationRecord,
+    Segment, UpdateMetadataValue, FUNCTION_RECORD_COUNTER_ID, FUNCTION_STATISTICS_ID,
 };
 use std::sync::Arc;
 use thiserror::Error;
@@ -15,6 +15,10 @@ use uuid::Uuid;
 
 use crate::execution::functions::{CounterFunctionFactory, StatisticsFunctionExecutor};
 use crate::execution::operators::materialize_logs::MaterializeLogOutput;
+
+// Constants for CountAttachedFunction
+const COUNT_FUNCTION_OUTPUT_ID: &str = "function_output";
+const COUNT_METADATA_KEY: &str = "total_count";
 
 /// Trait for attached function executors that process input records and produce output records.
 /// Implementors can read from the output collection to maintain state across executions.
@@ -40,31 +44,90 @@ pub trait AttachedFunctionExecutor: Send + Sync + std::fmt::Debug {
 #[derive(Debug)]
 pub struct CountAttachedFunction;
 
+impl CountAttachedFunction {
+    /// Reads the existing count from the output reader.
+    /// Returns 0 if no existing count is found.
+    async fn get_existing_count(output_reader: Option<&RecordSegmentReader<'_>>) -> i64 {
+        let Some(reader) = output_reader else {
+            return 0;
+        };
+
+        // Try to get the existing record with the function output ID
+        let offset_id = match reader
+            .get_offset_id_for_user_id(COUNT_FUNCTION_OUTPUT_ID)
+            .await
+        {
+            Ok(Some(offset_id)) => offset_id,
+            _ => return 0,
+        };
+
+        // Get the data record for this offset id
+        let data_record = match reader.get_data_for_offset_id(offset_id).await {
+            Ok(Some(data_record)) => data_record,
+            _ => return 0,
+        };
+
+        // Extract total_count from metadata
+        if let Some(metadata) = &data_record.metadata {
+            if let Some(chroma_types::MetadataValue::Int(count)) = metadata.get(COUNT_METADATA_KEY)
+            {
+                return *count;
+            }
+        }
+
+        0
+    }
+}
+
 #[async_trait]
 impl AttachedFunctionExecutor for CountAttachedFunction {
     async fn execute(
         &self,
         input_records: Chunk<HydratedMaterializedLogRecord<'_, '_>>,
-        _output_reader: Option<&RecordSegmentReader<'_>>,
+        output_reader: Option<&RecordSegmentReader<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
         let records_count = input_records.len() as i64;
-        let new_total_count = records_count;
+
+        // NOTE(tanujnay112): Can get all these in one pass but this function is just for
+        // testing.
+        let delete_count = input_records
+            .iter()
+            .filter(|(record, _)| {
+                record.get_operation() == MaterializedLogOperation::DeleteExisting
+            })
+            .count() as i64;
+
+        let insert_count = input_records
+            .iter()
+            .filter(|(record, _)| record.get_operation() == MaterializedLogOperation::AddNew)
+            .count() as i64;
+
+        // Read existing count from output_reader if available
+        let existing_count = Self::get_existing_count(output_reader).await;
+        let new_total_count = existing_count + insert_count - delete_count;
+        println!(
+            "Existing count: {}, Insert count: {}, Delete count: {}, New total count: {}",
+            existing_count, insert_count, delete_count, new_total_count
+        );
 
         // Create output record with updated count
         let mut metadata = std::collections::HashMap::new();
         metadata.insert(
-            "total_count".to_string(),
+            COUNT_METADATA_KEY.to_string(),
             UpdateMetadataValue::Int(new_total_count),
         );
 
         let output_record = LogRecord {
             log_offset: 0,
             record: OperationRecord {
-                id: "function_output".to_string(),
+                id: COUNT_FUNCTION_OUTPUT_ID.to_string(),
                 embedding: Some(vec![0.0]),
                 encoding: None,
                 metadata: Some(metadata),
-                document: Some(format!("Processed {} records", records_count)),
+                document: Some(format!(
+                    "Last processed {} records (total: {})",
+                    records_count, new_total_count
+                )),
                 operation: Operation::Upsert,
             },
         };
@@ -118,6 +181,8 @@ pub struct ExecuteAttachedFunctionInput {
     pub materialized_logs: Vec<MaterializeLogOutput>,
     /// The tenant ID
     pub tenant_id: String,
+    /// The input collection's record segment to read existing data
+    pub input_record_segment: Option<RecordSegmentReader<'static>>,
     /// The output collection ID where results are written
     pub output_collection_id: CollectionUuid,
     /// The current completion offset
@@ -126,6 +191,8 @@ pub struct ExecuteAttachedFunctionInput {
     pub output_record_segment: Segment,
     /// Blockfile provider for reading segments
     pub blockfile_provider: BlockfileProvider,
+
+    pub is_rebuild: bool,
 }
 
 /// Output from the ExecuteAttachedFunction operator
@@ -190,19 +257,23 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
         );
 
         // Create record segment reader from the output collection's record segment
-        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
-            &input.output_record_segment,
-            &input.blockfile_provider,
-        ))
-        .await
-        {
-            Ok(reader) => Some(reader),
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
-                // Output collection has no data yet - this is the first run
-                tracing::info!("[ExecuteAttachedFunction]: Output segment uninitialized - first attached function run");
-                None
+        let output_record_segment_reader = if input.is_rebuild {
+            None
+        } else {
+            match Box::pin(RecordSegmentReader::from_segment(
+                &input.output_record_segment,
+                &input.blockfile_provider,
+            ))
+            .await
+            {
+                Ok(reader) => Some(reader),
+                Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                    // Output collection has no data yet - this is the first run
+                    tracing::info!("[ExecuteAttachedFunction]: Output segment uninitialized - first attached function run");
+                    None
+                }
+                Err(e) => return Err((*e).into()),
             }
-            Err(e) => return Err((*e).into()),
         };
 
         // Process all materialized logs and hydrate the records
@@ -214,7 +285,7 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
             for borrowed_record in materialized_log.result.iter() {
                 // Hydrate the record using the same pattern as materialize_logs operator
                 let hydrated_record = borrowed_record
-                    .hydrate(record_segment_reader.as_ref())
+                    .hydrate(input.input_record_segment.as_ref())
                     .await
                     .map_err(|e| ExecuteAttachedFunctionError::SegmentRead(Box::new(e)))?;
 
@@ -229,7 +300,7 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
             .attached_function_executor
             .execute(
                 Chunk::new(std::sync::Arc::from(all_hydrated_records)),
-                record_segment_reader.as_ref(),
+                output_record_segment_reader.as_ref(),
             )
             .await
             .map_err(ExecuteAttachedFunctionError::SegmentRead)?;
