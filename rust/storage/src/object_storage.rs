@@ -271,7 +271,7 @@ impl ObjectStorage {
         }
     }
 
-    pub async fn multipart_put(
+    async fn multipart_put(
         &self,
         key: &str,
         mut bytes: Vec<u8>,

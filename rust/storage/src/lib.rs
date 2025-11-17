@@ -391,7 +391,7 @@ impl Storage {
     ) -> Result<Option<ETag>, StorageError> {
         match self {
             Storage::S3(s3) => s3.put_bytes(key, bytes, options).await,
-            Storage::Object(obj) => obj.put(key, bytes.clone(), options).await.map(Some),
+            Storage::Object(obj) => obj.put(key, bytes, options).await.map(Some),
             Storage::Local(local) => local.put_bytes(key, &bytes, options).await,
             Storage::AdmissionControlledS3(as3) => as3.put_bytes(key, bytes, options).await,
         }
