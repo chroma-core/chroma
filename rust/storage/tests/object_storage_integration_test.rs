@@ -133,7 +133,7 @@ async fn test_gcs_conditional_operations() {
 // async fn test_s3_basic_operations() {
 //     let storage = create_s3_storage().await;
 //     let prefix = test_prefix("s3-basic");
-//     test_utils::test_basic_operations(&storage, &prefix).await;
+//     utils::test_basic_operations(&storage, &prefix).await;
 // }
 
 // ============================================================================

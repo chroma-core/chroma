@@ -163,7 +163,7 @@ pub async fn test_multipart_operations(storage: &ObjectStorage, test_prefix: &st
 
     // Test 2: Large file (multipart upload)
     let large_key = format!("{}large.txt", test_prefix);
-    let large_content = large_key.repeat(250_000); // ~6 MB
+    let large_content = large_key.repeat(400_000); // ~10 MB - well over 5MB threshold
 
     storage
         .put(
@@ -209,6 +209,10 @@ pub async fn test_multipart_operations(storage: &ObjectStorage, test_prefix: &st
 /// Test Group 3: Conditional operations (concurrency-aware APIs)
 ///
 /// Tests: if_not_exists, if_match, confirm_same, put_file with conditions
+///
+/// Note: Conditional operations always use oneshot uploads (not multipart),
+/// even for large files, because multipart uploads don't support ETags.
+/// The race condition test uses ~800KB content to verify this behavior.
 pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &str) {
     // Cleanup
     let existing = storage.list_prefix(test_prefix).await.unwrap_or_default();
@@ -349,28 +353,38 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
         .await;
     assert!(result.is_err(), "Second put_file should fail");
 
-    // Test 5: Race conditions
+    // Test 5: Race conditions with large files
     let key5 = format!("{}race-test.txt", test_prefix);
-    let initial = "initial".to_string();
+    // Use files > 5MB to:
+    // 1. Make uploads take longer (more realistic race condition)
+    // 2. Test that conditional operations use oneshot (not multipart) even for large files
+    //    that would normally trigger multipart upload, because multipart doesn't support ETags
+    let initial = "initial-data-".repeat(500_000); // ~6.5 MB - over 5MB threshold
 
     let race_etag = storage
         .put(&key5, initial.as_bytes().to_vec(), PutOptions::default())
         .await
         .expect("Initial put failed");
 
-    // Spawn concurrent updates with same stale ETag
+    // Spawn concurrent updates with same stale ETag - use large payloads > 5MB
     let storage_a = storage.clone();
     let storage_b = storage.clone();
     let key5_a = key5.clone();
     let key5_b = key5.clone();
     let etag_a = race_etag.clone();
     let etag_b = race_etag.clone();
+    let writer_a_content = "writer-a-data-".repeat(500_000); // ~7 MB - over 5MB threshold
+    let writer_b_content = "writer-b-data-".repeat(500_000); // ~7 MB - over 5MB threshold
+
+    // Keep copies for verification after the tasks complete
+    let writer_a_content_copy = writer_a_content.clone();
+    let writer_b_content_copy = writer_b_content.clone();
 
     let task_a = tokio::spawn(async move {
         storage_a
             .put(
                 &key5_a,
-                "writer-a".as_bytes().to_vec(),
+                writer_a_content.as_bytes().to_vec(),
                 PutOptions::if_matches(&etag_a, Default::default()),
             )
             .await
@@ -380,7 +394,7 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
         storage_b
             .put(
                 &key5_b,
-                "writer-b".as_bytes().to_vec(),
+                writer_b_content.as_bytes().to_vec(),
                 PutOptions::if_matches(&etag_b, Default::default()),
             )
             .await
@@ -393,6 +407,21 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
     // Exactly one should succeed
     let success_count = result_a.is_ok() as u32 + result_b.is_ok() as u32;
     assert_eq!(success_count, 1, "Exactly one writer should succeed");
+
+    // Verify the winner's content was actually written - COMPLETE byte-by-byte verification
+    let (final_data, _) = storage
+        .get(&key5, GetOptions::new(Default::default()))
+        .await
+        .expect("Failed to get final content");
+
+    // Compare against both possible winning contents
+    let is_writer_a = final_data == writer_a_content_copy.as_bytes();
+    let is_writer_b = final_data == writer_b_content_copy.as_bytes();
+
+    assert!(
+        is_writer_a || is_writer_b,
+        "Final content must exactly match one of the writers' content (not initial or corrupted)"
+    );
 
     // Cleanup
     storage
