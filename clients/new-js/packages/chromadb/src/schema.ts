@@ -107,78 +107,78 @@ export class FtsIndexType {
   constructor(
     public enabled: boolean,
     public config: FtsIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class StringInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: StringInvertedIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class VectorIndexType {
   constructor(
     public enabled: boolean,
     public config: VectorIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class SparseVectorIndexType {
   constructor(
     public enabled: boolean,
     public config: SparseVectorIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class IntInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: IntInvertedIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class FloatInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: FloatInvertedIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class BoolInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: BoolInvertedIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class StringValueType {
   constructor(
     public ftsIndex: FtsIndexType | null = null,
     public stringInvertedIndex: StringInvertedIndexType | null = null,
-  ) {}
+  ) { }
 }
 
 export class FloatListValueType {
-  constructor(public vectorIndex: VectorIndexType | null = null) {}
+  constructor(public vectorIndex: VectorIndexType | null = null) { }
 }
 
 export class SparseVectorValueType {
-  constructor(public sparseVectorIndex: SparseVectorIndexType | null = null) {}
+  constructor(public sparseVectorIndex: SparseVectorIndexType | null = null) { }
 }
 
 export class IntValueType {
-  constructor(public intInvertedIndex: IntInvertedIndexType | null = null) {}
+  constructor(public intInvertedIndex: IntInvertedIndexType | null = null) { }
 }
 
 export class FloatValueType {
   constructor(
     public floatInvertedIndex: FloatInvertedIndexType | null = null,
-  ) {}
+  ) { }
 }
 
 export class BoolValueType {
-  constructor(public boolInvertedIndex: BoolInvertedIndexType | null = null) {}
+  constructor(public boolInvertedIndex: BoolInvertedIndexType | null = null) { }
 }
 
 export class ValueTypes {
@@ -213,11 +213,11 @@ const cloneObject = <T>(value: T): T => {
   return Array.isArray(value)
     ? (value.map((item) => cloneObject(item)) as T)
     : (Object.fromEntries(
-        Object.entries(value as Record<string, unknown>).map(([k, v]) => [
-          k,
-          cloneObject(v),
-        ]),
-      ) as T);
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        k,
+        cloneObject(v),
+      ]),
+    ) as T);
 };
 
 const resolveEmbeddingFunctionName = (
@@ -369,9 +369,12 @@ export class Schema {
       );
     }
 
+    // TODO: Consider removing this check in the future to allow enabling all indexes for a key
+    // Disallow enabling all index types for a key (config=undefined, key="some_key")
     if (!configProvided && keyProvided && key) {
-      this.enableAllIndexesForKey(key);
-      return this;
+      throw new Error(
+        `Cannot enable all index types for key '${key}'. Please specify a specific index configuration.`,
+      );
     }
 
     if (configProvided && !keyProvided) {
@@ -413,9 +416,12 @@ export class Schema {
       );
     }
 
+    // TODO: Consider removing this check in the future to allow disabling all indexes for a key
+    // Disallow disabling all index types for a key (config=undefined, key="some_key")
     if (keyProvided && !configProvided && key) {
-      this.disableAllIndexesForKey(key);
-      return this;
+      throw new Error(
+        `Cannot disable all index types for key '${key}'. Please specify a specific index configuration.`,
+      );
     }
 
     if (keyProvided && configProvided && key) {
@@ -558,6 +564,7 @@ export class Schema {
   ): void {
     if (config instanceof SparseVectorIndexConfig && enabled) {
       this.validateSingleSparseVectorIndex(key);
+      this.validateSparseVectorConfig(config);
     }
 
     const current = (this.keys[key] = ensureValueTypes(this.keys[key]));
@@ -607,8 +614,10 @@ export class Schema {
     current.floatList = new FloatListValueType(
       new VectorIndexType(true, new VectorIndexConfig()),
     );
+    // Sparse vector indexes require both sourceKey and embeddingFunction,
+    // so they cannot be auto-enabled and must be configured explicitly
     current.sparseVector = new SparseVectorValueType(
-      new SparseVectorIndexType(true, new SparseVectorIndexConfig()),
+      new SparseVectorIndexType(false, new SparseVectorIndexConfig()),
     );
     current.intValue = new IntValueType(
       new IntInvertedIndexType(true, new IntInvertedIndexConfig()),
@@ -659,6 +668,16 @@ export class Schema {
           `Cannot enable sparse vector index on key '${targetKey}'. A sparse vector index is already enabled on key '${existingKey}'. Only one sparse vector index is allowed per collection.`,
         );
       }
+    }
+  }
+
+  private validateSparseVectorConfig(config: SparseVectorIndexConfig): void {
+    // Validate that if source_key is provided then embedding_function is also provided
+    // since there is no default embedding function
+    if (config.sourceKey !== null && config.sourceKey !== undefined && !config.embeddingFunction) {
+      throw new Error(
+        `If sourceKey is provided then embeddingFunction must also be provided since there is no default embedding function. Config: ${JSON.stringify(config)}`,
+      );
     }
   }
 
