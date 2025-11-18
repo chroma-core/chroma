@@ -219,7 +219,11 @@ describe("Schema", () => {
 
   it("chained create and delete operations", () => {
     const schema = new Schema();
-    const sparseConfig = new SparseVectorIndexConfig({ sourceKey: "raw_text" });
+    const sparseEf = new MockSparseEmbedding("chained_test");
+    const sparseConfig = new SparseVectorIndexConfig({
+      sourceKey: "raw_text",
+      embeddingFunction: sparseEf,
+    });
     const stringConfig = new StringInvertedIndexConfig();
 
     const result = schema
@@ -363,30 +367,18 @@ describe("Schema", () => {
     ).toThrow(/Cannot create index on special key '#embedding'/);
   });
 
-  it("enable and disable all indexes for custom key", () => {
+  it("cannot enable or disable all indexes for custom key", () => {
     const schema = new Schema();
 
-    schema.createIndex(undefined, "my_key");
+    // TODO: Consider removing this check in the future to allow enabling all indexes for a key
+    expect(() => schema.createIndex(undefined, "my_key")).toThrow(
+      /Cannot enable all index types for key 'my_key'/,
+    );
 
-    const enabled = schema.keys["my_key"];
-    expect(enabled.string?.ftsIndex?.enabled).toBe(true);
-    expect(enabled.string?.stringInvertedIndex?.enabled).toBe(true);
-    expect(enabled.floatList?.vectorIndex?.enabled).toBe(true);
-    expect(enabled.sparseVector?.sparseVectorIndex?.enabled).toBe(true);
-    expect(enabled.intValue?.intInvertedIndex?.enabled).toBe(true);
-    expect(enabled.floatValue?.floatInvertedIndex?.enabled).toBe(true);
-    expect(enabled.boolean?.boolInvertedIndex?.enabled).toBe(true);
-
-    schema.deleteIndex(undefined, "my_key");
-
-    const disabled = schema.keys["my_key"];
-    expect(disabled.string?.ftsIndex?.enabled).toBe(false);
-    expect(disabled.string?.stringInvertedIndex?.enabled).toBe(false);
-    expect(disabled.floatList?.vectorIndex?.enabled).toBe(false);
-    expect(disabled.sparseVector?.sparseVectorIndex?.enabled).toBe(false);
-    expect(disabled.intValue?.intInvertedIndex?.enabled).toBe(false);
-    expect(disabled.floatValue?.floatInvertedIndex?.enabled).toBe(false);
-    expect(disabled.boolean?.boolInvertedIndex?.enabled).toBe(false);
+    // TODO: Consider removing this check in the future to allow disabling all indexes for a key
+    expect(() => schema.deleteIndex(undefined, "my_key")).toThrow(
+      /Cannot disable all index types for key 'my_key'/,
+    );
   });
 
   it("cannot delete vector or fts index", () => {
@@ -775,9 +767,13 @@ describe("Schema", () => {
 
   it("multiple index types on same key", async () => {
     const schema = new Schema();
+    const sparseEf = new MockSparseEmbedding("multi_test");
 
     schema.createIndex(
-      new SparseVectorIndexConfig({ sourceKey: "source" }),
+      new SparseVectorIndexConfig({
+        sourceKey: "source",
+        embeddingFunction: sparseEf,
+      }),
       "multi_field",
     );
     schema.createIndex(new StringInvertedIndexConfig(), "multi_field");
@@ -842,8 +838,14 @@ describe("Schema", () => {
     expect(() => schema.createIndex()).toThrow(
       /Cannot enable all index types globally/,
     );
-    expect(() => schema.createIndex(undefined, "mykey")).not.toThrow();
-    expect(() => schema.deleteIndex(undefined, "mykey")).not.toThrow();
+    // TODO: Consider removing this check in the future to allow enabling all indexes for a key
+    expect(() => schema.createIndex(undefined, "mykey")).toThrow(
+      /Cannot enable all index types for key 'mykey'/,
+    );
+    // TODO: Consider removing this check in the future to allow disabling all indexes for a key
+    expect(() => schema.deleteIndex(undefined, "mykey")).toThrow(
+      /Cannot disable all index types for key 'mykey'/,
+    );
     expect(() => schema.deleteIndex(new VectorIndexConfig())).toThrow(
       /Deleting vector index is not currently supported/,
     );
@@ -903,11 +905,15 @@ describe("Schema", () => {
   it("many key overrides stress", async () => {
     const schema = new Schema();
 
+    const sparseEf = new MockSparseEmbedding("stress_test");
     for (let i = 0; i < 50; i += 1) {
       const key = `field_${i}`;
       if (i === 0) {
         schema.createIndex(
-          new SparseVectorIndexConfig({ sourceKey: `source_${i}` }),
+          new SparseVectorIndexConfig({
+            sourceKey: `source_${i}`,
+            embeddingFunction: sparseEf,
+          }),
           key,
         );
       } else if (i % 2 === 1) {
@@ -947,9 +953,16 @@ describe("Schema", () => {
 
   it("chained operations maintain consistency", () => {
     const schema = new Schema();
+    const sparseEf = new MockSparseEmbedding("chained_consistency");
 
     const result = schema
-      .createIndex(new SparseVectorIndexConfig({ sourceKey: "text" }), "field1")
+      .createIndex(
+        new SparseVectorIndexConfig({
+          sourceKey: "text",
+          embeddingFunction: sparseEf,
+        }),
+        "field1",
+      )
       .deleteIndex(new StringInvertedIndexConfig(), "field2")
       .deleteIndex(new StringInvertedIndexConfig(), "field3")
       .deleteIndex(new IntInvertedIndexConfig(), "field4");
@@ -1128,9 +1141,13 @@ describe("Schema", () => {
 
   it("key overrides have independent configs", async () => {
     const schema = new Schema();
+    const sparseEf = new MockSparseEmbedding("independent_test");
 
     schema.createIndex(
-      new SparseVectorIndexConfig({ sourceKey: "default_source" }),
+      new SparseVectorIndexConfig({
+        sourceKey: "default_source",
+        embeddingFunction: sparseEf,
+      }),
       "field1",
     );
     schema.createIndex(new StringInvertedIndexConfig(), "field2");
@@ -1198,9 +1215,13 @@ describe("Schema", () => {
 
   it("key specific overrides remain independent", async () => {
     const schema = new Schema();
+    const sparseEf = new MockSparseEmbedding("key_specific_test");
 
     schema.createIndex(
-      new SparseVectorIndexConfig({ sourceKey: "source_a" }),
+      new SparseVectorIndexConfig({
+        sourceKey: "source_a",
+        embeddingFunction: sparseEf,
+      }),
       "key_a",
     );
     schema.createIndex(new StringInvertedIndexConfig(), "key_b");
@@ -1263,8 +1284,12 @@ describe("Schema", () => {
 
   it("partial override fills from defaults", async () => {
     const schema = new Schema();
+    const sparseEf = new MockSparseEmbedding("partial_test");
     schema.createIndex(
-      new SparseVectorIndexConfig({ sourceKey: "my_source" }),
+      new SparseVectorIndexConfig({
+        sourceKey: "my_source",
+        embeddingFunction: sparseEf,
+      }),
       "multi_index_field",
     );
 
@@ -1750,7 +1775,7 @@ describe("Schema", () => {
     const { K } = require("../src/execution");
     const schema = new Schema();
     const sparseEf = new MockSparseEmbedding("key_test");
-    
+
     schema.createIndex(
       new SparseVectorIndexConfig({
         embeddingFunction: sparseEf,
