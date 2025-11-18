@@ -83,6 +83,7 @@ type S3MetaStoreConfig struct {
 	AccessKeyID             string
 	SecretAccessKey         string
 	ForcePathStyle          bool
+	GCSInterop              bool
 }
 
 type S3MetaStoreInterface interface {
@@ -154,7 +155,7 @@ func NewS3MetaStore(ctx context.Context, cfg S3MetaStoreConfig) (*S3MetaStore, e
 		awsConfigParts = append(awsConfigParts, config.WithCredentialsProvider(creds))
 	}
 
-	if cfg.Endpoint != "" {
+	if cfg.GCSInterop && cfg.Endpoint != "" {
 		resolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...any) (aws.Endpoint, error) {
 			return aws.Endpoint{
 				URL:               cfg.Endpoint,
@@ -171,8 +172,10 @@ func NewS3MetaStore(ctx context.Context, cfg S3MetaStoreConfig) (*S3MetaStore, e
 		return nil, err
 	}
 
-	// Add middleware to remove offending header for signing
-	awsConfig.HTTPClient = &http.Client{Transport: &RecalculateV4Signature{http.DefaultTransport, v4.NewSigner(), awsConfig}}
+	// Add middleware to remove offending header for signing for GCS Support
+	if cfg.GCSInterop {
+		awsConfig.HTTPClient = &http.Client{Transport: &RecalculateV4Signature{http.DefaultTransport, v4.NewSigner(), awsConfig}}
+	}
 
 	// Create S3 client with optional path-style addressing and custom endpoint
 	otelaws.AppendMiddlewares(&awsConfig.APIOptions)

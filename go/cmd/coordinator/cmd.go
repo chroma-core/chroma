@@ -80,6 +80,7 @@ func init() {
 	Cmd.Flags().StringVar(&conf.MetaStoreConfig.AccessKeyID, "s3-access-key-id", "", "S3 access key ID")
 	Cmd.Flags().StringVar(&conf.MetaStoreConfig.SecretAccessKey, "s3-secret-access-key", "", "S3 secret access key")
 	Cmd.Flags().BoolVar(&conf.MetaStoreConfig.ForcePathStyle, "s3-force-path-style", false, "S3 force path style")
+	Cmd.Flags().BoolVar(&conf.MetaStoreConfig.GCSInterop, "s3-gcs-interop", false, "Enable Google Cloud Storage support for S3 client")
 
 	// Version file
 	Cmd.Flags().BoolVar(&conf.VersionFileEnabled, "version-file-enabled", false, "Enable version file")
