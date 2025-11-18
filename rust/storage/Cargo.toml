@@ -7,18 +7,18 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
-bytes = "1.8.0"
-aws-sdk-s3 = "1.63"
-aws-smithy-types = "1.2"
-aws-config = { version = "1.5", features = ["behavior-version-latest"] }
-object_store = { version = "0.11", features = ["aws"] }
-
 async-trait = { workspace = true }
+aws-sdk-s3 = { workspace = true }
+aws-smithy-types = { workspace = true }
+aws-config = { workspace = true }
+bytes = { workspace = true }
 futures = { workspace = true }
+object_store = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tempfile = { workspace = true }
-thiserror.workspace = true
+thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 opentelemetry = { workspace = true }
