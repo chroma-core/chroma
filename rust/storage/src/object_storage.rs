@@ -370,7 +370,7 @@ impl ObjectStorage {
     ) -> Result<DeletedObjects, StorageError> {
         let keys = keys.into_iter().collect::<Vec<_>>();
 
-        // Execute deletes in parallel (50 concurrent as in previous implementation)
+        // Execute deletes in parallel
         let results = stream::iter(keys)
             .map(|key| async move {
                 let key_str = key.as_ref().to_string();

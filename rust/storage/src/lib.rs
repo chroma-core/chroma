@@ -248,7 +248,7 @@ impl Storage {
             Storage::Object(obj) => obj
                 .get(key, options)
                 .await
-                .map(|(bytes, _)| bytes.to_vec().into()),
+                .map(|(bytes, _)| Vec::from(bytes).into()),
             Storage::Local(local) => local.get(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage.get(key, options).await
@@ -275,7 +275,7 @@ impl Storage {
             }
             Storage::Object(obj) => {
                 let (bytes, etag) = obj.get(key, options).await?;
-                let fetch_result = fetch_fn(Ok(bytes.to_vec().into())).await?;
+                let fetch_result = fetch_fn(Ok(Vec::from(bytes).into())).await?;
                 Ok((fetch_result, Some(etag)))
             }
             Storage::Local(local) => {
@@ -348,7 +348,7 @@ impl Storage {
             Storage::S3(s3) => s3.get_with_e_tag(key).await,
             Storage::Object(obj) => {
                 let (bytes, etag) = obj.get(key, options).await?;
-                Ok((bytes.to_vec().into(), Some(etag)))
+                Ok((Vec::from(bytes).into(), Some(etag)))
             }
             Storage::Local(local) => local.get_with_e_tag(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
@@ -403,11 +403,18 @@ impl Storage {
     pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
         match self {
             Storage::S3(s3) => s3.delete(key, options).await,
-            Storage::Object(obj) => obj.delete(key).await,
-            Storage::Local(local) => {
+            Storage::Object(obj) => {
                 if options.if_match.is_some() {
                     return Err(StorageError::Message {
                         message: "if match not supported for object store backend".to_string(),
+                    });
+                }
+                obj.delete(key).await
+            }
+            Storage::Local(local) => {
+                if options.if_match.is_some() {
+                    return Err(StorageError::Message {
+                        message: "if match not supported for local backend".to_string(),
                     });
                 }
                 local.delete(key).await

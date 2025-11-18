@@ -51,6 +51,7 @@ pub async fn test_basic_operations(storage: &ObjectStorage, test_prefix: &str) {
             .get(key, GetOptions::new(Default::default()))
             .await
             .unwrap_or_else(|e| panic!("Failed to get {}: {}", key, e));
+        assert!(data.is_unique());
         assert_eq!(data, key.as_bytes(), "Content mismatch for {}", key);
     }
 
@@ -78,6 +79,7 @@ pub async fn test_basic_operations(storage: &ObjectStorage, test_prefix: &str) {
         .get(&dst, GetOptions::new(Default::default()))
         .await
         .expect("Failed to get copied file");
+    assert!(data.is_unique());
     assert_eq!(data, src.as_bytes(), "Copied file content mismatch");
 
     // Verify original still exists
@@ -95,6 +97,7 @@ pub async fn test_basic_operations(storage: &ObjectStorage, test_prefix: &str) {
         .get(&dst, GetOptions::new(Default::default()))
         .await
         .expect("Failed to get renamed file");
+    assert!(data.is_unique());
     assert_eq!(data, src.as_bytes(), "Renamed file content mismatch");
 
     // Verify original no longer exists
@@ -155,6 +158,7 @@ pub async fn test_multipart_operations(storage: &ObjectStorage, test_prefix: &st
         .get(&small_key, GetOptions::new(Default::default()))
         .await
         .expect("Failed to get small file");
+    assert!(data.is_unique());
     assert_eq!(
         data,
         small_content.as_bytes(),
@@ -179,6 +183,7 @@ pub async fn test_multipart_operations(storage: &ObjectStorage, test_prefix: &st
         .get(&large_key, GetOptions::new(Default::default()))
         .await
         .expect("Failed to get large file with oneshot");
+    assert!(data.is_unique());
     assert_eq!(
         data,
         large_content.as_bytes(),
@@ -193,6 +198,7 @@ pub async fn test_multipart_operations(storage: &ObjectStorage, test_prefix: &st
         )
         .await
         .expect("Failed to get large file with parallelism");
+    assert!(data.is_unique());
     assert_eq!(
         data,
         large_content.as_bytes(),
@@ -237,6 +243,7 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
         .get(&key1, GetOptions::new(Default::default()))
         .await
         .expect("Failed to get");
+    assert!(data.is_unique());
     assert_eq!(data, content1.as_bytes());
 
     // Second create should fail
@@ -277,6 +284,7 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
         .get(&key2, GetOptions::new(Default::default()))
         .await
         .expect("Failed to get");
+    assert!(data.is_unique());
     assert_eq!(data, content_v2.as_bytes());
 
     // Update with stale ETag should fail
@@ -345,6 +353,7 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
         .get(&key4, GetOptions::new(Default::default()))
         .await
         .expect("Failed to get");
+    assert!(data.is_unique());
     assert_eq!(data, content4.as_bytes());
 
     // Second put_file should fail
@@ -421,6 +430,7 @@ pub async fn test_conditional_operations(storage: &ObjectStorage, test_prefix: &
         .get(&key5, GetOptions::new(Default::default()))
         .await
         .expect("Failed to get final content");
+    assert!(final_data.is_unique());
 
     // Compare against both possible winning contents
     let is_writer_a = final_data == writer_a_content_copy.as_bytes();
