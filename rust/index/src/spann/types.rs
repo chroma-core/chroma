@@ -813,7 +813,10 @@ impl SpannIndexWriter {
                 }
             }
             Ok(None) => {}
-            Err(_) => {}
+            Err(e) => {
+                tracing::error!("Error getting posting list for head {}: {}", head_id, e);
+                return Err(SpannIndexWriterError::PostingListGetError(e));
+            }
         }
         Ok(())
     }
