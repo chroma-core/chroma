@@ -27,8 +27,8 @@ Most quotas can be increased upon request. If your application requires higher l
 | Maximum number of where predicates                  | 8           |
 | Maximum size of full text search or regex search    | 256         |
 | Maximum number of results returned                  | 300         |
-| Maximum number of concurrent reads per collection   | 5           |
-| Maximum number of concurrent writes per collection  | 5           |
+| Maximum number of concurrent reads per collection   | 10          |
+| Maximum number of concurrent writes per collection  | 10          |
 | Maximum number of collections                       | 1,000,000   |
 | Maximum number of records per collection            | 5,000,000   |
 | Maximum fork edges from root                        | 4,096       |
