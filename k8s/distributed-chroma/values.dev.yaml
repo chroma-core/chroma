@@ -6,9 +6,6 @@ sysdb:
     s3-secret-access-key: "minio123"
     s3-force-path-style: true
     create-bucket-if-not-exists: true
-    heap-service-enabled: 'true'
-    heap-service-port: '50052'
-    heap-service-assignment-hasher: 'murmur3'  # Assignment policy hasher (options: murmur3)
 rustFrontendService:
   # We have to specify the command, because the Dockerfile uses the CLI since its shared with
   # single node, so in values.dev we pass the CONFIG_PATH into the chroma run command
@@ -39,9 +36,6 @@ compactionService:
 
 rustLogService:
   replicaCount: 1
-
-heapTenderService:
-  enabled: true
 
 garbageCollector:
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"

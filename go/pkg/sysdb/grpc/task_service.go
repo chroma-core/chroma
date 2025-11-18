@@ -91,48 +91,12 @@ func (s *Server) DetachFunction(ctx context.Context, req *coordinatorpb.DetachFu
 	return res, nil
 }
 
-func (s *Server) AdvanceAttachedFunction(ctx context.Context, req *coordinatorpb.AdvanceAttachedFunctionRequest) (*coordinatorpb.AdvanceAttachedFunctionResponse, error) {
-	log.Info("AdvanceAttachedFunction", zap.String("collection_id", req.GetCollectionId()), zap.String("id", req.GetId()))
-
-	res, err := s.coordinator.AdvanceAttachedFunction(ctx, req)
-	if err != nil {
-		log.Error("AdvanceAttachedFunction failed", zap.Error(err))
-		return nil, err
-	}
-
-	return res, nil
-}
-
-func (s *Server) FinishAttachedFunction(ctx context.Context, req *coordinatorpb.FinishAttachedFunctionRequest) (*coordinatorpb.FinishAttachedFunctionResponse, error) {
-	log.Info("FinishAttachedFunction", zap.String("id", req.Id))
-
-	res, err := s.coordinator.FinishAttachedFunction(ctx, req)
-	if err != nil {
-		log.Error("FinishAttachedFunction failed", zap.Error(err))
-		return nil, err
-	}
-
-	return res, nil
-}
-
 func (s *Server) GetFunctions(ctx context.Context, req *coordinatorpb.GetFunctionsRequest) (*coordinatorpb.GetFunctionsResponse, error) {
 	log.Info("GetFunctions")
 
 	res, err := s.coordinator.GetFunctions(ctx, req)
 	if err != nil {
 		log.Error("GetFunctions failed", zap.Error(err))
-		return nil, err
-	}
-
-	return res, nil
-}
-
-func (s *Server) PeekScheduleByCollectionId(ctx context.Context, req *coordinatorpb.PeekScheduleByCollectionIdRequest) (*coordinatorpb.PeekScheduleByCollectionIdResponse, error) {
-	log.Info("PeekScheduleByCollectionId", zap.Int64("num_collections", int64(len(req.CollectionId))))
-
-	res, err := s.coordinator.PeekScheduleByCollectionId(ctx, req)
-	if err != nil {
-		log.Error("PeekScheduleByCollectionId failed", zap.Error(err))
 		return nil, err
 	}
 

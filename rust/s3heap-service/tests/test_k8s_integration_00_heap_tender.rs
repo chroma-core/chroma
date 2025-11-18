@@ -332,6 +332,7 @@ async fn test_k8s_integration_multiple_collections_all_processed() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_k8s_integration_cursor_initialized_on_first_run() {
     let storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
     let test_id = uuid::Uuid::new_v4();
@@ -376,6 +377,7 @@ async fn test_k8s_integration_cursor_initialized_on_first_run() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_k8s_integration_cursor_advances_on_subsequent_runs() {
     let storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
     let test_id = uuid::Uuid::new_v4();
@@ -440,6 +442,7 @@ async fn test_k8s_integration_cursor_advances_on_subsequent_runs() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_k8s_integration_cursor_not_updated_when_no_new_data() {
     let storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
     let test_id = uuid::Uuid::new_v4();

@@ -647,7 +647,6 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for LogFetchOrchestrator
                 let collection_info = match self.context.get_collection_info_mut() {
                     Ok(info) => info,
                     Err(err) => {
-                        tracing::info!("We're failing right here");
                         self.terminate_with_result(Err(err.into()), ctx).await;
                         return;
                     }

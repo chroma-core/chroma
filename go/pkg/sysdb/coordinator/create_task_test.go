@@ -2,9 +2,10 @@ package coordinator
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
+
+	"github.com/chroma-core/chroma/go/pkg/common"
 
 	"github.com/chroma-core/chroma/go/pkg/memberlist_manager"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
@@ -26,29 +27,6 @@ var testMinimalUUIDv7 = uuid.UUID{
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // timestamp = 0 (bytes 0-5)
 	0x70, 0x00, // version 7 (0x7) in high nibble, low nibble = 0 (bytes 6-7)
 	0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // variant bits + rest = 0 (bytes 8-15)
-}
-
-// MockHeapClient is a mock implementation of HeapClient for testing
-type MockHeapClient struct {
-	mock.Mock
-}
-
-func (m *MockHeapClient) Push(ctx context.Context, collectionID string, schedules []*coordinatorpb.Schedule) error {
-	args := m.Called(ctx, collectionID, schedules)
-	return args.Error(0)
-}
-
-func (m *MockHeapClient) Summary(ctx context.Context) (*coordinatorpb.HeapSummaryResponse, error) {
-	args := m.Called(ctx)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*coordinatorpb.HeapSummaryResponse), args.Error(1)
-}
-
-func (m *MockHeapClient) Close() error {
-	args := m.Called()
-	return args.Error(0)
 }
 
 // MockMemberlistStore is a mock implementation of memberlist_manager.IMemberlistStore for testing
@@ -78,7 +56,6 @@ type AttachFunctionTestSuite struct {
 	mockFunctionDb         *dbmodel_mocks.IFunctionDb
 	mockDatabaseDb         *dbmodel_mocks.IDatabaseDb
 	mockCollectionDb       *dbmodel_mocks.ICollectionDb
-	mockHeapClient         *MockHeapClient
 	coordinator            *Coordinator
 }
 
@@ -122,7 +99,7 @@ func (suite *AttachFunctionTestSuite) setupAttachFunctionMocks(ctx context.Conte
 
 	// Return a matcher function that can be used to capture attached function data
 	return func(attachedFunction *dbmodel.AttachedFunction) bool {
-		return attachedFunction.LowestLiveNonce == nil
+		return true
 	}
 }
 
@@ -147,9 +124,6 @@ func (suite *AttachFunctionTestSuite) SetupTest() {
 	suite.mockCollectionDb = &dbmodel_mocks.ICollectionDb{}
 	suite.mockCollectionDb.Test(suite.T())
 
-	suite.mockHeapClient = new(MockHeapClient)
-	suite.mockHeapClient.Test(suite.T())
-
 	// Setup coordinator with mocks
 	suite.coordinator = &Coordinator{
 		ctx: context.Background(),
@@ -157,7 +131,6 @@ func (suite *AttachFunctionTestSuite) SetupTest() {
 			metaDomain: suite.mockMetaDomain,
 			txImpl:     suite.mockTxImpl,
 		},
-		heapClient: suite.mockHeapClient,
 	}
 }
 
@@ -166,7 +139,7 @@ func (suite *AttachFunctionTestSuite) SetupTest() {
 // - Create attached function with NULL lowest_live_nonce (Phase 1)
 // - Push to heap service (Phase 2)
 // - Update lowest_live_nonce to complete initialization (Phase 3)
-func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation_WithHeapService() {
+func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 	ctx := context.Background()
 
 	// Test data
@@ -236,9 +209,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation_With
 			attachedFunction.FunctionID == functionID &&
 			attachedFunction.TenantID == tenantID &&
 			attachedFunction.DatabaseID == databaseID &&
-			attachedFunction.MinRecordsForInvocation == int64(MinRecordsForInvocation) &&
-			attachedFunction.LowestLiveNonce == nil && // KEY: Must be NULL for 2PC
-			attachedFunction.NextNonce != uuid.Nil
+			attachedFunction.MinRecordsForInvocation == int64(MinRecordsForInvocation)
 	})).Return(nil).Once()
 
 	// Mock the Transaction call itself - it will execute the function
@@ -251,36 +222,13 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation_With
 			suite.NoError(err)
 		}).Return(nil).Once()
 
-	// ===== Phase 2: Push to heap service =====
-	suite.mockHeapClient.On("Push", ctx, inputCollectionID, mock.MatchedBy(func(schedules []*coordinatorpb.Schedule) bool {
-		// Verify schedule structure
-		if len(schedules) != 1 {
-			return false
-		}
-		schedule := schedules[0]
-		return schedule.Triggerable.PartitioningUuid == inputCollectionID &&
-			schedule.Triggerable.SchedulingUuid != "" &&
-			schedule.Nonce == testMinimalUUIDv7.String() && // Should use minimal UUID
-			schedule.NextScheduled != nil
-	})).Return(nil).Once()
-
-	// ===== Phase 3: Update lowest_live_nonce =====
-	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("UpdateLowestLiveNonce", mock.AnythingOfType("uuid.UUID"), testMinimalUUIDv7).
-		Return(nil).Once()
-
 	// Execute AttachFunction
 	response, err := suite.coordinator.AttachFunction(ctx, request)
 
-	// Assertions
-	suite.NoError(err)
-	suite.NotNil(response)
-	suite.NotEmpty(response.Id)
-
-	// Verify attached function ID is valid UUID
-	attachedFunctionID, err := uuid.Parse(response.Id)
-	suite.NoError(err)
-	suite.NotEqual(uuid.Nil, attachedFunctionID)
+	// Assertions - heap service is not enabled in this test setup
+	suite.Error(err)
+	suite.Nil(response)
+	suite.ErrorIs(err, common.ErrHeapServiceNotEnabled)
 
 	// Verify all mocks were called as expected
 	suite.mockMetaDomain.AssertExpectations(suite.T())
@@ -288,7 +236,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation_With
 	suite.mockFunctionDb.AssertExpectations(suite.T())
 	suite.mockDatabaseDb.AssertExpectations(suite.T())
 	suite.mockCollectionDb.AssertExpectations(suite.T())
-	suite.mockHeapClient.AssertExpectations(suite.T())
 	suite.mockTxImpl.AssertExpectations(suite.T())
 }
 
@@ -310,8 +257,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 	databaseID := "database-uuid"
 	functionID := uuid.New()
 	MinRecordsForInvocation := uint64(100)
-	nextNonce := uuid.Must(uuid.NewV7())
-	lowestLiveNonce := uuid.Must(uuid.NewV7())
 
 	params := &structpb.Struct{
 		Fields: map[string]*structpb.Value{
@@ -341,8 +286,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 		OutputCollectionName:    outputCollectionName,
 		FunctionID:              functionID,
 		MinRecordsForInvocation: int64(MinRecordsForInvocation),
-		NextNonce:               nextNonce,
-		LowestLiveNonce:         &lowestLiveNonce, // KEY: Already initialized
 		NextRun:                 now,
 		CreatedAt:               now,
 		UpdatedAt:               now,
@@ -380,13 +323,10 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 	suite.NotNil(response)
 	suite.Equal(existingAttachedFunctionID.String(), response.Id)
 
-	// Verify no writes occurred (no Insert, no UpdateLowestLiveNonce, no heap Push)
+	// Verify no writes occurred (no Insert, no heap Push)
 	// Note: Transaction IS called for idempotency check, but no writes happen inside it
 	suite.mockTxImpl.AssertNumberOfCalls(suite.T(), "Transaction", 1)
 	suite.mockAttachedFunctionDb.AssertNotCalled(suite.T(), "Insert")
-	suite.mockAttachedFunctionDb.AssertNotCalled(suite.T(), "UpdateLowestLiveNonce")
-
-	suite.mockHeapClient.AssertNotCalled(suite.T(), "Push")
 
 	// Verify all read mocks were called
 	suite.mockMetaDomain.AssertExpectations(suite.T())
@@ -395,13 +335,13 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 	suite.mockDatabaseDb.AssertExpectations(suite.T())
 }
 
-// TestAttachFunction_RecoveryFlow_HeapFailureThenSuccess tests the realistic recovery scenario:
+// TestAttachFunction_RecoveryFlow tests the realistic recovery scenario:
 // - First AttachFunction: Phase 1 succeeds (attached function created), Phase 2 fails (heap error)
 // - Attached function left in incomplete state (lowest_live_nonce = NULL)
 // - GetAttachedFunctionByName: Returns ErrAttachedFunctionNotReady because attached function is incomplete
 // - Second AttachFunction: Detects incomplete attached function, completes Phase 2 & 3, succeeds
 // - GetAttachedFunctionByName: Now succeeds and returns the ready attached function
-func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow_HeapFailureThenSuccess() {
+func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 	ctx := context.Background()
 
 	// Test data
@@ -415,7 +355,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow_HeapFailur
 	databaseID := "database-uuid"
 	functionID := uuid.New()
 	MinRecordsForInvocation := uint64(100)
-	nextNonce := uuid.Must(uuid.NewV7())
 	now := time.Now()
 
 	params := &structpb.Struct{
@@ -461,21 +400,13 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow_HeapFailur
 		Return([]*dbmodel.CollectionAndMetadata{}, nil).Once()
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("Insert", mock.MatchedBy(func(attachedFunction *dbmodel.AttachedFunction) bool {
-		return attachedFunction.LowestLiveNonce == nil
-	})).Return(nil).Once()
+	suite.mockAttachedFunctionDb.On("Insert", mock.Anything).Return(nil).Once()
 
 	suite.mockTxImpl.On("Transaction", ctx, mock.AnythingOfType("func(context.Context) error")).
 		Run(func(args mock.Arguments) {
 			txFunc := args.Get(1).(func(context.Context) error)
 			_ = txFunc(context.Background())
 		}).Return(nil).Once()
-
-	// Phase 2: HEAP PUSH FAILS
-	suite.mockHeapClient.On("Push", ctx, inputCollectionID, mock.Anything).
-		Return(errors.New("heap service temporarily unavailable")).Once()
-
-	// Phase 3: NOT REACHED (because Phase 2 failed)
 
 	// First AttachFunction call - should fail at heap push
 	response1, err1 := suite.coordinator.AttachFunction(ctx, request)
@@ -494,8 +425,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow_HeapFailur
 		OutputCollectionName:    outputCollectionName,
 		FunctionID:              functionID,
 		MinRecordsForInvocation: int64(MinRecordsForInvocation),
-		NextNonce:               nextNonce,
-		LowestLiveNonce:         nil,
 		NextRun:                 now,
 		CreatedAt:               now,
 		UpdatedAt:               now,
@@ -525,23 +454,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow_HeapFailur
 			_ = txFunc(context.Background())
 		}).Return(nil).Once()
 
-	// Phase 2: Heap push succeeds this time
-	suite.mockHeapClient.On("Push", ctx, inputCollectionID, mock.MatchedBy(func(schedules []*coordinatorpb.Schedule) bool {
-		if len(schedules) != 1 {
-			return false
-		}
-		schedule := schedules[0]
-		return schedule.Triggerable.PartitioningUuid == inputCollectionID &&
-			schedule.Triggerable.SchedulingUuid == incompleteAttachedFunctionID.String() &&
-			schedule.Nonce == testMinimalUUIDv7.String() &&
-			schedule.NextScheduled != nil
-	})).Return(nil).Once()
-
-	// Phase 3: Update lowest_live_nonce to complete initialization
-	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("UpdateLowestLiveNonce", incompleteAttachedFunctionID, testMinimalUUIDv7).
-		Return(nil).Once()
-
 	// Second AttachFunction call - should succeed
 	response2, err2 := suite.coordinator.AttachFunction(ctx, request)
 	suite.NoError(err2)
@@ -552,7 +464,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow_HeapFailur
 	suite.mockTxImpl.AssertNumberOfCalls(suite.T(), "Transaction", 2) // First attempt + recovery attempt
 
 	// Verify Phase 2 and 3 were executed in recovery
-	suite.mockHeapClient.AssertExpectations(suite.T())
 	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
 	suite.mockMetaDomain.AssertExpectations(suite.T())
 }
@@ -576,8 +487,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	databaseID := "database-uuid"
 	existingOperatorID := uuid.New()
 	MinRecordsForInvocation := uint64(100)
-	nextNonce := uuid.Must(uuid.NewV7())
-	lowestLiveNonce := uuid.Must(uuid.NewV7())
 	now := time.Now()
 
 	params := &structpb.Struct{
@@ -607,8 +516,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 		OutputCollectionName:    outputCollectionName,
 		FunctionID:              existingOperatorID,
 		MinRecordsForInvocation: int64(MinRecordsForInvocation),
-		NextNonce:               nextNonce,
-		LowestLiveNonce:         &lowestLiveNonce, // Already initialized
 		NextRun:                 now,
 		CreatedAt:               now,
 		UpdatedAt:               now,
@@ -649,11 +556,9 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	suite.Contains(err.Error(), existingOperatorName)
 	suite.Contains(err.Error(), requestedOperatorName)
 
-	// Verify no writes occurred (Transaction IS called but Insert/Update/Push are not)
+	// Verify no writes occurred (Transaction IS called but Insert/Push are not)
 	suite.mockTxImpl.AssertNumberOfCalls(suite.T(), "Transaction", 1)
 	suite.mockAttachedFunctionDb.AssertNotCalled(suite.T(), "Insert")
-	suite.mockAttachedFunctionDb.AssertNotCalled(suite.T(), "UpdateLowestLiveNonce")
-	suite.mockHeapClient.AssertNotCalled(suite.T(), "Push")
 
 	// Verify read mocks were called
 	suite.mockMetaDomain.AssertExpectations(suite.T())
