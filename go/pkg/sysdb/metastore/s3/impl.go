@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httputil"
 	"strings"
 	"time"
 
@@ -48,19 +47,23 @@ func (lt *RecalculateV4Signature) RoundTrip(req *http.Request) (*http.Response, 
 
 	// sign with the same date
 	timeString := req.Header.Get("X-Amz-Date")
-	timeDate, _ := time.Parse("20060102T150405Z", timeString)
-
-	creds, _ := lt.cfg.Credentials.Retrieve(req.Context())
-	err := lt.signer.SignHTTP(req.Context(), creds, req, v4.GetPayloadHash(req.Context()), "s3", lt.cfg.Region, timeDate)
+	timeDate, err := time.Parse("20060102T150405Z", timeString)
 	if err != nil {
 		return nil, err
 	}
+
+	creds, err := lt.cfg.Credentials.Retrieve(req.Context())
+	if err != nil {
+		return nil, err
+	}
+
+	err = lt.signer.SignHTTP(req.Context(), creds, req, v4.GetPayloadHash(req.Context()), "s3", lt.cfg.Region, timeDate)
+	if err != nil {
+		return nil, err
+	}
+
 	// Reset Accept-Encoding if desired
 	req.Header.Set("Accept-Encoding", val)
-
-	fmt.Println("AfterAdjustment")
-	rrr, _ := httputil.DumpRequest(req, false)
-	fmt.Println(string(rrr))
 
 	// follows up the original round tripper
 	return lt.next.RoundTrip(req)
