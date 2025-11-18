@@ -6,9 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httputil"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -19,6 +23,48 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
+
+// NOTE(sicheng): As a temporary solution we use the AWS SDK with GCS, but this approach needs a few tweaks:
+// https://stackoverflow.com/questions/73717477/gcp-cloud-storage-golang-aws-sdk2-upload-file-with-s3-interoperability-creds
+//
+// In summary, the AWS SDK we are using (1.36.3) is not fully compatible with the GCS because it uses and additional header
+// for signing. We need to add a middleware to remove the offending header, as suggested by the thread above.
+//
+// If we are upgrading AWS SDK to version higher than 1.73.0, we need additional tweak:
+// cfg.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+type RecalculateV4Signature struct {
+	next   http.RoundTripper
+	signer *v4.Signer
+	cfg    aws.Config
+}
+
+// NOTE(sicheng): Code borrowed from https://stackoverflow.com/questions/73717477/gcp-cloud-storage-golang-aws-sdk2-upload-file-with-s3-interoperability-creds
+func (lt *RecalculateV4Signature) RoundTrip(req *http.Request) (*http.Response, error) {
+	// store for later use
+	val := req.Header.Get("Accept-Encoding")
+
+	// delete the header so the header doesn't account for in the signature
+	req.Header.Del("Accept-Encoding")
+
+	// sign with the same date
+	timeString := req.Header.Get("X-Amz-Date")
+	timeDate, _ := time.Parse("20060102T150405Z", timeString)
+
+	creds, _ := lt.cfg.Credentials.Retrieve(req.Context())
+	err := lt.signer.SignHTTP(req.Context(), creds, req, v4.GetPayloadHash(req.Context()), "s3", lt.cfg.Region, timeDate)
+	if err != nil {
+		return nil, err
+	}
+	// Reset Accept-Encoding if desired
+	req.Header.Set("Accept-Encoding", val)
+
+	fmt.Println("AfterAdjustment")
+	rrr, _ := httputil.DumpRequest(req, false)
+	fmt.Println(string(rrr))
+
+	// follows up the original round tripper
+	return lt.next.RoundTrip(req)
+}
 
 // Path to Version Files in S3.
 // Example:
@@ -101,34 +147,32 @@ func NewS3MetaStore(ctx context.Context, cfg S3MetaStoreConfig) (*S3MetaStore, e
 	var awsConfig aws.Config
 	var err error
 
+	awsConfigParts := []func(*config.LoadOptions) error{config.WithRegion(region)}
+
 	if cfg.AccessKeyID != "" && cfg.SecretAccessKey != "" {
 		creds := credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, "")
-		if cfg.Endpoint != "" {
-			awsConfig, err = config.LoadDefaultConfig(ctx,
-				config.WithCredentialsProvider(creds),
-				config.WithRegion(region),
-			)
-		} else {
-			awsConfig, err = config.LoadDefaultConfig(ctx,
-				config.WithCredentialsProvider(creds),
-				config.WithRegion(region),
-			)
-		}
-	} else {
-		if cfg.Endpoint != "" {
-			awsConfig, err = config.LoadDefaultConfig(ctx,
-				config.WithRegion(region),
-			)
-		} else {
-			awsConfig, err = config.LoadDefaultConfig(ctx,
-				config.WithRegion(region),
-			)
-		}
+		awsConfigParts = append(awsConfigParts, config.WithCredentialsProvider(creds))
 	}
 
+	if cfg.Endpoint != "" {
+		resolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...any) (aws.Endpoint, error) {
+			return aws.Endpoint{
+				URL:               cfg.Endpoint,
+				SigningRegion:     cfg.Region,
+				Source:            aws.EndpointSourceCustom,
+				HostnameImmutable: true,
+			}, nil
+		})
+		awsConfigParts = append(awsConfigParts, config.WithEndpointResolverWithOptions(resolver))
+	}
+
+	awsConfig, err = config.LoadDefaultConfig(ctx, awsConfigParts...)
 	if err != nil {
 		return nil, err
 	}
+
+	// Add middleware to remove offending header for signing
+	awsConfig.HTTPClient = &http.Client{Transport: &RecalculateV4Signature{http.DefaultTransport, v4.NewSigner(), awsConfig}}
 
 	// Create S3 client with optional path-style addressing and custom endpoint
 	otelaws.AppendMiddlewares(&awsConfig.APIOptions)
@@ -159,7 +203,7 @@ func NewS3MetaStore(ctx context.Context, cfg S3MetaStoreConfig) (*S3MetaStore, e
 	}
 
 	// Verify we have access to the bucket
-	_, err = s3Client.HeadBucket(ctx, &s3.HeadBucketInput{
+	_, err = s3Client.ListObjects(ctx, &s3.ListObjectsInput{
 		Bucket: aws.String(bucketName),
 	})
 	if err != nil {
