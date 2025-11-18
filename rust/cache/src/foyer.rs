@@ -188,7 +188,7 @@ pub struct FoyerCacheConfig {
     pub mem: usize,
 
     #[arg(skip)]
-    #[serde(default)]
+    #[serde(default, flatten)]
     pub disk: DiskFieldValue,
 
     /// Disk cache file size. (MiB)
@@ -799,9 +799,8 @@ mod test {
     #[test]
     fn test_legacy_config_deserialize() {
         let legacy_yaml = r#"
-disk:
-  dir: "/tmp/foyer_cache"
-  disk: 4096
+dir: "/tmp/foyer_cache"
+disk: 4096
 "#;
 
         let config: FoyerCacheConfig =
