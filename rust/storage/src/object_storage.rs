@@ -274,12 +274,7 @@ impl ObjectStorage {
         }
     }
 
-    async fn multipart_put(
-        &self,
-        key: &str,
-        bytes: Bytes,
-        _options: PutOptions,
-    ) -> Result<ETag, StorageError> {
+    async fn multipart_put(&self, key: &str, bytes: Bytes) -> Result<ETag, StorageError> {
         let chunk_ranges = Self::partition(bytes.len() as u64, self.upload_part_size_bytes)
             .map(|(start, end)| (start as usize..end as usize));
         let mut upload_handle = self.store.put_multipart(&key.into()).await?;
@@ -331,20 +326,24 @@ impl ObjectStorage {
         (&update_version).try_into()
     }
 
+    pub fn is_oneshot_upload(&self, total_size_bytes: u64, options: &PutOptions) -> bool {
+        // NOTE(sicheng): GCS has no support for conditional multipart upload
+        // https://docs.cloud.google.com/storage/docs/multipart-uploads
+        total_size_bytes <= self.upload_part_size_bytes
+            || options.if_match.is_some()
+            || options.if_not_exists
+    }
+
     pub async fn put(
         &self,
         key: &str,
         bytes: Bytes,
         options: PutOptions,
     ) -> Result<ETag, StorageError> {
-        // TODO(sicheng): Figure out how to perform conditional multipart upload
-        if bytes.len() > self.upload_part_size_bytes as usize
-            && options.if_match.is_none()
-            && !options.if_not_exists
-        {
-            self.multipart_put(key, bytes, options).await
-        } else {
+        if self.is_oneshot_upload(bytes.len() as u64, &options) {
             self.oneshot_put(key, bytes, options).await
+        } else {
+            self.multipart_put(key, bytes).await
         }
     }
 

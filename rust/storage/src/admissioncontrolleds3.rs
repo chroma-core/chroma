@@ -149,10 +149,7 @@ impl ACStorageProvider {
         match self {
             ACStorageProvider::S3(s3_storage) => s3_storage.is_oneshot_upload(total_size_bytes),
             ACStorageProvider::Object(object_storage) => {
-                // TODO(sicheng): Figure out how to perform conditional multipart upload
-                total_size_bytes <= object_storage.upload_part_size_bytes as usize
-                    || options.if_match.is_some()
-                    || options.if_not_exists
+                object_storage.is_oneshot_upload(total_size_bytes as u64, options)
             }
         }
     }
