@@ -98,6 +98,8 @@ fn default_name() -> String {
 
 pub type FoyerError = foyer::Error;
 
+// Legacy Disk Parsing Handling
+
 /// Format:
 ///
 /// - "/path/to/disk/cache/dir"
@@ -105,6 +107,7 @@ pub type FoyerError = foyer::Error;
 #[derive(Deserialize, Debug, Clone, Serialize, Parser)]
 pub struct Disk {
     /// Directory for disk cache data.
+    #[serde(alias = "dir")]
     pub path: String,
     /// Disk cache capacity. (MiB)
     pub capacity: usize,
@@ -119,34 +122,6 @@ impl Disk {
     }
 }
 
-// Needed for clap parsing.
-impl FromStr for Disk {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = s.split(':').collect();
-
-        match parts.len() {
-            1 => Ok(Disk {
-                path: parts[0].to_string(),
-                capacity: default_disk_capacity(),
-            }),
-            2 => {
-                let capacity = parts[1]
-                    .parse::<usize>()
-                    .map_err(|e| format!("Invalid capacity: {}", e))?;
-                Ok(Disk {
-                    path: parts[0].to_string(),
-                    capacity,
-                })
-            }
-            _ => Err(format!(
-                "Invalid disk format. Expected 'path' or 'path:capacity', got '{s}'",
-            )),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LegacyDisk {
     dir: String,
@@ -155,7 +130,7 @@ pub struct LegacyDisk {
 }
 
 /// Represents the disk field value, supporting both old and new config formats.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum DiskFieldValue {
     /// New format: list of disks with paths and capacities
@@ -167,6 +142,71 @@ pub enum DiskFieldValue {
 impl Default for DiskFieldValue {
     fn default() -> Self {
         DiskFieldValue::MultiDisk(vec![])
+    }
+}
+
+impl<'de> Deserialize<'de> for DiskFieldValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Helper {
+            Multi { disk: Vec<Disk> },
+            Legacy(LegacyDisk),
+        }
+
+        match Helper::deserialize(deserializer)? {
+            Helper::Multi { disk } => Ok(DiskFieldValue::MultiDisk(disk)),
+            Helper::Legacy(legacy) => Ok(DiskFieldValue::Legacy(legacy)),
+        }
+    }
+}
+
+#[allow(clippy::to_string_trait_impl)]
+impl ToString for DiskFieldValue {
+    fn to_string(&self) -> String {
+        match self {
+            DiskFieldValue::MultiDisk(disks) => disks
+                .iter()
+                .map(|d| format!("{}:{}", d.path, d.capacity))
+                .collect::<Vec<String>>()
+                .join(", "),
+            DiskFieldValue::Legacy(legacy) => {
+                format!("{}:{}", legacy.dir, legacy.capacity)
+            }
+        }
+    }
+}
+
+impl FromStr for DiskFieldValue {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Multiple disks are separated by commas, a single disk is just a single entry.
+        let disks = s
+            .split(',')
+            .map(|part| {
+                let parts: Vec<&str> = part.split(':').collect();
+                if parts.len() == 2 {
+                    let path = parts[0].to_string();
+                    let capacity = parts[1]
+                        .parse::<usize>()
+                        .map_err(|e| format!("Invalid capacity: {}", e))?;
+                    Ok(Disk { path, capacity })
+                } else if parts.len() == 1 {
+                    let path = parts[0].to_string();
+                    Ok(Disk {
+                        path,
+                        capacity: default_disk_capacity(),
+                    })
+                } else {
+                    Err("Invalid disk format".to_string())
+                }
+            })
+            .collect::<Result<Vec<Disk>, String>>()?;
+        Ok(DiskFieldValue::MultiDisk(disks))
     }
 }
 
@@ -187,7 +227,7 @@ pub struct FoyerCacheConfig {
     #[serde(default = "default_mem")]
     pub mem: usize,
 
-    #[arg(skip)]
+    #[arg(long, default_value = "DiskFieldValue::default")]
     #[serde(default, flatten)]
     pub disk: DiskFieldValue,
 
@@ -455,19 +495,31 @@ where
         let disks = config.disks();
         if disks.is_empty() {
             return Err(Box::new(CacheError::InvalidCacheConfig(
-                "missing disk".to_string(),
+                "No disks configured for hybrid cache. Please configure cache directory and capacity in order to use Hybrid cache.
+
+                E.g., in YAML:
+                disk:
+                  - dir: /path/to/disk/cache/dir
+                    capacity: 4096
+
+                ".to_string(),
             )));
         }
 
         let mut dev = CombinedDeviceBuilder::new();
         for Disk { path, capacity } in disks.iter() {
-            let d = FsDeviceBuilder::new(path)
+            let device_builder = FsDeviceBuilder::new(path).with_capacity(capacity * MIB);
+            // Internal to foyer the cfg target_os = linux gates acccess to direct I/O.
+            #[cfg(target_os = "linux")]
+            let device_builder = device_builder.with_direct(true);
+            let d = device_builder
                 .with_capacity(capacity * MIB)
                 .build()
                 .map_err(|e| {
-                    CacheError::InvalidCacheConfig(format!("builder failed: {e:?}")).boxed()
+                    CacheError::InvalidCacheConfig(format!("Cache device builder failed: {e:?}"))
+                        .boxed()
                 })?;
-            dev = dev.with_device(d);
+            dev = dev.with_device(d)
         }
         let mut throttle = Throttle::default();
         if config.admission_rate_limit > 0 {
@@ -776,6 +828,7 @@ where
 
 #[cfg(test)]
 mod test {
+    use clap::Parser;
     use std::path::PathBuf;
 
     use tokio::{fs::File, sync::mpsc};
@@ -796,12 +849,34 @@ mod test {
         }
     }
 
+    // Disk Cache Config Tests
+
     #[test]
-    fn test_legacy_config_deserialize() {
+    fn test_disk_field_value_clap_parse() {
+        let args = ["foyer-cache", "--disk", "/tmp/disk_a:2048,/tmp/disk_b:1024"];
+
+        let config = FoyerCacheConfig::parse_from(args);
+        let disks = config.disks();
+        assert_eq!(disks.len(), 2);
+        assert_eq!(disks[0].path, "/tmp/disk_a");
+        assert_eq!(disks[0].capacity, 2048);
+        assert_eq!(disks[1].path, "/tmp/disk_b");
+        assert_eq!(disks[1].capacity, 1024);
+    }
+
+    #[test]
+    fn test_disk_field_value_clap_default() {
+        let config = FoyerCacheConfig::default();
+        let disks = config.disks();
+        assert_eq!(disks.len(), 0);
+    }
+
+    #[test]
+    fn test_legacy_disk_config_deserialize() {
         let legacy_yaml = r#"
-dir: "/tmp/foyer_cache"
-disk: 4096
-"#;
+            dir: "/tmp/foyer_cache"
+            disk: 4096
+        "#;
 
         let config: FoyerCacheConfig =
             serde_yaml::from_str(legacy_yaml).expect("Should be able to deserialize legacy config");
@@ -811,6 +886,46 @@ disk: 4096
         assert_eq!(disks[0].path, "/tmp/foyer_cache");
         assert_eq!(disks[0].capacity, 4096);
     }
+
+    #[test]
+    fn test_new_disk_config_multi_disk_deserialize() {
+        let yaml = r#"
+            disk:
+            - path: "/mnt/cache_a"
+                capacity: 4096
+            - path: "/mnt/cache_b"
+                capacity: 2048
+        "#;
+
+        let config: FoyerCacheConfig =
+            serde_yaml::from_str(yaml).expect("Should deserialize new multi disk config");
+
+        let disks = config.disks();
+        assert_eq!(disks.len(), 2);
+        assert_eq!(disks[0].path, "/mnt/cache_a");
+        assert_eq!(disks[0].capacity, 4096);
+        assert_eq!(disks[1].path, "/mnt/cache_b");
+        assert_eq!(disks[1].capacity, 2048);
+    }
+
+    #[test]
+    fn test_new_disk_config_single_disk_deserialize() {
+        let yaml = r#"
+            disk:
+            - path: "/mnt/cache_a"
+                capacity: 4096
+        "#;
+
+        let config: FoyerCacheConfig =
+            serde_yaml::from_str(yaml).expect("Should deserialize new single disk config");
+
+        let disks = config.disks();
+        assert_eq!(disks.len(), 1);
+        assert_eq!(disks[0].path, "/mnt/cache_a");
+        assert_eq!(disks[0].capacity, 4096);
+    }
+
+    // Foyer
 
     #[tokio::test]
     async fn test_foyer_memory_cache_can_close_file_descriptor() {
