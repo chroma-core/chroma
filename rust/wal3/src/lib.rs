@@ -74,8 +74,8 @@ pub enum Error {
     EmptyBatch,
     #[error("perform exponential backoff and retry")]
     Backoff,
-    #[error("an internal, otherwise unclassifiable error")]
-    Internal,
+    #[error("an internal, otherwise unclassifiable error ({}:{})")]
+    Internal { file: String, line: u32 },
     #[error("could not find FSN in path: {0}")]
     MissingFragmentSequenceNumber(String),
     #[error("corrupt manifest: {0}")]
@@ -100,6 +100,14 @@ pub enum Error {
     StorageError(#[from] Arc<chroma_storage::StorageError>),
 }
 
+impl Error {
+    pub fn internal(file: impl Into<String>, line: impl Into<u32>) -> Self {
+        let file = file.into();
+        let line = line.into();
+        Self::Internal { file, line }
+    }
+}
+
 impl chroma_error::ChromaError for Error {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
@@ -114,7 +122,7 @@ impl chroma_error::ChromaError for Error {
             Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
             Self::EmptyBatch => chroma_error::ErrorCodes::InvalidArgument,
             Self::Backoff => chroma_error::ErrorCodes::Unavailable,
-            Self::Internal => chroma_error::ErrorCodes::Internal,
+            Self::Internal { .. } => chroma_error::ErrorCodes::Internal,
             Self::MissingFragmentSequenceNumber(_) => chroma_error::ErrorCodes::Internal,
             Self::CorruptManifest(_) => chroma_error::ErrorCodes::DataLoss,
             Self::CorruptFragment(_) => chroma_error::ErrorCodes::DataLoss,

@@ -191,7 +191,7 @@ impl LogWriter {
             // SAFETY(rescrv):  This is unit tested to never happen.  If it happens, add more tests.
             if !new_manifest.can_apply_fragment(&frag) {
                 tracing::error!("Cannot apply frag to a clean manifest.");
-                return Err(Error::Internal);
+                return Err(Error::internal(file!(), line!()));
             }
             new_manifest.apply_fragment(frag);
             // SAFETY(rescrv):  If this fails, there's nothing left to do.
@@ -529,8 +529,8 @@ impl OnceLogWriter {
         mark_dirty: Arc<dyn MarkDirty>,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
-        let batch_manager =
-            BatchManager::new(options.throttle_fragment).ok_or_else(|| Error::Internal)?;
+        let batch_manager = BatchManager::new(options.throttle_fragment)
+            .ok_or_else(|| Error::internal(file!(), line!()))?;
         let mut manifest_manager = ManifestManager::new(
             options.throttle_manifest,
             options.snapshot_manifest,
@@ -591,8 +591,8 @@ impl OnceLogWriter {
         mark_dirty: Arc<dyn MarkDirty>,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
-        let batch_manager =
-            BatchManager::new(options.throttle_fragment).ok_or_else(|| Error::Internal)?;
+        let batch_manager = BatchManager::new(options.throttle_fragment)
+            .ok_or_else(|| Error::internal(file!(), line!()))?;
         let manifest_manager = ManifestManager::new(
             options.throttle_manifest,
             options.snapshot_manifest,
@@ -661,7 +661,9 @@ impl OnceLogWriter {
                 }
             }
             let span = tracing::info_span!("wait_for_durability");
-            rx.instrument(span).await.map_err(|_| Error::Internal)?
+            rx.instrument(span)
+                .await
+                .map_err(|_| Error::internal(file!(), line!()))?
         }
         .instrument(append_span_clone)
         .await
