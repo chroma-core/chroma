@@ -18,7 +18,6 @@ type AttachedFunction struct {
 	FunctionParams          string     `gorm:"column:function_params;type:jsonb;not null"`
 	CompletionOffset        int64      `gorm:"column:completion_offset;type:bigint;not null;default:0"`
 	LastRun                 *time.Time `gorm:"column:last_run;type:timestamp"`
-	NextRun                 time.Time  `gorm:"column:next_run;type:timestamp;not null"`
 	MinRecordsForInvocation int64      `gorm:"column:min_records_for_invocation;type:bigint;not null;default:100"`
 	CurrentAttempts         int32      `gorm:"column:current_attempts;type:integer;not null;default:0"`
 	IsAlive                 bool       `gorm:"column:is_alive;type:boolean;not null;default:true"`

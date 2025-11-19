@@ -111,7 +111,6 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 
 			// Validation passed, reuse the concurrent attached function's data
 			attachedFunctionID = concurrentAttachedFunction.ID
-			nextRun = concurrentAttachedFunction.NextRun
 			// Already created, skip Phase 2
 			skipPhase2 = true
 			return nil
@@ -187,15 +186,12 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			FunctionParams:          paramsJSON,
 			CompletionOffset:        0,
 			LastRun:                 nil,
-			NextRun:                 now,
 			MinRecordsForInvocation: int64(req.MinRecordsForInvocation),
 			CurrentAttempts:         0,
 			CreatedAt:               now,
 			UpdatedAt:               now,
 			OldestWrittenNonce:      nil,
 		}
-
-		nextRun = attachedFunction.NextRun
 
 		err = s.catalog.metaDomain.AttachedFunctionDb(txCtx).Insert(attachedFunction)
 		if err != nil {
@@ -289,7 +285,6 @@ func attachedFunctionToProto(attachedFunction *dbmodel.AttachedFunction, functio
 		MinRecordsForInvocation: uint64(attachedFunction.MinRecordsForInvocation),
 		TenantId:                attachedFunction.TenantID,
 		DatabaseId:              attachedFunction.DatabaseID,
-		NextRunAt:               uint64(attachedFunction.NextRun.UnixMicro()),
 		CreatedAt:               uint64(attachedFunction.CreatedAt.UnixMicro()),
 		UpdatedAt:               uint64(attachedFunction.UpdatedAt.UnixMicro()),
 	}
@@ -729,7 +724,6 @@ func (s *Coordinator) GetSoftDeletedAttachedFunctions(ctx context.Context, req *
 			UpdatedAt:               uint64(af.UpdatedAt.UnixMicro()),
 		}
 
-		protoAttachedFunctions[i].NextRunAt = uint64(af.NextRun.UnixMicro())
 		if af.OutputCollectionID != nil {
 			protoAttachedFunctions[i].OutputCollectionId = proto.String(*af.OutputCollectionID)
 		}
