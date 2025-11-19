@@ -237,7 +237,7 @@ impl Storage {
         match self {
             Storage::S3(s3) => Some(&s3.bucket),
             Storage::Object(obj) => Some(&obj.bucket),
-            Storage::AdmissionControlledS3(ac_s3) => Some(&ac_s3.storage.bucket),
+            Storage::AdmissionControlledS3(ac_s3) => Some(ac_s3.storage.bucket_name()),
             Storage::Local(_) => None,
         }
     }
@@ -396,7 +396,7 @@ impl Storage {
             Storage::S3(s3) => s3.put_bytes(key, bytes, options).await,
             Storage::Object(obj) => obj.put(key, bytes.into(), options).await.map(Some),
             Storage::Local(local) => local.put_bytes(key, &bytes, options).await,
-            Storage::AdmissionControlledS3(as3) => as3.put_bytes(key, bytes, options).await,
+            Storage::AdmissionControlledS3(as3) => as3.put_bytes(key, bytes.into(), options).await,
         }
     }
 
