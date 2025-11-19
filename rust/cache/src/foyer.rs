@@ -187,22 +187,34 @@ impl FromStr for DiskFieldValue {
         // Multiple disks are separated by commas, a single disk is just a single entry.
         let disks = s
             .split(',')
+            .filter_map(|part| {
+                let trimmed = part.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                }
+            })
             .map(|part| {
-                let parts: Vec<&str> = part.split(':').collect();
-                if parts.len() == 2 {
-                    let path = parts[0].to_string();
-                    let capacity = parts[1]
+                let mut sections = part.splitn(2, ':');
+                let path = sections
+                    .next()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                    .ok_or_else(|| "Disk path cannot be empty".to_string())?
+                    .to_string();
+
+                if let Some(cap_str) = sections.next() {
+                    let capacity = cap_str
+                        .trim()
                         .parse::<usize>()
                         .map_err(|e| format!("Invalid capacity: {}", e))?;
                     Ok(Disk { path, capacity })
-                } else if parts.len() == 1 {
-                    let path = parts[0].to_string();
+                } else {
                     Ok(Disk {
                         path,
                         capacity: default_disk_capacity(),
                     })
-                } else {
-                    Err("Invalid disk format".to_string())
                 }
             })
             .collect::<Result<Vec<Disk>, String>>()?;
@@ -830,6 +842,7 @@ where
 mod test {
     use clap::Parser;
     use std::path::PathBuf;
+    use std::str::FromStr;
 
     use tokio::{fs::File, sync::mpsc};
 
@@ -869,6 +882,21 @@ mod test {
         let config = FoyerCacheConfig::default();
         let disks = config.disks();
         assert_eq!(disks.len(), 0);
+    }
+
+    #[test]
+    fn test_disk_field_value_from_str_trims_and_filters_empty_parts() {
+        let parsed =
+            DiskFieldValue::from_str(", /tmp/disk_a:2048 , /tmp/disk_b , ").expect("parse input");
+        let disks = match parsed {
+            DiskFieldValue::MultiDisk(disks) => disks,
+            DiskFieldValue::Legacy(_) => panic!("expected multi disk variant"),
+        };
+        assert_eq!(disks.len(), 2);
+        assert_eq!(disks[0].path, "/tmp/disk_a");
+        assert_eq!(disks[0].capacity, 2048);
+        assert_eq!(disks[1].path, "/tmp/disk_b");
+        assert_eq!(disks[1].capacity, default_disk_capacity());
     }
 
     #[test]
