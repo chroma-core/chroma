@@ -222,10 +222,12 @@ impl ACStorageProvider {
                         upload_future.await
                     }
                 });
-                let upload_parts = stream::iter(upload_part_futures)
+                let mut upload_parts = stream::iter(upload_part_futures)
                     .buffer_unordered(part_count)
                     .try_collect::<Vec<_>>()
                     .await?;
+
+                upload_parts.sort_unstable_by_key(|part| part.part_number());
 
                 s3_storage
                     .finish_multipart_upload(key, &upload_id, upload_parts, options)
@@ -598,6 +600,18 @@ impl AdmissionControlledS3Storage {
             storage: ACStorageProvider::S3(storage.into()),
             outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(policy),
+            metrics: AdmissionControlledS3StorageMetrics::default(),
+        }
+    }
+
+    pub fn new_object_with_default_policy(storage: ObjectStorage) -> Self {
+        Self {
+            storage: ACStorageProvider::Object(storage),
+            outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            rate_limiter: Arc::new(RateLimitPolicy::CountBasedPolicy(CountBasedPolicy::new(
+                2,
+                &vec![1.0],
+            ))),
             metrics: AdmissionControlledS3StorageMetrics::default(),
         }
     }
