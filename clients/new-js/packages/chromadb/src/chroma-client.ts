@@ -441,6 +441,7 @@ export class ChromaClient {
       configuration,
       embeddingFunction,
       metadata,
+      schema,
     });
 
     const { data } = await Api.createCollection({
