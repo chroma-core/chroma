@@ -263,8 +263,7 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskRecovery_HybridAppro
 		return
 	}
 	suite.NotNil(taskResp)
-	// TODO(tanujnay112): Cleanup after redoing AttachFunction
-	suite.T().Skip("Test requires proto regeneration for AttachFunctionResponse.Id field")
+	suite.NotNil(taskResp.AttachedFunction)
 
 	// STEP 3: Try to create task with same name but DIFFERENT parameters → should fail
 	_, err = suite.sysdbClient.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
@@ -357,8 +356,7 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskCleanup_ThenRecreate
 		return
 	}
 	suite.NotNil(taskResp)
-	// TODO(tanujnay112): Cleanup after redoing AttachFunction
-	suite.T().Skip("Test requires proto regeneration for AttachFunctionResponse.Id field")
+	suite.NotNil(taskResp.AttachedFunction)
 
 	// STEP 2: Call CleanupExpiredPartialAttachedFunctions (with short timeout to test it doesn't affect complete tasks)
 	cleanupResp, err := suite.sysdbClient.CleanupExpiredPartialAttachedFunctions(ctx, &coordinatorpb.CleanupExpiredPartialAttachedFunctionsRequest{
@@ -370,14 +368,16 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskCleanup_ThenRecreate
 	suite.T().Logf("Cleanup completed, removed %d tasks", cleanupResp.CleanedUpCount)
 
 	// STEP 3: Verify task still exists and can be retrieved
-	getResp, err := suite.sysdbClient.GetAttachedFunctionByName(ctx, &coordinatorpb.GetAttachedFunctionByNameRequest{
-		InputCollectionId: collectionID,
-		Name:              taskName,
+	getResp, err := suite.sysdbClient.GetAttachedFunctions(ctx, &coordinatorpb.GetAttachedFunctionsRequest{
+		InputCollectionId: &collectionID,
+		Name:              &taskName,
+		OnlyReady:         func() *bool { b := true; return &b }(),
 	})
 	suite.NoError(err, "Task should still exist after cleanup")
 	suite.NotNil(getResp)
-	suite.Equal(taskResp.AttachedFunction.Id, getResp.AttachedFunction.Id)
-	suite.T().Logf("Task still exists after cleanup: %s", getResp.AttachedFunction.Id)
+	suite.Require().Len(getResp.AttachedFunctions, 1)
+	suite.Equal(taskResp.AttachedFunction.Id, getResp.AttachedFunctions[0].Id)
+	suite.T().Logf("Task still exists after cleanup: %s", getResp.AttachedFunctions[0].Id)
 
 	// STEP 4: Delete the task
 	_, err = suite.sysdbClient.DetachFunction(ctx, &coordinatorpb.DetachFunctionRequest{

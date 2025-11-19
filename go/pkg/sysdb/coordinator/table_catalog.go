@@ -714,7 +714,8 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 		}
 
 		// List attached functions for this collection (as input) and soft delete them
-		attachedFunctions, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetByCollectionID(deleteCollection.ID.String())
+		inputCollID := deleteCollection.ID.String()
+		attachedFunctions, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, &inputCollID, false)
 		if err != nil {
 			return err
 		}
@@ -734,7 +735,11 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 					log.Error("Failed to parse attached function ID from metadata", zap.Error(parseErr), zap.String("value", *meta.StrValue))
 					return parseErr
 				}
-				attachedFunction, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetByID(attachedFunctionID)
+				results, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(&attachedFunctionID, nil, nil, false)
+				var attachedFunction *dbmodel.AttachedFunction
+				if len(results) > 0 {
+					attachedFunction = results[0]
+				}
 				if err != nil {
 					log.Error("Failed to get attached function by ID", zap.Error(err), zap.String("attached_function_id", attachedFunctionID.String()))
 					return err

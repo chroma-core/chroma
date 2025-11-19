@@ -1351,8 +1351,16 @@ mod tests {
 
         // Verify statistics were generated
         let updated_attached_function = sysdb
-            .get_attached_function_by_name(collection_id, attached_function_name.clone())
+            .get_attached_functions(chroma_sysdb::GetAttachedFunctionsOptions {
+                name: Some(attached_function_name.clone()),
+                input_collection_id: Some(collection_id),
+                only_ready: true,
+                ..Default::default()
+            })
             .await
+            .expect("Attached function query should succeed")
+            .into_iter()
+            .next()
             .expect("Attached function should be found");
 
         // Note: completion_offset is 14, all 15 records (0-14) were processed

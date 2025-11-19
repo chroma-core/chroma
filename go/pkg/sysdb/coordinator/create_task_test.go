@@ -18,15 +18,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// testMinimalUUIDv7 is the test's copy of minimalUUIDv7 from task.go
-// UUIDv7 format: [timestamp (48 bits)][version (4 bits)][random (12 bits)][variant (2 bits)][random (62 bits)]
-// This UUID has all zeros for timestamp and random bits, making it the minimal valid UUIDv7.
-var testMinimalUUIDv7 = uuid.UUID{
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // timestamp = 0 (bytes 0-5)
-	0x70, 0x00, // version 7 (0x7) in high nibble, low nibble = 0 (bytes 6-7)
-	0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // variant bits + rest = 0 (bytes 8-15)
-}
-
 // MockMemberlistStore is a mock implementation of memberlist_manager.IMemberlistStore for testing
 type MockMemberlistStore struct {
 	mock.Mock
@@ -69,7 +60,7 @@ func (suite *AttachFunctionTestSuite) setupAttachFunctionMocks(ctx context.Conte
 	// Phase 1: Create attached function in transaction
 	// Check if any attached function exists for this collection
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetAnyByCollectionID", inputCollectionID).
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &inputCollectionID, false).
 		Return([]*dbmodel.AttachedFunction{}, nil).Once()
 
 	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
@@ -165,7 +156,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 	// Setup mocks that will be called within the transaction (using mock.Anything for context)
 	// Check if any attached function exists for this collection
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetAnyByCollectionID", inputCollectionID).
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), &attachedFunctionName, &inputCollectionID, false).
 		Return([]*dbmodel.AttachedFunction{}, nil).Once()
 
 	// Look up database
@@ -283,7 +274,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 
 			// Inside transaction: check for existing attached functions
 			suite.mockMetaDomain.On("AttachedFunctionDb", txCtx).Return(suite.mockAttachedFunctionDb).Once()
-			suite.mockAttachedFunctionDb.On("GetAnyByCollectionID", inputCollectionID).
+			suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &inputCollectionID, false).
 				Return([]*dbmodel.AttachedFunction{existingAttachedFunction}, nil).Once()
 
 			// Note: validateAttachedFunctionMatchesRequest uses dbmodel.GetFunctionNameByID (static lookup),
@@ -352,7 +343,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 
 	// Phase 1: Create attached function in transaction
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetAnyByCollectionID", inputCollectionID).
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), &attachedFunctionName, &inputCollectionID, false).
 		Return([]*dbmodel.AttachedFunction{}, nil).Once()
 
 	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
@@ -408,7 +399,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 
 			// Inside transaction: check for existing attached functions
 			suite.mockMetaDomain.On("AttachedFunctionDb", txCtx).Return(suite.mockAttachedFunctionDb).Once()
-			suite.mockAttachedFunctionDb.On("GetAnyByCollectionID", inputCollectionID).
+			suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &inputCollectionID, false).
 				Return([]*dbmodel.AttachedFunction{incompleteAttachedFunction}, nil).Once()
 
 			// Note: validateAttachedFunctionMatchesRequest uses dbmodel.GetFunctionNameByID (static lookup),
@@ -498,7 +489,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 
 			// Inside transaction: check for existing attached functions
 			suite.mockMetaDomain.On("AttachedFunctionDb", txCtx).Return(suite.mockAttachedFunctionDb).Once()
-			suite.mockAttachedFunctionDb.On("GetAnyByCollectionID", inputCollectionID).
+			suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &inputCollectionID, false).
 				Return([]*dbmodel.AttachedFunction{existingAttachedFunction}, nil).Once()
 
 			// Note: validateAttachedFunctionMatchesRequest uses dbmodel.GetFunctionNameByID (static lookup)

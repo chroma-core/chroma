@@ -458,14 +458,14 @@ impl SysDb {
         }
     }
 
-    pub async fn list_attached_functions(
+    pub async fn get_attached_functions(
         &mut self,
-        collection_id: CollectionUuid,
-    ) -> Result<Vec<chroma_proto::AttachedFunction>, ListAttachedFunctionsError> {
+        options: crate::GetAttachedFunctionsOptions,
+    ) -> Result<Vec<chroma_types::AttachedFunction>, ListAttachedFunctionsError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.list_attached_functions(collection_id).await,
+            SysDb::Grpc(grpc) => grpc.get_attached_functions(options).await,
             SysDb::Sqlite(_) => Err(ListAttachedFunctionsError::NotImplemented),
-            SysDb::Test(test) => test.list_attached_functions(collection_id).await,
+            SysDb::Test(test) => test.get_attached_functions(options).await,
         }
     }
 
@@ -1322,23 +1322,47 @@ impl GrpcSysDb {
         Ok(res.count as usize)
     }
 
-    pub async fn list_attached_functions(
+    pub async fn get_attached_functions(
         &mut self,
-        collection_id: CollectionUuid,
-    ) -> Result<Vec<chroma_proto::AttachedFunction>, ListAttachedFunctionsError> {
+        options: crate::GetAttachedFunctionsOptions,
+    ) -> Result<Vec<chroma_types::AttachedFunction>, ListAttachedFunctionsError> {
         let res = self
             .client
-            .list_attached_functions(chroma_proto::ListAttachedFunctionsRequest {
-                input_collection_id: collection_id.0.to_string(),
+            .get_attached_functions(chroma_proto::GetAttachedFunctionsRequest {
+                id: options.id.map(|id| id.0.to_string()),
+                name: options.name,
+                input_collection_id: options.input_collection_id.map(|id| id.0.to_string()),
+                only_ready: Some(options.only_ready),
             })
             .await
             .map_err(|err| match err.code() {
-                Code::NotFound => ListAttachedFunctionsError::NotFound(collection_id.0.to_string()),
+                Code::NotFound => {
+                    let id_str = options
+                        .input_collection_id
+                        .map(|id| id.0.to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    ListAttachedFunctionsError::NotFound(id_str)
+                }
                 _ => ListAttachedFunctionsError::Internal(err.into()),
             })?
             .into_inner();
 
-        Ok(res.attached_functions)
+        // Convert proto attached functions to Rust types
+        res.attached_functions
+            .into_iter()
+            .map(|proto_af| {
+                Self::attached_function_from_proto(proto_af).map_err(|e| match e {
+                    GetAttachedFunctionError::ServerReturnedInvalidData => {
+                        ListAttachedFunctionsError::Internal(
+                            tonic::Status::internal("Server returned invalid data").into(),
+                        )
+                    }
+                    _ => ListAttachedFunctionsError::Internal(
+                        tonic::Status::internal("Failed to convert attached function").into(),
+                    ),
+                })
+            })
+            .collect()
     }
 
     pub async fn get_collections_to_gc(
@@ -1923,70 +1947,6 @@ impl GrpcSysDb {
         })
     }
 
-    pub async fn get_attached_function_by_name(
-        &mut self,
-        input_collection_id: chroma_types::CollectionUuid,
-        attached_function_name: String,
-    ) -> Result<chroma_types::AttachedFunction, GetAttachedFunctionError> {
-        let req = chroma_proto::GetAttachedFunctionByNameRequest {
-            input_collection_id: input_collection_id.to_string(),
-            name: attached_function_name.clone(),
-        };
-
-        let response = match self.client.get_attached_function_by_name(req).await {
-            Ok(resp) => resp,
-            Err(status) => {
-                if status.code() == tonic::Code::NotFound {
-                    return Err(GetAttachedFunctionError::NotFound);
-                }
-                return Err(GetAttachedFunctionError::FailedToGetAttachedFunction(
-                    status,
-                ));
-            }
-        };
-        let response = response.into_inner();
-
-        // Extract the nested attached function from response
-        let attached_function = response.attached_function.ok_or_else(|| {
-            GetAttachedFunctionError::FailedToGetAttachedFunction(tonic::Status::internal(
-                "Missing attached function in response",
-            ))
-        })?;
-
-        Self::attached_function_from_proto(attached_function)
-    }
-
-    pub async fn get_attached_function_by_uuid(
-        &mut self,
-        attached_function_uuid: chroma_types::AttachedFunctionUuid,
-    ) -> Result<chroma_types::AttachedFunction, GetAttachedFunctionError> {
-        let req = chroma_proto::GetAttachedFunctionByUuidRequest {
-            id: attached_function_uuid.0.to_string(),
-        };
-
-        let response = match self.client.get_attached_function_by_uuid(req).await {
-            Ok(resp) => resp,
-            Err(status) => {
-                if status.code() == tonic::Code::NotFound {
-                    return Err(GetAttachedFunctionError::NotFound);
-                }
-                return Err(GetAttachedFunctionError::FailedToGetAttachedFunction(
-                    status,
-                ));
-            }
-        };
-        let response = response.into_inner();
-
-        // Extract the nested attached function from response
-        let attached_function = response.attached_function.ok_or_else(|| {
-            GetAttachedFunctionError::FailedToGetAttachedFunction(tonic::Status::internal(
-                "Missing attached function in response",
-            ))
-        })?;
-
-        Self::attached_function_from_proto(attached_function)
-    }
-
     pub async fn soft_delete_attached_function(
         &mut self,
         name: String,
@@ -2240,47 +2200,6 @@ impl SysDb {
             }
             SysDb::Test(_) => {
                 todo!()
-            }
-        }
-    }
-
-    pub async fn get_attached_function_by_name(
-        &mut self,
-        input_collection_id: chroma_types::CollectionUuid,
-        attached_function_name: String,
-    ) -> Result<chroma_types::AttachedFunction, GetAttachedFunctionError> {
-        match self {
-            SysDb::Grpc(grpc) => {
-                grpc.get_attached_function_by_name(input_collection_id, attached_function_name)
-                    .await
-            }
-            SysDb::Sqlite(sqlite) => {
-                sqlite
-                    .get_attached_function_by_name(input_collection_id, attached_function_name)
-                    .await
-            }
-            SysDb::Test(_) => {
-                todo!()
-            }
-        }
-    }
-
-    pub async fn get_attached_function_by_uuid(
-        &mut self,
-        attached_function_uuid: chroma_types::AttachedFunctionUuid,
-    ) -> Result<chroma_types::AttachedFunction, GetAttachedFunctionError> {
-        match self {
-            SysDb::Grpc(grpc) => {
-                grpc.get_attached_function_by_uuid(attached_function_uuid)
-                    .await
-            }
-            SysDb::Sqlite(_) => {
-                // TODO: Implement for Sqlite
-                Err(GetAttachedFunctionError::NotFound)
-            }
-            SysDb::Test(_) => {
-                // TODO: Implement for TestSysDb
-                Err(GetAttachedFunctionError::NotFound)
             }
         }
     }

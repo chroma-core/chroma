@@ -2,9 +2,7 @@ use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_sysdb::sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::{
-    AttachedFunction, AttachedFunctionConversionError, CollectionUuid, ListAttachedFunctionsError,
-};
+use chroma_types::{AttachedFunction, CollectionUuid, ListAttachedFunctionsError};
 use thiserror::Error;
 
 /// The `GetAttachedFunctionOperator` lists attached functions for a collection and selects the first one.
@@ -39,8 +37,6 @@ pub struct GetAttachedFunctionOutput {
 pub enum GetAttachedFunctionOperatorError {
     #[error("Failed to list attached functions: {0}")]
     ListFunctions(#[from] ListAttachedFunctionsError),
-    #[error("Failed to convert attached function proto")]
-    ConversionError(#[from] AttachedFunctionConversionError),
     #[error("No attached function found")]
     NoAttachedFunctionFound,
 }
@@ -49,22 +45,18 @@ pub enum GetAttachedFunctionOperatorError {
 pub enum GetAttachedFunctionError {
     #[error("Failed to list attached functions: {0}")]
     ListFunctions(#[from] ListAttachedFunctionsError),
-    #[error("Failed to convert attached function proto")]
-    ConversionError(#[from] AttachedFunctionConversionError),
 }
 
 impl ChromaError for GetAttachedFunctionError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
             GetAttachedFunctionError::ListFunctions(e) => e.code(),
-            GetAttachedFunctionError::ConversionError(_) => chroma_error::ErrorCodes::Internal,
         }
     }
 
     fn should_trace_error(&self) -> bool {
         match self {
             GetAttachedFunctionError::ListFunctions(e) => e.should_trace_error(),
-            GetAttachedFunctionError::ConversionError(_) => true,
         }
     }
 }
@@ -73,9 +65,6 @@ impl ChromaError for GetAttachedFunctionOperatorError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
             GetAttachedFunctionOperatorError::ListFunctions(e) => e.code(),
-            GetAttachedFunctionOperatorError::ConversionError(_) => {
-                chroma_error::ErrorCodes::Internal
-            }
             GetAttachedFunctionOperatorError::NoAttachedFunctionFound => {
                 chroma_error::ErrorCodes::NotFound
             }
@@ -85,7 +74,6 @@ impl ChromaError for GetAttachedFunctionOperatorError {
     fn should_trace_error(&self) -> bool {
         match self {
             GetAttachedFunctionOperatorError::ListFunctions(e) => e.should_trace_error(),
-            GetAttachedFunctionOperatorError::ConversionError(_) => true,
             GetAttachedFunctionOperatorError::NoAttachedFunctionFound => false,
         }
     }
@@ -112,7 +100,11 @@ impl Operator<GetAttachedFunctionInput, GetAttachedFunctionOutput> for GetAttach
         let attached_functions = self
             .sysdb
             .clone()
-            .list_attached_functions(input.collection_id)
+            .get_attached_functions(chroma_sysdb::GetAttachedFunctionsOptions {
+                input_collection_id: Some(input.collection_id),
+                only_ready: true,
+                ..Default::default()
+            })
             .await?;
 
         if attached_functions.is_empty() {
@@ -127,15 +119,10 @@ impl Operator<GetAttachedFunctionInput, GetAttachedFunctionOutput> for GetAttach
         }
 
         // Take the first attached function from the list
-        let attached_function_proto = attached_functions
+        let attached_function = attached_functions
             .into_iter()
             .next()
             .ok_or(GetAttachedFunctionOperatorError::NoAttachedFunctionFound)?;
-
-        // Convert proto to AttachedFunction type using TryFrom from task.rs
-        let attached_function: AttachedFunction = attached_function_proto
-            .try_into()
-            .map_err(GetAttachedFunctionOperatorError::ConversionError)?;
 
         tracing::info!(
             "[{}]: Found attached function '{}' for collection {}",

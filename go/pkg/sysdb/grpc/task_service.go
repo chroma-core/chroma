@@ -29,39 +29,15 @@ func (s *Server) AttachFunction(ctx context.Context, req *coordinatorpb.AttachFu
 	return res, nil
 }
 
-func (s *Server) GetAttachedFunctionByName(ctx context.Context, req *coordinatorpb.GetAttachedFunctionByNameRequest) (*coordinatorpb.GetAttachedFunctionByNameResponse, error) {
-	log.Info("GetAttachedFunctionByName", zap.String("input_collection_id", req.InputCollectionId), zap.String("name", req.Name))
+func (s *Server) GetAttachedFunctions(ctx context.Context, req *coordinatorpb.GetAttachedFunctionsRequest) (*coordinatorpb.GetAttachedFunctionsResponse, error) {
+	log.Info("GetAttachedFunctions",
+		zap.Stringp("id", req.Id),
+		zap.Stringp("name", req.Name),
+		zap.Stringp("input_collection_id", req.InputCollectionId))
 
-	res, err := s.coordinator.GetAttachedFunctionByName(ctx, req)
+	res, err := s.coordinator.GetAttachedFunctions(ctx, req)
 	if err != nil {
-		log.Error("GetAttachedFunctionByName failed", zap.Error(err))
-		if err == common.ErrAttachedFunctionNotFound {
-			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
-		}
-		return nil, err
-	}
-
-	return res, nil
-}
-
-func (s *Server) ListAttachedFunctions(ctx context.Context, req *coordinatorpb.ListAttachedFunctionsRequest) (*coordinatorpb.ListAttachedFunctionsResponse, error) {
-	log.Info("ListAttachedFunctions", zap.String("input_collection_id", req.InputCollectionId))
-
-	res, err := s.coordinator.ListAttachedFunctions(ctx, req)
-	if err != nil {
-		log.Error("ListAttachedFunctions failed", zap.Error(err))
-		return nil, err
-	}
-
-	return res, nil
-}
-
-func (s *Server) GetAttachedFunctionByUuid(ctx context.Context, req *coordinatorpb.GetAttachedFunctionByUuidRequest) (*coordinatorpb.GetAttachedFunctionByUuidResponse, error) {
-	log.Info("GetAttachedFunctionByUuid", zap.String("id", req.Id))
-
-	res, err := s.coordinator.GetAttachedFunctionByUuid(ctx, req)
-	if err != nil {
-		log.Error("GetAttachedFunctionByUuid failed", zap.Error(err))
+		log.Error("GetAttachedFunctions failed", zap.Error(err))
 		if err == common.ErrAttachedFunctionNotFound {
 			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}

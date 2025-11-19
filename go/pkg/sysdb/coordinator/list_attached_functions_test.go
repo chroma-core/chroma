@@ -86,7 +86,7 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_Success()
 	}
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetByCollectionID", collectionID).Return(attachedFunctions, nil).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &collectionID, true).Return(attachedFunctions, nil).Once()
 
 	functionOne := &dbmodel.Function{ID: functionID1, Name: "function-one"}
 	functionTwo := &dbmodel.Function{ID: functionID2, Name: "function-two"}
@@ -108,8 +108,8 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_Success()
 		})).
 		Return([]*dbmodel.Function{functionOne, functionTwo}, nil).Once()
 
-	req := &coordinatorpb.ListAttachedFunctionsRequest{InputCollectionId: collectionID}
-	resp, err := suite.coordinator.ListAttachedFunctions(ctx, req)
+	req := &coordinatorpb.GetAttachedFunctionsRequest{InputCollectionId: &collectionID, OnlyReady: func() *bool { b := true; return &b }()}
+	resp, err := suite.coordinator.GetAttachedFunctions(ctx, req)
 
 	suite.Require().NoError(err)
 	suite.Require().NotNil(resp)
@@ -130,10 +130,10 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_EmptyResu
 	collectionID := "test-collection"
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetByCollectionID", collectionID).Return([]*dbmodel.AttachedFunction{}, nil).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &collectionID, true).Return([]*dbmodel.AttachedFunction{}, nil).Once()
 
-	req := &coordinatorpb.ListAttachedFunctionsRequest{InputCollectionId: collectionID}
-	resp, err := suite.coordinator.ListAttachedFunctions(ctx, req)
+	req := &coordinatorpb.GetAttachedFunctionsRequest{InputCollectionId: &collectionID, OnlyReady: func() *bool { b := true; return &b }()}
+	resp, err := suite.coordinator.GetAttachedFunctions(ctx, req)
 
 	suite.Require().NoError(err)
 	suite.Require().NotNil(resp)
@@ -163,13 +163,13 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_FunctionD
 	}
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetByCollectionID", collectionID).Return([]*dbmodel.AttachedFunction{attachedFunction}, nil).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &collectionID, true).Return([]*dbmodel.AttachedFunction{attachedFunction}, nil).Once()
 
 	suite.mockMetaDomain.On("FunctionDb", ctx).Return(suite.mockFunctionDb).Once()
 	suite.mockFunctionDb.On("GetByIDs", []uuid.UUID{functionID}).Return(nil, errors.New("db error")).Once()
 
-	req := &coordinatorpb.ListAttachedFunctionsRequest{InputCollectionId: collectionID}
-	resp, err := suite.coordinator.ListAttachedFunctions(ctx, req)
+	req := &coordinatorpb.GetAttachedFunctionsRequest{InputCollectionId: &collectionID, OnlyReady: func() *bool { b := true; return &b }()}
+	resp, err := suite.coordinator.GetAttachedFunctions(ctx, req)
 
 	suite.Require().Error(err)
 	suite.Nil(resp)
@@ -198,15 +198,15 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_InvalidPa
 	}
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetByCollectionID", collectionID).Return([]*dbmodel.AttachedFunction{attachedFunction}, nil).Once()
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &collectionID, true).Return([]*dbmodel.AttachedFunction{attachedFunction}, nil).Once()
 
 	functionModel := &dbmodel.Function{ID: functionID, Name: "function"}
 
 	suite.mockMetaDomain.On("FunctionDb", ctx).Return(suite.mockFunctionDb).Once()
 	suite.mockFunctionDb.On("GetByIDs", []uuid.UUID{functionID}).Return([]*dbmodel.Function{functionModel}, nil).Once()
 
-	req := &coordinatorpb.ListAttachedFunctionsRequest{InputCollectionId: collectionID}
-	resp, err := suite.coordinator.ListAttachedFunctions(ctx, req)
+	req := &coordinatorpb.GetAttachedFunctionsRequest{InputCollectionId: &collectionID, OnlyReady: func() *bool { b := true; return &b }()}
+	resp, err := suite.coordinator.GetAttachedFunctions(ctx, req)
 
 	suite.Require().Error(err)
 	suite.Nil(resp)
