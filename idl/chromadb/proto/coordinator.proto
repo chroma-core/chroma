@@ -324,24 +324,7 @@ message FlushCollectionCompactionResponse {
 // AttachedFunction update information for transactional flush operations
 message AttachedFunctionUpdateInfo {
   string id = 1;
-  string run_nonce = 2;
-  uint64 completion_offset = 3;
-}
-
-// Combined request to flush collection compaction and update attached function atomically in a single transaction
-message FlushCollectionCompactionAndAttachedFunctionRequest {
-  FlushCollectionCompactionRequest flush_compaction = 1;
-  AttachedFunctionUpdateInfo attached_function_update = 2;
-}
-
-message FlushCollectionCompactionAndAttachedFunctionResponse {
-  string collection_id = 1;
-  int32 collection_version = 2;
-  int64 last_compaction_time = 3;
-  // Updated attached function fields from database (authoritative)
-  string next_nonce = 4;
-  google.protobuf.Timestamp next_run = 5;
-  uint64 completion_offset = 6;
+  uint64 completion_offset = 2;
 }
 
 // Used for serializing contents in collection version history file.
@@ -592,9 +575,6 @@ message AttachedFunction {
   uint64 min_records_for_invocation = 9;
   string tenant_id = 10;
   string database_id = 11;
-  uint64 next_run_at = 12;
-  optional string lowest_live_nonce = 13;
-  string next_nonce = 14;
   uint64 created_at = 15;
   uint64 updated_at = 16;
   string function_id = 17;
@@ -629,28 +609,7 @@ message DetachFunctionResponse {
   bool success = 1;
 }
 
-message AdvanceAttachedFunctionRequest {
-  optional string collection_id = 1;
-  optional string id = 2;
-  optional string run_nonce = 3;
-  optional uint64 completion_offset = 4;
-  optional uint64 next_run_delay_secs = 5;
-}
-
-message AdvanceAttachedFunctionResponse {
-  string next_run_nonce = 1;
-  uint64 next_run_at = 2;
-  uint64 completion_offset = 3;
-}
-
-message FinishAttachedFunctionRequest {
-  string id = 1;
-}
-
-message FinishAttachedFunctionResponse {}
-
 message CleanupExpiredPartialAttachedFunctionsRequest {
-  // Maximum age in seconds for partial attached functions (with lowest_live_nonce = NULL)
   // Attached functions older than this will be deleted
   uint64 max_age_seconds = 1;
 }
@@ -673,22 +632,6 @@ message GetFunctionsRequest {
 
 message GetFunctionsResponse {
   repeated Function functions = 1;
-}
-
-message PeekScheduleByCollectionIdRequest {
-  repeated string collection_id = 1;
-}
-
-message ScheduleEntry {
-  optional string collection_id = 1;
-  optional string attached_function_id = 2;
-  optional string run_nonce = 3;
-  optional uint64 when_to_run = 4;
-  optional string lowest_live_nonce = 5;
-}
-
-message PeekScheduleByCollectionIdResponse {
-  repeated ScheduleEntry schedule = 1;
 }
 
 message GetSoftDeletedAttachedFunctionsRequest {
@@ -734,8 +677,6 @@ service SysDB {
   rpc ResetState(google.protobuf.Empty) returns (ResetStateResponse) {}
   rpc GetLastCompactionTimeForTenant(GetLastCompactionTimeForTenantRequest) returns (GetLastCompactionTimeForTenantResponse) {}
   rpc SetLastCompactionTimeForTenant(SetLastCompactionTimeForTenantRequest) returns (google.protobuf.Empty) {}
-  rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
-  rpc FlushCollectionCompactionAndAttachedFunction(FlushCollectionCompactionAndAttachedFunctionRequest) returns (FlushCollectionCompactionAndAttachedFunctionResponse) {}
   rpc RestoreCollection(RestoreCollectionRequest) returns (RestoreCollectionResponse) {}
   rpc ListCollectionVersions(ListCollectionVersionsRequest) returns (ListCollectionVersionsResponse) {}
   rpc GetCollectionSize(GetCollectionSizeRequest) returns (GetCollectionSizeResponse) {}
@@ -744,17 +685,15 @@ service SysDB {
   rpc DeleteCollectionVersion(DeleteCollectionVersionRequest) returns (DeleteCollectionVersionResponse) {}
   rpc BatchGetCollectionVersionFilePaths(BatchGetCollectionVersionFilePathsRequest) returns (BatchGetCollectionVersionFilePathsResponse) {}
   rpc BatchGetCollectionSoftDeleteStatus(BatchGetCollectionSoftDeleteStatusRequest) returns (BatchGetCollectionSoftDeleteStatusResponse) {}
+  rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
   rpc AttachFunction(AttachFunctionRequest) returns (AttachFunctionResponse) {}
   rpc CreateOutputCollectionForAttachedFunction(CreateOutputCollectionForAttachedFunctionRequest) returns (CreateOutputCollectionForAttachedFunctionResponse) {}
   rpc GetAttachedFunctionByName(GetAttachedFunctionByNameRequest) returns (GetAttachedFunctionByNameResponse) {}
   rpc GetAttachedFunctionByUuid(GetAttachedFunctionByUuidRequest) returns (GetAttachedFunctionByUuidResponse) {}
   rpc ListAttachedFunctions(ListAttachedFunctionsRequest) returns (ListAttachedFunctionsResponse) {}
   rpc DetachFunction(DetachFunctionRequest) returns (DetachFunctionResponse) {}
-  rpc AdvanceAttachedFunction(AdvanceAttachedFunctionRequest) returns (AdvanceAttachedFunctionResponse) {}
-  rpc FinishAttachedFunction(FinishAttachedFunctionRequest) returns (FinishAttachedFunctionResponse) {}
   rpc CleanupExpiredPartialAttachedFunctions(CleanupExpiredPartialAttachedFunctionsRequest) returns (CleanupExpiredPartialAttachedFunctionsResponse) {}
   rpc GetFunctions(GetFunctionsRequest) returns (GetFunctionsResponse) {}
-  rpc PeekScheduleByCollectionId(PeekScheduleByCollectionIdRequest) returns (PeekScheduleByCollectionIdResponse) {}
   rpc GetSoftDeletedAttachedFunctions(GetSoftDeletedAttachedFunctionsRequest) returns (GetSoftDeletedAttachedFunctionsResponse) {}
   rpc FinishAttachedFunctionDeletion(FinishAttachedFunctionDeletionRequest) returns (FinishAttachedFunctionDeletionResponse) {}
 }

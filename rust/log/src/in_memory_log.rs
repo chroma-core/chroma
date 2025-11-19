@@ -1,10 +1,23 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use chroma_error::ChromaError;
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{CollectionUuid, LogRecord};
+use thiserror::Error;
 
 use crate::types::CollectionInfo;
+
+#[derive(Error, Debug)]
+pub enum InMemoryLogError {
+    #[error("Failed to update log offset (simulated failure)")]
+    UpdateOffsetFailed,
+}
+
+impl ChromaError for InMemoryLogError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
 
 // This is used for testing only, it represents a log record that is stored in memory
 // internal to a mock log implementation
@@ -32,6 +45,7 @@ impl Debug for InternalLogRecord {
 pub struct InMemoryLog {
     collection_to_log: HashMap<CollectionUuid, Vec<InternalLogRecord>>,
     offsets: HashMap<CollectionUuid, i64>,
+    fail_update_offset: bool,
 }
 
 impl InMemoryLog {
@@ -39,7 +53,12 @@ impl InMemoryLog {
         InMemoryLog {
             collection_to_log: HashMap::new(),
             offsets: HashMap::new(),
+            fail_update_offset: false,
         }
+    }
+
+    pub fn set_fail_update_offset(&mut self, fail: bool) {
+        self.fail_update_offset = fail;
     }
 
     pub fn add_log(&mut self, collection_id: CollectionUuid, log: InternalLogRecord) {
@@ -123,8 +142,12 @@ impl InMemoryLog {
         &mut self,
         collection_id: CollectionUuid,
         new_offset: i64,
-    ) {
+    ) -> Result<(), Box<dyn ChromaError>> {
+        if self.fail_update_offset {
+            return Err(Box::new(InMemoryLogError::UpdateOffsetFailed));
+        }
         self.offsets.insert(collection_id, new_offset);
+        Ok(())
     }
 
     pub(super) async fn scout_logs(

@@ -7,6 +7,9 @@ members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "ru
 anyhow = "1.0"
 arrow = "55.1"
 async-trait = "0.1"
+aws-config = { version = "1.5", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.63"
+aws-smithy-types = "1.2"
 axum = { version = "0.8", features = ["macros"] }
 bytes = "1.10"
 chrono = { version = "0.4", features = ["serde"] }
@@ -16,6 +19,7 @@ flatbuffers = "25.2.10"
 futures = "0.3"
 futures-core = "0.3"
 http-body-util = "0.1.3"
+object_store = { version = "0.12", features = ["gcp"] }
 lazy_static = { version = "1.4" }
 lexical-core = "1.0"
 murmur3 = "0.5.2"

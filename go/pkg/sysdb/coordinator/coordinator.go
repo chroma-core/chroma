@@ -13,7 +13,6 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/chroma-core/chroma/go/pkg/types"
-	"github.com/google/uuid"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 )
@@ -285,16 +284,6 @@ func (s *Coordinator) SetTenantResourceName(ctx context.Context, tenantID string
 
 func (s *Coordinator) FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
 	return s.catalog.FlushCollectionCompaction(ctx, flushCollectionCompaction)
-}
-
-func (s *Coordinator) FlushCollectionCompactionAndAttachedFunction(
-	ctx context.Context,
-	flushCollectionCompaction *model.FlushCollectionCompaction,
-	attachedFunctionID uuid.UUID,
-	runNonce uuid.UUID,
-	completionOffset int64,
-) (*model.FlushCollectionInfo, error) {
-	return s.catalog.FlushCollectionCompactionAndAttachedFunction(ctx, flushCollectionCompaction, attachedFunctionID, runNonce, completionOffset)
 }
 
 func (s *Coordinator) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64) ([]*model.CollectionToGc, error) {

@@ -34,36 +34,6 @@ func (_m *IAttachedFunctionDb) DeleteAll() error {
 	return r0
 }
 
-// Advance provides a mock function with given fields: attachedFunctionID, attachedFunctionRunNonce, completionOffset, nextRunDelaySecs
-func (_m *IAttachedFunctionDb) Advance(attachedFunctionID uuid.UUID, attachedFunctionRunNonce uuid.UUID, completionOffset int64, nextRunDelaySecs uint64) (*dbmodel.AdvanceAttachedFunction, error) {
-	ret := _m.Called(attachedFunctionID, attachedFunctionRunNonce, completionOffset, nextRunDelaySecs)
-
-	if len(ret) == 0 {
-		panic("no return value specified for Advance")
-	}
-
-	var r0 *dbmodel.AdvanceAttachedFunction
-	var r1 error
-	if rf, ok := ret.Get(0).(func(uuid.UUID, uuid.UUID, int64, uint64) (*dbmodel.AdvanceAttachedFunction, error)); ok {
-		return rf(attachedFunctionID, attachedFunctionRunNonce, completionOffset, nextRunDelaySecs)
-	}
-	if rf, ok := ret.Get(0).(func(uuid.UUID, uuid.UUID, int64, uint64) *dbmodel.AdvanceAttachedFunction); ok {
-		r0 = rf(attachedFunctionID, attachedFunctionRunNonce, completionOffset, nextRunDelaySecs)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*dbmodel.AdvanceAttachedFunction)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(uuid.UUID, uuid.UUID, int64, uint64) error); ok {
-		r1 = rf(attachedFunctionID, attachedFunctionRunNonce, completionOffset, nextRunDelaySecs)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // CleanupExpiredPartial provides a mock function with given fields: maxAgeSeconds
 func (_m *IAttachedFunctionDb) CleanupExpiredPartial(maxAgeSeconds uint64) ([]uuid.UUID, error) {
 	ret := _m.Called(maxAgeSeconds)
@@ -309,24 +279,6 @@ func (_m *IAttachedFunctionDb) SoftDeleteByID(id uuid.UUID) error {
 	var r0 error
 	if rf, ok := ret.Get(0).(func(uuid.UUID) error); ok {
 		r0 = rf(id)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// UpdateCompletionOffset provides a mock function with given fields: attachedFunctionID, attachedFunctionRunNonce, completionOffset
-func (_m *IAttachedFunctionDb) UpdateCompletionOffset(attachedFunctionID uuid.UUID, attachedFunctionRunNonce uuid.UUID, completionOffset int64) error {
-	ret := _m.Called(attachedFunctionID, attachedFunctionRunNonce, completionOffset)
-
-	if len(ret) == 0 {
-		panic("no return value specified for UpdateCompletionOffset")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(uuid.UUID, uuid.UUID, int64) error); ok {
-		r0 = rf(attachedFunctionID, attachedFunctionRunNonce, completionOffset)
 	} else {
 		r0 = ret.Error(0)
 	}
