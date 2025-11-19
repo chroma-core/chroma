@@ -268,4 +268,6 @@ export class ChromaBm25EmbeddingFunction implements SparseEmbeddingFunction {
     }
 }
 
+// register with both name (chroma_bm25) and mapped package name (chroma-bm25)
 registerSparseEmbeddingFunction(NAME, ChromaBm25EmbeddingFunction);
+registerSparseEmbeddingFunction("chroma-bm25", ChromaBm25EmbeddingFunction);
