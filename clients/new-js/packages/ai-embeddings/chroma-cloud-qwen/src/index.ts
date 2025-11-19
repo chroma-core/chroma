@@ -14,7 +14,7 @@ const NAME = "chroma-cloud-qwen";
 
 export interface ChromaCloudQwenConfig {
 	model: ChromaCloudQwenEmbeddingModel;
-	task: string;
+	task: string | null;
 	instructions: ChromaCloudQwenEmbeddingInstructions;
 	api_key_env_var: string;
 }
@@ -45,7 +45,7 @@ export const CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS: ChromaCloudQwenEmbeddingIns
 
 export interface ChromaCloudQwenArgs {
 	model: ChromaCloudQwenEmbeddingModel;
-	task?: string;
+	task: string | null;
 	instructions?: ChromaCloudQwenEmbeddingInstructions;
 	apiKeyEnvVar?: string;
 }
@@ -67,13 +67,13 @@ export class ChromaCloudQwenEmbeddingFunction implements EmbeddingFunction {
 	private readonly model: ChromaCloudQwenEmbeddingModel;
 	private readonly url: string;
 	private readonly headers: { [key: string]: string };
-	private readonly task: string;
+	private readonly task: string | null;
 	private readonly instructions: ChromaCloudQwenEmbeddingInstructions;
 
 	constructor(args: ChromaCloudQwenArgs) {
 		const {
 			model,
-			task = "nl_to_code",
+			task,
 			instructions = CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
 			apiKeyEnvVar = "CHROMA_API_KEY",
 		} = args;
@@ -104,10 +104,15 @@ export class ChromaCloudQwenEmbeddingFunction implements EmbeddingFunction {
 			return [];
 		}
 
+		let instruction = "";
+		if (this.task && this.task in this.instructions) {
+			instruction =
+				this.instructions[this.task][ChromaCloudQwenEmbeddingTarget.DOCUMENTS];
+		}
+
 		const body: ChromaCloudEmbeddingRequest = {
 			texts,
-			instructions:
-				this.instructions[this.task][ChromaCloudQwenEmbeddingTarget.DOCUMENTS],
+			instructions: instruction,
 		};
 
 		try {
@@ -136,10 +141,15 @@ export class ChromaCloudQwenEmbeddingFunction implements EmbeddingFunction {
 			return [];
 		}
 
+		let instruction = "";
+		if (this.task && this.task in this.instructions) {
+			instruction =
+				this.instructions[this.task][ChromaCloudQwenEmbeddingTarget.QUERY];
+		}
+
 		const body: ChromaCloudEmbeddingRequest = {
 			texts,
-			instructions:
-				this.instructions[this.task][ChromaCloudQwenEmbeddingTarget.QUERY],
+			instructions: instruction,
 		};
 
 		try {
@@ -174,6 +184,10 @@ export class ChromaCloudQwenEmbeddingFunction implements EmbeddingFunction {
 	public static buildFromConfig(
 		config: ChromaCloudQwenConfig,
 	): ChromaCloudQwenEmbeddingFunction {
+		if (config.model === undefined || config.task === undefined) {
+			throw new ChromaValueError("Config is missing a required field");
+		}
+
 		// Deserialize instructions dict from string keys to enum keys (if needed)
 		// The config.instructions will have string keys like "nl_to_code" and "documents"
 		// We need to convert these to the enum values for proper runtime usage
