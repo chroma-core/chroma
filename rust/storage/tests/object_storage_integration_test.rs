@@ -27,8 +27,10 @@
 
 mod utils;
 
+use chroma_storage::admissioncontrolleds3::AdmissionControlledS3Storage;
 use chroma_storage::config::{ObjectStorageConfig, ObjectStorageProvider};
 use chroma_storage::object_storage::ObjectStorage;
+use chroma_storage::Storage;
 
 // ============================================================================
 // CONFIGURATION - UPDATE THESE VALUES FOR YOUR ENVIRONMENT
@@ -75,7 +77,8 @@ fn test_prefix(test_name: &str) -> String {
 #[tokio::test]
 #[ignore] // Requires GCS credentials and bucket access
 async fn test_gcs_basic_operations() {
-    let storage = create_gcs_storage().await;
+    let obj_storage = create_gcs_storage().await;
+    let storage = Storage::Object(obj_storage);
     let prefix = test_prefix("gcs-basic");
 
     utils::test_basic_operations(&storage, &prefix).await;
@@ -84,7 +87,8 @@ async fn test_gcs_basic_operations() {
 #[tokio::test]
 #[ignore] // Requires GCS credentials and bucket access
 async fn test_gcs_multipart_operations() {
-    let storage = create_gcs_storage().await;
+    let obj_storage = create_gcs_storage().await;
+    let storage = Storage::Object(obj_storage);
     let prefix = test_prefix("gcs-multipart");
 
     utils::test_multipart_operations(&storage, &prefix).await;
@@ -93,80 +97,133 @@ async fn test_gcs_multipart_operations() {
 #[tokio::test]
 #[ignore] // Requires GCS credentials and bucket access
 async fn test_gcs_conditional_operations() {
-    let storage = create_gcs_storage().await;
+    let obj_storage = create_gcs_storage().await;
+    let storage = Storage::Object(obj_storage);
     let prefix = test_prefix("gcs-conditional");
 
     utils::test_conditional_operations(&storage, &prefix).await;
 }
 
 // ============================================================================
-// TESTS - S3 (Template - implement when needed)
-// ============================================================================
-
-// Uncomment and configure when testing S3:
-//
-// const S3_BUCKET_NAME: &str = "my-test-bucket";
-// const S3_REGION: &str = "us-east-1";
-//
-// async fn create_s3_storage() -> ObjectStorage {
-//     let config = ObjectStorageConfig {
-//         bucket: S3_BUCKET_NAME.to_string(),
-//         credentials: ObjectStorageCredentials::S3 {
-//             access_key_id: std::env::var("AWS_ACCESS_KEY_ID").ok(),
-//             secret_access_key: std::env::var("AWS_SECRET_ACCESS_KEY").ok(),
-//             region: S3_REGION.to_string(),
-//         },
-//         connect_timeout_ms: 5000,
-//         request_timeout_ms: 60000,
-//         request_retry_count: 3,
-//         upload_part_size_bytes: 5 * 1024 * 1024,
-//         download_part_size_bytes: 256 * 1024,
-//     };
-//
-//     ObjectStorage::new(&config)
-//         .await
-//         .expect("Failed to create S3 storage client")
-// }
-//
-// #[tokio::test]
-// #[ignore]
-// async fn test_s3_basic_operations() {
-//     let storage = create_s3_storage().await;
-//     let prefix = test_prefix("s3-basic");
-//     utils::test_basic_operations(&storage, &prefix).await;
-// }
-
-// ============================================================================
-// CLEANUP UTILITY (Optional - run manually to clean up test objects)
+// TESTS - S3 Legacy (Minio - requires local minio server)
 // ============================================================================
 
 #[tokio::test]
-#[ignore] // Only run manually when needed
-async fn cleanup_all_test_objects() {
-    let storage = create_gcs_storage().await;
+#[ignore] // Requires local minio server running
+async fn test_s3_basic_operations() {
+    let storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
+    let prefix = test_prefix("s3-basic");
 
-    println!("Cleaning up all test objects under prefix: {}", TEST_PREFIX);
+    utils::test_basic_operations(&storage, &prefix).await;
+}
 
-    let objects = storage
-        .list_prefix(TEST_PREFIX)
-        .await
-        .expect("Failed to list objects");
+#[tokio::test]
+#[ignore] // Requires local minio server running
+async fn test_s3_multipart_operations() {
+    let storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
+    let prefix = test_prefix("s3-multipart");
 
-    if objects.is_empty() {
-        println!("No test objects found");
-        return;
-    }
+    utils::test_multipart_operations(&storage, &prefix).await;
+}
 
-    println!("Found {} test objects, deleting...", objects.len());
+#[tokio::test]
+#[ignore] // Requires local minio server running
+async fn test_s3_conditional_operations() {
+    let storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
+    let prefix = test_prefix("s3-conditional");
 
-    let result = storage
-        .delete_many(objects)
-        .await
-        .expect("Failed to delete objects");
+    utils::test_conditional_operations(&storage, &prefix).await;
+}
 
-    println!(
-        "Cleanup complete: {} deleted, {} errors",
-        result.deleted.len(),
-        result.errors.len()
-    );
+// ============================================================================
+// TESTS - Admission Controlled GCS
+// ============================================================================
+
+#[tokio::test]
+#[ignore] // Requires GCS credentials and bucket access
+async fn test_gcs_ac_basic_operations() {
+    let obj_storage = create_gcs_storage().await;
+    let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
+    let storage = Storage::AdmissionControlledS3(ac_storage);
+    let prefix = test_prefix("gcs-ac-basic");
+
+    utils::test_basic_operations(&storage, &prefix).await;
+}
+
+#[tokio::test]
+#[ignore] // Requires GCS credentials and bucket access
+async fn test_gcs_ac_multipart_operations() {
+    let obj_storage = create_gcs_storage().await;
+    let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
+    let storage = Storage::AdmissionControlledS3(ac_storage);
+    let prefix = test_prefix("gcs-ac-multipart");
+
+    utils::test_multipart_operations(&storage, &prefix).await;
+}
+
+#[tokio::test]
+#[ignore] // Requires GCS credentials and bucket access
+async fn test_gcs_ac_conditional_operations() {
+    let obj_storage = create_gcs_storage().await;
+    let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
+    let storage = Storage::AdmissionControlledS3(ac_storage);
+    let prefix = test_prefix("gcs-ac-conditional");
+
+    utils::test_conditional_operations(&storage, &prefix).await;
+}
+
+// ============================================================================
+// TESTS - Admission Controlled S3 Legacy (Minio)
+// ============================================================================
+
+#[tokio::test]
+#[ignore] // Requires local minio server running
+async fn test_s3_ac_basic_operations() {
+    let base_storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
+
+    // Extract S3Storage from Storage enum to wrap in AdmissionControlled
+    let s3_storage = match base_storage {
+        Storage::S3(s3) => s3,
+        _ => panic!("Expected S3 storage"),
+    };
+
+    let ac_storage = AdmissionControlledS3Storage::new_s3_with_default_policy(s3_storage);
+    let storage = Storage::AdmissionControlledS3(ac_storage);
+    let prefix = test_prefix("s3-ac-basic");
+
+    utils::test_basic_operations(&storage, &prefix).await;
+}
+
+#[tokio::test]
+#[ignore] // Requires local minio server running
+async fn test_s3_ac_multipart_operations() {
+    let base_storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
+
+    let s3_storage = match base_storage {
+        Storage::S3(s3) => s3,
+        _ => panic!("Expected S3 storage"),
+    };
+
+    let ac_storage = AdmissionControlledS3Storage::new_s3_with_default_policy(s3_storage);
+    let storage = Storage::AdmissionControlledS3(ac_storage);
+    let prefix = test_prefix("s3-ac-multipart");
+
+    utils::test_multipart_operations(&storage, &prefix).await;
+}
+
+#[tokio::test]
+#[ignore] // Requires local minio server running
+async fn test_s3_ac_conditional_operations() {
+    let base_storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
+
+    let s3_storage = match base_storage {
+        Storage::S3(s3) => s3,
+        _ => panic!("Expected S3 storage"),
+    };
+
+    let ac_storage = AdmissionControlledS3Storage::new_s3_with_default_policy(s3_storage);
+    let storage = Storage::AdmissionControlledS3(ac_storage);
+    let prefix = test_prefix("s3-ac-conditional");
+
+    utils::test_conditional_operations(&storage, &prefix).await;
 }
