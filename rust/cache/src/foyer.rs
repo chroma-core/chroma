@@ -528,7 +528,7 @@ where
         let dev = dev.with_throttle(throttle);
 
         let engine_builder = BlockEngineBuilder::new(dev.build().map_err(|e| {
-            CacheError::InvalidCacheConfig(format!("builder failed: {e:?}")).boxed()
+            CacheError::InvalidCacheConfig(format!("Cache engine builder failed: {e:?}")).boxed()
         })?)
         .with_indexer_shards(config.shards)
         .with_recover_concurrency(config.recover_concurrency)
@@ -542,7 +542,7 @@ where
         ]);
 
         let io_engine = PsyncIoEngineBuilder::new().build().await.map_err(|e| {
-            CacheError::InvalidCacheConfig(format!("builder failed: {e:?}")).boxed()
+            CacheError::InvalidCacheConfig(format!("Cache IOEngine builder failed: {e:?}")).boxed()
         })?;
 
         let builder = builder
@@ -553,7 +553,7 @@ where
             .with_io_engine(io_engine);
 
         let cache = builder.build().await.map_err(|e| {
-            CacheError::InvalidCacheConfig(format!("builder failed: {e:?}")).boxed()
+            CacheError::InvalidCacheConfig(format!("Hybrid cache builder failed: {e:?}")).boxed()
         })?;
         cache.enable_tracing();
         cache.update_tracing_options(tracing_options);
@@ -891,9 +891,9 @@ mod test {
     fn test_new_disk_config_multi_disk_deserialize() {
         let yaml = r#"
             disk:
-            - path: "/mnt/cache_a"
+              - path: "/mnt/cache_a"
                 capacity: 4096
-            - path: "/mnt/cache_b"
+              - path: "/mnt/cache_b"
                 capacity: 2048
         "#;
 
@@ -912,7 +912,7 @@ mod test {
     fn test_new_disk_config_single_disk_deserialize() {
         let yaml = r#"
             disk:
-            - path: "/mnt/cache_a"
+              - path: "/mnt/cache_a"
                 capacity: 4096
         "#;
 
