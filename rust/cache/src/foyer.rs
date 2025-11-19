@@ -9,7 +9,8 @@ use foyer::{
     PsyncIoEngineBuilder, S3FifoConfig, StorageKey, StorageValue, Throttle, TracingOptions,
 };
 use opentelemetry::{global, KeyValue};
-use serde::{Deserialize, Serialize};
+use serde::{de::IgnoredAny, Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -150,16 +151,35 @@ impl<'de> Deserialize<'de> for DiskFieldValue {
     where
         D: serde::Deserializer<'de>,
     {
+        use serde::de::Error;
+
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum Helper {
             Multi { disk: Vec<Disk> },
             Legacy(LegacyDisk),
+            // This is used to handle interop between the old disk format being flattened
+            // and the memory-only format both using capacity
+            Map(BTreeMap<String, IgnoredAny>),
         }
 
-        match Helper::deserialize(deserializer)? {
-            Helper::Multi { disk } => Ok(DiskFieldValue::MultiDisk(disk)),
-            Helper::Legacy(legacy) => Ok(DiskFieldValue::Legacy(legacy)),
+        match Option::<Helper>::deserialize(deserializer)? {
+            None => Ok(DiskFieldValue::default()),
+            Some(Helper::Multi { disk }) => Ok(DiskFieldValue::MultiDisk(disk)),
+            Some(Helper::Legacy(legacy)) => Ok(DiskFieldValue::Legacy(legacy)),
+            Some(Helper::Map(map)) => {
+                let has_path = map.contains_key("dir") || map.contains_key("path");
+                let has_capacity = map.contains_key("disk");
+                if !has_path && !has_capacity {
+                    return Ok(DiskFieldValue::default());
+                }
+                if has_capacity && !has_path {
+                    return Ok(DiskFieldValue::default());
+                }
+                Err(Error::custom(
+                    "Invalid disk configuration: specify both disk path and capacity.",
+                ))
+            }
         }
     }
 }
@@ -882,6 +902,51 @@ mod test {
         let config = FoyerCacheConfig::default();
         let disks = config.disks();
         assert_eq!(disks.len(), 0);
+    }
+
+    #[test]
+    fn test_memory_cache_config_without_disk_fields() {
+        let yaml = r#"
+name: "collections_with_segments_cache"
+capacity: 1000
+"#;
+
+        let config: FoyerCacheConfig =
+            serde_yaml::from_str(yaml).expect("Should deserialize memory cache config");
+
+        assert_eq!(config.capacity, 1000);
+        assert!(config.disks().is_empty());
+    }
+
+    #[test]
+    fn test_legacy_capacity_only_defaults_to_empty_disk() {
+        let yaml = r#"
+disk: 2048
+"#;
+
+        let config: FoyerCacheConfig =
+            serde_yaml::from_str(yaml).expect("Should deserialize config");
+
+        // Legacy configs could omit `dir`, which meant “memory cache only”.
+        // Ensure we still fall back to an empty disk list in that scenario.
+        assert!(config.disks().is_empty());
+    }
+
+    #[test]
+    fn test_legacy_capacity_with_memory_capacity_stays_memory_only() {
+        let yaml = r#"
+capacity: 512
+disk: 2048
+"#;
+
+        let config: FoyerCacheConfig =
+            serde_yaml::from_str(yaml).expect("Should deserialize config");
+
+        assert_eq!(config.capacity, 512);
+        // Legacy configs could omit `dir`, which meant “memory cache only”.
+        // if they specified a disk capacity, it should still be memory only if no
+        // path is specified.
+        assert!(config.disks().is_empty());
     }
 
     #[test]
