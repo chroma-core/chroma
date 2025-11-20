@@ -435,3 +435,18 @@ Other arguments you can provide:
 * `--max-step-iterations`: The maximum number of tool-call interactions the agent will issue when solving each step. Defaults to 5.
 
 Experiment with different configurations of the agent. For example, stronger reasoning models are slower, but may not need a query plan, or many iterations to solve a query correctly. They are more likely to be better at selecting the correct search tools, providing them with the best arguments, and reasoning through the results. Smaller or older models are faster and may not excel at tool calling. However, with a query plan and the intermiediate evaluation steps, they might still produce the correct answer. 
+
+## Building the Agent
+
+{% Banner type="tip" %}
+You can find the full implementation in the [chroma-cookbooks](https://github.com/chroma-core/chroma-cookbooks/tree/master/agentic-search) repo.
+{% /Banner %}
+
+We built a simple agent in this project to demonstrate the core concepts in this guide.
+
+The `BaseAgent` class orchestrates the agentic workflow described above. It holds a reference to
+* An `LLMService` - a simple abstraction for interacting with an LLM provider for getting structured outputs and tool calling.
+* A `prompts` objects, defining the prompts used for different LLM interactions needed for this workflow (for example, generating the query plan, evaluating it, etc.).
+* A list of `Tool`s that will be used to solve a user's query.
+
+The `SearchAgent` class extends `BaseAgent` and provides it with the tools to search over the BrowseComp-Plus collection, using Chroma's [Search API](../../cloud/search-api/overview). It also passes the specific prompts needed for this specific search task.
