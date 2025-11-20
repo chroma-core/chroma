@@ -9,6 +9,13 @@ import CodeBlockHeader from "@/components/markdoc/code-block-header";
 
 import "highlight.js/styles/atom-one-dark.css";
 
+export interface CodeBlockProps {
+  content: React.ReactNode;
+  language: string;
+  showHeader: boolean;
+  className?: string;
+}
+
 const rehypeRemovePre = () => {
   return (tree: any) => {
     visit(tree, "element", (node) => {
@@ -25,12 +32,12 @@ const rehypeRemovePre = () => {
   };
 };
 
-const CodeBlock: React.FC<{
-  content: React.ReactNode;
-  language: string;
-  showHeader: boolean;
-  className?: string;
-}> = async ({ content, language, showHeader = true, className }) => {
+const CodeBlock: React.FC<CodeBlockProps> = async ({
+  content,
+  language,
+  showHeader = true,
+  className,
+}) => {
   if (typeof content !== "string") {
     throw new Error("CodeBlock children must be a string.");
   }
@@ -60,5 +67,6 @@ const CodeBlock: React.FC<{
     </div>
   );
 };
+CodeBlock.displayName = "CodeBlock";
 
 export default CodeBlock;
