@@ -74,7 +74,7 @@ pub enum Error {
     EmptyBatch,
     #[error("perform exponential backoff and retry")]
     Backoff,
-    #[error("an internal, otherwise unclassifiable error ({}:{})")]
+    #[error("an internal, otherwise unclassifiable error ({file}:{line})")]
     Internal { file: String, line: u32 },
     #[error("could not find FSN in path: {0}")]
     MissingFragmentSequenceNumber(String),
