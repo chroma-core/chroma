@@ -428,7 +428,7 @@ To see the agent in action. It will go through the steps for solving query 770 -
 
 Other arguments you can provide:
 * `--provider`: The LLM provider you want to use. Defaults to OpenAI (currently only OpenAI is supported).
-* `--model`: The model you want the agent to use. Default to `gpt-5-nano`.
+* `--model`: The model you want the agent to use. Defaults to `gpt-4o-mini`.
 * `--max-plan-size`: The maximum query plan steps the agent will go through to solve the query. Defaults to 10. When set to 1, the query planning step is skipped.
 * `--max-step-iterations`: The maximum number of tool-call interactions the agent will issue when solving each step. Defaults to 5.
 
