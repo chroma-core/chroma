@@ -256,8 +256,8 @@ mod tests {
             CacheConfig::Memory(c) => {
                 assert_eq!(c.capacity, 1000);
             }
-            CacheConfig::Disk(c) => {
-                assert_eq!(c.capacity, 1000);
+            CacheConfig::Disk(_) => {
+                panic!("Expected memory cache, got disk cache");
             }
             CacheConfig::Nop => {}
             _ => {}
