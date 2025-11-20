@@ -118,9 +118,13 @@ pub struct LocalStorageConfig {
 #[derive(Deserialize, Debug, Default, Clone, Serialize)]
 pub struct AdmissionControlledS3StorageConfig {
     #[serde(default)]
-    pub s3_config: S3StorageConfig,
+    pub object_store_config: ObjectStorageConfig,
     #[serde(default)]
     pub rate_limiting_policy: RateLimitingConfig,
+    #[serde(default)]
+    pub s3_config: S3StorageConfig,
+    #[serde(default)]
+    pub use_object_store_client: bool,
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
@@ -132,12 +136,12 @@ pub struct CountBasedPolicyConfig {
 }
 
 impl CountBasedPolicyConfig {
-    fn default_max_concurrent_requests() -> usize {
-        30
-    }
-
     fn default_bandwidth_allocation() -> Vec<f32> {
         vec![0.7, 0.3]
+    }
+
+    fn default_max_concurrent_requests() -> usize {
+        30
     }
 }
 

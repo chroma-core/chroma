@@ -11,6 +11,7 @@ use bytes::{Bytes, BytesMut};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use futures::stream::{self, StreamExt, TryStreamExt};
+use object_store::ObjectMeta;
 use object_store::{gcp::GoogleCloudStorageBuilder, GetRange, ObjectStore, PutMode, UpdateVersion};
 use serde::{Deserialize, Serialize};
 
@@ -104,12 +105,23 @@ impl TryFrom<&UpdateVersion> for ETag {
     type Error = StorageError;
 
     fn try_from(uv: &UpdateVersion) -> Result<Self, Self::Error> {
-        let serializable: ObjectVersionTag = uv.clone().into();
-        serde_json::to_string(&serializable)
+        serde_json::to_string(&ObjectVersionTag::from(uv.clone()))
             .map(ETag)
             .map_err(|e| StorageError::Generic {
                 source: Arc::new(e),
             })
+    }
+}
+
+impl TryFrom<ObjectMeta> for ETag {
+    type Error = StorageError;
+
+    fn try_from(om: ObjectMeta) -> Result<Self, Self::Error> {
+        (&UpdateVersion {
+            e_tag: om.e_tag,
+            version: om.version,
+        })
+            .try_into()
     }
 }
 
@@ -175,20 +187,17 @@ impl ObjectStorage {
         })
     }
 
+    pub async fn head(&self, key: &str) -> Result<ObjectMeta, StorageError> {
+        Ok(self.store.head(&key.into()).await?)
+    }
+
     pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
-        let metadata = self.store.head(&key.into()).await?;
-
-        // Serialize metadata's e_tag/version into UpdateVersion for comparison
-        let current_update_version = UpdateVersion {
-            e_tag: metadata.e_tag.clone(),
-            version: metadata.version.clone(),
-        };
-
-        let current_etag: ETag = (&current_update_version).try_into()?;
+        let metadata = self.head(key).await?;
+        let current_etag = ETag::try_from(metadata)?;
         Ok(current_etag.0 == e_tag.0)
     }
 
-    fn partition(total_size: u64, chunk_size: u64) -> impl Iterator<Item = (u64, u64)> {
+    pub fn partition(total_size: u64, chunk_size: u64) -> impl Iterator<Item = (u64, u64)> {
         let chunk_count = total_size.div_ceil(chunk_size);
         let chunk_start = (0..chunk_count).map(move |i| i * chunk_size);
         chunk_start
@@ -197,13 +206,9 @@ impl ObjectStorage {
     }
 
     async fn multipart_get(&self, key: &str) -> Result<(Bytes, ETag), StorageError> {
-        let metadata = self.store.head(&key.into()).await?;
+        let metadata = self.head(key).await?;
         let object_size = metadata.size;
-        let etag = (&UpdateVersion {
-            e_tag: metadata.e_tag.clone(),
-            version: metadata.version.clone(),
-        })
-            .try_into()?;
+        let etag = metadata.try_into()?;
         if object_size == 0 {
             return Ok((Bytes::new(), etag));
         }
@@ -269,12 +274,7 @@ impl ObjectStorage {
         }
     }
 
-    async fn multipart_put(
-        &self,
-        key: &str,
-        bytes: Bytes,
-        _options: PutOptions,
-    ) -> Result<ETag, StorageError> {
+    async fn multipart_put(&self, key: &str, bytes: Bytes) -> Result<ETag, StorageError> {
         let chunk_ranges = Self::partition(bytes.len() as u64, self.upload_part_size_bytes)
             .map(|(start, end)| (start as usize..end as usize));
         let mut upload_handle = self.store.put_multipart(&key.into()).await?;
@@ -298,7 +298,7 @@ impl ObjectStorage {
         (&update_version).try_into()
     }
 
-    async fn oneshot_put(
+    pub async fn oneshot_put(
         &self,
         key: &str,
         bytes: Bytes,
@@ -326,20 +326,24 @@ impl ObjectStorage {
         (&update_version).try_into()
     }
 
+    pub fn is_oneshot_upload(&self, total_size_bytes: u64, options: &PutOptions) -> bool {
+        // NOTE(sicheng): GCS has no support for conditional multipart upload
+        // https://docs.cloud.google.com/storage/docs/multipart-uploads
+        total_size_bytes <= self.upload_part_size_bytes
+            || options.if_match.is_some()
+            || options.if_not_exists
+    }
+
     pub async fn put(
         &self,
         key: &str,
         bytes: Bytes,
         options: PutOptions,
     ) -> Result<ETag, StorageError> {
-        // TODO(sicheng): Figure out how to perform conditional multipart upload
-        if bytes.len() > self.upload_part_size_bytes as usize
-            && options.if_match.is_none()
-            && !options.if_not_exists
-        {
-            self.multipart_put(key, bytes, options).await
-        } else {
+        if self.is_oneshot_upload(bytes.len() as u64, &options) {
             self.oneshot_put(key, bytes, options).await
+        } else {
+            self.multipart_put(key, bytes).await
         }
     }
 
@@ -356,7 +360,7 @@ impl ObjectStorage {
             .map_err(|e| StorageError::Generic {
                 source: Arc::new(e),
             })?;
-        self.oneshot_put(key, bytes.into(), options).await
+        self.put(key, bytes.into(), options).await
     }
 
     pub async fn delete(&self, key: &str) -> Result<(), StorageError> {

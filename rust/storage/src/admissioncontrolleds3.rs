@@ -1,3 +1,4 @@
+use crate::object_storage::ObjectStorage;
 use crate::StorageError;
 use crate::{
     config::{RateLimitingConfig, StorageConfig},
@@ -6,18 +7,17 @@ use crate::{
 };
 use crate::{DeleteOptions, ETag, PutOptions, StorageConfigError};
 use async_trait::async_trait;
-use aws_sdk_s3::primitives::{ByteStream, Length};
 use bytes::Bytes;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_tracing::util::Stopwatch;
-use futures::future::BoxFuture;
-use futures::{stream, FutureExt, StreamExt};
+use futures::{stream, FutureExt, StreamExt, TryStreamExt};
 use opentelemetry::{global, metrics::Counter, KeyValue};
 use std::any::Any;
 use std::fmt::Debug;
 use std::future::Future;
+use std::sync::atomic::AtomicUsize;
 use std::{
     collections::HashMap,
     sync::{
@@ -25,7 +25,6 @@ use std::{
         Arc,
     },
 };
-use std::{ops::Range, sync::atomic::AtomicUsize};
 
 type BatchFetchResult = Result<(Arc<Vec<u8>>, Option<ETag>), StorageError>;
 
@@ -35,6 +34,285 @@ use tokio::{
     sync::{Semaphore, SemaphorePermit, TryAcquireError},
 };
 
+// NOTE(sicheng): This is a temporary wrapper type over S3 client and generic object storage client for GCS. In the future we will deprecate the S3 client and use the generic client only.
+#[derive(Clone)]
+pub enum ACStorageProvider {
+    S3(Box<S3Storage>),
+    Object(ObjectStorage),
+}
+
+impl ACStorageProvider {
+    pub fn bucket_name(&self) -> &str {
+        match self {
+            ACStorageProvider::S3(s3_storage) => &s3_storage.bucket,
+            ACStorageProvider::Object(object_storage) => &object_storage.bucket,
+        }
+    }
+
+    fn download_part_size_bytes(&self) -> usize {
+        match self {
+            ACStorageProvider::S3(s3_storage) => s3_storage.download_part_size_bytes,
+            ACStorageProvider::Object(object_storage) => {
+                object_storage.download_part_size_bytes as usize
+            }
+        }
+    }
+
+    async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
+        match self {
+            ACStorageProvider::S3(s3_storage) => s3_storage.confirm_same(key, e_tag).await,
+            ACStorageProvider::Object(object_storage) => {
+                object_storage.confirm_same(key, e_tag).await
+            }
+        }
+    }
+
+    async fn get_with_e_tag(
+        &self,
+        key: &str,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        match self {
+            ACStorageProvider::S3(s3_storage) => s3_storage.get_with_e_tag(key).await,
+            ACStorageProvider::Object(object_storage) => {
+                let (bytes, etag) = object_storage.get(key, Default::default()).await?;
+                Ok((Vec::from(bytes).into(), Some(etag)))
+            }
+        }
+    }
+
+    async fn get_key_ranges(
+        &self,
+        key: &str,
+    ) -> Result<(i64, Vec<(i64, i64)>, Option<ETag>), StorageError> {
+        match self {
+            ACStorageProvider::S3(s3_storage) => s3_storage.get_key_ranges(key).await,
+            ACStorageProvider::Object(object_storage) => {
+                let metadata = object_storage.store.head(&key.into()).await?;
+                let content_size = metadata.size;
+                let content_ranges =
+                    ObjectStorage::partition(content_size, object_storage.download_part_size_bytes);
+                let etag = metadata.try_into()?;
+                Ok((
+                    content_size as i64,
+                    content_ranges
+                        .map(|(from, to)| (from as i64, to as i64))
+                        .collect(),
+                    Some(etag),
+                ))
+            }
+        }
+    }
+
+    async fn fetch_and_write_range(
+        &self,
+        key: &str,
+        from: i64,
+        to: i64,
+        buffer: &mut [u8],
+        _token: SemaphorePermit<'_>,
+    ) -> Result<(), StorageError> {
+        match self {
+            ACStorageProvider::S3(s3_storage) => {
+                let output = s3_storage
+                    .fetch_range(key.to_string(), format!("bytes={from}-{to}"))
+                    .await?;
+                let body = output.body;
+                let mut reader = body.into_async_read();
+                if let Err(err) = reader.read_exact(buffer).await {
+                    tracing::error!("Error reading from s3: {}", err);
+                    return Err(StorageError::Generic {
+                        source: Arc::new(err),
+                    });
+                }
+            }
+            ACStorageProvider::Object(object_storage) => {
+                let bytes = object_storage
+                    .store
+                    .get_range(&key.into(), from as u64..to as u64)
+                    .await?;
+                if bytes.len() != buffer.len() {
+                    return Err(StorageError::Message {
+                        message: format!(
+                            "Expected {} bytes in part, got {} bytes",
+                            buffer.len(),
+                            bytes.len()
+                        ),
+                    });
+                }
+                buffer.copy_from_slice(&bytes);
+            }
+        };
+        Ok(())
+    }
+
+    fn is_oneshot_upload(&self, total_size_bytes: usize, options: &PutOptions) -> bool {
+        match self {
+            ACStorageProvider::S3(s3_storage) => s3_storage.is_oneshot_upload(total_size_bytes),
+            ACStorageProvider::Object(object_storage) => {
+                object_storage.is_oneshot_upload(total_size_bytes as u64, options)
+            }
+        }
+    }
+
+    async fn oneshot_put(
+        &self,
+        key: &str,
+        bytes: Bytes,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError> {
+        match self {
+            ACStorageProvider::S3(s3_storage) => {
+                s3_storage
+                    .oneshot_upload(
+                        key,
+                        bytes.len(),
+                        |range| {
+                            let payload = bytes.slice(range).into();
+                            async move { Ok(payload) }.boxed()
+                        },
+                        options,
+                    )
+                    .await
+            }
+            ACStorageProvider::Object(object_storage) => object_storage
+                .oneshot_put(key, bytes, options)
+                .await
+                .map(Some),
+        }
+    }
+
+    async fn rate_limited_multipart_upload(
+        &self,
+        key: &str,
+        bytes: Bytes,
+        options: PutOptions,
+        rate_limiter: Arc<RateLimitPolicy>,
+        priority_holder: Arc<PriorityHolder>,
+        metric: Arc<AtomicUsize>,
+    ) -> Result<Option<ETag>, StorageError> {
+        let create_bytestream_fn = |range| {
+            let payload = bytes.slice(range).into();
+            async move { Ok(payload) }.boxed()
+        };
+        match self {
+            ACStorageProvider::S3(s3_storage) => {
+                let (part_count, size_of_last_part, upload_id) = s3_storage
+                    .prepare_multipart_upload(key, bytes.len())
+                    .await?;
+                metric.fetch_add(part_count, Ordering::Relaxed);
+                let upload_part_futures = (0..part_count).map(|part_index| {
+                    let rate_limiter_clone = rate_limiter.clone();
+                    let priority_holder_clone = priority_holder.clone();
+                    let metric_clone = metric.clone();
+                    let upload_future = s3_storage.upload_part(
+                        key,
+                        &upload_id,
+                        part_count,
+                        part_index,
+                        size_of_last_part,
+                        &create_bytestream_fn,
+                    );
+                    async move {
+                        // Acquire token.
+                        let _permit = rate_limiter_clone.enter(priority_holder_clone, None).await;
+                        metric_clone.fetch_sub(1, Ordering::Relaxed);
+                        upload_future.await
+                    }
+                });
+                let mut upload_parts = stream::iter(upload_part_futures)
+                    .buffer_unordered(part_count)
+                    .try_collect::<Vec<_>>()
+                    .await?;
+
+                upload_parts.sort_unstable_by_key(|part| part.part_number());
+
+                s3_storage
+                    .finish_multipart_upload(key, &upload_id, upload_parts, options)
+                    .await
+            }
+            ACStorageProvider::Object(object_storage) => {
+                let chunk_ranges = ObjectStorage::partition(
+                    bytes.len() as u64,
+                    object_storage.upload_part_size_bytes,
+                )
+                .map(|(start, end)| (start as usize..end as usize));
+                let mut upload_handle = object_storage.store.put_multipart(&key.into()).await?;
+                let upload_part_futures = chunk_ranges
+                    .map(|range| {
+                        let rate_limiter_clone = rate_limiter.clone();
+                        let priority_holder_clone = priority_holder.clone();
+                        let metric_clone = metric.clone();
+                        let upload_future = upload_handle.put_part(bytes.slice(range).into());
+
+                        async move {
+                            // Acquire token.
+                            let _permit =
+                                rate_limiter_clone.enter(priority_holder_clone, None).await;
+                            metric_clone.fetch_sub(1, Ordering::Relaxed);
+                            upload_future.await
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                let part_count = upload_part_futures.len();
+                metric.fetch_add(part_count, Ordering::Relaxed);
+
+                stream::iter(upload_part_futures)
+                    .buffer_unordered(part_count)
+                    .try_collect::<Vec<_>>()
+                    .await?;
+
+                let result = upload_handle.complete().await?;
+                let update_version = object_store::UpdateVersion {
+                    e_tag: result.e_tag,
+                    version: result.version,
+                };
+
+                (&update_version).try_into().map(Some)
+            }
+        }
+    }
+
+    async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
+        match self {
+            ACStorageProvider::S3(s3_storage) => s3_storage.copy(src_key, dst_key).await,
+            ACStorageProvider::Object(object_storage) => {
+                object_storage.copy(src_key, dst_key).await
+            }
+        }
+    }
+    async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
+        match self {
+            ACStorageProvider::S3(s3_storage) => s3_storage.list_prefix(prefix).await,
+            ACStorageProvider::Object(object_storage) => object_storage.list_prefix(prefix).await,
+        }
+    }
+
+    async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
+        match self {
+            ACStorageProvider::S3(s3_storage) => s3_storage.delete(key, options).await,
+            ACStorageProvider::Object(object_storage) => {
+                if options.if_match.is_some() {
+                    return Err(StorageError::Message {
+                        message: "if match not supported for object store backend".to_string(),
+                    });
+                }
+                object_storage.delete(key).await
+            }
+        }
+    }
+
+    pub async fn delete_many<S: AsRef<str> + std::fmt::Debug, I: IntoIterator<Item = S>>(
+        &self,
+        keys: I,
+    ) -> Result<crate::s3::DeletedObjects, StorageError> {
+        match self {
+            ACStorageProvider::S3(s3_storage) => s3_storage.delete_many(keys).await,
+            ACStorageProvider::Object(object_storage) => object_storage.delete_many(keys).await,
+        }
+    }
+}
+
 /// Wrapper over s3 storage that provides proxy features such as
 /// request coalescing, rate limiting, etc.
 /// For reads, it will coalesce requests for the same key and rate limit
@@ -42,7 +320,7 @@ use tokio::{
 /// For writes, it will rate limit the number of concurrent requests.
 #[derive(Clone)]
 pub struct AdmissionControlledS3Storage {
-    pub(crate) storage: S3Storage,
+    pub(crate) storage: ACStorageProvider,
     #[allow(clippy::type_complexity)]
     outstanding_read_requests: Arc<tokio::sync::Mutex<HashMap<String, InflightRequest>>>,
     rate_limiter: Arc<RateLimitPolicy>,
@@ -302,9 +580,9 @@ impl From<usize> for StorageRequestPriority {
 ////// AdmissionControlledS3Storage //////
 
 impl AdmissionControlledS3Storage {
-    pub fn new_with_default_policy(storage: S3Storage) -> Self {
+    pub fn new_s3_with_default_policy(storage: S3Storage) -> Self {
         Self {
-            storage,
+            storage: ACStorageProvider::S3(storage.into()),
             outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(RateLimitPolicy::CountBasedPolicy(CountBasedPolicy::new(
                 2,
@@ -314,17 +592,38 @@ impl AdmissionControlledS3Storage {
         }
     }
 
-    pub fn new(storage: S3Storage, policy: RateLimitPolicy) -> Self {
+    pub fn new_s3(storage: S3Storage, policy: RateLimitPolicy) -> Self {
         Self {
-            storage,
+            storage: ACStorageProvider::S3(storage.into()),
             outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(policy),
             metrics: AdmissionControlledS3StorageMetrics::default(),
         }
     }
 
-    async fn parallel_fetch(
-        storage: S3Storage,
+    pub fn new_object_with_default_policy(storage: ObjectStorage) -> Self {
+        Self {
+            storage: ACStorageProvider::Object(storage),
+            outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            rate_limiter: Arc::new(RateLimitPolicy::CountBasedPolicy(CountBasedPolicy::new(
+                2,
+                &vec![1.0],
+            ))),
+            metrics: AdmissionControlledS3StorageMetrics::default(),
+        }
+    }
+
+    pub fn new_object(storage: ObjectStorage, policy: RateLimitPolicy) -> Self {
+        Self {
+            storage: ACStorageProvider::Object(storage),
+            outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            rate_limiter: Arc::new(policy),
+            metrics: AdmissionControlledS3StorageMetrics::default(),
+        }
+    }
+
+    async fn parallel_read(
+        storage: ACStorageProvider,
         rate_limiter: Arc<RateLimitPolicy>,
         key: String,
         priority: Arc<PriorityHolder>,
@@ -339,7 +638,7 @@ impl AdmissionControlledS3Storage {
             return Ok((Arc::new(Vec::new()), e_tag));
         }
 
-        let part_size = storage.download_part_size_bytes;
+        let part_size = storage.download_part_size_bytes();
         tracing::debug!(
             "[AdmissionControlledS3][Parallel fetch] Content length: {}, key ranges: {:?}",
             content_length,
@@ -361,39 +660,13 @@ impl AdmissionControlledS3Storage {
             let fut = async move {
                 // Acquire permit.
                 let token = rate_limiter_clone.enter(priority, None).await;
-                let range_str = format!("bytes={}-{}", range.0, range.1);
                 outstanding_read_request_metric.record(
                     outstanding_read_request_counter.load(Ordering::Relaxed) as u64,
                     &hostname_attr_clone,
                 );
                 outstanding_read_request_counter.fetch_add(1, Ordering::Relaxed);
                 let res = storage_clone
-                    .fetch_range(key_clone, range_str)
-                    .then(|res| async move {
-                        let _token = token;
-                        match res {
-                            Ok(output) => {
-                                let body = output.body;
-                                let mut reader = body.into_async_read();
-                                match reader.read_exact(output_slice).await {
-                                    Ok(_) => Ok(()),
-                                    Err(e) => {
-                                        tracing::error!("Error reading from s3: {}", e);
-                                        Err(StorageError::Generic {
-                                            source: Arc::new(e),
-                                        })
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!("Error reading from s3: {}", e);
-                                Err(StorageError::Generic {
-                                    source: Arc::new(e),
-                                })
-                            }
-                        }
-                        // _token gets dropped due to RAII and we've released the permit.
-                    })
+                    .fetch_and_write_range(&key_clone, range.0, range.1, output_slice, token)
                     .await;
                 outstanding_read_request_counter.fetch_sub(1, Ordering::Relaxed);
                 res
@@ -409,8 +682,8 @@ impl AdmissionControlledS3Storage {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn read_from_storage(
-        storage: S3Storage,
+    async fn read(
+        storage: ACStorageProvider,
         rate_limiter: Arc<RateLimitPolicy>,
         key: String,
         priority: Arc<PriorityHolder>,
@@ -660,7 +933,7 @@ impl AdmissionControlledS3Storage {
 
                                 async {
                                     if is_parallel {
-                                        AdmissionControlledS3Storage::parallel_fetch(
+                                        AdmissionControlledS3Storage::parallel_read(
                                             storage_clone,
                                             rate_limiter_clone,
                                             key_clone,
@@ -671,7 +944,7 @@ impl AdmissionControlledS3Storage {
                                         )
                                         .await
                                     } else {
-                                        AdmissionControlledS3Storage::read_from_storage(
+                                        AdmissionControlledS3Storage::read(
                                             storage_clone,
                                             rate_limiter_clone,
                                             key_clone,
@@ -746,7 +1019,7 @@ impl AdmissionControlledS3Storage {
         options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         let priority_holder = Arc::new(PriorityHolder::new(options.priority));
-        AdmissionControlledS3Storage::read_from_storage(
+        AdmissionControlledS3Storage::read(
             self.storage.clone(),
             self.rate_limiter.clone(),
             key.to_string(),
@@ -759,53 +1032,31 @@ impl AdmissionControlledS3Storage {
         .await
     }
 
-    async fn oneshot_upload(
+    // NOTE(sicheng): This was used to upload hnsw files. We have refactored
+    // the pipline so that we upload from memory, so this should be deprecated
+    // in the future.
+    pub async fn put_file(
         &self,
         key: &str,
-        total_size_bytes: usize,
-        create_bytestream_fn: impl Fn(
-            Range<usize>,
-        ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
+        path: &str,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
-        // Record write requests waiting for token
-        self.metrics.nac_write_requests_waiting_for_token.record(
-            self.metrics
-                .write_requests_waiting_for_token
-                .fetch_add(1, Ordering::Relaxed) as u64,
-            &self.metrics.hostname_attribute,
-        );
-
-        // Acquire permit.
-        let priority_holder = Arc::new(PriorityHolder::new(options.priority));
-        let _permit = self.rate_limiter.enter(priority_holder, None).await;
-
-        self.metrics
-            .write_requests_waiting_for_token
-            .fetch_sub(1, Ordering::Relaxed);
-
-        self.storage
-            .oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
+        let bytes = tokio::fs::read(path)
             .await
-        // Permit gets dropped due to RAII.
+            .map_err(|e| StorageError::Generic {
+                source: Arc::new(e),
+            })?;
+        self.put_bytes(key, bytes.into(), options).await
     }
 
-    async fn multipart_upload(
+    pub async fn put_bytes(
         &self,
         key: &str,
-        total_size_bytes: usize,
-        create_bytestream_fn: impl Fn(
-            Range<usize>,
-        ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
+        bytes: Bytes,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
         let priority_holder = Arc::new(PriorityHolder::new(options.priority));
-        let (part_count, size_of_last_part, upload_id) = self
-            .storage
-            .prepare_multipart_upload(key, total_size_bytes)
-            .await?;
-        let mut upload_parts = Vec::new();
-        for part_index in 0..part_count {
+        if self.storage.is_oneshot_upload(bytes.len(), &options) {
             // Record write requests waiting for token
             self.metrics.nac_write_requests_waiting_for_token.record(
                 self.metrics
@@ -814,110 +1065,27 @@ impl AdmissionControlledS3Storage {
                 &self.metrics.hostname_attribute,
             );
 
-            // Acquire token.
-            let _permit = self.rate_limiter.enter(priority_holder.clone(), None).await;
+            // Acquire permit.
+            let _permit = self.rate_limiter.enter(priority_holder, None).await;
 
             self.metrics
                 .write_requests_waiting_for_token
                 .fetch_sub(1, Ordering::Relaxed);
 
-            let completed_part = self
-                .storage
-                .upload_part(
-                    key,
-                    &upload_id,
-                    part_count,
-                    part_index,
-                    size_of_last_part,
-                    &create_bytestream_fn,
-                )
-                .await?;
-            upload_parts.push(completed_part);
+            return self.storage.oneshot_put(key, bytes, options).await;
             // Permit gets dropped due to RAII.
         }
 
         self.storage
-            .finish_multipart_upload(key, &upload_id, upload_parts, options)
+            .rate_limited_multipart_upload(
+                key,
+                bytes,
+                options,
+                self.rate_limiter.clone(),
+                priority_holder,
+                self.metrics.write_requests_waiting_for_token.clone(),
+            )
             .await
-    }
-
-    async fn put_object(
-        &self,
-        key: &str,
-        total_size_bytes: usize,
-        create_bytestream_fn: impl Fn(
-            Range<usize>,
-        ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
-        options: PutOptions,
-    ) -> Result<Option<ETag>, StorageError> {
-        if self.storage.is_oneshot_upload(total_size_bytes) {
-            return self
-                .oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
-                .await;
-        }
-
-        self.multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
-            .await?;
-        Ok(None)
-    }
-
-    pub async fn put_file(
-        &self,
-        key: &str,
-        path: &str,
-        options: PutOptions,
-    ) -> Result<Option<ETag>, StorageError> {
-        let file_size = tokio::fs::metadata(path)
-            .await
-            .map_err(|err| StorageError::Generic {
-                source: Arc::new(err),
-            })?
-            .len();
-
-        let path = path.to_string();
-
-        self.put_object(
-            key,
-            file_size as usize,
-            move |range| {
-                let path = path.clone();
-
-                async move {
-                    ByteStream::read_from()
-                        .path(path)
-                        .offset(range.start as u64)
-                        .length(Length::Exact(range.len() as u64))
-                        .build()
-                        .await
-                        .map_err(|err| StorageError::Generic {
-                            source: Arc::new(err),
-                        })
-                }
-                .boxed()
-            },
-            options,
-        )
-        .await
-    }
-
-    pub async fn put_bytes(
-        &self,
-        key: &str,
-        bytes: Vec<u8>,
-        options: PutOptions,
-    ) -> Result<Option<ETag>, StorageError> {
-        let bytes = Arc::new(Bytes::from(bytes));
-
-        self.put_object(
-            key,
-            bytes.len(),
-            move |range| {
-                let bytes = bytes.clone();
-                async move { Ok(ByteStream::from(bytes.slice(range))) }.boxed()
-            },
-            options,
-        )
-        .await
     }
 
     pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
@@ -955,15 +1123,19 @@ impl Configurable<StorageConfig> for AdmissionControlledS3Storage {
     ) -> Result<Self, Box<dyn ChromaError>> {
         match &config {
             StorageConfig::AdmissionControlledS3(nacconfig) => {
+                let policy =
+                    RateLimitPolicy::try_from_config(&nacconfig.rate_limiting_policy, registry)
+                        .await?;
+                if nacconfig.use_object_store_client {
+                    let object_storage = ObjectStorage::new(&nacconfig.object_store_config).await?;
+                    return Ok(Self::new_object(object_storage, policy));
+                }
                 let s3_storage = S3Storage::try_from_config(
                     &StorageConfig::S3(nacconfig.s3_config.clone()),
                     registry,
                 )
                 .await?;
-                let policy =
-                    RateLimitPolicy::try_from_config(&nacconfig.rate_limiting_policy, registry)
-                        .await?;
-                return Ok(Self::new(s3_storage, policy));
+                return Ok(Self::new_s3(s3_storage, policy));
             }
             _ => {
                 return Err(Box::new(StorageConfigError::InvalidStorageConfig));
@@ -1207,7 +1379,7 @@ mod tests {
         };
         storage.create_bucket().await.unwrap();
         let admission_controlled_storage =
-            AdmissionControlledS3Storage::new_with_default_policy(storage);
+            AdmissionControlledS3Storage::new_s3_with_default_policy(storage);
 
         // Randomly generate a 16 byte utf8 string.
         let test_data_key: String = rand::thread_rng()
@@ -1224,7 +1396,7 @@ mod tests {
         admission_controlled_storage
             .put_bytes(
                 &test_data_key,
-                test_data_value_string.as_bytes().to_vec(),
+                test_data_value_string.as_bytes().to_vec().into(),
                 crate::PutOptions::default(),
             )
             .await
@@ -1258,7 +1430,7 @@ mod tests {
         };
         storage.create_bucket().await.unwrap();
         let admission_controlled_storage =
-            AdmissionControlledS3Storage::new_with_default_policy(storage);
+            AdmissionControlledS3Storage::new_s3_with_default_policy(storage);
 
         // Create test data for multiple keys
         let test_keys = vec!["test-key-1", "test-key-2", "test-key-3"];
@@ -1271,7 +1443,11 @@ mod tests {
         // Put all test data
         for (key, value) in test_keys.iter().zip(test_values.iter()) {
             admission_controlled_storage
-                .put_bytes(key, value.as_bytes().to_vec(), crate::PutOptions::default())
+                .put_bytes(
+                    key,
+                    value.as_bytes().to_vec().into(),
+                    crate::PutOptions::default(),
+                )
                 .await
                 .unwrap();
         }
@@ -1326,13 +1502,13 @@ mod tests {
         };
         storage.create_bucket().await.unwrap();
         let admission_controlled_storage =
-            AdmissionControlledS3Storage::new_with_default_policy(storage);
+            AdmissionControlledS3Storage::new_s3_with_default_policy(storage);
 
         let test_data = "test data";
         admission_controlled_storage
             .put_bytes(
                 "test",
-                test_data.as_bytes().to_vec(),
+                test_data.as_bytes().to_vec().into(),
                 crate::PutOptions::default(),
             )
             .await
@@ -1372,7 +1548,7 @@ mod tests {
         };
         storage.create_bucket().await.unwrap();
         let admission_controlled_storage =
-            AdmissionControlledS3Storage::new_with_default_policy(storage);
+            AdmissionControlledS3Storage::new_s3_with_default_policy(storage);
 
         let test_data_key: String = rand::thread_rng()
             .sample_iter(Alphanumeric)
@@ -1383,7 +1559,7 @@ mod tests {
         admission_controlled_storage
             .put_bytes(
                 &test_data_key,
-                test_data_value_string.as_bytes().to_vec(),
+                test_data_value_string.as_bytes().to_vec().into(),
                 crate::PutOptions::default(),
             )
             .await
