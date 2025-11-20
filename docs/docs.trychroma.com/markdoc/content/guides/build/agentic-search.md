@@ -20,8 +20,6 @@ However, this single-step retrieval strategy has critical limitations:
 4. **Iterates** - Refines the plan and repeats steps 2-3 based on what it has learned so far
 5. **Synthesizes** - Combines information from multiple retrievals to form a comprehensive answer
 
-[image]
-
 Instead of executing a single query and hoping for the best, an agentic approach allows the agent to break down complex questions into manageable sub-queries, execute multiple retrievals across different Chroma collections, evaluate whether the retrieved information is sufficient, and refine its search strategy based on what it discovers.
 
 For example, an agentic search system might handle our example question above as follows:
