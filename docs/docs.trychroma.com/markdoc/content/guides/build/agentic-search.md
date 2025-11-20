@@ -449,4 +449,12 @@ The `BaseAgent` class orchestrates the agentic workflow described above. It hold
 * A `prompts` objects, defining the prompts used for different LLM interactions needed for this workflow (for example, generating the query plan, evaluating it, etc.).
 * A list of `Tool`s that will be used to solve a user's query.
 
+The project encapsulates different parts of the workflow into their own components.
+
+The `QueryPlanner` generates a query plan for a given user query. This is a list of `PlanStep` objects, each keeping track of its status (`Pending`, `Success`, `Failure`, `Cancelled` etc.), and dependency on other steps in the plan. The planner is an iterator that emits the next batch of `Pending` steps ready for execution. It also exposes methods that let other components override the plan and update the status of completed steps.
+
+The `Executor` solves a single `PlanStep`. It implements a simple tool calling loop with the `LLMService` until the step is solved. Finally it produces a `StepOutcome` object, summarizing the execution, identifying candidate answers and supporting evidence.
+
+The `Evaluator` considers the plan and the history of outcomes to decide how to proceed with the query plan.
+
 The `SearchAgent` class extends `BaseAgent` and provides it with the tools to search over the BrowseComp-Plus collection, using Chroma's [Search API](../../cloud/search-api/overview). It also passes the specific prompts needed for this specific search task.
