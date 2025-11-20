@@ -418,7 +418,7 @@ pnpm install
 
 {% /Steps %}
 
-The project includes a CLI interface that lets you interact with the search agent. You can run in it development to get started. The CLI expects one argument - the query ID to solve. From the root directory you can run
+The project includes a CLI interface that lets you interact with the search agent. You can run it in development mode to get started. The CLI expects one argument - the query ID to solve. From the root directory you can run
 
 ```terminal
 pnpm cli:dev 770
