@@ -93,7 +93,7 @@ For example, an agentic search system might handle our example question above as
 Agentic search is the technique that powers most production AI applications.
 
 * Legal assistants search across case law databases, statutes, regulatory documents, and internal firm precedents.
-* Medical AI systems query across clinical guides, research papers, parient records, and drug databases to support medical reasoning.
+* Medical AI systems query across clinical guides, research papers, patient records, and drug databases to support medical reasoning.
 * Customer support AI agents navigate product documentation, past ticket resolutions, and company knowledge bases, while dynamically adjusting their search based on specific use cases.
 * Coding assistants search across documentation, code repositories, and issue trackers to help developers solve problems.
 
@@ -120,7 +120,7 @@ overall performance.
 Every query in the BrowseComp-Plus dataset has
 * Gold docs - that are needed to compile the final correct answer for the query.
 * Evidence docs - are needed to answer the query but may not directly contain the final answer themselves. They provide supporting information required for reasoning through the problem. The gold docs are a subset of the evidence docs.
-* Negative docs - included to deliberately make answering the query more difficult. They are introduced to distract the agent, and force it to distinguish between relevant and irrelevant information.
+* Negative docs - are included to deliberately make answering the query more difficult. They are introduced to distract the agent, and force it to distinguish between relevant and irrelevant information.
 
 For example, here is query `770`:
 
@@ -350,7 +350,7 @@ In this collection there are 10 query records. Each has the following metadata f
 * `gold_docs`: The list of gold doc IDs needed to answer this query
 
 Most BrowseComp-Plus documents are too large to embed and store as they are, so we chunked them into discrete pieces. Each document record has the following metadata fields:
-* `doc_id`: The original BrowsComp-Plus document ID this record was chunked from.
+* `doc_id`: The original BrowseComp-Plus document ID this record was chunked from.
 * `index`: The order in which this chunk appears in the original document. This is useful if we want to reconstruct the original documents.
 
 Chunking the documents not only allows us to store them efficiently, but it is also a good context engineering practice. When the agent issues a search a smaller relevant chunk is more economical than a very large document.
@@ -374,7 +374,7 @@ Choose the "Load sample dataset" option, and then choose the BrowseCompPlus data
 {% /Step %}
 
 {% Step %}
-Once your collection loads, choose the "Setting" tab. On the bottom of the page, choose the `.env` tab. Create an API key, and copy the environment variables you will need for running the project: `CHROMA_API_KEY`, `CHROMA_TENANT`, and `CHROMA_DATABASE`.
+Once your collection loads, choose the "Settings" tab. On the bottom of the page, choose the `.env` tab. Create an API key, and copy the environment variables you will need for running the project: `CHROMA_API_KEY`, `CHROMA_TENANT`, and `CHROMA_DATABASE`.
 {% /Step %}
 
 {% Step %}
@@ -403,7 +403,7 @@ To run this project, you will also need an [OpenAI API key](https://platform.ope
 CHROMA_API_KEY=<YOUR CHROMA API KEY>
 CHROMA_TENANT=<YOUR CHROMA TENANT>
 CHROMA_DATABASE=agentic-search
-OPENAI_API_KEY=<YOU OPENAI API KEY>
+OPENAI_API_KEY=<YOUR OPENAI API KEY>
 ```
 
 {% /Step %}
@@ -434,7 +434,7 @@ Other arguments you can provide:
 * `--max-plan-size`: The maximum query plan steps the agent will go through to solve the query. Defaults to 10. When set to 1, the query planning step is skipped.
 * `--max-step-iterations`: The maximum number of tool-call interactions the agent will issue when solving each step. Defaults to 5.
 
-Experiment with different configurations of the agent. For example, stronger reasoning models are slower, but may not need a query plan, or many iterations to solve a query correctly. They are more likely to be better at selecting the correct search tools, providing them with the best arguments, and reasoning through the results. Smaller or older models are faster and may not excel at tool calling. However, with a query plan and the intermiediate evaluation steps, they might still produce the correct answer. 
+Experiment with different configurations of the agent. For example, stronger reasoning models are slower, but may not need a query plan, or many iterations to solve a query correctly. They are more likely to be better at selecting the correct search tools, providing them with the best arguments, and reasoning through the results. Smaller or older models are faster and may not excel at tool calling. However, with a query plan and the intermediate evaluation steps, they might still produce the correct answer. 
 
 ## Building the Agent
 
