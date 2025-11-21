@@ -1,54 +1,54 @@
 {
-    "name": "@chroma-core/chroma-cloud-splade",
-    "version": "0.1.9",
-    "private": false,
-    "description": "Chroma Cloud Splade sparse embedding function",
-    "main": "dist/cjs/chroma-cloud-splade.cjs",
-    "types": "dist/chroma-cloud-splade.d.ts",
-    "module": "dist/chroma-cloud-splade.legacy-esm.js",
-    "type": "module",
-    "exports": {
-        ".": {
-            "import": {
-                "types": "./dist/chroma-cloud-splade.d.ts",
-                "default": "./dist/chroma-cloud-splade.mjs"
-            },
-            "require": {
-                "types": "./dist/cjs/chroma-cloud-splade.d.cts",
-                "default": "./dist/cjs/chroma-cloud-splade.cjs"
-            }
-        }
-    },
-    "files": [
-        "src",
-        "dist"
-    ],
-    "scripts": {
-        "clean": "rimraf dist",
-        "prebuild": "rimraf dist",
-        "build": "tsup",
-        "watch": "tsup --watch",
-        "test": "jest"
-    },
-    "devDependencies": {
-        "@jest/globals": "^29.7.0",
-        "dotenv": "^16.3.1",
-        "jest": "^29.7.0",
-        "rimraf": "^5.0.0",
-        "ts-jest": "^29.1.2",
-        "ts-node": "^10.9.2",
-        "tsup": "^8.3.5"
-    },
-    "peerDependencies": {
-        "chromadb": "workspace:^"
-    },
-    "dependencies": {
-        "@chroma-core/ai-embeddings-common": "workspace:^"
-    },
-    "engines": {
-        "node": ">=20"
-    },
-    "publishConfig": {
-        "access": "public"
+  "name": "@chroma-core/chroma-cloud-splade",
+  "version": "0.1.10",
+  "private": false,
+  "description": "Chroma Cloud Splade sparse embedding function",
+  "main": "dist/cjs/chroma-cloud-splade.cjs",
+  "types": "dist/chroma-cloud-splade.d.ts",
+  "module": "dist/chroma-cloud-splade.legacy-esm.js",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/chroma-cloud-splade.d.ts",
+        "default": "./dist/chroma-cloud-splade.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/chroma-cloud-splade.d.cts",
+        "default": "./dist/cjs/chroma-cloud-splade.cjs"
+      }
     }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "prebuild": "rimraf dist",
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "dotenv": "^16.3.1",
+    "jest": "^29.7.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.3.5"
+  },
+  "peerDependencies": {
+    "chromadb": "workspace:^"
+  },
+  "dependencies": {
+    "@chroma-core/ai-embeddings-common": "workspace:^"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

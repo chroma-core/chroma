@@ -1,106 +1,153 @@
 import {
-	CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
-	ChromaCloudQwenEmbeddingFunction,
-	ChromaCloudQwenEmbeddingModel,
+  CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
+  ChromaCloudQwenArgs,
+  ChromaCloudQwenEmbeddingFunction,
+  ChromaCloudQwenEmbeddingModel,
 } from "./index";
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { CloudClient } from "chromadb";
 
 describe("ChromaCloudQwenEmbeddingFunction", () => {
-	beforeEach(() => {
-		jest.resetAllMocks();
-	});
+  beforeEach(() => {
+    jest.resetAllMocks();
+  });
 
-	const defaultParametersTest = "should initialize with default parameters";
-	if (!process.env.CHROMA_API_KEY) {
-		it.skip(defaultParametersTest, () => { });
-	} else {
-		it(defaultParametersTest, () => {
-			const embedder = new ChromaCloudQwenEmbeddingFunction({
-				model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
-				task: "nl_to_code",
-			});
-			expect(embedder.name).toBe("chroma-cloud-qwen");
+  const defaultParametersTest = "should initialize with default parameters";
+  if (!process.env.CHROMA_API_KEY) {
+    it.skip(defaultParametersTest, () => {});
+  } else {
+    it(defaultParametersTest, () => {
+      const embedder = new ChromaCloudQwenEmbeddingFunction({
+        model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
+        task: "nl_to_code",
+      });
+      expect(embedder.name).toBe("chroma-cloud-qwen");
 
-			const config = embedder.getConfig();
-			expect(config.model).toBe("Qwen/Qwen3-Embedding-0.6B");
-			expect(config.task).toBe("nl_to_code");
-			expect(config.api_key_env_var).toBe("CHROMA_API_KEY");
-		});
-	}
+      const config = embedder.getConfig();
+      expect(config.model).toBe("Qwen/Qwen3-Embedding-0.6B");
+      expect(config.task).toBe("nl_to_code");
+      expect(config.api_key_env_var).toBe("CHROMA_API_KEY");
+    });
+  }
 
-	it("should initialize with custom error for a API key", () => {
-		const originalEnv = process.env.CHROMA_API_KEY;
-		delete process.env.CHROMA_API_KEY;
+  it("should initialize with custom error for a API key", () => {
+    const originalEnv = process.env.CHROMA_API_KEY;
+    delete process.env.CHROMA_API_KEY;
 
-		try {
-			expect(() => {
-				new ChromaCloudQwenEmbeddingFunction({
-					model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
-					task: "nl_to_code",
-				});
-			}).toThrow("Chroma Embedding API key is required");
-		} finally {
-			if (originalEnv) {
-				process.env.CHROMA_API_KEY = originalEnv;
-			}
-		}
-	});
+    try {
+      expect(() => {
+        new ChromaCloudQwenEmbeddingFunction({
+          model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
+          task: "nl_to_code",
+        });
+      }).toThrow("Chroma Embedding API key is required");
+    } finally {
+      if (originalEnv) {
+        process.env.CHROMA_API_KEY = originalEnv;
+      }
+    }
+  });
 
-	it("should use custom API key environment variable", () => {
-		process.env.CUSTOM_CHROMA_API_KEY = "test-api-key";
+  it("should use custom API key environment variable", () => {
+    process.env.CUSTOM_CHROMA_API_KEY = "test-api-key";
 
-		try {
-			const embedder = new ChromaCloudQwenEmbeddingFunction({
-				model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
-				task: "nl_to_code",
-				apiKeyEnvVar: "CUSTOM_CHROMA_API_KEY",
-			});
+    try {
+      const embedder = new ChromaCloudQwenEmbeddingFunction({
+        model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
+        task: "nl_to_code",
+        apiKeyEnvVar: "CUSTOM_CHROMA_API_KEY",
+      });
 
-			expect(embedder.getConfig().api_key_env_var).toBe(
-				"CUSTOM_CHROMA_API_KEY",
-			);
-		} finally {
-			delete process.env.CUSTOM_CHROMA_API_KEY;
-		}
-	});
+      expect(embedder.getConfig().api_key_env_var).toBe(
+        "CUSTOM_CHROMA_API_KEY",
+      );
+    } finally {
+      delete process.env.CUSTOM_CHROMA_API_KEY;
+    }
+  });
 
-	const buildFromConfigTest = "should build from config";
-	if (!process.env.CHROMA_API_KEY) {
-		it.skip(buildFromConfigTest, () => { });
-	} else {
-		it(buildFromConfigTest, () => {
-			const config = {
-				api_key_env_var: "CHROMA_API_KEY",
-				model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
-				instructions: CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
-				task: "nl_to_code",
-			};
+  const buildFromConfigTest = "should build from config";
+  if (!process.env.CHROMA_API_KEY) {
+    it.skip(buildFromConfigTest, () => {});
+  } else {
+    it(buildFromConfigTest, () => {
+      const config = {
+        api_key_env_var: "CHROMA_API_KEY",
+        model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
+        instructions: CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
+        task: "nl_to_code",
+      };
 
-			const embedder = ChromaCloudQwenEmbeddingFunction.buildFromConfig(config);
+      const embedder = ChromaCloudQwenEmbeddingFunction.buildFromConfig(config);
 
-			expect(embedder.getConfig()).toEqual(config);
-		});
+      expect(embedder.getConfig()).toEqual(config);
+    });
 
-		const generateEmbeddingsTest = "should generate embeddings";
-		if (!process.env.CHROMA_API_KEY) {
-			it.skip(generateEmbeddingsTest, () => { });
-		} else {
-			it(generateEmbeddingsTest, async () => {
-				const embedder = new ChromaCloudQwenEmbeddingFunction({
-					model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
-					task: "nl_to_code",
-				});
-				const texts = ["Hello world", "Test text"];
-				const embeddings = await embedder.generate(texts);
+    const generateEmbeddingsTest = "should generate embeddings";
+    if (!process.env.CHROMA_API_KEY) {
+      it.skip(generateEmbeddingsTest, () => {});
+    } else {
+      it(generateEmbeddingsTest, async () => {
+        const embedder = new ChromaCloudQwenEmbeddingFunction({
+          model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
+          task: "nl_to_code",
+        });
+        const texts = ["Hello world", "Test text"];
+        const embeddings = await embedder.generate(texts);
 
-				expect(embeddings.length).toBe(texts.length);
+        expect(embeddings.length).toBe(texts.length);
 
-				embeddings.forEach((embedding) => {
-					expect(embedding.length).toBeGreaterThan(0);
-				});
+        embeddings.forEach((embedding) => {
+          expect(embedding.length).toBeGreaterThan(0);
+        });
 
-				expect(embeddings[0]).not.toEqual(embeddings[1]);
-			});
-		}
-	}
+        expect(embeddings[0]).not.toEqual(embeddings[1]);
+      });
+    }
+  }
+
+  it("should test API key hydration from Chroma Client", async () => {
+    process.env.CHROMA_API_KEY = "test";
+
+    const client = new CloudClient({
+      tenant: "test-tenant",
+      database: "test-database",
+    });
+
+    process.env.CHROMA_API_KEY = "";
+
+    const config: ChromaCloudQwenArgs = {
+      model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
+      instructions: CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
+      task: "nl_to_code",
+      client,
+    };
+
+    const ef = new ChromaCloudQwenEmbeddingFunction(config);
+
+    expect(ef).toBeDefined();
+    expect(ef).toBeInstanceOf(ChromaCloudQwenEmbeddingFunction);
+  });
+
+  it("should test API key hydration from client when building from config", async () => {
+    const client = new CloudClient({
+      apiKey: "test",
+      tenant: "test-tenant",
+      database: "test-database",
+    });
+
+    const config = {
+      api_key_env_var: "CHROMA_API_KEY",
+      model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
+      instructions: CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
+      task: "nl_to_code",
+    };
+
+    const embedder = ChromaCloudQwenEmbeddingFunction.buildFromConfig(
+      config,
+      client,
+    );
+
+    expect(embedder.getConfig()).toEqual(config);
+  });
 });

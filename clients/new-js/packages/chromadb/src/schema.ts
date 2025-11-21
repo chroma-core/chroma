@@ -14,6 +14,7 @@ import {
   SparseEmbeddingFunction,
 } from "./embedding-function";
 import { Key } from "./execution";
+import { ChromaClient } from "./chroma-client";
 
 export const DOCUMENT_KEY = "#document";
 export const EMBEDDING_KEY = "#embedding";
@@ -107,78 +108,78 @@ export class FtsIndexType {
   constructor(
     public enabled: boolean,
     public config: FtsIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class StringInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: StringInvertedIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class VectorIndexType {
   constructor(
     public enabled: boolean,
     public config: VectorIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class SparseVectorIndexType {
   constructor(
     public enabled: boolean,
     public config: SparseVectorIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class IntInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: IntInvertedIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class FloatInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: FloatInvertedIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class BoolInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: BoolInvertedIndexConfig,
-  ) { }
+  ) {}
 }
 
 export class StringValueType {
   constructor(
     public ftsIndex: FtsIndexType | null = null,
     public stringInvertedIndex: StringInvertedIndexType | null = null,
-  ) { }
+  ) {}
 }
 
 export class FloatListValueType {
-  constructor(public vectorIndex: VectorIndexType | null = null) { }
+  constructor(public vectorIndex: VectorIndexType | null = null) {}
 }
 
 export class SparseVectorValueType {
-  constructor(public sparseVectorIndex: SparseVectorIndexType | null = null) { }
+  constructor(public sparseVectorIndex: SparseVectorIndexType | null = null) {}
 }
 
 export class IntValueType {
-  constructor(public intInvertedIndex: IntInvertedIndexType | null = null) { }
+  constructor(public intInvertedIndex: IntInvertedIndexType | null = null) {}
 }
 
 export class FloatValueType {
   constructor(
     public floatInvertedIndex: FloatInvertedIndexType | null = null,
-  ) { }
+  ) {}
 }
 
 export class BoolValueType {
-  constructor(public boolInvertedIndex: BoolInvertedIndexType | null = null) { }
+  constructor(public boolInvertedIndex: BoolInvertedIndexType | null = null) {}
 }
 
 export class ValueTypes {
@@ -213,11 +214,11 @@ const cloneObject = <T>(value: T): T => {
   return Array.isArray(value)
     ? (value.map((item) => cloneObject(item)) as T)
     : (Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
-        k,
-        cloneObject(v),
-      ]),
-    ) as T);
+        Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+          k,
+          cloneObject(v),
+        ]),
+      ) as T);
 };
 
 const resolveEmbeddingFunctionName = (
@@ -448,7 +449,8 @@ export class Schema {
   }
 
   static async deserializeFromJSON(
-    json?: InternalSchema | JsonDict | null,
+    json: InternalSchema | JsonDict | null,
+    client: ChromaClient,
   ): Promise<Schema | undefined> {
     if (json == null) {
       return undefined;
@@ -458,11 +460,15 @@ export class Schema {
     const instance = Object.create(Schema.prototype) as Schema;
     instance.defaults = await Schema.deserializeValueTypes(
       (data.defaults ?? {}) as Record<string, any>,
+      client,
     );
     instance.keys = {};
     const keys = (data.keys ?? {}) as Record<string, Record<string, any>>;
     for (const [keyName, value] of Object.entries(keys)) {
-      instance.keys[keyName] = await Schema.deserializeValueTypes(value);
+      instance.keys[keyName] = await Schema.deserializeValueTypes(
+        value,
+        client,
+      );
     }
     return instance;
   }
@@ -674,7 +680,11 @@ export class Schema {
   private validateSparseVectorConfig(config: SparseVectorIndexConfig): void {
     // Validate that if source_key is provided then embedding_function is also provided
     // since there is no default embedding function
-    if (config.sourceKey !== null && config.sourceKey !== undefined && !config.embeddingFunction) {
+    if (
+      config.sourceKey !== null &&
+      config.sourceKey !== undefined &&
+      !config.embeddingFunction
+    ) {
       throw new Error(
         `If sourceKey is provided then embeddingFunction must also be provided since there is no default embedding function. Config: ${JSON.stringify(config)}`,
       );
@@ -921,6 +931,7 @@ export class Schema {
 
   private static async deserializeValueTypes(
     json: Record<string, any>,
+    client: ChromaClient,
   ): Promise<ValueTypes> {
     const result = new ValueTypes();
 
@@ -933,12 +944,14 @@ export class Schema {
     if (json[FLOAT_LIST_VALUE_NAME]) {
       result.floatList = await Schema.deserializeFloatListValueType(
         json[FLOAT_LIST_VALUE_NAME],
+        client,
       );
     }
 
     if (json[SPARSE_VECTOR_VALUE_NAME]) {
       result.sparseVector = await Schema.deserializeSparseVectorValueType(
         json[SPARSE_VECTOR_VALUE_NAME],
+        client,
       );
     }
 
@@ -983,12 +996,16 @@ export class Schema {
 
   private static async deserializeFloatListValueType(
     json: Record<string, any>,
+    client: ChromaClient,
   ): Promise<FloatListValueType> {
     let vectorIndex: VectorIndexType | null = null;
     if (json[VECTOR_INDEX_NAME]) {
       const data = json[VECTOR_INDEX_NAME];
       const enabled = Boolean(data.enabled);
-      const config = await Schema.deserializeVectorConfig(data.config ?? {});
+      const config = await Schema.deserializeVectorConfig(
+        data.config ?? {},
+        client,
+      );
       vectorIndex = new VectorIndexType(enabled, config);
     }
     return new FloatListValueType(vectorIndex);
@@ -996,6 +1013,7 @@ export class Schema {
 
   private static async deserializeSparseVectorValueType(
     json: Record<string, any>,
+    client: ChromaClient,
   ): Promise<SparseVectorValueType> {
     let sparseIndex: SparseVectorIndexType | null = null;
     if (json[SPARSE_VECTOR_INDEX_NAME]) {
@@ -1003,6 +1021,7 @@ export class Schema {
       const enabled = Boolean(data.enabled);
       const config = await Schema.deserializeSparseVectorConfig(
         data.config ?? {},
+        client,
       );
       sparseIndex = new SparseVectorIndexType(enabled, config);
     }
@@ -1053,6 +1072,7 @@ export class Schema {
 
   private static async deserializeVectorConfig(
     json: Record<string, any>,
+    client: ChromaClient,
   ): Promise<VectorIndexConfig> {
     const config = new VectorIndexConfig({
       space: (json.space as Space | null | undefined) ?? null,
@@ -1061,10 +1081,11 @@ export class Schema {
       spann: json.spann ? cloneObject(json.spann) : null,
     });
 
-    config.embeddingFunction = await getEmbeddingFunction(
-      "schema deserialization",
-      json.embedding_function as EmbeddingFunctionConfiguration,
-    );
+    config.embeddingFunction = await getEmbeddingFunction({
+      collectionName: "schema deserialization",
+      client,
+      efConfig: json.embedding_function as EmbeddingFunctionConfiguration,
+    });
     if (!config.space && config.embeddingFunction?.defaultSpace) {
       config.space = config.embeddingFunction.defaultSpace();
     }
@@ -1074,6 +1095,7 @@ export class Schema {
 
   private static async deserializeSparseVectorConfig(
     json: Record<string, any>,
+    client: ChromaClient,
   ): Promise<SparseVectorIndexConfig> {
     const config = new SparseVectorIndexConfig({
       sourceKey: (json.source_key as string | null | undefined) ?? null,
@@ -1083,6 +1105,7 @@ export class Schema {
     const embeddingFunction =
       (await getSparseEmbeddingFunction(
         "schema deserialization",
+        client,
         json.embedding_function as EmbeddingFunctionConfiguration,
       )) ??
       (config.embeddingFunction as

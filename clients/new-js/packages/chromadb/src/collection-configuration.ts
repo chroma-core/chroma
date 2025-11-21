@@ -14,6 +14,7 @@ import {
 } from "./embedding-function";
 import { CollectionMetadata } from "./types";
 import { Schema } from "./schema";
+import { ChromaClient } from "./chroma-client";
 
 export interface CollectionConfiguration {
   embeddingFunction?: EmbeddingFunctionConfiguration | null;
@@ -80,7 +81,11 @@ export const processCreateCollectionConfig = async ({
     configEmbeddingFunction: configuration?.embeddingFunction,
   });
 
-  if (!embeddingFunctionConfiguration && embeddingFunction !== null && schemaEmbeddingFunction === undefined) {
+  if (
+    !embeddingFunctionConfiguration &&
+    embeddingFunction !== null &&
+    schemaEmbeddingFunction === undefined
+  ) {
     embeddingFunctionConfiguration = await getDefaultEFConfig();
   }
 
@@ -122,7 +127,7 @@ export const processCreateCollectionConfig = async ({
       ) {
         console.warn(
           `Space '${configuration.hnsw.space}' is not supported by embedding function '${overallEf.name || "unknown"}'. ` +
-          `Supported spaces: ${supportedSpaces.join(", ")}`,
+            `Supported spaces: ${supportedSpaces.join(", ")}`,
         );
       }
 
@@ -132,7 +137,7 @@ export const processCreateCollectionConfig = async ({
       ) {
         console.warn(
           `Space '${configuration.spann.space}' is not supported by embedding function '${overallEf.name || "unknown"}'. ` +
-          `Supported spaces: ${supportedSpaces.join(", ")}`,
+            `Supported spaces: ${supportedSpaces.join(", ")}`,
         );
       }
 
@@ -147,7 +152,7 @@ export const processCreateCollectionConfig = async ({
       ) {
         console.warn(
           `Space '${metadata["hnsw:space"]}' from metadata is not supported by embedding function '${overallEf.name || "unknown"}'. ` +
-          `Supported spaces: ${supportedSpaces.join(", ")}`,
+            `Supported spaces: ${supportedSpaces.join(", ")}`,
         );
       }
     }
@@ -167,11 +172,13 @@ export const processUpdateCollectionConfig = async ({
   currentConfiguration,
   currentEmbeddingFunction,
   newConfiguration,
+  client,
 }: {
   collectionName: string;
   currentConfiguration: CollectionConfiguration;
   currentEmbeddingFunction?: EmbeddingFunction;
   newConfiguration: UpdateCollectionConfiguration;
+  client: ChromaClient;
 }): Promise<{
   updateConfiguration?: ApiUpdateCollectionConfiguration;
   updateEmbeddingFunction?: EmbeddingFunction;
@@ -190,10 +197,11 @@ export const processUpdateCollectionConfig = async ({
 
   const embeddingFunction =
     currentEmbeddingFunction ||
-    (await getEmbeddingFunction(
-      collectionName,
-      currentConfiguration.embeddingFunction ?? undefined,
-    ));
+    (await getEmbeddingFunction({
+      collectionName: collectionName,
+      client,
+      efConfig: currentConfiguration.embeddingFunction ?? undefined,
+    }));
 
   const newEmbeddingFunction = newConfiguration.embeddingFunction;
 

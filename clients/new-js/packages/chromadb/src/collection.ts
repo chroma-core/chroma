@@ -1,5 +1,8 @@
 import { ChromaClient } from "./chroma-client";
-import { EmbeddingFunction, SparseEmbeddingFunction } from "./embedding-function";
+import {
+  EmbeddingFunction,
+  SparseEmbeddingFunction,
+} from "./embedding-function";
 import {
   BaseRecordSet,
   CollectionMetadata,
@@ -330,7 +333,11 @@ export class CollectionImpl implements Collection {
     return await embeddingFunction.generate(inputs);
   }
 
-  private async sparseEmbed(sparseEmbeddingFunction: SparseEmbeddingFunction, inputs: string[], isQuery: boolean): Promise<SparseVector[]> {
+  private async sparseEmbed(
+    sparseEmbeddingFunction: SparseEmbeddingFunction,
+    inputs: string[],
+    isQuery: boolean,
+  ): Promise<SparseVector[]> {
     if (isQuery && sparseEmbeddingFunction.generateForQueries) {
       return await sparseEmbeddingFunction.generateForQueries(inputs);
     }
@@ -371,12 +378,14 @@ export class CollectionImpl implements Collection {
       if (!documents) {
         return undefined;
       }
-      metadatas = Array(documents.length).fill(null).map(() => ({}));
+      metadatas = Array(documents.length)
+        .fill(null)
+        .map(() => ({}));
     }
 
     // Create copies, converting null to empty object
     const updatedMetadatas = metadatas.map((metadata) =>
-      metadata !== null && metadata !== undefined ? { ...metadata } : {}
+      metadata !== null && metadata !== undefined ? { ...metadata } : {},
     );
     const documentsList = documents ? [...documents] : undefined;
 
@@ -418,7 +427,11 @@ export class CollectionImpl implements Collection {
           continue;
         }
 
-        const sparseEmbeddings = await this.sparseEmbed(embeddingFunction, inputs, false);
+        const sparseEmbeddings = await this.sparseEmbed(
+          embeddingFunction,
+          inputs,
+          false,
+        );
         if (sparseEmbeddings.length !== positions.length) {
           throw new ChromaValueError(
             "Sparse embedding function returned unexpected number of embeddings.",
@@ -451,7 +464,11 @@ export class CollectionImpl implements Collection {
         continue;
       }
 
-      const sparseEmbeddings = await this.sparseEmbed(embeddingFunction, inputs, false);
+      const sparseEmbeddings = await this.sparseEmbed(
+        embeddingFunction,
+        inputs,
+        false,
+      );
       if (sparseEmbeddings.length !== positions.length) {
         throw new ChromaValueError(
           "Sparse embedding function returned unexpected number of embeddings.",
@@ -465,7 +482,7 @@ export class CollectionImpl implements Collection {
 
     // Convert empty objects back to null
     const resultMetadatas = updatedMetadatas.map((metadata) =>
-      Object.keys(metadata).length === 0 ? null : metadata
+      Object.keys(metadata).length === 0 ? null : metadata,
     );
 
     return resultMetadatas as Metadata[];
@@ -507,10 +524,7 @@ export class CollectionImpl implements Collection {
     }
 
     const sparseIndex = valueTypes.sparseVector?.sparseVectorIndex;
-    if (
-      sparseIndex?.enabled &&
-      sparseIndex.config.embeddingFunction
-    ) {
+    if (sparseIndex?.enabled && sparseIndex.config.embeddingFunction) {
       const sparseEmbeddingFunction = sparseIndex.config.embeddingFunction;
       const sparseEmbeddings = await this.sparseEmbed(
         sparseEmbeddingFunction,
@@ -526,10 +540,7 @@ export class CollectionImpl implements Collection {
     }
 
     const vectorIndex = valueTypes.floatList?.vectorIndex;
-    if (
-      vectorIndex?.enabled &&
-      vectorIndex.config.embeddingFunction
-    ) {
+    if (vectorIndex?.enabled && vectorIndex.config.embeddingFunction) {
       const embeddingFunction = vectorIndex.config.embeddingFunction;
       const embeddings = embeddingFunction.generateForQueries
         ? await embeddingFunction.generateForQueries([queryValue])
@@ -574,7 +585,9 @@ export class CollectionImpl implements Collection {
     return Object.fromEntries(entries);
   }
 
-  private async embedSearchPayload(payload: SearchPayload): Promise<SearchPayload> {
+  private async embedSearchPayload(
+    payload: SearchPayload,
+  ): Promise<SearchPayload> {
     if (!payload.rank) {
       return payload;
     }
@@ -595,14 +608,14 @@ export class CollectionImpl implements Collection {
     if (!schema) return undefined;
 
     const schemaOverride = schema.keys[EMBEDDING_KEY];
-    const overrideFunction = schemaOverride?.floatList?.vectorIndex?.config
-      .embeddingFunction;
+    const overrideFunction =
+      schemaOverride?.floatList?.vectorIndex?.config.embeddingFunction;
     if (overrideFunction) {
       return overrideFunction;
     }
 
-    const defaultFunction = schema.defaults.floatList?.vectorIndex?.config
-      .embeddingFunction;
+    const defaultFunction =
+      schema.defaults.floatList?.vectorIndex?.config.embeddingFunction;
     return defaultFunction ?? undefined;
   }
 
@@ -641,7 +654,9 @@ export class CollectionImpl implements Collection {
       );
     }
 
-    return preparedRecordSet as T extends true ? PreparedRecordSet : PreparedInsertRecordSet;
+    return preparedRecordSet as T extends true
+      ? PreparedRecordSet
+      : PreparedInsertRecordSet;
   }
 
   private validateGet(
@@ -856,11 +871,15 @@ export class CollectionImpl implements Collection {
     });
   }
 
-  public async search(searches: SearchLike | SearchLike[]): Promise<SearchResult> {
+  public async search(
+    searches: SearchLike | SearchLike[],
+  ): Promise<SearchResult> {
     const items = Array.isArray(searches) ? searches : [searches];
 
     if (items.length === 0) {
-      throw new ChromaValueError("At least one search payload must be provided.");
+      throw new ChromaValueError(
+        "At least one search payload must be provided.",
+      );
     }
 
     const payloads = await Promise.all(
@@ -897,11 +916,12 @@ export class CollectionImpl implements Collection {
 
     const { updateConfiguration, updateEmbeddingFunction } = configuration
       ? await processUpdateCollectionConfig({
-        collectionName: this.name,
-        currentConfiguration: this.configuration,
-        newConfiguration: configuration,
-        currentEmbeddingFunction: this.embeddingFunction,
-      })
+          collectionName: this.name,
+          currentConfiguration: this.configuration,
+          newConfiguration: configuration,
+          currentEmbeddingFunction: this.embeddingFunction,
+          client: this.chromaClient,
+        })
       : {};
 
     if (updateEmbeddingFunction) {
