@@ -508,7 +508,7 @@ impl wal3::MarkDirty for MarkDirty {
             let num_records = num_records as u64;
             let initial_insertion_epoch_us = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .map_err(|_| wal3::Error::Internal)?
+                .map_err(|_| wal3::Error::internal(file!(), line!()))?
                 .as_micros() as u64;
             let dirty_marker = DirtyMarker::MarkDirty {
                 collection_id: self.collection_id,
@@ -519,13 +519,13 @@ impl wal3::MarkDirty for MarkDirty {
             };
             let dirty_marker_json = serde_json::to_string(&dirty_marker).map_err(|err| {
                 tracing::error!("Failed to serialize dirty marker: {}", err);
-                wal3::Error::Internal
+                wal3::Error::internal(file!(), line!())
             })?;
             dirty_log.append(Vec::from(dirty_marker_json)).await?;
             Ok(())
         } else {
             tracing::error!("asked to mark dirty with no dirty log");
-            Err(wal3::Error::Internal)
+            Err(wal3::Error::internal(file!(), line!()))
         }
     }
 }
@@ -663,7 +663,7 @@ impl LogServer {
             position: LogPosition::from_offset(adjusted_log_offset as u64),
             epoch_us: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .map_err(|_| wal3::Error::Internal)
+                .map_err(|_| wal3::Error::internal(file!(), line!()))
                 .unwrap()
                 .as_micros() as u64,
             writer: "TODO".to_string(),
@@ -2399,7 +2399,7 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|_| wal3::Error::Internal)
+            .map_err(|_| wal3::Error::internal(file!(), line!()))
             .unwrap()
             .as_micros() as u64;
         let markers = vec![
@@ -2441,7 +2441,7 @@ mod tests {
         // Test that a collection without enough records won't induce head-of-line blocking.
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|_| wal3::Error::Internal)
+            .map_err(|_| wal3::Error::internal(file!(), line!()))
             .unwrap()
             .as_micros() as u64;
         let collection_id_blocking = CollectionUuid::new();
@@ -2924,10 +2924,10 @@ mod tests {
 
     #[test]
     fn error_enum_conversion_from_wal3() {
-        let wal3_error = wal3::Error::Internal;
+        let wal3_error = wal3::Error::internal(file!(), line!());
         let service_error = Error::from(wal3_error);
         match service_error {
-            Error::Wal3(wal3::Error::Internal) => {}
+            Error::Wal3(wal3::Error::Internal { .. }) => {}
             _ => panic!("Expected Wal3 error variant"),
         }
     }
@@ -2944,7 +2944,7 @@ mod tests {
 
     #[test]
     fn error_enum_display_messages() {
-        let wal3_error = Error::Wal3(wal3::Error::Internal);
+        let wal3_error = Error::Wal3(wal3::Error::internal(file!(), line!()));
         assert!(wal3_error.to_string().contains("wal3"));
 
         let json_error =
@@ -3401,7 +3401,7 @@ mod tests {
 
     #[test]
     fn error_chain_verification() {
-        let wal3_error = wal3::Error::Internal;
+        let wal3_error = wal3::Error::internal(file!(), line!());
         let service_error: Box<dyn std::error::Error> = Box::new(Error::from(wal3_error));
 
         assert!(service_error.source().is_some());

@@ -353,7 +353,7 @@ impl ManifestManager {
         match rx.await {
             Ok(None) => Ok(()),
             Ok(Some(err)) => Err(err),
-            Err(_) => Err(Error::Internal),
+            Err(_) => Err(Error::internal(file!(), line!())),
         }
     }
 

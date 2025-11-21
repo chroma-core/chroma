@@ -25,7 +25,7 @@ pub async fn copy(
         .await?;
     if short_read {
         tracing::error!("short_read in unlimited copy");
-        return Err(Error::Internal);
+        return Err(Error::internal(file!(), line!()));
     }
     if !fragments.is_empty() {
         let mut futures = vec![];
@@ -84,7 +84,7 @@ pub async fn copy(
             initial_seq_no: reference.next_fragment_seq_no(),
         };
         if manifest.initial_offset.is_some() && manifest.initial_seq_no.is_none() {
-            return Err(Error::Internal);
+            return Err(Error::internal(file!(), line!()));
         }
         Manifest::initialize_from_manifest(options, storage, &target, manifest).await?;
     }
