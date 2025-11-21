@@ -221,16 +221,15 @@ export const registerSparseEmbeddingFunction = (
 
 /**
  * Retrieves and instantiates an embedding function from configuration.
- * @param collectionName - Name of the collection (for error messages)
- * @param efConfig - Configuration for the embedding function
- * @param client - The client creating the collection
  * @returns EmbeddingFunction instance or undefined if it cannot be constructed
  */
-export const getEmbeddingFunction = async (
-  collectionName: string,
-  efConfig?: EmbeddingFunctionConfiguration,
-  client?: ChromaClient,
-) => {
+export const getEmbeddingFunction = async (args: {
+  collectionName: string;
+  client: ChromaClient;
+  efConfig?: EmbeddingFunctionConfiguration;
+}) => {
+  const { collectionName, client, efConfig } = args;
+
   if (!efConfig) {
     console.warn(
       `No embedding function configuration found for collection ${collectionName}. 'add' and 'query' will fail unless you provide them embeddings directly.`,
@@ -309,14 +308,12 @@ export const getEmbeddingFunction = async (
 
 /**
  * Retrieves and instantiates a sparse embedding function from configuration.
- * @param collectionName - Name of the collection (for error messages)
- * @param efConfig - Configuration for the sparse embedding function
  * @returns SparseEmbeddingFunction instance or undefined if it cannot be constructed
  */
 export const getSparseEmbeddingFunction = async (
   collectionName: string,
+  client: ChromaClient,
   efConfig?: EmbeddingFunctionConfiguration,
-  client?: ChromaClient,
 ) => {
   if (!efConfig) {
     return undefined;

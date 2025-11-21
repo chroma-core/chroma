@@ -19,12 +19,12 @@ import {
   SparseVectorIndexConfig,
   VectorIndexConfig,
 } from "../src/schema";
-import type { ChromaClient } from "../src/chroma-client";
+import { ChromaClient } from "../src/chroma-client";
 
 class MockEmbedding implements EmbeddingFunction {
   public readonly name = "mock_embedding";
 
-  constructor(private readonly modelName = "mock_model") { }
+  constructor(private readonly modelName = "mock_model") {}
 
   async generate(texts: string[]): Promise<number[][]> {
     return texts.map(() => [1, 2, 3]);
@@ -50,7 +50,7 @@ class MockEmbedding implements EmbeddingFunction {
 class MockSparseEmbedding implements SparseEmbeddingFunction {
   public readonly name = "mock_sparse";
 
-  constructor(private readonly identifier = "mock_sparse") { }
+  constructor(private readonly identifier = "mock_sparse") {}
 
   async generate(texts: string[]) {
     return texts.map(() => ({ indices: [0, 1], values: [1, 1] }));
@@ -68,7 +68,7 @@ class MockSparseEmbedding implements SparseEmbeddingFunction {
 class DeterministicSparseEmbedding implements SparseEmbeddingFunction {
   public readonly name = "deterministic_sparse";
 
-  constructor(private readonly label = "det") { }
+  constructor(private readonly label = "det") {}
 
   async generate(texts: string[]) {
     return texts.map((text, index) => {
@@ -109,6 +109,8 @@ beforeAll(() => {
 });
 
 describe("Schema", () => {
+  const client = new ChromaClient();
+
   it("default schema initialization", () => {
     const schema = new Schema();
 
@@ -506,7 +508,7 @@ describe("Schema", () => {
     });
     expect(embeddingJson.config!.source_key).toBe(DOCUMENT_KEY);
 
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     expect(deserialized).toBeDefined();
     expect(deserialized!.defaults.string?.ftsIndex?.enabled).toBe(false);
     expect(deserialized!.defaults.string?.stringInvertedIndex?.enabled).toBe(
@@ -555,7 +557,7 @@ describe("Schema", () => {
     expect(embeddingVector.config!.embedding_function!.type).toBe("legacy");
     expect(embeddingVector.config!.source_key).toBe(DOCUMENT_KEY);
 
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     expect(deserialized?.defaults.floatList?.vectorIndex?.config.space).toBe(
       "cosine",
     );
@@ -610,7 +612,7 @@ describe("Schema", () => {
       ef_search: 128,
     });
 
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     const desDefaultsVector = deserialized?.defaults.floatList?.vectorIndex;
     expect(desDefaultsVector?.config.embeddingFunction).toBeDefined();
     expect(desDefaultsVector?.config.embeddingFunction?.getConfig?.()).toEqual({
@@ -657,7 +659,7 @@ describe("Schema", () => {
     expect(embeddingVector.config!.spann).toEqual(spannConfig);
     expect(embeddingVector.config!.hnsw).toBeUndefined();
 
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     const desDefaultsVector = deserialized?.defaults.floatList?.vectorIndex;
     expect(desDefaultsVector?.config.spann).toEqual(spannConfig);
     expect(desDefaultsVector?.config.hnsw).toBeNull();
@@ -736,7 +738,7 @@ describe("Schema", () => {
     expect(priceJson["float"]!["float_inverted_index"]!.enabled).toBe(false);
     expect(priceJson["float"]!["float_inverted_index"]!.config).toEqual({});
 
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     expect(
       deserialized?.keys["embeddings_field"].sparseVector?.sparseVectorIndex
         ?.enabled,
@@ -795,7 +797,7 @@ describe("Schema", () => {
       true,
     );
 
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     const desOverride = deserialized?.keys["multi_field"];
     expect(desOverride?.sparseVector?.sparseVectorIndex?.enabled).toBe(true);
     expect(desOverride?.string?.stringInvertedIndex?.enabled).toBe(true);
@@ -820,7 +822,7 @@ describe("Schema", () => {
       json.keys["temp_field"]!["string"]!["string_inverted_index"]!.enabled,
     ).toBe(false);
 
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     expect(
       deserialized?.keys["temp_field"].string?.stringInvertedIndex?.enabled,
     ).toBe(false);
@@ -878,7 +880,7 @@ describe("Schema", () => {
       expect.arrayContaining([DOCUMENT_KEY, EMBEDDING_KEY]),
     );
 
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     expect(deserialized?.defaults.string?.ftsIndex?.enabled).toBe(false);
     expect(
       deserialized?.keys[EMBEDDING_KEY].floatList?.vectorIndex?.enabled,
@@ -888,9 +890,11 @@ describe("Schema", () => {
   it("multiple serialize deserialize roundtrips", async () => {
     const schema = new Schema();
     const json1 = schema.serializeToJSON();
-    const schema2 = await Schema.deserializeFromJSON(json1);
+    const schema2 = await Schema.deserializeFromJSON(json1, client);
     const json2 = schema2?.serializeToJSON();
-    const schema3 = json2 ? await Schema.deserializeFromJSON(json2) : undefined;
+    const schema3 = json2
+      ? await Schema.deserializeFromJSON(json2, client)
+      : undefined;
     const json3 = schema3?.serializeToJSON();
 
     expect(json1).toBeDefined();
@@ -937,7 +941,7 @@ describe("Schema", () => {
     const json = schema.serializeToJSON();
     expect(Object.keys(json.keys)).toHaveLength(52);
 
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     expect(Object.keys(deserialized!.keys)).toHaveLength(52);
     expect(
       deserialized!.keys["field_0"].sparseVector?.sparseVectorIndex?.config
@@ -1015,7 +1019,7 @@ describe("Schema", () => {
       json.keys["is_active"]!["bool"]!["bool_inverted_index"]!.enabled,
     ).toBe(false);
 
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     expect(deserialized?.defaults.floatValue?.floatInvertedIndex?.enabled).toBe(
       false,
     );
@@ -1046,7 +1050,7 @@ describe("Schema", () => {
       json.keys[EMBEDDING_KEY]!["float_list"]!["vector_index"]!.config!.space,
     ).toBe("cosine");
 
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     expect(deserialized?.defaults.floatList?.vectorIndex?.config.space).toBe(
       "cosine",
     );
@@ -1072,7 +1076,7 @@ describe("Schema", () => {
       json.keys[EMBEDDING_KEY]!["float_list"]!["vector_index"]!.config!.space,
     ).toBe("l2");
 
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     expect(deserialized?.defaults.floatList?.vectorIndex?.config.space).toBe(
       "l2",
     );
@@ -1101,7 +1105,7 @@ describe("Schema", () => {
     expect(embeddingVector.config!.space).toBe("ip");
     expect(embeddingVector.config!.embedding_function!.type).toBe("legacy");
 
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     expect(deserialized?.defaults.floatList?.vectorIndex?.config.space).toBe(
       "ip",
     );
@@ -1122,13 +1126,15 @@ describe("Schema", () => {
     expect(
       json1["defaults"]["float_list"]!["vector_index"]!.config!.space,
     ).toBe("cosine");
-    const schema2 = await Schema.deserializeFromJSON(json1);
+    const schema2 = await Schema.deserializeFromJSON(json1, client);
 
     const json2 = schema2?.serializeToJSON();
     expect(
       json2?.["defaults"]["float_list"]!["vector_index"]!.config!.space,
     ).toBe("cosine");
-    const schema3 = json2 ? await Schema.deserializeFromJSON(json2) : undefined;
+    const schema3 = json2
+      ? await Schema.deserializeFromJSON(json2, client)
+      : undefined;
 
     const json3 = schema3?.serializeToJSON();
     expect(
@@ -1160,7 +1166,7 @@ describe("Schema", () => {
     );
 
     const json = schema.serializeToJSON();
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     expect(
       deserialized?.keys["field1"].sparseVector?.sparseVectorIndex?.config
         .sourceKey,
@@ -1243,7 +1249,7 @@ describe("Schema", () => {
     );
 
     const json = schema.serializeToJSON();
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     expect(
       deserialized?.keys["key_a"].sparseVector?.sparseVectorIndex?.config
         .sourceKey,
@@ -1310,7 +1316,7 @@ describe("Schema", () => {
     expect(fieldJson["bool"]).toBeUndefined();
     expect(fieldJson["float_list"]).toBeUndefined();
 
-    const deserialized = await Schema.deserializeFromJSON(json);
+    const deserialized = await Schema.deserializeFromJSON(json, client);
     const desOverride = deserialized?.keys["multi_index_field"];
     expect(desOverride?.sparseVector?.sparseVectorIndex?.enabled).toBe(true);
     expect(desOverride?.string).toBeNull();
@@ -1381,13 +1387,11 @@ describe("Schema", () => {
     const mockChromaClient = {
       getMaxBatchSize: jest.fn().mockResolvedValue(1000),
       supportsBase64Encoding: jest.fn().mockResolvedValue(false),
-      _path: jest
-        .fn()
-        .mockResolvedValue({
-          path: "/api/v1",
-          tenant: "default_tenant",
-          database: "default_database",
-        }),
+      _path: jest.fn().mockResolvedValue({
+        path: "/api/v1",
+        tenant: "default_tenant",
+        database: "default_database",
+      }),
     };
 
     const collection = new CollectionImpl({
@@ -1454,13 +1458,11 @@ describe("Schema", () => {
     const mockChromaClient = {
       getMaxBatchSize: jest.fn().mockResolvedValue(1000),
       supportsBase64Encoding: jest.fn().mockResolvedValue(false),
-      _path: jest
-        .fn()
-        .mockResolvedValue({
-          path: "/api/v1",
-          tenant: "default_tenant",
-          database: "default_database",
-        }),
+      _path: jest.fn().mockResolvedValue({
+        path: "/api/v1",
+        tenant: "default_tenant",
+        database: "default_database",
+      }),
     };
 
     const collection = new CollectionImpl({
@@ -1531,13 +1533,11 @@ describe("Schema", () => {
     const mockChromaClient = {
       getMaxBatchSize: jest.fn().mockResolvedValue(1000),
       supportsBase64Encoding: jest.fn().mockResolvedValue(false),
-      _path: jest
-        .fn()
-        .mockResolvedValue({
-          path: "/api/v1",
-          tenant: "default_tenant",
-          database: "default_database",
-        }),
+      _path: jest.fn().mockResolvedValue({
+        path: "/api/v1",
+        tenant: "default_tenant",
+        database: "default_database",
+      }),
     };
 
     const collection = new CollectionImpl({
@@ -1609,13 +1609,11 @@ describe("Schema", () => {
     const mockChromaClient = {
       getMaxBatchSize: jest.fn().mockResolvedValue(1000),
       supportsBase64Encoding: jest.fn().mockResolvedValue(false),
-      _path: jest
-        .fn()
-        .mockResolvedValue({
-          path: "/api/v1",
-          tenant: "default_tenant",
-          database: "default_database",
-        }),
+      _path: jest.fn().mockResolvedValue({
+        path: "/api/v1",
+        tenant: "default_tenant",
+        database: "default_database",
+      }),
     };
 
     const collection = new CollectionImpl({
@@ -1681,13 +1679,11 @@ describe("Schema", () => {
     const mockChromaClient = {
       getMaxBatchSize: jest.fn().mockResolvedValue(1000),
       supportsBase64Encoding: jest.fn().mockResolvedValue(false),
-      _path: jest
-        .fn()
-        .mockResolvedValue({
-          path: "/api/v1",
-          tenant: "default_tenant",
-          database: "default_database",
-        }),
+      _path: jest.fn().mockResolvedValue({
+        path: "/api/v1",
+        tenant: "default_tenant",
+        database: "default_database",
+      }),
     };
 
     const collection = new CollectionImpl({
@@ -1781,13 +1777,19 @@ describe("Schema", () => {
         embeddingFunction: sparseEf,
         sourceKey: K.DOCUMENT,
       }),
-      "sparse_field"
+      "sparse_field",
     );
 
     const json = schema.serializeToJSON();
-    expect(json.keys["sparse_field"]?.["sparse_vector"]?.["sparse_vector_index"]?.config?.source_key).toBe("#document");
+    expect(
+      json.keys["sparse_field"]?.["sparse_vector"]?.["sparse_vector_index"]
+        ?.config?.source_key,
+    ).toBe("#document");
 
-    const deserialized = await Schema.deserializeFromJSON(json);
-    expect(deserialized?.keys["sparse_field"].sparseVector?.sparseVectorIndex?.config.sourceKey).toBe("#document");
+    const deserialized = await Schema.deserializeFromJSON(json, client);
+    expect(
+      deserialized?.keys["sparse_field"].sparseVector?.sparseVectorIndex?.config
+        .sourceKey,
+    ).toBe("#document");
   });
 });
