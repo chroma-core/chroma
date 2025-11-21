@@ -52,6 +52,10 @@ import type { SparseVectorIndexConfig } from "./schema";
  * Provides methods for adding, querying, updating, and deleting records.
  */
 export interface Collection {
+  /** Tenant name */
+  tenant: string;
+  /** Database name */
+  database: string;
   /** Unique identifier for the collection */
   id: string;
   /** Name of the collection */
@@ -214,6 +218,10 @@ export interface CollectionArgs {
   name: string;
   /** Collection ID */
   id: string;
+  /** Tenant name */
+  tenant: string;
+  /** Database name */
+  database: string;
   /** Embedding function for the collection */
   embeddingFunction?: EmbeddingFunction;
   /** Collection configuration */
@@ -232,6 +240,8 @@ export class CollectionImpl implements Collection {
   protected readonly chromaClient: ChromaClient;
   protected readonly apiClient: ReturnType<typeof createClient>;
   public readonly id: string;
+  public readonly tenant: string;
+  public readonly database: string;
   private _name: string;
   private _metadata: CollectionMetadata | undefined;
   private _configuration: CollectionConfiguration;
@@ -246,6 +256,8 @@ export class CollectionImpl implements Collection {
     chromaClient,
     apiClient,
     id,
+    tenant,
+    database,
     name,
     metadata,
     configuration,
@@ -255,6 +267,8 @@ export class CollectionImpl implements Collection {
     this.chromaClient = chromaClient;
     this.apiClient = apiClient;
     this.id = id;
+    this.tenant = tenant;
+    this.database = database;
     this._name = name;
     this._metadata = metadata;
     this._configuration = configuration;
@@ -309,9 +323,9 @@ export class CollectionImpl implements Collection {
     database: string;
     collection_id: string;
   }> {
-    const clientPath = await this.chromaClient._path();
     return {
-      ...clientPath,
+      tenant: this.tenant,
+      database: this.database,
       collection_id: this.id,
     };
   }
@@ -958,6 +972,8 @@ export class CollectionImpl implements Collection {
       chromaClient: this.chromaClient,
       apiClient: this.apiClient,
       name: data.name,
+      tenant: this.tenant,
+      database: this.database,
       id: data.id,
       embeddingFunction: this._embeddingFunction,
       metadata: deserializeMetadata(data.metadata ?? undefined) ?? undefined,
