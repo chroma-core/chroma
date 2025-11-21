@@ -547,17 +547,6 @@ message AttachFunctionResponse {
   string id = 1;
 }
 
-message CreateOutputCollectionForAttachedFunctionRequest {
-  string attached_function_id = 1;
-  string collection_name = 2;
-  string tenant_id = 3;
-  string database_id = 4;
-}
-
-message CreateOutputCollectionForAttachedFunctionResponse {
-  string collection_id = 1;
-}
-
 message GetAttachedFunctionByNameRequest {
   string input_collection_id = 1;
   string name = 2;
@@ -578,6 +567,7 @@ message AttachedFunction {
   uint64 created_at = 15;
   uint64 updated_at = 16;
   string function_id = 17;
+  bool is_ready = 18;
 }
 
 message GetAttachedFunctionByNameResponse {
@@ -608,6 +598,12 @@ message DetachFunctionRequest {
 message DetachFunctionResponse {
   bool success = 1;
 }
+
+message FinishCreateAttachedFunctionRequest {
+  string id = 1;
+}
+
+message FinishCreateAttachedFunctionResponse {}
 
 message CleanupExpiredPartialAttachedFunctionsRequest {
   // Attached functions older than this will be deleted
@@ -687,11 +683,11 @@ service SysDB {
   rpc BatchGetCollectionSoftDeleteStatus(BatchGetCollectionSoftDeleteStatusRequest) returns (BatchGetCollectionSoftDeleteStatusResponse) {}
   rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
   rpc AttachFunction(AttachFunctionRequest) returns (AttachFunctionResponse) {}
-  rpc CreateOutputCollectionForAttachedFunction(CreateOutputCollectionForAttachedFunctionRequest) returns (CreateOutputCollectionForAttachedFunctionResponse) {}
   rpc GetAttachedFunctionByName(GetAttachedFunctionByNameRequest) returns (GetAttachedFunctionByNameResponse) {}
   rpc GetAttachedFunctionByUuid(GetAttachedFunctionByUuidRequest) returns (GetAttachedFunctionByUuidResponse) {}
   rpc ListAttachedFunctions(ListAttachedFunctionsRequest) returns (ListAttachedFunctionsResponse) {}
   rpc DetachFunction(DetachFunctionRequest) returns (DetachFunctionResponse) {}
+  rpc FinishCreateAttachedFunction(FinishCreateAttachedFunctionRequest) returns (FinishCreateAttachedFunctionResponse) {}
   rpc CleanupExpiredPartialAttachedFunctions(CleanupExpiredPartialAttachedFunctionsRequest) returns (CleanupExpiredPartialAttachedFunctionsResponse) {}
   rpc GetFunctions(GetFunctionsRequest) returns (GetFunctionsResponse) {}
   rpc GetSoftDeletedAttachedFunctions(GetSoftDeletedAttachedFunctionsRequest) returns (GetSoftDeletedAttachedFunctionsResponse) {}

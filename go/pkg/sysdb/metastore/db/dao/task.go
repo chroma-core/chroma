@@ -42,12 +42,32 @@ func (s *attachedFunctionDb) Insert(attachedFunction *dbmodel.AttachedFunction) 
 	return nil
 }
 
+func (s *attachedFunctionDb) Update(attachedFunction *dbmodel.AttachedFunction) error {
+	result := s.db.Model(&dbmodel.AttachedFunction{}).
+		Where("id = ?", attachedFunction.ID).
+		Where("is_deleted = ?", false).
+		Updates(attachedFunction)
+
+	if result.Error != nil {
+		log.Error("update attached function failed", zap.Error(result.Error))
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		log.Error("update attached function: no rows affected", zap.String("id", attachedFunction.ID.String()))
+		return common.ErrAttachedFunctionNotFound
+	}
+
+	return nil
+}
+
 func (s *attachedFunctionDb) GetByName(inputCollectionID string, name string) (*dbmodel.AttachedFunction, error) {
 	var attachedFunction dbmodel.AttachedFunction
 	err := s.db.
 		Where("input_collection_id = ?", inputCollectionID).
 		Where("name = ?", name).
 		Where("is_deleted = ?", false).
+		Where("is_ready = ?", true).
 		First(&attachedFunction).Error
 
 	if err != nil {
@@ -61,11 +81,31 @@ func (s *attachedFunctionDb) GetByName(inputCollectionID string, name string) (*
 	return &attachedFunction, nil
 }
 
+func (s *attachedFunctionDb) GetAnyByName(inputCollectionID string, name string) (*dbmodel.AttachedFunction, error) {
+	var attachedFunction dbmodel.AttachedFunction
+	err := s.db.
+		Where("input_collection_id = ?", inputCollectionID).
+		Where("name = ?", name).
+		Where("is_deleted = ?", false).
+		First(&attachedFunction).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		log.Error("GetAnyByName failed", zap.Error(err))
+		return nil, err
+	}
+
+	return &attachedFunction, nil
+}
+
 func (s *attachedFunctionDb) GetByID(id uuid.UUID) (*dbmodel.AttachedFunction, error) {
 	var attachedFunction dbmodel.AttachedFunction
 	err := s.db.
 		Where("id = ?", id).
 		Where("is_deleted = ?", false).
+		Where("is_ready = ?", true).
 		First(&attachedFunction).Error
 
 	if err != nil {
@@ -79,11 +119,30 @@ func (s *attachedFunctionDb) GetByID(id uuid.UUID) (*dbmodel.AttachedFunction, e
 	return &attachedFunction, nil
 }
 
+func (s *attachedFunctionDb) GetAnyByID(id uuid.UUID) (*dbmodel.AttachedFunction, error) {
+	var attachedFunction dbmodel.AttachedFunction
+	err := s.db.
+		Where("id = ?", id).
+		Where("is_deleted = ?", false).
+		First(&attachedFunction).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		log.Error("GetAnyByID failed", zap.Error(err), zap.String("id", id.String()))
+		return nil, err
+	}
+
+	return &attachedFunction, nil
+}
+
 func (s *attachedFunctionDb) GetByCollectionID(inputCollectionID string) ([]*dbmodel.AttachedFunction, error) {
 	var attachedFunctions []*dbmodel.AttachedFunction
 	err := s.db.
 		Where("input_collection_id = ?", inputCollectionID).
 		Where("is_deleted = ?", false).
+		Where("is_ready = ?", true).
 		Find(&attachedFunctions).Error
 
 	if err != nil {
@@ -92,28 +151,6 @@ func (s *attachedFunctionDb) GetByCollectionID(inputCollectionID string) ([]*dbm
 	}
 
 	return attachedFunctions, nil
-}
-
-func (s *attachedFunctionDb) UpdateOutputCollectionID(id uuid.UUID, outputCollectionID *string) error {
-	now := time.Now()
-	result := s.db.Model(&dbmodel.AttachedFunction{}).
-		Where("id = ? AND is_deleted = false", id).
-		Updates(map[string]interface{}{
-			"output_collection_id": outputCollectionID,
-			"updated_at":           now,
-		})
-
-	if result.Error != nil {
-		log.Error("UpdateOutputCollectionID failed", zap.Error(result.Error), zap.String("id", id.String()))
-		return result.Error
-	}
-
-	if result.RowsAffected == 0 {
-		log.Error("UpdateOutputCollectionID: no rows affected", zap.String("id", id.String()))
-		return common.ErrAttachedFunctionNotFound
-	}
-
-	return nil
 }
 
 func (s *attachedFunctionDb) SoftDelete(inputCollectionID string, name string) error {

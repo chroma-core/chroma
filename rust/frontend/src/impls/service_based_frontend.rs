@@ -1906,6 +1906,7 @@ impl ServiceBasedFrontend {
                 )))
             })?);
 
+        // Step 1: Create attached function with is_ready = false
         let attached_function_id = self
             .sysdb_client
             .create_attached_function(
@@ -1935,6 +1936,22 @@ impl ServiceBasedFrontend {
                 }
             })?;
 
+        // Step 2: Start backfill (stub for now)
+        self.start_backfill(attached_function_id).await;
+
+        // Step 3: Create output collection and set is_ready = true
+        self.sysdb_client
+            .finish_create_attached_function(attached_function_id)
+            .await
+            .map_err(|e| {
+                chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
+                    tonic::Status::internal(format!(
+                        "Failed to finish creating attached function: {}",
+                        e
+                    )),
+                )))
+            })?;
+
         Ok(AttachFunctionResponse {
             attached_function: chroma_types::AttachedFunctionInfo {
                 id: attached_function_id.to_string(),
@@ -1942,6 +1959,12 @@ impl ServiceBasedFrontend {
                 function_id,
             },
         })
+    }
+
+    // Stub method for backfill - will be implemented later
+    async fn start_backfill(&self, _attached_function_id: chroma_types::AttachedFunctionUuid) {
+        tracing::info!("start_backfill stub called - not yet implemented");
+        // TODO: Implement backfill logic
     }
 
     pub async fn detach_function(

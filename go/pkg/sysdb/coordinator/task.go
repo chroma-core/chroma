@@ -18,7 +18,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // validateAttachedFunctionMatchesRequest validates that an existing attached function's parameters match the request parameters.
@@ -88,13 +87,11 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 	}
 
 	var attachedFunctionID uuid.UUID = uuid.New()
-	var nextRun time.Time
-	var skipPhase2 bool // Flag to skip Phase 2 if task is already fully created
 
-	// ===== Phase 1: Create attached function (if needed) =====
+	// ===== Step 1: Create attached function with is_ready = false =====
 	err := s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		// Double-check attached function doesn't exist (race condition protection)
-		concurrentAttachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetByName(req.InputCollectionId, req.Name)
+		// Double-check attached function doesn't exist (check both ready and not-ready)
+		concurrentAttachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAnyByName(req.InputCollectionId, req.Name)
 		if err != nil {
 			log.Error("AttachFunction: failed to double-check attached function", zap.Error(err))
 			return err
@@ -109,10 +106,8 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 				return err
 			}
 
-			// Validation passed, reuse the concurrent attached function's data
+			// Validation passed, reuse the concurrent attached function ID (idempotent)
 			attachedFunctionID = concurrentAttachedFunction.ID
-			// Already created, skip Phase 2
-			skipPhase2 = true
 			return nil
 		}
 
@@ -137,7 +132,6 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			log.Error("AttachFunction: function not found", zap.String("function_name", req.FunctionName))
 			return common.ErrFunctionNotFound
 		}
-
 		// Check if input collection exists
 		collections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections([]string{req.InputCollectionId}, nil, req.TenantId, req.Database, nil, nil, false)
 		if err != nil {
@@ -191,6 +185,7 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			CreatedAt:               now,
 			UpdatedAt:               now,
 			OldestWrittenNonce:      nil,
+			IsReady:                 false, // We will later set this to true in FinishAttachFunction
 		}
 
 		err = s.catalog.metaDomain.AttachedFunctionDb(txCtx).Insert(attachedFunction)
@@ -199,7 +194,7 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			return err
 		}
 
-		log.Debug("AttachFunction: Phase 1: attached function created",
+		log.Debug("AttachFunction: attached function created with is_ready=false",
 			zap.String("attached_function_id", attachedFunctionID.String()),
 			zap.String("name", req.Name))
 		return nil
@@ -208,45 +203,6 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 	if err != nil {
 		return nil, err
 	}
-
-	// If function is already created, return immediately (idempotency)
-	if skipPhase2 {
-		log.Info("AttachFunction: function already created, skipping Phase 2",
-			zap.String("attached_function_id", attachedFunctionID.String()))
-		return &coordinatorpb.AttachFunctionResponse{
-			Id: attachedFunctionID.String(),
-		}, nil
-	}
-
-	// ===== Phase 2: Push initial schedule =====
-	log.Debug("AttachFunction: Phase 2: pushing initial schedule",
-		zap.String("attached_function_id", attachedFunctionID.String()))
-	// Push initial schedule to heap service if enabled
-	if s.heapClient == nil {
-		return nil, common.ErrHeapServiceNotEnabled
-	}
-
-	// Create schedule for the attached function
-	schedule := &coordinatorpb.Schedule{
-		Triggerable: &coordinatorpb.Triggerable{
-			PartitioningUuid: req.InputCollectionId,
-			SchedulingUuid:   attachedFunctionID.String(),
-		},
-		NextScheduled: timestamppb.New(nextRun),
-	}
-
-	err = s.heapClient.Push(ctx, req.InputCollectionId, []*coordinatorpb.Schedule{schedule})
-	if err != nil {
-		log.Error("AttachFunction: Phase 2: failed to push schedule to heap service",
-			zap.Error(err),
-			zap.String("attached_function_id", attachedFunctionID.String()),
-			zap.String("collection_id", req.InputCollectionId))
-		return nil, err
-	}
-
-	log.Debug("AttachFunction: Phase 2: pushed schedule to heap service",
-		zap.String("attached_function_id", attachedFunctionID.String()),
-		zap.String("collection_id", req.InputCollectionId))
 
 	return &coordinatorpb.AttachFunctionResponse{
 		Id: attachedFunctionID.String(),
@@ -287,6 +243,7 @@ func attachedFunctionToProto(attachedFunction *dbmodel.AttachedFunction, functio
 		DatabaseId:              attachedFunction.DatabaseID,
 		CreatedAt:               uint64(attachedFunction.CreatedAt.UnixMicro()),
 		UpdatedAt:               uint64(attachedFunction.UpdatedAt.UnixMicro()),
+		IsReady:                 attachedFunction.IsReady,
 	}
 	if attachedFunction.OutputCollectionID != nil {
 		attachedFunctionProto.OutputCollectionId = attachedFunction.OutputCollectionID
@@ -445,112 +402,6 @@ func (s *Coordinator) GetAttachedFunctionByUuid(ctx context.Context, req *coordi
 	}, nil
 }
 
-// CreateOutputCollectionForAttachedFunction atomically creates an output collection and updates the attached function's output_collection_id
-func (s *Coordinator) CreateOutputCollectionForAttachedFunction(ctx context.Context, req *coordinatorpb.CreateOutputCollectionForAttachedFunctionRequest) (*coordinatorpb.CreateOutputCollectionForAttachedFunctionResponse, error) {
-	var collectionID types.UniqueID
-
-	// Execute all operations in a transaction for atomicity
-	err := s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		// 1. Parse attached function ID
-		attachedFunctionID, err := uuid.Parse(req.AttachedFunctionId)
-		if err != nil {
-			log.Error("CreateOutputCollectionForAttachedFunction: invalid attached_function_id", zap.Error(err))
-			return status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
-		}
-
-		// 2. Get the attached function to verify it exists and doesn't already have an output collection
-		attachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetByID(attachedFunctionID)
-		if err != nil {
-			log.Error("CreateOutputCollectionForAttachedFunction: failed to get attached function", zap.Error(err))
-			return err
-		}
-		if attachedFunction == nil {
-			log.Error("CreateOutputCollectionForAttachedFunction: attached function not found")
-			return status.Errorf(codes.NotFound, "attached function not found")
-		}
-
-		// Check if output collection already exists
-		if attachedFunction.OutputCollectionID != nil && *attachedFunction.OutputCollectionID != "" {
-			log.Error("CreateOutputCollectionForAttachedFunction: output collection already exists",
-				zap.String("existing_collection_id", *attachedFunction.OutputCollectionID))
-			return status.Errorf(codes.AlreadyExists, "output collection already exists")
-		}
-
-		// 3. Generate new collection UUID
-		collectionID = types.NewUniqueID()
-
-		// 4. Look up database by ID to get its name
-		database, err := s.catalog.metaDomain.DatabaseDb(txCtx).GetByID(req.DatabaseId)
-		if err != nil {
-			log.Error("CreateOutputCollectionForAttachedFunction: failed to get database", zap.Error(err))
-			return err
-		}
-		if database == nil {
-			log.Error("CreateOutputCollectionForAttachedFunction: database not found", zap.String("database_id", req.DatabaseId), zap.String("tenant_id", req.TenantId))
-			return common.ErrDatabaseNotFound
-		}
-
-		// 5. Create the collection with segments
-		// Set a default dimension to ensure segment writers can be initialized
-		dimension := int32(1) // Default dimension for attached function output collections
-		collection := &model.CreateCollection{
-			ID:                   collectionID,
-			Name:                 req.CollectionName,
-			ConfigurationJsonStr: "{}", // Empty JSON object for default config
-			TenantID:             req.TenantId,
-			DatabaseName:         database.Name,
-			Dimension:            &dimension,
-			Metadata:             nil,
-		}
-
-		// Create segments for the collection (distributed setup)
-		segments := []*model.Segment{
-			{
-				ID:           types.NewUniqueID(),
-				Type:         "urn:chroma:segment/vector/hnsw-distributed",
-				Scope:        "VECTOR",
-				CollectionID: collectionID,
-			},
-			{
-				ID:           types.NewUniqueID(),
-				Type:         "urn:chroma:segment/metadata/blockfile",
-				Scope:        "METADATA",
-				CollectionID: collectionID,
-			},
-			{
-				ID:           types.NewUniqueID(),
-				Type:         "urn:chroma:segment/record/blockfile",
-				Scope:        "RECORD",
-				CollectionID: collectionID,
-			},
-		}
-
-		_, _, err = s.catalog.CreateCollectionAndSegments(txCtx, collection, segments, 0)
-		if err != nil {
-			log.Error("CreateOutputCollectionForAttachedFunction: failed to create collection", zap.Error(err))
-			return err
-		}
-
-		// 6. Update attached function with output_collection_id
-		collectionIDStr := collectionID.String()
-		err = s.catalog.metaDomain.AttachedFunctionDb(txCtx).UpdateOutputCollectionID(attachedFunctionID, &collectionIDStr)
-		if err != nil {
-			log.Error("CreateOutputCollectionForAttachedFunction: failed to update attached function", zap.Error(err))
-			return err
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &coordinatorpb.CreateOutputCollectionForAttachedFunctionResponse{
-		CollectionId: collectionID.String(),
-	}, nil
-}
-
 // DetachFunction soft deletes an attached function by ID
 func (s *Coordinator) DetachFunction(ctx context.Context, req *coordinatorpb.DetachFunctionRequest) (*coordinatorpb.DetachFunctionResponse, error) {
 	// Parse attached_function_id
@@ -563,7 +414,6 @@ func (s *Coordinator) DetachFunction(ctx context.Context, req *coordinatorpb.Det
 	// First get the attached function to check if we need to delete the output collection
 	attachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetByID(attachedFunctionID)
 	if err != nil {
-		// If attached function is not ready (lowest_live_nonce == NULL), treat it as not found
 		if errors.Is(err, common.ErrAttachedFunctionNotReady) {
 			log.Error("DetachFunction: attached function not ready (not initialized)")
 			return nil, status.Error(codes.NotFound, "attached function not found")
@@ -652,6 +502,115 @@ func (s *Coordinator) GetFunctions(ctx context.Context, req *coordinatorpb.GetFu
 	return &coordinatorpb.GetFunctionsResponse{
 		Functions: protoFunctions,
 	}, nil
+}
+
+// FinishCreateAttachedFunction creates the output collection and sets is_ready to true in a single transaction
+func (s *Coordinator) FinishCreateAttachedFunction(ctx context.Context, req *coordinatorpb.FinishCreateAttachedFunctionRequest) (*coordinatorpb.FinishCreateAttachedFunctionResponse, error) {
+	attachedFunctionID, err := uuid.Parse(req.Id)
+	if err != nil {
+		log.Error("FinishCreateAttachedFunction: invalid attached_function_id", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
+	}
+
+	// Execute all operations in a transaction for atomicity
+	err = s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// 1. Get the attached function to retrieve metadata
+		attachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAnyByID(attachedFunctionID)
+		if err != nil {
+			log.Error("FinishCreateAttachedFunction: failed to get attached function", zap.Error(err))
+			return err
+		}
+		if attachedFunction == nil {
+			log.Error("FinishCreateAttachedFunction: attached function not found")
+			return status.Errorf(codes.NotFound, "attached function not found")
+		}
+
+		// 2. Check if output collection already exists (idempotency)
+		if attachedFunction.IsReady {
+			log.Info("FinishCreateAttachedFunction: attached function is already ready", zap.String("attached_function_id", attachedFunctionID.String()))
+			return nil
+		}
+
+		// 3. Look up database by ID to get its name
+		database, err := s.catalog.metaDomain.DatabaseDb(txCtx).GetByID(attachedFunction.DatabaseID)
+		if err != nil {
+			log.Error("FinishCreateAttachedFunction: failed to get database", zap.Error(err))
+			return err
+		}
+		if database == nil {
+			log.Error("FinishCreateAttachedFunction: database not found", zap.String("database_id", attachedFunction.DatabaseID), zap.String("tenant_id", attachedFunction.TenantID))
+			return common.ErrDatabaseNotFound
+		}
+
+		// 4. Generate new collection UUID
+		collectionID := types.NewUniqueID()
+
+		// 5. Create the output collection with segments
+		dimension := int32(1) // Default dimension for attached function output collections
+		collection := &model.CreateCollection{
+			ID:                   collectionID,
+			Name:                 attachedFunction.OutputCollectionName,
+			ConfigurationJsonStr: "{}", // Empty JSON object for default config
+			TenantID:             attachedFunction.TenantID,
+			DatabaseName:         database.Name,
+			Dimension:            &dimension,
+			Metadata:             nil,
+		}
+
+		// Create segments for the collection (distributed setup)
+		segments := []*model.Segment{
+			{
+				ID:           types.NewUniqueID(),
+				Type:         "urn:chroma:segment/vector/hnsw-distributed",
+				Scope:        "VECTOR",
+				CollectionID: collectionID,
+			},
+			{
+				ID:           types.NewUniqueID(),
+				Type:         "urn:chroma:segment/metadata/blockfile",
+				Scope:        "METADATA",
+				CollectionID: collectionID,
+			},
+			{
+				ID:           types.NewUniqueID(),
+				Type:         "urn:chroma:segment/record/blockfile",
+				Scope:        "RECORD",
+				CollectionID: collectionID,
+			},
+		}
+
+		_, _, err = s.catalog.CreateCollectionAndSegments(txCtx, collection, segments, 0)
+		if err != nil {
+			log.Error("FinishCreateAttachedFunction: failed to create collection", zap.Error(err))
+			return err
+		}
+
+		// 6. Update attached function with output_collection_id and set is_ready to true
+		collectionIDStr := collectionID.String()
+		now := time.Now()
+		dbAttachedFunction := &dbmodel.AttachedFunction{
+			ID:                 attachedFunctionID,
+			OutputCollectionID: &collectionIDStr,
+			IsReady:            true,
+			UpdatedAt:          now,
+		}
+		err = s.catalog.metaDomain.AttachedFunctionDb(txCtx).Update(dbAttachedFunction)
+		if err != nil {
+			log.Error("FinishCreateAttachedFunction: failed to update output collection ID and set ready", zap.Error(err))
+			return err
+		}
+
+		log.Info("FinishCreateAttachedFunction: successfully created output collection and set is_ready=true",
+			zap.String("attached_function_id", attachedFunctionID.String()),
+			zap.String("output_collection_id", collectionID.String()))
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &coordinatorpb.FinishCreateAttachedFunctionResponse{}, nil
 }
 
 // CleanupExpiredPartialAttachedFunctions finds and soft deletes attached functions that were partially created

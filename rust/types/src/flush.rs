@@ -37,6 +37,25 @@ impl ChromaError for FinishAttachedFunctionError {
 }
 
 #[derive(Error, Debug)]
+pub enum FinishCreateAttachedFunctionError {
+    #[error("Failed to finish creating attached function: {0}")]
+    FailedToFinishCreateAttachedFunction(#[from] tonic::Status),
+    #[error("Attached function not found")]
+    AttachedFunctionNotFound,
+}
+
+impl ChromaError for FinishCreateAttachedFunctionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            FinishCreateAttachedFunctionError::FailedToFinishCreateAttachedFunction(_) => {
+                ErrorCodes::Internal
+            }
+            FinishCreateAttachedFunctionError::AttachedFunctionNotFound => ErrorCodes::NotFound,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
 pub enum GetMinCompletionOffsetError {
     #[error("Failed to get min completion offset: {0}")]
     FailedToGetMinCompletionOffset(#[from] tonic::Status),

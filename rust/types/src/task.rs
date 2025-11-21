@@ -72,4 +72,6 @@ pub struct AttachedFunction {
     /// Timestamp when the attached function was last updated
     #[serde(default = "default_systemtime")]
     pub updated_at: SystemTime,
+    /// Whether the attached function is ready (has completed initialization/backfill)
+    pub is_ready: bool,
 }
