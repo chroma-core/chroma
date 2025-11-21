@@ -267,7 +267,7 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for RegisterOrchestrator
         message: TaskResult<RegisterOutput, RegisterError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let collection_info = match self.context.get_input_collection_info() {
+        let collection_info = match self.context.get_collection_info() {
             Ok(collection_info) => collection_info,
             Err(e) => {
                 self.terminate_with_result(Err(e.into()), ctx).await;
@@ -297,7 +297,7 @@ impl Handler<TaskResult<FinishAttachedFunctionOutput, FinishAttachedFunctionErro
         message: TaskResult<FinishAttachedFunctionOutput, FinishAttachedFunctionError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let collection_info = match self.context.get_input_collection_info() {
+        let collection_info = match self.context.get_collection_info() {
             Ok(collection_info) => collection_info,
             Err(e) => {
                 self.terminate_with_result(Err(e.into()), ctx).await;

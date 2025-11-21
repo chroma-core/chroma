@@ -50,8 +50,6 @@ impl AttachedFunctionExecutor for CountAttachedFunction {
         let records_count = input_records.len() as i64;
         let new_total_count = records_count;
 
-        println!("new_total_count is {}", new_total_count);
-
         // Create output record with updated count
         let mut metadata = std::collections::HashMap::new();
         metadata.insert(

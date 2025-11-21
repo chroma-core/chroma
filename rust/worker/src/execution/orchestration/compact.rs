@@ -1,4 +1,4 @@
-use std::{cell::OnceCell, sync::Arc};
+use std::{cell::OnceCell, collections::HashSet, sync::Arc};
 
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -104,9 +104,7 @@ pub struct CollectionCompactInfo {
 
 #[derive(Debug)]
 pub struct CompactionContext {
-    pub input_collection_info: OnceCell<CollectionCompactInfo>,
-    pub output_collection_info: OnceCell<CollectionCompactInfo>,
-    pub attached_function_context: OnceCell<FunctionContext>,
+    pub collection_info: OnceCell<CollectionCompactInfo>,
     pub log: Log,
     pub sysdb: SysDb,
     pub blockfile_provider: BlockfileProvider,
@@ -118,6 +116,7 @@ pub struct CompactionContext {
     pub fetch_log_batch_size: u32,
     pub max_compaction_size: usize,
     pub max_partition_size: usize,
+    pub hnsw_index_uuids: HashSet<IndexUuid>, // TODO(tanujnay112): Remove after direct hnsw is solidified
     #[cfg(test)]
     pub poison_offset: Option<u32>,
 }
@@ -126,9 +125,7 @@ impl Clone for CompactionContext {
     fn clone(&self) -> Self {
         let orchestrator_context = OrchestratorContext::new(self.dispatcher.clone());
         Self {
-            input_collection_info: self.input_collection_info.clone(),
-            output_collection_info: self.output_collection_info.clone(),
-            attached_function_context: self.attached_function_context.clone(),
+            collection_info: self.collection_info.clone(),
             log: self.log.clone(),
             sysdb: self.sysdb.clone(),
             blockfile_provider: self.blockfile_provider.clone(),
@@ -140,6 +137,32 @@ impl Clone for CompactionContext {
             fetch_log_batch_size: self.fetch_log_batch_size,
             max_compaction_size: self.max_compaction_size,
             max_partition_size: self.max_partition_size,
+            hnsw_index_uuids: self.hnsw_index_uuids.clone(),
+            #[cfg(test)]
+            poison_offset: self.poison_offset,
+        }
+    }
+}
+
+impl CompactionContext {
+    /// Create an empty output context for attached function orchestrator
+    /// This creates a new context with an empty collection_info OnceCell
+    fn clone_for_new_collection(&self) -> Self {
+        let orchestrator_context = OrchestratorContext::new(self.dispatcher.clone());
+        Self {
+            collection_info: OnceCell::new(), // Start empty for output context
+            log: self.log.clone(),
+            sysdb: self.sysdb.clone(),
+            blockfile_provider: self.blockfile_provider.clone(),
+            hnsw_provider: self.hnsw_provider.clone(),
+            spann_provider: self.spann_provider.clone(),
+            dispatcher: self.dispatcher.clone(),
+            orchestrator_context,
+            is_rebuild: self.is_rebuild,
+            fetch_log_batch_size: self.fetch_log_batch_size,
+            max_compaction_size: self.max_compaction_size,
+            max_partition_size: self.max_partition_size,
+            hnsw_index_uuids: self.hnsw_index_uuids.clone(),
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -243,9 +266,7 @@ impl CompactionContext {
     ) -> Self {
         let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
         CompactionContext {
-            input_collection_info: OnceCell::new(),
-            output_collection_info: OnceCell::new(),
-            attached_function_context: OnceCell::new(),
+            collection_info: OnceCell::new(),
             is_rebuild,
             fetch_log_batch_size,
             max_compaction_size,
@@ -257,6 +278,7 @@ impl CompactionContext {
             spann_provider,
             dispatcher,
             orchestrator_context,
+            hnsw_index_uuids: HashSet::new(),
             #[cfg(test)]
             poison_offset: None,
         }
@@ -267,67 +289,35 @@ impl CompactionContext {
         self.poison_offset = Some(offset);
     }
 
-    pub fn get_output_segment_writers(&self) -> Result<CompactWriters, CompactionContextError> {
-        self.get_output_collection_info()?.writers.clone().ok_or(
-            CompactionContextError::InvariantViolation(
-                "Output segment writers should have been set",
-            ),
-        )
-    }
-
-    pub fn get_input_segment_writers(&self) -> Result<CompactWriters, CompactionContextError> {
-        self.get_input_collection_info()?.writers.clone().ok_or(
-            CompactionContextError::InvariantViolation(
-                "Input segment writers should have been set",
-            ),
-        )
-    }
-
-    pub fn get_input_collection_info(
-        &self,
-    ) -> Result<&CollectionCompactInfo, CompactionContextError> {
-        self.input_collection_info
+    pub fn get_collection_info(&self) -> Result<&CollectionCompactInfo, CompactionContextError> {
+        self.collection_info
             .get()
             .ok_or(CompactionContextError::InvariantViolation(
                 "Collection info should have been set",
             ))
     }
 
-    pub fn get_output_collection_info(
-        &self,
-    ) -> Result<&CollectionCompactInfo, CompactionContextError> {
-        self.output_collection_info
-            .get()
-            .ok_or(CompactionContextError::InvariantViolation(
-                "Collection info should have been set",
-            ))
+    pub fn get_segment_writers(&self) -> Result<CompactWriters, CompactionContextError> {
+        self.get_collection_info()?.writers.clone().ok_or(
+            CompactionContextError::InvariantViolation("Segment writers should have been set"),
+        )
     }
 
-    pub fn get_input_collection_info_mut(
+    pub fn get_collection_info_mut(
         &mut self,
     ) -> Result<&mut CollectionCompactInfo, CompactionContextError> {
-        self.input_collection_info
+        self.collection_info
             .get_mut()
             .ok_or(CompactionContextError::InvariantViolation(
                 "Collection info mut should have been set",
             ))
     }
 
-    pub fn get_output_collection_info_mut(
-        &mut self,
-    ) -> Result<&mut CollectionCompactInfo, CompactionContextError> {
-        self.output_collection_info
-            .get_mut()
-            .ok_or(CompactionContextError::InvariantViolation(
-                "Collection info mut should have been set",
-            ))
-    }
-
-    pub fn get_output_segment_writer_by_id(
+    pub fn get_segment_writer_by_id(
         &self,
         segment_id: SegmentUuid,
     ) -> Result<ChromaSegmentWriter<'static>, CompactionContextError> {
-        let writers = self.get_output_segment_writers()?;
+        let writers = self.get_segment_writers()?;
 
         if writers.metadata_writer.id == segment_id {
             return Ok(ChromaSegmentWriter::MetadataSegment(
@@ -382,11 +372,15 @@ impl CompactionContext {
                 let materialized = success.materialized;
                 let collection_info = success.collection_info;
 
-                self.input_collection_info
+                self.collection_info
                     .set(collection_info.clone())
                     .map_err(|_| {
                         CompactionContextError::InvariantViolation("Collection info already set")
                     })?;
+
+                if let Some(hnsw_index_uuid) = collection_info.hnsw_index_uuid {
+                    self.hnsw_index_uuids.insert(hnsw_index_uuid);
+                }
 
                 Ok(Success::new(materialized, collection_info.clone()).into())
             }
@@ -402,7 +396,7 @@ impl CompactionContext {
         log_fetch_records: Arc<Vec<MaterializeLogOutput>>,
         system: System,
     ) -> Result<ApplyLogsOrchestratorResponse, ApplyLogsOrchestratorError> {
-        let collection_info = self.get_input_collection_info()?;
+        let collection_info = self.get_collection_info()?;
         if log_fetch_records.is_empty() {
             return Ok(ApplyLogsOrchestratorResponse::new_with_empty_results(
                 collection_info.collection_id.into(),
@@ -410,7 +404,7 @@ impl CompactionContext {
             ));
         }
 
-        if self.get_output_collection_info().is_err() {
+        if self.get_collection_info().is_err() {
             return Err(ApplyLogsOrchestratorError::InvariantViolation(
                 "Output collection info should have been set before running apply logs",
             ));
@@ -437,7 +431,7 @@ impl CompactionContext {
             }
         };
 
-        let collection_info = self.get_output_collection_info_mut()?;
+        let collection_info = self.get_collection_info_mut()?;
         collection_info.schema = apply_logs_response.schema.clone();
         collection_info.collection.total_records_post_compaction =
             apply_logs_response.total_records_post_compaction;
@@ -451,11 +445,10 @@ impl CompactionContext {
         data_fetch_records: Arc<Vec<MaterializeLogOutput>>,
         system: System,
     ) -> Result<AttachedFunctionOrchestratorResponse, AttachedFunctionOrchestratorError> {
-        let input_collection_info = self.get_input_collection_info()?.clone();
-        let input_collection_info_clone = input_collection_info.clone();
+        let collection_info = self.get_collection_info()?.clone();
         let attached_function_orchestrator = AttachedFunctionOrchestrator::new(
-            input_collection_info,
-            self.clone(),
+            collection_info,
+            self.clone_for_new_collection(),
             self.dispatcher.clone(),
             data_fetch_records,
         );
@@ -473,30 +466,41 @@ impl CompactionContext {
 
         // Set the output collection info based on the response
         match &attached_function_response {
-            AttachedFunctionOrchestratorResponse::NoAttachedFunction { .. } => {
-                self.output_collection_info
-                    .set(input_collection_info_clone)
-                    .map_err(|_| {
-                        AttachedFunctionOrchestratorError::InvariantViolation(
-                            "Collection info should not have been already set".to_string(),
-                        )
-                    })?;
-            }
+            AttachedFunctionOrchestratorResponse::NoAttachedFunction { .. } => {}
             AttachedFunctionOrchestratorResponse::Success {
                 output_collection_info,
                 ..
             } => {
-                self.output_collection_info
-                    .set(output_collection_info.clone())
-                    .map_err(|_| {
-                        AttachedFunctionOrchestratorError::InvariantViolation(
-                            "Collection info should not have been already set".to_string(),
-                        )
-                    })?;
+                // We are replacing the output collection info with the attached function output
+                self.collection_info = OnceCell::from(output_collection_info.clone());
+
+                if let Some(hnsw_index_uuid) = output_collection_info.hnsw_index_uuid {
+                    self.hnsw_index_uuids.insert(hnsw_index_uuid);
+                }
             }
         }
 
         Ok(attached_function_response)
+    }
+
+    async fn run_regular_compaction_workflow(
+        &mut self,
+        log_fetch_records: Arc<Vec<MaterializeLogOutput>>,
+        system: System,
+    ) -> Result<CollectionRegisterInfo, CompactionError> {
+        let apply_logs_response = self.run_apply_logs(log_fetch_records, system).await?;
+
+        // Build CollectionRegisterInfo from the updated context
+        let collection_info = self
+            .get_collection_info()
+            .map_err(CompactionError::CompactionContextError)?
+            .clone();
+
+        Ok(CollectionRegisterInfo {
+            collection_info,
+            flush_results: apply_logs_response.flush_results,
+            collection_logical_size_bytes: apply_logs_response.collection_logical_size_bytes,
+        })
     }
 
     async fn run_attached_function_workflow(
@@ -517,7 +521,7 @@ impl CompactionContext {
                 completion_offset,
             } => {
                 // Update self to use the output collection for apply_logs
-                self.output_collection_info = OnceCell::from(output_collection_info.clone());
+                self.collection_info = OnceCell::from(output_collection_info.clone());
 
                 // Apply materialized output to output collection
                 let apply_logs_response = self
@@ -597,28 +601,10 @@ impl CompactionContext {
         let log_fetch_records = Arc::new(log_fetch_records);
         let log_fetch_records_clone = log_fetch_records.clone();
 
-        let input_collection_info =
-            self.input_collection_info
-                .get()
-                .ok_or(CompactionError::InvariantViolation(
-                    "Input collection info should not be None",
-                ))?;
-
-        // Clone first - both clones will have empty output_collection_info
         let mut self_clone_fn = self.clone();
         let mut self_clone_compact = self.clone();
         let system_clone_fn = system.clone();
         let system_clone_compact = system.clone();
-
-        // Set output_collection_info on self and the apply_logs clone
-        // The attached function orchestrator will set its own separate output_collection_info
-        self.output_collection_info
-            .set(input_collection_info.clone())
-            .map_err(|_| {
-                CompactionError::InvariantViolation(
-                    "Collection info should not have been already set",
-                )
-            })?;
 
         // 1. Attached function execution + apply output to output collection
         // 2. Apply input logs to input collection
@@ -633,33 +619,11 @@ impl CompactionContext {
 
         let compact_future = Box::pin(async move {
             self_clone_compact
-                .output_collection_info
-                .set(input_collection_info.clone())
-                .map_err(|_| {
-                    CompactionError::InvariantViolation(
-                        "Collection info should not have been already set",
-                    )
-                })?;
-            let apply_logs_response = self_clone_compact
-                .run_apply_logs(log_fetch_records, system_clone_compact)
-                .await?;
-
-            // Build CollectionRegisterInfo from the updated context
-            let collection_info = self_clone_compact
-                .get_output_collection_info()
-                .map_err(CompactionError::CompactionContextError)?
-                .clone();
-            Ok::<CollectionRegisterInfo, CompactionError>(CollectionRegisterInfo {
-                collection_info,
-                flush_results: apply_logs_response.flush_results,
-                collection_logical_size_bytes: apply_logs_response.collection_logical_size_bytes,
-            })
+                .run_regular_compaction_workflow(log_fetch_records, system_clone_compact)
+                .await
         });
 
-        let (fn_result, compact_result) = tokio::join!(fn_future, compact_future);
-
-        let fn_result = fn_result?;
-        let compact_result = compact_result?;
+        let (fn_result, compact_result) = tokio::try_join!(fn_future, compact_future)?;
 
         // Collect results
         let mut attached_function_context = None;
@@ -696,24 +660,12 @@ impl CompactionContext {
     }
 
     pub(crate) async fn cleanup(self) {
-        if let Some(collection_info) = self.input_collection_info.get() {
-            if let Some(hnsw_index_uuid) = collection_info.hnsw_index_uuid {
-                let _ = HnswIndexProvider::purge_one_id(
-                    self.hnsw_provider.temporary_storage_path.as_path(),
-                    hnsw_index_uuid,
-                )
-                .await;
-            }
-        }
-
-        if let Some(collection_info) = self.output_collection_info.get() {
-            if let Some(hnsw_index_uuid) = collection_info.hnsw_index_uuid {
-                let _ = HnswIndexProvider::purge_one_id(
-                    self.hnsw_provider.temporary_storage_path.as_path(),
-                    hnsw_index_uuid,
-                )
-                .await;
-            }
+        for hnsw_index_uuid in self.hnsw_index_uuids {
+            let _ = HnswIndexProvider::purge_one_id(
+                self.hnsw_provider.temporary_storage_path.as_path(),
+                hnsw_index_uuid,
+            )
+            .await;
         }
     }
 }
@@ -2526,10 +2478,7 @@ mod tests {
             .expect("Apply should have succeeded.");
 
         let register_info = vec![CollectionRegisterInfo {
-            collection_info: compaction_context_1
-                .get_input_collection_info()
-                .unwrap()
-                .clone(),
+            collection_info: compaction_context_1.get_collection_info().unwrap().clone(),
             flush_results: compaction_1_apply_response.flush_results,
             collection_logical_size_bytes: compaction_1_apply_response
                 .collection_logical_size_bytes,

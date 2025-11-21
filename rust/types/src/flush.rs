@@ -158,27 +158,6 @@ impl FlushCompactionResponse {
     }
 }
 
-impl TryFrom<FlushCollectionCompactionAndAttachedFunctionResponse> for FlushCompactionResponse {
-    type Error = FlushCompactionResponseConversionError;
-
-    fn try_from(
-        value: FlushCollectionCompactionAndAttachedFunctionResponse,
-    ) -> Result<Self, Self::Error> {
-        // Use first collection for backward compatibility
-        let first_collection = value
-            .collections
-            .first()
-            .ok_or(FlushCompactionResponseConversionError::MissingCollections)?;
-        let id = Uuid::parse_str(&first_collection.collection_id)
-            .map_err(|_| FlushCompactionResponseConversionError::InvalidUuid)?;
-        Ok(FlushCompactionResponse {
-            collection_id: CollectionUuid(id),
-            collection_version: first_collection.collection_version,
-            last_compaction_time: first_collection.last_compaction_time,
-        })
-    }
-}
-
 impl TryFrom<FlushCollectionCompactionAndAttachedFunctionResponse>
     for FlushCompactionAndAttachedFunctionResponse
 {

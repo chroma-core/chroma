@@ -628,7 +628,6 @@ impl SysDb {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn flush_compaction_and_attached_function(
         &mut self,
         collections: Vec<CollectionFlushInfo>,

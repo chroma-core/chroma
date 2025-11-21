@@ -181,7 +181,8 @@ impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
         let mut counts: HashMap<String, HashMap<StatisticsValue, Box<dyn StatisticsFunction>>> =
             HashMap::default();
         for (hydrated_record, _index) in input_records.iter() {
-            // Skip delete operations - they should not be counted in statistics
+            // This is only applicable for non-incremental statistics.
+            // TODO(tanujnay112): Change this when we make incremental statistics work.
             if hydrated_record.get_operation() == MaterializedLogOperation::DeleteExisting {
                 continue;
             }

@@ -313,7 +313,7 @@ impl LogFetchOrchestrator {
         // NOTE: We allow writers to be uninitialized for the case when the materialized logs are empty
         let record_reader = self
             .context
-            .get_input_segment_writers()
+            .get_segment_writers()
             .ok()
             .and_then(|writers| writers.record_reader);
 
@@ -334,7 +334,7 @@ impl LogFetchOrchestrator {
                 }
             };
 
-            let collection_info = match self.context.get_input_collection_info_mut() {
+            let collection_info = match self.context.get_collection_info_mut() {
                 Ok(info) => info,
                 Err(err) => {
                     return self.terminate_with_result(Err(err.into()), ctx).await;
@@ -447,7 +447,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             schema: collection.schema.clone(),
         };
 
-        let result = self.context.input_collection_info.set(collection_info);
+        let result = self.context.collection_info.set(collection_info);
         if result.is_err() {
             self.terminate_with_result(
                 Err(LogFetchOrchestratorError::InvariantViolation(
@@ -560,16 +560,10 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             vector_writer,
         };
 
-        let collection_info = match self.context.input_collection_info.get_mut() {
-            Some(info) => info,
-            None => {
-                self.terminate_with_result(
-                    Err(LogFetchOrchestratorError::InvariantViolation(
-                        "Collection info should have been initialized",
-                    )),
-                    ctx,
-                )
-                .await;
+        let collection_info = match self.context.get_collection_info_mut() {
+            Ok(info) => info,
+            Err(err) => {
+                self.terminate_with_result(Err(err.into()), ctx).await;
                 return;
             }
         };
@@ -644,7 +638,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for LogFetchOrchestrator
         tracing::info!("Pulled Records: {}", output.len());
         match output.iter().last() {
             Some((rec, _)) => {
-                let collection_info = match self.context.get_input_collection_info_mut() {
+                let collection_info = match self.context.get_collection_info_mut() {
                     Ok(info) => info,
                     Err(err) => {
                         self.terminate_with_result(Err(err.into()), ctx).await;
@@ -659,7 +653,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for LogFetchOrchestrator
             }
             None => {
                 tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behing the sysdb.");
-                let collection_info = match self.context.get_input_collection_info() {
+                let collection_info = match self.context.get_collection_info() {
                     Ok(info) => info,
                     Err(err) => {
                         self.terminate_with_result(Err(err.into()), ctx).await;
@@ -699,7 +693,7 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
         };
         tracing::info!("Sourced Records: {}", output.len());
         // Each record should corresond to a log
-        let collection_info = match self.context.get_input_collection_info_mut() {
+        let collection_info = match self.context.get_collection_info_mut() {
             Ok(info) => info,
             Err(err) => {
                 self.terminate_with_result(Err(err.into()), ctx).await;
@@ -708,7 +702,7 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
         };
         collection_info.collection.total_records_post_compaction = output.len() as u64;
 
-        let collection_info = match self.context.get_input_collection_info() {
+        let collection_info = match self.context.get_collection_info() {
             Ok(info) => info,
             Err(err) => {
                 self.terminate_with_result(Err(err.into()), ctx).await;
@@ -766,7 +760,7 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
         }
         self.num_uncompleted_materialization_tasks -= 1;
         if self.num_uncompleted_materialization_tasks == 0 {
-            let collection_info = match self.context.input_collection_info.take() {
+            let collection_info = match self.context.collection_info.take() {
                 Some(info) => info,
                 None => {
                     self.terminate_with_result(

@@ -230,7 +230,7 @@ impl AttachedFunctionOrchestrator {
         &self,
     ) -> Result<&CollectionCompactInfo, AttachedFunctionOrchestratorError> {
         self.output_context
-            .get_output_collection_info()
+            .get_collection_info()
             .map_err(AttachedFunctionOrchestratorError::CompactionContext)
     }
 
@@ -239,7 +239,7 @@ impl AttachedFunctionOrchestrator {
         &self,
     ) -> Result<CollectionUuid, AttachedFunctionOrchestratorError> {
         self.output_context
-            .get_output_collection_info()
+            .get_collection_info()
             .map(|info| info.collection_id)
             .map_err(AttachedFunctionOrchestratorError::CompactionContext)
     }
@@ -249,9 +249,7 @@ impl AttachedFunctionOrchestrator {
         &mut self,
         collection_info: CollectionCompactInfo,
     ) -> Result<(), CollectionCompactInfo> {
-        self.output_context
-            .output_collection_info
-            .set(collection_info)
+        self.output_context.collection_info.set(collection_info)
     }
 
     /// Get the function context if it has been set
@@ -339,7 +337,7 @@ impl AttachedFunctionOrchestrator {
         // NOTE: We allow writers to be uninitialized for the case when the materialized logs are empty
         let record_reader = self
             .output_context
-            .get_output_segment_writers()
+            .get_segment_writers()
             .ok()
             .and_then(|writers| writers.record_reader);
 
@@ -363,7 +361,7 @@ impl AttachedFunctionOrchestrator {
                 }
             };
 
-            let collection_info = match self.output_context.get_output_collection_info_mut() {
+            let collection_info = match self.output_context.get_collection_info_mut() {
                 Ok(info) => info,
                 Err(err) => {
                     return self.terminate_with_result(Err(err.into()), ctx).await;
@@ -490,7 +488,7 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
                 );
 
                 // TODO(tanujnay112): Handle error
-                let _ = self.function_context.set(FunctionContext {
+                let _ = self.set_function_context(FunctionContext {
                     attached_function_id: attached_function.id,
                     function_id: attached_function.function_id,
                     updated_completion_offset: attached_function.completion_offset,
