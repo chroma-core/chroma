@@ -67,6 +67,9 @@ message CollectionInfo {
   int64 first_log_offset = 2;
   // The timestamp of the first log entry of the collection that needs to be compacted
   int64 first_log_ts = 3;
+  // If the request was the result of the backfill call---operator's intention left to the spurr of
+  // the moment.
+  bool backfill = 4;
 }
 
 message GetAllCollectionInfoToCompactRequest {
@@ -174,6 +177,14 @@ message FragmentToEvict {
 message PurgeFromCacheResponse {
 }
 
+message BackfillRequest {
+  string collection_id = 1;
+  uint64 initial_insertion_epoch_us = 2;
+}
+
+message BackfillResponse {
+}
+
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
   rpc ScoutLogs(ScoutLogsRequest) returns (ScoutLogsResponse) {}
@@ -200,4 +211,6 @@ service LogService {
   // Similar to UpdateCollectionLogOffset, but allows the offset to go back in time.
   // Uses the exact same request/response types as UpdateCollectionLogOffset by design.
   rpc RollbackCollectionLogOffset(UpdateCollectionLogOffsetRequest) returns (UpdateCollectionLogOffsetResponse) {}
+  // Manually mark a request as dirty.
+  rpc Backfill(BackfillRequest) returns (BackfillResponse) {}
 }

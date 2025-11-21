@@ -100,6 +100,7 @@ async fn test_k8s_integration_single_mark_dirty_returns_collection() {
         num_records: 10,
         reinsert_count: 0,
         initial_insertion_epoch_us: 1234567890,
+        backfill: false,
     };
 
     let log_writer = wal3::LogWriter::open_or_initialize(
@@ -139,6 +140,7 @@ async fn test_k8s_integration_multiple_markers_same_collection_keeps_max() {
             num_records: 10,
             reinsert_count: 0,
             initial_insertion_epoch_us: 1234567890,
+            backfill: false,
         },
         DirtyMarker::MarkDirty {
             collection_id,
@@ -146,6 +148,7 @@ async fn test_k8s_integration_multiple_markers_same_collection_keeps_max() {
             num_records: 5,
             reinsert_count: 0,
             initial_insertion_epoch_us: 1234567890,
+            backfill: false,
         },
         DirtyMarker::MarkDirty {
             collection_id,
@@ -153,6 +156,7 @@ async fn test_k8s_integration_multiple_markers_same_collection_keeps_max() {
             num_records: 3,
             reinsert_count: 0,
             initial_insertion_epoch_us: 1234567890,
+            backfill: false,
         },
     ];
 
@@ -196,6 +200,7 @@ async fn test_k8s_integration_reinsert_count_nonzero_filters_marker() {
             num_records: 10,
             reinsert_count: 0,
             initial_insertion_epoch_us: 1234567890,
+            backfill: false,
         },
         DirtyMarker::MarkDirty {
             collection_id: collection_id2,
@@ -203,6 +208,7 @@ async fn test_k8s_integration_reinsert_count_nonzero_filters_marker() {
             num_records: 5,
             reinsert_count: 1,
             initial_insertion_epoch_us: 1234567890,
+            backfill: false,
         },
     ];
 
@@ -246,6 +252,7 @@ async fn test_k8s_integration_purge_and_cleared_markers_ignored() {
             num_records: 10,
             reinsert_count: 0,
             initial_insertion_epoch_us: 1234567890,
+            backfill: false,
         },
         DirtyMarker::Purge {
             collection_id: collection_id2,
@@ -257,6 +264,7 @@ async fn test_k8s_integration_purge_and_cleared_markers_ignored() {
             num_records: 5,
             reinsert_count: 0,
             initial_insertion_epoch_us: 1234567890,
+            backfill: false,
         },
     ];
 
@@ -302,6 +310,7 @@ async fn test_k8s_integration_multiple_collections_all_processed() {
             num_records: 10,
             reinsert_count: 0,
             initial_insertion_epoch_us: 1234567890,
+            backfill: false,
         })
         .collect();
 
@@ -346,6 +355,7 @@ async fn test_k8s_integration_cursor_initialized_on_first_run() {
         num_records: 10,
         reinsert_count: 0,
         initial_insertion_epoch_us: 1234567890,
+        backfill: false,
     };
 
     let log_writer = wal3::LogWriter::open_or_initialize(
@@ -401,6 +411,7 @@ async fn test_k8s_integration_cursor_advances_on_subsequent_runs() {
         num_records: 10,
         reinsert_count: 0,
         initial_insertion_epoch_us: 1234567890,
+        backfill: false,
     };
     log_writer
         .append(serde_json::to_vec(&marker1).unwrap())
@@ -428,6 +439,7 @@ async fn test_k8s_integration_cursor_advances_on_subsequent_runs() {
         num_records: 5,
         reinsert_count: 0,
         initial_insertion_epoch_us: 1234567890,
+        backfill: false,
     };
     log_writer
         .append(serde_json::to_vec(&marker2).unwrap())
@@ -456,6 +468,7 @@ async fn test_k8s_integration_cursor_not_updated_when_no_new_data() {
         num_records: 10,
         reinsert_count: 0,
         initial_insertion_epoch_us: 1234567890,
+        backfill: false,
     };
 
     let log_writer = wal3::LogWriter::open_or_initialize(
@@ -536,6 +549,7 @@ async fn test_k8s_integration_handles_empty_markers_after_filtering() {
             num_records: 10,
             reinsert_count: 5,
             initial_insertion_epoch_us: 1234567890,
+            backfill: false,
         },
         DirtyMarker::Purge {
             collection_id: CollectionUuid::new(),
