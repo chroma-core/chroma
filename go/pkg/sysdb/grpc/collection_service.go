@@ -579,6 +579,9 @@ func (s *Server) FlushCollectionCompactionAndAttachedFunction(ctx context.Contex
 		log.Error("FlushCollectionCompactionAndAttachedFunction failed. flush_compactions is empty")
 		return nil, grpcutils.BuildInternalGrpcError("at least one flush_compaction is required")
 	}
+
+	// Currently we only expect 1 or 2 flush_compactions. We expect the former in the case of backfills
+	// and the latter in the case of normal compactions with an attached function.
 	if len(flushReqs) > 2 {
 		log.Error("FlushCollectionCompactionAndAttachedFunction failed. too many flush_compactions", zap.Int("count", len(flushReqs)))
 		return nil, grpcutils.BuildInternalGrpcError("expected 1 or 2 flush_compactions")

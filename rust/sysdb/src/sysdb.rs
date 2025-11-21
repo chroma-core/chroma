@@ -9,16 +9,16 @@ use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
     chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments, CollectionFlushInfo,
-    CollectionMetadataUpdate, CountCollectionsError, CreateCollectionError, CreateDatabaseError,
-    CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
-    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionByCrnError,
-    GetCollectionSizeError, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
-    GetDatabaseResponse, GetSegmentsError, GetTenantError, GetTenantResponse,
-    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
-    ListAttachedFunctionsError, ListCollectionVersionsError, ListDatabasesError,
-    ListDatabasesResponse, Metadata, ResetError, ResetResponse, SegmentFlushInfo,
-    SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError, UpdateTenantError,
-    UpdateTenantResponse,
+    CollectionFlushInfoConversionError, CollectionMetadataUpdate, CountCollectionsError,
+    CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
+    CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
+    DeleteDatabaseResponse, GetCollectionByCrnError, GetCollectionSizeError,
+    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
+    GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
+    InternalUpdateCollectionConfiguration, ListAttachedFunctionsError, ListCollectionVersionsError,
+    ListDatabasesError, ListDatabasesResponse, Metadata, ResetError, ResetResponse,
+    SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError,
+    UpdateTenantError, UpdateTenantResponse,
 };
 use chroma_types::{
     AttachedFunctionUpdateInfo, AttachedFunctionUuid, BatchGetCollectionSoftDeleteStatusError,
@@ -1657,38 +1657,10 @@ impl GrpcSysDb {
         attached_function_update: AttachedFunctionUpdateInfo,
     ) -> Result<FlushCompactionAndAttachedFunctionResponse, FlushCompactionError> {
         // Process all collections into flush compaction requests
-        let mut flush_compactions = Vec::with_capacity(collections.len());
-
-        for collection in collections {
-            let segment_compaction_info = collection
-                .segment_flush_info
-                .iter()
-                .map(|segment_flush_info| segment_flush_info.try_into())
-                .collect::<Result<
-                    Vec<chroma_proto::FlushSegmentCompactionInfo>,
-                    SegmentFlushInfoConversionError,
-                >>()?;
-
-            let schema_str = collection.schema.and_then(|s| {
-                serde_json::to_string(&s).ok().or_else(|| {
-                    tracing::error!(
-                        "Failed to serialize schema for flush_compaction_and_attached_function"
-                    );
-                    None
-                })
-            });
-
-            flush_compactions.push(chroma_proto::FlushCollectionCompactionRequest {
-                tenant_id: collection.tenant_id,
-                collection_id: collection.collection_id.0.to_string(),
-                log_position: collection.log_position,
-                collection_version: collection.collection_version,
-                segment_compaction_info,
-                total_records_post_compaction: collection.total_records_post_compaction,
-                size_bytes_post_compaction: collection.size_bytes_post_compaction,
-                schema_str,
-            });
-        }
+        let flush_compactions = collections
+            .into_iter()
+            .map(|collection| collection.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
 
         let attached_function_update_proto = Some(chroma_proto::AttachedFunctionUpdateInfo {
             id: attached_function_update.attached_function_id.0.to_string(),
@@ -2137,6 +2109,8 @@ pub enum FlushCompactionError {
     FailedToFlushCompaction(#[from] tonic::Status),
     #[error("Failed to convert segment flush info")]
     SegmentFlushInfoConversionError(#[from] SegmentFlushInfoConversionError),
+    #[error("Failed to convert collection flush info")]
+    CollectionFlushInfoConversionError(#[from] CollectionFlushInfoConversionError),
     #[error("Failed to convert flush compaction response")]
     FlushCompactionResponseConversionError(#[from] FlushCompactionResponseConversionError),
     #[error("Collection not found in sysdb")]
@@ -2158,6 +2132,7 @@ impl ChromaError for FlushCompactionError {
                 }
             }
             FlushCompactionError::SegmentFlushInfoConversionError(_) => ErrorCodes::Internal,
+            FlushCompactionError::CollectionFlushInfoConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::FlushCompactionResponseConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::CollectionNotFound => ErrorCodes::Internal,
             FlushCompactionError::SegmentNotFound => ErrorCodes::Internal,

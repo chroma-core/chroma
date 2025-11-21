@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -60,7 +60,7 @@ pub struct ApplyLogsOrchestrator {
     segment_spans: HashMap<SegmentUuid, Span>,
 
     // Store the materialized outputs from LogFetchOrchestrator
-    materialized_log_data: Option<Arc<Vec<MaterializeLogOutput>>>,
+    materialized_log_data: Option<Vec<MaterializeLogOutput>>,
 
     metrics: CompactionMetrics,
 }
@@ -181,7 +181,7 @@ impl ApplyLogsOrchestratorResponse {
 impl ApplyLogsOrchestrator {
     pub fn new(
         context: &CompactionContext,
-        materialized_log_data: Option<Arc<Vec<MaterializeLogOutput>>>,
+        materialized_log_data: Option<Vec<MaterializeLogOutput>>,
     ) -> Self {
         ApplyLogsOrchestrator {
             context: context.clone(),

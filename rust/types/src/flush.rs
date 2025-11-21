@@ -1,8 +1,6 @@
 use super::{AttachedFunctionUuid, CollectionUuid, ConversionError, Schema};
 use crate::{
-    chroma_proto::{
-        FilePaths, FlushCollectionCompactionAndAttachedFunctionResponse, FlushSegmentCompactionInfo,
-    },
+    chroma_proto::{self, FilePaths, FlushSegmentCompactionInfo},
     SegmentUuid,
 };
 use chroma_error::{ChromaError, ErrorCodes};
@@ -130,6 +128,45 @@ pub enum SegmentFlushInfoConversionError {
     DecodeError(#[from] ConversionError),
 }
 
+#[derive(Error, Debug)]
+pub enum CollectionFlushInfoConversionError {
+    #[error("Failed to convert segment flush info: {0}")]
+    SegmentConversionError(#[from] SegmentFlushInfoConversionError),
+    #[error("Failed to serialize schema")]
+    SchemaSerializationError,
+}
+
+impl TryFrom<CollectionFlushInfo> for chroma_proto::FlushCollectionCompactionRequest {
+    type Error = CollectionFlushInfoConversionError;
+
+    fn try_from(collection: CollectionFlushInfo) -> Result<Self, Self::Error> {
+        let segment_compaction_info = collection
+            .segment_flush_info
+            .iter()
+            .map(|segment_flush_info| segment_flush_info.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let schema_str = collection
+            .schema
+            .map(|s| {
+                serde_json::to_string(&s)
+                    .map_err(|_| CollectionFlushInfoConversionError::SchemaSerializationError)
+            })
+            .transpose()?;
+
+        Ok(crate::chroma_proto::FlushCollectionCompactionRequest {
+            tenant_id: collection.tenant_id,
+            collection_id: collection.collection_id.0.to_string(),
+            log_position: collection.log_position,
+            collection_version: collection.collection_version,
+            segment_compaction_info,
+            total_records_post_compaction: collection.total_records_post_compaction,
+            size_bytes_post_compaction: collection.size_bytes_post_compaction,
+            schema_str,
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct FlushCompactionResponse {
     pub collection_id: CollectionUuid,
@@ -158,13 +195,13 @@ impl FlushCompactionResponse {
     }
 }
 
-impl TryFrom<FlushCollectionCompactionAndAttachedFunctionResponse>
+impl TryFrom<chroma_proto::FlushCollectionCompactionAndAttachedFunctionResponse>
     for FlushCompactionAndAttachedFunctionResponse
 {
     type Error = FlushCompactionResponseConversionError;
 
     fn try_from(
-        value: FlushCollectionCompactionAndAttachedFunctionResponse,
+        value: chroma_proto::FlushCollectionCompactionAndAttachedFunctionResponse,
     ) -> Result<Self, Self::Error> {
         // Parse all collections from the repeated field
         let mut collections = Vec::with_capacity(value.collections.len());

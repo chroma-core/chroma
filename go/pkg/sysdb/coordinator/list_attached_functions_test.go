@@ -66,6 +66,7 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_Success()
 			MinRecordsForInvocation: 5,
 			CreatedAt:               now,
 			UpdatedAt:               now,
+			IsReady:                 true,
 		},
 		{
 			ID:                      uuid.New(),
@@ -80,6 +81,7 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_Success()
 			MinRecordsForInvocation: 15,
 			CreatedAt:               now,
 			UpdatedAt:               now,
+			IsReady:                 true,
 		},
 	}
 
@@ -157,6 +159,7 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_FunctionD
 		MinRecordsForInvocation: 1,
 		CreatedAt:               now,
 		UpdatedAt:               now,
+		IsReady:                 true,
 	}
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()
@@ -191,6 +194,7 @@ func (suite *ListAttachedFunctionsTestSuite) TestListAttachedFunctions_InvalidPa
 		MinRecordsForInvocation: 1,
 		CreatedAt:               now,
 		UpdatedAt:               now,
+		IsReady:                 true,
 	}
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", ctx).Return(suite.mockAttachedFunctionDb).Once()

@@ -716,7 +716,6 @@ fn attached_function_to_proto(
         created_at: system_time_to_micros(attached_function.created_at),
         updated_at: system_time_to_micros(attached_function.updated_at),
         function_id: attached_function.function_id.to_string(),
-        is_ready: false, // Default value since Rust struct doesn't track this field
     }
 }
 

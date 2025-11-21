@@ -1,4 +1,4 @@
-use std::{cell::OnceCell, collections::HashSet, sync::Arc};
+use std::{cell::OnceCell, collections::HashSet};
 
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -393,7 +393,7 @@ impl CompactionContext {
 
     pub(crate) async fn run_apply_logs(
         &mut self,
-        log_fetch_records: Arc<Vec<MaterializeLogOutput>>,
+        log_fetch_records: Vec<MaterializeLogOutput>,
         system: System,
     ) -> Result<ApplyLogsOrchestratorResponse, ApplyLogsOrchestratorError> {
         let collection_info = self.get_collection_info()?;
@@ -442,7 +442,7 @@ impl CompactionContext {
     // Should be invoked on output collection context
     pub(crate) async fn run_attached_function(
         &mut self,
-        data_fetch_records: Arc<Vec<MaterializeLogOutput>>,
+        data_fetch_records: Vec<MaterializeLogOutput>,
         system: System,
     ) -> Result<AttachedFunctionOrchestratorResponse, AttachedFunctionOrchestratorError> {
         let collection_info = self.get_collection_info()?.clone();
@@ -485,7 +485,7 @@ impl CompactionContext {
 
     async fn run_regular_compaction_workflow(
         &mut self,
-        log_fetch_records: Arc<Vec<MaterializeLogOutput>>,
+        log_fetch_records: Vec<MaterializeLogOutput>,
         system: System,
     ) -> Result<CollectionRegisterInfo, CompactionError> {
         let apply_logs_response = self.run_apply_logs(log_fetch_records, system).await?;
@@ -505,7 +505,7 @@ impl CompactionContext {
 
     async fn run_attached_function_workflow(
         &mut self,
-        log_fetch_records: Arc<Vec<MaterializeLogOutput>>,
+        log_fetch_records: Vec<MaterializeLogOutput>,
         system: System,
     ) -> Result<Option<(FunctionContext, CollectionRegisterInfo)>, CompactionError> {
         let attached_function_result =
@@ -525,7 +525,7 @@ impl CompactionContext {
 
                 // Apply materialized output to output collection
                 let apply_logs_response = self
-                    .run_apply_logs(Arc::new(materialized_output), system.clone())
+                    .run_apply_logs(materialized_output, system.clone())
                     .await?;
 
                 let function_context = FunctionContext {
@@ -534,8 +534,11 @@ impl CompactionContext {
                     updated_completion_offset: completion_offset,
                 };
 
+                // Get updated collection info after running apply logs.
+                let output_collection_info = self.get_collection_info()?;
+
                 let collection_register_info = CollectionRegisterInfo {
-                    collection_info: output_collection_info,
+                    collection_info: output_collection_info.clone(),
                     flush_results: apply_logs_response.flush_results,
                     collection_logical_size_bytes: apply_logs_response
                         .collection_logical_size_bytes,
@@ -598,10 +601,10 @@ impl CompactionContext {
         };
 
         // Wrap in Arc to avoid cloning large MaterializeLogOutput data
-        let log_fetch_records = Arc::new(log_fetch_records);
         let log_fetch_records_clone = log_fetch_records.clone();
 
         let mut self_clone_fn = self.clone();
+        // TODO(tanujnay112): Think about a better way to pass mutable state to these futures
         let mut self_clone_compact = self.clone();
         let system_clone_fn = system.clone();
         let system_clone_compact = system.clone();
@@ -728,7 +731,6 @@ mod tests {
     };
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
-    use std::sync::Arc;
     use tokio::fs;
 
     use chroma_blockstore::arrow::config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES};
@@ -2473,7 +2475,7 @@ mod tests {
             compaction_1_log_records.len()
         );
         let compaction_1_apply_response = compaction_context_1
-            .run_apply_logs(Arc::new(compaction_1_log_records), system.clone())
+            .run_apply_logs(compaction_1_log_records, system.clone())
             .await
             .expect("Apply should have succeeded.");
 

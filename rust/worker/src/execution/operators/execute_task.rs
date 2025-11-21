@@ -69,7 +69,7 @@ impl AttachedFunctionExecutor for CountAttachedFunction {
             },
         };
 
-        Ok(Chunk::new(std::sync::Arc::from(vec![output_record])))
+        Ok(Chunk::new(Arc::from(vec![output_record])))
     }
 }
 
@@ -115,7 +115,7 @@ impl ExecuteAttachedFunctionOperator {
 #[derive(Debug)]
 pub struct ExecuteAttachedFunctionInput {
     /// The materialized log outputs to process
-    pub materialized_logs: Arc<Vec<MaterializeLogOutput>>,
+    pub materialized_logs: Vec<MaterializeLogOutput>,
     /// The tenant ID
     pub tenant_id: String,
     /// The output collection ID where results are written

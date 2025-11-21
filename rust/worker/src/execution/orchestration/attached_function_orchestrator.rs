@@ -65,7 +65,7 @@ pub struct AttachedFunctionOrchestrator {
     >,
 
     // Store the materialized outputs from DataFetchOrchestrator
-    materialized_log_data: Arc<Vec<MaterializeLogOutput>>,
+    materialized_log_data: Vec<MaterializeLogOutput>,
 
     // Function context
     function_context: OnceCell<FunctionContext>,
@@ -204,7 +204,7 @@ impl AttachedFunctionOrchestrator {
         input_collection_info: CollectionCompactInfo,
         output_context: CompactionContext,
         dispatcher: ComponentHandle<Dispatcher>,
-        data_fetch_records: Arc<Vec<MaterializeLogOutput>>,
+        data_fetch_records: Vec<MaterializeLogOutput>,
     ) -> Self {
         let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
 
@@ -308,7 +308,12 @@ impl AttachedFunctionOrchestrator {
         // Get the completion offset from the input collection's pulled log offset
         let completion_offset = collection_info.pulled_log_offset as u64;
 
-        println!(
+        let materialized_output = materialized_output
+            .into_iter()
+            .filter(|output| !output.result.is_empty())
+            .collect::<Vec<_>>();
+
+        tracing::info!(
             "Attached function finished successfully with {} records",
             materialized_output.len()
         );
@@ -487,12 +492,23 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
                     attached_function.name
                 );
 
-                // TODO(tanujnay112): Handle error
-                let _ = self.set_function_context(FunctionContext {
-                    attached_function_id: attached_function.id,
-                    function_id: attached_function.function_id,
-                    updated_completion_offset: attached_function.completion_offset,
-                });
+                if self
+                    .set_function_context(FunctionContext {
+                        attached_function_id: attached_function.id,
+                        function_id: attached_function.function_id,
+                        updated_completion_offset: attached_function.completion_offset,
+                    })
+                    .is_err()
+                {
+                    self.terminate_with_result(
+                        Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                            "Failed to set function context for attached function".to_string(),
+                        )),
+                        ctx,
+                    )
+                    .await;
+                    return;
+                }
 
                 // Get the output collection ID from the attached function
                 let output_collection_id = match attached_function.output_collection_id {
@@ -709,8 +725,8 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
         let collection_info = self.get_input_collection_info();
 
         let input = ExecuteAttachedFunctionInput {
-            materialized_logs: Arc::clone(&self.materialized_log_data), // Use the actual materialized logs from data fetch
-            tenant_id: "default".to_string(), // TODO: Get actual tenant ID
+            materialized_logs: self.materialized_log_data.clone(), // Use the actual materialized logs from data fetch
+            tenant_id: "default".to_string(),                      // TODO: Get actual tenant ID
             output_collection_id: message.collection.collection_id,
             completion_offset: collection_info.pulled_log_offset as u64, // Use the completion offset from input collection
             output_record_segment: message.record_segment.clone(),

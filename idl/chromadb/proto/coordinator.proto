@@ -588,7 +588,6 @@ message AttachedFunction {
   uint64 created_at = 15;
   uint64 updated_at = 16;
   string function_id = 17;
-  bool is_ready = 18;
 }
 
 message GetAttachedFunctionByNameResponse {

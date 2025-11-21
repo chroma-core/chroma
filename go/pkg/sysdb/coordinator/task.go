@@ -222,6 +222,10 @@ func attachedFunctionToProto(attachedFunction *dbmodel.AttachedFunction, functio
 		return nil, status.Errorf(codes.Internal, "attached function has invalid completion_offset: %d", attachedFunction.CompletionOffset)
 	}
 
+	if !attachedFunction.IsReady {
+		return nil, status.Errorf(codes.Internal, "serialized attached function is not ready")
+	}
+
 	attachedFunctionProto := &coordinatorpb.AttachedFunction{
 		Id:                      attachedFunction.ID.String(),
 		Name:                    attachedFunction.Name,
@@ -236,7 +240,6 @@ func attachedFunctionToProto(attachedFunction *dbmodel.AttachedFunction, functio
 		DatabaseId:              attachedFunction.DatabaseID,
 		CreatedAt:               uint64(attachedFunction.CreatedAt.UnixMicro()),
 		UpdatedAt:               uint64(attachedFunction.UpdatedAt.UnixMicro()),
-		IsReady:                 attachedFunction.IsReady,
 	}
 	if attachedFunction.OutputCollectionID != nil {
 		attachedFunctionProto.OutputCollectionId = attachedFunction.OutputCollectionID

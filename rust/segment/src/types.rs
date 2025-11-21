@@ -504,7 +504,6 @@ impl MaterializeLogsResult {
     /// # Note
     /// This is primarily intended for testing and should not be used in production code.
     /// Use the `materialize_logs` function instead for proper log materialization.
-    #[doc(hidden)]
     pub fn from_logs_for_test(logs: Chunk<LogRecord>) -> Result<Self, LogMaterializerError> {
         let mut materialized = Vec::new();
         for (index, (log_record, _)) in logs.iter().enumerate() {
