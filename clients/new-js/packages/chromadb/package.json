@@ -47,6 +47,8 @@
     "semver": "^7.7.1"
   },
   "devDependencies": {
+    "@chroma-core/chroma-cloud-qwen": "workspace:^",
+    "@chroma-core/chroma-cloud-splade": "workspace:^",
     "@chroma-core/default-embed": "workspace:^",
     "@hey-api/client-fetch": "^0.10.0",
     "@hey-api/openapi-ts": "^0.67.3",

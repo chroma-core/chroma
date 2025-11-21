@@ -88,7 +88,7 @@ export class ChromaCloudSpladeEmbeddingFunction
     let apiKey = process.env[apiKeyEnvVar];
 
     if (!apiKey && client && client.headers) {
-      apiKey = client.headers["chroma-x-token"];
+      apiKey = client.headers["x-chroma-token"];
     }
 
     if (!apiKey) {
