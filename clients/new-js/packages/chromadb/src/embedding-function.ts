@@ -1,6 +1,7 @@
 import { EmbeddingFunctionConfiguration, SparseVector } from "./api";
 import { ChromaValueError } from "./errors";
 import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
+import { ChromaClient } from "./chroma-client";
 
 /**
  * Supported vector space types.
@@ -34,7 +35,10 @@ export interface EmbeddingFunction {
   /** Returns all supported vector spaces for this embedding function */
   supportedSpaces?(): EmbeddingFunctionSpace[];
   /** Creates an instance from configuration object */
-  buildFromConfig?(config: Record<string, any>): EmbeddingFunction;
+  buildFromConfig?(
+    config: Record<string, any>,
+    client?: ChromaClient,
+  ): EmbeddingFunction;
   /** Returns the current configuration as an object */
   getConfig?(): Record<string, any>;
   /**
@@ -72,7 +76,10 @@ export interface SparseEmbeddingFunction {
   /** Optional name identifier for the embedding function */
   name?: string;
   /** Creates an instance from configuration object */
-  buildFromConfig?(config: Record<string, any>): SparseEmbeddingFunction;
+  buildFromConfig?(
+    config: Record<string, any>,
+    client?: ChromaClient,
+  ): SparseEmbeddingFunction;
   /** Returns the current configuration as an object */
   getConfig?(): Record<string, any>;
   /**
@@ -93,11 +100,14 @@ export interface SparseEmbeddingFunction {
  */
 export interface EmbeddingFunctionClass {
   /** Constructor for creating new instances */
-  new(...args: any[]): EmbeddingFunction;
+  new (...args: any[]): EmbeddingFunction;
   /** Name identifier for the embedding function */
   name: string;
   /** Static method to build instance from configuration */
-  buildFromConfig(config: Record<string, any>): EmbeddingFunction;
+  buildFromConfig(
+    config: Record<string, any>,
+    client?: ChromaClient,
+  ): EmbeddingFunction;
 }
 
 /**
@@ -106,11 +116,14 @@ export interface EmbeddingFunctionClass {
  */
 export interface SparseEmbeddingFunctionClass {
   /** Constructor for creating new instances */
-  new(...args: any[]): SparseEmbeddingFunction;
+  new (...args: any[]): SparseEmbeddingFunction;
   /** Name identifier for the embedding function */
   name: string;
   /** Static method to build instance from configuration */
-  buildFromConfig(config: Record<string, any>): SparseEmbeddingFunction;
+  buildFromConfig(
+    config: Record<string, any>,
+    client?: ChromaClient,
+  ): SparseEmbeddingFunction;
 }
 
 /**
@@ -139,6 +152,11 @@ const unsupportedEmbeddingFunctions: Set<string> = new Set([
   "open_clip",
   "roboflow",
   "text2vec",
+]);
+
+const chromaCloudEmbeddingFunctions: Set<string> = new Set([
+  "chroma-cloud-splade",
+  "chroma-cloud-qwen",
 ]);
 
 /**
@@ -205,11 +223,13 @@ export const registerSparseEmbeddingFunction = (
  * Retrieves and instantiates an embedding function from configuration.
  * @param collectionName - Name of the collection (for error messages)
  * @param efConfig - Configuration for the embedding function
+ * @param client - The client creating the collection
  * @returns EmbeddingFunction instance or undefined if it cannot be constructed
  */
 export const getEmbeddingFunction = async (
   collectionName: string,
   efConfig?: EmbeddingFunctionConfiguration,
+  client?: ChromaClient,
 ) => {
   if (!efConfig) {
     console.warn(
@@ -272,7 +292,7 @@ export const getEmbeddingFunction = async (
 
   try {
     if (embeddingFunction.buildFromConfig) {
-      return embeddingFunction.buildFromConfig(constructorConfig);
+      return embeddingFunction.buildFromConfig(constructorConfig, client);
     }
 
     console.warn(
@@ -296,6 +316,7 @@ export const getEmbeddingFunction = async (
 export const getSparseEmbeddingFunction = async (
   collectionName: string,
   efConfig?: EmbeddingFunctionConfiguration,
+  client?: ChromaClient,
 ) => {
   if (!efConfig) {
     return undefined;
@@ -342,7 +363,7 @@ export const getSparseEmbeddingFunction = async (
 
   try {
     if (sparseEmbeddingFunction.buildFromConfig) {
-      return sparseEmbeddingFunction.buildFromConfig(constructorConfig);
+      return sparseEmbeddingFunction.buildFromConfig(constructorConfig, client);
     }
 
     console.warn(

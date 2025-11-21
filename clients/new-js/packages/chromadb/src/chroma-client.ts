@@ -76,6 +76,7 @@ export class ChromaClient {
   private _tenant: string | undefined;
   private _database: string | undefined;
   private _preflightChecks: ChecklistResponse | undefined;
+  private _headers: Record<string, string> | undefined;
   private readonly apiClient: ReturnType<typeof createClient>;
 
   /**
@@ -124,6 +125,8 @@ export class ChromaClient {
     this._tenant = tenant || process.env.CHROMA_TENANT;
     this._database = database || process.env.CHROMA_DATABASE;
 
+    this._headers = headers;
+
     const configOptions = {
       ...fetchOptions,
       method: normalizeMethod(fetchOptions?.method) as HttpMethod,
@@ -171,6 +174,10 @@ export class ChromaClient {
     preflightChecks: ChecklistResponse | undefined,
   ) {
     this._preflightChecks = preflightChecks;
+  }
+
+  public get headers(): Record<string, string> | undefined {
+    return this._headers;
   }
 
   /** @ignore */
