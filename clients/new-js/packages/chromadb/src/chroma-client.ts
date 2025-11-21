@@ -417,13 +417,14 @@ export class ChromaClient {
       client: this.apiClient,
       path: { crn },
     });
-    const schema = await Schema.deserializeFromJSON(data.schema ?? undefined);
+    const schema = await Schema.deserializeFromJSON(data.schema ?? null, this);
     const schemaEmbeddingFunction = resolveSchemaEmbeddingFunction(schema);
     const resolvedEmbeddingFunction =
-      (await getEmbeddingFunction(
-        data.name,
-        data.configuration_json.embedding_function ?? undefined,
-      )) ?? schemaEmbeddingFunction;
+      (await getEmbeddingFunction({
+        collectionName: data.name,
+        efConfig: data.configuration_json.embedding_function ?? undefined,
+        client: this,
+      })) ?? schemaEmbeddingFunction;
     return new CollectionImpl({
       chromaClient: this,
       apiClient: this.apiClient,
