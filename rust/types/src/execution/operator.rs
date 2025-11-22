@@ -803,8 +803,7 @@ impl TryFrom<KnnBatchResult> for chroma_proto::KnnBatchResult {
 /// let sparse = QueryVector::Sparse(SparseVector::new(
 ///     vec![0, 5, 10, 50],      // indices
 ///     vec![0.5, 0.3, 0.8, 0.2], // values
-///     None,
-/// ));
+/// ).unwrap());
 /// ```
 ///
 /// # Examples
@@ -833,8 +832,7 @@ impl TryFrom<KnnBatchResult> for chroma_proto::KnnBatchResult {
 ///     query: QueryVector::Sparse(SparseVector::new(
 ///         vec![1, 5, 10],
 ///         vec![0.5, 0.3, 0.8],
-///         None,
-///     )),
+///     ).unwrap()),
 ///     key: Key::field("sparse_embedding"),
 ///     limit: 100,
 ///     default: None,
