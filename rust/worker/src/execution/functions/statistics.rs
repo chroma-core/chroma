@@ -111,7 +111,7 @@ impl StatisticsValue {
     }
 
     /// A stable representation of the statistics's value.
-    fn stable_value_token(&self) -> Option<String> {
+    fn stable_value_label(&self) -> Option<String> {
         match self {
             Self::Bool(_) => None,
             Self::Int(_) => None,
@@ -248,10 +248,10 @@ impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
                     "value".to_string(),
                     UpdateMetadataValue::Str(stable_value_index),
                 );
-                if let Some(stable_value_token) = stats_value.stable_value_token() {
+                if let Some(stable_value_label) = stats_value.stable_value_label() {
                     metadata.insert(
-                        "value_token".to_string(),
-                        UpdateMetadataValue::Str(stable_value_token),
+                        "value_label".to_string(),
+                        UpdateMetadataValue::Str(stable_value_label),
                     );
                 }
 
