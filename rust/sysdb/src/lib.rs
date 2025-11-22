@@ -8,4 +8,4 @@ pub mod types;
 pub use config::*;
 pub use sysdb::*;
 pub use test_sysdb::*;
-pub use types::*;
+pub use types::{GetAttachedFunctionsOptions, GetCollectionsOptions};
