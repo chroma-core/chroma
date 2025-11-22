@@ -3,8 +3,10 @@ package grpc
 import (
 	"context"
 	"encoding/json"
+	"math"
 
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
+	"github.com/google/uuid"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
@@ -567,6 +569,134 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		CollectionVersion:  flushCollectionInfo.CollectionVersion,
 		LastCompactionTime: flushCollectionInfo.TenantLastCompactionTime,
 	}
+	return res, nil
+}
+
+func (s *Server) FlushCollectionCompactionAndAttachedFunction(ctx context.Context, req *coordinatorpb.FlushCollectionCompactionAndAttachedFunctionRequest) (*coordinatorpb.FlushCollectionCompactionAndAttachedFunctionResponse, error) {
+	// Parse the repeated flush compaction requests
+	flushReqs := req.GetFlushCompactions()
+	if len(flushReqs) == 0 {
+		log.Error("FlushCollectionCompactionAndAttachedFunction failed. flush_compactions is empty")
+		return nil, grpcutils.BuildInternalGrpcError("at least one flush_compaction is required")
+	}
+
+	// Currently we only expect 1 or 2 flush_compactions. We expect the former in the case of backfills
+	// and the latter in the case of normal compactions with an attached function.
+	if len(flushReqs) > 2 {
+		log.Error("FlushCollectionCompactionAndAttachedFunction failed. too many flush_compactions", zap.Int("count", len(flushReqs)))
+		return nil, grpcutils.BuildInternalGrpcError("expected 1 or 2 flush_compactions")
+	}
+
+	// Parse attached function update info
+	attachedFunctionUpdate := req.GetAttachedFunctionUpdate()
+	if attachedFunctionUpdate == nil {
+		log.Error("FlushCollectionCompactionAndAttachedFunction failed. attached_function_update is nil")
+		return nil, grpcutils.BuildInternalGrpcError("attached_function_update is required")
+	}
+
+	attachedFunctionID, err := uuid.Parse(attachedFunctionUpdate.Id)
+	if err != nil {
+		log.Error("FlushCollectionCompactionAndAttachedFunction failed. error parsing attached_function_id", zap.Error(err), zap.String("attached_function_id", attachedFunctionUpdate.Id))
+		return nil, grpcutils.BuildInternalGrpcError("invalid attached_function_id: " + err.Error())
+	}
+
+	// Validate completion_offset fits in int64 before storing in database
+	if attachedFunctionUpdate.CompletionOffset > uint64(math.MaxInt64) {
+		log.Error("FlushCollectionCompactionAndAttachedFunction: completion_offset too large",
+			zap.Uint64("completion_offset", attachedFunctionUpdate.CompletionOffset))
+		return nil, grpcutils.BuildInternalGrpcError("completion_offset too large")
+	}
+	completionOffsetSigned := int64(attachedFunctionUpdate.CompletionOffset)
+
+	// Parse all flush requests into a slice
+	collectionCompactions := make([]*model.FlushCollectionCompaction, 0, len(flushReqs))
+
+	for _, flushReq := range flushReqs {
+		collectionID, err := types.ToUniqueID(&flushReq.CollectionId)
+		err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
+		if err != nil {
+			log.Error("FlushCollectionCompactionAndAttachedFunction failed. error parsing collection id", zap.Error(err), zap.String("collection_id", flushReq.CollectionId))
+			return nil, grpcutils.BuildInternalGrpcError(err.Error())
+		}
+
+		segmentCompactionInfo := make([]*model.FlushSegmentCompaction, 0, len(flushReq.SegmentCompactionInfo))
+		for _, flushSegmentCompaction := range flushReq.SegmentCompactionInfo {
+			segmentID, err := types.ToUniqueID(&flushSegmentCompaction.SegmentId)
+			err = grpcutils.BuildErrorForUUID(segmentID, "segment", err)
+			if err != nil {
+				log.Error("FlushCollectionCompactionAndAttachedFunction failed. error parsing segment id", zap.Error(err), zap.String("collection_id", flushReq.CollectionId))
+				return nil, grpcutils.BuildInternalGrpcError(err.Error())
+			}
+			filePaths := make(map[string][]string)
+			for key, filePath := range flushSegmentCompaction.FilePaths {
+				filePaths[key] = filePath.Paths
+			}
+			segmentCompactionInfo = append(segmentCompactionInfo, &model.FlushSegmentCompaction{
+				ID:        segmentID,
+				FilePaths: filePaths,
+			})
+		}
+
+		collectionCompactions = append(collectionCompactions, &model.FlushCollectionCompaction{
+			ID:                         collectionID,
+			TenantID:                   flushReq.TenantId,
+			LogPosition:                flushReq.LogPosition,
+			CurrentCollectionVersion:   flushReq.CollectionVersion,
+			FlushSegmentCompactions:    segmentCompactionInfo,
+			TotalRecordsPostCompaction: flushReq.TotalRecordsPostCompaction,
+			SizeBytesPostCompaction:    flushReq.SizeBytesPostCompaction,
+		})
+	}
+
+	// Call the Extended coordinator function to handle all collections
+	extendedFlushInfo, err := s.coordinator.FlushCollectionCompactionsAndAttachedFunction(
+		ctx,
+		collectionCompactions,
+		attachedFunctionID,
+		completionOffsetSigned,
+	)
+	if err != nil {
+		log.Error("FlushCollectionCompactionAndAttachedFunction failed", zap.Error(err), zap.String("attached_function_id", attachedFunctionUpdate.Id))
+		if err == common.ErrCollectionSoftDeleted {
+			return nil, grpcutils.BuildFailedPreconditionGrpcError(err.Error())
+		}
+		if err == common.ErrAttachedFunctionNotFound {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	// Build response with repeated collections
+	res := &coordinatorpb.FlushCollectionCompactionAndAttachedFunctionResponse{
+		Collections: make([]*coordinatorpb.CollectionCompactionInfo, 0, len(extendedFlushInfo.Collections)),
+	}
+
+	for _, flushInfo := range extendedFlushInfo.Collections {
+		res.Collections = append(res.Collections, &coordinatorpb.CollectionCompactionInfo{
+			CollectionId:       flushInfo.ID,
+			CollectionVersion:  flushInfo.CollectionVersion,
+			LastCompactionTime: flushInfo.TenantLastCompactionTime,
+		})
+	}
+
+	// Populate attached function state with authoritative values from database (use first collection)
+	if len(extendedFlushInfo.Collections) > 0 {
+		firstFlushInfo := extendedFlushInfo.Collections[0]
+		attachedFunctionState := &coordinatorpb.AttachedFunctionState{}
+
+		if firstFlushInfo.AttachedFunctionCompletionOffset != nil {
+			// Validate completion_offset is non-negative before converting to uint64
+			if *firstFlushInfo.AttachedFunctionCompletionOffset < 0 {
+				log.Error("FlushCollectionCompactionAndAttachedFunction: invalid completion_offset",
+					zap.Int64("completion_offset", *firstFlushInfo.AttachedFunctionCompletionOffset))
+				return nil, grpcutils.BuildInternalGrpcError("attached function has invalid completion_offset")
+			}
+			attachedFunctionState.CompletionOffset = uint64(*firstFlushInfo.AttachedFunctionCompletionOffset)
+		}
+
+		res.AttachedFunctionState = attachedFunctionState
+	}
+
 	return res, nil
 }
 

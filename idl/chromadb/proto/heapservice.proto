@@ -4,7 +4,6 @@ package chroma;
 
 option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
 
-import "chromadb/proto/chroma.proto";
 import "google/protobuf/timestamp.proto";
 
 // A task that can be scheduled and triggered in the heap.

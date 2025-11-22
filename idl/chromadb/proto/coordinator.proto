@@ -327,6 +327,27 @@ message AttachedFunctionUpdateInfo {
   uint64 completion_offset = 2;
 }
 
+// Combined request to flush collection compaction and update attached function atomically in a single transaction
+message FlushCollectionCompactionAndAttachedFunctionRequest {
+  repeated FlushCollectionCompactionRequest flush_compactions = 1;
+  AttachedFunctionUpdateInfo attached_function_update = 2;
+}
+
+message CollectionCompactionInfo {
+  string collection_id = 1;
+  int32 collection_version = 2;
+  int64 last_compaction_time = 3;
+}
+
+message AttachedFunctionState {
+  uint64 completion_offset = 1;
+}
+
+message FlushCollectionCompactionAndAttachedFunctionResponse {
+  repeated CollectionCompactionInfo collections = 1;
+  AttachedFunctionState attached_function_state = 2;
+}
+
 // Used for serializing contents in collection version history file.
 message CollectionVersionFile {
   CollectionInfoImmutable collection_info_immutable = 1;
@@ -544,7 +565,7 @@ message AttachFunctionRequest {
 }
 
 message AttachFunctionResponse {
-  string id = 1;
+  AttachedFunction attached_function = 1;
 }
 
 message GetAttachedFunctionByNameRequest {
@@ -567,7 +588,6 @@ message AttachedFunction {
   uint64 created_at = 15;
   uint64 updated_at = 16;
   string function_id = 17;
-  bool is_ready = 18;
 }
 
 message GetAttachedFunctionByNameResponse {
@@ -692,4 +712,5 @@ service SysDB {
   rpc GetFunctions(GetFunctionsRequest) returns (GetFunctionsResponse) {}
   rpc GetSoftDeletedAttachedFunctions(GetSoftDeletedAttachedFunctionsRequest) returns (GetSoftDeletedAttachedFunctionsResponse) {}
   rpc FinishAttachedFunctionDeletion(FinishAttachedFunctionDeletionRequest) returns (FinishAttachedFunctionDeletionResponse) {}
+  rpc FlushCollectionCompactionAndAttachedFunction(FlushCollectionCompactionAndAttachedFunctionRequest) returns (FlushCollectionCompactionAndAttachedFunctionResponse) {}
 }

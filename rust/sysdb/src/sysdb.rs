@@ -8,24 +8,25 @@ use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments,
-    CollectionMetadataUpdate, CountCollectionsError, CreateCollectionError, CreateDatabaseError,
-    CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
-    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionByCrnError,
-    GetCollectionSizeError, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
-    GetDatabaseResponse, GetSegmentsError, GetTenantError, GetTenantResponse,
-    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
-    ListAttachedFunctionsError, ListCollectionVersionsError, ListDatabasesError,
-    ListDatabasesResponse, Metadata, ResetError, ResetResponse, SegmentFlushInfo,
-    SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError, UpdateTenantError,
-    UpdateTenantResponse,
+    chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments, CollectionFlushInfo,
+    CollectionFlushInfoConversionError, CollectionMetadataUpdate, CountCollectionsError,
+    CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
+    CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
+    DeleteDatabaseResponse, GetCollectionByCrnError, GetCollectionSizeError,
+    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
+    GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
+    InternalUpdateCollectionConfiguration, ListAttachedFunctionsError, ListCollectionVersionsError,
+    ListDatabasesError, ListDatabasesResponse, Metadata, ResetError, ResetResponse,
+    SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError,
+    UpdateTenantError, UpdateTenantResponse,
 };
 use chroma_types::{
-    AttachedFunctionUuid, BatchGetCollectionSoftDeleteStatusError,
+    AttachedFunctionUpdateInfo, AttachedFunctionUuid, BatchGetCollectionSoftDeleteStatusError,
     BatchGetCollectionVersionFilePathsError, Collection, CollectionConversionError, CollectionUuid,
     CountForksError, DatabaseUuid, FinishCreateAttachedFunctionError, FinishDatabaseDeletionError,
-    FlushCompactionResponse, FlushCompactionResponseConversionError, ForkCollectionError, Schema,
-    SchemaError, Segment, SegmentConversionError, SegmentScope, Tenant,
+    FlushCompactionAndAttachedFunctionResponse, FlushCompactionResponse,
+    FlushCompactionResponseConversionError, ForkCollectionError, Schema, SchemaError, Segment,
+    SegmentConversionError, SegmentScope, Tenant,
 };
 use prost_types;
 use std::collections::HashMap;
@@ -624,6 +625,21 @@ impl SysDb {
                 )
                 .await
             }
+        }
+    }
+
+    pub async fn flush_compaction_and_attached_function(
+        &mut self,
+        collections: Vec<CollectionFlushInfo>,
+        attached_function_update: AttachedFunctionUpdateInfo,
+    ) -> Result<FlushCompactionAndAttachedFunctionResponse, FlushCompactionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.flush_compaction_and_attached_function(collections, attached_function_update)
+                    .await
+            }
+            SysDb::Sqlite(_) => todo!(),
+            SysDb::Test(_) => todo!(),
         }
     }
 
@@ -1635,6 +1651,53 @@ impl GrpcSysDb {
         }
     }
 
+    async fn flush_compaction_and_attached_function(
+        &mut self,
+        collections: Vec<CollectionFlushInfo>,
+        attached_function_update: AttachedFunctionUpdateInfo,
+    ) -> Result<FlushCompactionAndAttachedFunctionResponse, FlushCompactionError> {
+        // Process all collections into flush compaction requests
+        let flush_compactions = collections
+            .into_iter()
+            .map(|collection| collection.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let attached_function_update_proto = Some(chroma_proto::AttachedFunctionUpdateInfo {
+            id: attached_function_update.attached_function_id.0.to_string(),
+            completion_offset: attached_function_update.completion_offset,
+        });
+
+        let req = chroma_proto::FlushCollectionCompactionAndAttachedFunctionRequest {
+            flush_compactions,
+            attached_function_update: attached_function_update_proto,
+        };
+
+        let res = self
+            .client
+            .flush_collection_compaction_and_attached_function(req)
+            .await;
+        match res {
+            Ok(res) => {
+                let res = res.into_inner();
+                let res = match res.try_into() {
+                    Ok(res) => res,
+                    Err(e) => {
+                        return Err(
+                            FlushCompactionError::FlushCompactionResponseConversionError(e),
+                        );
+                    }
+                };
+                Ok(res)
+            }
+            Err(e) => {
+                if e.code() == Code::FailedPrecondition {
+                    return Err(FlushCompactionError::FailedToFlushCompaction(e));
+                }
+                Err(FlushCompactionError::FailedToFlushCompaction(e))
+            }
+        }
+    }
+
     async fn mark_version_for_deletion(
         &mut self,
         epoch_id: i64,
@@ -1736,10 +1799,15 @@ impl GrpcSysDb {
         let response = self.client.attach_function(req).await?.into_inner();
         // Parse the returned attached_function_id - this should always succeed since the server generated it
         // If this fails, it indicates a serious server bug or protocol corruption
+        let attached_function = response.attached_function.ok_or_else(|| {
+            tracing::error!("Server did not return attached function in response");
+            AttachFunctionError::ServerReturnedInvalidData
+        })?;
+
         let attached_function_id = chroma_types::AttachedFunctionUuid(
-            uuid::Uuid::parse_str(&response.id).map_err(|e| {
+            uuid::Uuid::parse_str(&attached_function.id).map_err(|e| {
                 tracing::error!(
-                    attached_function_id = %response.id,
+                    attached_function_id = %attached_function.id,
                     error = %e,
                     "Server returned invalid attached_function_id UUID - attached function was created but response is corrupt"
                 );
@@ -1832,7 +1900,6 @@ impl GrpcSysDb {
                 + std::time::Duration::from_micros(attached_function.created_at),
             updated_at: std::time::SystemTime::UNIX_EPOCH
                 + std::time::Duration::from_micros(attached_function.updated_at),
-            is_ready: attached_function.is_ready,
         })
     }
 
@@ -2042,6 +2109,8 @@ pub enum FlushCompactionError {
     FailedToFlushCompaction(#[from] tonic::Status),
     #[error("Failed to convert segment flush info")]
     SegmentFlushInfoConversionError(#[from] SegmentFlushInfoConversionError),
+    #[error("Failed to convert collection flush info")]
+    CollectionFlushInfoConversionError(#[from] CollectionFlushInfoConversionError),
     #[error("Failed to convert flush compaction response")]
     FlushCompactionResponseConversionError(#[from] FlushCompactionResponseConversionError),
     #[error("Collection not found in sysdb")]
@@ -2063,6 +2132,7 @@ impl ChromaError for FlushCompactionError {
                 }
             }
             FlushCompactionError::SegmentFlushInfoConversionError(_) => ErrorCodes::Internal,
+            FlushCompactionError::CollectionFlushInfoConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::FlushCompactionResponseConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::CollectionNotFound => ErrorCodes::Internal,
             FlushCompactionError::SegmentNotFound => ErrorCodes::Internal,

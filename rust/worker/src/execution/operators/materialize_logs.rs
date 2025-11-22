@@ -56,7 +56,7 @@ impl MaterializeLogInput {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MaterializeLogOutput {
     pub result: MaterializeLogsResult,
     pub collection_logical_size_delta: i64,

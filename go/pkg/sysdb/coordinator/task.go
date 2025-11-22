@@ -76,7 +76,7 @@ func (s *Coordinator) validateAttachedFunctionMatchesRequest(ctx context.Context
 	return nil
 }
 
-// AttachFunction creates a new attached function in the database
+// AttachFunction creates an output collection and attached function in a single transaction
 func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.AttachFunctionRequest) (*coordinatorpb.AttachFunctionResponse, error) {
 	log := log.With(zap.String("method", "AttachFunction"))
 
@@ -143,18 +143,6 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			return common.ErrCollectionNotFound
 		}
 
-		// Check if output collection already exists
-		outputCollectionName := req.OutputCollectionName
-		existingOutputCollections, err := s.catalog.metaDomain.CollectionDb(txCtx).GetCollections(nil, &outputCollectionName, req.TenantId, req.Database, nil, nil, false)
-		if err != nil {
-			log.Error("AttachFunction: failed to check output collection", zap.Error(err))
-			return err
-		}
-		if len(existingOutputCollections) > 0 {
-			log.Error("AttachFunction: output collection already exists")
-			return common.ErrCollectionUniqueConstraintViolation
-		}
-
 		// Serialize params
 		var paramsJSON string
 		if req.Params != nil {
@@ -168,6 +156,7 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			paramsJSON = "{}"
 		}
 
+		// Create attached function
 		now := time.Now()
 		attachedFunction := &dbmodel.AttachedFunction{
 			ID:                      attachedFunctionID,
@@ -176,6 +165,7 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			DatabaseID:              databases[0].ID,
 			InputCollectionID:       req.InputCollectionId,
 			OutputCollectionName:    req.OutputCollectionName,
+			OutputCollectionID:      nil,
 			FunctionID:              function.ID,
 			FunctionParams:          paramsJSON,
 			CompletionOffset:        0,
@@ -196,6 +186,7 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 
 		log.Debug("AttachFunction: attached function created with is_ready=false",
 			zap.String("attached_function_id", attachedFunctionID.String()),
+			zap.String("output_collection_name", req.OutputCollectionName),
 			zap.String("name", req.Name))
 		return nil
 	})
@@ -205,7 +196,9 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 	}
 
 	return &coordinatorpb.AttachFunctionResponse{
-		Id: attachedFunctionID.String(),
+		AttachedFunction: &coordinatorpb.AttachedFunction{
+			Id: attachedFunctionID.String(),
+		},
 	}, nil
 }
 
@@ -229,6 +222,10 @@ func attachedFunctionToProto(attachedFunction *dbmodel.AttachedFunction, functio
 		return nil, status.Errorf(codes.Internal, "attached function has invalid completion_offset: %d", attachedFunction.CompletionOffset)
 	}
 
+	if !attachedFunction.IsReady {
+		return nil, status.Errorf(codes.Internal, "serialized attached function is not ready")
+	}
+
 	attachedFunctionProto := &coordinatorpb.AttachedFunction{
 		Id:                      attachedFunction.ID.String(),
 		Name:                    attachedFunction.Name,
@@ -243,7 +240,6 @@ func attachedFunctionToProto(attachedFunction *dbmodel.AttachedFunction, functio
 		DatabaseId:              attachedFunction.DatabaseID,
 		CreatedAt:               uint64(attachedFunction.CreatedAt.UnixMicro()),
 		UpdatedAt:               uint64(attachedFunction.UpdatedAt.UnixMicro()),
-		IsReady:                 attachedFunction.IsReady,
 	}
 	if attachedFunction.OutputCollectionID != nil {
 		attachedFunctionProto.OutputCollectionId = attachedFunction.OutputCollectionID
@@ -581,7 +577,7 @@ func (s *Coordinator) FinishCreateAttachedFunction(ctx context.Context, req *coo
 
 		_, _, err = s.catalog.CreateCollectionAndSegments(txCtx, collection, segments, 0)
 		if err != nil {
-			log.Error("FinishCreateAttachedFunction: failed to create collection", zap.Error(err))
+			log.Error("FinishCreateAttachedFunction: failed to create output collection", zap.Error(err))
 			return err
 		}
 

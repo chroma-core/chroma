@@ -497,6 +497,34 @@ impl MaterializeLogsResult {
             index: 0,
         }
     }
+
+    /// Create a MaterializeLogsResult from log records for testing purposes.
+    /// Each log record is treated as a new insertion with a unique offset_id.
+    ///
+    /// # Note
+    /// This is primarily intended for testing and should not be used in production code.
+    /// Use the `materialize_logs` function instead for proper log materialization.
+    pub fn from_logs_for_test(logs: Chunk<LogRecord>) -> Result<Self, LogMaterializerError> {
+        let mut materialized = Vec::new();
+        for (index, (log_record, _)) in logs.iter().enumerate() {
+            let offset_id = (index + 1) as u32;
+            let mut mat_record =
+                MaterializedLogRecord::from_log_record(offset_id, index, log_record)?;
+
+            // Override the operation for delete records
+            if log_record.record.operation == Operation::Delete {
+                mat_record.final_operation = MaterializedLogOperation::DeleteExisting;
+                mat_record.final_document_at_log_index = None;
+                mat_record.final_embedding_at_log_index = None;
+            }
+
+            materialized.push(mat_record);
+        }
+        Ok(Self {
+            logs,
+            materialized: Chunk::new(materialized.into()),
+        })
+    }
 }
 
 // IntoIterator is implemented for &'a MaterializeLogsResult rather than MaterializeLogsResult because the iterator needs to hand out values with a lifetime of 'a.

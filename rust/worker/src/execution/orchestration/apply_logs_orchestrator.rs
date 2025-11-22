@@ -461,7 +461,7 @@ impl Orchestrator for ApplyLogsOrchestrator {
             }
         };
 
-        for materialized_output in materialized_outputs {
+        for materialized_output in materialized_outputs.iter() {
             if materialized_output.result.is_empty() {
                 self.terminate_with_result(
                     Err(ApplyLogsOrchestratorError::InvariantViolation(
@@ -477,7 +477,7 @@ impl Orchestrator for ApplyLogsOrchestrator {
 
             // Create tasks for each materialized output
             let result = self
-                .create_apply_log_to_segment_writer_tasks(materialized_output.result, ctx)
+                .create_apply_log_to_segment_writer_tasks(materialized_output.result.clone(), ctx)
                 .await;
 
             let mut new_tasks = match result {
@@ -525,15 +525,10 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
 
         if message.segment_type == "MetadataSegmentWriter" {
             if let Some(update) = message.schema_update {
-                let collection_info_cell = self.context.collection_info.get_mut();
-                let collection_info = match collection_info_cell {
-                    Some(collection_info) => collection_info,
-                    None => {
-                        let err = ApplyLogsOrchestratorError::InvariantViolation(
-                            "Collection info should have been set",
-                        );
-                        self.terminate_with_result(Err(err), ctx).await;
-                        return;
+                let collection_info = match self.context.get_collection_info_mut() {
+                    Ok(info) => info,
+                    Err(err) => {
+                        return self.terminate_with_result(Err(err.into()), ctx).await;
                     }
                 };
 

@@ -560,16 +560,10 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             vector_writer,
         };
 
-        let collection_info = match self.context.collection_info.get_mut() {
-            Some(info) => info,
-            None => {
-                self.terminate_with_result(
-                    Err(LogFetchOrchestratorError::InvariantViolation(
-                        "Collection info should have been initialized",
-                    )),
-                    ctx,
-                )
-                .await;
+        let collection_info = match self.context.get_collection_info_mut() {
+            Ok(info) => info,
+            Err(err) => {
+                self.terminate_with_result(Err(err.into()), ctx).await;
                 return;
             }
         };

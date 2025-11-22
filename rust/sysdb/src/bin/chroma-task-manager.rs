@@ -126,7 +126,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             let response = client.attach_function(request).await?;
-            println!("Attached Function created: {}", response.into_inner().id);
+            let attached_function = response
+                .into_inner()
+                .attached_function
+                .ok_or("Server did not return attached function")?;
+            println!("Attached Function created: {}", attached_function.id);
         }
         Command::GetAttachedFunction {
             input_collection_id,
@@ -138,7 +142,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             let response = client.get_attached_function_by_name(request).await?;
-            let attached_function = response.into_inner().attached_function.unwrap();
+            let attached_function = response
+                .into_inner()
+                .attached_function
+                .ok_or("Server did not return attached function")?;
 
             println!("Attached Function ID: {:?}", attached_function.id);
             println!("Name: {:?}", attached_function.name);

@@ -72,6 +72,89 @@ pub struct AttachedFunction {
     /// Timestamp when the attached function was last updated
     #[serde(default = "default_systemtime")]
     pub updated_at: SystemTime,
-    /// Whether the attached function is ready (has completed initialization/backfill)
-    pub is_ready: bool,
+    // is_ready is a column in the database, but not in the struct because
+    // it is not meant to be used in rust code. If it is false, rust code
+    // should never even see it.
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AttachedFunctionConversionError {
+    #[error("Invalid UUID: {0}")]
+    InvalidUuid(String),
+    #[error("Attached function params aren't supported yet")]
+    ParamsNotSupported,
+}
+
+impl TryFrom<crate::chroma_proto::AttachedFunction> for AttachedFunction {
+    type Error = AttachedFunctionConversionError;
+
+    fn try_from(
+        attached_function: crate::chroma_proto::AttachedFunction,
+    ) -> Result<Self, Self::Error> {
+        // Parse attached_function_id
+        let attached_function_id = attached_function
+            .id
+            .parse::<AttachedFunctionUuid>()
+            .map_err(|_| {
+                AttachedFunctionConversionError::InvalidUuid("attached_function_id".to_string())
+            })?;
+
+        // Parse function_id
+        let function_id = attached_function
+            .function_id
+            .parse::<uuid::Uuid>()
+            .map_err(|_| AttachedFunctionConversionError::InvalidUuid("function_id".to_string()))?;
+
+        // Parse input_collection_id
+        let input_collection_id = attached_function
+            .input_collection_id
+            .parse::<CollectionUuid>()
+            .map_err(|_| {
+                AttachedFunctionConversionError::InvalidUuid("input_collection_id".to_string())
+            })?;
+
+        // Parse output_collection_id if available
+        let output_collection_id = attached_function
+            .output_collection_id
+            .map(|id| id.parse::<CollectionUuid>())
+            .transpose()
+            .map_err(|_| {
+                AttachedFunctionConversionError::InvalidUuid("output_collection_id".to_string())
+            })?;
+
+        // Parse params if available - only allow empty JSON "{}" or empty struct for now.
+        // TODO(tanujnay112): Process params when we allow them
+        let params = if let Some(params_struct) = &attached_function.params {
+            if !params_struct.fields.is_empty() {
+                return Err(AttachedFunctionConversionError::ParamsNotSupported);
+            }
+            Some("{}".to_string())
+        } else {
+            None
+        };
+
+        // Parse timestamps
+        let created_at = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_micros(attached_function.created_at);
+        let updated_at = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_micros(attached_function.updated_at);
+
+        Ok(AttachedFunction {
+            id: attached_function_id,
+            name: attached_function.name,
+            function_id,
+            input_collection_id,
+            output_collection_name: attached_function.output_collection_name,
+            output_collection_id,
+            params,
+            tenant_id: attached_function.tenant_id,
+            database_id: attached_function.database_id,
+            last_run: None, // Not available in proto
+            completion_offset: attached_function.completion_offset,
+            min_records_for_invocation: attached_function.min_records_for_invocation,
+            is_deleted: false, // Not available in proto, would need to be fetched separately
+            created_at,
+            updated_at,
+        })
+    }
 }

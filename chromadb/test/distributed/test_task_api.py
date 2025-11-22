@@ -9,9 +9,13 @@ import pytest
 from chromadb.api.client import Client as ClientCreator
 from chromadb.config import System
 from chromadb.errors import ChromaError, NotFoundError
+from chromadb.test.utils.wait_for_version_increase import (
+    get_collection_version,
+    wait_for_version_increase,
+)
 
 
-def test_function_attach_and_detach(basic_http_client: System) -> None:
+def test_count_function_attach_and_detach(basic_http_client: System) -> None:
     """Test creating and removing a function with the record_counter operator"""
     client = ClientCreator.from_system(basic_http_client)
     client.reset()
@@ -21,21 +25,6 @@ def test_function_attach_and_detach(basic_http_client: System) -> None:
         name="my_document",
         metadata={"description": "Sample documents for task processing"},
     )
-
-    # Add initial documents
-    collection.add(
-        ids=["doc1", "doc2", "doc3"],
-        documents=[
-            "The quick brown fox jumps over the lazy dog",
-            "Machine learning is a subset of artificial intelligence",
-            "Python is a popular programming language",
-        ],
-        metadatas=[{"source": "proverb"}, {"source": "tech"}, {"source": "tech"}],
-    )
-
-    # Verify collection has documents
-    assert collection.count() == 3
-    # TODO(tanujnay112): Verify the output collection has the correct count
 
     # Create a task that counts records in the collection
     attached_fn = collection.attach_function(
@@ -47,19 +36,22 @@ def test_function_attach_and_detach(basic_http_client: System) -> None:
 
     # Verify task creation succeeded
     assert attached_fn is not None
+    initial_version = get_collection_version(client, collection.name)
 
-    # Add more documents
+    # Add documents
     collection.add(
-        ids=["doc4", "doc5"],
-        documents=[
-            "Chroma is a vector database",
-            "Tasks automate data processing",
-        ],
+        ids=["doc_{}".format(i) for i in range(0, 300)],
+        documents=["test document"] * 300,
     )
 
     # Verify documents were added
-    assert collection.count() == 5
-    # TODO(tanujnay112): Verify the output collection has the correct count
+    assert collection.count() == 300
+
+    wait_for_version_increase(client, collection.name, initial_version)
+
+    result = client.get_collection("my_documents_counts").get("function_output")
+    assert result["metadatas"] is not None
+    assert result["metadatas"][0]["total_count"] == 300
 
     # Remove the task
     success = attached_fn.detach(
