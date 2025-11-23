@@ -436,10 +436,10 @@ mod tests {
                 ),
                 (
                     "sparse_key".to_string(),
-                    UpdateMetadataValue::SparseVector(SparseVector::new(
-                        vec![1, 3],
-                        vec![0.25, 0.75],
-                    )),
+                    UpdateMetadataValue::SparseVector(
+                        SparseVector::new(vec![1, 3], vec![0.25, 0.75])
+                            .expect("sparse vector creation should succeed"),
+                    ),
                 ),
             ]),
         );
@@ -455,7 +455,10 @@ mod tests {
                 ),
                 (
                     "sparse_key".to_string(),
-                    UpdateMetadataValue::SparseVector(SparseVector::new(vec![3], vec![0.5])),
+                    UpdateMetadataValue::SparseVector(
+                        SparseVector::new(vec![3], vec![0.5])
+                            .expect("sparse vector creation should succeed"),
+                    ),
                 ),
             ]),
         );
@@ -627,10 +630,10 @@ mod tests {
             "sparse-empty",
             HashMap::from([(
                 "sparse_key".to_string(),
-                UpdateMetadataValue::SparseVector(SparseVector::new(
-                    Vec::<u32>::new(),
-                    Vec::<f32>::new(),
-                )),
+                UpdateMetadataValue::SparseVector(
+                    SparseVector::new(Vec::<u32>::new(), Vec::<f32>::new())
+                        .expect("valid sparse vector"),
+                ),
             )]),
         );
 

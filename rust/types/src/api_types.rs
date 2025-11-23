@@ -2419,7 +2419,9 @@ mod test {
         // Add unsorted sparse vector - should fail validation
         metadata.insert(
             "sparse".to_string(),
-            MetadataValue::SparseVector(SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2])),
+            MetadataValue::SparseVector(
+                SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2]).unwrap(),
+            ),
         );
 
         let result = AddCollectionRecordsRequest::try_new(
@@ -2443,10 +2445,9 @@ mod test {
         // Add unsorted sparse vector - should fail validation
         metadata.insert(
             "sparse".to_string(),
-            UpdateMetadataValue::SparseVector(SparseVector::new(
-                vec![3, 1, 2],
-                vec![0.3, 0.1, 0.2],
-            )),
+            UpdateMetadataValue::SparseVector(
+                SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2]).unwrap(),
+            ),
         );
 
         let result = UpdateCollectionRecordsRequest::try_new(
@@ -2470,10 +2471,9 @@ mod test {
         // Add unsorted sparse vector - should fail validation
         metadata.insert(
             "sparse".to_string(),
-            UpdateMetadataValue::SparseVector(SparseVector::new(
-                vec![3, 1, 2],
-                vec![0.3, 0.1, 0.2],
-            )),
+            UpdateMetadataValue::SparseVector(
+                SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2]).unwrap(),
+            ),
         );
 
         let result = UpsertCollectionRecordsRequest::try_new(

@@ -190,18 +190,20 @@ export class ChromaBm25EmbeddingFunction implements SparseEmbeddingFunction {
     }
 
     private encode(text: string): SparseVector {
-        const tokens = this.tokenizer.tokenize(text);
+        const tokenList = this.tokenizer.tokenize(text);
 
-        if (tokens.length === 0) {
+        if (tokenList.length === 0) {
             return { indices: [], values: [] };
         }
 
-        const docLen = tokens.length;
+        const docLen = tokenList.length;
         const counts = new Map<number, number>();
+        const tokenMap = new Map<number, string>();
 
-        for (const token of tokens) {
+        for (const token of tokenList) {
             const tokenId = this.hasher.hash(token);
             counts.set(tokenId, (counts.get(tokenId) ?? 0) + 1);
+            tokenMap.set(tokenId, token);
         }
 
         const indices = Array.from(counts.keys()).sort((a, b) => a - b);
@@ -213,8 +215,15 @@ export class ChromaBm25EmbeddingFunction implements SparseEmbeddingFunction {
                 (1 - this.b + (this.b * docLen) / this.avgDocLength);
             return (tf * (this.k + 1)) / denominator;
         });
+        const tokens = indices.map((idx) => {
+            const token = tokenMap.get(idx);
+            if (!token) {
+                throw new Error(`Token not found for index ${idx}`);
+            }
+            return token;
+        });
 
-        return { indices, values };
+        return { indices, values, tokens };
     }
 
     public async generate(texts: string[]): Promise<SparseVector[]> {

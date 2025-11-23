@@ -2666,10 +2666,10 @@ mod test {
             let mut update_metadata1 = HashMap::new();
             update_metadata1.insert(
                 String::from("sparse_vec"),
-                UpdateMetadataValue::SparseVector(chroma_types::SparseVector::new(
-                    vec![0, 5, 10],
-                    vec![0.1, 0.5, 0.9],
-                )),
+                UpdateMetadataValue::SparseVector(
+                    chroma_types::SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9])
+                        .expect("valid sparse vector"),
+                ),
             );
             update_metadata1.insert(
                 String::from("category"),
