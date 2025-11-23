@@ -80,6 +80,34 @@ def test_task_with_invalid_function(basic_http_client: System) -> None:
         )
 
 
+def test_attach_function_returns_function_name(basic_http_client: System) -> None:
+    """Test that attach_function and get_attached_function return function_name field instead of UUID"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    collection = client.create_collection(name="test_function_name")
+    collection.add(ids=["id1"], documents=["doc1"])
+
+    # Attach a function and verify function_name field in response
+    attached_fn = collection.attach_function(
+        name="my_counter",
+        function_id="record_counter",
+        output_collection="output_collection",
+        params=None,
+    )
+
+    # Verify the attached function has function_name (not function_id UUID)
+    assert attached_fn.function_name == "record_counter"
+    assert attached_fn.name == "my_counter"
+
+    # Get the attached function and verify function_name field is also present
+    retrieved_fn = collection.get_attached_function("my_counter")
+    assert retrieved_fn == attached_fn
+    
+    # Clean up
+    attached_fn.detach(delete_output_collection=True)
+
+
 def test_function_multiple_collections(basic_http_client: System) -> None:
     """Test attaching functions on multiple collections"""
     client = ClientCreator.from_system(basic_http_client)

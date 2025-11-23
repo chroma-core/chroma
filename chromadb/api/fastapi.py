@@ -782,10 +782,38 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             client=self,
             id=UUID(resp_json["attached_function"]["id"]),
             name=resp_json["attached_function"]["name"],
-            function_id=resp_json["attached_function"]["function_id"],
+            function_name=resp_json["attached_function"]["function_name"],
             input_collection_id=input_collection_id,
             output_collection=output_collection,
             params=params,
+            tenant=tenant,
+            database=database,
+        )
+
+    @trace_method("FastAPI.get_attached_function", OpenTelemetryGranularity.ALL)
+    @override
+    def get_attached_function(
+        self,
+        name: str,
+        input_collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "AttachedFunction":
+        """Get an attached function by name for a specific collection."""
+        resp_json = self._make_request(
+            "get",
+            f"/tenants/{tenant}/databases/{database}/collections/{input_collection_id}/functions/{name}",
+        )
+
+        af = resp_json["attached_function"]
+        return AttachedFunction(
+            client=self,
+            id=UUID(af["id"]),
+            name=af["name"],
+            function_name=af["function_name"],
+            input_collection_id=input_collection_id,
+            output_collection=af["output_collection"],
+            params=af.get("params"),
             tenant=tenant,
             database=database,
         )

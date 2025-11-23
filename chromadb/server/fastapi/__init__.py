@@ -425,6 +425,20 @@ class FastAPI(Server):
             response_model=None,
         )
 
+        self.router.add_api_route(
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/functions/attach",
+            self.attach_function,
+            methods=["POST"],
+            response_model=None,
+        )
+
+        self.router.add_api_route(
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/functions/{function_name}",
+            self.get_attached_function,
+            methods=["GET"],
+            response_model=None,
+        )
+
     def shutdown(self) -> None:
         self._system.stop()
 
@@ -937,6 +951,103 @@ class FastAPI(Server):
             database_name,
             limiter=self._capacity_limiter,
         )
+
+    @trace_method("FastAPI.attach_function", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
+    async def attach_function(
+        self,
+        request: Request,
+        tenant: str,
+        database_name: str,
+        collection_id: str,
+    ) -> Dict[str, Any]:
+        try:
+
+            def process_attach_function(request: Request, raw_body: bytes) -> Dict[str, Any]:
+                body = orjson.loads(raw_body)
+                # NOTE: Auth check for attaching functions
+                self.sync_auth_request(
+                    request.headers,
+                    AuthzAction.UPDATE_COLLECTION,  # Using UPDATE_COLLECTION as the auth action
+                    tenant,
+                    database_name,
+                    collection_id,
+                )
+                self._set_request_context(request=request)
+
+                name = body.get("name")
+                function_id = body.get("function_id")
+                output_collection = body.get("output_collection")
+                params = body.get("params")
+
+                attached_fn = self._api.attach_function(
+                    function_id=function_id,
+                    name=name,
+                    input_collection_id=_uuid(collection_id),
+                    output_collection=output_collection,
+                    params=params,
+                    tenant=tenant,
+                    database=database_name,
+                )
+
+                return {
+                    "attached_function": {
+                        "id": str(attached_fn.id),
+                        "name": attached_fn.name,
+                        "function_name": attached_fn.function_name,
+                        "output_collection": attached_fn.output_collection,
+                        "params": attached_fn.params,
+                    }
+                }
+
+            raw_body = await request.body()
+            return await to_thread.run_sync(
+                process_attach_function,
+                request,
+                raw_body,
+                limiter=self._capacity_limiter,
+            )
+        except Exception:
+            raise
+
+    @trace_method("FastAPI.get_attached_function", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
+    async def get_attached_function(
+        self,
+        request: Request,
+        tenant: str,
+        database_name: str,
+        collection_id: str,
+        function_name: str,
+    ) -> Dict[str, Any]:
+        # NOTE: Auth check for getting attached functions
+        await self.auth_request(
+            request.headers,
+            AuthzAction.GET_COLLECTION,  # Using GET_COLLECTION as the auth action
+            tenant,
+            database_name,
+            collection_id,
+        )
+        add_attributes_to_current_span({"tenant": tenant})
+
+        attached_fn = await to_thread.run_sync(
+            self._api.get_attached_function,
+            function_name,
+            _uuid(collection_id),
+            tenant,
+            database_name,
+            limiter=self._capacity_limiter,
+        )
+
+        return {
+            "attached_function": {
+                "id": str(attached_fn.id),
+                "name": attached_fn.name,
+                "function_name": attached_fn.function_name,
+                "output_collection": attached_fn.output_collection,
+                "params": attached_fn.params,
+            }
+        }
 
     @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
     @rate_limit

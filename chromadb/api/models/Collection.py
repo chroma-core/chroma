@@ -533,3 +533,22 @@ class Collection(CollectionCommon["ServerAPI"]):
             tenant=self.tenant,
             database=self.database,
         )
+
+    def get_attached_function(self, name: str) -> "AttachedFunction":
+        """Get an attached function by name for this collection.
+
+        Args:
+            name: Name of the attached function
+
+        Returns:
+            AttachedFunction: The attached function object
+
+        Raises:
+            NotFoundError: If the attached function doesn't exist
+        """
+        return self._client.get_attached_function(
+            name=name,
+            input_collection_id=self.id,
+            tenant=self.tenant,
+            database=self.database,
+        )

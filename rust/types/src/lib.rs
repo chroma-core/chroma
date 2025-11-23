@@ -14,6 +14,7 @@ mod log;
 mod metadata;
 mod operation;
 pub mod operators;
+pub mod operators_generated;
 mod record;
 mod scalar_encoding;
 mod segment;
