@@ -178,13 +178,14 @@ impl Operator<IdfInput, IdfOutput> for Idf {
                     indices: self.query.indices.len(),
                 });
             }
-            let scaled_query = SparseVector::from_triples(self.query.iter().enumerate().map(
-                |(token_position, (index, value))| {
-                    let nt = nts.get(&index).cloned().unwrap_or_default() as f32;
-                    let scale = scale(n as f32, nt);
-                    (tokens[token_position].clone(), index, scale * value)
-                },
-            ));
+            let scaled_query =
+                SparseVector::from_triples(self.query.iter().zip(tokens.iter()).map(
+                    |((index, value), token)| {
+                        let nt = nts.get(&index).cloned().unwrap_or_default() as f32;
+                        let scale = scale(n as f32, nt);
+                        (token.clone(), index, scale * value)
+                    },
+                ));
             Ok(IdfOutput { scaled_query })
         } else {
             let scaled_query = SparseVector::from_pairs(self.query.iter().map(|(index, value)| {
@@ -629,5 +630,37 @@ mod tests {
                 indices: 2
             })
         ));
+    }
+
+    #[tokio::test]
+    async fn test_idf_with_tokens_preserves_them() {
+        let (_test_segment, input) = Box::pin(setup_idf_input(10, vec![])).await;
+
+        let query_vector = SparseVector {
+            indices: vec![0, 1, 2],
+            values: vec![1.0, 1.0, 1.0],
+            tokens: Some(vec![
+                "term_a".to_string(),
+                "term_b".to_string(),
+                "term_c".to_string(),
+            ]),
+        };
+
+        let idf_operator = Idf {
+            query: query_vector,
+            key: "sparse_embedding".to_string(),
+        };
+
+        let output = idf_operator
+            .run(&input)
+            .await
+            .expect("IDF operator should succeed");
+
+        let scaled = &output.scaled_query;
+        assert_eq!(scaled.indices.len(), 3);
+        assert_eq!(scaled.tokens.as_ref().unwrap().len(), 3);
+        assert_eq!(scaled.tokens.as_ref().unwrap()[0], "term_a");
+        assert_eq!(scaled.tokens.as_ref().unwrap()[1], "term_b");
+        assert_eq!(scaled.tokens.as_ref().unwrap()[2], "term_c");
     }
 }
