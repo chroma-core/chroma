@@ -100,6 +100,7 @@ impl Arbitrary for OperationRecord {
                             }
                         }
                         Operation::Delete => None,
+                        Operation::BackfillFn => None,
                     };
                     let encoding = embedding.as_ref().map(|_| ScalarEncoding::FLOAT32);
 

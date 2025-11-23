@@ -479,6 +479,7 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
 pub struct MaterializeLogsResult {
     logs: Chunk<LogRecord>,
     materialized: Chunk<MaterializedLogRecord>,
+    has_backfill: bool,
 }
 
 impl MaterializeLogsResult {
@@ -488,6 +489,10 @@ impl MaterializeLogsResult {
 
     pub fn len(&self) -> usize {
         self.materialized.len()
+    }
+
+    pub fn has_backfill(&self) -> bool {
+        self.has_backfill
     }
 
     pub fn iter(&self) -> MaterializeLogsResultIter {
@@ -628,11 +633,17 @@ pub async fn materialize_logs(
         .instrument(Span::current())
         .await?;
     }
+
+    let mut has_backfill = false;
     // Populate updates to these and fresh records that are being
     // inserted for the first time.
     async {
         for (log_record, log_index) in logs.iter() {
             match log_record.record.operation {
+                Operation::BackfillFn => {
+                    has_backfill = true;
+                    continue;
+                }
                 Operation::Add => {
                     // If this is an add of a record present in the segment then add
                     // only if it has been previously deleted in the log.
@@ -918,6 +929,7 @@ pub async fn materialize_logs(
     Ok(MaterializeLogsResult {
         logs,
         materialized: Chunk::new(res.into()),
+        has_backfill,
     })
 }
 

@@ -2330,6 +2330,8 @@ pub struct AttachFunctionResponse {
 pub enum AttachFunctionError {
     #[error(" Attached Function with name [{0}] already exists")]
     AlreadyExists(String),
+    #[error("Failed to get collection and segments")]
+    GetCollectionError(#[from] GetCollectionError),
     #[error("Input collection [{0}] does not exist")]
     InputCollectionNotFound(String),
     #[error("Output collection [{0}] already exists")]
@@ -2344,6 +2346,7 @@ impl ChromaError for AttachFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
             AttachFunctionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            AttachFunctionError::GetCollectionError(err) => err.code(),
             AttachFunctionError::InputCollectionNotFound(_) => ErrorCodes::NotFound,
             AttachFunctionError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
             AttachFunctionError::Validation(err) => err.code(),
