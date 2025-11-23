@@ -48,6 +48,7 @@ We welcome pull requests to add new Integrations to the community.
 | [Langchain](./frameworks/langchain)         | ✓      | ✓            |
 | [LlamaIndex](./frameworks/llamaindex)       | ✓      | ✓            |
 | [Braintrust](./frameworks/braintrust)       | ✓      | ✓            |
+| [Contextual AI](./frameworks/contextual-ai) | ✓      | -            |
 | [OpenLLMetry](./frameworks/openllmetry)     | ✓      | Coming Soon! |
 | [Streamlit](./frameworks/streamlit)         | ✓      | -            |
 | [Haystack](./frameworks/haystack)           | ✓      | -            |
