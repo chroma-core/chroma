@@ -153,7 +153,7 @@ impl StatisticsValue {
             Self::Int(_) => None,
             Self::Str(_) => None,
             Self::Float(_) => None,
-            Self::SparseVector(_, token) => token.clone(),
+            Self::SparseVector(_, label) => label.clone(),
         }
     }
 
@@ -224,9 +224,9 @@ impl Hash for StatisticsValue {
             StatisticsValue::Int(value) => value.hash(state),
             StatisticsValue::Float(value) => value.to_bits().hash(state),
             StatisticsValue::Str(value) => value.hash(state),
-            StatisticsValue::SparseVector(value, token) => {
+            StatisticsValue::SparseVector(value, label) => {
                 value.hash(state);
-                token.hash(state);
+                label.hash(state);
             }
         }
     }
