@@ -309,7 +309,13 @@ impl StatisticsFunctionExecutor {
                 },
                 "str" => StatisticsValue::Str(value_str.to_string()),
                 "sparse" => match value_str.parse::<u32>() {
-                    Ok(index) => StatisticsValue::SparseVector(index),
+                    Ok(index) => {
+                        let label = match metadata.get("value_label") {
+                            Some(MetadataValue::Str(v)) => Some(v.clone()),
+                            _ => None,
+                        };
+                        StatisticsValue::SparseVector(index, label)
+                    }
                     _ => continue,
                 },
                 _ => continue,
@@ -423,7 +429,7 @@ impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
                 }
                 let stable_value_index = stats_value.stable_value_index();
                 let stable_value_string = stats_value.stable_value_string();
-                let record_id = format!("{key}::{stable_string}");
+                let record_id = format!("{key}::{stable_value_string}");
                 let document = format!("statistics about {key} for {stable_value_string}");
 
                 if key != SUMMARY_KEY && count.is_empty() {
