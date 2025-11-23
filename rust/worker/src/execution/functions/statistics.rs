@@ -3,9 +3,10 @@
 //! The core idea is the following: For each key-value pair associated with a record, aggregate so
 //! (key, value) -> count.  This gives a count of how frequently each key appears.
 //!
-//! For now it's not incremental.
+//! The statistics executor is incremental - it loads existing counts from the output_reader
+//! and updates them with new records.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use async_trait::async_trait;
@@ -27,8 +28,14 @@ pub trait StatisticsFunctionFactory: std::fmt::Debug + Send + Sync {
 
 /// Accumulate statistics.  Must be an associative and commutative over a sequence of `observe` calls.
 pub trait StatisticsFunction: std::fmt::Debug + Send {
-    fn observe(&mut self, hydrated_record: &HydratedMaterializedLogRecord<'_, '_>);
+    // TODO(tanujnay112): Look into changing the abstraction layer to not have to switch
+    // on the type of the record.
+    fn observe_insert(&mut self, hydrated_record: &HydratedMaterializedLogRecord<'_, '_>);
+    fn observe_delete(&mut self, hydrated_record: &HydratedMaterializedLogRecord<'_, '_>);
     fn output(&self) -> UpdateMetadataValue;
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+    fn is_empty(&self) -> bool;
+    fn is_changed(&self) -> bool;
 }
 
 #[derive(Debug, Default)]
@@ -43,15 +50,44 @@ impl StatisticsFunctionFactory for CounterFunctionFactory {
 #[derive(Debug, Default)]
 pub struct CounterFunction {
     acc: i64,
+    is_changed: bool,
+}
+
+impl CounterFunction {
+    /// Create a CounterFunction with an initial value.
+    pub fn with_initial_value(value: i64) -> Self {
+        Self {
+            acc: value,
+            is_changed: false,
+        }
+    }
 }
 
 impl StatisticsFunction for CounterFunction {
-    fn observe(&mut self, _: &HydratedMaterializedLogRecord<'_, '_>) {
+    fn observe_insert(&mut self, _: &HydratedMaterializedLogRecord<'_, '_>) {
         self.acc = self.acc.saturating_add(1);
+        self.is_changed = true;
+    }
+
+    fn observe_delete(&mut self, _: &HydratedMaterializedLogRecord<'_, '_>) {
+        self.acc = self.acc.saturating_sub(1);
+        self.is_changed = true;
     }
 
     fn output(&self) -> UpdateMetadataValue {
         UpdateMetadataValue::Int(self.acc)
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn is_changed(&self) -> bool {
+        self.is_changed
+    }
+
+    fn is_empty(&self) -> bool {
+        self.acc == 0
     }
 }
 
@@ -167,9 +203,102 @@ impl Hash for StatisticsValue {
     }
 }
 
+/// Special key for storing summary statistics (e.g., total record count).
+const SUMMARY_KEY: &str = "summary";
+
+/// StatisticsValue for tracking total record count in the summary.
+fn total_count_value() -> StatisticsValue {
+    StatisticsValue::Str("total_count".to_string())
+}
+
 /// Task executor that aggregates metadata value frequencies for the statistics task.
 #[derive(Debug)]
 pub struct StatisticsFunctionExecutor(pub Box<dyn StatisticsFunctionFactory>);
+
+impl StatisticsFunctionExecutor {
+    /// Load existing statistics from the output reader.
+    /// Returns a HashMap with the same structure as the counts HashMap.
+    async fn load_existing_statistics(
+        &self,
+        output_reader: Option<&RecordSegmentReader<'_>>,
+    ) -> Result<
+        HashMap<String, HashMap<StatisticsValue, Box<dyn StatisticsFunction>>>,
+        Box<dyn ChromaError>,
+    > {
+        let mut counts: HashMap<String, HashMap<StatisticsValue, Box<dyn StatisticsFunction>>> =
+            HashMap::default();
+
+        let Some(reader) = output_reader else {
+            return Ok(counts);
+        };
+
+        let max_offset_id = reader.get_max_offset_id();
+        let mut stream = reader.get_data_stream(0..=max_offset_id).await;
+
+        while let Some(record_result) = stream.next().await {
+            let (_, record) = record_result?;
+
+            // Parse the record to extract key, value, type, and count
+            let Some(metadata) = &record.metadata else {
+                continue;
+            };
+
+            let key = match metadata.get("key") {
+                Some(MetadataValue::Str(k)) => k.clone(),
+                _ => continue,
+            };
+
+            let value_type = match metadata.get("type") {
+                Some(MetadataValue::Str(t)) => t.as_str(),
+                _ => continue,
+            };
+
+            let value_str = match metadata.get("value") {
+                Some(MetadataValue::Str(v)) => v.as_str(),
+                _ => continue,
+            };
+
+            let count = match metadata.get("count") {
+                Some(MetadataValue::Int(c)) => *c,
+                _ => continue,
+            };
+
+            // Reconstruct the StatisticsValue from type and value
+            let stats_value = match value_type {
+                "bool" => match value_str {
+                    "true" => StatisticsValue::Bool(true),
+                    "false" => StatisticsValue::Bool(false),
+                    _ => continue,
+                },
+                "int" => match value_str.parse::<i64>() {
+                    Ok(i) => StatisticsValue::Int(i),
+                    _ => continue,
+                },
+                "float" => match value_str.parse::<f64>() {
+                    Ok(f) => StatisticsValue::Float(f),
+                    _ => continue,
+                },
+                "str" => StatisticsValue::Str(value_str.to_string()),
+                "sparse" => match value_str.parse::<u32>() {
+                    Ok(index) => StatisticsValue::SparseVector(index),
+                    _ => continue,
+                },
+                _ => continue,
+            };
+
+            // Create a statistics function initialized with the existing count
+            let stats_function =
+                Box::new(CounterFunction::with_initial_value(count)) as Box<dyn StatisticsFunction>;
+
+            counts
+                .entry(key)
+                .or_default()
+                .insert(stats_value, stats_function);
+        }
+
+        Ok(counts)
+    }
+}
 
 #[async_trait]
 impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
@@ -178,34 +307,110 @@ impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
         input_records: Chunk<HydratedMaterializedLogRecord<'_, '_>>,
         output_reader: Option<&RecordSegmentReader<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
-        let mut counts: HashMap<String, HashMap<StatisticsValue, Box<dyn StatisticsFunction>>> =
-            HashMap::default();
+        // Load existing statistics from output_reader if available
+        let mut counts = self.load_existing_statistics(output_reader).await?;
+
+        // Process new input records and update counts
         for (hydrated_record, _index) in input_records.iter() {
-            // This is only applicable for non-incremental statistics.
-            // TODO(tanujnay112): Change this when we make incremental statistics work.
             if hydrated_record.get_operation() == MaterializedLogOperation::DeleteExisting {
+                for (key, old_value) in hydrated_record.merged_metadata() {
+                    for stats_value in StatisticsValue::from_metadata_value(&old_value) {
+                        let inner_map = counts.entry(key.to_string()).or_default();
+                        inner_map
+                            .entry(stats_value)
+                            .or_insert_with(|| self.0.create())
+                            .observe_delete(hydrated_record);
+                    }
+                }
+
+                counts
+                    .entry(SUMMARY_KEY.to_string())
+                    .or_default()
+                    .entry(total_count_value())
+                    .or_insert_with(|| self.0.create())
+                    .observe_delete(hydrated_record);
                 continue;
             }
 
-            // Use merged_metadata to get the metadata from the hydrated record
-            let metadata = hydrated_record.merged_metadata();
-            for (key, value) in metadata.iter() {
-                let inner_map = counts.entry(key.clone()).or_default();
-                for stats_value in StatisticsValue::from_metadata_value(value) {
+            if hydrated_record.get_operation() == MaterializedLogOperation::AddNew {
+                counts
+                    .entry(SUMMARY_KEY.to_string())
+                    .or_default()
+                    .entry(total_count_value())
+                    .or_insert_with(|| self.0.create())
+                    .observe_insert(hydrated_record);
+            }
+
+            let metadata_delta = hydrated_record.compute_metadata_delta();
+
+            // Decrement counts for deleted metadata
+            for (key, old_value) in metadata_delta.metadata_to_delete {
+                for stats_value in StatisticsValue::from_metadata_value(old_value) {
+                    let inner_map = counts.entry(key.to_string()).or_default();
                     inner_map
                         .entry(stats_value)
                         .or_insert_with(|| self.0.create())
-                        .observe(hydrated_record);
+                        .observe_delete(hydrated_record);
+                }
+            }
+
+            // Decrement counts for old values in updates
+            for (key, (old_value, _new_value)) in &metadata_delta.metadata_to_update {
+                for stats_value in StatisticsValue::from_metadata_value(old_value) {
+                    let inner_map = counts.entry(key.to_string()).or_default();
+                    inner_map
+                        .entry(stats_value)
+                        .or_insert_with(|| self.0.create())
+                        .observe_delete(hydrated_record);
+                }
+            }
+
+            // Increment counts for new values in both updates and inserts
+            for (key, value) in metadata_delta
+                .metadata_to_update
+                .iter()
+                .map(|(k, (_old, new))| (*k, *new))
+                .chain(
+                    metadata_delta
+                        .metadata_to_insert
+                        .iter()
+                        .map(|(k, v)| (*k, *v)),
+                )
+            {
+                for stats_value in StatisticsValue::from_metadata_value(value) {
+                    let inner_map = counts.entry(key.to_string()).or_default();
+                    inner_map
+                        .entry(stats_value)
+                        .or_insert_with(|| self.0.create())
+                        .observe_insert(hydrated_record);
                 }
             }
         }
-        let mut keys = HashSet::with_capacity(counts.len());
         let mut records = Vec::with_capacity(counts.len());
         for (key, inner_map) in counts.into_iter() {
             for (stats_value, count) in inner_map.into_iter() {
+                if !count.is_changed() {
+                    continue;
+                }
                 let stable_value = stats_value.stable_value();
                 let stable_string = stats_value.stable_string();
                 let record_id = format!("{key}::{stable_string}");
+
+                if key != SUMMARY_KEY && count.is_empty() {
+                    records.push(LogRecord {
+                        log_offset: 0,
+                        record: OperationRecord {
+                            id: record_id,
+                            embedding: None,
+                            encoding: None,
+                            metadata: None,
+                            document: None,
+                            operation: Operation::Delete,
+                        },
+                    });
+                    continue;
+                }
+
                 let document = format!("statistics about {key} for {stable_string}");
 
                 let mut metadata = HashMap::with_capacity(4);
@@ -217,7 +422,6 @@ impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
                 );
                 metadata.insert("value".to_string(), UpdateMetadataValue::Str(stable_value));
 
-                keys.insert(record_id.clone());
                 records.push(LogRecord {
                     log_offset: 0,
                     record: OperationRecord {
@@ -232,28 +436,6 @@ impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
                 });
             }
         }
-        // Delete records we didn't recreate.
-        if let Some(output_reader) = output_reader {
-            let max_offset_id = output_reader.get_max_offset_id();
-            let mut stream = output_reader.get_data_stream(0..=max_offset_id).await;
-
-            while let Some(record) = stream.next().await {
-                let (_, record) = record?;
-                if !keys.contains(record.id) {
-                    records.push(LogRecord {
-                        log_offset: 0,
-                        record: OperationRecord {
-                            id: record.id.to_owned(),
-                            embedding: None,
-                            encoding: None,
-                            metadata: None,
-                            document: None,
-                            operation: Operation::Delete,
-                        },
-                    })
-                }
-            }
-        }
         Ok(Chunk::new(records.into()))
     }
 }
@@ -263,8 +445,9 @@ mod tests {
     use std::collections::HashMap;
 
     use chroma_segment::{
-        blockfile_record::RecordSegmentReader, test::TestDistributedSegment,
-        types::MaterializeLogsResult,
+        blockfile_record::RecordSegmentReader,
+        test::TestDistributedSegment,
+        types::{materialize_logs, MaterializeLogsResult},
     };
     use chroma_types::{
         Chunk, LogRecord, Operation, OperationRecord, SparseVector, UpdateMetadata,
@@ -485,7 +668,8 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![record_one, record_two].into());
-        let materialized = MaterializeLogsResult::from_logs_for_test(logs)
+        let materialized = materialize_logs(&None, logs, None)
+            .await
             .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
@@ -562,6 +746,15 @@ mod tests {
                     format!("{}", 3),
                 ),
             ),
+            (
+                "summary::s:total_count".to_string(),
+                (
+                    2,
+                    "summary".to_string(),
+                    "str".to_string(),
+                    "total_count".to_string(),
+                ),
+            ),
         ]);
 
         assert_eq!(actual, expected);
@@ -587,7 +780,8 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![record_one, record_two].into());
-        let materialized = MaterializeLogsResult::from_logs_for_test(logs)
+        let materialized = materialize_logs(&None, logs, None)
+            .await
             .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
@@ -598,7 +792,7 @@ mod tests {
             .expect("execution succeeds");
 
         let actual = collect_statistics_map(&output);
-        assert_eq!(actual.len(), 1);
+        assert_eq!(actual.len(), 2);
 
         let float_string = format!("{:.16e}", f64::NAN);
         let expected_id = format!("float_key::f:{float_string}");
@@ -613,6 +807,19 @@ mod tests {
                 .get(&expected_id)
                 .expect("NaN metadata should be grouped under a single entry"),
             &expected_entry
+        );
+
+        let summary_entry = (
+            2,
+            "summary".to_string(),
+            "str".to_string(),
+            "total_count".to_string(),
+        );
+        assert_eq!(
+            actual
+                .get("summary::s:total_count")
+                .expect("Should have summary total_count"),
+            &summary_entry
         );
     }
 
@@ -631,7 +838,8 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![upsert_record, delete_record].into());
-        let materialized = MaterializeLogsResult::from_logs_for_test(logs)
+        let materialized = materialize_logs(&None, logs, None)
+            .await
             .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
@@ -642,7 +850,7 @@ mod tests {
             .expect("execution succeeds");
 
         let actual = collect_statistics_map(&output);
-        assert_eq!(actual.len(), 1);
+        assert_eq!(actual.len(), 2);
 
         let true_id = format!("bool_key::b:{}", true);
         assert!(
@@ -654,6 +862,11 @@ mod tests {
         assert!(
             !actual.contains_key(&false_id),
             "delete metadata should be ignored by the statistics executor"
+        );
+
+        assert!(
+            actual.contains_key("summary::s:total_count"),
+            "should have summary total_count for the upsert"
         );
     }
 
@@ -673,7 +886,8 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![record].into());
-        let materialized = MaterializeLogsResult::from_logs_for_test(logs)
+        let materialized = materialize_logs(&None, logs, None)
+            .await
             .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
@@ -683,7 +897,12 @@ mod tests {
             .await
             .expect("execution succeeds");
 
-        assert!(output.is_empty());
+        let actual = collect_statistics_map(&output);
+        assert_eq!(actual.len(), 1);
+        assert!(
+            actual.contains_key("summary::s:total_count"),
+            "should have summary total_count even for empty sparse vector"
+        );
     }
 
     #[tokio::test]
@@ -696,7 +915,8 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![record].into());
-        let materialized = MaterializeLogsResult::from_logs_for_test(logs)
+        let materialized = materialize_logs(&None, logs, None)
+            .await
             .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
@@ -706,46 +926,70 @@ mod tests {
             .await
             .expect("execution succeeds");
 
-        assert_eq!(output.total_len(), 0);
-        assert_eq!(output.len(), 0);
-        assert!(output.is_empty());
+        let actual = collect_statistics_map(&output);
+        assert_eq!(actual.len(), 1);
+        assert!(
+            actual.contains_key("summary::s:total_count"),
+            "should have summary total_count even when metadata value is unconvertible"
+        );
     }
 
     #[tokio::test]
     async fn statistics_executor_deletes_stale_records_from_segment() {
         let executor = StatisticsFunctionExecutor(Box::new(CounterFunctionFactory));
 
-        let mut test_segment = TestDistributedSegment::new().await;
+        // Create input collection segment with records
+        let mut input_segment = TestDistributedSegment::new().await;
+        let input_record_with_obsolete_key = build_record(
+            "input-0",
+            HashMap::from([("obsolete_key".to_string(), UpdateMetadataValue::Bool(true))]),
+        );
+        let input_chunk = Chunk::new(vec![input_record_with_obsolete_key].into());
+        Box::pin(input_segment.compact_log(input_chunk, 1)).await;
 
-        let stale_record = build_complete_statistics_record("obsolete_key", "true", "bool", "b", 1);
-
-        let fresh_record = build_complete_statistics_record("fresh_key", "1", "int", "i", 3);
-
-        let existing_chunk = Chunk::new(vec![stale_record, fresh_record].into());
-
-        Box::pin(test_segment.compact_log(existing_chunk, 1)).await;
-
-        let record_reader = Box::pin(RecordSegmentReader::from_segment(
-            &test_segment.record_segment,
-            &test_segment.blockfile_provider,
+        let input_record_reader = Box::pin(RecordSegmentReader::from_segment(
+            &input_segment.record_segment,
+            &input_segment.blockfile_provider,
         ))
         .await
-        .expect("record segment reader creation succeeds");
+        .expect("input record segment reader creation succeeds");
 
+        // Create output collection segment with existing statistics
+        let mut output_segment = TestDistributedSegment::new().await;
+        let stale_record = build_complete_statistics_record("obsolete_key", "true", "bool", "b", 1);
+        let fresh_record = build_complete_statistics_record("fresh_key", "1", "int", "i", 3);
+        let existing_output_chunk = Chunk::new(vec![stale_record, fresh_record].into());
+        Box::pin(output_segment.compact_log(existing_output_chunk, 1)).await;
+
+        let output_record_reader = Box::pin(RecordSegmentReader::from_segment(
+            &output_segment.record_segment,
+            &output_segment.blockfile_provider,
+        ))
+        .await
+        .expect("output record segment reader creation succeeds");
+
+        // Create logs: update fresh_key and delete obsolete_key
         let logs = Chunk::new(
-            vec![build_record(
-                "input-1",
-                HashMap::from([("fresh_key".to_string(), UpdateMetadataValue::Int(1))]),
-            )]
+            vec![
+                build_record(
+                    "input-1",
+                    HashMap::from([("fresh_key".to_string(), UpdateMetadataValue::Int(1))]),
+                ),
+                build_record_with_operation("input-0", Operation::Delete, HashMap::new()),
+            ]
             .into(),
         );
-        let materialized = MaterializeLogsResult::from_logs_for_test(logs)
+        let materialized = materialize_logs(&Some(input_record_reader.clone()), logs, None)
+            .await
             .expect("materialization should succeed");
-        let hydrated = hydrate_records(&materialized, Some(&record_reader)).await;
+
+        // Hydrate from INPUT collection to get proper metadata for the delete
+        let hydrated = hydrate_records(&materialized, Some(&input_record_reader)).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
+        // Execute with OUTPUT collection reader to load existing statistics
         let output = executor
-            .execute(input, Some(&record_reader))
+            .execute(input, Some(&output_record_reader))
             .await
             .expect("execution succeeds");
 
@@ -755,7 +999,7 @@ mod tests {
 
         let fresh_stats = upserts
             .get("fresh_key::i:1")
-            .expect("fresh statistics record should be recreated");
+            .expect("fresh statistics record should be updated");
         let metadata = fresh_stats
             .metadata
             .as_ref()
@@ -763,14 +1007,14 @@ mod tests {
 
         let (count, key, value_type, value) = extract_metadata_tuple(metadata);
 
-        assert_eq!(count, 1);
+        assert_eq!(count, 4); // 3 (existing) + 1 (new)
         assert_eq!(key, "fresh_key");
         assert_eq!(value_type, "int");
         assert_eq!(value, "1");
     }
 
     #[tokio::test]
-    async fn statistics_executor_zeroes_output_when_input_empty() {
+    async fn statistics_executor_does_not_emit_when_input_empty() {
         let executor = StatisticsFunctionExecutor(Box::new(CounterFunctionFactory));
 
         let mut test_segment = TestDistributedSegment::new().await;
@@ -788,7 +1032,8 @@ mod tests {
         .expect("record segment reader creation succeeds");
 
         let empty_logs: Chunk<LogRecord> = Chunk::new(Vec::<LogRecord>::new().into());
-        let materialized = MaterializeLogsResult::from_logs_for_test(empty_logs)
+        let materialized = materialize_logs(&None, empty_logs, None)
+            .await
             .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, Some(&record_reader)).await;
         let empty_input = Chunk::new(std::sync::Arc::from(hydrated));
@@ -800,10 +1045,99 @@ mod tests {
 
         let deletes = partition_output_expect_no_upserts(&output);
 
-        assert_eq!(deletes, vec!["empty_key::s:initial".to_string()]);
+        assert!(deletes.is_empty());
     }
 
-    // TODO(tanujnay112): Reenable this after function compaction is brought back
+    #[tokio::test]
+    async fn statistics_executor_decrements_count_on_delete() {
+        let executor = StatisticsFunctionExecutor(Box::new(CounterFunctionFactory));
+
+        // Create input collection with two records having the same metadata value
+        let mut input_segment = TestDistributedSegment::new().await;
+        let input_record1 = build_record(
+            "input-1",
+            HashMap::from([(
+                "category".to_string(),
+                UpdateMetadataValue::Str("tech".to_string()),
+            )]),
+        );
+        let input_record2 = build_record(
+            "input-2",
+            HashMap::from([(
+                "category".to_string(),
+                UpdateMetadataValue::Str("tech".to_string()),
+            )]),
+        );
+        let input_chunk = Chunk::new(vec![input_record1, input_record2].into());
+        Box::pin(input_segment.compact_log(input_chunk, 1)).await;
+
+        let input_record_reader = Box::pin(RecordSegmentReader::from_segment(
+            &input_segment.record_segment,
+            &input_segment.blockfile_provider,
+        ))
+        .await
+        .expect("input record segment reader creation succeeds");
+
+        // Create output collection with existing statistic: category=tech with count=2
+        let mut output_segment = TestDistributedSegment::new().await;
+        let existing_stat = build_complete_statistics_record("category", "tech", "str", "s", 2);
+        let existing_chunk = Chunk::new(vec![existing_stat].into());
+        Box::pin(output_segment.compact_log(existing_chunk, 1)).await;
+
+        let output_record_reader = Box::pin(RecordSegmentReader::from_segment(
+            &output_segment.record_segment,
+            &output_segment.blockfile_provider,
+        ))
+        .await
+        .expect("output record segment reader creation succeeds");
+
+        // Delete one of the records with category=tech
+        let logs = Chunk::new(
+            vec![build_record_with_operation(
+                "input-1",
+                Operation::Delete,
+                HashMap::new(),
+            )]
+            .into(),
+        );
+        let materialized = materialize_logs(&Some(input_record_reader.clone()), logs, None)
+            .await
+            .expect("materialization should succeed");
+
+        // Hydrate from INPUT collection to get proper metadata for the delete
+        let hydrated = hydrate_records(&materialized, Some(&input_record_reader)).await;
+        let input = Chunk::new(std::sync::Arc::from(hydrated));
+
+        // Execute with OUTPUT collection reader to load existing statistics
+        let output = executor
+            .execute(input, Some(&output_record_reader))
+            .await
+            .expect("execution succeeds");
+
+        let (upserts, deletes) = partition_output(&output);
+
+        // Should have no deletes (statistic still exists)
+        assert!(deletes.is_empty());
+
+        // Should have an update for category=tech with decremented count
+        let stat_key = "category::s:tech";
+        let updated_stat = upserts
+            .get(stat_key)
+            .expect("category=tech statistic should be updated");
+
+        let metadata = updated_stat
+            .metadata
+            .as_ref()
+            .expect("statistics executor always sets metadata");
+
+        let (count, key, value_type, value) = extract_metadata_tuple(metadata);
+
+        assert_eq!(count, 1); // 2 (existing) - 1 (deleted)
+        assert_eq!(key, "category");
+        assert_eq!(value_type, "str");
+        assert_eq!(value, "tech");
+    }
+
     #[tokio::test]
     async fn test_k8s_integration_statistics_function() {
         use crate::config::RootConfig;
@@ -1068,15 +1402,15 @@ mod tests {
         // Verify we found exactly 4 unique statistics (2 colors + 2 sizes)
         assert_eq!(
             stats_by_key_value.len(),
-            4,
-            "Should have exactly 4 unique statistics"
+            5,
+            "Should have exactly 5 unique statistics"
         );
 
-        // Verify total count is 30 (15 records × 2 metadata keys)
+        // Verify total count is 45 (15 records × 3 metadata keys)
         let total_count: i64 = stats_by_key_value.values().sum();
         assert_eq!(
-            total_count, 30,
-            "Total count should be 30 (15 records × 2 metadata keys)"
+            total_count, 45,
+            "Total count should be 45 (15 records × 3 metadata keys)"
         );
 
         tracing::info!(
