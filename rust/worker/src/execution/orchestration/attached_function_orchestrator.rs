@@ -203,8 +203,7 @@ pub enum AttachedFunctionOrchestratorResponse {
         job_id: JobId,
         materialized_output: Vec<MaterializeLogOutput>,
         output_collection_info: CollectionCompactInfo,
-        attached_function_id: AttachedFunctionUuid,
-        completion_offset: u64,
+        function_context: FunctionContext,
     },
 }
 
@@ -302,9 +301,9 @@ impl AttachedFunctionOrchestrator {
             }
         };
 
-        // Get attached function ID - should always exist in success case
-        let attached_function = match self.get_function_context() {
-            Some(func) => func,
+        // Get function context - should always exist in success case
+        let mut function_context = match self.get_function_context() {
+            Some(func) => func.clone(),
             None => {
                 self.terminate_with_result(
                     Err(AttachedFunctionOrchestratorError::FunctionContextNotSet),
@@ -314,10 +313,9 @@ impl AttachedFunctionOrchestrator {
                 return;
             }
         };
-        let attached_function_id = attached_function.attached_function_id;
 
-        // Get the completion offset from the input collection's pulled log offset
-        let completion_offset = collection_info.pulled_log_offset as u64;
+        // Update the completion offset from the input collection's pulled log offset
+        function_context.updated_completion_offset = collection_info.pulled_log_offset as u64;
 
         let materialized_output = materialized_output
             .into_iter()
@@ -335,8 +333,7 @@ impl AttachedFunctionOrchestrator {
                 job_id,
                 materialized_output,
                 output_collection_info,
-                attached_function_id,
-                completion_offset,
+                function_context,
             }),
             ctx,
         )

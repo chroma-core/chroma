@@ -654,8 +654,7 @@ impl CompactionContext {
                 job_id: _,
                 output_collection_info,
                 materialized_output,
-                attached_function_id,
-                completion_offset,
+                function_context,
             } => {
                 // Update self to use the output collection for apply_logs
                 self.collection_info = OnceCell::from(output_collection_info.clone());
@@ -664,12 +663,6 @@ impl CompactionContext {
                 let apply_logs_response = self
                     .run_apply_logs(materialized_output, system.clone())
                     .await?;
-
-                let function_context = FunctionContext {
-                    attached_function_id,
-                    function_id: attached_function_id.0,
-                    updated_completion_offset: completion_offset,
-                };
 
                 // Get updated collection info after running apply logs.
                 let output_collection_info = self.get_collection_info()?;
