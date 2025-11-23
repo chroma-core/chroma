@@ -12,7 +12,8 @@ use chroma_segment::{
 };
 use chroma_sysdb::SysDb;
 use chroma_system::{
-    ComponentHandle, Dispatcher, Orchestrator, OrchestratorContext, PanicError, System, TaskError,
+    wrap, ComponentHandle, Dispatcher, Orchestrator, OrchestratorContext, PanicError, System,
+    TaskError,
 };
 use chroma_types::{Collection, CollectionUuid, JobId, Schema, SegmentUuid};
 use opentelemetry::metrics::Counter;
@@ -29,7 +30,10 @@ use super::log_fetch_orchestrator::{
 use super::register_orchestrator::{CollectionRegisterInfo, RegisterOrchestrator};
 
 use crate::execution::{
-    operators::materialize_logs::MaterializeLogOutput,
+    operators::{
+        get_attached_function::{GetAttachedFunctionInput, GetAttachedFunctionOperator},
+        materialize_logs::MaterializeLogOutput,
+    },
     orchestration::{
         apply_logs_orchestrator::ApplyLogsOrchestratorResponse,
         attached_function_orchestrator::FunctionContext,
@@ -100,6 +104,15 @@ pub struct CollectionCompactInfo {
     pub pulled_log_offset: i64,
     pub hnsw_index_uuid: Option<IndexUuid>,
     pub schema: Option<Schema>,
+}
+
+#[derive(Debug)]
+pub enum BackfillResult {
+    BackfillCompleted {
+        function_context: FunctionContext,
+        collection_register_info: CollectionRegisterInfo,
+    },
+    NoBackfillRequired,
 }
 
 #[derive(Debug)]
@@ -342,10 +355,11 @@ impl CompactionContext {
         &mut self,
         collection_id: CollectionUuid,
         system: System,
+        is_getting_compacted_logs: bool,
     ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
         let log_fetch_orchestrator = LogFetchOrchestrator::new(
             collection_id,
-            self.is_rebuild,
+            self.is_rebuild || is_getting_compacted_logs,
             self.fetch_log_batch_size,
             self.max_compaction_size,
             self.max_partition_size,
@@ -387,6 +401,9 @@ impl CompactionContext {
             LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(repair) => Ok(
                 RequireCompactionOffsetRepair::new(repair.job_id, repair.witnessed_offset_in_sysdb)
                     .into(),
+            ),
+            LogFetchOrchestratorResponse::RequireFunctionBackfill(backfill) => Ok(
+                LogFetchOrchestratorResponse::RequireFunctionBackfill(backfill),
             ),
         }
     }
@@ -444,6 +461,7 @@ impl CompactionContext {
         &mut self,
         data_fetch_records: Vec<MaterializeLogOutput>,
         system: System,
+        is_backfill: bool,
     ) -> Result<AttachedFunctionOrchestratorResponse, AttachedFunctionOrchestratorError> {
         let collection_info = self.get_collection_info()?.clone();
         let attached_function_orchestrator = AttachedFunctionOrchestrator::new(
@@ -451,6 +469,7 @@ impl CompactionContext {
             self.clone_for_new_collection(),
             self.dispatcher.clone(),
             data_fetch_records,
+            is_backfill,
         );
 
         let attached_function_response =
@@ -503,13 +522,116 @@ impl CompactionContext {
         })
     }
 
+    async fn needs_backfill(&mut self) -> Result<bool, CompactionError> {
+        let collection_info = self.get_collection_info()?;
+        let collection_id = collection_info.collection_id;
+        let log_position = collection_info.collection.log_position;
+
+        // Create the operator and wrap it as a task
+        let operator = Box::new(GetAttachedFunctionOperator::new(
+            self.sysdb.clone(),
+            collection_id,
+        ));
+        let input = GetAttachedFunctionInput { collection_id };
+
+        // Create a receiver for the task
+        let (receiver, rx) = chroma_system::OneshotMessageReceiver::new();
+
+        // Wrap the operator as a task
+        let task = wrap(
+            operator,
+            input,
+            Box::new(receiver),
+            self.orchestrator_context.task_cancellation_token.clone(),
+        );
+
+        // Send the task to the dispatcher
+        self.dispatcher
+            .send(task, Some(tracing::Span::current()))
+            .await
+            .map_err(|_| {
+                CompactionError::InvariantViolation(
+                    "Failed to send GetAttachedFunction task to dispatcher",
+                )
+            })?;
+
+        // Wait for the result
+        let task_result = rx.await.map_err(|_| {
+            CompactionError::InvariantViolation("Failed to receive GetAttachedFunction task result")
+        })?;
+
+        let output = task_result
+            .into_inner()
+            .map_err(|_| CompactionError::InvariantViolation("GetAttachedFunction task failed"))?;
+
+        // Check if we have an attached function
+        match output.attached_function {
+            Some(function) => {
+                // Check if backfill is needed by comparing offsets
+                // log_position is i64, completion_offset is u64
+                let log_position_u64 = log_position.max(0) as u64;
+                if log_position_u64 < function.completion_offset {
+                    return Err(CompactionError::InvariantViolation(
+                        "Log position is less than completion offset",
+                    ));
+                }
+                Ok(function.completion_offset < log_position_u64)
+            }
+            None => Ok(false), // No attached function means no backfill needed
+        }
+    }
+
+    async fn run_backfill_attached_function_workflow(
+        &mut self,
+        system: System,
+    ) -> Result<BackfillResult, CompactionError> {
+        // See if we need backfill
+        if !self.needs_backfill().await? {
+            return Ok(BackfillResult::NoBackfillRequired);
+        }
+
+        let log_fetch_records = match self
+            .run_get_logs(
+                self.get_collection_info()
+                    .map_err(CompactionError::CompactionContextError)?
+                    .collection_id,
+                system.clone(),
+                true,
+            )
+            .await?
+        {
+            LogFetchOrchestratorResponse::Success(success) => success.materialized,
+            LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_)
+            | LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
+                return Err(CompactionError::InvariantViolation(
+                    "Attached function backfill log fetch should not return compaction offset repair or function backfill",
+                ))
+            }
+        };
+
+        let result =
+            Box::pin(self.run_attached_function_workflow(log_fetch_records, system, true)).await?;
+
+        match result {
+            Some((function_context, collection_register_info)) => {
+                Ok(BackfillResult::BackfillCompleted {
+                    function_context,
+                    collection_register_info,
+                })
+            }
+            None => Ok(BackfillResult::NoBackfillRequired),
+        }
+    }
+
     async fn run_attached_function_workflow(
         &mut self,
         log_fetch_records: Vec<MaterializeLogOutput>,
         system: System,
+        is_backfill: bool,
     ) -> Result<Option<(FunctionContext, CollectionRegisterInfo)>, CompactionError> {
         let attached_function_result =
-            Box::pin(self.run_attached_function(log_fetch_records, system.clone())).await?;
+            Box::pin(self.run_attached_function(log_fetch_records, system.clone(), is_backfill))
+                .await?;
 
         match attached_function_result {
             AttachedFunctionOrchestratorResponse::NoAttachedFunction { .. } => Ok(None),
@@ -586,7 +708,9 @@ impl CompactionContext {
         collection_id: CollectionUuid,
         system: System,
     ) -> Result<CompactionResponse, CompactionError> {
-        let result = self.run_get_logs(collection_id, system.clone()).await?;
+        let result = self
+            .run_get_logs(collection_id, system.clone(), false)
+            .await?;
 
         let (log_fetch_records, _) = match result {
             LogFetchOrchestratorResponse::Success(success) => {
@@ -597,6 +721,38 @@ impl CompactionContext {
                     job_id: repair.job_id,
                     witnessed_offset_in_sysdb: repair.witnessed_offset_in_sysdb,
                 });
+            }
+            LogFetchOrchestratorResponse::RequireFunctionBackfill(backfill) => {
+                // Try to run backfill workflow
+                let fn_result =
+                    Box::pin(self.run_backfill_attached_function_workflow(system.clone())).await?;
+
+                match fn_result {
+                    BackfillResult::BackfillCompleted {
+                        function_context,
+                        collection_register_info,
+                    } => {
+                        // Backfill was needed and completed - register and return
+                        let results = vec![collection_register_info];
+                        Box::pin(self.run_register(
+                            results,
+                            Some(function_context),
+                            system.clone(),
+                        ))
+                        .await?;
+
+                        // TODO(tanujnay112): Should we look into just doing the rest of the compaction workflow
+                        // instead of exiting here?
+
+                        return Ok(CompactionResponse::Success {
+                            job_id: collection_id.into(),
+                        });
+                    }
+                    BackfillResult::NoBackfillRequired => {
+                        // No backfill was needed - reuse the already-fetched logs
+                        (backfill.materialized, backfill.collection_info)
+                    }
+                }
             }
         };
 
@@ -613,10 +769,11 @@ impl CompactionContext {
         // 2. Apply input logs to input collection
         // Box the futures to avoid stack overflow with large state machines
         let fn_future = async move {
-            Box::pin(
-                self_clone_fn
-                    .run_attached_function_workflow(log_fetch_records_clone, system_clone_fn),
-            )
+            Box::pin(self_clone_fn.run_attached_function_workflow(
+                log_fetch_records_clone,
+                system_clone_fn,
+                false,
+            ))
             .await
         };
 
@@ -2399,7 +2556,7 @@ mod tests {
         // Start compaction 1's log_fetch_orchestrator
         println!("Starting compaction 1's run_get_logs...");
         let compaction_1_logs_result = compaction_context_1
-            .run_get_logs(collection_uuid, system.clone())
+            .run_get_logs(collection_uuid, system.clone(), false)
             .await;
 
         // Store the logs for compaction 1 to use later
@@ -2410,6 +2567,9 @@ mod tests {
                 }
                 Ok(LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_)) => {
                     panic!("Unexpected repair response in test");
+                }
+                Ok(LogFetchOrchestratorResponse::RequireFunctionBackfill(_)) => {
+                    panic!("Unexpected function backfill response in test");
                 }
                 Err(e) => {
                     panic!("Compaction 1 run_get_logs failed: {:?}", e);

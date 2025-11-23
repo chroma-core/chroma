@@ -193,6 +193,7 @@ pub struct ExecuteAttachedFunctionInput {
     pub blockfile_provider: BlockfileProvider,
 
     pub is_rebuild: bool,
+    pub is_for_backfill: bool,
 }
 
 /// Output from the ExecuteAttachedFunction operator
@@ -257,7 +258,8 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
         );
 
         // Create record segment reader from the output collection's record segment
-        let output_record_segment_reader = if input.is_rebuild {
+        let output_record_segment_reader = if input.is_rebuild || input.is_for_backfill {
+            // For rebuild and backfill, we don't read any existing data in output collection
             None
         } else {
             match Box::pin(RecordSegmentReader::from_segment(
@@ -280,12 +282,21 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
         let mut all_hydrated_records = Vec::new();
         let mut total_records_processed = 0u64;
 
+        // For backfill, all existing compacted data from the input collection should be
+        // in our input materialized logs. So we don't need to read any existing data from
+        // the input collection segments.
+        let input_record_segment = if input.is_for_backfill {
+            None
+        } else {
+            input.input_record_segment.as_ref()
+        };
+
         for materialized_log in input.materialized_logs.iter() {
             // Use the iterator to process each materialized record
             for borrowed_record in materialized_log.result.iter() {
                 // Hydrate the record using the same pattern as materialize_logs operator
                 let hydrated_record = borrowed_record
-                    .hydrate(input.input_record_segment.as_ref())
+                    .hydrate(input_record_segment)
                     .await
                     .map_err(|e| ExecuteAttachedFunctionError::SegmentRead(Box::new(e)))?;
 

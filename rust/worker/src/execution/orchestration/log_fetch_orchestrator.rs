@@ -156,9 +156,17 @@ pub(crate) struct RequireCompactionOffsetRepair {
 }
 
 #[derive(Debug)]
+pub(crate) struct RequireFunctionBackfill {
+    pub materialized: Vec<MaterializeLogOutput>,
+    pub collection_info: CollectionCompactInfo,
+}
+
+#[derive(Debug)]
 pub(crate) enum LogFetchOrchestratorResponse {
     Success(Success),
     RequireCompactionOffsetRepair(RequireCompactionOffsetRepair),
+    #[allow(dead_code)]
+    RequireFunctionBackfill(RequireFunctionBackfill),
 }
 
 impl Success {
