@@ -357,6 +357,9 @@ impl CompactionContext {
         system: System,
         is_getting_compacted_logs: bool,
     ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
+        // TODO(tanujnay112): This is awful, we need to find a better way to pass
+        // the active collection info around.
+        self.collection_info = OnceCell::new();
         let log_fetch_orchestrator = LogFetchOrchestrator::new(
             collection_id,
             self.is_rebuild || is_getting_compacted_logs,
@@ -604,8 +607,11 @@ impl CompactionContext {
     ) -> Result<BackfillResult, CompactionError> {
         // See if we need backfill
         if !self.needs_backfill().await? {
+            tracing::debug!("No backfill needed");
             return Ok(BackfillResult::NoBackfillRequired);
         }
+
+        tracing::debug!("Backfill needed");
 
         let log_fetch_records = match self
             .run_get_logs(

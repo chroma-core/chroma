@@ -885,3 +885,27 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
             bool: True if successful
         """
         pass
+
+    @abstractmethod
+    def get_attached_function(
+        self,
+        name: str,
+        input_collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "AttachedFunction":
+        """Get an attached function by name for a specific collection.
+
+        Args:
+            name: Name of the attached function
+            input_collection_id: ID of the input collection
+            tenant: The tenant name
+            database: The database name
+
+        Returns:
+            AttachedFunction: The attached function object
+
+        Raises:
+            NotFoundError: If the attached function doesn't exist
+        """
+        pass

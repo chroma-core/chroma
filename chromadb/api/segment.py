@@ -957,6 +957,20 @@ class SegmentAPI(ServerAPI):
             "The Segment API (embedded mode) does not support attached function operations."
         )
 
+    @override
+    def get_attached_function(
+        self,
+        name: str,
+        input_collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "AttachedFunction":
+        """Attached functions are not supported in the Segment API (local embedded mode)."""
+        raise NotImplementedError(
+            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
+            "The Segment API (embedded mode) does not support attached function operations."
+        )
+
     # TODO: This could potentially cause race conditions in a distributed version of the
     # system, since the cache is only local.
     # TODO: promote collection -> topic to a base class method so that it can be
