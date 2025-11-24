@@ -4,6 +4,7 @@ Integration test for the Collection statistics wrapper methods
 
 import pytest
 import json
+import time
 from chromadb.api.client import Client as ClientCreator
 from chromadb.config import System
 from chromadb.test.utils.wait_for_version_increase import (
