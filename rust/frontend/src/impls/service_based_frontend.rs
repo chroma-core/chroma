@@ -1969,7 +1969,6 @@ impl ServiceBasedFrontend {
         collection_id: CollectionUuid,
         _attached_function_id: chroma_types::AttachedFunctionUuid,
     ) -> Result<(), chroma_types::AttachFunctionError> {
-        tracing::info!("start_backfill stub called - not yet implemented");
         let embedding_dim = self
             .get_collection_dimension(collection_id)
             .await?

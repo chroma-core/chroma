@@ -552,3 +552,166 @@ class Collection(CollectionCommon["ServerAPI"]):
             tenant=self.tenant,
             database=self.database,
         )
+
+    def _get_statistics_fn_name(self) -> str:
+        """Generate the default name for the statistics attached function.
+
+        Returns:
+            str: The statistics function name
+        """
+        return f"{self.name}_stats"
+
+    def enable_statistics(self, stats_collection_name: Optional[str] = None) -> "AttachedFunction":
+        """Enable statistics collection for this collection.
+
+        This attaches the statistics function which will automatically compute
+        and update metadata value frequencies whenever records are added, updated,
+        or deleted.
+
+        Args:
+            stats_collection_name: Name of the collection where statistics will be stored.
+                                   If None, defaults to "{collection_name}_statistics".
+
+        Returns:
+            AttachedFunction: The attached statistics function
+
+        Example:
+            >>> collection.enable_statistics()
+            >>> collection.add(ids=["id1"], documents=["doc1"], metadatas=[{"key": "value"}])
+            >>> # Statistics are automatically computed
+            >>> stats = collection.statistics()
+        """
+        if stats_collection_name is None:
+            stats_collection_name = f"{self.name}_statistics"
+
+        return self.attach_function(
+            name=self._get_statistics_fn_name(),
+            function_id="statistics",
+            output_collection=stats_collection_name,
+            params=None,
+        )
+
+    def _get_statistics_fn(self) -> "AttachedFunction":
+        """Get the statistics attached function for this collection.
+
+        Returns:
+            AttachedFunction: The statistics function
+
+        Raises:
+            NotFoundError: If statistics are not enabled
+            AssertionError: If the attached function is not a statistics function
+        """
+        af = self.get_attached_function(self._get_statistics_fn_name())
+        assert af.function_name == "statistics", "Attached function is not a statistics function"
+        return af
+
+    def disable_statistics(self, delete_stats_collection: bool = False) -> bool:
+        """Disable statistics collection for this collection.
+
+        Args:
+            delete_stats_collection: If True, also delete the statistics output collection.
+                                      Defaults to False.
+
+        Returns:
+            bool: True if successful
+
+        Example:
+            >>> collection.disable_statistics(delete_stats_collection=True)
+        """
+        return self._get_statistics_fn().detach(delete_output_collection=delete_stats_collection)
+
+    def statistics(self) -> Dict[str, Any]:
+        """Get the current statistics for this collection.
+
+        Statistics include frequency counts for all metadata key-value pairs,
+        as well as a summary with the total record count.
+
+        Returns:
+            Dict[str, Any]: A dictionary with the structure:
+                {
+                    "statistics": {
+                        "key1": {
+                            "value1": {"type": count, ...},
+                            "value2": {"type": count, ...}
+                        },
+                        "key2": {...},
+                        ...
+                    },
+                    "summary": {
+                        "total_count": count
+                    }
+                }
+
+        Example:
+            >>> collection.enable_statistics()
+            >>> collection.add(
+            ...     ids=["id1", "id2"],
+            ...     documents=["doc1", "doc2"],
+            ...     metadatas=[{"category": "A", "score": 10}, {"category": "B", "score": 10}]
+            ... )
+            >>> # Wait for statistics to be computed
+            >>> stats = collection.statistics()
+            >>> print(stats)
+            {
+                "statistics": {
+                    "category": {
+                        "A": {"str": 1},
+                        "B": {"str": 1}
+                    },
+                    "score": {
+                        "10": {"int": 2}
+                    }
+                },
+                "summary": {
+                    "total_count": 2
+                }
+            }
+        """
+        from collections import defaultdict
+
+        af = self._get_statistics_fn()
+        
+        # Get the statistics output collection model from the server
+        stats_collection_model = self._client.get_collection(
+            name=af.output_collection,
+            tenant=self.tenant,
+            database=self.database,
+        )
+        
+        # Wrap it in a Collection object to access get/query methods
+        stats_collection = Collection(
+            client=self._client,
+            model=stats_collection_model,
+            embedding_function=None,  # Statistics collections don't need embedding functions
+            data_loader=None,
+        )
+
+        # Get all statistics records
+        results = stats_collection.get(include=["metadatas"])
+
+        stats: Dict[str, Dict[str, Dict[str, int]]] = defaultdict(lambda: defaultdict(dict))
+        summary: Dict[str, Any] = {}
+
+        if results["metadatas"]:
+            for metadata in results["metadatas"]:
+                if metadata is None:
+                    continue
+
+                key = metadata.get("key")
+                value = metadata.get("value")
+                value_type = metadata.get("type")
+                count = metadata.get("count")
+
+                if key is not None and value is not None and value_type is not None and count is not None:
+                    # Separate summary statistics from regular statistics
+                    if key == "summary":
+                        if value == "total_count":
+                            summary["total_count"] = count
+                    else:
+                        stats[key][value]['count'] = count
+
+        result = {"statistics": dict(stats)}
+        if summary:
+            result["summary"] = summary
+
+        return result
