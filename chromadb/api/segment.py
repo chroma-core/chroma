@@ -930,6 +930,20 @@ class SegmentAPI(ServerAPI):
         )
 
     @override
+    def get_attached_function(
+        self,
+        name: str,
+        input_collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "AttachedFunction":
+        """Attached functions are not supported in the Segment API (local embedded mode)."""
+        raise NotImplementedError(
+            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
+            "The Segment API (embedded mode) does not support attached function operations."
+        )
+
+    @override
     def detach_function(
         self,
         attached_function_id: UUID,

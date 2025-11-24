@@ -23,11 +23,63 @@ export type AttachFunctionResponse = {
     attached_function: AttachedFunctionInfo;
 };
 
+/**
+ * API response struct for attached function with function_name instead of function_id
+ */
+export type AttachedFunctionApiResponse = {
+    /**
+     * Completion offset: the WAL position up to which the attached function has processed records
+     */
+    completion_offset: number;
+    /**
+     * Database name this attached function belongs to
+     */
+    database_id: string;
+    /**
+     * Name of the function (e.g., "record_counter", "statistics")
+     */
+    function_name: string;
+    /**
+     * Unique identifier for the attached function
+     */
+    id: AttachedFunctionUuid;
+    /**
+     * Source collection that triggers the attached function
+     */
+    input_collection_id: CollectionUuid;
+    /**
+     * Minimum number of new records required before the attached function runs again
+     */
+    min_records_for_invocation: number;
+    /**
+     * Human-readable name for the attached function instance
+     */
+    name: string;
+    /**
+     * Name of target collection where attached function output is stored
+     */
+    output_collection: string;
+    output_collection_id?: null | CollectionUuid;
+    /**
+     * Optional JSON parameters for the function
+     */
+    params?: string | null;
+    /**
+     * Tenant name this attached function belongs to
+     */
+    tenant_id: string;
+};
+
 export type AttachedFunctionInfo = {
-    function_id: string;
+    function_name: string;
     id: string;
     name: string;
 };
+
+/**
+ * AttachedFunctionUuid is a wrapper around Uuid to provide a type for attached function identifiers.
+ */
+export type AttachedFunctionUuid = string;
 
 export type BoolInvertedIndexConfig = {
     [key: string]: never;
@@ -181,6 +233,10 @@ export type FtsIndexConfig = {
 export type FtsIndexType = {
     config: FtsIndexConfig;
     enabled: boolean;
+};
+
+export type GetAttachedFunctionResponse = {
+    attached_function: AttachedFunctionApiResponse;
 };
 
 export type GetRequestPayload = RawWhereFields & {
@@ -1519,6 +1575,56 @@ export type AttachFunctionResponses = {
 };
 
 export type AttachFunctionResponse2 = AttachFunctionResponses[keyof AttachFunctionResponses];
+
+export type GetAttachedFunctionData = {
+    body?: never;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Collection ID
+         */
+        collection_id: string;
+        /**
+         * Attached function name
+         */
+        function_name: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/{function_name}';
+};
+
+export type GetAttachedFunctionErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Attached function not found
+     */
+    404: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type GetAttachedFunctionError = GetAttachedFunctionErrors[keyof GetAttachedFunctionErrors];
+
+export type GetAttachedFunctionResponses = {
+    /**
+     * Attached function retrieved successfully
+     */
+    200: GetAttachedFunctionResponse;
+};
+
+export type GetAttachedFunctionResponse2 = GetAttachedFunctionResponses[keyof GetAttachedFunctionResponses];
 
 export type CollectionGetData = {
     body: GetRequestPayload;

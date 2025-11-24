@@ -1957,7 +1957,7 @@ impl ServiceBasedFrontend {
             attached_function: chroma_types::AttachedFunctionInfo {
                 id: attached_function_id.to_string(),
                 name,
-                function_id,
+                function_name: function_id,
             },
         })
     }
@@ -1993,6 +1993,30 @@ impl ServiceBasedFrontend {
             .push_logs(&tenant, collection_id, logs)
             .await?;
         Ok(())
+    }
+
+    pub async fn get_attached_function(
+        &mut self,
+        _tenant_name: String,
+        _database_name: String,
+        collection_id: String,
+        function_name: String,
+    ) -> Result<chroma_types::AttachedFunction, chroma_sysdb::GetAttachedFunctionError> {
+        // Parse collection_id from path parameter - client-side validation
+        let collection_uuid =
+            CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
+                chroma_sysdb::GetAttachedFunctionError::FailedToGetAttachedFunction(
+                    tonic::Status::invalid_argument(format!(
+                        "Client validation error: Invalid collection_id UUID format: {}",
+                        e
+                    )),
+                )
+            })?);
+
+        // Get the attached function by name
+        self.sysdb_client
+            .get_attached_function_by_name(collection_uuid, function_name)
+            .await
     }
 
     pub async fn detach_function(

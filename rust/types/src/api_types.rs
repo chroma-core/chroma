@@ -7,12 +7,18 @@ use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
 use crate::operator::SearchResult;
+use crate::operators_generated::{
+    FUNCTION_RECORD_COUNTER_ID, FUNCTION_RECORD_COUNTER_NAME, FUNCTION_STATISTICS_ID,
+    FUNCTION_STATISTICS_NAME,
+};
 use crate::plan::PlanToProtoError;
 use crate::plan::SearchPayload;
 use crate::validators::{
     validate_metadata_vec, validate_name, validate_non_empty_collection_update_metadata,
     validate_optional_metadata, validate_schema, validate_update_metadata_vec,
 };
+use crate::AttachedFunction;
+use crate::AttachedFunctionUuid;
 use crate::Collection;
 use crate::CollectionConfigurationToInternalConfigurationError;
 use crate::CollectionConversionError;
@@ -2317,13 +2323,75 @@ impl AttachFunctionRequest {
 pub struct AttachedFunctionInfo {
     pub id: String,
     pub name: String,
-    pub function_id: String,
+    pub function_name: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AttachFunctionResponse {
     pub attached_function: AttachedFunctionInfo,
+}
+
+/// API response struct for attached function with function_name instead of function_id
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AttachedFunctionApiResponse {
+    /// Unique identifier for the attached function
+    pub id: AttachedFunctionUuid,
+    /// Human-readable name for the attached function instance
+    pub name: String,
+    /// Name of the function (e.g., "record_counter", "statistics")
+    pub function_name: String,
+    /// Source collection that triggers the attached function
+    pub input_collection_id: CollectionUuid,
+    /// Name of target collection where attached function output is stored
+    #[serde(rename = "output_collection")]
+    pub output_collection_name: String,
+    /// ID of the output collection (lazily filled in after creation)
+    pub output_collection_id: Option<CollectionUuid>,
+    /// Optional JSON parameters for the function
+    pub params: Option<String>,
+    /// Tenant name this attached function belongs to
+    pub tenant_id: String,
+    /// Database name this attached function belongs to
+    pub database_id: String,
+    /// Completion offset: the WAL position up to which the attached function has processed records
+    pub completion_offset: u64,
+    /// Minimum number of new records required before the attached function runs again
+    pub min_records_for_invocation: u64,
+}
+
+impl AttachedFunctionApiResponse {
+    /// Convert an AttachedFunction to the API response format, mapping function_id UUID to function_name
+    pub fn from_attached_function(af: AttachedFunction) -> Result<Self, GetAttachedFunctionError> {
+        let function_name = match af.function_id {
+            id if id == FUNCTION_RECORD_COUNTER_ID => FUNCTION_RECORD_COUNTER_NAME.to_string(),
+            id if id == FUNCTION_STATISTICS_ID => FUNCTION_STATISTICS_NAME.to_string(),
+            _ => {
+                return Err(GetAttachedFunctionError::UnknownFunctionId(af.function_id));
+            }
+        };
+
+        Ok(Self {
+            id: af.id,
+            name: af.name,
+            function_name,
+            input_collection_id: af.input_collection_id,
+            output_collection_name: af.output_collection_name,
+            output_collection_id: af.output_collection_id,
+            params: af.params,
+            tenant_id: af.tenant_id,
+            database_id: af.database_id,
+            completion_offset: af.completion_offset,
+            min_records_for_invocation: af.min_records_for_invocation,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetAttachedFunctionResponse {
+    pub attached_function: AttachedFunctionApiResponse,
 }
 
 #[derive(Error, Debug)]
@@ -2351,6 +2419,26 @@ impl ChromaError for AttachFunctionError {
             AttachFunctionError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
             AttachFunctionError::Validation(err) => err.code(),
             AttachFunctionError::Internal(err) => err.code(),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum GetAttachedFunctionError {
+    #[error("Attached Function not found")]
+    NotFound(String),
+    #[error("Unknown function ID [{0}]. Function may not be registered in the system.")]
+    UnknownFunctionId(Uuid),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for GetAttachedFunctionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetAttachedFunctionError::NotFound(_) => ErrorCodes::NotFound,
+            GetAttachedFunctionError::UnknownFunctionId(_) => ErrorCodes::Internal,
+            GetAttachedFunctionError::Internal(err) => err.code(),
         }
     }
 }
