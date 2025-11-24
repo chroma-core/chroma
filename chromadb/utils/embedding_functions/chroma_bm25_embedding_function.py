@@ -22,6 +22,24 @@ DEFAULT_TOKEN_MAX_LENGTH = 40
 
 DEFAULT_CHROMA_BM25_STOPWORDS: List[str] = list(_DEFAULT_STOPWORDS)
 
+class _HashedToken:
+    __slots__ = ("hash", "label")
+
+    def __init__(self, hash: int, label: Optional[str]):
+        self.hash = hash
+        self.label = label
+
+    def __hash__(self) -> int:
+        return self.hash
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _HashedToken):
+            return NotImplemented
+        return self.hash == other.hash
+
+    def __lt__(self, other: "_HashedToken") -> bool:
+        return self.hash < other.hash
+
 
 class ChromaBm25Config(TypedDict, total=False):
     k: float
@@ -29,6 +47,7 @@ class ChromaBm25Config(TypedDict, total=False):
     avg_doc_length: float
     token_max_length: int
     stopwords: List[str]
+    store_tokens: bool
 
 
 class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
@@ -39,6 +58,7 @@ class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
         avg_doc_length: float = DEFAULT_AVG_DOC_LENGTH,
         token_max_length: int = DEFAULT_TOKEN_MAX_LENGTH,
         stopwords: Optional[Iterable[str]] = None,
+        store_tokens: bool = False,
     ) -> None:
         """Initialize the BM25 sparse embedding function."""
 
@@ -46,6 +66,7 @@ class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
         self.b = float(b)
         self.avg_doc_length = float(avg_doc_length)
         self.token_max_length = int(token_max_length)
+        self.store_tokens = bool(store_tokens)
 
         if stopwords is not None:
             self.stopwords: Optional[List[str]] = [str(word) for word in stopwords]
@@ -65,19 +86,29 @@ class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
             return SparseVector(indices=[], values=[])
 
         doc_len = float(len(tokens))
-        counts = Counter(self._hasher.hash(token) for token in tokens)
+        counts = Counter(
+            _HashedToken(self._hasher.hash(token), token if self.store_tokens else None)
+            for token in tokens
+        )
 
-        indices = sorted(counts.keys())
+        sorted_keys = sorted(counts.keys())
+        indices: List[int] = []
         values: List[float] = []
-        for idx in indices:
-            tf = float(counts[idx])
+        tokens: Optional[List[str]] = [] if self.store_tokens else None
+
+        for key in sorted_keys:
+            tf = float(counts[key])
             denominator = tf + self.k * (
                 1 - self.b + (self.b * doc_len) / self.avg_doc_length
             )
             score = tf * (self.k + 1) / denominator
+            
+            indices.append(key.hash)
             values.append(score)
+            if tokens is not None:
+                tokens.append(key.label)
 
-        return SparseVector(indices=indices, values=values)
+        return SparseVector(indices=indices, values=values, labels=tokens)
 
     def __call__(self, input: Documents) -> SparseVectors:
         sparse_vectors: SparseVectors = []
@@ -107,6 +138,7 @@ class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
             avg_doc_length=config.get("avg_doc_length", DEFAULT_AVG_DOC_LENGTH),
             token_max_length=config.get("token_max_length", DEFAULT_TOKEN_MAX_LENGTH),
             stopwords=config.get("stopwords"),
+            store_tokens=config.get("store_tokens", False),
         )
 
     def get_config(self) -> Dict[str, Any]:
@@ -115,6 +147,7 @@ class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
             "b": self.b,
             "avg_doc_length": self.avg_doc_length,
             "token_max_length": self.token_max_length,
+            "store_tokens": self.store_tokens,
         }
 
         if self.stopwords is not None:
@@ -125,7 +158,7 @@ class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
-        mutable_keys = {"k", "b", "avg_doc_length", "token_max_length", "stopwords"}
+        mutable_keys = {"k", "b", "avg_doc_length", "token_max_length", "stopwords", "store_tokens"}
         for key in new_config:
             if key not in mutable_keys:
                 raise ValueError(f"Updating '{key}' is not supported for {NAME}")

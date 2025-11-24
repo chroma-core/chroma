@@ -27,6 +27,10 @@
             "items": {
                 "type": "string"
             }
+        },
+        "store_tokens": {
+            "type": "boolean",
+            "description": "Whether to store token strings in the sparse vectors (default: true)"
         }
     },
     "additionalProperties": false
