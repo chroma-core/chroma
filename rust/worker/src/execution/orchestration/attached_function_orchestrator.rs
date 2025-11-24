@@ -79,6 +79,8 @@ pub struct AttachedFunctionOrchestrator {
     orchestrator_context: OrchestratorContext,
 
     dispatcher: ComponentHandle<Dispatcher>,
+
+    is_for_backfill: bool,
 }
 
 #[derive(Error, Debug)]
@@ -212,6 +214,7 @@ impl AttachedFunctionOrchestrator {
         output_context: CompactionContext,
         dispatcher: ComponentHandle<Dispatcher>,
         data_fetch_records: Vec<MaterializeLogOutput>,
+        is_for_backfill: bool,
     ) -> Self {
         let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
 
@@ -224,6 +227,7 @@ impl AttachedFunctionOrchestrator {
             state: ExecutionState::MaterializeApplyCommitFlush,
             orchestrator_context,
             dispatcher,
+            is_for_backfill,
         }
     }
 
@@ -778,6 +782,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             output_record_segment: message.record_segment.clone(),
             blockfile_provider: self.output_context.blockfile_provider.clone(),
             is_rebuild: self.output_context.is_rebuild,
+            is_for_backfill: self.is_for_backfill,
         };
 
         let task = wrap(
