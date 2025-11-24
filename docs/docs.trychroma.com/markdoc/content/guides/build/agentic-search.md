@@ -1,5 +1,7 @@
 # Agentic Search
 
+{% Video link="https://www.youtube.com/embed/_VAPVcdow-Q" title="Framework-less Agentic Search" /%}
+
 We've seen how retrieval enables LLMs to answer questions over private data and maintain state for AI applications. While this approach works well for simple lookups, it falls short in most real-world scenarios.
 
 Consider building an internal chatbot for a business where a user asks: 
