@@ -312,6 +312,9 @@ impl TestReferenceSegment {
                 Operation::Delete => {
                     coll.remove(&id);
                 }
+                Operation::BackfillFn => {
+                    continue;
+                }
             };
         }
     }

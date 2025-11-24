@@ -369,6 +369,9 @@ impl SqliteMetadataWriter {
                 metadata_owned = Some(doc_embedded_meta);
             }
             match operation {
+                Operation::BackfillFn => {
+                    continue;
+                }
                 Operation::Add => {
                     if let Some(offset_id) =
                         Self::add_record(tx, segment_id, log_offset_unsigned, id.clone()).await?

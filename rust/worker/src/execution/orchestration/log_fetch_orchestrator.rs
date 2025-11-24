@@ -161,6 +161,18 @@ pub(crate) struct RequireFunctionBackfill {
     pub collection_info: CollectionCompactInfo,
 }
 
+impl RequireFunctionBackfill {
+    pub fn new(
+        materialized: Vec<MaterializeLogOutput>,
+        collection_info: CollectionCompactInfo,
+    ) -> Self {
+        Self {
+            materialized,
+            collection_info,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum LogFetchOrchestratorResponse {
     Success(Success),
@@ -202,6 +214,12 @@ impl From<RequireCompactionOffsetRepair> for LogFetchOrchestratorResponse {
     }
 }
 
+impl From<RequireFunctionBackfill> for LogFetchOrchestratorResponse {
+    fn from(value: RequireFunctionBackfill) -> Self {
+        LogFetchOrchestratorResponse::RequireFunctionBackfill(value)
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct LogFetchOrchestrator {
     collection_id: CollectionUuid,
@@ -211,6 +229,7 @@ pub(crate) struct LogFetchOrchestrator {
     state: ExecutionState,
     num_uncompleted_materialization_tasks: usize,
     materialized_outputs: Vec<MaterializeLogOutput>,
+    has_backfill: bool,
 }
 
 #[async_trait]
@@ -291,6 +310,7 @@ impl LogFetchOrchestrator {
             state: ExecutionState::Pending,
             num_uncompleted_materialization_tasks: 0,
             materialized_outputs: Vec::new(),
+            has_backfill: false,
         }
     }
 
@@ -763,6 +783,10 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
             None => return,
         };
 
+        if output.result.has_backfill() {
+            self.has_backfill = true;
+        }
+
         if !output.result.is_empty() {
             self.materialized_outputs.push(output);
         }
@@ -782,11 +806,16 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
                 }
             };
             let materialized = std::mem::take(&mut self.materialized_outputs);
-            self.terminate_with_result(
-                Ok(Success::new(materialized, collection_info.clone()).into()),
-                ctx,
-            )
-            .await;
+            if self.has_backfill {
+                self.terminate_with_result(
+                    Ok(RequireFunctionBackfill::new(materialized, collection_info).into()),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+            self.terminate_with_result(Ok(Success::new(materialized, collection_info).into()), ctx)
+                .await;
         }
     }
 }

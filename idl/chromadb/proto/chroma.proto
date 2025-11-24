@@ -12,6 +12,7 @@ enum Operation {
     UPDATE = 1;
     UPSERT = 2;
     DELETE = 3;
+    BACKFILL_FN = 4;
 }
 
 enum ScalarEncoding {

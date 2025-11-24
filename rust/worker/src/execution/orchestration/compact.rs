@@ -402,9 +402,26 @@ impl CompactionContext {
                 RequireCompactionOffsetRepair::new(repair.job_id, repair.witnessed_offset_in_sysdb)
                     .into(),
             ),
-            LogFetchOrchestratorResponse::RequireFunctionBackfill(backfill) => Ok(
-                LogFetchOrchestratorResponse::RequireFunctionBackfill(backfill),
-            ),
+            LogFetchOrchestratorResponse::RequireFunctionBackfill(backfill) => {
+                if let Some(hnsw_index_uuid) = backfill.collection_info.hnsw_index_uuid {
+                    self.hnsw_index_uuids.insert(hnsw_index_uuid);
+                };
+
+                tracing::info!(
+                    "Backfilling collection {}",
+                    backfill.collection_info.collection_id
+                );
+
+                self.collection_info
+                    .set(backfill.collection_info.clone())
+                    .map_err(|_| {
+                        CompactionContextError::InvariantViolation("Collection info already set")
+                    })?;
+
+                Ok(LogFetchOrchestratorResponse::RequireFunctionBackfill(
+                    backfill,
+                ))
+            }
         }
     }
 
@@ -592,9 +609,7 @@ impl CompactionContext {
 
         let log_fetch_records = match self
             .run_get_logs(
-                self.get_collection_info()
-                    .map_err(CompactionError::CompactionContextError)?
-                    .collection_id,
+                self.get_collection_info().map_err(CompactionError::CompactionContextError)?.collection_id,
                 system.clone(),
                 true,
             )

@@ -609,6 +609,7 @@ fn operation_from_code(code: u32) -> Operation {
         1 => Operation::Update,
         2 => Operation::Upsert,
         3 => Operation::Delete,
+        4 => Operation::BackfillFn,
         _ => panic!("Invalid operation code"),
     }
 }
@@ -619,6 +620,7 @@ fn operation_to_code(operation: Operation) -> u32 {
         Operation::Update => 1,
         Operation::Upsert => 2,
         Operation::Delete => 3,
+        Operation::BackfillFn => 4,
     }
 }
 

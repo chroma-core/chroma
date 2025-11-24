@@ -1915,7 +1915,7 @@ impl ServiceBasedFrontend {
                 input_collection_id,
                 output_collection.clone(),
                 params,
-                tenant_name,
+                tenant_name.clone(),
                 database_name,
                 self.min_records_for_invocation,
             )
@@ -1936,8 +1936,9 @@ impl ServiceBasedFrontend {
                 }
             })?;
 
-        // Step 2: Start backfill (stub for now)
-        self.start_backfill(attached_function_id).await;
+        // Step 2: Start backfill
+        self.start_backfill(tenant_name, input_collection_id, attached_function_id)
+            .await?;
 
         // Step 3: Create output collection and set is_ready = true
         self.sysdb_client
@@ -1962,9 +1963,36 @@ impl ServiceBasedFrontend {
     }
 
     // Stub method for backfill - will be implemented later
-    async fn start_backfill(&self, _attached_function_id: chroma_types::AttachedFunctionUuid) {
+    async fn start_backfill(
+        &mut self,
+        tenant: String,
+        collection_id: CollectionUuid,
+        _attached_function_id: chroma_types::AttachedFunctionUuid,
+    ) -> Result<(), chroma_types::AttachFunctionError> {
         tracing::info!("start_backfill stub called - not yet implemented");
-        // TODO(tanujnay112): Implement backfill logic
+        let embedding_dim = self
+            .get_collection_dimension(collection_id)
+            .await?
+            .unwrap_or(1);
+        let fake_embedding = vec![0.0; embedding_dim as usize];
+        // TODO(tanujnay112): Make this either a configurable or better yet a separate
+        // RPC to the logs service.
+        let num_fake_logs = 250;
+        let logs = vec![
+            OperationRecord {
+                id: "backfill_id".to_string(),
+                embedding: Some(fake_embedding),
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation: Operation::BackfillFn,
+            };
+            num_fake_logs
+        ];
+        self.log_client
+            .push_logs(&tenant, collection_id, logs)
+            .await?;
+        Ok(())
     }
 
     pub async fn detach_function(
