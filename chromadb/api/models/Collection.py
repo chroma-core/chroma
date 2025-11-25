@@ -699,6 +699,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
                 key = metadata.get("key")
                 value = metadata.get("value")
+                value_label = metadata.get("value_label")
                 value_type = metadata.get("type")
                 count = metadata.get("count")
 
@@ -708,7 +709,9 @@ class Collection(CollectionCommon["ServerAPI"]):
                         if value == "total_count":
                             summary["total_count"] = count
                     else:
-                        stats[key][value]['count'] = count
+                        # Prioritize value_label if present, otherwise use value
+                        stats_key = value_label if value_label is not None else value
+                        stats[key][stats_key]['count'] = count
 
         result = {"statistics": dict(stats)}
         if summary:

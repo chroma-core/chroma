@@ -6,6 +6,7 @@ import pytest
 import json
 import time
 from chromadb.api.client import Client as ClientCreator
+from chromadb.base_types import SparseVector
 from chromadb.config import System
 from chromadb.test.utils.wait_for_version_increase import (
     get_collection_version,
@@ -232,3 +233,72 @@ def test_statistics_wrapper_incremental_updates(basic_http_client: System) -> No
     assert stats["summary"]["total_count"] == 4
 
     collection.disable_statistics(delete_stats_collection=True)
+
+def test_sparse_vector_statistics(basic_http_client: System) -> None:
+    """Test statistics with sparse vector that includes labels"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    collection = client.create_collection(name="sparse_vector_test")
+    
+    # Create sparse vectors with labels
+    sparse_vec1 = SparseVector(
+        indices=[100, 200, 300],
+        values=[1.0, 2.0, 3.0],
+        labels=["apple", "banana", "cherry"]
+    )
+    sparse_vec2 = SparseVector(
+        indices=[100, 400],
+        values=[1.5, 2.5],
+        labels=["apple", "date"]
+    )
+    sparse_vec3 = SparseVector(
+        indices=[200, 300],
+        values=[2.0, 3.0],
+        labels=["banana", "cherry"]
+    )
+    
+    # Add data with sparse vectors
+    collection.add(
+        ids=["id1", "id2", "id3"],
+        documents=["doc1", "doc2", "doc3"],
+        metadatas=[
+            {"category": "A", "vec": sparse_vec1},
+            {"category": "B", "vec": sparse_vec2},
+            {"category": "A", "vec": sparse_vec3},
+        ],
+    )
+    collection.enable_statistics()
+
+    initial_version = get_collection_version(client, collection.name)
+
+    wait_for_version_increase(client, collection.name, initial_version)
+
+    # Get statistics
+    stats = collection.statistics()
+    print("\nSparse vector statistics output:")
+    print(json.dumps(stats, indent=2))
+    
+    assert "statistics" in stats
+    assert "summary" in stats
+    assert stats["summary"]["total_count"] == 3
+    
+    # Verify category statistics
+    assert "category" in stats["statistics"]
+    assert "A" in stats["statistics"]["category"]
+    assert "B" in stats["statistics"]["category"]
+    assert stats["statistics"]["category"]["A"]["count"] == 2
+    assert stats["statistics"]["category"]["B"]["count"] == 1
+    
+    # Verify sparse vector statistics use labels instead of hash IDs
+    assert "vec" in stats["statistics"]
+    assert "apple" in stats["statistics"]["vec"], "Should use label 'apple' not hash ID"
+    assert "banana" in stats["statistics"]["vec"], "Should use label 'banana' not hash ID"
+    assert "cherry" in stats["statistics"]["vec"], "Should use label 'cherry' not hash ID"
+    assert "date" in stats["statistics"]["vec"], "Should use label 'date' not hash ID"
+    
+    # Verify counts
+    assert stats["statistics"]["vec"]["apple"]["count"] == 2  # in id1 and id2
+    assert stats["statistics"]["vec"]["banana"]["count"] == 2  # in id1 and id3
+    assert stats["statistics"]["vec"]["cherry"]["count"] == 2  # in id1 and id3
+    assert stats["statistics"]["vec"]["date"]["count"] == 1    # in id2 only
