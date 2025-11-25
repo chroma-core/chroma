@@ -2,7 +2,6 @@
 Integration test for the Collection statistics wrapper methods
 """
 
-import pytest
 import json
 import time
 from chromadb.api.client import Client as ClientCreator
@@ -11,6 +10,12 @@ from chromadb.config import System
 from chromadb.test.utils.wait_for_version_increase import (
     get_collection_version,
     wait_for_version_increase,
+)
+from chromadb.utils.statistics import (
+    attach_statistics_function,
+    detach_statistics_function,
+    get_statistics,
+    get_statistics_fn_name,
 )
 
 
@@ -26,7 +31,7 @@ def test_statistics_wrapper(basic_http_client: System) -> None:
     )
 
     # Enable statistics
-    attached_fn = collection.enable_statistics()
+    attached_fn = attach_statistics_function(collection)
     assert attached_fn is not None
     assert attached_fn.function_name == "statistics"
     assert attached_fn.output_collection == "test_collection_statistics"
@@ -46,9 +51,10 @@ def test_statistics_wrapper(basic_http_client: System) -> None:
 
     # Wait for statistics to be computed
     wait_for_version_increase(client, collection.name, initial_version)
+    time.sleep(60)
 
     # Get statistics
-    stats = collection.statistics()
+    stats = get_statistics(collection)
     print("\nStatistics output:")
     print(json.dumps(stats, indent=2))
 
@@ -81,16 +87,17 @@ def test_statistics_wrapper(basic_http_client: System) -> None:
     assert stats["statistics"]["active"]["false"]["count"] == 1
 
     # Test get_attached_function
-    stats_fn = collection.get_attached_function(collection._get_statistics_fn_name())
+    stats_fn = collection.get_attached_function(get_statistics_fn_name(collection))
     assert stats_fn.function_name == "statistics"
 
     # Disable statistics (keep the collection)
-    success = collection.disable_statistics(delete_stats_collection=False)
+    success = detach_statistics_function(collection, delete_stats_collection=False)
     assert success is True
 
     # Verify the statistics collection still exists
     stats_collection = client.get_collection("test_collection_statistics")
     assert stats_collection is not None
+
 
 def test_backfill_statistics(basic_http_client: System) -> None:
     """Test backfill statistics"""
@@ -117,19 +124,19 @@ def test_backfill_statistics(basic_http_client: System) -> None:
     initial_version = get_collection_version(client, collection.name)
 
     # Enable statistics
-    attached_fn = collection.enable_statistics()
+    attached_fn = attach_statistics_function(collection)
     assert attached_fn.function_name == "statistics"
     assert attached_fn.output_collection == "my_collection_statistics"
 
     # Wait for statistics to be computed
     wait_for_version_increase(client, collection.name, initial_version)
 
-    stats = collection.statistics()
+    stats = get_statistics(collection)
     assert stats is not None
     assert "statistics" in stats
     assert "summary" in stats
 
-     # Verify summary
+    # Verify summary
     assert stats["summary"]["total_count"] == 3
 
     # Verify category statistics
@@ -153,10 +160,10 @@ def test_backfill_statistics(basic_http_client: System) -> None:
     assert stats["statistics"]["active"]["true"]["count"] == 2
     assert stats["statistics"]["active"]["false"]["count"] == 1
 
-
     # Disable statistics
-    success = collection.disable_statistics(delete_stats_collection=True)
+    success = detach_statistics_function(collection, delete_stats_collection=True)
     assert success is True
+
 
 def test_statistics_wrapper_custom_output_collection(basic_http_client: System) -> None:
     """Test statistics with custom output collection name"""
@@ -166,7 +173,9 @@ def test_statistics_wrapper_custom_output_collection(basic_http_client: System) 
     collection = client.create_collection(name="my_collection")
 
     # Enable statistics with custom output collection name
-    attached_fn = collection.enable_statistics(stats_collection_name="my_custom_stats")
+    attached_fn = attach_statistics_function(
+        collection, stats_collection_name="my_custom_stats"
+    )
     assert attached_fn.output_collection == "my_custom_stats"
 
     initial_version = get_collection_version(client, collection.name)
@@ -181,12 +190,13 @@ def test_statistics_wrapper_custom_output_collection(basic_http_client: System) 
     wait_for_version_increase(client, collection.name, initial_version)
 
     # Get statistics
-    stats = collection.statistics()
+    stats = get_statistics(collection)
     assert "statistics" in stats
     assert "key" in stats["statistics"]
 
     # Disable and delete the custom collection
-    collection.disable_statistics(delete_stats_collection=True)
+    detach_statistics_function(collection, delete_stats_collection=True)
+
 
 # commenting out for now as waiting for query cache invalidateion slows down the test suite
 def test_statistics_wrapper_incremental_updates(basic_http_client: System) -> None:
@@ -195,7 +205,7 @@ def test_statistics_wrapper_incremental_updates(basic_http_client: System) -> No
     client.reset()
 
     collection = client.create_collection(name="incremental_test")
-    collection.enable_statistics()
+    attach_statistics_function(collection)
 
     initial_version = get_collection_version(client, collection.name)
 
@@ -210,7 +220,7 @@ def test_statistics_wrapper_incremental_updates(basic_http_client: System) -> No
     next_version = get_collection_version(client, collection.name)
 
     # Check initial statistics
-    stats = collection.statistics()
+    stats = get_statistics(collection)
     assert stats["statistics"]["category"]["A"]["count"] == 2
     assert stats["summary"]["total_count"] == 2
 
@@ -227,37 +237,34 @@ def test_statistics_wrapper_incremental_updates(basic_http_client: System) -> No
     time.sleep(70)
 
     # Check updated statistics
-    stats = collection.statistics()
+    stats = get_statistics(collection)
     assert stats["statistics"]["category"]["A"]["count"] == 3
     assert stats["statistics"]["category"]["B"]["count"] == 1
     assert stats["summary"]["total_count"] == 4
 
-    collection.disable_statistics(delete_stats_collection=True)
+    detach_statistics_function(collection, delete_stats_collection=True)
+
 
 def test_sparse_vector_statistics(basic_http_client: System) -> None:
     """Test statistics with sparse vector that includes labels"""
     client = ClientCreator.from_system(basic_http_client)
     client.reset()
 
-    collection = client.create_collection(name="sparse_vector_test")
-    
+    collection = client.create_collection(name="sparse_vector_test1")
+
     # Create sparse vectors with labels
     sparse_vec1 = SparseVector(
         indices=[100, 200, 300],
         values=[1.0, 2.0, 3.0],
-        labels=["apple", "banana", "cherry"]
+        labels=["apple", "banana", "cherry"],
     )
     sparse_vec2 = SparseVector(
-        indices=[100, 400],
-        values=[1.5, 2.5],
-        labels=["apple", "date"]
+        indices=[100, 400], values=[1.5, 2.5], labels=["apple", "date"]
     )
     sparse_vec3 = SparseVector(
-        indices=[200, 300],
-        values=[2.0, 3.0],
-        labels=["banana", "cherry"]
+        indices=[200, 300], values=[2.0, 3.0], labels=["banana", "cherry"]
     )
-    
+
     # Add data with sparse vectors
     collection.add(
         ids=["id1", "id2", "id3"],
@@ -268,37 +275,107 @@ def test_sparse_vector_statistics(basic_http_client: System) -> None:
             {"category": "A", "vec": sparse_vec3},
         ],
     )
-    collection.enable_statistics()
+    attach_statistics_function(collection)
 
     initial_version = get_collection_version(client, collection.name)
 
     wait_for_version_increase(client, collection.name, initial_version)
 
     # Get statistics
-    stats = collection.statistics()
+    stats = get_statistics(collection)
     print("\nSparse vector statistics output:")
     print(json.dumps(stats, indent=2))
-    
+
     assert "statistics" in stats
     assert "summary" in stats
     assert stats["summary"]["total_count"] == 3
-    
+
     # Verify category statistics
     assert "category" in stats["statistics"]
     assert "A" in stats["statistics"]["category"]
     assert "B" in stats["statistics"]["category"]
     assert stats["statistics"]["category"]["A"]["count"] == 2
     assert stats["statistics"]["category"]["B"]["count"] == 1
-    
+
     # Verify sparse vector statistics use labels instead of hash IDs
     assert "vec" in stats["statistics"]
     assert "apple" in stats["statistics"]["vec"], "Should use label 'apple' not hash ID"
-    assert "banana" in stats["statistics"]["vec"], "Should use label 'banana' not hash ID"
-    assert "cherry" in stats["statistics"]["vec"], "Should use label 'cherry' not hash ID"
+    assert (
+        "banana" in stats["statistics"]["vec"]
+    ), "Should use label 'banana' not hash ID"
+    assert (
+        "cherry" in stats["statistics"]["vec"]
+    ), "Should use label 'cherry' not hash ID"
     assert "date" in stats["statistics"]["vec"], "Should use label 'date' not hash ID"
-    
+
     # Verify counts
     assert stats["statistics"]["vec"]["apple"]["count"] == 2  # in id1 and id2
     assert stats["statistics"]["vec"]["banana"]["count"] == 2  # in id1 and id3
     assert stats["statistics"]["vec"]["cherry"]["count"] == 2  # in id1 and id3
-    assert stats["statistics"]["vec"]["date"]["count"] == 1    # in id2 only
+    assert stats["statistics"]["vec"]["date"]["count"] == 1  # in id2 only
+
+
+def test_statistics_high_cardinality(basic_http_client: System) -> None:
+    """Test statistics with high cardinality metadata"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    collection = client.create_collection(name="high_cardinality_test")
+
+    # Generate 500 documents with 10 metadata fields each
+    num_docs = 500
+    num_fields = 10
+    ids = [f"id{i}" for i in range(num_docs)]
+    documents = [f"doc{i}" for i in range(num_docs)]
+    
+    metadatas = []
+    for i in range(num_docs):
+        meta = {}
+        for j in range(num_fields):
+            meta[f"field_{j}"] = f"value_{j}_{i}"
+        metadatas.append(meta)
+
+    # Add in batches to avoid hitting request size limits
+    batch_size = 100
+    initial_version = get_collection_version(client, collection.name)
+    
+    for i in range(0, num_docs, batch_size):
+        collection.add(
+            ids=ids[i : i + batch_size],
+            documents=documents[i : i + batch_size],
+            metadatas=metadatas[i : i + batch_size],
+        )
+
+    # Let all data be compacted
+    wait_for_version_increase(client, collection.name, initial_version)
+    initial_version = get_collection_version(client, collection.name)
+
+    # Enable statistics
+    attach_statistics_function(collection)
+
+    # Wait for statistics to be computed
+    wait_for_version_increase(client, collection.name, initial_version)
+
+    # Get statistics
+    stats = get_statistics(collection)
+    
+    assert "statistics" in stats
+    
+    # Verify we have stats for all fields
+    for j in range(num_fields):
+        field_key = f"field_{j}"
+        assert field_key in stats["statistics"]
+        
+        field_stats = stats["statistics"][field_key]
+        assert len(field_stats) == num_docs
+        
+        # Verify each value has count 1
+        for i in range(num_docs):
+            value = f"value_{j}_{i}"
+            assert value in field_stats
+            assert field_stats[value]["count"] == 1
+        
+    # Verify total count
+    assert stats["summary"]["total_count"] == num_docs
+
+    detach_statistics_function(collection, delete_stats_collection=True)
