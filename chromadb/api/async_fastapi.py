@@ -2,7 +2,7 @@ import asyncio
 from uuid import UUID
 import urllib.parse
 import orjson
-from typing import Any, Optional, cast, Tuple, Sequence, Dict, List
+from typing import Any, Mapping, Optional, cast, Tuple, Sequence, Dict, List
 import logging
 import httpx
 from overrides import override
@@ -138,6 +138,14 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             )
 
         return self._clients[loop_hash]
+
+    @override
+    def get_request_headers(self) -> Mapping[str, str]:
+        return dict(self._get_client().headers)
+
+    @override
+    def get_api_url(self) -> str:
+        return self._api_url
 
     async def _make_request(
         self, method: str, path: str, **kwargs: Dict[str, Any]

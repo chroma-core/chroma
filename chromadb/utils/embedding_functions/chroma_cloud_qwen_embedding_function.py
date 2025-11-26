@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Union, Optional
 import os
 import numpy as np
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
+from chromadb.utils.embedding_functions.utils import _get_shared_system_client
 from enum import Enum
 
 
@@ -56,9 +57,18 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
         self.api_key_env_var = api_key_env_var
+        # First, try to get API key from environment variable
         self.api_key = os.getenv(api_key_env_var)
+        # If not found in env var, try to get it from existing client instances
         if not self.api_key:
-            raise ValueError(f"The {api_key_env_var} environment variable is not set.")
+            SharedSystemClient = _get_shared_system_client()
+            self.api_key = SharedSystemClient.get_chroma_cloud_api_key_from_clients()
+        # Raise error if still no API key found
+        if not self.api_key:
+            raise ValueError(
+                f"API key not found in environment variable {api_key_env_var} "
+                f"or in any existing client instances"
+            )
 
         self.model = model
         self.task = task

@@ -7,9 +7,9 @@ from typing import Dict, Any
 from enum import Enum
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from chromadb.utils.sparse_embedding_utils import normalize_sparse_vector
-from chromadb.base_types import SparseVector
 import os
 from typing import Union
+from chromadb.utils.embedding_functions.utils import _get_shared_system_client
 
 
 class ChromaCloudSpladeEmbeddingModel(Enum):
@@ -36,10 +36,17 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
                 "The httpx python package is not installed. Please install it with `pip install httpx`"
             )
         self.api_key_env_var = api_key_env_var
+        # First, try to get API key from environment variable
         self.api_key = os.getenv(self.api_key_env_var)
+        # If not found in env var, try to get it from existing client instances
+        if not self.api_key:
+            SharedSystemClient = _get_shared_system_client()
+            self.api_key = SharedSystemClient.get_chroma_cloud_api_key_from_clients()
+        # Raise error if still no API key found
         if not self.api_key:
             raise ValueError(
-                f"API key not found in environment variable {self.api_key_env_var}"
+                f"API key not found in environment variable {self.api_key_env_var} "
+                f"or in any existing client instances"
             )
         self.model = model
         self._api_url = "https://embed.trychroma.com/embed_sparse"
