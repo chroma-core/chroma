@@ -174,6 +174,39 @@ pub struct FrontendServerConfig {
     pub cors_allow_origins: Option<Vec<String>>,
     #[serde(default = "default_enable_span_indexing")]
     pub enable_span_indexing: bool,
+    #[serde(default = "QuotaConfig::default")]
+    pub quota_config: QuotaConfig,
+    #[serde(default = "AuthConfig::default")]
+    pub auth_config: AuthConfig,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct QuotaConfig {
+    pub cache_capacity: usize,
+    pub cache_ttl_secs: u64,
+}
+
+impl Default for QuotaConfig {
+    fn default() -> Self {
+        Self {
+            cache_capacity: 1000,
+            cache_ttl_secs: 60,
+        }
+    }
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            cache_capacity: 1_000_000,
+            cache_ttl_ms: 60_000,
+        }
+    }
+}
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct AuthConfig {
+    pub cache_capacity: usize,
+    pub cache_ttl_ms: u64,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "sample_configs/distributed.yaml";
