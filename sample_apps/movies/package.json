@@ -1,0 +1,21 @@
+{
+  "name": "movies",
+  "module": "src/main.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "search": "bun src/main.ts search",
+    "retrieval": "bun src/main.ts retrieval"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@chroma-core/all": "^0.1.10",
+    "chromadb": "^3.1.6",
+    "openai": "^6.9.1"
+  }
+}
