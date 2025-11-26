@@ -58,6 +58,12 @@ spec:
             path: {{ .Values.rustLogService.cache.hostPath }}
             type: DirectoryOrCreate
         {{ end }}
+        {{- range $i, $cache := (default (list) .Values.rustLogService.cache.additionalVolumes) }}
+        - name: rust-log-service-cache-{{ add $i 1 }}
+          hostPath:
+            path: {{ $cache.hostPath }}
+            type: DirectoryOrCreate
+        {{- end }}
       containers:
         - name: rust-log-service
           {{ if .Values.rustLogService.command }}
@@ -79,6 +85,10 @@ spec:
             - name: rust-log-service-cache
               mountPath: {{ .Values.rustLogService.cache.mountPath }}
             {{ end }}
+            {{- range $i, $cache := (default (list) .Values.rustLogService.cache.additionalVolumes) }}
+            - name: rust-log-service-cache-{{ add $i 1 }}
+              mountPath: {{ $cache.mountPath }}
+            {{- end }}
           ports:
             - containerPort: 50051
           env:
