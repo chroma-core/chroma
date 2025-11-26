@@ -177,11 +177,11 @@ func (s *attachedFunctionDb) SoftDelete(inputCollectionID string, name string) e
 	return nil
 }
 
-func (s *attachedFunctionDb) SoftDeleteByID(id uuid.UUID) error {
+func (s *attachedFunctionDb) SoftDeleteByID(id uuid.UUID, inputCollectionID string) error {
 	// Update name and is_deleted in a single query
 	// Format: _deleted_<original_name>_<id>
 	result := s.db.Model(&dbmodel.AttachedFunction{}).
-		Where("id = ? AND is_deleted = false", id).
+		Where("id = ? AND input_collection_id = ? AND is_deleted = false", id, inputCollectionID).
 		Updates(map[string]interface{}{
 			"name":       gorm.Expr("CONCAT('_deleted_', name, '_', id::text)"),
 			"is_deleted": true,

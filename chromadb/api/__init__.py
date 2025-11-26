@@ -869,6 +869,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def detach_function(
         self,
         attached_function_id: UUID,
+        input_collection_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -877,6 +878,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
 
         Args:
             attached_function_id: ID of the attached function to remove
+            input_collection_id: ID of the input collection
             delete_output: Whether to also delete the output collection
             tenant: The tenant name
             database: The database name

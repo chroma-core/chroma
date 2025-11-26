@@ -1970,11 +1970,13 @@ impl GrpcSysDb {
     pub async fn soft_delete_attached_function(
         &mut self,
         attached_function_id: chroma_types::AttachedFunctionUuid,
+        input_collection_id: chroma_types::CollectionUuid,
         delete_output: bool,
     ) -> Result<(), DeleteAttachedFunctionError> {
         let req = chroma_proto::DetachFunctionRequest {
             attached_function_id: attached_function_id.to_string(),
             delete_output,
+            input_collection_id: input_collection_id.to_string(),
         };
 
         match self.client.detach_function(req).await {
@@ -2266,12 +2268,17 @@ impl SysDb {
     pub async fn soft_delete_attached_function(
         &mut self,
         attached_function_id: chroma_types::AttachedFunctionUuid,
+        input_collection_id: chroma_types::CollectionUuid,
         delete_output: bool,
     ) -> Result<(), DeleteAttachedFunctionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.soft_delete_attached_function(attached_function_id, delete_output)
-                    .await
+                grpc.soft_delete_attached_function(
+                    attached_function_id,
+                    input_collection_id,
+                    delete_output,
+                )
+                .await
             }
             SysDb::Sqlite(_) => Err(DeleteAttachedFunctionError::NotImplemented),
             SysDb::Test(_) => Err(DeleteAttachedFunctionError::NotImplemented),

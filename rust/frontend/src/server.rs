@@ -2164,7 +2164,7 @@ async fn attach_function(
             AuthzResource {
                 tenant: Some(tenant.clone()),
                 database: Some(database.clone()),
-                collection: None,
+                collection: Some(collection_id.clone()),
             },
         )
         .await?;
@@ -2264,7 +2264,7 @@ async fn detach_function(
             AuthzResource {
                 tenant: Some(tenant.clone()),
                 database: Some(database_name.clone()),
-                collection: None,
+                collection: Some(request.input_collection_id.clone()),
             },
         )
         .await?;

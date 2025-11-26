@@ -422,6 +422,15 @@ func (s *Coordinator) DetachFunction(ctx context.Context, req *coordinatorpb.Det
 		return nil, status.Errorf(codes.NotFound, "attached function not found")
 	}
 
+	// Validate that the input_collection_id matches the attached function's collection
+	// This prevents silent failures where a user provides a valid function ID but wrong collection ID
+	if attachedFunction.InputCollectionID != req.InputCollectionId {
+		log.Error("DetachFunction: input_collection_id mismatch",
+			zap.String("expected", attachedFunction.InputCollectionID),
+			zap.String("provided", req.InputCollectionId))
+		return nil, status.Error(codes.NotFound, "attached function not found")
+	}
+
 	// Execute collection and attached function deletion in a single transaction
 	err = s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// If delete_output is true and output_collection_id is set, soft-delete the output collection
@@ -455,7 +464,7 @@ func (s *Coordinator) DetachFunction(ctx context.Context, req *coordinatorpb.Det
 		}
 
 		// Now soft-delete the attached function
-		err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).SoftDeleteByID(attachedFunctionID)
+		err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).SoftDeleteByID(attachedFunctionID, req.InputCollectionId)
 		if err != nil {
 			log.Error("DetachFunction: failed to delete attached function", zap.Error(err))
 			return err

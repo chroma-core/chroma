@@ -173,6 +173,10 @@ export type DetachFunctionRequest = {
      * Whether to delete the output collection as well
      */
     delete_output?: boolean;
+    /**
+     * ID of the input collection
+     */
+    input_collection_id: string;
 };
 
 export type DetachFunctionResponse = {

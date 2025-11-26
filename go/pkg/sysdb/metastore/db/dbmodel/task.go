@@ -36,6 +36,7 @@ func (v AttachedFunction) TableName() string {
 //go:generate mockery --name=IAttachedFunctionDb
 type IAttachedFunctionDb interface {
 	Insert(attachedFunction *AttachedFunction) error
+	// TODO(tanujnay112): clean up this interface
 	GetByName(inputCollectionID string, name string) (*AttachedFunction, error)
 	GetAnyByName(inputCollectionID string, name string) (*AttachedFunction, error)
 	GetByID(id uuid.UUID) (*AttachedFunction, error)
@@ -44,7 +45,7 @@ type IAttachedFunctionDb interface {
 	Update(attachedFunction *AttachedFunction) error
 	Finish(id uuid.UUID) error
 	SoftDelete(inputCollectionID string, name string) error
-	SoftDeleteByID(id uuid.UUID) error
+	SoftDeleteByID(id uuid.UUID, inputCollectionID string) error
 	DeleteAll() error
 	GetMinCompletionOffsetForCollection(inputCollectionID string) (*int64, error)
 	CleanupExpiredPartial(maxAgeSeconds uint64) ([]uuid.UUID, error)

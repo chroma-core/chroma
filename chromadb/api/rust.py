@@ -638,6 +638,7 @@ class RustBindingsAPI(ServerAPI):
     def detach_function(
         self,
         attached_function_id: UUID,
+        input_collection_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
