@@ -45,7 +45,7 @@ type IAttachedFunctionDb interface {
 	Update(attachedFunction *AttachedFunction) error
 	Finish(id uuid.UUID) error
 	SoftDelete(inputCollectionID string, name string) error
-	SoftDeleteByID(id uuid.UUID, inputCollectionID string) error
+	SoftDeleteByID(id uuid.UUID, inputCollectionID uuid.UUID) error
 	DeleteAll() error
 	GetMinCompletionOffsetForCollection(inputCollectionID string) (*int64, error)
 	CleanupExpiredPartial(maxAgeSeconds uint64) ([]uuid.UUID, error)

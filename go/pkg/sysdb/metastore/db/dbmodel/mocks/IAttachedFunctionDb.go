@@ -329,7 +329,7 @@ func (_m *IAttachedFunctionDb) SoftDelete(inputCollectionID string, attachedFunc
 }
 
 // SoftDeleteByID provides a mock function with given fields: id, inputCollectionID
-func (_m *IAttachedFunctionDb) SoftDeleteByID(id uuid.UUID, inputCollectionID string) error {
+func (_m *IAttachedFunctionDb) SoftDeleteByID(id uuid.UUID, inputCollectionID uuid.UUID) error {
 	ret := _m.Called(id, inputCollectionID)
 
 	if len(ret) == 0 {
@@ -337,7 +337,7 @@ func (_m *IAttachedFunctionDb) SoftDeleteByID(id uuid.UUID, inputCollectionID st
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(uuid.UUID, string) error); ok {
+	if rf, ok := ret.Get(0).(func(uuid.UUID, uuid.UUID) error); ok {
 		r0 = rf(id, inputCollectionID)
 	} else {
 		r0 = ret.Error(0)

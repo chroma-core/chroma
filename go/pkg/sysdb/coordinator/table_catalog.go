@@ -713,6 +713,18 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 			return common.ErrCollectionDeleteNonExistingCollection
 		}
 
+		// List attached functions for this collection and soft delete them
+		attachedFunctions, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetByCollectionID(deleteCollection.ID.String())
+		if err != nil {
+			return err
+		}
+		for _, attachedFunction := range attachedFunctions {
+			log.Info("Soft deleting attached function for collection", zap.String("attached_function_id", attachedFunction.ID.String()), zap.String("collection_id", deleteCollection.ID.String()))
+			if err := tc.metaDomain.AttachedFunctionDb(txCtx).SoftDeleteByID(attachedFunction.ID, uuid.UUID(deleteCollection.ID)); err != nil {
+				return err
+			}
+		}
+
 		// Generate new name with timestamp and random number
 		oldName := *collections[0].Collection.Name
 		newName := fmt.Sprintf("_deleted_%s_%s", oldName, deleteCollection.ID.String())

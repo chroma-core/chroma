@@ -35,6 +35,7 @@ rustLogService:
   cache:
     hostPath: '/local/cache/chroma-log-service'
     mountPath: '/cache/'
+    additionalVolumes: []
 queryService:
   image:
     repository: 'query-service'
@@ -43,6 +44,7 @@ queryService:
   cache:
     hostPath: '/local/cache/chroma-query-service'
     mountPath: '/cache/'
+    additionalVolumes: []
   replicaCount: 2
 compactionService:
   image:
@@ -52,6 +54,7 @@ compactionService:
   cache:
     hostPath: '/local/cache/chroma-compaction-service'
     mountPath: '/cache/'
+    additionalVolumes: []
   replicaCount: 1
 sysdbMigration:
   image:
