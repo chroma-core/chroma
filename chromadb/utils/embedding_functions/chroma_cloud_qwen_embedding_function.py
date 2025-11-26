@@ -56,9 +56,19 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
         self.api_key_env_var = api_key_env_var
+        # First, try to get API key from environment variable
         self.api_key = os.getenv(api_key_env_var)
+        # If not found in env var, try to get it from existing client instances
         if not self.api_key:
-            raise ValueError(f"The {api_key_env_var} environment variable is not set.")
+            from chromadb.api.shared_system_client import SharedSystemClient
+
+            self.api_key = SharedSystemClient.get_chroma_cloud_api_key_from_clients()
+        # Raise error if still no API key found
+        if not self.api_key:
+            raise ValueError(
+                f"API key not found in environment variable {api_key_env_var} "
+                f"or in any existing client instances"
+            )
 
         self.model = model
         self.task = task

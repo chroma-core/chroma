@@ -1,4 +1,4 @@
-from typing import ClassVar, Dict
+from typing import ClassVar, Dict, Optional
 import uuid
 
 from chromadb.api import ServerAPI
@@ -94,3 +94,50 @@ class SharedSystemClient:
     def _submit_client_start_event(self) -> None:
         telemetry_client = self._system.instance(ProductTelemetryClient)
         telemetry_client.capture(ClientStartEvent())
+
+    @staticmethod
+    def get_chroma_cloud_api_key_from_clients() -> Optional[str]:
+        """
+        try to extract api key from existing client instaces by checking httpx session headers
+        if available.
+
+        Requirements to pull api key:
+        - must be a FastAPI instance (ignore RustBindingsAPI and SegmentAPI)
+        - must have a "api.trychroma.com" in the _api_url (ignore local/self-hosted instances)
+        - must have "x-chroma-token" or "X-Chroma-Token" in the headers
+
+        Returns:
+            The first api key found, or None if no client instances have api keys set.
+        """
+        # check FastAPI instance session headers bc this is where both cloudclient and httpclient paths converge
+        for system in SharedSystemClient._identifier_to_system.values():
+            try:
+                # get the ServerAPI instance (which is FastAPI for HTTP clients)
+                server_api = system.instance(ServerAPI)
+
+                # check if it's a FastAPI instance with a _session attribute
+                # RustBindingsAPI and SegmentAPI don't have a session attribute
+                if hasattr(server_api, "_session") and hasattr(
+                    server_api._session, "headers"
+                ):
+                    # only pull api key if the url contains the chroma cloud url
+                    if (
+                        not hasattr(server_api, "_api_url")
+                        or "api.trychroma.com" not in server_api._api_url
+                    ):
+                        continue
+
+                    # pull api key from the chroma token header
+                    headers = server_api._session.headers
+                    api_key = headers.get("X-Chroma-Token") or headers.get(
+                        "x-chroma-token"
+                    )
+                    if api_key:
+                        # header value might be a string or bytes, convert to string
+                        return str(api_key)
+            except Exception:
+                # if we can't access the ServerAPI instance or it doesn't have _session,
+                # continue to the next system instance
+                continue
+
+        return None
