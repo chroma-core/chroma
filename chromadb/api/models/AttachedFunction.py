@@ -105,6 +105,7 @@ class AttachedFunction:
         """
         return self._client.detach_function(
             attached_function_id=self._id,
+            input_collection_id=self._input_collection_id,
             delete_output=delete_output_collection,
             tenant=self._tenant,
             database=self._database,

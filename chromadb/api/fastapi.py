@@ -823,6 +823,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     def detach_function(
         self,
         attached_function_id: UUID,
+        input_collection_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -833,6 +834,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             f"/tenants/{tenant}/databases/{database}/attached_functions/{attached_function_id}/detach",
             json={
                 "delete_output": delete_output,
+                "input_collection_id": str(input_collection_id),
             },
         )
         return cast(bool, resp_json["success"])

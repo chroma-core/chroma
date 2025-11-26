@@ -720,7 +720,7 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 		}
 		for _, attachedFunction := range attachedFunctions {
 			log.Info("Soft deleting attached function for collection", zap.String("attached_function_id", attachedFunction.ID.String()), zap.String("collection_id", deleteCollection.ID.String()))
-			if err := tc.metaDomain.AttachedFunctionDb(txCtx).SoftDeleteByID(attachedFunction.ID); err != nil {
+			if err := tc.metaDomain.AttachedFunctionDb(txCtx).SoftDeleteByID(attachedFunction.ID, uuid.UUID(deleteCollection.ID)); err != nil {
 				return err
 			}
 		}
