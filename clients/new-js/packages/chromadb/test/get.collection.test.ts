@@ -53,9 +53,26 @@ describe("get collections", () => {
     } catch (error: any) {
       expect(error).toBeDefined();
       expect(error.message).toMatchInlineSnapshot(
-        `"Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, but got $contains"`,
+        `"Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, $exists, but got $contains"`,
       );
     }
+  });
+
+  test("it should filter by $exists", async () => {
+    const collection = await client.createCollection({ name: "test" });
+    await collection.add({
+      ids: ["1", "2", "3"],
+      embeddings: [
+        [0.1, 0.2],
+        [0.2, 0.3],
+        [0.3, 0.4],
+      ],
+      metadatas: [{ a: 1 }, {}, { b: 2 }],
+    });
+    const hasA = await collection.get({ where: { a: { $exists: true } } });
+    expect(hasA.ids).toEqual(["1"]);
+    const notA = await collection.get({ where: { a: { $exists: false } } });
+    expect(notA.ids.sort()).toEqual(["2", "3"]);
   });
 
   test("it should get embedding with matching documents", async () => {
