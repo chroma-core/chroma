@@ -71,7 +71,7 @@ These components operate differently depending on the deployment mode, particula
 - In Local and Single Node mode, all components share a process and use the local filesystem for durability.
 - In **Distributed** mode, components are deployed as independent services.
   - The log and built indexes are stored in cloud object storage.
-  - The system catalog is backed by a SQL database.
+  - The system catalog is backed by an SQL database.
   - All services use local SSDs as caches to reduce object storage latency and cost.
 
 ## Request Sequences
