@@ -6,7 +6,10 @@
   "type": "object",
   "properties": {
     "preferred_providers": {
-      "type": "array",
+      "type": [
+        "array",
+        "null"
+      ],
       "items": {
         "type": "string"
       },

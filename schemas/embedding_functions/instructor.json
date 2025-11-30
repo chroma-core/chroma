@@ -14,7 +14,10 @@
       "description": "Parameter device for the instructor embedding function"
     },
     "instruction": {
-      "type": "string",
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Parameter instruction for the instructor embedding function"
     }
   },
