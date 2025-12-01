@@ -474,6 +474,24 @@ impl<'me> MetadataSegmentWriter<'me> {
                     None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
                 }
             }
+            MetadataValue::StringArray(values) => {
+                // Index each string in the array separately in the string metadata index
+                match &self.string_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            match writer.set(prefix, v.as_str(), offset_id).await {
+                                Ok(()) => {}
+                                Err(e) => {
+                                    tracing::error!("Error inserting string array element into str metadata index writer {:?}", e);
+                                    return Err(e);
+                                }
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. String metadata index writer should be set for metadata segment"),
+                }
+            }
             MetadataValue::SparseVector(offset_value) => {
                 match &self.sparse_index_writer {
                     Some(writer) => {
@@ -547,6 +565,24 @@ impl<'me> MetadataSegmentWriter<'me> {
                         }
                     }
                     None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::StringArray(values) => {
+                // Delete each string in the array from the string metadata index
+                match &self.string_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            match writer.delete(prefix, v.as_str(), offset_id).await {
+                                Ok(()) => {}
+                                Err(e) => {
+                                    tracing::error!("Error deleting string array element from str metadata index writer {:?}", e);
+                                    return Err(e);
+                                }
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. String metadata index writer should be set for metadata segment"),
                 }
             }
             MetadataValue::SparseVector(offset_value) => match &self.sparse_index_writer {

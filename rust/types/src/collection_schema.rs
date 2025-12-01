@@ -1817,6 +1817,29 @@ impl Schema {
                     }),
                 },
             },
+            // StringArray uses the string index since each element is indexed as a string
+            MetadataValueType::StringArray => match &v_type.string {
+                Some(string_type) => match &string_type.string_inverted_index {
+                    Some(string_inverted_index) => Ok(string_inverted_index.enabled),
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "string_array".to_string(),
+                    }),
+                },
+                None => match &self.defaults.string {
+                    Some(string_type) => match &string_type.string_inverted_index {
+                        Some(string_inverted_index) => Ok(string_inverted_index.enabled),
+                        None => Err(SchemaError::MissingIndexConfiguration {
+                            key: key.to_string(),
+                            value_type: "string_array".to_string(),
+                        }),
+                    },
+                    None => Err(SchemaError::MissingIndexConfiguration {
+                        key: key.to_string(),
+                        value_type: "string_array".to_string(),
+                    }),
+                },
+            },
         }
     }
 
@@ -1836,6 +1859,8 @@ impl Schema {
                 let value_type = match &expression.comparison {
                     MetadataComparison::Primitive(_, value) => value.value_type(),
                     MetadataComparison::Set(_, set_value) => set_value.value_type(),
+                    // StringArrayContains uses string indexing since we look up strings
+                    MetadataComparison::StringArrayContains(_, _) => MetadataValueType::Str,
                 };
                 let is_enabled = self
                     .is_metadata_type_index_enabled(expression.key.as_str(), value_type)
@@ -1910,6 +1935,13 @@ impl Schema {
             MetadataValueType::SparseVector => {
                 if value_types.sparse_vector.is_none() {
                     value_types.sparse_vector = self.defaults.sparse_vector.clone();
+                    return true;
+                }
+            }
+            // StringArray uses string indexing since each element is indexed as a string
+            MetadataValueType::StringArray => {
+                if value_types.string.is_none() {
+                    value_types.string = self.defaults.string.clone();
                     return true;
                 }
             }

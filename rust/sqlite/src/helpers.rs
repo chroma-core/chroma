@@ -85,6 +85,9 @@ fn construct_upsert_metadata_stmt<
                 f32::null().into(),
                 bool::null().into(),
             ],
+            MetadataValue::StringArray(_) => {
+                todo!("String array is not yet supported for local")
+            }
             MetadataValue::SparseVector(_) => {
                 todo!("Sparse vector is not yet supported for local")
             }

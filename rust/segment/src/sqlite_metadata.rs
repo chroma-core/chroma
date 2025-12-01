@@ -641,6 +641,9 @@ impl IntoSqliteExpr for MetadataExpression {
                     MetadataValue::Int(i) => (EmbeddingMetadata::IntValue, Expr::val(*i)),
                     MetadataValue::Float(f) => (EmbeddingMetadata::FloatValue, Expr::val(*f)),
                     MetadataValue::Str(s) => (EmbeddingMetadata::StringValue, Expr::val(s)),
+                    MetadataValue::StringArray(_) => {
+                        unimplemented!("String array is not yet supported for local")
+                    }
                     MetadataValue::SparseVector(_) => {
                         unimplemented!("Comparision with sparse vector is not allowed")
                     }
@@ -762,6 +765,9 @@ impl IntoSqliteExpr for MetadataExpression {
                         Expr::col((Embeddings::Table, Embeddings::Id)).not_in_subquery(subq)
                     }
                 }
+            }
+            MetadataComparison::StringArrayContains(_, _) => {
+                unimplemented!("String array $contains is not yet supported for local")
             }
         }
     }
