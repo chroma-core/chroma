@@ -60,7 +60,7 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
 
 FROM debian:stable-slim AS runner
 
-RUN apt-get update && apt-get install -y dumb-init libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y dumb-init libssl-dev ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
 FROM runner AS cli
 
