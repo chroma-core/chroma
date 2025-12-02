@@ -13,7 +13,7 @@ RUN if [ "$ADDRESS_SANITIZER" = "1" ]; then \
   rustup default nightly && \
   rustup target add x86_64-unknown-linux-gnu ; \
   fi
-ENV RUSTFLAGS=${ADDRESS_SANITIZER:+'-Z sanitizer=address'}
+ENV RUSTFLAGS="${ADDRESS_SANITIZER:+-Z sanitizer=address}"
 ENV CC_x86_64_unknown_linux_gnu=${ADDRESS_SANITIZER:+gcc}
 ENV CXX_x86_64_unknown_linux_gnu=${ADDRESS_SANITIZER:+g++}
 ENV AR_x86_64_unknown_linux_gnu=${ADDRESS_SANITIZER:+ar}
@@ -50,7 +50,7 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   if [ "$ENABLE_AVX512" = "1" ]; then \
     export CXXFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
     export CFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
-    export RUSTFLAGS="-C target-feature=+avx,+fma" && \
+    export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+avx,+fma" && \
     echo "Building with AVX512 optimizations for hnswlib and AVX for Rust"; \
   else \
     echo "Building without AVX512 optimizations"; \
