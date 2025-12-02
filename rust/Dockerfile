@@ -4,6 +4,20 @@ ARG RELEASE_MODE=
 ARG PROTOC_VERSION=31.1
 ARG ENABLE_AVX512=
 
+# ADDRESS_SANITIZER is an optional build argument to enable Address Sanitizer.
+ARG ADDRESS_SANITIZER
+RUN if [ "$ADDRESS_SANITIZER" = "1" ]; then \
+  apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+  build-essential gcc g++ libssl-dev ca-certificates && \
+  rustup default nightly && \
+  rustup target add x86_64-unknown-linux-gnu ; \
+  fi
+ENV RUSTFLAGS=${ADDRESS_SANITIZER:+'-Z sanitizer=address'}
+ENV CC_x86_64_unknown_linux_gnu=${ADDRESS_SANITIZER:+gcc}
+ENV CXX_x86_64_unknown_linux_gnu=${ADDRESS_SANITIZER:+g++}
+ENV AR_x86_64_unknown_linux_gnu=${ADDRESS_SANITIZER:+ar}
+
 WORKDIR /chroma
 
 RUN ARCH=$(uname -m) && \
@@ -59,7 +73,16 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
 
 
 FROM debian:stable-slim AS runner
+ARG ADDRESS_SANITIZER
 
+ENV ASAN_OPTIONS=${ADDRESS_SANITIZER:+'symbolize=1'}
+ENV ASAN_SYMBOLIZER_PATH=${ADDRESS_SANITIZER:+'/usr/bin/llvm-symbolizer'}
+# If ADDRESS_SANITIZER is set, set RUST_BACKTRACE to full. Otherwise, set it to 0.
+ENV RUST_BACKTRACE=${ADDRESS_SANITIZER:+'full'}${ADDRESS_SANITIZER:-'0'}
+
+RUN if [ "$ADDRESS_SANITIZER" = "1" ]; then apt-get update \
+  && apt-get install -y build-essential llvm; \
+  fi
 RUN apt-get update && apt-get install -y dumb-init libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
 
 FROM runner AS cli
