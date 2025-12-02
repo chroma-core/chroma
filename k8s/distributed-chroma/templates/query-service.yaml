@@ -58,13 +58,13 @@ spec:
         - name: query-service-cache
           hostPath:
             path: {{ .Values.queryService.cache.hostPath }}
-            type: DirectoryOrCreate
+            type: {{ .Values.queryService.cache.type }}
         {{ end }}
         {{- range $i, $cache := (default (list) .Values.queryService.cache.additionalVolumes) }}
         - name: query-service-cache-{{ add $i 1 }}
           hostPath:
             path: {{ $cache.hostPath }}
-            type: DirectoryOrCreate
+            type: {{ .Values.queryService.cache.type }}
         {{- end }}
       containers:
         - name: query-service

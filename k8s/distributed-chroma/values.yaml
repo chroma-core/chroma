@@ -34,6 +34,7 @@ rustLogService:
     tag: 'latest'
   cache:
     hostPath: '/local/cache/chroma-log-service'
+    type: DirectoryOrCreate
     mountPath: '/cache/'
     additionalVolumes: []
 queryService:
@@ -43,6 +44,7 @@ queryService:
   env:
   cache:
     hostPath: '/local/cache/chroma-query-service'
+    type: DirectoryOrCreate
     mountPath: '/cache/'
     additionalVolumes: []
   replicaCount: 2
@@ -53,6 +55,7 @@ compactionService:
   env:
   cache:
     hostPath: '/local/cache/chroma-compaction-service'
+    type: DirectoryOrCreate
     mountPath: '/cache/'
     additionalVolumes: []
   replicaCount: 1
