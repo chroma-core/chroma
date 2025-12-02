@@ -56,13 +56,13 @@ spec:
         - name: rust-log-service-cache
           hostPath:
             path: {{ .Values.rustLogService.cache.hostPath }}
-            type: DirectoryOrCreate
+            type: {{ .Values.rustLogService.cache.type }}
         {{ end }}
         {{- range $i, $cache := (default (list) .Values.rustLogService.cache.additionalVolumes) }}
         - name: rust-log-service-cache-{{ add $i 1 }}
           hostPath:
             path: {{ $cache.hostPath }}
-            type: DirectoryOrCreate
+            type: {{ .Values.rustLogService.cache.type }}
         {{- end }}
       containers:
         - name: rust-log-service
