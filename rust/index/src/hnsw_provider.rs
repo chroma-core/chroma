@@ -631,27 +631,29 @@ impl HnswIndexProvider {
             .map(|(file, buffer)| {
                 let key = Self::format_key(prefix_path, index_uuid, file);
                 let storage = &self.storage;
+                let file = *file; // Copy for the closure
                 async move {
-                    let res = storage
+                    storage
                         .put_bytes(
                             &key,
                             buffer.to_vec(),
                             PutOptions::with_priority(StorageRequestPriority::P0),
                         )
-                        .await;
-                    match res {
-                        Ok(_) => {
-                            tracing::info!("Flushed hnsw index file: {}", file);
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to flush hnsw index file: {}", e);
-                        }
-                    }
+                        .await
+                        .map(|k| {
+                            tracing::info!("Flushed hnsw index file: {} with etag: {:?}", file, k);
+                        })
+                        .map_err(|e| {
+                            tracing::error!("Failed to flush hnsw index file {}: {}", file, e);
+                            e
+                        })
                 }
             })
             .collect::<Vec<_>>();
 
-        futures::future::join_all(upload_futures).await;
+        futures::future::try_join_all(upload_futures)
+            .await
+            .map_err(|e| Box::new(HnswIndexProviderFlushError::StoragePutError(e)))?;
         Ok(())
     }
 
@@ -1011,6 +1013,85 @@ mod tests {
                 );
             } else {
                 panic!("Expected hnsw purge to be successful")
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(unix)] // This test only works on Unix-like systems
+    async fn test_flush_from_memory_propagates_errors() {
+        use std::fs::Permissions;
+        use std::os::unix::fs::PermissionsExt;
+
+        let storage_dir = tempfile::tempdir().unwrap().path().to_path_buf();
+        let hnsw_tmp_path = storage_dir.join("hnsw");
+
+        // Create the directories needed
+        tokio::fs::create_dir_all(&hnsw_tmp_path).await.unwrap();
+
+        let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
+        let cache = new_non_persistent_cache_for_test();
+        // use_direct_hnsw = true to test the flush_from_memory path
+        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, 16, true);
+        let collection_id = CollectionUuid(Uuid::new_v4());
+
+        let dimensionality = 2;
+        let distance_function = DistanceFunction::Euclidean;
+        let default_hnsw_params = InternalHnswConfiguration::default();
+        let prefix_path = "test";
+
+        let created_index = provider
+            .create(
+                &collection_id,
+                default_hnsw_params.max_neighbors,
+                default_hnsw_params.ef_construction,
+                default_hnsw_params.ef_search,
+                dimensionality,
+                distance_function,
+                prefix_path,
+            )
+            .await
+            .unwrap();
+
+        let created_index_id = created_index.inner.read().hnsw_index.id;
+
+        // Create the prefix directory structure but make it read-only
+        // This ensures directory creation succeeds but file writing fails
+        let prefix_dir = storage_dir.join(prefix_path);
+        let hnsw_dir = prefix_dir.join("hnsw");
+        let index_dir = hnsw_dir.join(created_index_id.to_string());
+        tokio::fs::create_dir_all(&index_dir).await.unwrap();
+
+        // Make the final index directory read-only so file writes will fail
+        std::fs::set_permissions(&index_dir, Permissions::from_mode(0o444))
+            .expect("Failed to change permissions");
+
+        // Attempt to flush - this should fail because we can't write files to read-only directory
+        let result = provider
+            .flush_from_memory(prefix_path, &created_index_id, &created_index)
+            .await;
+
+        // Restore permissions for cleanup (do this before assertions in case they panic)
+        std::fs::set_permissions(&index_dir, Permissions::from_mode(0o755))
+            .expect("Failed to restore permissions");
+
+        // Verify that the error is propagated and not silently dropped
+        assert!(
+            result.is_err(),
+            "Expected flush to fail with permission error, but got: {:?}",
+            result
+        );
+
+        // Verify it's the correct error type
+        match result.unwrap_err().as_ref() {
+            HnswIndexProviderFlushError::StoragePutError(_) => {
+                // This is the expected error - success!
+            }
+            other => {
+                panic!(
+                    "Expected StoragePutError but got different error type: {:?}",
+                    other
+                );
             }
         }
     }
