@@ -64,7 +64,7 @@ spec:
         - name: query-service-cache-{{ add $i 1 }}
           hostPath:
             path: {{ $cache.hostPath }}
-            type: {{ .Values.queryService.cache.type }}
+            type: {{ $.Values.queryService.cache.type }}
         {{- end }}
       containers:
         - name: query-service
