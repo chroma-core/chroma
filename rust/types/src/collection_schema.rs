@@ -25,7 +25,24 @@ use crate::{
 
 impl ChromaError for SchemaError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::Internal
+        match self {
+            // Internal errors (500)
+            // These indicate system/internal issues during schema operations
+            SchemaError::MissingIndexConfiguration { .. } => ErrorCodes::Internal,
+            SchemaError::InvalidSchema { .. } => ErrorCodes::Internal,
+            // DefaultsMismatch and ConfigurationConflict only occur during schema merge()
+            // which happens internally during compaction, not from user input
+            SchemaError::DefaultsMismatch => ErrorCodes::Internal,
+            SchemaError::ConfigurationConflict { .. } => ErrorCodes::Internal,
+
+            // User/External errors (400)
+            // These indicate user-provided invalid input
+            SchemaError::InvalidUserInput { .. } => ErrorCodes::InvalidArgument,
+            SchemaError::ConfigAndSchemaConflict => ErrorCodes::InvalidArgument,
+            SchemaError::InvalidHnswConfig(_) => ErrorCodes::InvalidArgument,
+            SchemaError::InvalidSpannConfig(_) => ErrorCodes::InvalidArgument,
+            SchemaError::Builder(e) => e.code(),
+        }
     }
 }
 
@@ -45,6 +62,8 @@ pub enum SchemaError {
     InvalidHnswConfig(validator::ValidationErrors),
     #[error("Invalid SPANN configuration: {0}")]
     InvalidSpannConfig(validator::ValidationErrors),
+    #[error("Invalid schema input: {reason}")]
+    InvalidUserInput { reason: String },
     #[error(transparent)]
     Builder(#[from] SchemaBuilderError),
 }

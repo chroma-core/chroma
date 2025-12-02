@@ -31,7 +31,7 @@ from chromadb.utils.embedding_functions import (
 )
 from chromadb.api.models.Collection import Collection
 from chromadb.api.models.CollectionCommon import CollectionCommon
-from chromadb.errors import InvalidArgumentError, InternalError
+from chromadb.errors import InvalidArgumentError
 from chromadb.execution.expression import Knn, Search
 from chromadb.types import Collection as CollectionModel
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, cast
@@ -509,7 +509,7 @@ def test_sparse_vector_not_allowed_locally(
     schema = Schema()
     schema.create_index(key="sparse_metadata", config=SparseVectorIndexConfig())
     with pytest.raises(
-        InternalError, match="Sparse vector indexing is not enabled in local"
+        InvalidArgumentError, match="Sparse vector indexing is not enabled in local"
     ):
         _create_isolated_collection(client_factories, schema=schema)
 

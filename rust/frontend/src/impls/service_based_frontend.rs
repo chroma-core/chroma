@@ -576,7 +576,7 @@ impl ServiceBasedFrontend {
                     if let Some(schema) = reconciled_schema.as_ref() {
                         if schema.is_sparse_index_enabled() {
                             return Err(CreateCollectionError::InvalidSchema(
-                                SchemaError::InvalidSchema {
+                                SchemaError::InvalidUserInput {
                                     reason: "Sparse vector indexing is not enabled in local"
                                         .to_string(),
                                 },
