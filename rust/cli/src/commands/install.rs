@@ -1,6 +1,9 @@
 use crate::ui_utils::read_secret;
 use crate::utils::UtilsError::UserInputFailed;
-use crate::utils::{read_config, write_config, CliConfig, CliError, SELECTION_LIMIT};
+use crate::utils::{
+    get_current_profile, read_config, write_config, CliConfig, CliError, CHROMA_API_KEY_ENV_VAR,
+    CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT,
+};
 use clap::Parser;
 use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
@@ -46,8 +49,6 @@ pub struct InstallArgs {
     name: Option<String>,
     #[clap(long, conflicts_with_all = ["name"])]
     list: bool,
-    #[clap(long, hide = true)]
-    dev: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,6 +80,8 @@ struct AppListing {
 struct EnvVariable {
     name: String,
     secret: bool,
+    #[serde(default)]
+    default: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -437,44 +440,107 @@ fn write_env_file(
     Ok(())
 }
 
+fn app_requests_env(app_config: &SampleAppConfig, env_name: &str) -> bool {
+    app_config
+        .required_env_variables
+        .iter()
+        .chain(app_config.optional_env_variables.iter())
+        .any(|env_var| env_var.name == env_name)
+}
+
 fn get_app_env_variables(app_config: &SampleAppConfig) -> Result<SampleAppEnvVariables, CliError> {
     let mut env_variables = SampleAppEnvVariables::local();
 
+    // Check if user is logged in and app requests CHROMA_API_KEY
+    let cloud_creds = get_cloud_creds_if_available(app_config);
+
+    // Insert all required and optional env variables, using defaults if provided
     app_config
         .required_env_variables
         .iter()
         .for_each(|env_var| {
-            env_variables.0.insert(env_var.name.clone(), "".to_string());
+            let value = env_var.default.clone().unwrap_or_default();
+            env_variables.0.insert(env_var.name.clone(), value);
         });
 
     app_config
         .optional_env_variables
         .iter()
         .for_each(|env_var| {
-            env_variables.0.insert(env_var.name.clone(), "".to_string());
+            let value = env_var.default.clone().unwrap_or_default();
+            env_variables.0.insert(env_var.name.clone(), value);
         });
 
-    println!(
-        "{}",
-        prompt_env_variables_message(&app_config.required_env_variables)
-            .blue()
-            .bold()
-    );
-    let selection = Select::with_theme(&ColorfulTheme::default())
-        .items(&["Set with the installer", "Manually set later in .env"])
-        .default(0)
-        .interact()
-        .map_err(|_| UserInputFailed)?;
+    // If we have cloud credentials, inject them now
+    if let Some((profile_name, api_key, tenant_id)) = &cloud_creds {
+        println!(
+            "\n{} {}",
+            "Using Chroma Cloud credentials from profile:".green().bold(),
+            profile_name.green()
+        );
 
-    if selection == 0 {
-        for env_var in app_config.required_env_variables.clone() {
-            let prompt = format!("Enter your {} (Return to skip)", env_var.name);
-            let value = read_secret(&prompt).map_err(|_| UserInputFailed)?;
-            env_variables.0.insert(env_var.name.clone(), value);
+        if env_variables.0.contains_key(CHROMA_API_KEY_ENV_VAR) {
+            env_variables
+                .0
+                .insert(CHROMA_API_KEY_ENV_VAR.to_string(), api_key.clone());
+        }
+        if env_variables.0.contains_key(CHROMA_TENANT_ENV_VAR) {
+            env_variables
+                .0
+                .insert(CHROMA_TENANT_ENV_VAR.to_string(), tenant_id.clone());
+        }
+    }
+
+    // Filter out env vars that were auto-filled from cloud creds
+    let vars_to_prompt: Vec<EnvVariable> = app_config
+        .required_env_variables
+        .iter()
+        .filter(|env_var| {
+            if cloud_creds.is_some() {
+                env_var.name != CHROMA_API_KEY_ENV_VAR && env_var.name != CHROMA_TENANT_ENV_VAR
+            } else {
+                true
+            }
+        })
+        .cloned()
+        .collect();
+
+    // Only prompt if there are remaining env vars to set
+    if !vars_to_prompt.is_empty() {
+        println!(
+            "{}",
+            prompt_env_variables_message(&vars_to_prompt)
+                .blue()
+                .bold()
+        );
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .items(&["Set with the installer", "Manually set later in .env"])
+            .default(0)
+            .interact()
+            .map_err(|_| UserInputFailed)?;
+
+        if selection == 0 {
+            for env_var in vars_to_prompt {
+                let prompt = format!("Enter your {} (Return to skip)", env_var.name);
+                let value = read_secret(&prompt).map_err(|_| UserInputFailed)?;
+                env_variables.0.insert(env_var.name.clone(), value);
+            }
         }
     }
 
     Ok(env_variables)
+}
+
+/// Returns (profile_name, api_key, tenant_id) if user is logged in and app requests CHROMA_API_KEY
+fn get_cloud_creds_if_available(app_config: &SampleAppConfig) -> Option<(String, String, String)> {
+    if !app_requests_env(app_config, CHROMA_API_KEY_ENV_VAR) {
+        return None;
+    }
+
+    match get_current_profile() {
+        Ok((profile_name, profile)) => Some((profile_name, profile.api_key, profile.tenant_id)),
+        Err(_) => None,
+    }
 }
 
 fn display_run_instructions(app_config: SampleAppConfig) {
@@ -513,6 +579,7 @@ async fn install_sample_app(args: InstallArgs) -> Result<(), CliError> {
         read_app_config(app_name.as_str()).map_err(|_| InstallError::AppConfigReadFailed)?;
 
     let env_variables = get_app_env_variables(&app_config)?;
+
     write_env_file(env_variables, format!("./{}/.env", app_name))
         .map_err(|_| InstallError::EnvFileWriteFailed)?;
 
