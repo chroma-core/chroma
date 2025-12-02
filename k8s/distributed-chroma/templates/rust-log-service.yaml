@@ -62,7 +62,7 @@ spec:
         - name: rust-log-service-cache-{{ add $i 1 }}
           hostPath:
             path: {{ $cache.hostPath }}
-            type: {{ .Values.rustLogService.cache.type }}
+            type: {{ $.Values.rustLogService.cache.type }}
         {{- end }}
       containers:
         - name: rust-log-service

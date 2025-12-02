@@ -45,7 +45,7 @@ spec:
         - name: compaction-service-cache-{{ add $i 1 }}
           hostPath:
             path: {{ $cache.hostPath }}
-            type: {{ .Values.compactionService.cache.type }}
+            type: {{ $.Values.compactionService.cache.type }}
         {{- end }}
       containers:
         - name: compaction-service
