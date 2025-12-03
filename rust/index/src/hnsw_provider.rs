@@ -60,7 +60,7 @@ pub struct HnswIndexProvider {
     // TODO(tanujnay112): This feature flag is a temporary measure to gate
     // the hnsw loading from memory feature. Remove this after that feature
     // stabilizes.
-    use_direct_hnsw: bool,
+    pub use_direct_hnsw: bool,
 }
 
 pub struct HnswIndexFlusher {
