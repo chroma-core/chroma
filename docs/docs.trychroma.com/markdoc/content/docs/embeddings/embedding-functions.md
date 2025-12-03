@@ -245,6 +245,7 @@ You can create your own embedding function to use with Chroma; it just needs to 
 {% Tab label="python" %}
 
 ```python
+from typing import Dict, Any
 from chromadb import Documents, EmbeddingFunction, Embeddings
 from chromadb.utils.embedding_functions import register_embedding_function
 
