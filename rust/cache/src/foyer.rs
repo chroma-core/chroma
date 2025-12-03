@@ -81,11 +81,15 @@ const fn default_trace_get_us() -> usize {
     1000 * 100
 }
 
+const fn default_trace_obtain_us() -> usize {
+    1000 * 100
+}
+
 const fn default_trace_remove_us() -> usize {
     1000 * 100
 }
 
-const fn default_trace_get_or_fetch_us() -> usize {
+const fn default_trace_fetch_us() -> usize {
     1000 * 100
 }
 
@@ -324,6 +328,11 @@ pub struct FoyerCacheConfig {
     #[serde(default = "default_trace_get_us")]
     pub trace_get_us: usize,
 
+    /// Record obtain trace threshold. Only effective with "mtrace" feature.
+    #[arg(long, default_value_t = 1000 * 100)]
+    #[serde(default = "default_trace_obtain_us")]
+    pub trace_obtain_us: usize,
+
     /// Record remove trace threshold. Only effective with "mtrace" feature.
     #[arg(long, default_value_t = 1000 * 100)]
     #[serde(default = "default_trace_remove_us")]
@@ -331,8 +340,8 @@ pub struct FoyerCacheConfig {
 
     /// Record fetch trace threshold. Only effective with "mtrace" feature.
     #[arg(long, default_value_t = 1000 * 100)]
-    #[serde(default = "default_trace_get_or_fetch_us")]
-    pub trace_get_or_fetch_us: usize,
+    #[serde(default = "default_trace_fetch_us")]
+    pub trace_fetch_us: usize,
 }
 
 impl FoyerCacheConfig {
@@ -424,8 +433,9 @@ impl Default for FoyerCacheConfig {
             invalid_ratio: default_invalid_ratio(),
             trace_insert_us: default_trace_insert_us(),
             trace_get_us: default_trace_get_us(),
+            trace_obtain_us: default_trace_obtain_us(),
             trace_remove_us: default_trace_remove_us(),
-            trace_get_or_fetch_us: default_trace_get_or_fetch_us(),
+            trace_fetch_us: default_trace_fetch_us(),
             buffer_pool: default_buffer_pool_size(),
         }
     }
@@ -470,10 +480,9 @@ where
         let tracing_options = TracingOptions::new()
             .with_record_hybrid_insert_threshold(Duration::from_micros(config.trace_insert_us as _))
             .with_record_hybrid_get_threshold(Duration::from_micros(config.trace_get_us as _))
+            .with_record_hybrid_obtain_threshold(Duration::from_micros(config.trace_obtain_us as _))
             .with_record_hybrid_remove_threshold(Duration::from_micros(config.trace_remove_us as _))
-            .with_record_hybrid_get_or_fetch_threshold(Duration::from_micros(
-                config.trace_get_or_fetch_us as _,
-            ));
+            .with_record_hybrid_fetch_threshold(Duration::from_micros(config.trace_fetch_us as _));
 
         let otel_0_27_metrics = Box::new(
             mixtrics::registry::opentelemetry_0_27::OpenTelemetryMetricsRegistry::new(
@@ -648,7 +657,7 @@ where
     async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
         let hostname = &[self.hostname.clone()];
         let _stopwatch = Stopwatch::new(&self.obtain_latency, hostname, StopWatchUnit::Millis);
-        let res = self.cache.get(&key).await?.map(|v| v.value().clone());
+        let res = self.cache.obtain(key).await?.map(|v| v.value().clone());
         if res.is_some() {
             self.cache_hit.add(1, hostname);
         } else {
