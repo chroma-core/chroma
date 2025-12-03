@@ -747,7 +747,6 @@ mod test {
             .to_string();
         let cache = FoyerCacheConfig {
             dir: Some(dir.clone()),
-            flush: true,
             ..Default::default()
         }
         .build_hybrid::<String, String>()
