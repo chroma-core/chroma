@@ -246,11 +246,28 @@ You can create your own embedding function to use with Chroma; it just needs to 
 
 ```python
 from chromadb import Documents, EmbeddingFunction, Embeddings
+from chromadb.utils.embedding_functions import register_embedding_function
 
+@register_embedding_function
 class MyEmbeddingFunction(EmbeddingFunction):
+
+    def __init__(self):
+        pass
+
     def __call__(self, input: Documents) -> Embeddings:
         # embed the documents somehow
         return embeddings
+
+    @staticmethod
+    def name() -> str:
+        return "my-ef"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {}
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction":
+        return MyEmbeddingFunction()
 ```
 
 {% /Tab %}
