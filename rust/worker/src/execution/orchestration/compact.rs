@@ -130,6 +130,7 @@ pub struct CompactionContext {
     pub max_compaction_size: usize,
     pub max_partition_size: usize,
     pub hnsw_index_uuids: HashSet<IndexUuid>, // TODO(tanujnay112): Remove after direct hnsw is solidified
+    pub is_function_disabled: bool,
     #[cfg(test)]
     pub poison_offset: Option<u32>,
 }
@@ -151,6 +152,7 @@ impl Clone for CompactionContext {
             max_compaction_size: self.max_compaction_size,
             max_partition_size: self.max_partition_size,
             hnsw_index_uuids: self.hnsw_index_uuids.clone(),
+            is_function_disabled: self.is_function_disabled,
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -176,6 +178,7 @@ impl CompactionContext {
             max_compaction_size: self.max_compaction_size,
             max_partition_size: self.max_partition_size,
             hnsw_index_uuids: self.hnsw_index_uuids.clone(),
+            is_function_disabled: self.is_function_disabled,
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -276,6 +279,7 @@ impl CompactionContext {
         hnsw_provider: HnswIndexProvider,
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
+        is_function_disabled: bool,
     ) -> Self {
         let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
         CompactionContext {
@@ -292,6 +296,7 @@ impl CompactionContext {
             dispatcher,
             orchestrator_context,
             hnsw_index_uuids: HashSet::new(),
+            is_function_disabled,
             #[cfg(test)]
             poison_offset: None,
         }
@@ -737,34 +742,44 @@ impl CompactionContext {
                 });
             }
             LogFetchOrchestratorResponse::RequireFunctionBackfill(backfill) => {
-                // Try to run backfill workflow
-                let fn_result =
-                    Box::pin(self.run_backfill_attached_function_workflow(system.clone())).await?;
+                // Skip backfill workflow if function is disabled for this collection
+                if self.is_function_disabled {
+                    tracing::info!(
+                        collection_id = %collection_id,
+                        "Skipping function backfill workflow for disabled collection"
+                    );
+                    (backfill.materialized, backfill.collection_info)
+                } else {
+                    // Try to run backfill workflow
+                    let fn_result =
+                        Box::pin(self.run_backfill_attached_function_workflow(system.clone()))
+                            .await?;
 
-                match fn_result {
-                    BackfillResult::BackfillCompleted {
-                        function_context,
-                        collection_register_info,
-                    } => {
-                        // Backfill was needed and completed - register and return
-                        let results = vec![collection_register_info];
-                        Box::pin(self.run_register(
-                            results,
-                            Some(function_context),
-                            system.clone(),
-                        ))
-                        .await?;
+                    match fn_result {
+                        BackfillResult::BackfillCompleted {
+                            function_context,
+                            collection_register_info,
+                        } => {
+                            // Backfill was needed and completed - register and return
+                            let results = vec![collection_register_info];
+                            Box::pin(self.run_register(
+                                results,
+                                Some(function_context),
+                                system.clone(),
+                            ))
+                            .await?;
 
-                        // TODO(tanujnay112): Should we look into just doing the rest of the compaction workflow
-                        // instead of exiting here?
+                            // TODO(tanujnay112): Should we look into just doing the rest of the compaction workflow
+                            // instead of exiting here?
 
-                        return Ok(CompactionResponse::Success {
-                            job_id: collection_id.into(),
-                        });
-                    }
-                    BackfillResult::NoBackfillRequired => {
-                        // No backfill was needed - reuse the already-fetched logs
-                        (backfill.materialized, backfill.collection_info)
+                            return Ok(CompactionResponse::Success {
+                                job_id: collection_id.into(),
+                            });
+                        }
+                        BackfillResult::NoBackfillRequired => {
+                            // No backfill was needed - reuse the already-fetched logs
+                            (backfill.materialized, backfill.collection_info)
+                        }
                     }
                 }
             }
@@ -782,13 +797,19 @@ impl CompactionContext {
         // 1. Attached function execution + apply output to output collection
         // 2. Apply input logs to input collection
         // Box the futures to avoid stack overflow with large state machines
+        let is_function_disabled = self.is_function_disabled;
         let fn_future = async move {
-            Box::pin(self_clone_fn.run_attached_function_workflow(
-                log_fetch_records_clone,
-                system_clone_fn,
-                false,
-            ))
-            .await
+            if is_function_disabled {
+                tracing::info!("Skipping attached function workflow for disabled collection");
+                Ok(None)
+            } else {
+                Box::pin(self_clone_fn.run_attached_function_workflow(
+                    log_fetch_records_clone,
+                    system_clone_fn,
+                    false,
+                ))
+                .await
+            }
         };
 
         let compact_future = Box::pin(async move {
@@ -875,6 +896,7 @@ pub async fn compact(
     hnsw_index_provider: HnswIndexProvider,
     spann_provider: SpannProvider,
     dispatcher: ComponentHandle<Dispatcher>,
+    is_function_disabled: bool,
     #[cfg(test)] poison_offset: Option<u32>,
 ) -> Result<CompactionResponse, CompactionError> {
     let mut compaction_context = CompactionContext::new(
@@ -888,6 +910,7 @@ pub async fn compact(
         hnsw_index_provider.clone(),
         spann_provider.clone(),
         dispatcher.clone(),
+        is_function_disabled,
     );
 
     #[cfg(test)]
@@ -1058,6 +1081,7 @@ mod tests {
             test_segments.hnsw_provider.clone(),
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
+            false,
             None,
         ))
         .await;
@@ -1133,6 +1157,7 @@ mod tests {
             test_segments.hnsw_provider.clone(),
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
+            false,
             None,
         ))
         .await;
@@ -1236,6 +1261,7 @@ mod tests {
             test_segments.hnsw_provider.clone(),
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
+            false,
             None,
         ))
         .await;
@@ -1408,6 +1434,7 @@ mod tests {
             hnsw_provider.clone(),
             spann_provider.clone(),
             dispatcher_handle.clone(),
+            false,
             None,
         ))
         .await;
@@ -1594,6 +1621,7 @@ mod tests {
             hnsw_provider.clone(),
             spann_provider.clone(),
             dispatcher_handle.clone(),
+            false,
             Some(2), // The apply operator processing this offset will fail.
         ))
         .await;
@@ -1782,6 +1810,7 @@ mod tests {
             hnsw_provider.clone(),
             spann_provider.clone(),
             dispatcher_handle.clone(),
+            false,
             None,
         ))
         .await;
@@ -1815,6 +1844,7 @@ mod tests {
             hnsw_provider.clone(),
             spann_provider.clone(),
             dispatcher_handle.clone(),
+            false,
             None,
         ))
         .await;
@@ -2036,6 +2066,7 @@ mod tests {
             hnsw_provider.clone(),
             spann_provider.clone(),
             dispatcher_handle.clone(),
+            false,
             None,
         ))
         .await;
@@ -2242,6 +2273,7 @@ mod tests {
             hnsw_provider.clone(),
             spann_provider.clone(),
             dispatcher_handle.clone(),
+            false,
             None,
         ))
         .await;
@@ -2325,6 +2357,7 @@ mod tests {
             hnsw_provider.clone(),
             spann_provider.clone(),
             dispatcher_handle.clone(),
+            false,
             None,
         ))
         .await;
@@ -2570,6 +2603,7 @@ mod tests {
             hnsw_provider.clone(),
             spann_provider.clone(),
             dispatcher_handle.clone(),
+            false,
         );
 
         // Start compaction 1's log_fetch_orchestrator
@@ -2613,6 +2647,7 @@ mod tests {
             hnsw_provider.clone(),
             spann_provider.clone(),
             dispatcher_handle.clone(),
+            false,
         );
 
         // Now start compaction 2 and let it run completely using the compact() function
@@ -2630,6 +2665,7 @@ mod tests {
             hnsw_provider.clone(),
             spann_provider.clone(),
             dispatcher_handle.clone(),
+            false,
             None,
         ));
 
@@ -2710,5 +2746,429 @@ mod tests {
                 panic!("Expected hnsw purge to be successful")
             }
         }
+    }
+
+    /// Test that rebuilding a collection also rebuilds its attached function's output collection.
+    /// This test requires a running Tilt environment with GRPC sysdb.
+    ///
+    /// Steps:
+    /// 1. Create collection with 10 records (6 red, 4 blue) and attach statistics function
+    /// 2. First compaction (is_function_disabled=false) - function runs, completion_offset=9
+    /// 3. Add 5 more records (green)
+    /// 4. Second compaction (is_function_disabled=true) - function skipped, completion_offset stays 9
+    /// 5. Rebuild (is_rebuild=true) - function catches up on all 15 records
+    /// 6. Verify statistics: red=6, blue=4, green=5, total=15
+    #[tokio::test]
+    async fn test_k8s_integration_rebuild_with_attached_function() {
+        use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
+        use chroma_segment::blockfile_record::RecordSegmentReader;
+        use chroma_types::{CollectionUuid, Operation, OperationRecord, UpdateMetadataValue};
+
+        // Setup test environment
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        // Connect to Grpc SysDb (requires Tilt running)
+        let grpc_sysdb = chroma_sysdb::GrpcSysDb::try_from_config(
+            &chroma_sysdb::GrpcSysDbConfig {
+                host: "localhost".to_string(),
+                port: 50051,
+                connect_timeout_ms: 5000,
+                request_timeout_ms: 10000,
+                num_channels: 4,
+            },
+            &registry,
+        )
+        .await
+        .expect("Should connect to grpc sysdb");
+        let mut sysdb = SysDb::Grpc(grpc_sysdb);
+
+        let test_segments = TestDistributedSegment::new().await;
+        let mut in_memory_log = InMemoryLog::new();
+
+        // Create input collection
+        let collection_name = format!("test_rebuild_fn_{}", uuid::Uuid::new_v4());
+        let collection_id = CollectionUuid::new();
+
+        sysdb
+            .create_collection(
+                test_segments.collection.tenant.clone(),
+                test_segments.collection.database.clone(),
+                collection_id,
+                collection_name,
+                vec![
+                    test_segments.record_segment.clone(),
+                    test_segments.metadata_segment.clone(),
+                    test_segments.vector_segment.clone(),
+                ],
+                None,
+                None,
+                None,
+                test_segments.collection.dimension,
+                false,
+            )
+            .await
+            .expect("Collection create should be successful");
+
+        let tenant = "default_tenant".to_string();
+        let db = "default_database".to_string();
+
+        // Set initial log position
+        sysdb
+            .flush_compaction(
+                tenant.clone(),
+                collection_id,
+                -1,
+                0,
+                std::sync::Arc::new([]),
+                0,
+                0,
+                None,
+            )
+            .await
+            .expect("Should be able to update log_position");
+
+        // Add 10 records with metadata
+        for i in 0..10 {
+            let mut metadata = HashMap::new();
+            let color = if i < 6 { "red" } else { "blue" };
+            metadata.insert(
+                "color".to_string(),
+                UpdateMetadataValue::Str(color.to_string()),
+            );
+
+            let log_record = chroma_types::LogRecord {
+                log_offset: i as i64,
+                record: OperationRecord {
+                    id: format!("record_{}", i),
+                    embedding: Some(vec![
+                        0.0;
+                        test_segments.collection.dimension.unwrap_or(384)
+                            as usize
+                    ]),
+                    encoding: None,
+                    metadata: Some(metadata),
+                    document: Some(format!("doc {}", i)),
+                    operation: Operation::Upsert,
+                },
+            };
+
+            in_memory_log.add_log(
+                collection_id,
+                InternalLogRecord {
+                    collection_id,
+                    log_offset: i as i64,
+                    log_ts: i as i64,
+                    record: log_record,
+                },
+            );
+        }
+
+        let log = Log::InMemory(in_memory_log);
+        let test_run_id = uuid::Uuid::new_v4();
+        let attached_function_name = format!("test_rebuild_fn_{}", test_run_id);
+        let output_collection_name = format!("test_rebuild_output_{}", test_run_id);
+
+        // Create statistics attached function via sysdb
+        let attached_function_id = sysdb
+            .create_attached_function(
+                attached_function_name.clone(),
+                "statistics".to_string(),
+                collection_id,
+                output_collection_name.clone(),
+                serde_json::Value::Null,
+                tenant.clone(),
+                db.clone(),
+                10, // dimension
+            )
+            .await
+            .expect("Attached function creation should succeed");
+        sysdb
+            .finish_create_attached_function(attached_function_id)
+            .await
+            .expect("Attached function creation finish should succeed");
+
+        // First compaction - populates both input and output collections
+        println!("Starting first compaction...");
+        Box::pin(compact(
+            system.clone(),
+            collection_id,
+            false, // not a rebuild
+            50,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+        ))
+        .await
+        .expect("First compaction should succeed");
+        println!("First compaction completed");
+
+        // Verify the attached function was executed
+        let attached_function_after_compact = sysdb
+            .get_attached_function_by_name(collection_id, attached_function_name.clone())
+            .await
+            .expect("Attached function should be found");
+        assert_eq!(
+            attached_function_after_compact.completion_offset, 9,
+            "Completion offset should be 9 after processing 10 records (0-9)"
+        );
+
+        let output_collection_id = attached_function_after_compact
+            .output_collection_id
+            .expect("Output collection should exist");
+
+        // Add 5 more records (10-14) with color="green"
+        let mut log = log; // Make log mutable
+        if let Log::InMemory(ref mut in_memory_log) = log {
+            for i in 10..15 {
+                let mut metadata = HashMap::new();
+                metadata.insert(
+                    "color".to_string(),
+                    UpdateMetadataValue::Str("green".to_string()),
+                );
+
+                let log_record = chroma_types::LogRecord {
+                    log_offset: i as i64,
+                    record: OperationRecord {
+                        id: format!("record_{}", i),
+                        embedding: Some(vec![
+                            0.0;
+                            test_segments.collection.dimension.unwrap_or(384)
+                                as usize
+                        ]),
+                        encoding: None,
+                        metadata: Some(metadata),
+                        document: Some(format!("doc {}", i)),
+                        operation: Operation::Upsert,
+                    },
+                };
+
+                in_memory_log.add_log(
+                    collection_id,
+                    InternalLogRecord {
+                        collection_id,
+                        log_offset: i as i64,
+                        log_ts: i as i64,
+                        record: log_record,
+                    },
+                );
+            }
+        }
+        println!("Added 5 more records (10-14) with color=green");
+
+        // Second compaction with is_function_disabled=true - function should NOT run
+        println!("Starting second compaction with is_function_disabled=true...");
+        Box::pin(compact(
+            system.clone(),
+            collection_id,
+            false, // not a rebuild
+            50,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            true, // is_function_disabled = true
+            None,
+        ))
+        .await
+        .expect("Second compaction should succeed");
+        println!("Second compaction completed");
+
+        // Verify the attached function was NOT executed (completion_offset should still be 9)
+        let attached_function_after_disabled = sysdb
+            .get_attached_function_by_name(collection_id, attached_function_name.clone())
+            .await
+            .expect("Attached function should be found");
+        assert_eq!(
+            attached_function_after_disabled.completion_offset, 9,
+            "Completion offset should still be 9 - function was disabled"
+        );
+        println!(
+            "After disabled compaction: completion_offset={} (should be 9)",
+            attached_function_after_disabled.completion_offset
+        );
+
+        // Get output collection info before rebuild
+        let output_before_rebuild = sysdb
+            .get_collection_with_segments(output_collection_id)
+            .await
+            .expect("Should get output collection before rebuild");
+        let output_version_before = output_before_rebuild.collection.version;
+        let output_file_path_before = output_before_rebuild.record_segment.file_path.clone();
+
+        println!(
+            "Before rebuild: output_version={}, output_file_path={:?}",
+            output_version_before, output_file_path_before
+        );
+
+        // Now REBUILD the input collection - function should catch up on ALL records
+        println!("Starting rebuild of input collection (function should catch up)...");
+        Box::pin(compact(
+            system.clone(),
+            collection_id,
+            true, // is_rebuild = true
+            5000,
+            10000,
+            1000,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false, // is_function_disabled = false for rebuild
+            None,
+        ))
+        .await
+        .expect("Rebuild should succeed");
+        println!("Rebuild completed");
+
+        // Verify the input collection was rebuilt (version incremented)
+        let input_after_rebuild = sysdb
+            .get_collection_with_segments(collection_id)
+            .await
+            .expect("Should get input collection after rebuild");
+        println!(
+            "After rebuild: input_version={}",
+            input_after_rebuild.collection.version
+        );
+        assert!(
+            input_after_rebuild.collection.version > 1,
+            "Input collection version should be incremented after rebuild"
+        );
+
+        // Verify the output collection was also rebuilt
+        let output_after_rebuild = sysdb
+            .get_collection_with_segments(output_collection_id)
+            .await
+            .expect("Should get output collection after rebuild");
+
+        println!(
+            "After rebuild: output_version={}, output_file_path={:?}",
+            output_after_rebuild.collection.version, output_after_rebuild.record_segment.file_path
+        );
+
+        // Check if output collection was actually rebuilt
+        if output_after_rebuild.collection.version == output_version_before {
+            println!("WARNING: Output collection version did NOT change - attached function may not have run during rebuild!");
+        }
+
+        assert!(
+            output_after_rebuild.collection.version > output_version_before,
+            "Output collection version should be incremented after rebuild. Before: {}, After: {}",
+            output_version_before,
+            output_after_rebuild.collection.version
+        );
+
+        // Verify the output collection has new file paths (was actually rebuilt)
+        assert_ne!(
+            output_after_rebuild.record_segment.file_path, output_file_path_before,
+            "Output collection record segment file path should change after rebuild"
+        );
+
+        // Verify the output collection has the correct statistics data (not doubled!)
+        // If record_reader is incorrectly passed during rebuild, the statistics would
+        // accumulate instead of being recomputed from scratch.
+        let reader = Box::pin(RecordSegmentReader::from_segment(
+            &output_after_rebuild.record_segment,
+            &test_segments.blockfile_provider,
+        ))
+        .await
+        .expect("Should create reader for output collection");
+
+        let max_offset_id = reader.get_max_offset_id();
+        assert!(
+            max_offset_id > 0,
+            "Output collection should have records after rebuild"
+        );
+
+        // Read the statistics and verify counts are correct (not doubled)
+        use futures::stream::StreamExt;
+        let mut stream = reader.get_data_stream(0..=max_offset_id).await;
+        let mut stats_by_key_value: HashMap<(String, String), i64> = HashMap::new();
+
+        while let Some(result) = stream.next().await {
+            let (_, record) = result.expect("Should read record");
+            let metadata = record
+                .metadata
+                .expect("Statistics records should have metadata");
+
+            let key = match metadata.get("key") {
+                Some(chroma_types::MetadataValue::Str(k)) => k.clone(),
+                _ => continue,
+            };
+            let value = match metadata.get("value") {
+                Some(chroma_types::MetadataValue::Str(v)) => v.clone(),
+                _ => continue,
+            };
+            let count = match metadata.get("count") {
+                Some(chroma_types::MetadataValue::Int(c)) => *c,
+                _ => continue,
+            };
+
+            stats_by_key_value.insert((key, value), count);
+        }
+
+        // After rebuild, statistics should include ALL 15 records:
+        // - 6 records with color="red" (from first compaction)
+        // - 4 records with color="blue" (from first compaction)
+        // - 5 records with color="green" (added after first compaction, skipped by disabled second compaction)
+        // The rebuild should catch up on the green records that were missed.
+        let red_count = stats_by_key_value.get(&("color".to_string(), "red".to_string()));
+        let blue_count = stats_by_key_value.get(&("color".to_string(), "blue".to_string()));
+        let green_count = stats_by_key_value.get(&("color".to_string(), "green".to_string()));
+        println!(
+            "Statistics after rebuild: red={:?}, blue={:?}, green={:?}, all_stats={:?}",
+            red_count, blue_count, green_count, stats_by_key_value
+        );
+
+        assert_eq!(red_count, Some(&6), "Should have 6 records with color=red");
+        assert_eq!(
+            blue_count,
+            Some(&4),
+            "Should have 4 records with color=blue"
+        );
+        assert_eq!(
+            green_count,
+            Some(&5),
+            "Should have 5 records with color=green (caught up during rebuild)"
+        );
+
+        // Verify total_count includes all 15 records
+        let total_count =
+            stats_by_key_value.get(&("summary".to_string(), "total_count".to_string()));
+        assert_eq!(
+            total_count,
+            Some(&15),
+            "Total count should be 15 (all records processed during rebuild)"
+        );
+
+        tracing::info!(
+            "Rebuild with attached function test completed successfully. \
+            Input collection version: {}, Output collection version: {}, \
+            Statistics: red={:?}, blue={:?}, green={:?}, total={:?}",
+            input_after_rebuild.collection.version,
+            output_after_rebuild.collection.version,
+            red_count,
+            blue_count,
+            green_count,
+            total_count
+        );
     }
 }

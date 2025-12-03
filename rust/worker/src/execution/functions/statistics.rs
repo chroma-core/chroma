@@ -1343,6 +1343,7 @@ mod tests {
             test_segments.hnsw_provider.clone(),
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
+            false,
             None,
         ))
         .await

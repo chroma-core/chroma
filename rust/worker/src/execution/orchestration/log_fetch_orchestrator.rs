@@ -301,6 +301,7 @@ impl LogFetchOrchestrator {
             hnsw_provider,
             spann_provider,
             dispatcher.clone(),
+            false, // LogFetchOrchestrator doesn't need is_function_disabled
         );
         LogFetchOrchestrator {
             collection_id,
