@@ -2,11 +2,11 @@
 
 use clap::Parser;
 
-use chroma_cache::{CacheConfig, DiskFieldValue, FoyerCacheConfig};
+use chroma_cache::{CacheConfig, FoyerCacheConfig};
 
 fn main() {
     let mut config = FoyerCacheConfig::parse();
-    config.disk = DiskFieldValue::MultiDisk(vec![]);
+    config.dir = None;
     let out = serde_yaml::to_string(&CacheConfig::Memory(config)).unwrap();
     print!("{out}");
 }
