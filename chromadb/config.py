@@ -1,6 +1,7 @@
 import importlib
 import inspect
 import logging
+import platform
 from abc import ABC
 from enum import Enum
 from graphlib import TopologicalSorter
@@ -125,7 +126,13 @@ class Settings(BaseSettings):  # type: ignore
     environment: str = ""
 
     # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI" or "chromadb.api.rust.RustBindingsAPI"
-    chroma_api_impl: str = "chromadb.api.rust.RustBindingsAPI"
+    # On Windows, Rust bindings have a bug that causes collection.add() to hang indefinitely
+    # See: https://github.com/chroma-core/chroma/issues/5937
+    chroma_api_impl: str = (
+        "chromadb.api.segment.SegmentAPI"
+        if platform.system() == "Windows"
+        else "chromadb.api.rust.RustBindingsAPI"
+    )
 
     @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
     def empty_str_to_none(cls, v: str) -> Optional[str]:
