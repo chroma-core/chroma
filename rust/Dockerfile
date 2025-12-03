@@ -13,7 +13,7 @@ RUN if [ "$ADDRESS_SANITIZER" = "1" ]; then \
   rustup default nightly && \
   rustup target add x86_64-unknown-linux-gnu ; \
   fi
-ENV RUSTFLAGS="${ADDRESS_SANITIZER:+-Z sanitizer=address}"
+ENV RUSTFLAGS=${ADDRESS_SANITIZER:+'-Z sanitizer=address'}
 ENV CC_x86_64_unknown_linux_gnu=${ADDRESS_SANITIZER:+gcc}
 ENV CXX_x86_64_unknown_linux_gnu=${ADDRESS_SANITIZER:+g++}
 ENV AR_x86_64_unknown_linux_gnu=${ADDRESS_SANITIZER:+ar}
@@ -55,22 +55,13 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   else \
     echo "Building without AVX512 optimizations"; \
   fi && \
-  if [ "$RELEASE_MODE" = "1" ]; then cargo build --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES) --release; else cargo build --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES); fi && \
-  # Move CLI binary
-  if [ "$RELEASE_MODE" = "1" ]; then mv target/release/chroma ./chroma; else mv target/debug/chroma ./chroma; fi && \
-  # Move garbage collector binary
-  if [ "$RELEASE_MODE" = "1" ]; then mv target/release/garbage_collector_service ./garbage_collector_service; else mv target/debug/garbage_collector_service ./garbage_collector_service; fi && \
-  # Move load service binaries
-  if [ "$RELEASE_MODE" = "1" ]; then mv target/release/chroma-load ./chroma-load; else mv target/debug/chroma-load ./chroma-load; fi && \
-  # Move log service binary
-  if [ "$RELEASE_MODE" = "1" ]; then mv target/release/log_service ./log_service; else mv target/debug/log_service ./log_service; fi && \
-  # Move heap tender binary
-  if [ "$RELEASE_MODE" = "1" ]; then mv target/release/heap_tender_service ./heap_tender_service; else mv target/debug/heap_tender_service ./heap_tender_service; fi && \
-  # Move query service binary
-  if [ "$RELEASE_MODE" = "1" ]; then mv target/release/query_service ./query_service; else mv target/debug/query_service ./query_service; fi && \
-  # Move compaction service binary
-  if [ "$RELEASE_MODE" = "1" ]; then mv target/release/compaction_service ./compaction_service; else mv target/debug/compaction_service ./compaction_service; fi
-
+  build_target=$( [ "${ADDRESS_SANITIZER}" = "1" ] && echo '--target x86_64-unknown-linux-gnu' || echo '' ) && \
+  if [ "$RELEASE_MODE" = "1" ]; then cargo build ${build_target} --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES) --release; else cargo build --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES); fi && \
+  build_dir=$( [ "$RELEASE_MODE" = "1" ] && echo release || echo debug ) && \
+  build_dir=$( [ "${ADDRESS_SANITIZER}" = "1" ] && echo "x86_64-unknown-linux-gnu/${build_dir}" || echo "${build_dir}" ) && \
+  for bin in chroma garbage_collector_service chroma-load log_service heap_tender_service query_service compaction_service do \
+  mv "target/${build_dir}/${bin}" "./${bin}"; \
+  done
 
 FROM debian:stable-slim AS runner
 ARG ADDRESS_SANITIZER
