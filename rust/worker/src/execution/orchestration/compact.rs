@@ -834,6 +834,11 @@ impl CompactionContext {
     }
 
     pub(crate) async fn cleanup(self) {
+        if self.hnsw_provider.use_direct_hnsw {
+            return;
+        }
+
+        // TODO(tanujnay112): Remove when use_direct_hnsw is fully deprecated
         for hnsw_index_uuid in self.hnsw_index_uuids {
             let _ = HnswIndexProvider::purge_one_id(
                 self.hnsw_provider.temporary_storage_path.as_path(),
