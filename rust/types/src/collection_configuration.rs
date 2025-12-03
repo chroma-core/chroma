@@ -1079,4 +1079,365 @@ mod tests {
             ))
         );
     }
+
+    #[cfg(feature = "testing")]
+    mod proptests {
+        use super::*;
+        use crate::hnsw_configuration::Space;
+        use crate::strategies::{
+            embedding_function_strategy, internal_collection_configuration_strategy,
+            internal_hnsw_configuration_strategy, internal_spann_configuration_strategy,
+            knn_index_strategy,
+        };
+        use crate::{HnswConfiguration, MetadataValue, SpannConfiguration};
+        use proptest::prelude::*;
+        use proptest::test_runner::TestCaseError;
+
+        fn space_to_metadata_str(space: &Space) -> &'static str {
+            match space {
+                Space::L2 => "l2",
+                Space::Cosine => "cosine",
+                Space::Ip => "ip",
+            }
+        }
+
+        fn metadata_from_hnsw_config(config: &InternalHnswConfiguration) -> Metadata {
+            let mut metadata = Metadata::new();
+            metadata.insert(
+                "hnsw:space".to_string(),
+                MetadataValue::Str(space_to_metadata_str(&config.space).to_string()),
+            );
+            metadata.insert(
+                "hnsw:construction_ef".to_string(),
+                MetadataValue::Int(config.ef_construction as i64),
+            );
+            metadata.insert(
+                "hnsw:search_ef".to_string(),
+                MetadataValue::Int(config.ef_search as i64),
+            );
+            metadata.insert(
+                "hnsw:M".to_string(),
+                MetadataValue::Int(config.max_neighbors as i64),
+            );
+            metadata.insert(
+                "hnsw:num_threads".to_string(),
+                MetadataValue::Int(config.num_threads as i64),
+            );
+            metadata.insert(
+                "hnsw:resize_factor".to_string(),
+                MetadataValue::Float(config.resize_factor),
+            );
+            metadata.insert(
+                "hnsw:sync_threshold".to_string(),
+                MetadataValue::Int(config.sync_threshold as i64),
+            );
+            metadata.insert(
+                "hnsw:batch_size".to_string(),
+                MetadataValue::Int(config.batch_size as i64),
+            );
+            metadata
+        }
+
+        fn metadata_hnsw_strategy() -> impl Strategy<Value = (InternalHnswConfiguration, Metadata)>
+        {
+            internal_hnsw_configuration_strategy().prop_map(|config| {
+                let metadata = metadata_from_hnsw_config(&config);
+                (config, metadata)
+            })
+        }
+
+        fn assert_spann_is_default_with_space(
+            config: &InternalSpannConfiguration,
+            expected_space: Space,
+        ) -> Result<(), TestCaseError> {
+            let default_config = InternalSpannConfiguration {
+                space: expected_space,
+                ..InternalSpannConfiguration::default()
+            };
+            prop_assert_eq!(config, &default_config);
+            Ok(())
+        }
+
+        fn assert_hnsw_is_default_with_space(
+            config: &InternalHnswConfiguration,
+            expected_space: Space,
+        ) -> Result<(), TestCaseError> {
+            let default_config = InternalHnswConfiguration {
+                space: expected_space,
+                ..InternalHnswConfiguration::default()
+            };
+            prop_assert_eq!(config, &default_config);
+            Ok(())
+        }
+
+        proptest! {
+            #[test]
+            fn try_from_config_roundtrip_internal(
+                internal_config in internal_collection_configuration_strategy()
+            ) {
+                let collection_config: CollectionConfiguration = internal_config.clone().into();
+                let default_knn = match &internal_config.vector_index {
+                    VectorIndexConfiguration::Hnsw(_) => KnnIndex::Hnsw,
+                    VectorIndexConfiguration::Spann(_) => KnnIndex::Spann,
+                };
+
+                let result = InternalCollectionConfiguration::try_from_config(
+                    collection_config.clone(),
+                    default_knn,
+                    None,
+                )
+                .expect("conversion should succeed");
+
+                let embedding_function = internal_config.embedding_function.clone();
+                let expected_vector_index = match &internal_config.vector_index {
+                    VectorIndexConfiguration::Hnsw(original) => {
+                        let external: HnswConfiguration = original.clone().into();
+                        let expected_internal: InternalHnswConfiguration = external.clone().into();
+                        match &result.vector_index {
+                            VectorIndexConfiguration::Hnsw(converted) => {
+                                prop_assert_eq!(converted, &expected_internal);
+                            }
+                            _ => prop_assert!(false, "expected HNSW configuration"),
+                        }
+                        VectorIndexConfiguration::Hnsw(expected_internal)
+                    }
+                    VectorIndexConfiguration::Spann(original) => {
+                        let external: SpannConfiguration = original.clone().into();
+                        let expected_internal: InternalSpannConfiguration = external.clone().into();
+                        match &result.vector_index {
+                            VectorIndexConfiguration::Spann(converted) => {
+                                prop_assert_eq!(converted, &expected_internal);
+                            }
+                            _ => prop_assert!(false, "expected SPANN configuration"),
+                        }
+                        VectorIndexConfiguration::Spann(expected_internal)
+                    }
+                };
+
+                prop_assert_eq!(
+                    result.embedding_function.clone(),
+                    embedding_function.clone()
+                );
+                let expected = InternalCollectionConfiguration {
+                    vector_index: expected_vector_index,
+                    embedding_function: embedding_function.clone(),
+                };
+                prop_assert_eq!(result, expected);
+
+                let opposite_knn = match &internal_config.vector_index {
+                    VectorIndexConfiguration::Hnsw(_) => KnnIndex::Spann,
+                    VectorIndexConfiguration::Spann(_) => KnnIndex::Hnsw,
+                };
+                let opposite_result = InternalCollectionConfiguration::try_from_config(
+                    collection_config,
+                    opposite_knn,
+                    None,
+                )
+                .expect("conversion for opposite default should succeed");
+
+                prop_assert_eq!(
+                    opposite_result.embedding_function.clone(),
+                    internal_config.embedding_function.clone()
+                );
+
+                match (&internal_config.vector_index, &opposite_result.vector_index) {
+                    (VectorIndexConfiguration::Hnsw(original), VectorIndexConfiguration::Spann(spann)) => {
+                        let expected_space = original.space.clone();
+                        assert_spann_is_default_with_space(spann, expected_space)?;
+                    }
+                    (VectorIndexConfiguration::Spann(original), VectorIndexConfiguration::Hnsw(hnsw)) => {
+                        let expected_space = original.space.clone();
+                        assert_hnsw_is_default_with_space(hnsw, expected_space)?;
+                    }
+                    _ => prop_assert!(false, "unexpected opposite conversion result"),
+                }
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn try_from_config_uses_metadata_when_configs_absent(
+                (expected_hnsw, metadata) in metadata_hnsw_strategy(),
+                embedding in embedding_function_strategy(),
+                knn in knn_index_strategy(),
+            ) {
+                let collection_config = CollectionConfiguration {
+                    hnsw: None,
+                    spann: None,
+                    embedding_function: embedding.clone(),
+                };
+
+                let result = InternalCollectionConfiguration::try_from_config(
+                    collection_config,
+                    knn,
+                    Some(metadata.clone()),
+                )
+                .expect("conversion should succeed");
+
+                match (knn, &result.vector_index) {
+                    (KnnIndex::Hnsw, VectorIndexConfiguration::Hnsw(hnsw)) => {
+                        prop_assert_eq!(hnsw, &expected_hnsw);
+                    }
+                    (KnnIndex::Spann, VectorIndexConfiguration::Spann(spann)) => {
+                        prop_assert_eq!(spann.space.clone(), expected_hnsw.space.clone());
+                        assert_spann_is_default_with_space(spann, expected_hnsw.space.clone())?;
+                    }
+                    _ => prop_assert!(false, "unexpected vector index variant"),
+                }
+                prop_assert_eq!(result.embedding_function.clone(), embedding);
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn try_from_config_uses_metadata_when_hnsw_config_is_default_values(
+                (expected_hnsw, metadata) in metadata_hnsw_strategy(),
+                embedding in embedding_function_strategy(),
+            ) {
+                let collection_config = CollectionConfiguration {
+                    hnsw: Some(HnswConfiguration::default()),
+                    spann: None,
+                    embedding_function: embedding.clone(),
+                };
+
+                let result = InternalCollectionConfiguration::try_from_config(
+                    collection_config,
+                    KnnIndex::Hnsw,
+                    Some(metadata.clone()),
+                )
+                .expect("conversion should succeed");
+
+                match &result.vector_index {
+                    VectorIndexConfiguration::Hnsw(hnsw) => {
+                        prop_assert_eq!(hnsw, &expected_hnsw);
+                    }
+                    _ => prop_assert!(false, "expected hnsw configuration"),
+                }
+                prop_assert_eq!(result.embedding_function.clone(), embedding);
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn try_from_config_prefers_spann_when_default_is_spann(
+                hnsw_config in internal_hnsw_configuration_strategy(),
+                embedding in embedding_function_strategy(),
+            ) {
+                let embedding_clone = embedding.clone();
+                let collection_config = CollectionConfiguration {
+                    hnsw: Some(hnsw_config.clone().into()),
+                    spann: None,
+                    embedding_function: embedding,
+                };
+
+                let result = InternalCollectionConfiguration::try_from_config(
+                    collection_config,
+                    KnnIndex::Spann,
+                    None,
+                )
+                .expect("conversion should succeed");
+
+                let expected_space = hnsw_config.space.clone();
+                match &result.vector_index {
+                    VectorIndexConfiguration::Spann(spann) => {
+                        prop_assert_eq!(spann.space.clone(), expected_space.clone());
+                        assert_spann_is_default_with_space(spann, expected_space)?;
+                    }
+                    _ => prop_assert!(false, "expected spann configuration"),
+                }
+                prop_assert_eq!(result.embedding_function.clone(), embedding_clone);
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn try_from_config_prefers_hnsw_when_default_is_hnsw(
+                spann_config in internal_spann_configuration_strategy(),
+                embedding in embedding_function_strategy(),
+            ) {
+                let embedding_clone = embedding.clone();
+                let collection_config = CollectionConfiguration {
+                    hnsw: None,
+                    spann: Some(spann_config.clone().into()),
+                    embedding_function: embedding,
+                };
+
+                let result = InternalCollectionConfiguration::try_from_config(
+                    collection_config,
+                    KnnIndex::Hnsw,
+                    None,
+                )
+                .expect("conversion should succeed");
+
+                let expected_space = spann_config.space.clone();
+                match &result.vector_index {
+                    VectorIndexConfiguration::Hnsw(hnsw) => {
+                        prop_assert_eq!(hnsw.space.clone(), expected_space.clone());
+                        assert_hnsw_is_default_with_space(hnsw, expected_space)?;
+                    }
+                    _ => prop_assert!(false, "expected hnsw configuration"),
+                }
+                prop_assert_eq!(result.embedding_function.clone(), embedding_clone);
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn try_from_config_defaults_when_configs_absent(
+                embedding in embedding_function_strategy(),
+                knn in knn_index_strategy(),
+            ) {
+                let collection_config = CollectionConfiguration {
+                    hnsw: None,
+                    spann: None,
+                    embedding_function: embedding.clone(),
+                };
+
+                let result = InternalCollectionConfiguration::try_from_config(
+                    collection_config,
+                    knn,
+                    None,
+                )
+                .expect("conversion should succeed");
+
+                match (knn, &result.vector_index) {
+                    (KnnIndex::Hnsw, VectorIndexConfiguration::Hnsw(hnsw)) => {
+                        prop_assert_eq!(hnsw, &InternalHnswConfiguration::default());
+                    }
+                    (KnnIndex::Spann, VectorIndexConfiguration::Spann(spann)) => {
+                        prop_assert_eq!(spann, &InternalSpannConfiguration::default());
+                    }
+                    _ => prop_assert!(false, "unexpected vector index variant"),
+                }
+                prop_assert_eq!(result.embedding_function.clone(), embedding);
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn try_from_config_errors_on_multiple_configs(
+                hnsw_config in internal_hnsw_configuration_strategy(),
+                spann_config in internal_spann_configuration_strategy(),
+                embedding in embedding_function_strategy(),
+                knn in knn_index_strategy(),
+            ) {
+                let collection_config = CollectionConfiguration {
+                    hnsw: Some(hnsw_config.into()),
+                    spann: Some(spann_config.into()),
+                    embedding_function: embedding,
+                };
+
+                let result = InternalCollectionConfiguration::try_from_config(
+                    collection_config,
+                    knn,
+                    None,
+                );
+
+                prop_assert!(matches!(
+                    result,
+                    Err(CollectionConfigurationToInternalConfigurationError::MultipleVectorIndexConfigurations)
+                ));
+            }
+        }
+    }
 }
