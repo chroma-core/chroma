@@ -95,6 +95,8 @@ pub struct CompactorConfig {
     pub max_partition_size: usize,
     #[serde(default = "CompactorConfig::default_disabled_collections")]
     pub disabled_collections: Vec<String>,
+    #[serde(default = "CompactorConfig::default_disabled_function_collections")]
+    pub disabled_function_collections: Vec<String>,
     #[serde(default = "CompactorConfig::default_fetch_log_batch_size")]
     pub fetch_log_batch_size: u32,
     #[serde(default = "CompactorConfig::default_purge_dirty_log_timeout_seconds")]
@@ -138,6 +140,10 @@ impl CompactorConfig {
         vec![]
     }
 
+    fn default_disabled_function_collections() -> Vec<String> {
+        vec![]
+    }
+
     fn default_fetch_log_batch_size() -> u32 {
         100
     }
@@ -166,6 +172,7 @@ impl Default for CompactorConfig {
             max_compaction_size: CompactorConfig::default_max_compaction_size(),
             max_partition_size: CompactorConfig::default_max_partition_size(),
             disabled_collections: CompactorConfig::default_disabled_collections(),
+            disabled_function_collections: CompactorConfig::default_disabled_function_collections(),
             fetch_log_batch_size: CompactorConfig::default_fetch_log_batch_size(),
             purge_dirty_log_timeout_seconds:
                 CompactorConfig::default_purge_dirty_log_timeout_seconds(),

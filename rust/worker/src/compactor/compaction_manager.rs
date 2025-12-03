@@ -92,6 +92,7 @@ pub(crate) struct CompactionManagerContext {
     fetch_log_batch_size: u32,
     purge_dirty_log_timeout_seconds: u64,
     repair_log_offsets_timeout_seconds: u64,
+    disabled_function_collections: HashSet<CollectionUuid>,
 }
 
 pub(crate) struct CompactionManager {
@@ -107,12 +108,15 @@ pub(crate) struct CompactionManager {
 pub(crate) enum CompactionError {
     #[error("Failed to compact")]
     FailedToCompact,
+    #[error("Invalid collection UUID in config: {0}")]
+    InvalidCollectionUuid(String),
 }
 
 impl ChromaError for CompactionError {
     fn code(&self) -> ErrorCodes {
         match self {
             CompactionError::FailedToCompact => ErrorCodes::Internal,
+            CompactionError::InvalidCollectionUuid(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -137,6 +141,7 @@ impl CompactionManager {
         purge_dirty_log_timeout_seconds: u64,
         repair_log_offsets_timeout_seconds: u64,
         heap_service: Option<GrpcHeapService>,
+        disabled_function_collections: HashSet<CollectionUuid>,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
@@ -168,6 +173,7 @@ impl CompactionManager {
                 fetch_log_batch_size,
                 purge_dirty_log_timeout_seconds,
                 repair_log_offsets_timeout_seconds,
+                disabled_function_collections,
                 heap_service,
             },
             on_next_memberlist_signal: None,
@@ -365,6 +371,7 @@ impl CompactionManagerContext {
 
         // fetch data to compact -> execute_task/compact -> register
         // Use the compact function to handle the entire orchestration process
+        let is_function_disabled = self.disabled_function_collections.contains(&collection_id);
         let compact_result = Box::pin(compact(
             self.system.clone(),
             collection_id,
@@ -378,6 +385,7 @@ impl CompactionManagerContext {
             self.hnsw_index_provider.clone(),
             self.spann_provider.clone(),
             dispatcher.clone(),
+            is_function_disabled,
             #[cfg(test)]
             None,
         ))
@@ -440,7 +448,22 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let mut disabled_collections =
             HashSet::with_capacity(config.compactor.disabled_collections.len());
         for collection_id_str in &config.compactor.disabled_collections {
-            disabled_collections.insert(CollectionUuid(Uuid::from_str(collection_id_str).unwrap()));
+            let uuid = Uuid::from_str(collection_id_str).map_err(|_| {
+                Box::new(CompactionError::InvalidCollectionUuid(
+                    collection_id_str.clone(),
+                )) as Box<dyn ChromaError>
+            })?;
+            disabled_collections.insert(CollectionUuid(uuid));
+        }
+        let mut disabled_function_collections =
+            HashSet::with_capacity(config.compactor.disabled_function_collections.len());
+        for collection_id_str in &config.compactor.disabled_function_collections {
+            let uuid = Uuid::from_str(collection_id_str).map_err(|_| {
+                Box::new(CompactionError::InvalidCollectionUuid(
+                    collection_id_str.clone(),
+                )) as Box<dyn ChromaError>
+            })?;
+            disabled_function_collections.insert(CollectionUuid(uuid));
         }
 
         let assignment_policy_config = &config.assignment_policy;
@@ -527,6 +550,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             purge_dirty_log_timeout_seconds,
             repair_log_offsets_timeout_seconds,
             heap_service,
+            disabled_function_collections,
         )
     }
 }
@@ -1011,7 +1035,8 @@ mod tests {
             fetch_log_batch_size,
             purge_dirty_log_timeout_seconds,
             repair_log_offsets_timeout_seconds,
-            None, // heap_service not needed in tests
+            None,           // heap_service not needed in tests
+            HashSet::new(), // disabled_function_collections
         )
         .expect("Failed to create compaction manager in test");
 
