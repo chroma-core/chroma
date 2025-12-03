@@ -90,24 +90,39 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 
 	// ===== Step 1: Create attached function with is_ready = false =====
 	err := s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		// Double-check attached function doesn't exist (check both ready and not-ready)
-		concurrentAttachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAnyByName(req.InputCollectionId, req.Name)
+		// Check if there's any active (ready, non-deleted) attached function for this collection
+		// We only allow one active attached function per collection
+		existingAttachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetByCollectionID(req.InputCollectionId)
 		if err != nil {
-			log.Error("AttachFunction: failed to double-check attached function", zap.Error(err))
+			log.Error("AttachFunction: failed to check for existing attached function", zap.Error(err))
 			return err
 		}
-		if concurrentAttachedFunction != nil {
-			// Attached function was created concurrently, validate it matches our request
-			log.Info("AttachFunction: attached function created concurrently, validating parameters",
-				zap.String("attached_function_id", concurrentAttachedFunction.ID.String()))
+		if len(existingAttachedFunctions) > 0 {
+			if len(existingAttachedFunctions) > 1 {
+				log.Error("AttachFunction: collection has multiple attached functions")
+				return status.Errorf(codes.Internal, "data inconsistency: collection has %d attached functions, expected at most 1", len(existingAttachedFunctions))
+			}
 
-			// Validate that concurrent attached function matches our request
-			if err := s.validateAttachedFunctionMatchesRequest(txCtx, concurrentAttachedFunction, req); err != nil {
+			existingAttachedFunction := existingAttachedFunctions[0]
+			// There's already an attached function for this collection
+			if existingAttachedFunction.Name != req.Name {
+				// Different attached function exists - error
+				log.Error("AttachFunction: collection already has an attached function with different name",
+					zap.String("existing_name", existingAttachedFunction.Name),
+					zap.String("requested_name", req.Name))
+				return status.Errorf(codes.AlreadyExists, "collection already has an attached function: %s", existingAttachedFunction.Name)
+			}
+
+			// Same name - validate it matches our request (idempotency)
+			log.Info("AttachFunction: attached function exists with same name, validating parameters",
+				zap.String("attached_function_id", existingAttachedFunction.ID.String()))
+
+			if err := s.validateAttachedFunctionMatchesRequest(txCtx, existingAttachedFunction, req); err != nil {
 				return err
 			}
 
-			// Validation passed, reuse the concurrent attached function ID (idempotent)
-			attachedFunctionID = concurrentAttachedFunction.ID
+			// Validation passed, reuse the existing attached function ID (idempotent)
+			attachedFunctionID = existingAttachedFunction.ID
 			return nil
 		}
 

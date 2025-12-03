@@ -150,13 +150,15 @@ def test_function_multiple_collections(basic_http_client: System) -> None:
     assert attached_fn2.detach(delete_output_collection=True) is True
 
 
-def test_functions_multiple_attached_functions(basic_http_client: System) -> None:
-    """Test attaching multiple functions on the same collection"""
+def test_functions_one_attached_function_per_collection(
+    basic_http_client: System,
+) -> None:
+    """Test that only one attached function is allowed per collection"""
     client = ClientCreator.from_system(basic_http_client)
     client.reset()
 
     # Create a single collection
-    collection = client.create_collection(name="multi_task_collection")
+    collection = client.create_collection(name="single_task_collection")
     collection.add(ids=["id1", "id2", "id3"], documents=["doc1", "doc2", "doc3"])
 
     # Create first task on the collection
@@ -169,7 +171,29 @@ def test_functions_multiple_attached_functions(basic_http_client: System) -> Non
 
     assert attached_fn1 is not None
 
-    # Create second task on the SAME collection with a different name
+    # Attempt to create a second task with a different name should fail
+    # (only one attached function allowed per collection)
+    with pytest.raises(ChromaError, match="already has an attached function"):
+        collection.attach_function(
+            name="task_2",
+            function_id="record_counter",
+            output_collection="output_2",
+            params=None,
+        )
+
+    # Attempt to create a task with the same name but different params should also fail
+    with pytest.raises(ChromaError, match="already exists"):
+        collection.attach_function(
+            name="task_1",
+            function_id="record_counter",
+            output_collection="output_different",  # Different output collection
+            params=None,
+        )
+
+    # Detach the first function
+    assert attached_fn1.detach(delete_output_collection=True) is True
+
+    # Now we should be able to attach a new function
     attached_fn2 = collection.attach_function(
         name="task_2",
         function_id="record_counter",
@@ -178,35 +202,10 @@ def test_functions_multiple_attached_functions(basic_http_client: System) -> Non
     )
 
     assert attached_fn2 is not None
+    assert attached_fn2.id != attached_fn1.id
 
-    # Task IDs should be different even though they're on the same collection
-    assert attached_fn1.id != attached_fn2.id
-
-    # Create third task on the same collection
-    attached_fn3 = collection.attach_function(
-        name="task_3",
-        function_id="record_counter",
-        output_collection="output_3",
-        params=None,
-    )
-
-    assert attached_fn3 is not None
-    assert attached_fn3.id != attached_fn1.id
-    assert attached_fn3.id != attached_fn2.id
-
-    # Attempt to create a task with duplicate name on same collection should fail
-    with pytest.raises(ChromaError, match="already exists"):
-        collection.attach_function(
-            name="task_1",  # Duplicate name
-            function_id="record_counter",
-            output_collection="output_duplicate",
-            params=None,
-        )
-
-    # Clean up - remove each task individually
-    assert attached_fn1.detach(delete_output_collection=True) is True
+    # Clean up
     assert attached_fn2.detach(delete_output_collection=True) is True
-    assert attached_fn3.detach(delete_output_collection=True) is True
 
 
 def test_function_remove_nonexistent(basic_http_client: System) -> None:
