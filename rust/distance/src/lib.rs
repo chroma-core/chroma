@@ -20,7 +20,7 @@ pub use distance_avx::*;
 #[cfg(target_feature = "neon")]
 pub use distance_neon::*;
 
-#[cfg(target_feature = "sse")]
+#[cfg(all(target_feature = "sse", not(target_feature = "avx")))]
 pub use distance_sse::*;
 pub use types::*;
 
