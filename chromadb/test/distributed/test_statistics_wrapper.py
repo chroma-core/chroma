@@ -198,6 +198,64 @@ def test_statistics_wrapper_custom_output_collection(basic_http_client: System) 
     detach_statistics_function(collection, delete_stats_collection=True)
 
 
+def test_statistics_wrapper_key_filter(basic_http_client: System) -> None:
+    """Test get_statistics with key filter parameter"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    collection = client.create_collection(name="key_filter_test")
+
+    # Enable statistics
+    attach_statistics_function(collection)
+
+    initial_version = get_collection_version(client, collection.name)
+
+    # Add documents with multiple metadata keys
+    collection.add(
+        ids=["doc1", "doc2", "doc3"],
+        documents=["test document 1", "test document 2", "test document 3"],
+        metadatas=[
+            {"category": "A", "score": 10, "active": True},
+            {"category": "B", "score": 10, "active": False},
+            {"category": "A", "score": 20, "active": True},
+        ],
+    )
+
+    wait_for_version_increase(client, collection.name, initial_version)
+    time.sleep(60)
+
+    # Get all statistics (no key filter)
+    all_stats = get_statistics(collection)
+    assert "category" in all_stats["statistics"]
+    assert "score" in all_stats["statistics"]
+    assert "active" in all_stats["statistics"]
+
+    # Get statistics filtered by "category" key only
+    category_stats = get_statistics(collection, key="category")
+    assert "category" in category_stats["statistics"]
+    assert "score" not in category_stats["statistics"]
+    assert "active" not in category_stats["statistics"]
+    assert category_stats["statistics"]["category"]["A"]["count"] == 2
+    assert category_stats["statistics"]["category"]["B"]["count"] == 1
+    # Summary should still be present when filtering by key
+    assert "summary" in category_stats
+    assert category_stats["summary"]["total_count"] == 3
+
+    # Get statistics filtered by "score" key only
+    score_stats = get_statistics(collection, key="score")
+    assert "score" in score_stats["statistics"]
+    assert "category" not in score_stats["statistics"]
+    assert "active" not in score_stats["statistics"]
+    assert score_stats["statistics"]["score"]["10"]["count"] == 2
+    assert score_stats["statistics"]["score"]["20"]["count"] == 1
+    # Summary should still be present when filtering by key
+    assert "summary" in score_stats
+    assert score_stats["summary"]["total_count"] == 3
+
+    # Cleanup
+    detach_statistics_function(collection, delete_stats_collection=True)
+
+
 # commenting out for now as waiting for query cache invalidateion slows down the test suite
 def test_statistics_wrapper_incremental_updates(basic_http_client: System) -> None:
     """Test that statistics are updated incrementally"""
