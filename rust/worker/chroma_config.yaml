@@ -55,13 +55,12 @@ query_service:
         max_block_size_bytes: 8388608 # 8MB
         block_cache_config:
           disk:
+            dir: "/cache/chroma/query-service/block-cache"
             name: "block_cache"
             # 1k blocks * 8MiB = 8GiB, this is actually ignored in the disk cache config. Leaving it set to 1k for consistency.
             capacity: 1000
             mem: 8000 # 8GiB
-            disk:
-              - path: "/cache1/chroma/query-service/block-cache"
-                capacity: 12884 # 12 GiB
+            disk: 12884 # 12GiB
             file_size: 256 #  256 MiB
             flushers: 4
             flush: false
