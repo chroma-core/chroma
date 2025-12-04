@@ -10,6 +10,10 @@ path = "src/lib.rs"
 name = "sparse_vector_benchmark"
 path = "examples/sparse_vector_benchmark.rs"
 
+[[example]]
+name = "spann_profile"
+path = "examples/spann_profile.rs"
+
 [dependencies]
 rand = { workspace = true }
 thiserror = { workspace = true }
