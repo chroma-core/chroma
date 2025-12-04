@@ -1,6 +1,6 @@
 import orjson
 import logging
-from typing import Any, Dict, Optional, cast, Tuple, List
+from typing import Any, Dict, Mapping, Optional, cast, Tuple, List
 from typing import Sequence
 from uuid import UUID
 import httpx
@@ -104,6 +104,14 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             _headers = self._auth_provider.authenticate()
             for header, value in _headers.items():
                 self._session.headers[header] = value.get_secret_value()
+
+    @override
+    def get_request_headers(self) -> Mapping[str, str]:
+        return dict(self._session.headers)
+
+    @override
+    def get_api_url(self) -> str:
+        return self._api_url
 
     def _make_request(self, method: str, path: str, **kwargs: Dict[str, Any]) -> Any:
         # If the request has json in kwargs, use orjson to serialize it,

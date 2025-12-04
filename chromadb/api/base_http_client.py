@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, TypeVar
+from typing import Any, Dict, Mapping, Optional, TypeVar
 from urllib.parse import quote, urlparse, urlunparse
 import logging
 import orjson as json
@@ -135,3 +135,11 @@ class BaseHTTPClient(Component):
             if trace_id:
                 raise Exception(f"{resp.text} (trace ID: {trace_id})")
             raise (Exception(resp.text))
+
+    def get_request_headers(self) -> Mapping[str, str]:
+        """Return headers used for HTTP requests."""
+        return {}
+
+    def get_api_url(self) -> str:
+        """Return the API URL for this client."""
+        return ""
