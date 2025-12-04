@@ -40,6 +40,8 @@ pub enum InstallError {
     RuntimeError,
     #[error("Failed to write .env file")]
     EnvFileWriteFailed,
+    #[error("Database name is required for cloud mode. Use --db <database_name>")]
+    DatabaseRequired,
 }
 
 #[derive(Parser, Debug)]
@@ -50,11 +52,7 @@ pub struct InstallArgs {
     list: bool,
     #[clap(long)]
     local: bool,
-    #[clap(
-        long,
-        conflicts_with = "local",
-        help = "Database name to use (cloud mode only)"
-    )]
+    #[clap(long, help = "Database name to use")]
     db: Option<String>,
     #[clap(long, hide = true)]
     dev: Option<String>,
@@ -101,7 +99,7 @@ struct SampleAppConfig {
 pub struct SampleAppEnvVariables(HashMap<String, String>);
 
 impl SampleAppEnvVariables {
-    pub fn local() -> Self {
+    pub fn local(db_name: Option<String>) -> Self {
         let map = HashMap::from([
             (
                 "CHROMA_HOST".to_string(),
@@ -110,7 +108,7 @@ impl SampleAppEnvVariables {
             ("CHROMA_TENANT".to_string(), "default_tenant".to_string()),
             (
                 "CHROMA_DATABASE".to_string(),
-                "default_database".to_string(),
+                db_name.unwrap_or_else(|| "default_database".to_string()),
             ),
         ]);
         SampleAppEnvVariables(map)
@@ -466,14 +464,15 @@ fn write_env_file(
 fn get_app_env_variables(
     app_config: &SampleAppConfig,
     local: bool,
-    db_name: String,
+    db_name: Option<String>,
 ) -> Result<SampleAppEnvVariables, CliError> {
     let mut env_variables = match local {
         false => {
             let (_, current_profile) = get_current_profile()?;
-            SampleAppEnvVariables::cloud(current_profile, db_name)
+            // db_name is validated to be Some before calling this function in cloud mode
+            SampleAppEnvVariables::cloud(current_profile, db_name.unwrap())
         }
-        true => SampleAppEnvVariables::local(),
+        true => SampleAppEnvVariables::local(db_name),
     };
 
     app_config
@@ -548,8 +547,11 @@ async fn install_sample_app(args: InstallArgs) -> Result<(), CliError> {
     let app_config =
         read_app_config(app_name.as_str()).map_err(|_| InstallError::AppConfigReadFailed)?;
 
-    let db_name = args.db.unwrap_or_else(|| "default_database".to_string());
-    let env_variables = get_app_env_variables(&app_config, args.local, db_name)?;
+    // In cloud mode, db_name is required
+    if !args.local && args.db.is_none() {
+        return Err(InstallError::DatabaseRequired.into());
+    }
+    let env_variables = get_app_env_variables(&app_config, args.local, args.db)?;
     write_env_file(env_variables, format!("./{}/.env", app_name))
         .map_err(|_| InstallError::EnvFileWriteFailed)?;
 
