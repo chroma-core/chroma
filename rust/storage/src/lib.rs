@@ -502,8 +502,15 @@ pub fn test_storage() -> (TempDir, Storage) {
     (temp_dir, storage)
 }
 
+/// Customer-managed encryption key
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub enum Cmek {
+    GCP(String),
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct PutOptions {
+    cmek: Option<Cmek>,
     if_not_exists: bool,
     if_match: Option<ETag>,
     priority: StorageRequestPriority,
@@ -518,12 +525,12 @@ pub enum PutOptionsCreateError {
 impl PutOptions {
     pub fn if_not_exists(priority: StorageRequestPriority) -> Self {
         // SAFETY(rescrv):  This is always safe because of a unit test.
-        Self::new(true, None, priority).unwrap()
+        Self::new(None, true, None, priority).unwrap()
     }
 
     pub fn if_matches(e_tag: &ETag, priority: StorageRequestPriority) -> Self {
         // SAFETY(rescrv):  This is always safe because of a unit test.
-        Self::new(false, Some(e_tag.clone()), priority).unwrap()
+        Self::new(None, false, Some(e_tag.clone()), priority).unwrap()
     }
 
     pub fn with_priority(priority: StorageRequestPriority) -> Self {
@@ -534,6 +541,7 @@ impl PutOptions {
     }
 
     pub fn new(
+        cmek: Option<Cmek>,
         if_not_exists: bool,
         if_match: Option<ETag>,
         priority: StorageRequestPriority,
@@ -542,6 +550,7 @@ impl PutOptions {
             return Err(PutOptionsCreateError::IfNotExistsAndIfMatchEnabled);
         }
         Ok(PutOptions {
+            cmek,
             if_not_exists,
             if_match,
             priority,

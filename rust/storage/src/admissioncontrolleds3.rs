@@ -231,12 +231,22 @@ impl ACStorageProvider {
                     .await
             }
             ACStorageProvider::Object(object_storage) => {
+                let mut put_options = object_store::PutMultipartOptions::default();
+
+                // Apply customer managed encryption key
+                if let Some(cmek) = options.cmek {
+                    put_options.extensions.insert(cmek);
+                }
+
                 let chunk_ranges = ObjectStorage::partition(
                     bytes.len() as u64,
                     object_storage.upload_part_size_bytes,
                 )
-                .map(|(start, end)| (start as usize..end as usize));
-                let mut upload_handle = object_storage.store.put_multipart(&key.into()).await?;
+                .map(|(start, end)| start as usize..end as usize);
+                let mut upload_handle = object_storage
+                    .store
+                    .put_multipart_opts(&key.into(), put_options)
+                    .await?;
                 let upload_part_futures = chunk_ranges
                     .map(|range| {
                         let rate_limiter_clone = rate_limiter.clone();

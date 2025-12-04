@@ -11,16 +11,58 @@ use bytes::{Bytes, BytesMut};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use futures::stream::{self, StreamExt, TryStreamExt};
-use object_store::ObjectMeta;
-use object_store::{gcp::GoogleCloudStorageBuilder, GetRange, ObjectStore, PutMode, UpdateVersion};
+use object_store::{
+    client::{
+        HttpClient, HttpConnector, HttpError, HttpErrorKind, HttpRequest, HttpResponse,
+        HttpService, ReqwestConnector,
+    },
+    gcp::GoogleCloudStorageBuilder,
+    ClientOptions, GetRange, HeaderValue, ObjectMeta, ObjectStore, PutMode, UpdateVersion,
+};
 use serde::{Deserialize, Serialize};
 
-use crate::config::ObjectStorageProvider;
 use crate::{
-    config::{ObjectStorageConfig, StorageConfig},
+    config::{ObjectStorageConfig, ObjectStorageProvider, StorageConfig},
     s3::DeletedObjects,
-    ETag, GetOptions, PutOptions, StorageConfigError, StorageError,
+    Cmek, ETag, GetOptions, PutOptions, StorageConfigError, StorageError,
 };
+
+const GCP_CMEK_HEADER: &str = "x-goog-encryption-kms-key-name";
+
+#[derive(Debug)]
+struct ChromaHttpClient {
+    reqwest_client: HttpClient,
+}
+
+#[async_trait::async_trait]
+impl HttpService for ChromaHttpClient {
+    async fn call(&self, mut req: HttpRequest) -> Result<HttpResponse, HttpError> {
+        // Attach customer managed encryption key if configured
+        if let Some(cmek) = req.extensions_mut().remove::<Cmek>() {
+            let header = req.headers_mut();
+            match cmek {
+                Cmek::GCP(resource) => {
+                    header.insert(
+                        GCP_CMEK_HEADER,
+                        HeaderValue::from_str(&resource)
+                            .map_err(|err| HttpError::new(HttpErrorKind::Request, err))?,
+                    );
+                }
+            }
+        }
+        self.reqwest_client.execute(req).await
+    }
+}
+
+#[derive(Debug)]
+struct ChromaHttpConnector;
+
+impl HttpConnector for ChromaHttpConnector {
+    fn connect(&self, options: &ClientOptions) -> object_store::Result<HttpClient> {
+        let reqwest_client = ReqwestConnector::default().connect(options)?;
+        Ok(HttpClient::new(ChromaHttpClient { reqwest_client }))
+    }
+}
 
 impl From<object_store::Error> for StorageError {
     fn from(e: object_store::Error) -> Self {
@@ -166,10 +208,11 @@ impl ObjectStorage {
                     ..Default::default()
                 })
                 .with_client_options(
-                    object_store::ClientOptions::new()
+                    ClientOptions::new()
                         .with_timeout(Duration::from_millis(config.request_timeout_ms))
                         .with_connect_timeout(Duration::from_millis(config.connect_timeout_ms)),
                 )
+                .with_http_connector(ChromaHttpConnector)
                 .build()
                 .map_err(|e| {
                     Box::new(StorageConfigError::FailedToCreateBucket(format!(
@@ -181,9 +224,9 @@ impl ObjectStorage {
 
         Ok(ObjectStorage {
             bucket: config.bucket.clone(),
+            download_part_size_bytes: config.download_part_size_bytes,
             store: Arc::new(store),
             upload_part_size_bytes: config.upload_part_size_bytes,
-            download_part_size_bytes: config.download_part_size_bytes,
         })
     }
 
@@ -274,10 +317,25 @@ impl ObjectStorage {
         }
     }
 
-    async fn multipart_put(&self, key: &str, bytes: Bytes) -> Result<ETag, StorageError> {
+    async fn multipart_put(
+        &self,
+        key: &str,
+        bytes: Bytes,
+        options: PutOptions,
+    ) -> Result<ETag, StorageError> {
+        let mut put_options = object_store::PutMultipartOptions::default();
+
+        // Apply customer managed encryption key
+        if let Some(cmek) = options.cmek {
+            put_options.extensions.insert(cmek);
+        }
+
         let chunk_ranges = Self::partition(bytes.len() as u64, self.upload_part_size_bytes)
-            .map(|(start, end)| (start as usize..end as usize));
-        let mut upload_handle = self.store.put_multipart(&key.into()).await?;
+            .map(|(start, end)| start as usize..end as usize);
+        let mut upload_handle = self
+            .store
+            .put_multipart_opts(&key.into(), put_options)
+            .await?;
         let upload_parts = chunk_ranges
             .map(|range| upload_handle.put_part(bytes.slice(range).into()))
             .collect::<Vec<_>>();
@@ -305,6 +363,11 @@ impl ObjectStorage {
         options: PutOptions,
     ) -> Result<ETag, StorageError> {
         let mut put_options = object_store::PutOptions::default();
+
+        // Apply customer managed encryption key
+        if let Some(cmek) = options.cmek {
+            put_options.extensions.insert(cmek);
+        }
 
         // Apply conditional operations
         if options.if_not_exists {
@@ -343,7 +406,7 @@ impl ObjectStorage {
         if self.is_oneshot_upload(bytes.len() as u64, &options) {
             self.oneshot_put(key, bytes, options).await
         } else {
-            self.multipart_put(key, bytes).await
+            self.multipart_put(key, bytes, options).await
         }
     }
 
