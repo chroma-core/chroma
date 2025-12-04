@@ -2125,7 +2125,13 @@ async fn collection_search(
         }
     }
 
-    let request = SearchRequest::try_new(tenant, database, collection_id, searches)?;
+    let request = SearchRequest::try_new(
+        tenant,
+        database,
+        collection_id,
+        searches,
+        payload.eventual_consistency,
+    )?;
     let res = server
         .frontend
         .search(request)

@@ -479,6 +479,7 @@ impl ChromaCollection {
             self.collection.database.clone(),
             self.collection.collection_id,
             searches,
+            false,
         )?;
         let request = request.into_payload();
         self.send("search", "search", Method::POST, Some(request))

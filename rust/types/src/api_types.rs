@@ -2094,6 +2094,10 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SearchRequestPayload {
     pub searches: Vec<SearchPayload>,
+    /// If true, skip reading the log for eventual consistency queries.
+    /// Defaults to false for backwards compatibility.
+    #[serde(default)]
+    pub eventual_consistency: bool,
 }
 
 #[non_exhaustive]
@@ -2104,6 +2108,8 @@ pub struct SearchRequest {
     pub database_name: String,
     pub collection_id: CollectionUuid,
     pub searches: Vec<SearchPayload>,
+    /// If true, skip reading the log for eventual consistency queries.
+    pub eventual_consistency: bool,
 }
 
 impl SearchRequest {
@@ -2112,12 +2118,14 @@ impl SearchRequest {
         database_name: String,
         collection_id: CollectionUuid,
         searches: Vec<SearchPayload>,
+        eventual_consistency: bool,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
             database_name,
             collection_id,
             searches,
+            eventual_consistency,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -2126,6 +2134,7 @@ impl SearchRequest {
     pub fn into_payload(self) -> SearchRequestPayload {
         SearchRequestPayload {
             searches: self.searches,
+            eventual_consistency: self.eventual_consistency,
         }
     }
 }
