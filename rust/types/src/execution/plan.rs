@@ -547,6 +547,8 @@ impl TryFrom<SearchPayload> for chroma_proto::SearchPayload {
 pub struct Search {
     pub scan: Scan,
     pub payloads: Vec<SearchPayload>,
+    /// If true, skip reading from the log for eventual consistency queries
+    pub eventual_consistency: bool,
 }
 
 impl TryFrom<chroma_proto::SearchPlan> for Search {
@@ -563,6 +565,7 @@ impl TryFrom<chroma_proto::SearchPlan> for Search {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()?,
+            eventual_consistency: value.eventual_consistency,
         })
     }
 }
@@ -578,6 +581,7 @@ impl TryFrom<Search> for chroma_proto::SearchPlan {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()?,
+            eventual_consistency: value.eventual_consistency,
         })
     }
 }
