@@ -1011,11 +1011,25 @@ def test_collection_fork_inherits_and_isolates_schema(
         client_factories,
         schema=schema,
     )
+
+    parent_version_before_add = get_collection_version(client, collection.name)
+
+    parent_ids = [f"parent-{i}" for i in range(251)]
+    parent_docs = [f"parent doc {i}" for i in range(251)]
+    parent_metadatas: List[Mapping[str, Any]] = [
+        {"shared_key": f"parent_{i}"} for i in range(251)
+    ]
+
     collection.add(
-        ids=["parent-1"],
-        documents=["parent doc"],
-        metadatas=[{"shared_key": "parent"}],
+        ids=parent_ids,
+        documents=parent_docs,
+        metadatas=parent_metadatas,
     )
+
+    # Wait for parent to compact before forking. Otherwise, the fork inherits
+    # uncompacted logs, and compaction of those inherited logs could increment
+    # the fork's version before the fork's own data is compacted.
+    wait_for_version_increase(client, collection.name, parent_version_before_add)
 
     assert collection.schema is not None
     parent_schema_json = collection.schema.serialize_to_json()
@@ -1050,8 +1064,8 @@ def test_collection_fork_inherits_and_isolates_schema(
     assert reloaded_parent.schema is not None
     assert "child_only" not in reloaded_parent.schema.keys
 
-    parent_results = reloaded_parent.get(where={"shared_key": "parent"})
-    assert set(parent_results["ids"]) == {"parent-1"}
+    parent_results = reloaded_parent.get(where={"shared_key": "parent_10"})
+    assert set(parent_results["ids"]) == {"parent-10"}
 
     child_results = forked.get(where={"child_only": "value_10"})
     assert set(child_results["ids"]) == {"fork-10"}
