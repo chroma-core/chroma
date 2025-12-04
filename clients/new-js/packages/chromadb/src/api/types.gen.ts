@@ -271,7 +271,7 @@ export type GetUserIdentityResponse = {
 };
 
 export type HashMap = {
-  [key: string]: boolean | number | string | SparseVector | null;
+    [key: string]: boolean | number | string | SparseVector | null;
 };
 
 export type HeartbeatResponse = {
@@ -452,6 +452,11 @@ export type SearchPayload = {
 
 export type SearchRequestPayload = {
     searches: Array<SearchPayload>;
+    /**
+     * If true, skip reading the log for eventual consistency queries.
+     * Defaults to false for backwards compatibility.
+     */
+    eventual_consistency?: boolean;
 };
 
 export type SearchResponse = {

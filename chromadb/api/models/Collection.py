@@ -301,6 +301,7 @@ class Collection(CollectionCommon["ServerAPI"]):
     def search(
         self,
         searches: OneOrMany[Search],
+        eventual_consistency: bool = False,
     ) -> SearchResult:
         """Perform hybrid search on the collection.
         This is an experimental API that only works for Hosted Chroma for now.
@@ -374,6 +375,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             searches=cast(List[Search], embedded_searches),
             tenant=self.tenant,
             database=self.database,
+            eventual_consistency=eventual_consistency,
         )
 
     def update(

@@ -474,12 +474,25 @@ impl ChromaCollection {
         &self,
         searches: Vec<SearchPayload>,
     ) -> Result<SearchResponse, ChromaHttpClientError> {
+        self.search_with_options(searches, false).await
+    }
+
+    /// Search with eventual consistency option.
+    ///
+    /// If `eventual_consistency` is true, the query will skip reading the log
+    /// and only read from compacted segments, providing faster but potentially
+    /// stale results.
+    pub async fn search_with_options(
+        &self,
+        searches: Vec<SearchPayload>,
+        eventual_consistency: bool,
+    ) -> Result<SearchResponse, ChromaHttpClientError> {
         let request = SearchRequest::try_new(
             self.collection.tenant.clone(),
             self.collection.database.clone(),
             self.collection.collection_id,
             searches,
-            false,
+            eventual_consistency,
         )?;
         let request = request.into_payload();
         self.send("search", "search", Method::POST, Some(request))

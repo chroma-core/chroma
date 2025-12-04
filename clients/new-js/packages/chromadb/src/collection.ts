@@ -887,6 +887,7 @@ export class CollectionImpl implements Collection {
 
   public async search(
     searches: SearchLike | SearchLike[],
+    eventualConsistency: boolean = false,
   ): Promise<SearchResult> {
     const items = Array.isArray(searches) ? searches : [searches];
 
@@ -906,7 +907,10 @@ export class CollectionImpl implements Collection {
     const { data } = await Api.collectionSearch({
       client: this.apiClient,
       path: await this.path(),
-      body: { searches: payloads },
+      body: {
+        searches: payloads,
+        eventual_consistency: eventualConsistency,
+      },
     });
 
     return new SearchResult(data);
@@ -930,12 +934,12 @@ export class CollectionImpl implements Collection {
 
     const { updateConfiguration, updateEmbeddingFunction } = configuration
       ? await processUpdateCollectionConfig({
-          collectionName: this.name,
-          currentConfiguration: this.configuration,
-          newConfiguration: configuration,
-          currentEmbeddingFunction: this.embeddingFunction,
-          client: this.chromaClient,
-        })
+        collectionName: this.name,
+        currentConfiguration: this.configuration,
+        newConfiguration: configuration,
+        currentEmbeddingFunction: this.embeddingFunction,
+        client: this.chromaClient,
+      })
       : {};
 
     if (updateEmbeddingFunction) {

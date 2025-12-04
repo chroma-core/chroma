@@ -700,6 +700,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        eventual_consistency: bool = False,
     ) -> SearchResult:
         pass
 

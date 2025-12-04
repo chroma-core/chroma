@@ -438,6 +438,7 @@ class SegmentAPI(ServerAPI):
         searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        eventual_consistency: bool = False,
     ) -> SearchResult:
         raise NotImplementedError("Search is not implemented for SegmentAPI")
 

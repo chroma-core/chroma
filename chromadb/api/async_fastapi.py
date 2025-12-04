@@ -414,9 +414,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        eventual_consistency: bool = False,
     ) -> SearchResult:
         """Performs hybrid search on a collection"""
-        payload = {"searches": [s.to_dict() for s in searches]}
+        payload = {
+            "searches": [s.to_dict() for s in searches],
+            "eventual_consistency": eventual_consistency,
+        }
 
         resp_json = await self._make_request(
             "post",
