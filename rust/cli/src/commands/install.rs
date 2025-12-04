@@ -1,6 +1,8 @@
 use crate::ui_utils::read_secret;
 use crate::utils::UtilsError::UserInputFailed;
-use crate::utils::{get_current_profile, read_config, write_config, CliConfig, CliError, Profile, SELECTION_LIMIT};
+use crate::utils::{
+    get_current_profile, read_config, write_config, CliConfig, CliError, Profile, SELECTION_LIMIT,
+};
 use clap::Parser;
 use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
@@ -48,8 +50,12 @@ pub struct InstallArgs {
     list: bool,
     #[clap(long)]
     local: bool,
-    #[clap(long)]
-    db: String,
+    #[clap(
+        long,
+        conflicts_with = "local",
+        help = "Database name to use (cloud mode only)"
+    )]
+    db: Option<String>,
     #[clap(long, hide = true)]
     dev: Option<String>,
 }
@@ -102,13 +108,19 @@ impl SampleAppEnvVariables {
                 "http://localhost:8000".to_string(),
             ),
             ("CHROMA_TENANT".to_string(), "default_tenant".to_string()),
-            ("CHROMA_DATABASE".to_string(), "default_database".to_string()),
+            (
+                "CHROMA_DATABASE".to_string(),
+                "default_database".to_string(),
+            ),
         ]);
         SampleAppEnvVariables(map)
     }
     pub fn cloud(profile: Profile, db_name: String) -> Self {
         let map = HashMap::from([
-            ("CHROMA_HOST".to_string(), "https://api.trychroma.com".to_string()),
+            (
+                "CHROMA_HOST".to_string(),
+                "https://api.trychroma.com".to_string(),
+            ),
             ("CHROMA_TENANT".to_string(), profile.tenant_id),
             ("CHROMA_DATABASE".to_string(), db_name),
             ("CHROMA_API_KEY".to_string(), profile.api_key),
@@ -127,7 +139,8 @@ fn prompt_app_name_message() -> String {
 
 fn prompt_env_variables_message(env_variables: &[EnvVariable]) -> String {
     match env_variables.len() {
-        0..=1 => format!(
+        0 => "\nThis app has no required environment variables.".to_string(),
+        1 => format!(
             "\nThis app requires the {} environment variable. You can set it up with the installer, or edit your .env file later.",
             env_variables[0].name
         ),
@@ -450,13 +463,17 @@ fn write_env_file(
     Ok(())
 }
 
-fn get_app_env_variables(app_config: &SampleAppConfig, local: bool) -> Result<SampleAppEnvVariables, CliError> {
+fn get_app_env_variables(
+    app_config: &SampleAppConfig,
+    local: bool,
+    db_name: String,
+) -> Result<SampleAppEnvVariables, CliError> {
     let mut env_variables = match local {
         false => {
             let (_, current_profile) = get_current_profile()?;
-            SampleAppEnvVariables::cloud(current_profile, "".to_string())
-        },
-        true => SampleAppEnvVariables::local()
+            SampleAppEnvVariables::cloud(current_profile, db_name)
+        }
+        true => SampleAppEnvVariables::local(),
     };
 
     app_config
@@ -531,7 +548,8 @@ async fn install_sample_app(args: InstallArgs) -> Result<(), CliError> {
     let app_config =
         read_app_config(app_name.as_str()).map_err(|_| InstallError::AppConfigReadFailed)?;
 
-    let env_variables = get_app_env_variables(&app_config, args.local)?;
+    let db_name = args.db.unwrap_or_else(|| "default_database".to_string());
+    let env_variables = get_app_env_variables(&app_config, args.local, db_name)?;
     write_env_file(env_variables, format!("./{}/.env", app_name))
         .map_err(|_| InstallError::EnvFileWriteFailed)?;
 
