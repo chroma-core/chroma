@@ -590,10 +590,12 @@ pub async fn materialize_logs(
     let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
     let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
     if let Some(reader) = &record_segment_reader {
-        let user_ids = logs
+        let mut user_ids = logs
             .iter()
             .map(|(log, _)| log.record.id.as_str())
             .collect::<Vec<_>>();
+        user_ids.sort_unstable();
+        user_ids.dedup();
         async {
             reader.prefetch_user_id_to_id(&user_ids).await;
 
