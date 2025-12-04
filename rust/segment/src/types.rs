@@ -4,7 +4,6 @@ use chroma_types::{
     MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue, MetadataValueConversionError,
     Operation, Schema, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
 };
-use futures::{stream, StreamExt, TryStreamExt};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -588,8 +587,9 @@ pub async fn materialize_logs(
     };
 
     // Populate entries that are present in the record segment.
+    let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
     let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
-    let mut existing_id_to_materialized = if let Some(reader) = &record_segment_reader {
+    if let Some(reader) = &record_segment_reader {
         let user_ids = logs
             .iter()
             .map(|(log, _)| log.record.id.as_str())
@@ -597,40 +597,23 @@ pub async fn materialize_logs(
         async {
             reader.prefetch_user_id_to_id(&user_ids).await;
 
-            let existing_user_offset_ids = stream::iter(user_ids.iter().map(|user_id| async {
-                let offset_id_opt = reader.get_offset_id_for_user_id(user_id).await?;
-                Ok::<_, LogMaterializerError>(offset_id_opt.map(|offset_id| (*user_id, offset_id)))
-            }))
-            .buffer_unordered(user_ids.len())
-            .try_collect::<Vec<_>>()
-            .await?
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
+            let mut existing_offset_ids = Vec::with_capacity(user_ids.len());
+            for user_id in user_ids {
+                if let Some(offset_id) = reader.get_offset_id_for_user_id(user_id).await? {
+                    existing_offset_ids.push(offset_id);
+                    existing_id_to_materialized.insert(
+                        user_id,
+                        MaterializedLogRecord::from_segment_offset_id(offset_id),
+                    );
+                };
+            }
 
-            let existing_offset_ids = existing_user_offset_ids
-                .iter()
-                .map(|(_, offset_id)| *offset_id)
-                .collect::<Vec<_>>();
             reader.prefetch_id_to_data(&existing_offset_ids).await;
-
-            Ok::<_, LogMaterializerError>(
-                existing_user_offset_ids
-                    .into_iter()
-                    .map(|(user_id, offset_id)| {
-                        (
-                            user_id,
-                            MaterializedLogRecord::from_segment_offset_id(offset_id),
-                        )
-                    })
-                    .collect(),
-            )
+            Ok::<_, LogMaterializerError>(())
         }
         .instrument(Span::current())
-        .await?
-    } else {
-        HashMap::new()
-    };
+        .await?;
+    }
 
     let mut has_backfill = false;
     // Populate updates to these and fresh records that are being
