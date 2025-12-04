@@ -919,8 +919,7 @@ impl RecordSegmentReader<'_> {
             .await
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn prefetch_user_id_to_id(&self, keys: Vec<&str>) {
+    pub(crate) async fn prefetch_user_id_to_id(&self, keys: &[&str]) {
         self.user_id_to_id
             .load_blocks_for_keys(keys.iter().map(|k| ("".to_string(), *k)))
             .await
