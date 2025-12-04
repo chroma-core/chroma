@@ -119,7 +119,7 @@ def detach_statistics_function(
     return get_statistics_fn(collection).detach(delete_output_collection=delete_stats_collection)
 
 
-def get_statistics(collection: "Collection") -> Dict[str, Any]:
+def get_statistics(collection: "Collection", key: Optional[str] = None) -> Dict[str, Any]:
     """Get the current statistics for a collection.
 
     Statistics include frequency counts for all metadata key-value pairs,
@@ -127,6 +127,8 @@ def get_statistics(collection: "Collection") -> Dict[str, Any]:
 
     Args:
         collection: The collection to get statistics for
+        key: Optional metadata key to filter statistics for. If provided,
+             only returns statistics for that specific key.
 
     Returns:
         Dict[str, Any]: A dictionary with the structure:
@@ -194,9 +196,11 @@ def get_statistics(collection: "Collection") -> Dict[str, Any]:
     summary: Dict[str, Any] = {}
 
     offset = 0
+    # When filtering by key, also include "summary" entries to get total_count
+    where_filter = {"$or": [{"key": key}, {"key": "summary"}]} if key is not None else None
 
     while True:
-        page = stats_collection.get(include=["metadatas"], offset=offset)
+        page = stats_collection.get(include=["metadatas"], offset=offset, where=where_filter)
 
         metadatas = page.get("metadatas") or []
         if not metadatas:
@@ -206,20 +210,20 @@ def get_statistics(collection: "Collection") -> Dict[str, Any]:
             if metadata is None:
                 continue
 
-            key = metadata.get("key")
+            meta_key = metadata.get("key")
             value = metadata.get("value")
             value_label = metadata.get("value_label")
             value_type = metadata.get("type")
             count = metadata.get("count")
 
-            if key is not None and value is not None and value_type is not None and count is not None:
-                if key == "summary":
+            if meta_key is not None and value is not None and value_type is not None and count is not None:
+                if meta_key == "summary":
                     if value == "total_count":
                         summary["total_count"] = count
                 else:
                     # Prioritize value_label if present, otherwise use value
                     stats_key = value_label if value_label is not None else value
-                    stats[key][stats_key]["count"] = count
+                    stats[meta_key][stats_key]["count"] = count
 
         # Advance to next page using the actual number of items returned
         offset += len(metadatas)
