@@ -56,7 +56,7 @@ const TEST_PREFIX: &str = "object-store/";
 /// CMEK key resource name for testing
 /// Update this with your actual KMS key for CMEK tests
 /// Format: projects/PROJECT_ID/locations/LOCATION/keyRings/RING/cryptoKeys/KEY
-const GCS_CMEK_KEY_NAME: &str = "projects/shared-sandbox-478917/locations/us-west1/keyRings/cmek-test-ring/cryptoKeys/cmek-test";
+const GCS_CMEK_KEY_NAME: &str = GCS_INVALID_CMEK_KEY_NAME;
 
 /// Fake CMEK key for negative testing (should always fail)
 const GCS_INVALID_CMEK_KEY_NAME: &str =
