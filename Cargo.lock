@@ -3222,15 +3222,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-<<<<<<< HEAD
-version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50b7b23bdff0e7fecbef83438ce9389c352743ea0b8bda44fabca354f21b19a9"
-=======
 version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "635c7077026867cb5e5ea576c461f29b1c4151fce7a9d7cc3a1b1a9902d95c65"
->>>>>>> cfa0190ba ([CHORE]: Revert foyer multi-disk changes (#5942))
 dependencies = [
  "anyhow",
  "equivalent",
@@ -3248,15 +3242,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-<<<<<<< HEAD
-version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a72f40b0c110e4233f46df0589bf1b2b3b5ed04e4cf504a582374d7548c9c05"
-=======
 version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ed2316785e80137c7b91bb74dab1dc1967c3272df05825397b73ae8fc527041"
->>>>>>> cfa0190ba ([CHORE]: Revert foyer multi-disk changes (#5942))
 dependencies = [
  "ahash",
  "bincode",
@@ -3284,15 +3272,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-<<<<<<< HEAD
-version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b1b23cefdcd78b4d729679d75bb6fb96a57f7dd94f141dcc373a2db1c04fbaa"
-=======
 version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "090cf5b89d49fd61e7da9bfae3a1aef605f03196d542b2f8171c74f3add013f4"
->>>>>>> cfa0190ba ([CHORE]: Revert foyer multi-disk changes (#5942))
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3316,15 +3298,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-<<<<<<< HEAD
-version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1ea5872e0073e3c37bec0aa99923f03bcec3951a056c77cfdfcc8001a370f9a"
-=======
 version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "095e857c97d6339d4a4a6424b88d08fe08ad0366bfbfaf65d6ddf55baf3d2a38"
->>>>>>> cfa0190ba ([CHORE]: Revert foyer multi-disk changes (#5942))
 dependencies = [
  "ahash",
  "allocator-api2",
@@ -3341,11 +3317,6 @@ dependencies = [
  "fs4 0.13.1",
  "futures-core",
  "futures-util",
-<<<<<<< HEAD
- "hashbrown 0.15.2",
- "io-uring",
-=======
->>>>>>> cfa0190ba ([CHORE]: Revert foyer multi-disk changes (#5942))
  "itertools 0.14.0",
  "libc",
  "lz4",
