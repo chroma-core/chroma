@@ -230,7 +230,7 @@ impl InMemoryFrontend {
         .map_err(CreateCollectionError::InvalidSchema)?;
 
         let config = InternalCollectionConfiguration::try_from(&schema).map_err(|e| {
-            CreateCollectionError::InvalidSchema(SchemaError::InvalidSchema { reason: e })
+            CreateCollectionError::InvalidSchema(SchemaError::InvalidUserInput { reason: e })
         })?;
 
         let collection = Collection {
