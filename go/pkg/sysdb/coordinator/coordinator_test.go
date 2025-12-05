@@ -2056,6 +2056,83 @@ func (suite *APIsTestSuite) TestCannotAttachToOutputCollection() {
 	suite.NoError(err)
 }
 
+func (suite *APIsTestSuite) TestDeleteOutputCollectionDeletesAttachedFunction() {
+	ctx := context.Background()
+
+	// Create a test input collection
+	inputCollectionID := types.NewUniqueID()
+	inputCollectionName := "test_input_for_delete_output"
+	createInputCollection := &model.CreateCollection{
+		ID:           inputCollectionID,
+		Name:         inputCollectionName,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+	_, _, err := suite.coordinator.CreateCollection(ctx, createInputCollection)
+	suite.NoError(err)
+
+	// Create a dummy function
+	functionID := uuid.New()
+	functionName := "test_function_for_delete_output"
+	err = suite.db.Create(&dbmodel.Function{
+		ID:            functionID,
+		Name:          functionName,
+		IsIncremental: false,
+		ReturnType:    "{}",
+	}).Error
+	suite.NoError(err)
+
+	// Get database ID
+	databases, err := suite.coordinator.GetDatabase(ctx, &model.GetDatabase{Name: suite.databaseName, Tenant: suite.tenantName})
+	suite.NoError(err)
+
+	// Create attached function first (need its ID for the output collection metadata)
+	attachedFunctionID := uuid.New()
+	outputCollectionID := types.NewUniqueID()
+	outputCollectionIDStr := outputCollectionID.String()
+	err = suite.db.Create(&dbmodel.AttachedFunction{
+		ID:                   attachedFunctionID,
+		Name:                 "test_attached_for_delete_output",
+		TenantID:             suite.tenantName,
+		DatabaseID:           databases.ID,
+		InputCollectionID:    inputCollectionID.String(),
+		OutputCollectionName: "test_output_for_delete",
+		OutputCollectionID:   &outputCollectionIDStr,
+		FunctionID:           functionID,
+		FunctionParams:       "{}",
+		IsReady:              true,
+		IsDeleted:            false,
+	}).Error
+	suite.NoError(err)
+
+	// Create an output collection with metadata pointing to the attached function
+	outputCollectionMetadata := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
+	outputCollectionMetadata.Add(common.SourceAttachedFunctionIDKey, &model.CollectionMetadataValueStringType{Value: attachedFunctionID.String()})
+	createOutputCollection := &model.CreateCollection{
+		ID:           outputCollectionID,
+		Name:         "test_output_for_delete",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+		Metadata:     outputCollectionMetadata,
+	}
+	_, _, err = suite.coordinator.CreateCollection(ctx, createOutputCollection)
+	suite.NoError(err)
+
+	// Delete the output collection
+	deleteCollection := &model.DeleteCollection{
+		ID:           outputCollectionID,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+	err = suite.coordinator.SoftDeleteCollection(ctx, deleteCollection)
+	suite.NoError(err)
+
+	// Verify attached function is soft deleted
+	var count int64
+	suite.db.Model(&dbmodel.AttachedFunction{}).Where("id = ? AND is_deleted = ?", attachedFunctionID, true).Count(&count)
+	suite.Equal(int64(1), count)
+}
+
 func TestAPIsTestSuite(t *testing.T) {
 	testSuite := new(APIsTestSuite)
 	suite.Run(t, testSuite)
