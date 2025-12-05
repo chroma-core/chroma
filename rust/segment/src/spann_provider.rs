@@ -7,7 +7,7 @@ use chroma_index::{
     hnsw_provider::HnswIndexProvider,
     spann::types::{GarbageCollectionContext, SpannMetrics},
 };
-use chroma_types::{Collection, Segment};
+use chroma_types::{Cmek, Collection, Segment};
 
 use crate::distributed_spann::{SpannSegmentWriter, SpannSegmentWriterError};
 
@@ -52,6 +52,7 @@ impl SpannProvider {
         collection: &Collection,
         segment: &Segment,
         dimensionality: usize,
+        cmek: Option<Cmek>,
     ) -> Result<SpannSegmentWriter, SpannSegmentWriterError> {
         SpannSegmentWriter::from_segment(
             collection,
@@ -62,6 +63,7 @@ impl SpannProvider {
             self.garbage_collection_context.clone(),
             self.pl_block_size,
             self.metrics.clone(),
+            cmek,
         )
         .await
     }

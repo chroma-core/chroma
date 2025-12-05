@@ -5,6 +5,7 @@ use super::{
     types::{ArrowWriteableKey, ArrowWriteableValue},
 };
 use chroma_error::ChromaError;
+use chroma_types::Cmek;
 use futures::{StreamExt, TryStreamExt};
 use uuid::Uuid;
 
@@ -15,6 +16,7 @@ pub struct ArrowBlockfileFlusher {
     root: RootWriter,
     id: Uuid,
     count: u64,
+    cmek: Option<Cmek>,
 }
 
 impl ArrowBlockfileFlusher {
@@ -25,6 +27,7 @@ impl ArrowBlockfileFlusher {
         root: RootWriter,
         id: Uuid,
         count: u64,
+        cmek: Option<Cmek>,
     ) -> Self {
         Self {
             block_manager,
@@ -33,6 +36,7 @@ impl ArrowBlockfileFlusher {
             root,
             id,
             count,
+            cmek,
         }
     }
 
@@ -50,12 +54,16 @@ impl ArrowBlockfileFlusher {
         // number of futures is high.
         let mut futures = Vec::new();
         for block in &self.blocks {
-            futures.push(self.block_manager.flush(block, &self.root.prefix_path));
+            futures.push(self.block_manager.flush(
+                block,
+                &self.root.prefix_path,
+                self.cmek.clone(),
+            ));
         }
         let num_futures = futures.len();
         // buffer_unordered hangs with 0 futures.
         if num_futures == 0 {
-            self.root_manager.flush::<K>(&self.root).await?;
+            self.root_manager.flush::<K>(&self.root, self.cmek).await?;
             return Ok(());
         }
         tracing::debug!("Flushing {} blocks", num_futures);
@@ -67,7 +75,7 @@ impl ArrowBlockfileFlusher {
             .try_collect::<Vec<_>>()
             .await?;
 
-        self.root_manager.flush::<K>(&self.root).await?;
+        self.root_manager.flush::<K>(&self.root, self.cmek).await?;
         Ok(())
     }
 

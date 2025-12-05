@@ -14,6 +14,7 @@ use chroma_index::spann::types::{
 };
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
+use chroma_types::Cmek;
 use chroma_types::Collection;
 use chroma_types::Schema;
 use chroma_types::SchemaError;
@@ -106,6 +107,7 @@ impl SpannSegmentWriter {
         gc_context: GarbageCollectionContext,
         pl_block_size: usize,
         metrics: SpannMetrics,
+        cmek: Option<Cmek>,
     ) -> Result<SpannSegmentWriter, SpannSegmentWriterError> {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentWriterError::InvalidArgument);
@@ -206,6 +208,7 @@ impl SpannSegmentWriter {
             gc_context,
             pl_block_size,
             metrics,
+            cmek,
         )
         .await
         {
@@ -702,6 +705,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -799,6 +803,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -939,6 +944,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -1127,6 +1133,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -1232,6 +1239,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");
