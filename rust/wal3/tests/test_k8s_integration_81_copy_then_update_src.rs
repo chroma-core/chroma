@@ -29,7 +29,7 @@ async fn test_k8s_integration_81_copy_then_update_src() {
             ..LogWriterOptions::default()
         },
         Arc::clone(&storage),
-        "test_k8s_integration_81_copy_then_update_src_source",
+        "test_k8s_integration_80_copy_source",
         "load and scrub writer",
         (),
         None,

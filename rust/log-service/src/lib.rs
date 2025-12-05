@@ -1116,7 +1116,7 @@ impl LogServer {
         // Extract CMEK from request
         let cmek = push_logs
             .cmek
-            .map(|c| Cmek::try_from(c))
+            .map(Cmek::try_from)
             .transpose()
             .map_err(|e| {
                 tracing::error!("Failed to convert CMEK: {}", e);

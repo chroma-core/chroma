@@ -146,6 +146,7 @@ impl LogWriter {
     /// and I'd prefer to manually inspect failures than get the automation right to do it always
     /// automatically.  Bootstrap is intended only to last as long as there is a migration from the
     /// go to the rust log services.
+    #[allow(clippy::too_many_arguments)]
     pub async fn bootstrap<D: MarkDirty>(
         options: &LogWriterOptions,
         storage: &Arc<Storage>,
