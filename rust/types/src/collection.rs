@@ -14,6 +14,9 @@ use uuid::Uuid;
 #[cfg(feature = "pyo3")]
 use pyo3::{exceptions::PyValueError, types::PyAnyMethods};
 
+/// Metadata key used to mark output collections and link them to their source attached function.
+pub const SOURCE_ATTACHED_FUNCTION_ID_KEY: &str = "chroma:source_attached_function_id";
+
 /// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
 #[derive(
     Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
@@ -253,6 +256,14 @@ impl Collection {
             database_id: DatabaseUuid::new(),
             ..Default::default()
         }
+    }
+
+    /// Returns true if this collection is an output collection created by an attached function.
+    pub fn is_output_collection(&self) -> bool {
+        self.metadata
+            .as_ref()
+            .map(|m| m.contains_key(SOURCE_ATTACHED_FUNCTION_ID_KEY))
+            .unwrap_or(false)
     }
 }
 

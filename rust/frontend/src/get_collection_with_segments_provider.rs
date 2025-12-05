@@ -199,6 +199,11 @@ impl CollectionsWithSegmentsProvider {
         &mut self,
         collection_and_segments: CollectionAndSegments,
     ) {
+        // Don't cache output collections (created by attached functions).
+        if collection_and_segments.collection.is_output_collection() {
+            return;
+        }
+
         // Insert only if the collection dimension is set.
         if collection_and_segments.collection.dimension.is_some() {
             let collection_id = collection_and_segments.collection.collection_id;
