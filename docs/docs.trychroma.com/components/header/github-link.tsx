@@ -5,12 +5,18 @@ import { formatToK } from "@/lib/utils";
 import Link from "next/link";
 
 const GithubLink: React.FC = async () => {
-  const response = await fetch(
-    `https://api.github.com/repos/chroma-core/chroma`,
-  );
-  const stars = response.ok
-    ? (await response.json()).stargazers_count
-    : undefined;
+  let stars: number | undefined;
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/chroma-core/chroma`,
+      { next: { revalidate: 3600 } },
+    );
+    stars = response.ok
+      ? (await response.json()).stargazers_count
+      : undefined;
+  } catch {
+    stars = undefined;
+  }
 
   return (
     <Link
