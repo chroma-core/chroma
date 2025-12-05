@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Optional, Dict, Any, cast
 from collections import defaultdict
 
 from chromadb.api.types import Where
+from chromadb.api.functions import STATISTICS_FUNCTION
 
 if TYPE_CHECKING:
     from chromadb.api.models.Collection import Collection
@@ -75,8 +76,8 @@ def attach_statistics_function(
         stats_collection_name = f"{collection.name}_statistics"
 
     return collection.attach_function(
+        function=STATISTICS_FUNCTION,
         name=get_statistics_fn_name(collection),
-        function_id="statistics",
         output_collection=stats_collection_name,
         params=None,
     )
