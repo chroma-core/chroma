@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{PutMode, PutOptions, Storage, StorageError};
+use chroma_types::Cmek;
 use opentelemetry::trace::TraceContextExt;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
@@ -56,6 +57,7 @@ pub struct LogWriter {
     mark_dirty: Arc<dyn MarkDirty>,
     inner: Mutex<EpochWriter>,
     reopen_protection: tokio::sync::Mutex<()>,
+    cmek: Option<Cmek>,
 }
 
 impl LogWriter {
@@ -75,6 +77,7 @@ impl LogWriter {
         prefix: &str,
         writer: &str,
         mark_dirty: D,
+        cmek: Option<Cmek>,
     ) -> Result<Self, Error> {
         let mark_dirty = Arc::new(mark_dirty) as _;
         let inner = EpochWriter::default();
@@ -89,6 +92,7 @@ impl LogWriter {
             mark_dirty,
             inner: Mutex::new(inner),
             reopen_protection,
+            cmek,
         };
         this.ensure_open().await?;
         Ok(this)
@@ -101,6 +105,7 @@ impl LogWriter {
         prefix: &str,
         writer: &str,
         mark_dirty: D,
+        cmek: Option<Cmek>,
     ) -> Result<Self, Error> {
         let mark_dirty = Arc::new(mark_dirty) as _;
         let inner = EpochWriter::default();
@@ -115,6 +120,7 @@ impl LogWriter {
             mark_dirty,
             inner: Mutex::new(inner),
             reopen_protection,
+            cmek,
         };
         match this.ensure_open().await {
             Ok(_) => {}
