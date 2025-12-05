@@ -8,6 +8,7 @@ collections as new records are added.
 
 import chromadb
 import time
+from chromadb.api.functions import RECORD_COUNTER_FUNCTION
 
 # Connect to Chroma server
 client = chromadb.HttpClient(host="localhost", port=8000)
@@ -37,10 +38,10 @@ print(f"✅ Created collection '{collection.name}' with {collection.count()} doc
 # Attach a function that counts records in the collection
 # The 'record_counter' function processes each record and outputs {"count": N}
 attached_fn = collection.attach_function(
-    function_id="record_counter",  # Built-in function that counts records
+    function=RECORD_COUNTER_FUNCTION,
     name="count_my_docs",
-    output_collection="my_documents_counts",  # Auto-created
-    params=None,  # No additional parameters needed
+    output_collection="my_documents_counts",
+    params=None,
 )
 
 print("✅ Function attached successfully!")

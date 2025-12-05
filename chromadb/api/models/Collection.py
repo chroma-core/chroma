@@ -25,6 +25,8 @@ from chromadb.execution.expression.plan import Search
 
 import logging
 
+from chromadb.api.functions import Function
+
 if TYPE_CHECKING:
     from chromadb.api.models.AttachedFunction import AttachedFunction
 
@@ -500,7 +502,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
     def attach_function(
         self,
-        function_id: str,
+        function: Function,
         name: str,
         output_collection: str,
         params: Optional[Dict[str, Any]] = None,
@@ -508,7 +510,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         """Attach a function to this collection.
 
         Args:
-            function_id: Built-in function identifier (e.g., "record_counter")
+            function: A Function enum value (e.g., STATISTICS_FUNCTION, RECORD_COUNTER_FUNCTION)
             name: Unique name for this attached function
             output_collection: Name of the collection where function output will be stored
             params: Optional dictionary with function-specific parameters
@@ -517,13 +519,14 @@ class Collection(CollectionCommon["ServerAPI"]):
             AttachedFunction: Object representing the attached function
 
         Example:
+            >>> from chromadb.api.functions import STATISTICS_FUNCTION
             >>> attached_fn = collection.attach_function(
-            ...     function_id="record_counter",
+            ...     function=STATISTICS_FUNCTION,
             ...     name="mycoll_stats_fn",
             ...     output_collection="mycoll_stats",
-            ...     params={"threshold": 100}
             ... )
         """
+        function_id = function.value if isinstance(function, Function) else function
         return self._client.attach_function(
             function_id=function_id,
             name=name,
