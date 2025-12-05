@@ -93,7 +93,7 @@ fn display_run_message(config: &FrontendServerConfig) {
             .blue()
     );
     println!(
-        "☁️ To deploy your DB - try Chroma Cloud!\n- Sign up: {}\n- Docs: {}\n- Copy your data to Cloud: {}\n",
+        "☁️ To deploy your DB - try Chroma Cloud!\n- Sign up: {}\n- Copy your data to Cloud: {}\n",
         "https://trychroma.com/signup".underline().blue(),
         "chroma copy --to-cloud --all".yellow()
     );
