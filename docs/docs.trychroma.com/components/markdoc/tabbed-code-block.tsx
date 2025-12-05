@@ -7,21 +7,40 @@ import CodeBlock from "@/components/markdoc/code-block";
 import { TabProps, TabsTrigger } from "@/components/markdoc/tabs";
 import CodeTabs from "@/components/markdoc/code-tab";
 
+type AnyProps = Record<string, unknown>;
+
+const findCodeBlock = (
+  children: React.ReactNode,
+): React.ReactElement | null => {
+  if (!children) return null;
+  if (React.isValidElement(children) && children.type === CodeBlock) {
+    return children;
+  }
+  if (Array.isArray(children)) {
+    for (const child of children) {
+      const found = findCodeBlock(child);
+      if (found) return found;
+    }
+  }
+  if (React.isValidElement(children)) {
+    const props = children.props as AnyProps;
+    if (props.children) {
+      return findCodeBlock(props.children as React.ReactNode);
+    }
+  }
+  return null;
+};
+
 const TabbedCodeBlock: React.FC<{
   children: ReactElement<TabProps>[];
 }> = ({ children }) => {
   const tabs = children.map((tab) => {
+    const codeBlock = findCodeBlock(tab.props.children);
+    const codeBlockProps = codeBlock?.props as AnyProps | undefined;
     return {
       label: tab.props.label,
-      content: tab.props.children.props.content,
-      render:
-        tab.props.children.type === CodeBlock
-          ? React.cloneElement(tab, {
-              children: React.cloneElement(tab.props.children, {
-                showHeader: false,
-              }),
-            })
-          : tab,
+      content: (codeBlockProps?.content as string) || "",
+      render: tab,
     };
   });
 
@@ -51,7 +70,7 @@ const TabbedCodeBlock: React.FC<{
           ))}
         </div>
       </div>
-      <div>
+      <div className="[&_.code-block-header]:hidden">
         {tabs.map((tab) => (
           <TabsContent
             key={`${tab.label}-content`}
