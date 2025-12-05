@@ -1922,22 +1922,7 @@ impl ServiceBasedFrontend {
                 database_name,
                 self.min_records_for_invocation,
             )
-            .await
-            .map_err(|e| match e {
-                chroma_sysdb::AttachFunctionError::AlreadyExists => {
-                    chroma_types::AttachFunctionError::AlreadyExists(name.clone())
-                }
-                chroma_sysdb::AttachFunctionError::FailedToCreateAttachedFunction(s) => {
-                    chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
-                        s,
-                    )))
-                }
-                chroma_sysdb::AttachFunctionError::ServerReturnedInvalidData => {
-                    chroma_types::AttachFunctionError::Internal(Box::new(
-                        chroma_sysdb::AttachFunctionError::ServerReturnedInvalidData,
-                    ))
-                }
-            })?;
+            .await?;
 
         // Step 2: Start backfill
         self.start_backfill(tenant_name, input_collection_id, attached_function_id)
@@ -1947,13 +1932,13 @@ impl ServiceBasedFrontend {
         self.sysdb_client
             .finish_create_attached_function(attached_function_id)
             .await
-            .map_err(|e| {
-                chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
-                    tonic::Status::internal(format!(
-                        "Failed to finish creating attached function: {}",
-                        e
-                    )),
-                )))
+            .map_err(|e| match e {
+                chroma_types::FinishCreateAttachedFunctionError::OutputCollectionExists => {
+                    chroma_types::AttachFunctionError::OutputCollectionExists(
+                        output_collection.clone(),
+                    )
+                }
+                other => chroma_types::AttachFunctionError::from(other),
             })?;
 
         Ok(AttachFunctionResponse {

@@ -7,7 +7,11 @@ for automatically processing collections.
 
 import pytest
 from chromadb.api.client import Client as ClientCreator
-from chromadb.api.functions import RECORD_COUNTER_FUNCTION, Function
+from chromadb.api.functions import (
+    RECORD_COUNTER_FUNCTION,
+    STATISTICS_FUNCTION,
+    Function,
+)
 from chromadb.config import System
 from chromadb.errors import ChromaError, NotFoundError
 from chromadb.test.utils.wait_for_version_increase import (
@@ -181,7 +185,10 @@ def test_functions_one_attached_function_per_collection(
 
     # Attempt to create a second task with a different name should fail
     # (only one attached function allowed per collection)
-    with pytest.raises(ChromaError, match="already has an attached function"):
+    with pytest.raises(
+        ChromaError,
+        match="collection already has an attached function: name=task_1, function=record_counter, output_collection=output_1",
+    ):
         collection.attach_function(
             function=RECORD_COUNTER_FUNCTION,
             name="task_2",
@@ -189,10 +196,13 @@ def test_functions_one_attached_function_per_collection(
             params=None,
         )
 
-    # Attempt to create a task with the same name but different params should also fail
-    with pytest.raises(ChromaError, match="already exists"):
+    # Attempt to create a task with the same name but different function_id should also fail
+    with pytest.raises(
+        ChromaError,
+        match=r"collection already has an attached function: name=task_1, function=record_counter, output_collection=output_1",
+    ):
         collection.attach_function(
-            function=RECORD_COUNTER_FUNCTION,
+            function=STATISTICS_FUNCTION,
             name="task_1",
             output_collection="output_different",  # Different output collection
             params=None,
@@ -220,6 +230,55 @@ def test_functions_one_attached_function_per_collection(
         collection.detach_function(attached_fn2.name, delete_output_collection=True)
         is True
     )
+
+
+def test_attach_function_with_invalid_params(basic_http_client: System) -> None:
+    """Test that attach_function with non-empty params raises an error"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    collection = client.create_collection(name="test_invalid_params")
+    collection.add(ids=["id1"], documents=["test document"])
+
+    # Attempt to create task with non-empty params should fail
+    # (no functions currently accept parameters)
+    with pytest.raises(
+        ChromaError,
+        match="params must be empty - no functions currently accept parameters",
+    ):
+        collection.attach_function(
+            name="invalid_params_task",
+            function=RECORD_COUNTER_FUNCTION,
+            output_collection="output_collection",
+            params={"some_key": "some_value"},
+        )
+
+
+def test_attach_function_output_collection_already_exists(
+    basic_http_client: System,
+) -> None:
+    """Test that attach_function fails when output collection name already exists"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    # Create a collection that will be used as input
+    input_collection = client.create_collection(name="input_collection")
+    input_collection.add(ids=["id1"], documents=["test document"])
+
+    # Create another collection with the name we want to use for output
+    client.create_collection(name="existing_output_collection")
+
+    # Attempt to create task with output collection name that already exists
+    with pytest.raises(
+        ChromaError,
+        match=r"Output collection \[existing_output_collection\] already exists",
+    ):
+        input_collection.attach_function(
+            name="my_task",
+            function=RECORD_COUNTER_FUNCTION,
+            output_collection="existing_output_collection",
+            params=None,
+        )
 
 
 def test_function_remove_nonexistent(basic_http_client: System) -> None:

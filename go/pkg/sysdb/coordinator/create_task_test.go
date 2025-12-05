@@ -147,9 +147,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 	MinRecordsForInvocation := uint64(100)
 
 	params := &structpb.Struct{
-		Fields: map[string]*structpb.Value{
-			"param1": structpb.NewStringValue("value1"),
-		},
+		Fields: map[string]*structpb.Value{},
 	}
 
 	request := &coordinatorpb.AttachFunctionRequest{
@@ -241,7 +239,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 	tenantID := "test-tenant"
 	databaseName := "test-database"
 	databaseID := "database-uuid"
-	functionID := uuid.New()
+	functionID := dbmodel.FunctionRecordCounter
 	MinRecordsForInvocation := uint64(100)
 
 	params := &structpb.Struct{
@@ -288,10 +286,8 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 			suite.mockAttachedFunctionDb.On("GetByCollectionID", inputCollectionID).
 				Return([]*dbmodel.AttachedFunction{existingAttachedFunction}, nil).Once()
 
-			// Validate function by ID
-			suite.mockMetaDomain.On("FunctionDb", txCtx).Return(suite.mockFunctionDb).Once()
-			suite.mockFunctionDb.On("GetByID", functionID).
-				Return(&dbmodel.Function{ID: functionID, Name: functionName}, nil).Once()
+			// Note: validateAttachedFunctionMatchesRequest uses dbmodel.GetFunctionNameByID (static lookup),
+			// not FunctionDb.GetByID, so no mock needed for FunctionDb here
 
 			// Validate database matches
 			suite.mockMetaDomain.On("DatabaseDb", txCtx).Return(suite.mockDatabaseDb).Once()
@@ -317,7 +313,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 	// Verify all read mocks were called
 	suite.mockMetaDomain.AssertExpectations(suite.T())
 	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
-	suite.mockFunctionDb.AssertExpectations(suite.T())
 	suite.mockDatabaseDb.AssertExpectations(suite.T())
 }
 
@@ -339,15 +334,9 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 	tenantID := "test-tenant"
 	databaseName := "test-database"
 	databaseID := "database-uuid"
-	functionID := uuid.New()
+	functionID := dbmodel.FunctionRecordCounter
 	MinRecordsForInvocation := uint64(100)
 	now := time.Now()
-
-	params := &structpb.Struct{
-		Fields: map[string]*structpb.Value{
-			"param1": structpb.NewStringValue("value1"),
-		},
-	}
 
 	request := &coordinatorpb.AttachFunctionRequest{
 		Name:                    attachedFunctionName,
@@ -357,7 +346,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 		TenantId:                tenantID,
 		Database:                databaseName,
 		MinRecordsForInvocation: MinRecordsForInvocation,
-		Params:                  params,
 	}
 
 	// ========== FIRST ATTEMPT: Heap Push Fails ==========
@@ -423,10 +411,8 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 			suite.mockAttachedFunctionDb.On("GetByCollectionID", inputCollectionID).
 				Return([]*dbmodel.AttachedFunction{incompleteAttachedFunction}, nil).Once()
 
-			// Validate function matches
-			suite.mockMetaDomain.On("FunctionDb", txCtx).Return(suite.mockFunctionDb).Once()
-			suite.mockFunctionDb.On("GetByID", functionID).
-				Return(&dbmodel.Function{ID: functionID, Name: functionName}, nil).Once()
+			// Note: validateAttachedFunctionMatchesRequest uses dbmodel.GetFunctionNameByID (static lookup),
+			// not FunctionDb.GetByID, so no mock needed for FunctionDb here
 
 			// Validate database matches
 			suite.mockMetaDomain.On("DatabaseDb", txCtx).Return(suite.mockDatabaseDb).Once()
@@ -467,7 +453,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	tenantID := "test-tenant"
 	databaseName := "test-database"
 	databaseID := "database-uuid"
-	existingOperatorID := uuid.New()
+	existingOperatorID := dbmodel.FunctionRecordCounter
 	MinRecordsForInvocation := uint64(100)
 	now := time.Now()
 
@@ -514,21 +500,12 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 			suite.mockAttachedFunctionDb.On("GetByCollectionID", inputCollectionID).
 				Return([]*dbmodel.AttachedFunction{existingAttachedFunction}, nil).Once()
 
-			// Validate function - returns DIFFERENT function name
-			suite.mockMetaDomain.On("FunctionDb", txCtx).Return(suite.mockFunctionDb).Once()
-			suite.mockFunctionDb.On("GetByID", existingOperatorID).
-				Return(&dbmodel.Function{
-					ID:   existingOperatorID,
-					Name: existingOperatorName, // Different from request
-				}, nil).Once()
-
-			// Database lookup happens before the error is returned
-			suite.mockMetaDomain.On("DatabaseDb", txCtx).Return(suite.mockDatabaseDb).Once()
-			suite.mockDatabaseDb.On("GetDatabases", tenantID, databaseName).
-				Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
+			// Note: validateAttachedFunctionMatchesRequest uses dbmodel.GetFunctionNameByID (static lookup)
+			// which returns "record_counter" for FunctionRecordCounter - different from requestedOperatorName
+			// Validation returns (false, nil) early, so DatabaseDb.GetDatabases is NOT called
 
 			_ = txFunc(txCtx)
-		}).Return(status.Errorf(codes.AlreadyExists, "different function is attached with this name: existing=%s, requested=%s", existingOperatorName, requestedOperatorName)).Once()
+		}).Return(status.Errorf(codes.AlreadyExists, "collection already has an attached function: name=%s, function=%s, output_collection=%s", attachedFunctionName, existingOperatorName, outputCollectionName)).Once()
 
 	// Execute AttachFunction
 	response, err := suite.coordinator.AttachFunction(ctx, request)
@@ -536,9 +513,9 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	// Assertions - should fail with AlreadyExists error
 	suite.Error(err)
 	suite.Nil(response)
-	suite.Contains(err.Error(), "different function is attached with this name")
+	suite.Contains(err.Error(), "collection already has an attached function")
 	suite.Contains(err.Error(), existingOperatorName)
-	suite.Contains(err.Error(), requestedOperatorName)
+	suite.Contains(err.Error(), outputCollectionName)
 
 	// Verify no writes occurred (Transaction IS called but Insert/Push are not)
 	suite.mockTxImpl.AssertNumberOfCalls(suite.T(), "Transaction", 1)
@@ -547,7 +524,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	// Verify read mocks were called
 	suite.mockMetaDomain.AssertExpectations(suite.T())
 	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
-	suite.mockFunctionDb.AssertExpectations(suite.T())
 }
 
 func TestAttachFunctionTestSuite(t *testing.T) {

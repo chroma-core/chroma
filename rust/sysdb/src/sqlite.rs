@@ -675,7 +675,7 @@ impl SqliteSysDb {
         _min_records_for_attached_function: u64,
     ) -> Result<chroma_types::AttachedFunctionUuid, crate::AttachFunctionError> {
         // TODO: Implement this when attached function support is added to SqliteSysDb
-        Err(crate::AttachFunctionError::FailedToCreateAttachedFunction(
+        Err(crate::AttachFunctionError::InternalError(
             tonic::Status::unimplemented(
                 " Attached Function operations not yet implemented in SqliteSysDb",
             ),

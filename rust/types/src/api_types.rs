@@ -2396,16 +2396,24 @@ pub struct GetAttachedFunctionResponse {
 
 #[derive(Error, Debug)]
 pub enum AttachFunctionError {
-    #[error(" Attached Function with name [{0}] already exists")]
+    #[error("{0}")]
     AlreadyExists(String),
+    #[error("{0}")]
+    CollectionAlreadyHasFunction(String),
     #[error("Failed to get collection and segments")]
     GetCollectionError(#[from] GetCollectionError),
     #[error("Input collection [{0}] does not exist")]
     InputCollectionNotFound(String),
     #[error("Output collection [{0}] already exists")]
     OutputCollectionExists(String),
+    #[error("{0}")]
+    InvalidArgument(String),
+    #[error("{0}")]
+    FunctionNotFound(String),
     #[error(transparent)]
     Validation(#[from] ChromaValidationError),
+    #[error(transparent)]
+    FinishCreate(#[from] crate::FinishCreateAttachedFunctionError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
@@ -2414,10 +2422,14 @@ impl ChromaError for AttachFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
             AttachFunctionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            AttachFunctionError::CollectionAlreadyHasFunction(_) => ErrorCodes::FailedPrecondition,
             AttachFunctionError::GetCollectionError(err) => err.code(),
             AttachFunctionError::InputCollectionNotFound(_) => ErrorCodes::NotFound,
             AttachFunctionError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
+            AttachFunctionError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
+            AttachFunctionError::FunctionNotFound(_) => ErrorCodes::NotFound,
             AttachFunctionError::Validation(err) => err.code(),
+            AttachFunctionError::FinishCreate(err) => err.code(),
             AttachFunctionError::Internal(err) => err.code(),
         }
     }

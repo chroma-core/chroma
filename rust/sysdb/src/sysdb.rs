@@ -1754,12 +1754,10 @@ impl GrpcSysDb {
         self.client
             .finish_create_attached_function(req)
             .await
-            .map_err(|e| {
-                if e.code() == Code::NotFound {
-                    FinishCreateAttachedFunctionError::AttachedFunctionNotFound
-                } else {
-                    FinishCreateAttachedFunctionError::FailedToFinishCreateAttachedFunction(e)
-                }
+            .map_err(|e| match e.code() {
+                Code::NotFound => FinishCreateAttachedFunctionError::AttachedFunctionNotFound,
+                Code::AlreadyExists => FinishCreateAttachedFunctionError::OutputCollectionExists,
+                _ => FinishCreateAttachedFunctionError::FailedToFinishCreateAttachedFunction(e),
             })?;
         Ok(())
     }
@@ -1777,6 +1775,7 @@ impl GrpcSysDb {
         min_records_for_invocation: u64,
     ) -> Result<chroma_types::AttachedFunctionUuid, AttachFunctionError> {
         // Convert serde_json::Value to prost_types::Struct for gRPC
+        // Params must be an object (or null/empty object)
         let params_struct = match params {
             serde_json::Value::Object(map) => Some(prost_types::Struct {
                 fields: map
@@ -1784,7 +1783,12 @@ impl GrpcSysDb {
                     .map(|(k, v)| (k, json_to_prost_value(v)))
                     .collect(),
             }),
-            _ => None, // Non-object params omitted from proto
+            serde_json::Value::Null => None,
+            _ => {
+                return Err(AttachFunctionError::InvalidArgument(
+                    "params must be a json object".to_string(),
+                ))
+            }
         };
         let req = chroma_proto::AttachFunctionRequest {
             name: name.clone(),
@@ -1796,7 +1800,22 @@ impl GrpcSysDb {
             database: database_name.clone(),
             min_records_for_invocation,
         };
-        let response = self.client.attach_function(req).await?.into_inner();
+        let response = self
+            .client
+            .attach_function(req)
+            .await
+            .map_err(|e| match e.code() {
+                Code::AlreadyExists => AttachFunctionError::AlreadyExists(e.message().to_string()),
+                Code::FailedPrecondition => {
+                    AttachFunctionError::CollectionAlreadyHasFunction(e.message().to_string())
+                }
+                Code::InvalidArgument => {
+                    AttachFunctionError::InvalidArgument(e.message().to_string())
+                }
+                Code::NotFound => AttachFunctionError::FunctionNotFound(e.message().to_string()),
+                _ => AttachFunctionError::InternalError(e),
+            })?
+            .into_inner();
         // Parse the returned attached_function_id - this should always succeed since the server generated it
         // If this fails, it indicates a serious server bug or protocol corruption
         let attached_function = response.attached_function.ok_or_else(|| {
@@ -2313,10 +2332,16 @@ impl SysDb {
 
 #[derive(Error, Debug)]
 pub enum AttachFunctionError {
-    #[error("Attached function already exists")]
-    AlreadyExists,
-    #[error("Failed to create attached function: {0}")]
-    FailedToCreateAttachedFunction(#[from] tonic::Status),
+    #[error("AlreadyExistsError: {0}")]
+    AlreadyExists(String),
+    #[error("CollectionAlreadyHasFunctionError: {0}")]
+    CollectionAlreadyHasFunction(String),
+    #[error("InvalidArgumentError: {0}")]
+    InvalidArgument(String),
+    #[error("FunctionNotFoundError: {0}")]
+    FunctionNotFound(String),
+    #[error("InternalError: {0}")]
+    InternalError(#[from] tonic::Status),
     #[error(
         "Server returned invalid data - attached function was created but response is corrupt"
     )]
@@ -2326,9 +2351,41 @@ pub enum AttachFunctionError {
 impl ChromaError for AttachFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            AttachFunctionError::AlreadyExists => ErrorCodes::AlreadyExists,
-            AttachFunctionError::FailedToCreateAttachedFunction(e) => e.code().into(),
+            AttachFunctionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            AttachFunctionError::CollectionAlreadyHasFunction(_) => ErrorCodes::FailedPrecondition,
+            AttachFunctionError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
+            AttachFunctionError::FunctionNotFound(_) => ErrorCodes::NotFound,
+            AttachFunctionError::InternalError(e) => e.code().into(),
             AttachFunctionError::ServerReturnedInvalidData => ErrorCodes::Internal,
+        }
+    }
+}
+
+impl From<AttachFunctionError> for chroma_types::AttachFunctionError {
+    fn from(e: AttachFunctionError) -> Self {
+        match e {
+            AttachFunctionError::AlreadyExists(msg) => {
+                chroma_types::AttachFunctionError::AlreadyExists(msg)
+            }
+            AttachFunctionError::CollectionAlreadyHasFunction(msg) => {
+                chroma_types::AttachFunctionError::CollectionAlreadyHasFunction(msg)
+            }
+            AttachFunctionError::InvalidArgument(msg) => {
+                chroma_types::AttachFunctionError::InvalidArgument(msg)
+            }
+            AttachFunctionError::FunctionNotFound(msg) => {
+                chroma_types::AttachFunctionError::FunctionNotFound(msg)
+            }
+            AttachFunctionError::InternalError(status) => {
+                chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
+                    status,
+                )))
+            }
+            AttachFunctionError::ServerReturnedInvalidData => {
+                chroma_types::AttachFunctionError::Internal(Box::new(
+                    AttachFunctionError::ServerReturnedInvalidData,
+                ))
+            }
         }
     }
 }
