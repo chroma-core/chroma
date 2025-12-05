@@ -1787,6 +1787,7 @@ impl ServiceBasedFrontend {
                 collection_and_segments,
             },
             payloads: request.searches,
+            eventual_consistency: false,
         };
 
         // Execute the single search plan using the executor
