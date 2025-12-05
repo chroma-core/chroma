@@ -1,0 +1,7 @@
+{
+  "required_env_variables": [{ "name": "OPENAI_API_KEY", "secret": true }],
+  "optional_env_variables": [],
+  "startup_commands": {
+    "npm": "cd movies\nnpm install\nnpm run dev"
+  }
+}
