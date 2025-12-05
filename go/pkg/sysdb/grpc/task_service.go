@@ -68,11 +68,14 @@ func (s *Server) GetAttachedFunctionByUuid(ctx context.Context, req *coordinator
 }
 
 func (s *Server) DetachFunction(ctx context.Context, req *coordinatorpb.DetachFunctionRequest) (*coordinatorpb.DetachFunctionResponse, error) {
-	log.Info("DetachFunction", zap.String("attached_function_id", req.AttachedFunctionId))
+	log.Info("DetachFunction", zap.String("name", req.Name), zap.String("input_collection_id", req.InputCollectionId))
 
 	res, err := s.coordinator.DetachFunction(ctx, req)
 	if err != nil {
 		log.Error("DetachFunction failed", zap.Error(err))
+		if err == common.ErrAttachedFunctionNotFound {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
 		return nil, err
 	}
 

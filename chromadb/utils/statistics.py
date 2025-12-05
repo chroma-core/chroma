@@ -7,27 +7,29 @@ system to automatically compute metadata value frequencies.
 Example:
     >>> from chromadb.utils.statistics import attach_statistics_function, get_statistics
     >>> import chromadb
-    >>> 
+    >>>
     >>> client = chromadb.Client()
     >>> collection = client.get_or_create_collection("my_collection")
-    >>> 
+    >>>
     >>> # Attach statistics function
     >>> attach_statistics_function(collection)
-    >>> 
+    >>>
     >>> # Add some data
     >>> collection.add(
     ...     ids=["id1", "id2"],
     ...     documents=["doc1", "doc2"],
     ...     metadatas=[{"category": "A"}, {"category": "B"}]
     ... )
-    >>> 
+    >>>
     >>> # Get statistics
     >>> stats = get_statistics(collection)
     >>> print(stats)
 """
 
-from typing import TYPE_CHECKING, Optional, Dict, Any
+from typing import TYPE_CHECKING, Optional, Dict, Any, cast
 from collections import defaultdict
+
+from chromadb.api.types import Where
 
 if TYPE_CHECKING:
     from chromadb.api.models.Collection import Collection
@@ -47,8 +49,7 @@ def get_statistics_fn_name(collection: "Collection") -> str:
 
 
 def attach_statistics_function(
-    collection: "Collection",
-    stats_collection_name: Optional[str] = None
+    collection: "Collection", stats_collection_name: Optional[str] = None
 ) -> "AttachedFunction":
     """Attach statistics collection function to a collection.
 
@@ -95,13 +96,14 @@ def get_statistics_fn(collection: "Collection") -> "AttachedFunction":
         AssertionError: If the attached function is not a statistics function
     """
     af = collection.get_attached_function(get_statistics_fn_name(collection))
-    assert af.function_name == "statistics", "Attached function is not a statistics function"
+    assert (
+        af.function_name == "statistics"
+    ), "Attached function is not a statistics function"
     return af
 
 
 def detach_statistics_function(
-    collection: "Collection",
-    delete_stats_collection: bool = False
+    collection: "Collection", delete_stats_collection: bool = False
 ) -> bool:
     """Detach statistics collection function from a collection.
 
@@ -116,10 +118,15 @@ def detach_statistics_function(
     Example:
         >>> detach_statistics_function(collection, delete_stats_collection=True)
     """
-    return get_statistics_fn(collection).detach(delete_output_collection=delete_stats_collection)
+    attached_fn = get_statistics_fn(collection)
+    return collection.detach_function(
+        attached_fn.name, delete_output_collection=delete_stats_collection
+    )
 
 
-def get_statistics(collection: "Collection", key: Optional[str] = None) -> Dict[str, Any]:
+def get_statistics(
+    collection: "Collection", key: Optional[str] = None
+) -> Dict[str, Any]:
     """Get the current statistics for a collection.
 
     Statistics include frequency counts for all metadata key-value pairs,
@@ -175,14 +182,14 @@ def get_statistics(collection: "Collection", key: Optional[str] = None) -> Dict[
     from chromadb.api.models.Collection import Collection
 
     af = get_statistics_fn(collection)
-    
+
     # Get the statistics output collection model from the server
     stats_collection_model = collection._client.get_collection(
         name=af.output_collection,
         tenant=collection.tenant,
         database=collection.database,
     )
-    
+
     # Wrap it in a Collection object to access get/query methods
     stats_collection = Collection(
         client=collection._client,
@@ -197,10 +204,16 @@ def get_statistics(collection: "Collection", key: Optional[str] = None) -> Dict[
 
     offset = 0
     # When filtering by key, also include "summary" entries to get total_count
-    where_filter = {"$or": [{"key": key}, {"key": "summary"}]} if key is not None else None
+    where_filter: Optional[Where] = (
+        cast(Where, {"$or": [{"key": key}, {"key": "summary"}]})
+        if key is not None
+        else None
+    )
 
     while True:
-        page = stats_collection.get(include=["metadatas"], offset=offset, where=where_filter)
+        page = stats_collection.get(
+            include=["metadatas"], offset=offset, where=where_filter
+        )
 
         metadatas = page.get("metadatas") or []
         if not metadatas:
@@ -216,13 +229,21 @@ def get_statistics(collection: "Collection", key: Optional[str] = None) -> Dict[
             value_type = metadata.get("type")
             count = metadata.get("count")
 
-            if meta_key is not None and value is not None and value_type is not None and count is not None:
+            if (
+                meta_key is not None
+                and value is not None
+                and value_type is not None
+                and count is not None
+            ):
                 if meta_key == "summary":
                     if value == "total_count":
                         summary["total_count"] = count
                 else:
                     # Prioritize value_label if present, otherwise use value
                     stats_key = value_label if value_label is not None else value
+                    assert isinstance(meta_key, str)
+                    assert isinstance(stats_key, str)
+                    assert isinstance(count, int)
                     stats[meta_key][stats_key]["count"] = count
 
         # Advance to next page using the actual number of items returned

@@ -381,9 +381,9 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskCleanup_ThenRecreate
 
 	// STEP 4: Delete the task
 	_, err = suite.sysdbClient.DetachFunction(ctx, &coordinatorpb.DetachFunctionRequest{
-		AttachedFunctionId: taskResp.AttachedFunction.Id,
-		InputCollectionId:  collectionID,
-		DeleteOutput:       true,
+		Name:              taskName,
+		InputCollectionId: collectionID,
+		DeleteOutput:      true,
 	})
 	suite.NoError(err, "Should delete task")
 
