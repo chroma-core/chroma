@@ -2022,49 +2022,29 @@ impl ServiceBasedFrontend {
         &mut self,
         _tenant_id: String,
         _database_name: String,
-        attached_function_id: String,
-        DetachFunctionRequest {
-            delete_output,
-            input_collection_id,
-            ..
-        }: DetachFunctionRequest,
+        collection_id: String,
+        name: String,
+        DetachFunctionRequest { delete_output, .. }: DetachFunctionRequest,
     ) -> Result<DetachFunctionResponse, DetachFunctionError> {
-        // Parse attached_function_id from path parameter - client-side validation
-        let attached_function_uuid = chroma_types::AttachedFunctionUuid(
-            uuid::Uuid::parse_str(&attached_function_id).map_err(|e| {
+        // Parse collection_id from path parameter - client-side validation
+        let collection_uuid =
+            chroma_types::CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
                 DetachFunctionError::Internal(Box::new(chroma_error::TonicError(
                     tonic::Status::invalid_argument(format!(
-                        "Client validation error: Invalid attached_function_id UUID format: {}",
+                        "Client validation error: Invalid collection_id UUID format: {}",
                         e
                     )),
                 )))
-            })?,
-        );
-
-        // Parse input_collection_id from request - client-side validation
-        let input_collection_uuid = chroma_types::CollectionUuid(
-            uuid::Uuid::parse_str(&input_collection_id).map_err(|e| {
-                DetachFunctionError::Internal(Box::new(chroma_error::TonicError(
-                    tonic::Status::invalid_argument(format!(
-                        "Client validation error: Invalid input_collection_id UUID format: {}",
-                        e
-                    )),
-                )))
-            })?,
-        );
+            })?);
 
         // Detach function - soft delete it to prevent further runs
         // If delete_output is true, also delete the output collection
         self.sysdb_client
-            .soft_delete_attached_function(
-                attached_function_uuid,
-                input_collection_uuid,
-                delete_output,
-            )
+            .soft_delete_attached_function(name.clone(), collection_uuid, delete_output)
             .await
             .map_err(|e| match e {
                 chroma_sysdb::DeleteAttachedFunctionError::NotFound => {
-                    DetachFunctionError::NotFound(attached_function_id.clone())
+                    DetachFunctionError::NotFound(name.clone())
                 }
                 chroma_sysdb::DeleteAttachedFunctionError::FailedToDeleteAttachedFunction(s) => {
                     DetachFunctionError::Internal(Box::new(chroma_error::TonicError(s)))

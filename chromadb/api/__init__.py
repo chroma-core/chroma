@@ -868,7 +868,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     @abstractmethod
     def detach_function(
         self,
-        attached_function_id: UUID,
+        name: str,
         input_collection_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -877,7 +877,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         """Detach a function and prevent any further runs.
 
         Args:
-            attached_function_id: ID of the attached function to remove
+            name: Name of the attached function to remove
             input_collection_id: ID of the input collection
             delete_output: Whether to also delete the output collection
             tenant: The tenant name
@@ -885,29 +885,5 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
 
         Returns:
             bool: True if successful
-        """
-        pass
-
-    @abstractmethod
-    def get_attached_function(
-        self,
-        name: str,
-        input_collection_id: UUID,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> "AttachedFunction":
-        """Get an attached function by name for a specific collection.
-
-        Args:
-            name: Name of the attached function
-            input_collection_id: ID of the input collection
-            tenant: The tenant name
-            database: The database name
-
-        Returns:
-            AttachedFunction: The attached function object
-
-        Raises:
-            NotFoundError: If the attached function doesn't exist
         """
         pass
