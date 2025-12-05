@@ -2447,22 +2447,14 @@ impl ChromaError for GetAttachedFunctionError {
 #[derive(Clone, Debug, Deserialize, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DetachFunctionRequest {
-    /// ID of the input collection
-    pub input_collection_id: String,
     /// Whether to delete the output collection as well
     #[serde(default)]
     pub delete_output: bool,
 }
 
 impl DetachFunctionRequest {
-    pub fn try_new(
-        input_collection_id: String,
-        delete_output: bool,
-    ) -> Result<Self, ChromaValidationError> {
-        let request = Self {
-            input_collection_id,
-            delete_output,
-        };
+    pub fn try_new(delete_output: bool) -> Result<Self, ChromaValidationError> {
+        let request = Self { delete_output };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }

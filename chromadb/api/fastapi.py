@@ -830,7 +830,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @override
     def detach_function(
         self,
-        attached_function_id: UUID,
+        name: str,
         input_collection_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -839,10 +839,9 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """Detach a function and prevent any further runs."""
         resp_json = self._make_request(
             "post",
-            f"/tenants/{tenant}/databases/{database}/attached_functions/{attached_function_id}/detach",
+            f"/tenants/{tenant}/databases/{database}/collections/{input_collection_id}/attached_functions/{name}/detach",
             json={
                 "delete_output": delete_output,
-                "input_collection_id": str(input_collection_id),
             },
         )
         return cast(bool, resp_json["success"])
