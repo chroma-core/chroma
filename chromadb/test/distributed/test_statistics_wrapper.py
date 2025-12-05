@@ -6,6 +6,8 @@ import json
 import time
 from typing import Any
 
+import pytest
+
 from chromadb.api.client import Client as ClientCreator
 from chromadb.base_types import SparseVector
 from chromadb.config import System
@@ -234,7 +236,7 @@ def test_statistics_wrapper_key_filter(basic_http_client: System) -> None:
 
     # Get statistics filtered by "category" key only
     category_stats = get_statistics(
-        collection, "key_filter_test_statistics", key="category"
+        collection, "key_filter_test_statistics", keys=["category"]
     )
     assert "category" in category_stats["statistics"]
     assert "score" not in category_stats["statistics"]
@@ -246,7 +248,9 @@ def test_statistics_wrapper_key_filter(basic_http_client: System) -> None:
     assert category_stats["summary"]["total_count"] == 3
 
     # Get statistics filtered by "score" key only
-    score_stats = get_statistics(collection, "key_filter_test_statistics", key="score")
+    score_stats = get_statistics(
+        collection, "key_filter_test_statistics", keys=["score"]
+    )
     assert "score" in score_stats["statistics"]
     assert "category" not in score_stats["statistics"]
     assert "active" not in score_stats["statistics"]
@@ -255,6 +259,30 @@ def test_statistics_wrapper_key_filter(basic_http_client: System) -> None:
     # Summary should still be present when filtering by key
     assert "summary" in score_stats
     assert score_stats["summary"]["total_count"] == 3
+
+    # Cleanup
+    detach_statistics_function(collection, delete_stats_collection=True)
+
+
+def test_statistics_wrapper_key_filter_too_many_keys(basic_http_client: System) -> None:
+    """Test that get_statistics raises ValueError when more than 30 keys are provided"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    collection = client.create_collection(name="too_many_keys_test")
+
+    # Enable statistics
+    attach_statistics_function(collection, "too_many_keys_test_statistics")
+
+    # Generate more than 30 keys
+    too_many_keys = [f"key_{i}" for i in range(31)]
+
+    # Should raise ValueError when more than 30 keys are provided
+    with pytest.raises(ValueError) as exc_info:
+        get_statistics(collection, "too_many_keys_test_statistics", keys=too_many_keys)
+
+    assert "Too many keys provided: 31" in str(exc_info.value)
+    assert "Maximum allowed is 30" in str(exc_info.value)
 
     # Cleanup
     detach_statistics_function(collection, delete_stats_collection=True)
