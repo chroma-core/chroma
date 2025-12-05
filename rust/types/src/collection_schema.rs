@@ -1,6 +1,7 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use thiserror::Error;
 use validator::Validate;
 
@@ -141,6 +142,19 @@ pub const BOOL_INVERTED_INDEX_NAME: &str = "bool_inverted_index";
 // Special metadata keys - must match Python constants in chromadb/api/types.py
 pub const DOCUMENT_KEY: &str = "#document";
 pub const EMBEDDING_KEY: &str = "#embedding";
+
+/// Customer-managed encryption key
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub enum Cmek {
+    Gcp(Arc<String>),
+}
+
+impl Cmek {
+    /// Create a GCP CMEK from a KMS resource name
+    pub fn gcp(resource: String) -> Self {
+        Cmek::Gcp(Arc::new(resource))
+    }
+}
 
 // ============================================================================
 // SCHEMA STRUCTURES
