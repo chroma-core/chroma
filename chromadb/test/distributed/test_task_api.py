@@ -7,6 +7,7 @@ for automatically processing collections.
 
 import pytest
 from chromadb.api.client import Client as ClientCreator
+from chromadb.api.functions import Function, RecordCounterFunction
 from chromadb.config import System
 from chromadb.errors import ChromaError, NotFoundError
 from chromadb.test.utils.wait_for_version_increase import (
@@ -29,10 +30,9 @@ def test_count_function_attach_and_detach(basic_http_client: System) -> None:
 
     # Create a task that counts records in the collection
     attached_fn = collection.attach_function(
+        function=RecordCounterFunction(),
         name="count_my_docs",
-        function_id="record_counter",  # Built-in operator that counts records
         output_collection="my_documents_counts",
-        params=None,
     )
 
     # Verify task creation succeeded
@@ -66,6 +66,14 @@ def test_count_function_attach_and_detach(basic_http_client: System) -> None:
     assert success is True
 
 
+class InvalidFunction(Function):
+    """A function with an invalid name for testing error handling."""
+
+    @property
+    def name(self) -> str:
+        return "nonexistent_function"
+
+
 def test_task_with_invalid_function(basic_http_client: System) -> None:
     """Test that creating a task with an invalid function raises an error"""
     client = ClientCreator.from_system(basic_http_client)
@@ -77,10 +85,9 @@ def test_task_with_invalid_function(basic_http_client: System) -> None:
     # Attempt to create task with non-existent function should raise ChromaError
     with pytest.raises(ChromaError, match="function not found"):
         collection.attach_function(
+            function=InvalidFunction(),
             name="invalid_task",
-            function_id="nonexistent_function",
             output_collection="output_collection",
-            params=None,
         )
 
 
@@ -94,10 +101,9 @@ def test_attach_function_returns_function_name(basic_http_client: System) -> Non
 
     # Attach a function and verify function_name field in response
     attached_fn = collection.attach_function(
+        function=RecordCounterFunction(),
         name="my_counter",
-        function_id="record_counter",
         output_collection="output_collection",
-        params=None,
     )
 
     # Verify the attached function has function_name (not function_id UUID)
@@ -122,10 +128,9 @@ def test_function_multiple_collections(basic_http_client: System) -> None:
     collection1.add(ids=["id1", "id2"], documents=["doc1", "doc2"])
 
     attached_fn1 = collection1.attach_function(
+        function=RecordCounterFunction(),
         name="task_1",
-        function_id="record_counter",
         output_collection="output_1",
-        params=None,
     )
 
     assert attached_fn1 is not None
@@ -135,10 +140,9 @@ def test_function_multiple_collections(basic_http_client: System) -> None:
     collection2.add(ids=["id3", "id4"], documents=["doc3", "doc4"])
 
     attached_fn2 = collection2.attach_function(
+        function=RecordCounterFunction(),
         name="task_2",
-        function_id="record_counter",
         output_collection="output_2",
-        params=None,
     )
 
     assert attached_fn2 is not None
@@ -170,10 +174,9 @@ def test_functions_one_attached_function_per_collection(
 
     # Create first task on the collection
     attached_fn1 = collection.attach_function(
+        function=RecordCounterFunction(),
         name="task_1",
-        function_id="record_counter",
         output_collection="output_1",
-        params=None,
     )
 
     assert attached_fn1 is not None
@@ -182,19 +185,17 @@ def test_functions_one_attached_function_per_collection(
     # (only one attached function allowed per collection)
     with pytest.raises(ChromaError, match="already has an attached function"):
         collection.attach_function(
+            function=RecordCounterFunction(),
             name="task_2",
-            function_id="record_counter",
             output_collection="output_2",
-            params=None,
         )
 
     # Attempt to create a task with the same name but different params should also fail
     with pytest.raises(ChromaError, match="already exists"):
         collection.attach_function(
+            function=RecordCounterFunction(),
             name="task_1",
-            function_id="record_counter",
             output_collection="output_different",  # Different output collection
-            params=None,
         )
 
     # Detach the first function
@@ -205,10 +206,9 @@ def test_functions_one_attached_function_per_collection(
 
     # Now we should be able to attach a new function
     attached_fn2 = collection.attach_function(
+        function=RecordCounterFunction(),
         name="task_2",
-        function_id="record_counter",
         output_collection="output_2",
-        params=None,
     )
 
     assert attached_fn2 is not None
@@ -229,10 +229,9 @@ def test_function_remove_nonexistent(basic_http_client: System) -> None:
     collection = client.create_collection(name="test_collection")
     collection.add(ids=["id1"], documents=["test"])
     attached_fn = collection.attach_function(
+        function=RecordCounterFunction(),
         name="test_function",
-        function_id="record_counter",
         output_collection="output_collection",
-        params=None,
     )
 
     collection.detach_function(attached_fn.name, delete_output_collection=True)

@@ -53,6 +53,13 @@ from chromadb.execution.expression.operator import (
     # Reciprocal Rank Fusion for combining rankings
     Rrf,
 )
+
+# Import attachable functions
+from chromadb.api.functions import (
+    Function,
+    StatisticsFunction,
+    RecordCounterFunction,
+)
 from pathlib import Path
 import os
 
@@ -97,6 +104,10 @@ __all__ = [
     "IntInvertedIndexConfig",
     "FloatInvertedIndexConfig",
     "BoolInvertedIndexConfig",
+    # Attachable Functions
+    "Function",
+    "StatisticsFunction",
+    "RecordCounterFunction",
 ]
 
 from chromadb.types import CloudClientArg

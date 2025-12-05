@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Union, List, cast, Dict, Any
+from typing import TYPE_CHECKING, Optional, Union, List, cast
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
 from chromadb.api.types import (
@@ -27,6 +27,7 @@ import logging
 
 if TYPE_CHECKING:
     from chromadb.api.models.AttachedFunction import AttachedFunction
+    from chromadb.api.functions import Function
 
 logger = logging.getLogger(__name__)
 
@@ -500,36 +501,34 @@ class Collection(CollectionCommon["ServerAPI"]):
 
     def attach_function(
         self,
-        function_id: str,
+        function: "Function",
         name: str,
         output_collection: str,
-        params: Optional[Dict[str, Any]] = None,
     ) -> "AttachedFunction":
         """Attach a function to this collection.
 
         Args:
-            function_id: Built-in function identifier (e.g., "record_counter")
+            function: The function to attach (e.g. StatisticsFunction(), RecordCounterFunction())
             name: Unique name for this attached function
             output_collection: Name of the collection where function output will be stored
-            params: Optional dictionary with function-specific parameters
 
         Returns:
             AttachedFunction: Object representing the attached function
 
         Example:
+            >>> from chromadb.api.functions import StatisticsFunction
             >>> attached_fn = collection.attach_function(
-            ...     function_id="record_counter",
+            ...     function=StatisticsFunction(),
             ...     name="mycoll_stats_fn",
-            ...     output_collection="mycoll_stats",
-            ...     params={"threshold": 100}
+            ...     output_collection="mycoll_stats"
             ... )
         """
         return self._client.attach_function(
-            function_id=function_id,
+            function_id=function.name,
             name=name,
             input_collection_id=self.id,
             output_collection=output_collection,
-            params=params,
+            params=function.params,
             tenant=self.tenant,
             database=self.database,
         )
