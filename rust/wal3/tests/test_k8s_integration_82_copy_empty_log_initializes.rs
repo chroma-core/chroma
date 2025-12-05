@@ -4,7 +4,7 @@ use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
     Cursor, CursorName, CursorStoreOptions, GarbageCollectionOptions, Limits, LogPosition,
-    LogReader, LogReaderOptions, LogWriter, LogWriterOptions, SnapshotOptions,
+    LogReader, LogReaderOptions, LogWriter, LogWriterOptions,
 };
 
 #[tokio::test]

@@ -27,8 +27,8 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
         &storage,
         "test_k8s_integration_05_crash_safety_initialize_fails",
         FragmentSeqNo(1),
-        LogPosition::from_offset(1),
-        vec![vec![81, 82, 83, 84]],
+        position,
+        vec![vec![42, 43, 44, 45]],
         None,
     )
     .await
