@@ -74,8 +74,8 @@ class MySparseEmbeddingFunction
 
     public static buildFromConfig(
         config: MySparseEmbeddingFunctionConfig,
-    ): MySparseEmbeddingFunctionConfig {
-        return new MySparseEmbeddingFunction(...);
+    ): MySparseEmbeddingFunction {
+        return new MySparseEmbeddingFunction(config);
     }
 
     public getConfig(): MySparseEmbeddingFunctionConfig {
@@ -86,7 +86,7 @@ class MySparseEmbeddingFunction
         ...
     }
 
-    public static validateConfig(config: HuggingFaceSpladeConfig): void {
+    public static validateConfig(config: MySparseEmbeddingFunctionConfig): void {
         ...
     }
 }
