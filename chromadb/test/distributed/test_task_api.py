@@ -227,3 +227,29 @@ def test_function_remove_nonexistent(basic_http_client: System) -> None:
     # Trying to detach this function again should raise NotFoundError
     with pytest.raises(NotFoundError, match="does not exist"):
         attached_fn.detach(delete_output_collection=True)
+
+def test_attach_to_output_collection_fails(basic_http_client: System) -> None:
+    """Test that attaching a function to an output collection fails"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    # Create input collection
+    input_collection = client.create_collection(name="input_collection")
+    input_collection.add(ids=["id1"], documents=["test"])
+
+    _ = input_collection.attach_function(
+        name="test_function",
+        function_id="record_counter",
+        output_collection="output_collection",
+        params=None,
+    )
+
+    output_collection = client.get_collection(name="output_collection")
+
+    with pytest.raises(ChromaError, match="cannot attach function to an output collection"):
+        _ = output_collection.attach_function(
+            name="test_function_2",
+            function_id="record_counter",
+            output_collection="output_collection_2",
+            params=None,
+        )
