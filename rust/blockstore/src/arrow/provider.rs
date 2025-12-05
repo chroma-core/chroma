@@ -555,11 +555,7 @@ impl BlockManager {
         let block_bytes_len = bytes.len();
         let res = self
             .storage
-            .put_bytes(
-                &key,
-                bytes,
-                PutOptions::with_priority(StorageRequestPriority::P0),
-            )
+            .put_bytes(&key, bytes, PutOptions::default())
             .await;
         match res {
             Ok(_) => {
@@ -740,11 +736,7 @@ impl RootManager {
         let key = Self::get_storage_key(&root.prefix_path, &root.id);
         let res = self
             .storage
-            .put_bytes(
-                &key,
-                bytes,
-                PutOptions::with_priority(StorageRequestPriority::P0),
-            )
+            .put_bytes(&key, bytes, PutOptions::default())
             .await;
         match res {
             Ok(_) => {

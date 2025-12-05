@@ -301,14 +301,7 @@ impl ACStorageProvider {
     async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
         match self {
             ACStorageProvider::S3(s3_storage) => s3_storage.delete(key, options).await,
-            ACStorageProvider::Object(object_storage) => {
-                if options.if_match.is_some() {
-                    return Err(StorageError::Message {
-                        message: "if match not supported for object store backend".to_string(),
-                    });
-                }
-                object_storage.delete(key).await
-            }
+            ACStorageProvider::Object(object_storage) => object_storage.delete(key).await,
         }
     }
 

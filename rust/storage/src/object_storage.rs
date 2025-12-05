@@ -371,11 +371,11 @@ impl ObjectStorage {
         }
 
         // Apply conditional operations
-        if options.if_not_exists {
-            put_options.mode = PutMode::Create;
-        } else if let Some(etag) = &options.if_match {
-            put_options.mode = PutMode::Update(etag.try_into()?);
-        }
+        put_options.mode = match options.mode {
+            crate::PutMode::IfMatch(etag) => PutMode::Update((&etag).try_into()?),
+            crate::PutMode::IfNotExist => PutMode::Create,
+            crate::PutMode::Upsert => PutMode::Overwrite,
+        };
 
         let result = self
             .store
@@ -394,8 +394,10 @@ impl ObjectStorage {
         // NOTE(sicheng): GCS has no support for conditional multipart upload
         // https://docs.cloud.google.com/storage/docs/multipart-uploads
         total_size_bytes <= self.upload_part_size_bytes
-            || options.if_match.is_some()
-            || options.if_not_exists
+            || matches!(
+                options.mode,
+                crate::PutMode::IfMatch(_) | crate::PutMode::IfNotExist
+            )
     }
 
     pub async fn put(
