@@ -1,4 +1,4 @@
-use chroma_storage::Cmek;
+use chroma_types::Cmek;
 use uuid::Uuid;
 
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]

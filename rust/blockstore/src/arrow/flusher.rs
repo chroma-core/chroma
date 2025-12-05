@@ -5,7 +5,7 @@ use super::{
     types::{ArrowWriteableKey, ArrowWriteableValue},
 };
 use chroma_error::ChromaError;
-use chroma_storage::Cmek;
+use chroma_types::Cmek;
 use futures::{StreamExt, TryStreamExt};
 use uuid::Uuid;
 

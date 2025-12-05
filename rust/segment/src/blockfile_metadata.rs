@@ -19,7 +19,7 @@ use chroma_index::sparse::reader::SparseReader;
 use chroma_index::sparse::types::DEFAULT_BLOCK_SIZE;
 use chroma_index::sparse::writer::SparseFlusher;
 use chroma_index::sparse::writer::SparseWriter;
-use chroma_storage::Cmek;
+use chroma_types::Cmek;
 use chroma_types::DatabaseUuid;
 use chroma_types::Schema;
 use chroma_types::SegmentType;

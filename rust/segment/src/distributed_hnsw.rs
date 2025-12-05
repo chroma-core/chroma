@@ -8,9 +8,10 @@ use chroma_index::hnsw_provider::{
     HnswIndexProviderOpenError, HnswIndexRef,
 };
 use chroma_index::{Index, IndexUuid};
-use chroma_storage::Cmek;
-use chroma_types::{Collection, HnswParametersFromSegmentError, Schema, SchemaError, SegmentUuid};
-use chroma_types::{MaterializedLogOperation, Segment};
+use chroma_types::{
+    Cmek, Collection, HnswParametersFromSegmentError, MaterializedLogOperation, Schema,
+    SchemaError, Segment, SegmentUuid,
+};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
