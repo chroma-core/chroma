@@ -41,7 +41,7 @@ mod utils;
 use chroma_storage::admissioncontrolleds3::AdmissionControlledS3Storage;
 use chroma_storage::config::{ObjectStorageConfig, ObjectStorageProvider};
 use chroma_storage::object_storage::ObjectStorage;
-use chroma_storage::Storage;
+use chroma_storage::{Cmek, Storage};
 
 // ============================================================================
 // CONFIGURATION - UPDATE THESE VALUES FOR YOUR ENVIRONMENT
@@ -91,13 +91,13 @@ fn test_prefix(test_name: &str) -> String {
 }
 
 /// Helper to create valid CMEK instance from constant
-fn test_cmek() -> chroma_storage::Cmek {
-    chroma_storage::Cmek::GCP(GCS_CMEK_KEY_NAME.to_string())
+fn test_cmek() -> Cmek {
+    Cmek::gcp(GCS_CMEK_KEY_NAME.to_string())
 }
 
 /// Helper to create invalid CMEK for negative testing
-fn test_invalid_cmek() -> chroma_storage::Cmek {
-    chroma_storage::Cmek::GCP(GCS_INVALID_CMEK_KEY_NAME.to_string())
+fn test_invalid_cmek() -> Cmek {
+    Cmek::gcp(GCS_INVALID_CMEK_KEY_NAME.to_string())
 }
 
 // ============================================================================
