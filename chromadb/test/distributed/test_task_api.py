@@ -13,7 +13,6 @@ from chromadb.test.utils.wait_for_version_increase import (
     get_collection_version,
     wait_for_version_increase,
 )
-from time import sleep
 
 
 def test_count_function_attach_and_detach(basic_http_client: System) -> None:
@@ -49,8 +48,6 @@ def test_count_function_attach_and_detach(basic_http_client: System) -> None:
     assert collection.count() == 300
 
     wait_for_version_increase(client, collection.name, initial_version)
-    # Give some time to invalidate the frontend query cache
-    sleep(60)
 
     result = client.get_collection("my_documents_counts").get("function_output")
     assert result["metadatas"] is not None

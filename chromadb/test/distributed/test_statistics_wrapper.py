@@ -3,7 +3,6 @@ Integration test for the Collection statistics wrapper methods
 """
 
 import json
-import time
 from chromadb.api.client import Client as ClientCreator
 from chromadb.base_types import SparseVector
 from chromadb.config import System
@@ -51,7 +50,6 @@ def test_statistics_wrapper(basic_http_client: System) -> None:
 
     # Wait for statistics to be computed
     wait_for_version_increase(client, collection.name, initial_version)
-    time.sleep(60)
 
     # Get statistics
     stats = get_statistics(collection)
@@ -222,7 +220,6 @@ def test_statistics_wrapper_key_filter(basic_http_client: System) -> None:
     )
 
     wait_for_version_increase(client, collection.name, initial_version)
-    time.sleep(60)
 
     # Get all statistics (no key filter)
     all_stats = get_statistics(collection)
@@ -290,9 +287,6 @@ def test_statistics_wrapper_incremental_updates(basic_http_client: System) -> No
     )
 
     wait_for_version_increase(client, collection.name, next_version)
-    # TODO(tanujnay112): Remove this sleep once query cache invalidation is solidified
-    # or figure out a different testing harness where we don't have to wait for query cache invalidation
-    time.sleep(70)
 
     # Check updated statistics
     stats = get_statistics(collection)
