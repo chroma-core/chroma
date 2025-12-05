@@ -15,8 +15,7 @@ use crate::distributed_spann::{SpannSegmentFlusher, SpannSegmentWriter};
 
 use super::blockfile_metadata::{MetadataSegmentFlusher, MetadataSegmentWriter};
 use super::blockfile_record::{
-    ApplyMaterializedLogError, RecordSegmentFlusher, RecordSegmentReader,
-    RecordSegmentReaderCreationError, RecordSegmentWriter,
+    ApplyMaterializedLogError, RecordSegmentFlusher, RecordSegmentReader, RecordSegmentWriter,
 };
 use super::distributed_hnsw::DistributedHNSWSegmentWriter;
 
@@ -591,44 +590,28 @@ pub async fn materialize_logs(
     let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
     let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
     if let Some(reader) = &record_segment_reader {
+        let mut user_ids = logs
+            .iter()
+            .map(|(log, _)| log.record.id.as_str())
+            .collect::<Vec<_>>();
+        user_ids.sort_unstable();
+        user_ids.dedup();
         async {
-            for (log_record, _) in logs.iter() {
-                let exists = match reader
-                    .data_exists_for_user_id(log_record.record.id.as_str())
-                    .await
-                {
-                    Ok(res) => res,
-                    Err(e) => {
-                        return Err(LogMaterializerError::RecordSegment(e));
-                    }
+            reader.prefetch_user_id_to_id(&user_ids).await;
+
+            let mut existing_offset_ids = Vec::with_capacity(user_ids.len());
+            for user_id in user_ids {
+                if let Some(offset_id) = reader.get_offset_id_for_user_id(user_id).await? {
+                    existing_offset_ids.push(offset_id);
+                    existing_id_to_materialized.insert(
+                        user_id,
+                        MaterializedLogRecord::from_segment_offset_id(offset_id),
+                    );
                 };
-                if exists {
-                    match reader
-                        .get_offset_id_for_user_id(log_record.record.id.as_str())
-                        .await
-                    {
-                        Ok(Some(offset_id)) => {
-                            existing_id_to_materialized.insert(
-                                log_record.record.id.as_str(),
-                                MaterializedLogRecord::from_segment_offset_id(offset_id),
-                            );
-                        }
-                        Ok(None) => {
-                            return Err(LogMaterializerError::RecordSegment(Box::new(
-                                RecordSegmentReaderCreationError::UserRecordNotFound(format!(
-                                    "not found: {}",
-                                    log_record.record.id,
-                                )),
-                            )
-                                as _));
-                        }
-                        Err(e) => {
-                            return Err(LogMaterializerError::RecordSegment(e));
-                        }
-                    }
-                }
             }
-            Ok(())
+
+            reader.prefetch_id_to_data(&existing_offset_ids).await;
+            Ok::<_, LogMaterializerError>(())
         }
         .instrument(Span::current())
         .await?;
