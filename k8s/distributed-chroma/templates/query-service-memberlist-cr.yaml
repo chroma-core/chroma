@@ -13,14 +13,16 @@ spec:
 ---
 
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: query-service-memberlist-readerwriter
+  namespace: {{ .Values.namespace }}
 rules:
 - apiGroups:
   - chroma.cluster
   resources:
   - memberlists
+  namespace: {{ .Values.namespace }}
   verbs:
   - get
   - list
@@ -34,13 +36,15 @@ rules:
 ---
 
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: sysdb-query-service-memberlist-binding
+  namespace: {{ .Values.namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: query-service-memberlist-readerwriter
+  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: sysdb-serviceaccount
@@ -49,15 +53,17 @@ subjects:
 ---
 
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   # Awkward name, but this lets the query-service-serviceaccount read
   # the query-service-memberlist.
   name: query-service-query-service-memberlist-binding
+  namespace: {{ .Values.namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: query-service-memberlist-readerwriter
+  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: query-service-serviceaccount
@@ -66,13 +72,15 @@ subjects:
 ---
 
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: query-service-memberlist-readerwriter-binding
+  namespace: {{ .Values.namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: query-service-memberlist-readerwriter
+  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: default
@@ -82,13 +90,15 @@ subjects:
 
 
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: rust-frontend-service-query-service-memberlist-binding
+  namespace: {{ .Values.namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: query-service-memberlist-readerwriter
+  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: rust-frontend-service-serviceaccount

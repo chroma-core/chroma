@@ -156,6 +156,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: pod-watcher
+  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: query-service-serviceaccount

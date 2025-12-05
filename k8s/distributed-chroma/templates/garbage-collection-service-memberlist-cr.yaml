@@ -8,14 +8,16 @@ spec:
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: garbage-collection-service-memberlist-readerwriter
+  namespace: {{ .Values.namespace }}
 rules:
 - apiGroups:
     - chroma.cluster
   resources:
     - memberlists
+  namespace: {{ .Values.namespace }}
   verbs:
     - get
     - list
@@ -29,13 +31,15 @@ rules:
 ---
 
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: sysdb-garbage-collection-service-memberlist-binding
+  namespace: {{ .Values.namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: garbage-collection-service-memberlist-readerwriter
+  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: sysdb-serviceaccount
@@ -43,13 +47,15 @@ subjects:
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: garbage-collection-service-garbage-collection-service-memberlist-binding
+  namespace: {{ .Values.namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: garbage-collection-service-memberlist-readerwriter
+  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: garbage-collector-serviceaccount
@@ -58,13 +64,15 @@ subjects:
 ---
 
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: garbage-collection-service-memberlist-readerwriter-binding
+  namespace: {{ .Values.namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: garbage-collection-service-memberlist-readerwriter
+  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: default
