@@ -15,6 +15,7 @@ use crate::arrow::sparse_index::SparseIndexWriter;
 use crate::key::CompositeKey;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
+use chroma_storage::Cmek;
 use itertools::Itertools;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -46,6 +47,7 @@ pub struct ArrowOrderedBlockfileWriter {
     root: RootWriter,
     inner: Arc<Mutex<Inner>>,
     id: Uuid,
+    cmek: Option<Cmek>,
 }
 
 #[derive(Error, Debug)]
@@ -69,6 +71,7 @@ impl ArrowOrderedBlockfileWriter {
         block_manager: BlockManager,
         root_manager: RootManager,
         max_block_size_bytes: usize,
+        cmek: Option<Cmek>,
     ) -> Self {
         let initial_block = block_manager.create::<K, V, OrderedBlockDelta>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
@@ -90,6 +93,7 @@ impl ArrowOrderedBlockfileWriter {
                 completed_block_deltas: Vec::new(),
                 remaining_block_stack: VecDeque::new(),
             })),
+            cmek,
         }
     }
 
@@ -98,6 +102,7 @@ impl ArrowOrderedBlockfileWriter {
         block_manager: BlockManager,
         root_manager: RootManager,
         new_root: RootWriter,
+        cmek: Option<Cmek>,
     ) -> Self {
         let remaining_block_stack = {
             let root_forward = &new_root.sparse_index.data.lock().forward;
@@ -131,6 +136,7 @@ impl ArrowOrderedBlockfileWriter {
                 completed_block_deltas: Vec::new(),
                 remaining_block_stack,
             })),
+            cmek,
         }
     }
 
@@ -219,6 +225,7 @@ impl ArrowOrderedBlockfileWriter {
             self.root,
             self.id,
             count,
+            self.cmek,
         );
 
         Ok(flusher)
@@ -965,6 +972,7 @@ mod tests {
                 current_block_delta: Some((initial_block, None)),
                 completed_block_deltas: Vec::new(),
             })),
+            cmek: None,
         };
 
         let n = 2000;
@@ -1054,14 +1062,17 @@ mod tests {
         let old_block_2_record_batch = old_block_delta_2.finish::<&str, String>(None);
         let old_block_2 = Block::from_record_batch(old_block_id_2, old_block_2_record_batch);
         block_manager
-            .flush(&old_block_1, prefix_path)
+            .flush(&old_block_1, prefix_path, None)
             .await
             .unwrap();
         block_manager
-            .flush(&old_block_2, prefix_path)
+            .flush(&old_block_2, prefix_path, None)
             .await
             .unwrap();
-        root_manager.flush::<&str>(&old_root_writer).await.unwrap();
+        root_manager
+            .flush::<&str>(&old_root_writer, None)
+            .await
+            .unwrap();
 
         // We now have a v1 blockfile with 2 blocks and no counts in the root
 

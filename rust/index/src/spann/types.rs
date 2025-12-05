@@ -2430,6 +2430,7 @@ impl SpannIndexFlusher {
                     &self.hnsw_flusher.prefix_path,
                     &self.hnsw_flusher.index_id,
                     &self.hnsw_flusher.hnsw_index,
+                    None,
                 )
                 .await
                 .map_err(|e| {
