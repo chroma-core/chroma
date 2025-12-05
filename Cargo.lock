@@ -1915,6 +1915,7 @@ dependencies = [
  "chroma-config",
  "chroma-error",
  "chroma-tracing",
+ "chroma-types",
  "futures",
  "object_store",
  "opentelemetry",
