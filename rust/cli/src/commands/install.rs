@@ -469,7 +469,10 @@ fn get_app_env_variables(
     let mut env_variables = match local {
         false => {
             let (_, current_profile) = get_current_profile()?;
-            SampleAppEnvVariables::cloud(current_profile, db_name.ok_or(InstallError::DatabaseRequired)?)
+            SampleAppEnvVariables::cloud(
+                current_profile,
+                db_name.ok_or(InstallError::DatabaseRequired)?,
+            )
         }
         true => SampleAppEnvVariables::local(db_name),
     };
