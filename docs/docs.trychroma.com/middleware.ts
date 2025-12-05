@@ -75,6 +75,8 @@ const legacyPathsMapping: Record<string, string> = {
   "/production/administration/performance": "/guides/deploy/performance",
   "/production/administration/observability": "/guides/deploy/observability",
   "/cloud/collection-forking": "/cloud/features/collection-forking",
+  "/cloud/schema/sparse-vector-search":
+    "/cloud/sparse-embeddings/sparse-vector-search",
 };
 
 export const middleware = (request: NextRequest) => {
