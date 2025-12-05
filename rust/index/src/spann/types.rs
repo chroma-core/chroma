@@ -3691,7 +3691,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_reassign() {
+    async fn test_reassign_and_delete_center() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
@@ -3883,16 +3883,19 @@ mod tests {
             .expect("Expected reassign to succeed");
         // See the reassigned points.
         {
-            // Center 1 should remain unchanged.
+            // Center 1 should get 100 points: original 50 + 50 reassigned from center 3.
+            // Points 51-100 from center 3 (near 1000,1000) get reassigned because center 2
+            // was deleted, and center 1 is the only remaining nearby center.
             let pl = writer
                 .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 1)
                 .await
                 .expect("Error getting posting list")
                 .unwrap();
-            assert_eq!(pl.0.len(), 50);
-            assert_eq!(pl.1.len(), 50);
-            assert_eq!(pl.2.len(), 100);
+            assert_eq!(pl.0.len(), 100);
+            assert_eq!(pl.1.len(), 100);
+            assert_eq!(pl.2.len(), 200);
+            // First 50 are original points 1-50 at version 1
             for i in 1..=50 {
                 assert_eq!(pl.0[i - 1], i as u32);
                 assert_eq!(pl.1[i - 1], 1);
@@ -3902,28 +3905,26 @@ mod tests {
                     split_doc_embeddings1[(i - 1) * 2 + 1]
                 );
             }
-            // Center 2 should get 50 points, all with version 2 migrating from center 3.
+            // Next 50 are reassigned points 51-100 at version 2 (from center 3)
+            for i in 51..=100 {
+                assert_eq!(pl.0[i - 1], i as u32);
+                assert_eq!(pl.1[i - 1], 2);
+                assert_eq!(pl.2[(i - 1) * 2], split_doc_embeddings3[(i - 51) * 2]);
+                assert_eq!(
+                    pl.2[(i - 1) * 2 + 1],
+                    split_doc_embeddings3[(i - 51) * 2 + 1]
+                );
+            }
+            // Center 2 should be deleted (all its original points were reassigned out).
             let pl = writer
                 .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 2)
                 .await
-                .expect("Error getting posting list")
-                .unwrap();
-            assert_eq!(pl.0.len(), 50);
-            assert_eq!(pl.1.len(), 50);
-            assert_eq!(pl.2.len(), 100);
-            for i in 1..=50 {
-                assert_eq!(pl.0[i - 1], 50 + i as u32);
-                assert_eq!(pl.1[i - 1], 2);
-                assert_eq!(pl.2[(i - 1) * 2], split_doc_embeddings3[(i - 1) * 2]);
-                assert_eq!(
-                    pl.2[(i - 1) * 2 + 1],
-                    split_doc_embeddings3[(i - 1) * 2 + 1]
-                );
-            }
-            // Center 3 should get 100 points. 50 points with version 1 which weere
-            // originally in center 3 and 50 points with version 2 which were originally
-            // in center 2.
+                .expect("Error getting posting list");
+            assert!(pl.is_none());
+            // Center 3 should get 100 points. 50 points with version 1 which were
+            // originally in center 3 (now outdated since reassigned to center 1) and
+            // 50 points with version 2 which were originally in center 2.
             let pl = writer
                 .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 3)
