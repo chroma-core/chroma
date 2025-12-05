@@ -234,7 +234,7 @@ def test_statistics_wrapper_key_filter(basic_http_client: System) -> None:
 
     # Get statistics filtered by "category" key only
     category_stats = get_statistics(
-        collection, "key_filter_test_statistics", key="category"
+        collection, "key_filter_test_statistics", keys=["category"]
     )
     assert "category" in category_stats["statistics"]
     assert "score" not in category_stats["statistics"]
@@ -246,7 +246,9 @@ def test_statistics_wrapper_key_filter(basic_http_client: System) -> None:
     assert category_stats["summary"]["total_count"] == 3
 
     # Get statistics filtered by "score" key only
-    score_stats = get_statistics(collection, "key_filter_test_statistics", key="score")
+    score_stats = get_statistics(
+        collection, "key_filter_test_statistics", keys=["score"]
+    )
     assert "score" in score_stats["statistics"]
     assert "category" not in score_stats["statistics"]
     assert "active" not in score_stats["statistics"]
