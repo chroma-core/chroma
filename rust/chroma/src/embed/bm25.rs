@@ -31,7 +31,7 @@ where
     H: TokenHasher,
 {
     /// Whether to store tokens in the created sparse vectors.
-    pub store_tokens: bool,
+    pub include_tokens: bool,
     /// Tokenizer for converting text into tokens.
     pub tokenizer: T,
     /// Hasher for converting tokens into u32 identifiers.
@@ -57,7 +57,7 @@ impl BM25SparseEmbeddingFunction<Bm25Tokenizer, Murmur3AbsHasher> {
     /// - hasher: Murmur3 with seed 0, abs() behavior
     pub fn default_murmur3_abs() -> Self {
         Self {
-            store_tokens: true,
+            include_tokens: true,
             tokenizer: Bm25Tokenizer::default(),
             hasher: Murmur3AbsHasher::default(),
             k: 1.2,
@@ -78,7 +78,7 @@ where
 
         let doc_len = tokens.len() as f32;
 
-        if self.store_tokens {
+        if self.include_tokens {
             let mut token_ids = Vec::with_capacity(tokens.len());
             for token in tokens {
                 let id = self.hasher.hash(&token);

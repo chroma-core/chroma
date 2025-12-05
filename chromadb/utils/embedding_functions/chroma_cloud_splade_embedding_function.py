@@ -1,5 +1,6 @@
 from chromadb.api.types import (
     SparseEmbeddingFunction,
+    SparseVector,
     SparseVectors,
     Documents,
 )
@@ -21,7 +22,7 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         self,
         api_key_env_var: str = "CHROMA_API_KEY",
         model: ChromaCloudSpladeEmbeddingModel = ChromaCloudSpladeEmbeddingModel.SPLADE_PP_EN_V1,
-        store_tokens: bool = False,
+        include_tokens: bool = False,
     ):
         """
         Initialize the ChromaCloudSpladeEmbeddingFunction.
@@ -50,7 +51,7 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
                 f"or in any existing client instances"
             )
         self.model = model
-        self.store_tokens = bool(store_tokens)
+        self.include_tokens = bool(include_tokens)
         self._api_url = "https://embed.trychroma.com/embed_sparse"
         self._session = httpx.Client()
         self._session.headers.update(
@@ -89,7 +90,7 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
             "texts": list(input),
             "task": "",
             "target": "",
-            "fetch_tokens": "true" if self.store_tokens is True else "false",
+            "fetch_tokens": "true" if self.include_tokens is True else "false",
         }
 
         try:
@@ -123,14 +124,14 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
             if isinstance(emb, dict):
                 indices = emb.get("indices", [])
                 values = emb.get("values", [])
-                raw_labels = emb.get("labels") if self.store_tokens else None
+                raw_labels = emb.get("labels") if self.include_tokens else None
                 labels: Optional[List[str]] = raw_labels if raw_labels else None
             else:
                 # Already a SparseVector, extract its data
-                assert(isinstance(emb, SparseVector))
+                assert isinstance(emb, SparseVector)
                 indices = emb.indices
                 values = emb.values
-                labels = emb.labels if self.store_tokens else None
+                labels = emb.labels if self.include_tokens else None
 
             normalized_vectors.append(
                 normalize_sparse_vector(indices=indices, values=values, labels=labels)
@@ -155,23 +156,25 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         return ChromaCloudSpladeEmbeddingFunction(
             api_key_env_var=api_key_env_var,
             model=ChromaCloudSpladeEmbeddingModel(model),
-            store_tokens=config.get("store_tokens", False),
+            include_tokens=config.get("include_tokens", False),
         )
 
     def get_config(self) -> Dict[str, Any]:
         return {
             "api_key_env_var": self.api_key_env_var,
             "model": self.model.value,
-            "store_tokens": self.store_tokens,
+            "include_tokens": self.include_tokens,
         }
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
-        immutable_keys = {"store_tokens", "model"}
+        immutable_keys = {"include_tokens", "model"}
         for key in immutable_keys:
             if key in new_config and new_config[key] != old_config.get(key):
-                raise ValueError(f"Updating '{key}' is not supported for chroma-cloud-splade")
+                raise ValueError(
+                    f"Updating '{key}' is not supported for chroma-cloud-splade"
+                )
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:
