@@ -147,9 +147,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 	MinRecordsForInvocation := uint64(100)
 
 	params := &structpb.Struct{
-		Fields: map[string]*structpb.Value{
-			"param1": structpb.NewStringValue("value1"),
-		},
+		Fields: map[string]*structpb.Value{},
 	}
 
 	request := &coordinatorpb.AttachFunctionRequest{

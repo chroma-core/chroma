@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
+	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
@@ -110,7 +111,7 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 				log.Error("AttachFunction: collection already has an attached function with different name",
 					zap.String("existing_name", existingAttachedFunction.Name),
 					zap.String("requested_name", req.Name))
-				return status.Errorf(codes.AlreadyExists, "collection already has an attached function: %s", existingAttachedFunction.Name)
+				return status.Errorf(codes.FailedPrecondition, "collection already has an attached function: %s", existingAttachedFunction.Name)
 			}
 
 			// Same name - validate it matches our request (idempotency)
@@ -158,18 +159,14 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			return common.ErrCollectionNotFound
 		}
 
-		// Serialize params
-		var paramsJSON string
-		if req.Params != nil {
-			paramsBytes, err := req.Params.MarshalJSON()
-			if err != nil {
-				log.Error("AttachFunction: failed to marshal params", zap.Error(err))
-				return err
-			}
-			paramsJSON = string(paramsBytes)
-		} else {
-			paramsJSON = "{}"
+		// Validate params - currently no functions accept params
+		if req.Params != nil && len(req.Params.Fields) > 0 {
+			log.Error("AttachFunction: params must be empty - no functions currently accept parameters")
+			return status.Errorf(codes.InvalidArgument, "params must be empty - no functions currently accept parameters")
 		}
+
+		// Serialize params
+		paramsJSON := "{}"
 
 		// Create attached function
 		now := time.Now()
@@ -609,6 +606,9 @@ func (s *Coordinator) FinishCreateAttachedFunction(ctx context.Context, req *coo
 		_, _, err = s.catalog.CreateCollectionAndSegments(txCtx, collection, segments, 0)
 		if err != nil {
 			log.Error("FinishCreateAttachedFunction: failed to create output collection", zap.Error(err))
+			if err == common.ErrCollectionUniqueConstraintViolation {
+				return grpcutils.BuildAlreadyExistsGrpcError("output collection already exists")
+			}
 			return err
 		}
 
