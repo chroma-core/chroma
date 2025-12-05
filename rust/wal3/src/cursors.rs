@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, PutOptions, Storage,
+    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, PutMode, PutOptions, Storage,
     StorageError,
 };
 
@@ -146,8 +146,12 @@ impl CursorStore {
 
     pub async fn init(&self, name: &CursorName<'_>, cursor: Cursor) -> Result<Witness, Error> {
         // Semaphore taken by put.
-        let options = PutOptions::if_not_exists(StorageRequestPriority::P0);
-        self.put(name, cursor, options).await
+        self.put(
+            name,
+            cursor,
+            PutOptions::default().with_mode(PutMode::IfNotExist),
+        )
+        .await
     }
 
     pub async fn save(
@@ -157,8 +161,12 @@ impl CursorStore {
         witness: &Witness,
     ) -> Result<Witness, Error> {
         // Semaphore taken by put.
-        let options = PutOptions::if_matches(&witness.e_tag, StorageRequestPriority::P0);
-        self.put(name, cursor.clone(), options).await
+        self.put(
+            name,
+            cursor.clone(),
+            PutOptions::default().with_mode(PutMode::IfMatch(witness.e_tag.clone())),
+        )
+        .await
     }
 
     async fn put(

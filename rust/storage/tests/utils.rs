@@ -493,7 +493,7 @@ pub async fn test_invalid_cmek_fails(storage: &Storage, test_prefix: &str, inval
 
     // Verify error is related to encryption/permissions
     if let Err(e) = result {
-        let error_msg = format!("{}", e);
+        let error_msg = format!("{}", e).to_lowercase();
         // GCS typically returns 400 Bad Request or 403 Forbidden for invalid CMEK
         assert!(
             error_msg.contains("400")
