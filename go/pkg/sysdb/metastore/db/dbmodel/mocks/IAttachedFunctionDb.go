@@ -142,6 +142,36 @@ func (_m *IAttachedFunctionDb) GetByCollectionID(inputCollectionID string) ([]*d
 	return r0, r1
 }
 
+// GetReadyOrNotReadyByCollectionID provides a mock function with given fields: inputCollectionID
+func (_m *IAttachedFunctionDb) GetReadyOrNotReadyByCollectionID(inputCollectionID string) ([]*dbmodel.AttachedFunction, error) {
+	ret := _m.Called(inputCollectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReadyOrNotReadyByCollectionID")
+	}
+
+	var r0 []*dbmodel.AttachedFunction
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) ([]*dbmodel.AttachedFunction, error)); ok {
+		return rf(inputCollectionID)
+	}
+	if rf, ok := ret.Get(0).(func(string) []*dbmodel.AttachedFunction); ok {
+		r0 = rf(inputCollectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*dbmodel.AttachedFunction)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(inputCollectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetByName provides a mock function with given fields: inputCollectionID, attachedFunctionName
 func (_m *IAttachedFunctionDb) GetByName(inputCollectionID string, attachedFunctionName string) (*dbmodel.AttachedFunction, error) {
 	ret := _m.Called(inputCollectionID, attachedFunctionName)

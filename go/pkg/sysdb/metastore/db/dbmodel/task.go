@@ -42,6 +42,7 @@ type IAttachedFunctionDb interface {
 	GetByID(id uuid.UUID) (*AttachedFunction, error)
 	GetAnyByID(id uuid.UUID) (*AttachedFunction, error) // TODO(tanujnay112): Consolidate all the getters.
 	GetByCollectionID(inputCollectionID string) ([]*AttachedFunction, error)
+	GetReadyOrNotReadyByCollectionID(inputCollectionID string) ([]*AttachedFunction, error)
 	Update(attachedFunction *AttachedFunction) error
 	Finish(id uuid.UUID) error
 	SoftDelete(inputCollectionID string, name string) error
