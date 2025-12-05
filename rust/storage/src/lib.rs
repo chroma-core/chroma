@@ -12,6 +12,7 @@ pub mod local;
 pub mod object_storage;
 pub mod s3;
 pub mod stream;
+use chroma_types::Cmek;
 use local::LocalStorage;
 use tempfile::TempDir;
 use thiserror::Error;
@@ -500,19 +501,6 @@ pub fn test_storage() -> (TempDir, Storage) {
             "Should be able to convert temporary directory path to string",
         )));
     (temp_dir, storage)
-}
-
-/// Customer-managed encryption key
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub enum Cmek {
-    GCP(Arc<String>),
-}
-
-impl Cmek {
-    /// Create a GCP CMEK from a KMS resource name
-    pub fn gcp(resource: String) -> Self {
-        Cmek::GCP(Arc::new(resource))
-    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]

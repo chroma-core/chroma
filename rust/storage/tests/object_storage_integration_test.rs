@@ -41,7 +41,8 @@ mod utils;
 use chroma_storage::admissioncontrolleds3::AdmissionControlledS3Storage;
 use chroma_storage::config::{ObjectStorageConfig, ObjectStorageProvider};
 use chroma_storage::object_storage::ObjectStorage;
-use chroma_storage::{Cmek, Storage};
+use chroma_storage::Storage;
+use chroma_types::Cmek;
 
 // ============================================================================
 // CONFIGURATION - UPDATE THESE VALUES FOR YOUR ENVIRONMENT

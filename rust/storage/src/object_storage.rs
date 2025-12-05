@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
+use chroma_types::Cmek;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use object_store::{
     client::{
@@ -24,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     config::{ObjectStorageConfig, ObjectStorageProvider, StorageConfig},
     s3::DeletedObjects,
-    Cmek, ETag, GetOptions, PutOptions, StorageConfigError, StorageError,
+    ETag, GetOptions, PutOptions, StorageConfigError, StorageError,
 };
 
 const GCP_CMEK_HEADER: &str = "x-goog-encryption-kms-key-name";
@@ -41,7 +42,7 @@ impl HttpService for ChromaHttpClient {
         if let Some(cmek) = req.extensions_mut().remove::<Cmek>() {
             let header = req.headers_mut();
             match cmek {
-                Cmek::GCP(resource) => {
+                Cmek::Gcp(resource) => {
                     header.insert(
                         GCP_CMEK_HEADER,
                         HeaderValue::from_str(&resource)

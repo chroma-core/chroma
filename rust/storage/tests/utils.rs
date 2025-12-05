@@ -5,7 +5,8 @@
 //! via the unified Storage enum interface.
 
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::{Cmek, DeleteOptions, ETag, GetOptions, PutOptions, Storage};
+use chroma_storage::{DeleteOptions, ETag, GetOptions, PutOptions, Storage};
+use chroma_types::Cmek;
 
 /// Helper to create PutOptions with optional CMEK
 fn make_put_options(cmek: Option<Cmek>) -> PutOptions {
