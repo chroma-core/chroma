@@ -32,6 +32,7 @@ use chroma_types::chroma_proto::{
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::dirty_log_path_from_hostname;
+use chroma_types::Cmek;
 use chroma_types::{CollectionUuid, DirtyMarker};
 use figment::providers::{Env, Format, Yaml};
 use futures::stream::StreamExt;
@@ -1106,6 +1107,17 @@ impl LogServer {
             return Err(Status::invalid_argument("Too few records"));
         }
         self.check_for_backpressure(collection_id)?;
+
+        // Extract CMEK from request
+        let _cmek = push_logs
+            .cmek
+            .map(Cmek::try_from)
+            .transpose()
+            .map_err(|e| {
+                tracing::error!("Failed to convert CMEK: {}", e);
+                Status::invalid_argument("Invalid CMEK configuration")
+            })?;
+        // TODO(CMEK): Pass _cmek to get_log_from_handle in later steps (Steps 5-11)
 
         tracing::info!("Pushing logs for collection {}", collection_id);
         let prefix = collection_id.storage_prefix_for_log();
@@ -3560,6 +3572,7 @@ mod tests {
                     .map(TryInto::try_into)
                     .collect::<Result<_, _>>()
                     .expect("Logs should be valid"),
+                cmek: None,
             });
             if let Err(err) = server.push_logs(proto_push_log_req).await {
                 if err.code() == Code::Unavailable {

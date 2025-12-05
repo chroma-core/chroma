@@ -6,6 +6,7 @@ use std::sync::{Arc, LazyLock};
 use thiserror::Error;
 use validator::Validate;
 
+use crate::chroma_proto;
 use crate::collection_configuration::{
     EmbeddingFunctionConfiguration, InternalCollectionConfiguration,
     UpdateVectorIndexConfiguration, VectorIndexConfiguration,
@@ -20,7 +21,7 @@ use crate::{
     default_num_threads, default_reassign_neighbor_count, default_resize_factor, default_search_ef,
     default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
     default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
-    default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor,
+    default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor, ConversionError,
     HnswParametersFromSegmentError, InternalHnswConfiguration, InternalSpannConfiguration,
     InternalUpdateCollectionConfiguration, KnnIndex, Segment, CHROMA_KEY,
 };
@@ -184,6 +185,27 @@ impl Cmek {
     pub fn validate_pattern(&self) -> bool {
         match self {
             Cmek::Gcp(resource) => CMEK_GCP_RE.is_match(resource),
+        }
+    }
+}
+
+impl TryFrom<chroma_proto::Cmek> for Cmek {
+    type Error = ConversionError;
+
+    fn try_from(proto: chroma_proto::Cmek) -> Result<Self, Self::Error> {
+        match proto.provider {
+            Some(chroma_proto::cmek::Provider::Gcp(resource)) => Ok(Cmek::gcp(resource)),
+            None => Err(ConversionError::DecodeError),
+        }
+    }
+}
+
+impl From<Cmek> for chroma_proto::Cmek {
+    fn from(cmek: Cmek) -> Self {
+        match cmek {
+            Cmek::Gcp(resource) => chroma_proto::Cmek {
+                provider: Some(chroma_proto::cmek::Provider::Gcp((*resource).clone())),
+            },
         }
     }
 }

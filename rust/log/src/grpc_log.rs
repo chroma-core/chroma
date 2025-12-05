@@ -394,6 +394,7 @@ impl GrpcLog {
                     Vec<chroma_types::chroma_proto::OperationRecord>,
                     RecordConversionError,
                 >>()?,
+            cmek: None,
         };
 
         let resp = self
