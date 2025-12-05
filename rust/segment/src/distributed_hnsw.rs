@@ -8,6 +8,7 @@ use chroma_index::hnsw_provider::{
     HnswIndexProviderOpenError, HnswIndexRef,
 };
 use chroma_index::{Index, IndexUuid};
+use chroma_storage::Cmek;
 use chroma_types::{Collection, HnswParametersFromSegmentError, Schema, SchemaError, SegmentUuid};
 use chroma_types::{MaterializedLogOperation, Segment};
 use std::collections::HashMap;
@@ -27,6 +28,7 @@ pub struct DistributedHNSWSegmentWriter {
     index: HnswIndexRef,
     hnsw_index_provider: HnswIndexProvider,
     pub id: SegmentUuid,
+    cmek: Option<Cmek>,
 }
 
 impl Debug for DistributedHNSWSegmentWriter {
@@ -84,11 +86,13 @@ impl DistributedHNSWSegmentWriter {
         index: HnswIndexRef,
         hnsw_index_provider: HnswIndexProvider,
         id: SegmentUuid,
+        cmek: Option<Cmek>,
     ) -> Self {
         DistributedHNSWSegmentWriter {
             index,
             hnsw_index_provider,
             id,
+            cmek,
         }
     }
 
@@ -97,6 +101,7 @@ impl DistributedHNSWSegmentWriter {
         segment: &Segment,
         dimensionality: usize,
         hnsw_index_provider: HnswIndexProvider,
+        cmek: Option<Cmek>,
     ) -> Result<Box<DistributedHNSWSegmentWriter>, Box<DistributedHNSWSegmentFromSegmentError>>
     {
         let schema = if let Some(schema) = &collection.schema {
@@ -159,6 +164,7 @@ impl DistributedHNSWSegmentWriter {
                 index,
                 hnsw_index_provider,
                 segment.id,
+                cmek.clone(),
             )))
         } else {
             let prefix_path =
@@ -186,6 +192,7 @@ impl DistributedHNSWSegmentWriter {
                 index,
                 hnsw_index_provider,
                 segment.id,
+                cmek,
             )))
         }
     }
@@ -273,7 +280,7 @@ impl DistributedHNSWSegmentWriter {
         };
         match self
             .hnsw_index_provider
-            .flush(&prefix_path, &hnsw_index_id, &self.index, None)
+            .flush(&prefix_path, &hnsw_index_id, &self.index, self.cmek)
             .await
         {
             Ok(_) => {}

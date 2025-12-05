@@ -30,6 +30,7 @@ chroma-distance = { workspace = true }
 chroma-error = { workspace = true }
 chroma-index = { workspace = true }
 chroma-sqlite = { workspace = true }
+chroma-storage = { workspace = true }
 chroma-types = { workspace = true }
 
 [dev-dependencies]
