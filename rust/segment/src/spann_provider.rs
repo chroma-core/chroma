@@ -7,8 +7,7 @@ use chroma_index::{
     hnsw_provider::HnswIndexProvider,
     spann::types::{GarbageCollectionContext, SpannMetrics},
 };
-use chroma_storage::Cmek;
-use chroma_types::{Collection, Segment};
+use chroma_types::{Cmek, Collection, Segment};
 
 use crate::distributed_spann::{SpannSegmentWriter, SpannSegmentWriterError};
 

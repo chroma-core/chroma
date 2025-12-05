@@ -11,9 +11,8 @@ use chroma_blockstore::{
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::types::FullTextIndexError;
-use chroma_storage::Cmek;
 use chroma_types::{
-    DataRecord, DatabaseUuid, MaterializedLogOperation, SchemaError, Segment, SegmentType,
+    Cmek, DataRecord, DatabaseUuid, MaterializedLogOperation, SchemaError, Segment, SegmentType,
     SegmentUuid, MAX_OFFSET_ID, OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_TO_OFFSET_ID,
 };
 use futures::{Stream, StreamExt, TryStreamExt};

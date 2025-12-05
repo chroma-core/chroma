@@ -15,7 +15,7 @@ use crate::arrow::sparse_index::SparseIndexWriter;
 use crate::key::CompositeKey;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
-use chroma_storage::Cmek;
+use chroma_types::Cmek;
 use itertools::Itertools;
 use std::collections::HashSet;
 use std::collections::VecDeque;

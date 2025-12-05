@@ -15,7 +15,7 @@ use chroma_cache::AysncPartitionedMutex;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::Cmek;
+use chroma_types::Cmek;
 use futures::future::{join_all, try_join_all};
 use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::{Mutex, RwLock};

@@ -14,7 +14,7 @@ use chroma_index::spann::types::{
 };
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
-use chroma_storage::Cmek;
+use chroma_types::Cmek;
 use chroma_types::Collection;
 use chroma_types::Schema;
 use chroma_types::SchemaError;

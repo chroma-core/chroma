@@ -18,10 +18,10 @@ use chroma_cache::{CacheError, PersistentCache};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, Cmek, GetOptions, PutOptions, Storage,
-    StorageError,
+    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage, StorageError,
 };
 use chroma_tracing::util::{LogSlowOperation, Stopwatch};
+use chroma_types::Cmek;
 use futures::{stream::FuturesUnordered, StreamExt};
 use opentelemetry::global;
 use std::{
