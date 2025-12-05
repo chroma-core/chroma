@@ -505,7 +505,14 @@ pub fn test_storage() -> (TempDir, Storage) {
 /// Customer-managed encryption key
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum Cmek {
-    GCP(String),
+    GCP(Arc<String>),
+}
+
+impl Cmek {
+    /// Create a GCP CMEK from a KMS resource name
+    pub fn gcp(resource: String) -> Self {
+        Cmek::GCP(Arc::new(resource))
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
