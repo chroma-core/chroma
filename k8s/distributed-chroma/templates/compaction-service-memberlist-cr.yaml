@@ -13,14 +13,16 @@ spec:
 ---
 
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: compaction-service-memberlist-readerwriter
+  namespace: {{ .Values.namespace }}
 rules:
 - apiGroups:
   - chroma.cluster
   resources:
   - memberlists
+  namespace: {{ .Values.namespace }}
   verbs:
   - get
   - list
@@ -34,13 +36,15 @@ rules:
 ---
 
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: sysdb-compaction-service-memberlist-binding
+  namespace: {{ .Values.namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: compaction-service-memberlist-readerwriter
+  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: sysdb-serviceaccount
@@ -49,15 +53,17 @@ subjects:
 ---
 
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   # Awkward name, but this lets the compaction-service-serviceaccount read
   # the compaction-service-memberlist.
   name: compaction-service-compaction-service-memberlist-binding
+  namespace: {{ .Values.namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: compaction-service-memberlist-readerwriter
+  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: compaction-service-serviceaccount
@@ -66,13 +72,15 @@ subjects:
 ---
 
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: compaction-service-memberlist-readerwriter-binding
+  namespace: {{ .Values.namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: compaction-service-memberlist-readerwriter
+  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: default
