@@ -248,9 +248,11 @@ async fn get_log_from_handle<'a>(
     storage: &Arc<Storage>,
     prefix: &str,
     mark_dirty: MarkDirty,
+    cmek: Option<Cmek>,
 ) -> Result<LogRef<'a>, wal3::Error> {
     let active = handle.active.lock().await;
-    get_log_from_handle_with_mutex_held(handle, active, options, storage, prefix, mark_dirty).await
+    get_log_from_handle_with_mutex_held(handle, active, options, storage, prefix, mark_dirty, cmek)
+        .await
 }
 
 async fn get_log_from_handle_with_mutex_held<'a>(
@@ -260,6 +262,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
     storage: &Arc<Storage>,
     prefix: &str,
     mark_dirty: MarkDirty,
+    cmek: Option<Cmek>,
 ) -> Result<LogRef<'a>, wal3::Error> {
     if active.log.is_some() {
         active.keep_alive(Duration::from_secs(60));
@@ -277,6 +280,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
         // TODO(rescrv):  Configurable params.
         "log writer",
         mark_dirty.clone(),
+        cmek,
     )
     .await?;
     active.keep_alive(Duration::from_secs(60));
@@ -625,6 +629,7 @@ impl LogServer {
             &self.storage,
             &storage_prefix,
             mark_dirty,
+            None, // Offset updates don't use CMEK
         )
         .await
         .map_err(|err| Status::unknown(err.to_string()))?;
@@ -1109,15 +1114,14 @@ impl LogServer {
         self.check_for_backpressure(collection_id)?;
 
         // Extract CMEK from request
-        let _cmek = push_logs
+        let cmek = push_logs
             .cmek
-            .map(Cmek::try_from)
+            .map(|c| Cmek::try_from(c))
             .transpose()
             .map_err(|e| {
                 tracing::error!("Failed to convert CMEK: {}", e);
                 Status::invalid_argument("Invalid CMEK configuration")
             })?;
-        // TODO(CMEK): Pass _cmek to get_log_from_handle in later steps (Steps 5-11)
 
         tracing::info!("Pushing logs for collection {}", collection_id);
         let prefix = collection_id.storage_prefix_for_log();
@@ -1133,6 +1137,7 @@ impl LogServer {
             &self.storage,
             &prefix,
             mark_dirty,
+            cmek,
         )
         .await
         {
@@ -1768,6 +1773,7 @@ impl LogServer {
                     &self.storage,
                     &prefix,
                     mark_dirty,
+                    None, // GC doesn't use CMEK
                 )
                 .await
                 .map_err(handle_error_properly)?;
@@ -2324,6 +2330,7 @@ impl Configurable<LogServerConfig> for LogServer {
             &MarkDirty::path_for_hostname(&config.my_member_id),
             "dirty log writer",
             (),
+            None, // Dirty log doesn't use CMEK
         )
         .await
         .map_err(|err| -> Box<dyn ChromaError> { Box::new(err) as _ })?;
@@ -3536,6 +3543,7 @@ mod tests {
                 "test-rust-log-service",
                 "test-dirty-log-writer",
                 (),
+                None, // Test doesn't use CMEK
             )
             .await
             .expect("Dirty log should be initializable"),
@@ -4087,6 +4095,7 @@ mod tests {
             "dirty-test",
             "dirty log writer",
             (),
+            None, // Test doesn't use CMEK
         )
         .await
         .expect("Failed to create dirty log");
@@ -4117,6 +4126,7 @@ mod tests {
             &storage_prefix,
             "test log writer",
             (),
+            None, // Test doesn't use CMEK
         )
         .await
         .expect("Failed to initialize collection log");

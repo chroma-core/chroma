@@ -140,6 +140,7 @@ async fn test_k8s_integration_98_garbage_alternate() {
             prefix,
             "writer1",
             (),
+            None,
         )
         .await
         .unwrap(),
@@ -157,6 +158,7 @@ async fn test_k8s_integration_98_garbage_alternate() {
             prefix,
             "writer2",
             (),
+            None,
         )
         .await
         .unwrap(),

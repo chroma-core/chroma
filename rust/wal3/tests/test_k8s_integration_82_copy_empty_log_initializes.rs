@@ -13,17 +13,12 @@ async fn test_k8s_integration_82_copy_empty_log_initializes() {
     // Subsequent writes will repair the log and continue to make progress.
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let log = LogWriter::open_or_initialize(
-        LogWriterOptions {
-            snapshot_manifest: SnapshotOptions {
-                snapshot_rollover_threshold: 2,
-                fragment_rollover_threshold: 2,
-            },
-            ..LogWriterOptions::default()
-        },
+        LogWriterOptions::default(),
         Arc::clone(&storage),
         "test_k8s_integration_82_copy_empty_log_initializes_source",
-        "load and scrub writer",
+        "writer",
         (),
+        None,
     )
     .await
     .unwrap();

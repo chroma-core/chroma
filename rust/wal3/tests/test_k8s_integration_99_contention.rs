@@ -72,6 +72,7 @@ async fn test_k8s_integration_99_ping_pong_contention() {
             prefix,
             "writer1",
             (),
+            None,
         )
         .await
         .unwrap(),
@@ -84,6 +85,7 @@ async fn test_k8s_integration_99_ping_pong_contention() {
             prefix,
             "writer2",
             (),
+            None,
         )
         .await
         .unwrap(),
