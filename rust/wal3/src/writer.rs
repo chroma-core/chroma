@@ -154,6 +154,7 @@ impl LogWriter {
         mark_dirty: D,
         first_record_offset: LogPosition,
         messages: Vec<Vec<u8>>,
+        cmek: Option<Cmek>,
     ) -> Result<(), Error> {
         let num_records = messages.len();
         let start = first_record_offset;
@@ -179,6 +180,7 @@ impl LogWriter {
                 FragmentSeqNo(1),
                 first_record_offset,
                 messages,
+                cmek,
             )
             .await?;
             let seq_no = FragmentSeqNo(1);
@@ -438,6 +440,7 @@ impl LogWriter {
                 self.prefix.clone(),
                 self.writer.clone(),
                 Arc::clone(&self.mark_dirty),
+                self.cmek.clone(),
             )
             .await
             {
@@ -524,6 +527,8 @@ pub(crate) struct OnceLogWriter {
     manifest_manager: ManifestManager,
     /// BatchManager coordinates batching writes to the log.
     batch_manager: BatchManager,
+    /// Customer-managed encryption key for encrypting log fragments.
+    cmek: Option<Cmek>,
 }
 
 impl OnceLogWriter {
@@ -533,6 +538,7 @@ impl OnceLogWriter {
         prefix: String,
         writer: String,
         mark_dirty: Arc<dyn MarkDirty>,
+        cmek: Option<Cmek>,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
         let batch_manager = BatchManager::new(options.throttle_fragment)
@@ -554,6 +560,7 @@ impl OnceLogWriter {
             mark_dirty,
             manifest_manager,
             batch_manager,
+            cmek,
         });
         let that = Arc::downgrade(&this);
         let _flusher = tokio::task::spawn(async move {
@@ -615,6 +622,7 @@ impl OnceLogWriter {
             mark_dirty,
             manifest_manager,
             batch_manager,
+            cmek: None, // Read-only operations don't need CMEK
         }))
     }
 
@@ -744,6 +752,7 @@ impl OnceLogWriter {
             fragment_seq_no,
             log_position,
             messages,
+            self.cmek.clone(),
         );
         let fut2 = async {
             match self.mark_dirty.mark_dirty(log_position, messages_len).await {
@@ -1102,26 +1111,27 @@ pub async fn upload_parquet(
     fragment_seq_no: FragmentSeqNo,
     log_position: LogPosition,
     messages: Vec<Vec<u8>>,
+    cmek: Option<Cmek>,
 ) -> Result<(String, Setsum, usize), Error> {
     // Upload the log.
     let unprefixed_path = unprefixed_fragment_path(fragment_seq_no);
     let path = format!("{prefix}/{unprefixed_path}");
     let exp_backoff: ExponentialBackoff = options.throttle_fragment.into();
     let start = Instant::now();
+    let (buffer, setsum) = construct_parquet(log_position, &messages)?;
+    let mut put_options = PutOptions::default()
+        .with_priority(StorageRequestPriority::P0)
+        .with_mode(PutMode::IfNotExist);
+    if let Some(cmek) = cmek {
+        put_options = put_options.with_cmek(cmek);
+    }
     loop {
-        let (buffer, setsum) = construct_parquet(log_position, &messages)?;
         tracing::info!("upload_parquet: {:?} with {} bytes", path, buffer.len());
         // NOTE(rescrv):  This match block has been thoroughly reasoned through within the
         // `bootstrap` call above.  Don't change the error handling here without re-reasoning
         // there.
         match storage
-            .put_bytes(
-                &path,
-                buffer.clone(),
-                PutOptions::default()
-                    .with_priority(StorageRequestPriority::P0)
-                    .with_mode(PutMode::IfNotExist),
-            )
+            .put_bytes(&path, buffer.clone(), put_options.clone())
             .await
         {
             Ok(_) => {
