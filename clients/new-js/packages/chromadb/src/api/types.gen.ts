@@ -173,10 +173,6 @@ export type DetachFunctionRequest = {
      * Whether to delete the output collection as well
      */
     delete_output?: boolean;
-    /**
-     * ID of the input collection
-     */
-    input_collection_id: string;
 };
 
 export type DetachFunctionResponse = {
@@ -1108,48 +1104,6 @@ export type GetDatabaseResponses = {
 
 export type GetDatabaseResponse = GetDatabaseResponses[keyof GetDatabaseResponses];
 
-export type DetachFunctionData = {
-    body: DetachFunctionRequest;
-    path: {
-        /**
-         * Tenant ID
-         */
-        tenant: string;
-        /**
-         * Database name
-         */
-        database: string;
-        /**
-         * Attached Function ID
-         */
-        attached_function_id: string;
-    };
-    query?: never;
-    url: '/api/v2/tenants/{tenant}/databases/{database}/attached_functions/{attached_function_id}/detach';
-};
-
-export type DetachFunctionErrors = {
-    /**
-     * Unauthorized
-     */
-    401: ErrorResponse;
-    /**
-     * Server error
-     */
-    500: ErrorResponse;
-};
-
-export type DetachFunctionError = DetachFunctionErrors[keyof DetachFunctionErrors];
-
-export type DetachFunctionResponses = {
-    /**
-     * Function detached successfully
-     */
-    200: DetachFunctionResponse;
-};
-
-export type DetachFunctionResponse2 = DetachFunctionResponses[keyof DetachFunctionResponses];
-
 export type ListCollectionsData = {
     body?: never;
     path: {
@@ -1399,6 +1353,52 @@ export type CollectionAddResponses = {
 };
 
 export type CollectionAddResponse = CollectionAddResponses[keyof CollectionAddResponses];
+
+export type DetachFunctionData = {
+    body: DetachFunctionRequest;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Input collection ID
+         */
+        collection_id: string;
+        /**
+         * Attached function name
+         */
+        name: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach';
+};
+
+export type DetachFunctionErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type DetachFunctionError = DetachFunctionErrors[keyof DetachFunctionErrors];
+
+export type DetachFunctionResponses = {
+    /**
+     * Function detached successfully
+     */
+    200: DetachFunctionResponse;
+};
+
+export type DetachFunctionResponse2 = DetachFunctionResponses[keyof DetachFunctionResponses];
 
 export type CollectionCountData = {
     body?: never;

@@ -77,39 +77,20 @@ class AttachedFunction:
     @staticmethod
     def _normalize_params(params: Optional[Any]) -> Dict[str, Any]:
         """Normalize params to a consistent dict format.
-        
+
         Handles None, empty strings, JSON strings, and dicts.
         """
         if params is None:
             return {}
         if isinstance(params, str):
             try:
-                return json.loads(params) if params else {}
+                result = json.loads(params) if params else {}
+                return result if isinstance(result, dict) else {}
             except json.JSONDecodeError:
                 return {}
         if isinstance(params, dict):
             return params
         return {}
-
-    def detach(self, delete_output_collection: bool = False) -> bool:
-        """Detach this function and prevent any further runs.
-
-        Args:
-            delete_output_collection: Whether to also delete the output collection. Defaults to False.
-
-        Returns:
-            bool: True if successful
-
-        Example:
-            >>> success = attached_fn.detach(delete_output_collection=True)
-        """
-        return self._client.detach_function(
-            attached_function_id=self._id,
-            input_collection_id=self._input_collection_id,
-            delete_output=delete_output_collection,
-            tenant=self._tenant,
-            database=self._database,
-        )
 
     def __repr__(self) -> str:
         return (
@@ -123,11 +104,11 @@ class AttachedFunction:
         """Compare two AttachedFunction objects for equality."""
         if not isinstance(other, AttachedFunction):
             return False
-        
+
         # Normalize params: handle None, {}, and JSON strings
         self_params = self._normalize_params(self._params)
         other_params = self._normalize_params(other._params)
-        
+
         return (
             self._id == other._id
             and self._name == other._name
@@ -143,8 +124,10 @@ class AttachedFunction:
         """Return hash of the AttachedFunction."""
         # Normalize params using the same logic as __eq__
         normalized_params = self._normalize_params(self._params)
-        params_tuple = tuple(sorted(normalized_params.items())) if normalized_params else ()
-        
+        params_tuple = (
+            tuple(sorted(normalized_params.items())) if normalized_params else ()
+        )
+
         return hash(
             (
                 self._id,

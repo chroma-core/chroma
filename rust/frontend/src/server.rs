@@ -327,7 +327,7 @@ impl FrontendServer {
                 get(get_attached_function),
             )
             .route(
-                "/api/v2/tenants/{tenant}/databases/{database}/attached_functions/{attached_function_id}/detach",
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach",
                 post(detach_function),
             )
             .merge(docs_router)
@@ -2237,7 +2237,7 @@ async fn get_attached_function(
 /// Detach a function
 #[utoipa::path(
     post,
-    path = "/api/v2/tenants/{tenant}/databases/{database}/attached_functions/{attached_function_id}/detach",
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach",
     request_body = DetachFunctionRequest,
     responses(
         (status = 200, description = "Function detached successfully", body = DetachFunctionResponse),
@@ -2247,12 +2247,13 @@ async fn get_attached_function(
     params(
         ("tenant" = String, Path, description = "Tenant ID"),
         ("database" = String, Path, description = "Database name"),
-        ("attached_function_id" = String, Path, description = "Attached Function ID")
+        ("collection_id" = String, Path, description = "Input collection ID"),
+        ("name" = String, Path, description = "Attached function name")
     )
 )]
 async fn detach_function(
     headers: HeaderMap,
-    Path((tenant, database_name, attached_function_id)): Path<(String, String, String)>,
+    Path((tenant, database_name, collection_id, name)): Path<(String, String, String, String)>,
     State(mut server): State<FrontendServer>,
     TracedJson(request): TracedJson<DetachFunctionRequest>,
 ) -> Result<Json<DetachFunctionResponse>, ServerError> {
@@ -2264,7 +2265,7 @@ async fn detach_function(
             AuthzResource {
                 tenant: Some(tenant.clone()),
                 database: Some(database_name.clone()),
-                collection: Some(request.input_collection_id.clone()),
+                collection: Some(collection_id.clone()),
             },
         )
         .await?;
@@ -2277,7 +2278,7 @@ async fn detach_function(
 
     let res = server
         .frontend
-        .detach_function(tenant, database_name, attached_function_id, request)
+        .detach_function(tenant, database_name, collection_id, name, request)
         .await?;
     Ok(Json(res))
 }

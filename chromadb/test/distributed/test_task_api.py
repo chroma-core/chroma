@@ -57,7 +57,8 @@ def test_count_function_attach_and_detach(basic_http_client: System) -> None:
     assert result["metadatas"][0]["total_count"] == 300
 
     # Remove the task
-    success = attached_fn.detach(
+    success = collection.detach_function(
+        attached_fn.name,
         delete_output_collection=True,
     )
 
@@ -108,7 +109,7 @@ def test_attach_function_returns_function_name(basic_http_client: System) -> Non
     assert retrieved_fn == attached_fn
 
     # Clean up
-    attached_fn.detach(delete_output_collection=True)
+    collection.detach_function(attached_fn.name, delete_output_collection=True)
 
 
 def test_function_multiple_collections(basic_http_client: System) -> None:
@@ -146,8 +147,14 @@ def test_function_multiple_collections(basic_http_client: System) -> None:
     assert attached_fn1.id != attached_fn2.id
 
     # Clean up
-    assert attached_fn1.detach(delete_output_collection=True) is True
-    assert attached_fn2.detach(delete_output_collection=True) is True
+    assert (
+        collection1.detach_function(attached_fn1.name, delete_output_collection=True)
+        is True
+    )
+    assert (
+        collection2.detach_function(attached_fn2.name, delete_output_collection=True)
+        is True
+    )
 
 
 def test_functions_one_attached_function_per_collection(
@@ -191,7 +198,10 @@ def test_functions_one_attached_function_per_collection(
         )
 
     # Detach the first function
-    assert attached_fn1.detach(delete_output_collection=True) is True
+    assert (
+        collection.detach_function(attached_fn1.name, delete_output_collection=True)
+        is True
+    )
 
     # Now we should be able to attach a new function
     attached_fn2 = collection.attach_function(
@@ -205,7 +215,10 @@ def test_functions_one_attached_function_per_collection(
     assert attached_fn2.id != attached_fn1.id
 
     # Clean up
-    assert attached_fn2.detach(delete_output_collection=True) is True
+    assert (
+        collection.detach_function(attached_fn2.name, delete_output_collection=True)
+        is True
+    )
 
 
 def test_function_remove_nonexistent(basic_http_client: System) -> None:
@@ -222,8 +235,8 @@ def test_function_remove_nonexistent(basic_http_client: System) -> None:
         params=None,
     )
 
-    attached_fn.detach(delete_output_collection=True)
+    collection.detach_function(attached_fn.name, delete_output_collection=True)
 
     # Trying to detach this function again should raise NotFoundError
     with pytest.raises(NotFoundError, match="does not exist"):
-        attached_fn.detach(delete_output_collection=True)
+        collection.detach_function(attached_fn.name, delete_output_collection=True)

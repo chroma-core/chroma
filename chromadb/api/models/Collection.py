@@ -552,3 +552,28 @@ class Collection(CollectionCommon["ServerAPI"]):
             tenant=self.tenant,
             database=self.database,
         )
+
+    def detach_function(
+        self,
+        name: str,
+        delete_output_collection: bool = False,
+    ) -> bool:
+        """Detach a function from this collection.
+
+        Args:
+            name: The name of the attached function
+            delete_output_collection: Whether to also delete the output collection. Defaults to False.
+
+        Returns:
+            bool: True if successful
+
+        Example:
+            >>> success = collection.detach_function("my_function", delete_output_collection=True)
+        """
+        return self._client.detach_function(
+            name=name,
+            input_collection_id=self.id,
+            delete_output=delete_output_collection,
+            tenant=self.tenant,
+            database=self.database,
+        )
