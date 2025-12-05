@@ -105,6 +105,9 @@ s3heap-service = { path = "rust/s3heap-service" }
 wal3 = { path = "rust/wal3" }
 worker = { path = "rust/worker" }
 
+# Concurrent data structures
+dashmap = "6.1"
+
 # Dev dependencies
 bincode = "1.3.3"
 criterion = { version = "0.7", features = ["async_tokio"] }
