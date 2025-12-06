@@ -508,8 +508,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             vector_segment.file_path = Default::default();
         }
 
-        // TODO(sicheng): Extract CMEK from collection schema
-        let cmek = None;
+        let cmek = collection.schema.as_ref().and_then(|s| s.cmek.clone());
 
         let record_writer = match self
             .ok_or_terminate(
