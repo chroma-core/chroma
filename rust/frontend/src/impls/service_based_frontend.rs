@@ -1924,6 +1924,15 @@ impl ServiceBasedFrontend {
                 chroma_sysdb::AttachFunctionError::AlreadyExists => {
                     chroma_types::AttachFunctionError::AlreadyExists(name.clone())
                 }
+                chroma_sysdb::AttachFunctionError::CollectionAlreadyHasFunction(msg) => {
+                    chroma_types::AttachFunctionError::CollectionAlreadyHasFunction(msg)
+                }
+                chroma_sysdb::AttachFunctionError::InvalidArgument(msg) => {
+                    chroma_types::AttachFunctionError::InvalidArgument(msg)
+                }
+                chroma_sysdb::AttachFunctionError::FunctionNotFound(msg) => {
+                    chroma_types::AttachFunctionError::FunctionNotFound(msg)
+                }
                 chroma_sysdb::AttachFunctionError::FailedToCreateAttachedFunction(s) => {
                     chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
                         s,
@@ -1944,13 +1953,20 @@ impl ServiceBasedFrontend {
         self.sysdb_client
             .finish_create_attached_function(attached_function_id)
             .await
-            .map_err(|e| {
-                chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
-                    tonic::Status::internal(format!(
-                        "Failed to finish creating attached function: {}",
-                        e
-                    )),
-                )))
+            .map_err(|e| match e {
+                chroma_types::FinishCreateAttachedFunctionError::OutputCollectionExists => {
+                    chroma_types::AttachFunctionError::OutputCollectionExists(
+                        output_collection.clone(),
+                    )
+                }
+                chroma_types::FinishCreateAttachedFunctionError::AttachedFunctionNotFound => {
+                    chroma_types::AttachFunctionError::Internal(Box::new(e))
+                }
+                chroma_types::FinishCreateAttachedFunctionError::FailedToFinishCreateAttachedFunction(
+                    status,
+                ) => chroma_types::AttachFunctionError::Internal(Box::new(
+                    chroma_error::TonicError(status),
+                )),
             })?;
 
         Ok(AttachFunctionResponse {

@@ -55,6 +55,8 @@ pub enum FinishCreateAttachedFunctionError {
     FailedToFinishCreateAttachedFunction(#[from] tonic::Status),
     #[error("Attached function not found")]
     AttachedFunctionNotFound,
+    #[error("Output collection already exists")]
+    OutputCollectionExists,
 }
 
 impl ChromaError for FinishCreateAttachedFunctionError {
@@ -64,6 +66,7 @@ impl ChromaError for FinishCreateAttachedFunctionError {
                 ErrorCodes::Internal
             }
             FinishCreateAttachedFunctionError::AttachedFunctionNotFound => ErrorCodes::NotFound,
+            FinishCreateAttachedFunctionError::OutputCollectionExists => ErrorCodes::AlreadyExists,
         }
     }
 }

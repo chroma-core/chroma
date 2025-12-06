@@ -173,7 +173,9 @@ def test_functions_one_attached_function_per_collection(
 
     # Attempt to create a second task with a different name should fail
     # (only one attached function allowed per collection)
-    with pytest.raises(ChromaError, match="already has an attached function"):
+    with pytest.raises(
+        ChromaError, match="collection already has an attached function: task_1"
+    ):
         collection.attach_function(
             name="task_2",
             function_id="record_counter",
@@ -181,11 +183,13 @@ def test_functions_one_attached_function_per_collection(
             params=None,
         )
 
-    # Attempt to create a task with the same name but different params should also fail
-    with pytest.raises(ChromaError, match="already exists"):
+    # Attempt to create a task with the same name but different function_id should also fail
+    with pytest.raises(
+        ChromaError, match=r"Attached Function with name \[task_1\] already exists"
+    ):
         collection.attach_function(
             name="task_1",
-            function_id="record_counter",
+            function_id="statistics",
             output_collection="output_different",  # Different output collection
             params=None,
         )
