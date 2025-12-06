@@ -55,6 +55,7 @@ async fn garbage_collect_in_a_loop(options: LogWriterOptions, storage: Arc<Stora
             prefix,
             "benchmark gc'er",
             (),
+            None,
         )
         .await
         {
@@ -87,6 +88,7 @@ async fn main() {
             "wal3bench",
             "benchmark writer",
             (),
+            None,
         )
         .await
         .unwrap(),

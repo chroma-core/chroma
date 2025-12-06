@@ -18,7 +18,7 @@ use chroma_system::System;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse};
 use chroma_types::{
-    CollectionUuid, ForkLogsResponse, LogRecord, OperationRecord, RecordConversionError,
+    Cmek, CollectionUuid, ForkLogsResponse, LogRecord, OperationRecord, RecordConversionError,
 };
 use std::fmt::Debug;
 use std::time::Duration;
@@ -384,8 +384,13 @@ impl GrpcLog {
         &mut self,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
+        cmek: Option<Cmek>,
     ) -> Result<(), GrpcPushLogsError> {
         let num_records = records.len();
+
+        // Convert Cmek to protobuf format
+        let cmek_proto = cmek.map(|c| c.into());
+
         let request = chroma_proto::PushLogsRequest {
             collection_id: collection_id.0.to_string(),
 
@@ -394,6 +399,7 @@ impl GrpcLog {
                     Vec<chroma_types::chroma_proto::OperationRecord>,
                     RecordConversionError,
                 >>()?,
+            cmek: cmek_proto,
         };
 
         let resp = self

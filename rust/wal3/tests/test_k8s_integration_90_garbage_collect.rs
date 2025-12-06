@@ -24,6 +24,7 @@ async fn test_k8s_integration_90_garbage_collect() {
         PREFIX,
         WRITER,
         (),
+        None,
     )
     .await
     .unwrap();

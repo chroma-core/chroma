@@ -89,6 +89,7 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
             &prefix_clone,
             "concurrent_writer",
             (),
+            None,
         )
         .await
         .unwrap();
