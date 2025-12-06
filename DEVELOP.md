@@ -22,6 +22,31 @@ for MacOS `brew install protobuf`
 
 You can also install `chromadb` the `pypi` package locally and in editable mode with `pip install -e .`.
 
+### Python-only dev setup (Windows)
+
+If you want to work on the Python package only and you're on Windows (PowerShell), this minimal setup gets you started quickly.
+
+Prerequisites
+
+- Windows with Python 3.8+ installed and on PATH
+- Git (optional, for cloning/forking)
+
+Quick steps (PowerShell)
+
+1. Create and activate a virtual environment:
+
+```powershell
+python -m venv .venv
+.\\.venv\\Scripts\\Activate.ps1
+```
+
+2. Install dependencies and set up pre-commit hooks:
+
+```powershell
+pip install -r .\requirements.txt
+pip install -r .\requirements_dev.txt
+pip install -e .
+pre-commit install
 ## Local dev setup for distributed chroma
 
 We use tilt for providing local dev setup. Tilt is an open source project
