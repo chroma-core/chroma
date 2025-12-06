@@ -1,5 +1,5 @@
 use crate::regex::{ChromaRegex, ChromaRegexError};
-use crate::{CompositeExpression, DocumentOperator, MetadataExpression, PrimitiveOperator, Where};
+use crate::{CompositeExpression, DocumentOperator, MetadataExpression, PrimitiveOperator, StringArrayOperator, Where};
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
 use serde::Serialize;
@@ -311,17 +311,30 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
         }
         if operand.is_string() {
             let operand_str = operand.as_str().unwrap();
+            // Check for StringArray containment operators first
+            // $contains/$not_contains on metadata keys check if a StringArray contains a value
+            let string_array_operator = match operator.as_str() {
+                "$contains" => Some(StringArrayOperator::Contains),
+                "$not_contains" => Some(StringArrayOperator::NotContains),
+                _ => None,
+            };
+            if let Some(array_op) = string_array_operator {
+                return Ok(Where::Metadata(MetadataExpression {
+                    key: key.clone(),
+                    comparison: crate::MetadataComparison::StringArrayContains(
+                        array_op,
+                        operand_str.to_string(),
+                    ),
+                }));
+            }
+            // Check for document regex operators (only regex applies to documents via metadata where)
             let document_operator_type = match operator.as_str() {
-                "$contains" => Some(DocumentOperator::Contains),
-                "$not_contains" => Some(DocumentOperator::NotContains),
                 "$regex" => Some(DocumentOperator::Regex),
                 "$not_regex" => Some(DocumentOperator::NotRegex),
                 _ => None,
             };
             if let Some(doc_op) = document_operator_type {
-                if matches!(doc_op, DocumentOperator::Regex | DocumentOperator::NotRegex) {
-                    ChromaRegex::try_from(operand_str.to_string())?;
-                }
+                ChromaRegex::try_from(operand_str.to_string())?;
                 return Ok(Where::Document(crate::DocumentExpression {
                     operator: doc_op,
                     pattern: operand_str.to_string(),
@@ -569,6 +582,82 @@ mod tests {
                     PrimitiveOperator::NotEqual,
                     crate::MetadataValue::Str("value1".to_string()),
                 ),
+            }),
+        ];
+
+        for (payload, expected_result) in payloads.iter().zip(expected_results.iter()) {
+            let result = parse_where(payload);
+            assert!(
+                result.is_ok(),
+                "Parsing failed for payload: {}: {:?}",
+                serde_json::to_string_pretty(payload).unwrap(),
+                result
+            );
+            assert_eq!(
+                result.unwrap(),
+                *expected_result,
+                "Parsed result did not match expected result: {}",
+                serde_json::to_string_pretty(payload).unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_where_string_array_contains() {
+        let payloads = [
+            // $contains on metadata key
+            json!({
+              "tags": {"$contains": "rust"}
+            }),
+            // $not_contains on metadata key
+            json!({
+              "categories": {"$not_contains": "archived"}
+            }),
+            // Combined with $and
+            json!({
+              "$and": [
+                  {"tags": {"$contains": "rust"}},
+                  {"tags": {"$not_contains": "deprecated"}}
+              ]
+            }),
+        ];
+
+        let expected_results = [
+            // $contains
+            Where::Metadata(MetadataExpression {
+                key: "tags".to_string(),
+                comparison: crate::MetadataComparison::StringArrayContains(
+                    crate::StringArrayOperator::Contains,
+                    "rust".to_string(),
+                ),
+            }),
+            // $not_contains
+            Where::Metadata(MetadataExpression {
+                key: "categories".to_string(),
+                comparison: crate::MetadataComparison::StringArrayContains(
+                    crate::StringArrayOperator::NotContains,
+                    "archived".to_string(),
+                ),
+            }),
+            // Combined with $and
+            Where::Composite(CompositeExpression {
+                operator: crate::BooleanOperator::And,
+                children: vec![
+                    Where::Metadata(MetadataExpression {
+                        key: "tags".to_string(),
+                        comparison: crate::MetadataComparison::StringArrayContains(
+                            crate::StringArrayOperator::Contains,
+                            "rust".to_string(),
+                        ),
+                    }),
+                    Where::Metadata(MetadataExpression {
+                        key: "tags".to_string(),
+                        comparison: crate::MetadataComparison::StringArrayContains(
+                            crate::StringArrayOperator::NotContains,
+                            "deprecated".to_string(),
+                        ),
+                    }),
+                ],
             }),
         ];
 

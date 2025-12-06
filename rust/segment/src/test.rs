@@ -586,6 +586,17 @@ impl CheckRecord for MetadataExpression {
                     SetOperator::NotIn => !contains,
                 }
             }
+            MetadataComparison::StringArrayContains(op, value) => {
+                // Check if the stored metadata is a StringArray containing the value
+                let contains = match stored {
+                    Some(MetadataValue::StringArray(arr)) => arr.contains(value),
+                    _ => false,
+                };
+                match op {
+                    chroma_types::StringArrayOperator::Contains => contains,
+                    chroma_types::StringArrayOperator::NotContains => !contains,
+                }
+            }
         }
     }
 }

@@ -21,7 +21,7 @@ use chroma_types::{
     },
     BooleanOperator, Chunk, CompositeExpression, DataRecord, DocumentExpression, DocumentOperator,
     LogRecord, MaterializedLogOperation, MetadataComparison, MetadataExpression, MetadataSetValue,
-    MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap, Where,
+    MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap, StringArrayOperator, Where,
 };
 use futures::future::try_join_all;
 use roaring::RoaringBitmap;
@@ -342,6 +342,11 @@ impl MetadataProvider<'_> {
                             .as_ref(),
                         &s.as_str().into(),
                     ),
+                    MetadataValue::StringArray(_) => {
+                        // StringArray values should not be compared directly with Primitive operators
+                        // Use $contains operator instead
+                        unimplemented!("Use $contains operator for StringArray comparison")
+                    }
                     MetadataValue::SparseVector(_) => {
                         unimplemented!("Comparison with sparse vector is not supported")
                     }
@@ -470,6 +475,19 @@ impl<'me> RoaringMetadataFilter<'me> for MetadataExpression {
                     SetOperator::NotIn => child_evaluations
                         .into_iter()
                         .fold(SignedRoaringBitmap::full(), BitAnd::bitand),
+                }
+            }
+            MetadataComparison::StringArrayContains(operator, value) => {
+                // StringArrayContains checks if a StringArray metadata field contains a specific value.
+                // Since each element of the array is indexed separately in the string metadata index,
+                // we just do an Equal lookup on the string value.
+                let string_value = MetadataValue::Str(value.clone());
+                let bitmap = metadata_provider
+                    .filter_by_metadata(&self.key, &string_value, &PrimitiveOperator::Equal)
+                    .await?;
+                match operator {
+                    StringArrayOperator::Contains => SignedRoaringBitmap::Include(bitmap),
+                    StringArrayOperator::NotContains => SignedRoaringBitmap::Exclude(bitmap),
                 }
             }
         };

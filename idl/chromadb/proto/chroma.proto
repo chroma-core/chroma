@@ -87,6 +87,10 @@ message Tenant {
     optional string resource_name = 2;
 }
 
+message StringArray {
+    repeated string values = 1;
+}
+
 message UpdateMetadataValue {
     // Not set if user wants to delete the key.
     // TODO(Sanket): Should we make this more explicit?
@@ -96,6 +100,7 @@ message UpdateMetadataValue {
         double float_value = 3;
         bool bool_value = 4;
         SparseVector sparse_vector_value = 5;
+        StringArray string_array_value = 6;
     }
 }
 
@@ -219,6 +224,7 @@ message DirectComparison {
         DoubleListComparison double_list_operand = 7;
         BoolListComparison bool_list_operand = 8;
         SingleBoolComparison single_bool_operand = 9;
+        StringArrayContainsComparison string_array_contains_operand = 10;
     }
 }
 
@@ -311,6 +317,18 @@ message SingleDoubleComparison {
         GenericComparator generic_comparator = 2;
         NumberComparator number_comparator = 3;
     }
+}
+
+// Operator for checking containment in a StringArray metadata field
+enum StringArrayOperator {
+    STRING_ARRAY_CONTAINS = 0;
+    STRING_ARRAY_NOT_CONTAINS = 1;
+}
+
+// Used when checking if a StringArray metadata field contains a specific string
+message StringArrayContainsComparison {
+    string value = 1;
+    StringArrayOperator operator = 2;
 }
 
 /* Vector Reader Interface */

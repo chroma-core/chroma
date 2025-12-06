@@ -339,6 +339,8 @@ pub enum UpdateMetadataValue {
     Float(f64),
     Str(String),
     #[cfg_attr(feature = "testing", proptest(skip))]
+    StringArray(Vec<String>),
+    #[cfg_attr(feature = "testing", proptest(skip))]
     SparseVector(SparseVector),
     None,
 }
@@ -356,6 +358,8 @@ impl<'py> pyo3::FromPyObject<'py> for UpdateMetadataValue {
             Ok(UpdateMetadataValue::Float(value))
         } else if let Ok(value) = ob.extract::<String>() {
             Ok(UpdateMetadataValue::Str(value))
+        } else if let Ok(value) = ob.extract::<Vec<String>>() {
+            Ok(UpdateMetadataValue::StringArray(value))
         } else if let Ok(value) = ob.extract::<SparseVector>() {
             Ok(UpdateMetadataValue::SparseVector(value))
         } else {
@@ -408,6 +412,12 @@ impl From<&str> for UpdateMetadataValue {
     }
 }
 
+impl From<Vec<String>> for UpdateMetadataValue {
+    fn from(v: Vec<String>) -> Self {
+        Self::StringArray(v)
+    }
+}
+
 impl From<SparseVector> for UpdateMetadataValue {
     fn from(v: SparseVector) -> Self {
         Self::SparseVector(v)
@@ -445,6 +455,9 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
             Some(chroma_proto::update_metadata_value::Value::StringValue(value)) => {
                 Ok(UpdateMetadataValue::Str(value.clone()))
             }
+            Some(chroma_proto::update_metadata_value::Value::StringArrayValue(value)) => {
+                Ok(UpdateMetadataValue::StringArray(value.values.clone()))
+            }
             Some(chroma_proto::update_metadata_value::Value::SparseVectorValue(value)) => {
                 let sparse = value
                     .clone()
@@ -477,6 +490,13 @@ impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
                     value,
                 )),
             },
+            UpdateMetadataValue::StringArray(values) => chroma_proto::UpdateMetadataValue {
+                value: Some(
+                    chroma_proto::update_metadata_value::Value::StringArrayValue(
+                        chroma_proto::StringArray { values },
+                    ),
+                ),
+            },
             UpdateMetadataValue::SparseVector(sparse_vec) => chroma_proto::UpdateMetadataValue {
                 value: Some(
                     chroma_proto::update_metadata_value::Value::SparseVectorValue(
@@ -498,6 +518,9 @@ impl TryFrom<&UpdateMetadataValue> for MetadataValue {
             UpdateMetadataValue::Int(value) => Ok(MetadataValue::Int(*value)),
             UpdateMetadataValue::Float(value) => Ok(MetadataValue::Float(*value)),
             UpdateMetadataValue::Str(value) => Ok(MetadataValue::Str(value.clone())),
+            UpdateMetadataValue::StringArray(value) => {
+                Ok(MetadataValue::StringArray(value.clone()))
+            }
             UpdateMetadataValue::SparseVector(value) => {
                 Ok(MetadataValue::SparseVector(value.clone()))
             }
@@ -529,6 +552,8 @@ pub enum MetadataValue {
     Float(f64),
     Str(String),
     #[cfg_attr(feature = "testing", proptest(skip))]
+    StringArray(Vec<String>),
+    #[cfg_attr(feature = "testing", proptest(skip))]
     SparseVector(SparseVector),
 }
 
@@ -539,6 +564,7 @@ impl std::fmt::Display for MetadataValue {
             MetadataValue::Int(v) => write!(f, "{}", v),
             MetadataValue::Float(v) => write!(f, "{}", v),
             MetadataValue::Str(v) => write!(f, "\"{}\"", v),
+            MetadataValue::StringArray(v) => write!(f, "StringArray(len={})", v.len()),
             MetadataValue::SparseVector(v) => write!(f, "SparseVector(len={})", v.values.len()),
         }
     }
@@ -552,6 +578,7 @@ pub enum MetadataValueType {
     Int,
     Float,
     Str,
+    StringArray,
     SparseVector,
 }
 
@@ -562,6 +589,7 @@ impl MetadataValue {
             MetadataValue::Int(_) => MetadataValueType::Int,
             MetadataValue::Float(_) => MetadataValueType::Float,
             MetadataValue::Str(_) => MetadataValueType::Str,
+            MetadataValue::StringArray(_) => MetadataValueType::StringArray,
             MetadataValue::SparseVector(_) => MetadataValueType::SparseVector,
         }
     }
@@ -615,6 +643,12 @@ impl From<&str> for MetadataValue {
     }
 }
 
+impl From<Vec<String>> for MetadataValue {
+    fn from(v: Vec<String>) -> Self {
+        MetadataValue::StringArray(v)
+    }
+}
+
 impl From<SparseVector> for MetadataValue {
     fn from(v: SparseVector) -> Self {
         MetadataValue::SparseVector(v)
@@ -624,7 +658,7 @@ impl From<SparseVector> for MetadataValue {
 /// We need `Eq` and `Ord` since we want to use this as a key in `BTreeMap`
 ///
 /// For cross-type comparisons, we define a consistent ordering based on variant position:
-/// Bool < Int < Float < Str < SparseVector
+/// Bool < Int < Float < Str < StringArray < SparseVector
 #[allow(clippy::derive_ord_xor_partial_ord)]
 impl Ord for MetadataValue {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -635,7 +669,8 @@ impl Ord for MetadataValue {
                 MetadataValue::Int(_) => 1,
                 MetadataValue::Float(_) => 2,
                 MetadataValue::Str(_) => 3,
-                MetadataValue::SparseVector(_) => 4,
+                MetadataValue::StringArray(_) => 4,
+                MetadataValue::SparseVector(_) => 5,
             }
         }
 
@@ -646,6 +681,9 @@ impl Ord for MetadataValue {
                 (MetadataValue::Int(left), MetadataValue::Int(right)) => left.cmp(right),
                 (MetadataValue::Float(left), MetadataValue::Float(right)) => left.total_cmp(right),
                 (MetadataValue::Str(left), MetadataValue::Str(right)) => left.cmp(right),
+                (MetadataValue::StringArray(left), MetadataValue::StringArray(right)) => {
+                    left.cmp(right)
+                }
                 (MetadataValue::SparseVector(left), MetadataValue::SparseVector(right)) => {
                     left.cmp(right)
                 }
@@ -712,6 +750,7 @@ impl From<MetadataValue> for UpdateMetadataValue {
             MetadataValue::Int(v) => UpdateMetadataValue::Int(v),
             MetadataValue::Float(v) => UpdateMetadataValue::Float(v),
             MetadataValue::Str(v) => UpdateMetadataValue::Str(v),
+            MetadataValue::StringArray(v) => UpdateMetadataValue::StringArray(v),
             MetadataValue::SparseVector(v) => UpdateMetadataValue::SparseVector(v),
         }
     }
@@ -728,6 +767,9 @@ impl From<MetadataValue> for Value {
                 Number::from_f64(val).expect("Inf and NaN should not be present in MetadataValue"),
             ),
             MetadataValue::Str(val) => Self::String(val),
+            MetadataValue::StringArray(val) => {
+                Self::Array(val.into_iter().map(Self::String).collect())
+            }
             MetadataValue::SparseVector(val) => {
                 let mut map = serde_json::Map::new();
                 map.insert(
@@ -831,6 +873,13 @@ impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
             },
             MetadataValue::Bool(value) => chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
+            },
+            MetadataValue::StringArray(values) => chroma_proto::UpdateMetadataValue {
+                value: Some(
+                    chroma_proto::update_metadata_value::Value::StringArrayValue(
+                        chroma_proto::StringArray { values },
+                    ),
+                ),
             },
             MetadataValue::SparseVector(sparse_vec) => chroma_proto::UpdateMetadataValue {
                 value: Some(
@@ -951,6 +1000,7 @@ pub fn logical_size_of_metadata(metadata: &Metadata) -> usize {
                     MetadataValue::Int(i) => size_of_val(i),
                     MetadataValue::Float(f) => size_of_val(f),
                     MetadataValue::Str(s) => s.len(),
+                    MetadataValue::StringArray(arr) => arr.iter().map(|s| s.len()).sum(),
                     MetadataValue::SparseVector(v) => {
                         size_of_val(&v.indices[..]) + size_of_val(&v.values[..])
                     }
@@ -1146,6 +1196,16 @@ impl serde::Serialize for Where {
                         .map_err(serde::ser::Error::custom)?;
                         inner_map.insert(op_key.to_string(), values_json);
                     }
+                    MetadataComparison::StringArrayContains(op, value) => {
+                        let op_key = match op {
+                            StringArrayOperator::Contains => "$contains",
+                            StringArrayOperator::NotContains => "$not_contains",
+                        };
+                        inner_map.insert(
+                            op_key.to_string(),
+                            serde_json::Value::String(value.clone()),
+                        );
+                    }
                 }
 
                 outer_map.serialize_entry(&meta.key, &inner_map)?;
@@ -1256,6 +1316,7 @@ impl Where {
                     MetadataSetValue::Float(items) => items.len() as u64,
                     MetadataSetValue::Str(items) => items.len() as u64,
                 },
+                MetadataComparison::StringArrayContains(_, _) => 1,
             },
         }
     }
@@ -1465,6 +1526,9 @@ impl std::fmt::Display for MetadataExpression {
             MetadataComparison::Set(op, set_value) => {
                 write!(f, "{} {} {}", self.key, op, set_value)
             }
+            MetadataComparison::StringArrayContains(op, value) => {
+                write!(f, "{} {} \"{}\"", self.key, op, value)
+            }
         }
     }
 }
@@ -1554,6 +1618,12 @@ impl TryFrom<chroma_proto::DirectComparison> for MetadataExpression {
                 single_bool_comparison.comparator().into(),
                 MetadataValue::Bool(single_bool_comparison.value),
             ),
+            chroma_proto::direct_comparison::Comparison::StringArrayContainsOperand(
+                string_array_contains_comparison,
+            ) => MetadataComparison::StringArrayContains(
+                string_array_contains_comparison.operator().into(),
+                string_array_contains_comparison.value,
+            ),
         };
         Ok(Self {
             key: value.key,
@@ -1578,6 +1648,7 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
                                 numeric => chroma_proto::single_double_comparison::Comparator::NumberComparator(chroma_proto::NumberComparator::try_from(numeric)? as i32) }),
                             }),
                 MetadataValue::Str(value) => chroma_proto::direct_comparison::Comparison::SingleStringOperand(chroma_proto::SingleStringComparison { value, comparator: chroma_proto::GenericComparator::try_from(primitive_operator)? as i32 }),
+                MetadataValue::StringArray(_) => return Err(WhereConversionError::Cause("Primitive comparison with string array is not supported, use $contains instead".to_string())),
                 MetadataValue::SparseVector(_) => return Err(WhereConversionError::Cause("Comparison with sparse vector is not supported".to_string())),
             },
             MetadataComparison::Set(set_operator, metadata_set_value) => match metadata_set_value {
@@ -1585,6 +1656,14 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
                 MetadataSetValue::Int(vec) => chroma_proto::direct_comparison::Comparison::IntListOperand(chroma_proto::IntListComparison { values: vec, list_operator: chroma_proto::ListOperator::from(set_operator) as i32 }),
                 MetadataSetValue::Float(vec) => chroma_proto::direct_comparison::Comparison::DoubleListOperand(chroma_proto::DoubleListComparison { values: vec, list_operator: chroma_proto::ListOperator::from(set_operator) as i32 }),
                 MetadataSetValue::Str(vec) => chroma_proto::direct_comparison::Comparison::StringListOperand(chroma_proto::StringListComparison { values: vec, list_operator: chroma_proto::ListOperator::from(set_operator) as i32 }),
+            },
+            MetadataComparison::StringArrayContains(operator, value) => {
+                chroma_proto::direct_comparison::Comparison::StringArrayContainsOperand(
+                    chroma_proto::StringArrayContainsComparison {
+                        value,
+                        operator: chroma_proto::StringArrayOperator::from(operator) as i32,
+                    }
+                )
             },
         };
         Ok(Self {
@@ -1599,6 +1678,48 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
 pub enum MetadataComparison {
     Primitive(PrimitiveOperator, MetadataValue),
     Set(SetOperator, MetadataSetValue),
+    /// Check if a StringArray metadata field contains a specific string value.
+    /// The string is the value to check for containment.
+    StringArrayContains(StringArrayOperator, String),
+}
+
+/// Operators for StringArray metadata fields
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
+pub enum StringArrayOperator {
+    /// Check if the array contains the given value
+    Contains,
+    /// Check if the array does not contain the given value
+    NotContains,
+}
+
+impl std::fmt::Display for StringArrayOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op_str = match self {
+            StringArrayOperator::Contains => "∋",
+            StringArrayOperator::NotContains => "∌",
+        };
+        write!(f, "{}", op_str)
+    }
+}
+
+impl From<chroma_proto::StringArrayOperator> for StringArrayOperator {
+    fn from(value: chroma_proto::StringArrayOperator) -> Self {
+        match value {
+            chroma_proto::StringArrayOperator::StringArrayContains => Self::Contains,
+            chroma_proto::StringArrayOperator::StringArrayNotContains => Self::NotContains,
+        }
+    }
+}
+
+impl From<StringArrayOperator> for chroma_proto::StringArrayOperator {
+    fn from(value: StringArrayOperator) -> Self {
+        match value {
+            StringArrayOperator::Contains => Self::StringArrayContains,
+            StringArrayOperator::NotContains => Self::StringArrayNotContains,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
