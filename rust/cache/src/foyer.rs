@@ -349,7 +349,7 @@ where
             .with_name(config.name.clone())
             .with_metrics_registry(otel_0_27_metrics)
             .with_tracing_options(tracing_options.clone())
-            .with_policy(foyer::HybridCachePolicy::WriteOnInsertion)
+            .with_policy(foyer::HybridCachePolicy::WriteOnEviction)
             .memory(config.mem)
             .with_shards(config.shards);
 
