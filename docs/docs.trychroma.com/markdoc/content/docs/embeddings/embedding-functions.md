@@ -23,24 +23,23 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [OpenAI](../../integrations/embedding-models/openai)                                     | ✓      | ✓          |
 | [Together AI](../../integrations/embedding-models/together-ai)                           | ✓      | ✓          |
 
-
 For TypeScript users, Chroma provides packages for a number of embedding model providers. The Chromadb python package ships will all embedding functions included.
 
-| Provider                    | Embedding Function Package                    
-| ----------                  | ------------------------- 
-| All (installs all packages) | [@chroma-core/all](https://www.npmjs.com/package/@chroma-core/all)     
-| Cloudflare Workers AI       | [@chroma-core/cloudflare-worker-ai](https://www.npmjs.com/package/@chroma-core/cloudflare-worker-ai)     
-| Cohere                      | [@chroma-core/cohere](https://www.npmjs.com/package/@chroma-core/cohere) 
-| Google Gemini               | [@chroma-core/google-gemini](https://www.npmjs.com/package/@chroma-core/google-gemini)     
-| Hugging Face Server         | [@chroma-core/huggingface-server](https://www.npmjs.com/package/@chroma-core/huggingface-server)     
-| Jina                        | [@chroma-core/jina](https://www.npmjs.com/package/@chroma-core/jina)     
-| Mistral                     | [@chroma-core/mistral](https://www.npmjs.com/package/@chroma-core/mistral)     
-| Morph                       | [@chroma-core/morph](https://www.npmjs.com/package/@chroma-core/morph)     
-| Ollama                      | [@chroma-core/ollama](https://www.npmjs.com/package/@chroma-core/ollama)     
-| OpenAI                      | [@chroma-core/openai](https://www.npmjs.com/package/@chroma-core/openai)     
+| Provider                    | Embedding Function Package
+| ----------                  | -------------------------
+| All (installs all packages) | [@chroma-core/all](https://www.npmjs.com/package/@chroma-core/all)
+| Cloudflare Workers AI       | [@chroma-core/cloudflare-worker-ai](https://www.npmjs.com/package/@chroma-core/cloudflare-worker-ai)
+| Cohere                      | [@chroma-core/cohere](https://www.npmjs.com/package/@chroma-core/cohere)
+| Google Gemini               | [@chroma-core/google-gemini](https://www.npmjs.com/package/@chroma-core/google-gemini)
+| Hugging Face Server         | [@chroma-core/huggingface-server](https://www.npmjs.com/package/@chroma-core/huggingface-server)
+| Jina                        | [@chroma-core/jina](https://www.npmjs.com/package/@chroma-core/jina)
+| Mistral                     | [@chroma-core/mistral](https://www.npmjs.com/package/@chroma-core/mistral)
+| Morph                       | [@chroma-core/morph](https://www.npmjs.com/package/@chroma-core/morph)
+| Ollama                      | [@chroma-core/ollama](https://www.npmjs.com/package/@chroma-core/ollama)
+| OpenAI                      | [@chroma-core/openai](https://www.npmjs.com/package/@chroma-core/openai)
 | Qwen (via Chroma Cloud)     | [@chroma-core/chroma-cloud-qwen](https://www.npmjs.com/package/@chroma-core/chroma-cloud-qwen)
-| Together AI                 | [@chroma-core/together-ai](https://www.npmjs.com/package/@chroma-core/together-ai)     
-| Voyage AI                   | [@chroma-core/voyageai](https://www.npmjs.com/package/@chroma-core/voyageai)     
+| Together AI                 | [@chroma-core/together-ai](https://www.npmjs.com/package/@chroma-core/together-ai)
+| Voyage AI                   | [@chroma-core/voyageai](https://www.npmjs.com/package/@chroma-core/voyageai)
 
 We welcome pull requests to add new Embedding Functions to the community.
 
@@ -252,8 +251,8 @@ from chromadb.utils.embedding_functions import register_embedding_function
 @register_embedding_function
 class MyEmbeddingFunction(EmbeddingFunction):
 
-    def __init__(self):
-        pass
+    def __init__(self, model):
+        self.model = model
 
     def __call__(self, input: Documents) -> Embeddings:
         # embed the documents somehow
@@ -264,11 +263,11 @@ class MyEmbeddingFunction(EmbeddingFunction):
         return "my-ef"
 
     def get_config(self) -> Dict[str, Any]:
-        return {}
+        return dict(model=self.model)
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction":
-        return MyEmbeddingFunction()
+        return MyEmbeddingFunction(config.model)
 ```
 
 {% /Tab %}
@@ -276,18 +275,40 @@ class MyEmbeddingFunction(EmbeddingFunction):
 {% Tab label="typescript" %}
 
 ```typescript
-import { EmbeddingFunction } from "chromadb";
+export interface MyEmbeddingConfig {
+  model: string;
+}
 
-class MyEmbeddingFunction implements EmbeddingFunction {
-  private api_key: string;
+export class MyEmbeddingFunction implements EmbeddingFunction {
+  public readonly name = "my-embedding-function";
+  private readonly model: string;
 
-  constructor(api_key: string) {
-    this.api_key = api_key;
+  constructor(args: { model: string }) {
+    this.model = args.model;
   }
 
-  public async generate(texts: string[]): Promise<number[][]> {
-    // do things to turn texts into embeddings with an api_key perhaps
-    return embeddings;
+  async generate(texts: string[]): Promise<number[][]> {
+    // embed the documents somehow
+    return [];
+  }
+
+  getConfig(): MyEmbeddingConfig {
+    return {
+      model: this.model,
+    };
+  }
+
+  validateConfigUpdate(config: Record<string, any>) {
+    if ("model" in config) {
+      throw new ChromaValueError("Model cannot be updated");
+    }
+  }
+
+  static buildFromConfig(
+    config: MyEmbeddingConfig,
+    _client?: ChromaClient,
+  ): MyEmbeddingFunction {
+    return new MyEmbeddingFunction(config);
   }
 }
 ```
