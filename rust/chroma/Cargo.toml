@@ -23,12 +23,17 @@ tracing.workspace = true
 chroma-api-types.workspace = true
 chroma-error.workspace = true
 chroma-types.workspace = true
+chroma-frontend = { workspace = true, optional = true }
+chroma-system = { workspace = true, optional = true }
+chroma-config = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 
 [features]
 default = ["rustls", "ollama"]
 native-tls = ["reqwest/default-tls", "reqwest/default"]
 rustls = ["reqwest/rustls-tls"]
 ollama = []
+server = ["chroma-frontend", "chroma-system", "chroma-config", "uuid"]
 
 [dev-dependencies]
 dotenvy = "0.15.7"
