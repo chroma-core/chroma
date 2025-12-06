@@ -227,6 +227,10 @@ pub struct Schema {
     /// TODO(Sanket): Needed for backwards compatibility. Should remove after deploy.
     #[serde(rename = "keys", alias = "key_overrides")]
     pub keys: HashMap<String, ValueTypes>,
+    /// Customer-managed encryption key for collection data
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<Object>))]
+    pub cmek: Option<Cmek>,
 }
 
 impl Schema {
@@ -437,7 +441,11 @@ impl Default for Schema {
             },
         );
 
-        Schema { defaults, keys }
+        Schema {
+            defaults,
+            keys,
+            cmek: None,
+        }
     }
 }
 
@@ -812,7 +820,11 @@ impl Schema {
         };
         keys.insert(DOCUMENT_KEY.to_string(), document_defaults);
 
-        Schema { defaults, keys }
+        Schema {
+            defaults,
+            keys,
+            cmek: None,
+        }
     }
 
     pub fn get_internal_spann_config(&self) -> Option<InternalSpannConfiguration> {
@@ -919,6 +931,7 @@ impl Schema {
                 Ok(Schema {
                     defaults: merged_defaults,
                     keys: merged_keys,
+                    cmek: user.cmek.clone().or(default_schema.cmek.clone()),
                 })
             }
             None => Ok(default_schema),
@@ -945,6 +958,7 @@ impl Schema {
         Ok(Schema {
             defaults: self.defaults.clone(),
             keys,
+            cmek: other.cmek.clone().or(self.cmek.clone()),
         })
     }
 
@@ -1593,6 +1607,11 @@ impl Schema {
             }
         }
 
+        // Check CMEK is None (default)
+        if self.cmek.is_some() {
+            return false;
+        }
+
         true
     }
 
@@ -2152,6 +2171,28 @@ impl Schema {
         }
 
         Ok(self)
+    }
+
+    /// Set customer-managed encryption key for the collection (builder pattern)
+    ///
+    /// This method allows setting CMEK on a schema for fluent, chainable configuration.
+    ///
+    /// # Arguments
+    /// * `cmek` - Customer-managed encryption key configuration
+    ///
+    /// # Returns
+    /// `Self` for method chaining
+    ///
+    /// # Examples
+    /// ```
+    /// use chroma_types::{Schema, Cmek};
+    ///
+    /// let schema = Schema::default()
+    ///     .with_cmek(Cmek::gcp("projects/my-project/locations/us/keyRings/my-ring/cryptoKeys/my-key".to_string()));
+    /// ```
+    pub fn with_cmek(mut self, cmek: Cmek) -> Self {
+        self.cmek = Some(cmek);
+        self
     }
 
     /// Set vector index config globally (applies to #embedding)
@@ -2799,6 +2840,7 @@ mod tests {
         let user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
+            cmek: None,
         };
 
         let result = Schema::reconcile_with_defaults(Some(&user_schema), KnnIndex::Spann).unwrap();
@@ -2812,6 +2854,7 @@ mod tests {
         let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
+            cmek: None,
         };
 
         user_schema.defaults.string = Some(StringValueType {
@@ -2847,6 +2890,7 @@ mod tests {
         let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
+            cmek: None,
         };
 
         user_schema.defaults.float_list = Some(FloatListValueType {
@@ -2896,6 +2940,7 @@ mod tests {
             Schema {
                 defaults: merged_defaults,
                 keys: merged_keys,
+                cmek: None,
             }
         };
 
@@ -2932,6 +2977,7 @@ mod tests {
         let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
+            cmek: None,
         };
 
         // Add a custom key override
@@ -2979,6 +3025,7 @@ mod tests {
         let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
+            cmek: None,
         };
 
         // Override the #embedding key with custom settings
@@ -3500,6 +3547,7 @@ mod tests {
         let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
+            cmek: None,
         };
 
         // Set up complex user defaults
@@ -3576,6 +3624,7 @@ mod tests {
             Schema {
                 defaults: merged_defaults,
                 keys: merged_keys,
+                cmek: None,
             }
         };
 
