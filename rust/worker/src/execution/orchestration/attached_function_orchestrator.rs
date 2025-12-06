@@ -588,9 +588,6 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             message.vector_segment.id
         );
 
-        // TODO(sicheng): Get CMEK from collection schema
-        let cmek = None;
-
         // Create segment writers for the output collection
         let collection = &message.collection;
         let dimension = match collection.dimension {
@@ -607,6 +604,15 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                 return;
             }
         };
+
+        // Extract CMEK from input collection schema (inherit for output collection segments)
+        // The output collection inherits the input collection's encryption policy
+        let cmek = self
+            .get_input_collection_info()
+            .collection
+            .schema
+            .as_ref()
+            .and_then(|s| s.cmek.clone());
 
         let record_writer = match self
             .ok_or_terminate(
