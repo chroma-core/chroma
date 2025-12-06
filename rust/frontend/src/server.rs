@@ -1011,6 +1011,21 @@ async fn create_collection(
         format!("tenant:{}", tenant).as_str(),
     ])?;
 
+    // Validate CMEK authorization
+    if let Some(schema) = &payload.schema {
+        if let Some(cmek) = &schema.cmek {
+            match server.config.frontend.tenant_cmek_keys.get(&tenant) {
+                None => {
+                    return Err(ValidationError::CmekUnauthorizedTenant(tenant.clone()).into());
+                }
+                Some(allowed_keys) if !allowed_keys.contains(cmek) => {
+                    return Err(ValidationError::CmekUnauthorizedKey(tenant.clone()).into());
+                }
+                Some(_) => {} // Authorized
+            }
+        }
+    }
+
     let payload_clone = payload.clone();
 
     let configuration = match payload_clone.configuration {

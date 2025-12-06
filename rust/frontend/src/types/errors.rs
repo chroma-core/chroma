@@ -29,6 +29,10 @@ pub enum ValidationError {
     UpdateCollection(#[from] UpdateCollectionError),
     #[error("Error parsing collection configuration: {0}")]
     ParseCollectionConfiguration(#[from] CollectionConfigurationToInternalConfigurationError),
+    #[error("Tenant '{0}' does not have any associated CMEK key")]
+    CmekUnauthorizedTenant(String),
+    #[error("Tenant '{0}' is not authorized to use the specified CMEK key")]
+    CmekUnauthorizedKey(String),
 }
 
 impl ChromaError for ValidationError {
@@ -41,6 +45,8 @@ impl ChromaError for ValidationError {
             ValidationError::GetCollection(err) => err.code(),
             ValidationError::UpdateCollection(err) => err.code(),
             ValidationError::ParseCollectionConfiguration(_) => ErrorCodes::InvalidArgument,
+            ValidationError::CmekUnauthorizedTenant(_) => ErrorCodes::PermissionDenied,
+            ValidationError::CmekUnauthorizedKey(_) => ErrorCodes::PermissionDenied,
         }
     }
 }

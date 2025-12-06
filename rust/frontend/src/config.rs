@@ -7,11 +7,12 @@ use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sqlite::config::SqliteDBConfig;
 use chroma_sysdb::SysDbConfig;
 use chroma_tracing::{OtelFilter, OtelFilterLevel};
-use chroma_types::{default_default_knn_index, KnnIndex};
+use chroma_types::{default_default_knn_index, Cmek, KnnIndex};
 use figment::providers::{Env, Format, Yaml};
 use mdac::CircuitBreakerConfig;
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct ScorecardRule {
@@ -73,6 +74,8 @@ pub struct FrontendConfig {
     pub enable_schema: bool,
     #[serde(default = "default_min_records_for_invocation")]
     pub min_records_for_invocation: u64,
+    #[serde(default)]
+    pub tenant_cmek_keys: HashMap<String, Vec<Cmek>>,
 }
 
 impl FrontendConfig {
@@ -93,6 +96,7 @@ impl FrontendConfig {
             tenants_to_migrate_immediately_threshold: None,
             enable_schema: default_enable_schema(),
             min_records_for_invocation: default_min_records_for_invocation(),
+            tenant_cmek_keys: HashMap::new(),
         }
     }
 }
