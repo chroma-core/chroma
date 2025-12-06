@@ -415,6 +415,12 @@ export type RawWhereFields = {
  */
 export type Schema = {
     /**
+     * Customer-managed encryption key for collection data
+     */
+    cmek?: {
+        [key: string]: unknown;
+    } | null;
+    /**
      * Default index configurations for each value type
      */
     defaults: ValueTypes;
