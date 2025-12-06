@@ -267,7 +267,7 @@ class MyEmbeddingFunction(EmbeddingFunction):
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction":
-        return MyEmbeddingFunction(config.model)
+        return MyEmbeddingFunction(config['model'])
 ```
 
 {% /Tab %}
