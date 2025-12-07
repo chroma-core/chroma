@@ -20,6 +20,7 @@ pub use chroma_types::BoolInvertedIndexConfig;
 pub use chroma_types::BoolInvertedIndexType;
 pub use chroma_types::BoolValueType;
 pub use chroma_types::BooleanOperator;
+pub use chroma_types::Cmek;
 pub use chroma_types::Collection;
 pub use chroma_types::CollectionConfiguration;
 pub use chroma_types::CollectionConversionError;
