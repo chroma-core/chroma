@@ -109,7 +109,7 @@ impl Configurable<(USearchProviderConfig, Storage)> for USearchIndexProvider {
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (usearch_config, storage) = config;
         let cache = chroma_cache::from_config(&usearch_config.cache_config).await?;
-        
+
         let quantization_kind = match usearch_config.quantization.as_deref() {
             Some("f16") => ScalarKind::F16,
             Some("i8") => ScalarKind::I8,
@@ -234,13 +234,13 @@ impl USearchIndexProvider {
         let key = Self::format_key(prefix_path, source_id);
         let s3_fetch_span =
             tracing::trace_span!(parent: Span::current(), "Read usearch index from storage");
-        
+
         let result = self
             .storage
             .get(&key, GetOptions::new(StorageRequestPriority::P0))
             .instrument(s3_fetch_span)
             .await?;
-        
+
         Ok(result)
     }
 
@@ -278,7 +278,7 @@ impl USearchIndexProvider {
 
         // Load index
         let _guard = self.write_mutex.lock(id).await;
-        
+
         // Final cache check
         if let Some(index) = self.get(id, cache_key).await {
             return Ok(index);
@@ -662,7 +662,7 @@ mod tests {
         {
             let guard = opened_index.inner.read();
             assert_eq!(guard.usearch_index.len(), 2);
-            
+
             let (ids, _) = guard
                 .usearch_index
                 .query(&[1.0, 0.0, 0.0], 1, &[], &[])
@@ -679,7 +679,7 @@ mod tests {
 
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
         let cache = new_non_persistent_cache_for_test();
-        
+
         // Create provider with f16 quantization
         let provider = USearchIndexProvider::new(
             storage,
@@ -717,4 +717,3 @@ mod tests {
         }
     }
 }
-
