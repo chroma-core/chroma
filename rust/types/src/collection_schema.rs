@@ -146,22 +146,41 @@ pub const EMBEDDING_KEY: &str = "#embedding";
 
 // Static regex pattern to validate CMEK for GCP
 static CMEK_GCP_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"projects/\w+/locations/\w+/keyRings/\w+/cryptoKeys/\w+")
+    Regex::new(r"projects/.+/locations/.+/keyRings/.+/cryptoKeys/.+")
         .expect("The CMEK pattern for GCP should be valid")
 });
 
-/// Customer-managed encryption key
+/// Customer-managed encryption key for storage encryption.
+///
+/// CMEK allows you to use your own encryption keys managed by cloud providers'
+/// key management services (KMS) instead of default provider-managed keys.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum Cmek {
+    /// Google Cloud Platform KMS key resource name.
+    ///
+    /// Format: `projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}`
     Gcp(Arc<String>),
 }
 
 impl Cmek {
     /// Create a GCP CMEK from a KMS resource name
+    ///
+    /// # Example
+    /// ```
+    /// use chroma_types::Cmek;
+    /// let cmek = Cmek::gcp(
+    ///     "projects/my-project/locations/us-central1/keyRings/my-ring/cryptoKeys/my-key".to_string()
+    /// );
+    /// ```
     pub fn gcp(resource: String) -> Self {
         Cmek::Gcp(Arc::new(resource))
     }
 
+    /// Validates that the CMEK resource name matches the expected pattern.
+    ///
+    /// Returns `true` if the resource name is well-formed according to the
+    /// provider's format requirements. Does not verify that the key exists
+    /// or is accessible.
     pub fn validate_pattern(&self) -> bool {
         match self {
             Cmek::Gcp(resource) => CMEK_GCP_RE.is_match(resource),

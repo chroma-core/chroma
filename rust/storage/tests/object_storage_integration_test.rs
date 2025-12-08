@@ -88,7 +88,8 @@ async fn create_gcs_storage() -> ObjectStorage {
 
 /// Helper to generate a unique test prefix for each test to avoid conflicts
 fn test_prefix(test_name: &str) -> String {
-    format!("{}{}/", TEST_PREFIX, test_name)
+    let rand = rand::random::<u128>();
+    format!("{}{}-{}/", TEST_PREFIX, test_name, rand)
 }
 
 /// Helper to create valid CMEK instance from constant
@@ -111,7 +112,6 @@ fn test_invalid_cmek_gcs() -> Cmek {
 // ============================================================================
 
 #[tokio::test]
-#[ignore] // Requires GCS credentials and bucket access
 async fn test_gcs_basic_operations() {
     let obj_storage = create_gcs_storage().await;
     let storage = Storage::Object(obj_storage);
@@ -121,7 +121,6 @@ async fn test_gcs_basic_operations() {
 }
 
 #[tokio::test]
-#[ignore] // Requires GCS credentials and bucket access
 async fn test_gcs_multipart_operations() {
     let obj_storage = create_gcs_storage().await;
     let storage = Storage::Object(obj_storage);
@@ -131,7 +130,6 @@ async fn test_gcs_multipart_operations() {
 }
 
 #[tokio::test]
-#[ignore] // Requires GCS credentials and bucket access
 async fn test_gcs_conditional_operations() {
     let obj_storage = create_gcs_storage().await;
     let storage = Storage::Object(obj_storage);
@@ -141,7 +139,6 @@ async fn test_gcs_conditional_operations() {
 }
 
 #[tokio::test]
-#[ignore] // Requires GCS credentials, bucket access, and valid CMEK setup
 async fn test_gcs_cmek_basic_operations() {
     let obj_storage = create_gcs_storage().await;
     let storage = Storage::Object(obj_storage);
@@ -151,7 +148,6 @@ async fn test_gcs_cmek_basic_operations() {
 }
 
 #[tokio::test]
-#[ignore] // Requires GCS credentials, bucket access, and valid CMEK setup
 async fn test_gcs_cmek_multipart_operations() {
     let obj_storage = create_gcs_storage().await;
     let storage = Storage::Object(obj_storage);
@@ -161,7 +157,6 @@ async fn test_gcs_cmek_multipart_operations() {
 }
 
 #[tokio::test]
-#[ignore] // Requires GCS credentials, bucket access, and valid CMEK setup
 async fn test_gcs_cmek_conditional_operations() {
     let obj_storage = create_gcs_storage().await;
     let storage = Storage::Object(obj_storage);
@@ -171,7 +166,6 @@ async fn test_gcs_cmek_conditional_operations() {
 }
 
 #[tokio::test]
-#[ignore] // Requires GCS credentials and bucket access
 async fn test_gcs_cmek_invalid_key_fails() {
     let obj_storage = create_gcs_storage().await;
     let storage = Storage::Object(obj_storage);

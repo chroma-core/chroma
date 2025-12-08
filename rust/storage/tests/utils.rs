@@ -217,7 +217,7 @@ pub async fn test_multipart_operations(storage: &Storage, test_prefix: &str, cme
 
     // Cleanup
     storage
-        .delete_many(vec![small_key, large_key])
+        .delete_many([small_key, large_key])
         .await
         .expect("Failed to cleanup");
 }
@@ -460,7 +460,7 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str, c
 
     // Cleanup
     storage
-        .delete_many(vec![key1, key2, key3, key4, key5])
+        .delete_many([key1, key2, key3, key4, key5])
         .await
         .expect("Failed to cleanup");
 }
@@ -494,13 +494,12 @@ pub async fn test_invalid_cmek_fails(storage: &Storage, test_prefix: &str, inval
 
     // Verify error is related to encryption/permissions
     if let Err(e) = result {
-        let error_msg = format!("{}", e);
+        let error_msg = format!("{}", e).to_lowercase();
         // GCS typically returns 400 Bad Request or 403 Forbidden for invalid CMEK
         assert!(
             error_msg.contains("400")
                 || error_msg.contains("403")
                 || error_msg.contains("permission")
-                || error_msg.contains("encryption")
                 || error_msg.contains("kms")
                 || error_msg.contains("key"),
             "Expected CMEK-related error, got: {}",
