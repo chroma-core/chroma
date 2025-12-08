@@ -10,7 +10,7 @@ const CodeBlockHeader: React.FC<{
   content: string;
 }> = ({ language, content }) => {
   return (
-    <div className="code-block-header flex items-center justify-between bg-gray-900 rounded-t-sm">
+    <div className="flex items-center justify-between bg-gray-900 rounded-t-sm">
       <div className={tabLabelStyle} data-state={"active"}>
         {capitalize(language)}
       </div>
