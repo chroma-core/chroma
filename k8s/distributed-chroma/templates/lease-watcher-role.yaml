@@ -3,8 +3,8 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  namespace: {{ .Values.namespace }}
   name: lease-watcher
+  namespace: {{ .Values.namespace }}
 rules:
 - apiGroups: ["coordination.k8s.io"]
   resources: ["leases"]
