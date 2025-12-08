@@ -46,7 +46,7 @@ attached_fn = collection.attach_function(
 print("✅ Function attached successfully!")
 print(f"   Attached Function ID: {attached_fn.id}")
 print(f"   Name: {attached_fn.name}")
-print(f"   Function: {attached_fn.function_id}")
+print(f"   Function: {attached_fn.function_name}")
 print(f"   Input collection: {collection.name}")
 print(f"   Output collection: {attached_fn.output_collection}")
 
@@ -73,8 +73,9 @@ print(f"Collection now has {collection.count()} documents")
 print("\n" + "=" * 60)
 input("Press Enter to detach the function...")
 
-success = attached_fn.detach(
-    delete_output_collection=True  # Also delete the output collection
+success = collection.detach_function(
+    attached_fn.name,
+    delete_output_collection=True,  # Also delete the output collection
 )
 
 if success:

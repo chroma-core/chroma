@@ -611,7 +611,7 @@ message ListAttachedFunctionsResponse {
 }
 
 message DetachFunctionRequest {
-  string attached_function_id = 1;
+  string name = 1;
   bool delete_output = 2; // If true and output_collection_id is not null, atomically soft-delete the output collection
   string input_collection_id = 3;
 }

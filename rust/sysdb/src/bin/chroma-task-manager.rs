@@ -52,8 +52,8 @@ enum Command {
     },
     #[command(about = "Detach a function")]
     DetachFunction {
-        #[arg(long, help = "ID of the attached function to delete")]
-        attached_function_id: String,
+        #[arg(long, help = "Name of the attached function to delete")]
+        name: String,
         #[arg(long, help = "ID of the input collection")]
         input_collection_id: String,
         #[arg(long, help = "Whether to delete the output collection")]
@@ -175,12 +175,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         Command::DetachFunction {
-            attached_function_id,
+            name,
             input_collection_id,
             delete_output,
         } => {
             let request = chroma_proto::DetachFunctionRequest {
-                attached_function_id,
+                name,
                 input_collection_id,
                 delete_output,
             };

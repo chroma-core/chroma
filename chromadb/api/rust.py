@@ -637,26 +637,12 @@ class RustBindingsAPI(ServerAPI):
     @override
     def detach_function(
         self,
-        attached_function_id: UUID,
+        name: str,
         input_collection_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        """Attached functions are not supported in the Rust bindings (local embedded mode)."""
-        raise NotImplementedError(
-            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
-            "The Rust bindings (embedded mode) do not support attached function operations."
-        )
-
-    @override
-    def get_attached_function(
-        self,
-        name: str,
-        input_collection_id: UUID,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> "AttachedFunction":
         """Attached functions are not supported in the Rust bindings (local embedded mode)."""
         raise NotImplementedError(
             "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
