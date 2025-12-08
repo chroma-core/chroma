@@ -80,6 +80,11 @@ const legacyPathsMapping: Record<string, string> = {
 export const middleware = (request: NextRequest) => {
   const path = request.nextUrl.pathname.toLowerCase();
 
+  // Case-insensitive redirect
+  if (request.nextUrl.pathname !== path) {
+    return NextResponse.redirect(new URL(path, request.url));
+  }
+
   if (path in legacyPathsMapping) {
     const currentPath = legacyPathsMapping[path];
     return NextResponse.redirect(new URL(currentPath, request.url));
