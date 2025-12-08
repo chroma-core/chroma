@@ -68,6 +68,7 @@ pub struct HnswIndexFlusher {
     pub prefix_path: String,
     pub index_id: IndexUuid,
     pub hnsw_index: HnswIndexRef,
+    pub cmek: Option<Cmek>,
 }
 
 #[derive(Clone)]

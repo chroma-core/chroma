@@ -2384,8 +2384,8 @@ impl SpannIndexWriter {
         // Next head.
         let mut bf_options = BlockfileWriterOptions::new(self.prefix_path.clone());
         bf_options = bf_options.unordered_mutations();
-        if let Some(cmek) = self.cmek {
-            bf_options = bf_options.with_cmek(cmek);
+        if let Some(cmek) = &self.cmek {
+            bf_options = bf_options.with_cmek(cmek.clone());
         }
         let max_head_id_bf = self
             .blockfile_provider
@@ -2453,6 +2453,7 @@ impl SpannIndexWriter {
                 prefix_path,
                 index_id: hnsw_id,
                 hnsw_index,
+                cmek: self.cmek,
             },
             metrics: SpannIndexFlusherMetrics {
                 pl_flush_latency: self.metrics.pl_flush_latency.clone(),
@@ -2568,7 +2569,7 @@ impl SpannIndexFlusher {
                     &self.hnsw_flusher.prefix_path,
                     &self.hnsw_flusher.index_id,
                     &self.hnsw_flusher.hnsw_index,
-                    None,
+                    self.hnsw_flusher.cmek.clone(),
                 )
                 .await
                 .map_err(|e| {
