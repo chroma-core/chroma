@@ -17,7 +17,6 @@ rules:
     - chroma.cluster
   resources:
     - memberlists
-  namespace: {{ .Values.namespace }}
   verbs:
     - get
     - list
@@ -39,7 +38,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: garbage-collection-service-memberlist-readerwriter
-  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: sysdb-serviceaccount
@@ -55,7 +53,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: garbage-collection-service-memberlist-readerwriter
-  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: garbage-collector-serviceaccount
@@ -72,7 +69,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: garbage-collection-service-memberlist-readerwriter
-  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: default

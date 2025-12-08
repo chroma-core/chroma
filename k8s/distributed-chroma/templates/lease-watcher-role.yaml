@@ -8,7 +8,6 @@ metadata:
 rules:
 - apiGroups: ["coordination.k8s.io"]
   resources: ["leases"]
-  namespace: {{ .Values.namespace }}
   verbs: ["get", "create", "watch", "update", "delete"]
 
 ---

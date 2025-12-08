@@ -22,7 +22,6 @@ rules:
   - chroma.cluster
   resources:
   - memberlists
-  namespace: {{ .Values.namespace }}
   verbs:
   - get
   - list
@@ -44,7 +43,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: query-service-memberlist-readerwriter
-  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: sysdb-serviceaccount
@@ -63,7 +61,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: query-service-memberlist-readerwriter
-  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: query-service-serviceaccount
@@ -80,7 +77,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: query-service-memberlist-readerwriter
-  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: default
@@ -98,7 +94,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: query-service-memberlist-readerwriter
-  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: rust-frontend-service-serviceaccount

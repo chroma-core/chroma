@@ -23,7 +23,6 @@ rules:
   - chroma.cluster
   resources:
   - memberlists
-  namespace: chroma
   verbs:
   - get
   - list
@@ -43,7 +42,7 @@ metadata:
   namespace: chroma
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: test-memberlist-reader
   namespace: chroma
 subjects:

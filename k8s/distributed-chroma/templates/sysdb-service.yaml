@@ -100,7 +100,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: pod-watcher
-  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: sysdb-serviceaccount
@@ -116,7 +115,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: lease-watcher
-  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: sysdb-serviceaccount

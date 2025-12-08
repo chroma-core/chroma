@@ -8,7 +8,6 @@ metadata:
 rules:
 - apiGroups: [""]
   resources: ["pods"]
-  namespace: {{ .Values.namespace }}
   verbs: ["get", "list", "watch"]
 
 ---

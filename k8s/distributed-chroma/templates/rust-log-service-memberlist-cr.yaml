@@ -17,7 +17,6 @@ rules:
     - chroma.cluster
   resources:
     - memberlists
-  namespace: {{ .Values.namespace }}
   verbs:
     - get
     - list
@@ -40,7 +39,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: rust-log-service-memberlist-readerwriter
-  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: sysdb-serviceaccount
@@ -58,7 +56,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: rust-log-service-memberlist-readerwriter
-  namespace: {{ .Values.namespace }}
 subjects:
 - kind: ServiceAccount
   name: rust-frontend-service-serviceaccount
