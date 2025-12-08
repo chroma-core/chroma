@@ -182,17 +182,6 @@ impl ServiceBasedFrontend {
             .collection)
     }
 
-    async fn get_collection_dimension(
-        &mut self,
-        collection_id: CollectionUuid,
-    ) -> Result<Option<u32>, GetCollectionError> {
-        Ok(self
-            .get_cached_collection(collection_id)
-            .await?
-            .dimension
-            .map(|dim| dim as u32))
-    }
-
     async fn set_collection_dimension(
         &mut self,
         collection_id: CollectionUuid,
@@ -210,28 +199,17 @@ impl ServiceBasedFrontend {
         Ok(UpdateCollectionResponse {})
     }
 
-    async fn get_collection_cmek(
-        &mut self,
-        collection_id: CollectionUuid,
-    ) -> Result<Option<Cmek>, GetCollectionError> {
-        Ok(self
-            .get_cached_collection(collection_id)
-            .await?
-            .schema
-            .as_ref()
-            .and_then(|s| s.cmek.clone()))
-    }
-
     async fn validate_embedding<Embedding, F>(
         &mut self,
         collection_id: CollectionUuid,
         option_embeddings: Option<&Vec<Embedding>>,
         update_if_not_present: bool,
         read_length: F,
-    ) -> Result<(), ValidationError>
+    ) -> Result<Collection, ValidationError>
     where
         F: Fn(&Embedding) -> Option<usize>,
     {
+        let collection = self.get_cached_collection(collection_id).await?;
         if let Some(embeddings) = option_embeddings {
             let emb_dims = embeddings
                 .iter()
@@ -246,28 +224,23 @@ impl ServiceBasedFrontend {
                 low as u32
             } else {
                 // No embedding to check, return
-                return Ok(());
+                return Ok(collection);
             };
-            match self.get_collection_dimension(collection_id).await {
-                Ok(Some(expected_dim)) => {
+            match collection.dimension.map(|dim| dim as u32) {
+                Some(expected_dim) => {
                     if expected_dim != emb_dim {
                         return Err(ValidationError::DimensionMismatch(expected_dim, emb_dim));
                     }
-
-                    Ok(())
                 }
-                Ok(None) => {
+                None => {
                     if update_if_not_present {
                         self.set_collection_dimension(collection_id, emb_dim)
                             .await?;
                     }
-                    Ok(())
                 }
-                Err(err) => Err(err.into()),
-            }
-        } else {
-            Ok(())
+            };
         }
+        Ok(collection)
     }
 
     pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
@@ -819,11 +792,8 @@ impl ServiceBasedFrontend {
         tenant_id: &str,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
+        cmek: Option<Cmek>,
     ) -> Result<(), Box<dyn ChromaError>> {
-        let cmek = self
-            .get_collection_cmek(collection_id)
-            .await
-            .map_err(ChromaError::boxed)?;
         self.log_client
             .push_logs(tenant_id, collection_id, records, cmek)
             .await
@@ -842,14 +812,15 @@ impl ServiceBasedFrontend {
             ..
         }: AddCollectionRecordsRequest,
     ) -> Result<AddCollectionRecordsResponse, AddCollectionRecordsError> {
-        self.validate_embedding(
-            collection_id,
-            Some(&embeddings),
-            true,
-            |embedding: &Vec<f32>| Some(embedding.len()),
-        )
-        .await
-        .map_err(|err| err.boxed())?;
+        let collection = self
+            .validate_embedding(
+                collection_id,
+                Some(&embeddings),
+                true,
+                |embedding: &Vec<f32>| Some(embedding.len()),
+            )
+            .await
+            .map_err(|err| err.boxed())?;
 
         let embeddings = Some(embeddings.into_iter().map(Some).collect());
 
@@ -862,9 +833,13 @@ impl ServiceBasedFrontend {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
             let tenant_id_clone = tenant_id.clone();
+            let cmek_clone = collection
+                .schema
+                .as_ref()
+                .and_then(|schema| schema.cmek.clone());
             async move {
                 self_clone
-                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone, cmek_clone)
                     .await
             }
         };
@@ -929,11 +904,12 @@ impl ServiceBasedFrontend {
             ..
         }: UpdateCollectionRecordsRequest,
     ) -> Result<UpdateCollectionRecordsResponse, UpdateCollectionRecordsError> {
-        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
-            embedding.as_ref().map(|emb| emb.len())
-        })
-        .await
-        .map_err(|err| err.boxed())?;
+        let collection = self
+            .validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+                embedding.as_ref().map(|emb| emb.len())
+            })
+            .await
+            .map_err(|err| err.boxed())?;
 
         let (records, log_size_bytes) = to_records(
             ids,
@@ -950,9 +926,13 @@ impl ServiceBasedFrontend {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
             let tenant_id_clone = tenant_id.clone();
+            let cmek_clone = collection
+                .schema
+                .as_ref()
+                .and_then(|schema| schema.cmek.clone());
             async move {
                 self_clone
-                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone, cmek_clone)
                     .await
             }
         };
@@ -1017,14 +997,15 @@ impl ServiceBasedFrontend {
             ..
         }: UpsertCollectionRecordsRequest,
     ) -> Result<UpsertCollectionRecordsResponse, UpsertCollectionRecordsError> {
-        self.validate_embedding(
-            collection_id,
-            Some(&embeddings),
-            true,
-            |embedding: &Vec<f32>| Some(embedding.len()),
-        )
-        .await
-        .map_err(|err| err.boxed())?;
+        let collection = self
+            .validate_embedding(
+                collection_id,
+                Some(&embeddings),
+                true,
+                |embedding: &Vec<f32>| Some(embedding.len()),
+            )
+            .await
+            .map_err(|err| err.boxed())?;
 
         let embeddings = Some(embeddings.into_iter().map(Some).collect());
 
@@ -1043,9 +1024,13 @@ impl ServiceBasedFrontend {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
             let tenant_id_clone = tenant_id.clone();
+            let cmek_clone = collection
+                .schema
+                .as_ref()
+                .and_then(|schema| schema.cmek.clone());
             async move {
                 self_clone
-                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone, cmek_clone)
                     .await
             }
         };
@@ -1226,7 +1211,13 @@ impl ServiceBasedFrontend {
 
             let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
 
-            self.retryable_push_logs(&tenant_id, collection_id, records)
+            let cmek = self
+                .get_cached_collection(collection_id)
+                .await
+                .map_err(|err| DeleteCollectionRecordsError::Internal(err.boxed()))?
+                .schema
+                .and_then(|schema| schema.cmek.clone());
+            self.retryable_push_logs(&tenant_id, collection_id, records, cmek)
                 .await
                 .map_err(|err| {
                     if err.code() == ErrorCodes::Unavailable {
@@ -1981,10 +1972,8 @@ impl ServiceBasedFrontend {
         collection_id: CollectionUuid,
         _attached_function_id: chroma_types::AttachedFunctionUuid,
     ) -> Result<(), chroma_types::AttachFunctionError> {
-        let embedding_dim = self
-            .get_collection_dimension(collection_id)
-            .await?
-            .unwrap_or(1);
+        let collection = self.get_cached_collection(collection_id).await?;
+        let embedding_dim = collection.dimension.unwrap_or(1);
         let fake_embedding = vec![0.0; embedding_dim as usize];
         // TODO(tanujnay112): Make this either a configurable or better yet a separate
         // RPC to the logs service.
@@ -2001,7 +1990,8 @@ impl ServiceBasedFrontend {
             num_fake_logs
         ];
 
-        self.retryable_push_logs(&tenant, collection_id, logs)
+        let cmek = collection.schema.and_then(|schema| schema.cmek.clone());
+        self.retryable_push_logs(&tenant, collection_id, logs, cmek)
             .await?;
         Ok(())
     }

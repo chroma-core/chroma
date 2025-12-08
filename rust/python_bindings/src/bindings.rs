@@ -128,7 +128,6 @@ impl Bindings {
             tenants_to_migrate_immediately_threshold: None,
             enable_schema,
             min_records_for_invocation: default_min_records_for_invocation(),
-            tenant_cmek_keys: std::collections::HashMap::new(),
         };
 
         let frontend = runtime.block_on(async {
