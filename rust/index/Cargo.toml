@@ -10,6 +10,14 @@ path = "src/lib.rs"
 name = "sparse_vector_benchmark"
 path = "examples/sparse_vector_benchmark.rs"
 
+[[example]]
+name = "inspect_hnsw"
+path = "examples/inspect_hnsw.rs"
+
+[[example]]
+name = "rebuild_hnsw"
+path = "examples/rebuild_hnsw.rs"
+
 [dependencies]
 rand = { workspace = true }
 thiserror = { workspace = true }
