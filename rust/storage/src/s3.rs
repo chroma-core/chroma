@@ -13,7 +13,7 @@ use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
 use super::StorageConfigError;
 use super::{DeleteOptions, PutOptions};
-use crate::{ETag, GetOptions, StorageError};
+use crate::{ETag, GetOptions, PutMode, StorageError};
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
@@ -652,14 +652,10 @@ impl S3Storage {
             .bucket(&self.bucket)
             .key(key)
             .body(create_bytestream_fn(0..total_size_bytes).await?);
-        let req = match options.if_not_exists {
-            true => req.if_none_match('*'),
-            false => req,
-        };
-
-        let req = match options.if_match {
-            Some(e_tag) => req.if_match(e_tag.0),
-            None => req,
+        let req = match options.mode {
+            PutMode::IfMatch(etag) => req.if_match(etag.0),
+            PutMode::IfNotExist => req.if_none_match('*'),
+            PutMode::Upsert => req,
         };
 
         let resp = req.send().await.map_err(|err| {
@@ -791,15 +787,10 @@ impl S3Storage {
                     .build(),
             )
             .upload_id(upload_id);
-
-        let complete_req = match options.if_not_exists {
-            true => complete_req.if_none_match('*'),
-            false => complete_req,
-        };
-
-        let complete_req = match options.if_match {
-            Some(e_tag) => complete_req.if_match(e_tag.0),
-            None => complete_req,
+        let complete_req = match options.mode {
+            PutMode::IfMatch(etag) => complete_req.if_match(etag.0),
+            PutMode::IfNotExist => complete_req.if_none_match('*'),
+            PutMode::Upsert => complete_req,
         };
 
         let resp = complete_req
@@ -853,11 +844,6 @@ impl S3Storage {
         self.metrics.s3_delete_count.add(1, &[]);
 
         let req = self.client.delete_object().bucket(&self.bucket).key(key);
-
-        let req = match options.if_match {
-            Some(e_tag) => req.if_match(e_tag.0),
-            None => req,
-        };
 
         match req.send().await {
             Ok(_) => {
@@ -1378,12 +1364,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    cmek: None,
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap();
@@ -1393,12 +1374,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    cmek: None,
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap_err();
@@ -1420,12 +1396,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    cmek: None,
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap();
@@ -1437,12 +1408,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    cmek: None,
-                    if_not_exists: false,
-                    if_match: e_tag,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfMatch(e_tag.unwrap())),
             )
             .await
             .unwrap();
@@ -1456,12 +1422,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    cmek: None,
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap();
@@ -1471,12 +1432,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    cmek: None,
-                    if_not_exists: false,
-                    if_match: Some(ETag("e_tag".to_string())),
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfMatch(ETag("e_tag".to_string()))),
             )
             .await
             .unwrap_err();
@@ -1497,11 +1453,14 @@ mod tests {
 
     #[test]
     fn test_put_options_default() {
-        let default = PutOptions::default();
-
-        assert!(!default.if_not_exists);
-        assert_eq!(default.if_match, None);
-        assert_eq!(default.priority, StorageRequestPriority::P0);
+        assert_eq!(
+            PutOptions::default(),
+            PutOptions {
+                cmek: None,
+                mode: PutMode::Upsert,
+                priority: StorageRequestPriority::P0
+            }
+        );
     }
 
     #[tokio::test]
@@ -1512,12 +1471,7 @@ mod tests {
                 "test/00",
                 9,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::from("ABC123XYZ"))))) as _,
-                PutOptions {
-                    cmek: None,
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap();
@@ -1538,12 +1492,7 @@ mod tests {
                     &format!("test/{:02x}", i),
                     0,
                     |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                    PutOptions {
-                        cmek: None,
-                        if_not_exists: true,
-                        if_match: None,
-                        priority: StorageRequestPriority::P0,
-                    },
+                    PutOptions::default().with_mode(PutMode::IfNotExist),
                 )
                 .await
                 .unwrap();
@@ -1571,12 +1520,7 @@ mod tests {
                     &key,
                     0,
                     |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                    PutOptions {
-                        cmek: None,
-                        if_not_exists: true,
-                        if_match: None,
-                        priority: StorageRequestPriority::P0,
-                    },
+                    PutOptions::default().with_mode(PutMode::IfNotExist),
                 )
                 .await
                 .unwrap();

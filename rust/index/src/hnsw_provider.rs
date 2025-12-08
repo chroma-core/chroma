@@ -636,7 +636,7 @@ impl HnswIndexProvider {
                         .put_bytes(
                             &key,
                             buffer.to_vec(),
-                            PutOptions::with_priority(StorageRequestPriority::P0),
+                            PutOptions::default().with_priority(StorageRequestPriority::P0),
                         )
                         .await
                         .map(|k| {
@@ -683,7 +683,7 @@ impl HnswIndexProvider {
                 .put_file(
                     &key,
                     file_path.to_str().unwrap(),
-                    PutOptions::with_priority(StorageRequestPriority::P0),
+                    PutOptions::default().with_priority(StorageRequestPriority::P0),
                 )
                 .await;
             match res {

@@ -18,14 +18,14 @@ use object_store::{
         HttpService, ReqwestConnector,
     },
     gcp::GoogleCloudStorageBuilder,
-    ClientOptions, GetRange, HeaderValue, ObjectMeta, ObjectStore, PutMode, UpdateVersion,
+    ClientOptions, GetRange, HeaderValue, ObjectMeta, ObjectStore, UpdateVersion,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{ObjectStorageConfig, ObjectStorageProvider, StorageConfig},
     s3::DeletedObjects,
-    ETag, GetOptions, PutOptions, StorageConfigError, StorageError,
+    ETag, GetOptions, PutMode, PutOptions, StorageConfigError, StorageError,
 };
 
 const GCP_CMEK_HEADER: &str = "x-goog-encryption-kms-key-name";
@@ -181,6 +181,18 @@ impl TryFrom<&ETag> for UpdateVersion {
                 )),
             })?;
         Ok(serializable.into())
+    }
+}
+
+impl TryFrom<PutMode> for object_store::PutMode {
+    type Error = StorageError;
+
+    fn try_from(value: PutMode) -> Result<Self, Self::Error> {
+        Ok(match value {
+            PutMode::IfMatch(etag) => Self::Update((&etag).try_into()?),
+            PutMode::IfNotExist => Self::Create,
+            PutMode::Upsert => Self::Overwrite,
+        })
     }
 }
 
@@ -371,11 +383,7 @@ impl ObjectStorage {
         }
 
         // Apply conditional operations
-        if options.if_not_exists {
-            put_options.mode = PutMode::Create;
-        } else if let Some(etag) = &options.if_match {
-            put_options.mode = PutMode::Update(etag.try_into()?);
-        }
+        put_options.mode = options.mode.try_into()?;
 
         let result = self
             .store
@@ -394,8 +402,10 @@ impl ObjectStorage {
         // NOTE(sicheng): GCS has no support for conditional multipart upload
         // https://docs.cloud.google.com/storage/docs/multipart-uploads
         total_size_bytes <= self.upload_part_size_bytes
-            || options.if_match.is_some()
-            || options.if_not_exists
+            || matches!(
+                options.mode,
+                crate::PutMode::IfMatch(_) | crate::PutMode::IfNotExist
+            )
     }
 
     pub async fn put(

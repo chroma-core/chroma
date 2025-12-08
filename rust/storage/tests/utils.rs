@@ -4,26 +4,26 @@
 //! any Storage backend (GCS, S3, Azure, Local, AdmissionControlled, etc.)
 //! via the unified Storage enum interface.
 
-use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::{DeleteOptions, ETag, GetOptions, PutOptions, Storage};
+use chroma_storage::{DeleteOptions, ETag, GetOptions, PutMode, PutOptions, Storage};
 use chroma_types::Cmek;
 
 /// Helper to create PutOptions with optional CMEK
 fn make_put_options(cmek: Option<Cmek>) -> PutOptions {
-    PutOptions::new(cmek, false, None, StorageRequestPriority::P0)
-        .expect("Failed to create PutOptions")
+    let mut options = PutOptions::default();
+    if let Some(cmek) = cmek {
+        options = options.with_cmek(cmek);
+    }
+    options
 }
 
 /// Helper to create PutOptions with if_not_exists and optional CMEK
 fn make_put_options_if_not_exists(cmek: Option<Cmek>) -> PutOptions {
-    PutOptions::new(cmek, true, None, StorageRequestPriority::P0)
-        .expect("Failed to create PutOptions")
+    make_put_options(cmek).with_mode(PutMode::IfNotExist)
 }
 
 /// Helper to create PutOptions with if_match and optional CMEK
 fn make_put_options_if_match(cmek: Option<Cmek>, etag: &ETag) -> PutOptions {
-    PutOptions::new(cmek, false, Some(etag.clone()), StorageRequestPriority::P0)
-        .expect("Failed to create PutOptions")
+    make_put_options(cmek).with_mode(PutMode::IfMatch(etag.clone()))
 }
 
 /// Test Group 1: Basic operations (non-concurrency aware APIs)
@@ -481,8 +481,7 @@ pub async fn test_invalid_cmek_fails(storage: &Storage, test_prefix: &str, inval
     let key = format!("{}invalid-cmek-test.txt", test_prefix);
     let content = b"test content".to_vec();
 
-    let put_opts = PutOptions::new(Some(invalid_cmek), false, None, StorageRequestPriority::P0)
-        .expect("Failed to create PutOptions");
+    let put_opts = PutOptions::default().with_cmek(invalid_cmek);
 
     // This should fail because the CMEK key is invalid/inaccessible
     let result = storage.put_bytes(&key, content, put_opts).await;

@@ -558,7 +558,7 @@ impl BlockManager {
             .put_bytes(
                 &key,
                 bytes,
-                PutOptions::with_priority(StorageRequestPriority::P0),
+                PutOptions::default().with_priority(StorageRequestPriority::P0),
             )
             .await;
         match res {
@@ -743,7 +743,7 @@ impl RootManager {
             .put_bytes(
                 &key,
                 bytes,
-                PutOptions::with_priority(StorageRequestPriority::P0),
+                PutOptions::default().with_priority(StorageRequestPriority::P0),
             )
             .await;
         match res {
