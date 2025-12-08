@@ -46,18 +46,15 @@ export const Tabs: React.FC<{ children: ReactElement<TabProps>[] }> = ({
   children,
 }) => {
   const { language } = useContext(AppContext);
-  // If there is only one tab, children is not an array, so we need to convert it to an array.
-  const childrenArray = Array.isArray(children) ? children : [children].filter(Boolean);
-  const languages = childrenArray.map((tab) => tab.props.label);
-  const defaultValue = languages.includes(language) ? language : languages[0];
   return (
     <div className="my-4">
       <UITabs
-        defaultValue={defaultValue}
+        defaultValue={children[0].props.label}
+        value={language}
         className="flex flex-col mt-2 pb-2"
       >
         <TabsList className="justify-start bg-transparent dark:bg-transparent rounded-none p-0 h-fit border-b border-gray-300 mb-4 dark:border-gray-700">
-          {childrenArray.map((tab) => (
+          {children.map((tab) => (
             <TabsTrigger
               key={`${tab.props.label}-header`}
               value={tab.props.label}
@@ -71,7 +68,7 @@ export const Tabs: React.FC<{ children: ReactElement<TabProps>[] }> = ({
           ))}
         </TabsList>
         <div>
-          {childrenArray.map((tab) => (
+          {children.map((tab) => (
             <TabsContent
               key={`${tab.props.label}-content`}
               value={tab.props.label}
@@ -79,10 +76,10 @@ export const Tabs: React.FC<{ children: ReactElement<TabProps>[] }> = ({
             >
               {tab.props.children.type === CodeBlock
                 ? React.cloneElement(tab, {
-                  children: React.cloneElement(tab.props.children, {
-                    showHeader: false,
-                  }),
-                })
+                    children: React.cloneElement(tab.props.children, {
+                      showHeader: false,
+                    }),
+                  })
                 : tab}
             </TabsContent>
           ))}

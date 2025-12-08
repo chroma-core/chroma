@@ -78,7 +78,7 @@ const legacyPathsMapping: Record<string, string> = {
 };
 
 export const middleware = (request: NextRequest) => {
-  const path = request.nextUrl.pathname.toLowerCase();
+  const path = request.nextUrl.pathname;
 
   if (path in legacyPathsMapping) {
     const currentPath = legacyPathsMapping[path];
