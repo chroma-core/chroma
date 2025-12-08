@@ -633,7 +633,11 @@ impl HnswIndexProvider {
                 let file = *file; // Copy for the closure
                 async move {
                     storage
-                        .put_bytes(&key, buffer.to_vec(), PutOptions::default())
+                        .put_bytes(
+                            &key,
+                            buffer.to_vec(),
+                            PutOptions::default().with_priority(StorageRequestPriority::P0),
+                        )
                         .await
                         .map(|k| {
                             tracing::info!("Flushed hnsw index file: {} with etag: {:?}", file, k);
@@ -676,7 +680,11 @@ impl HnswIndexProvider {
             let key = Self::format_key(prefix_path, id, file);
             let res = self
                 .storage
-                .put_file(&key, file_path.to_str().unwrap(), PutOptions::default())
+                .put_file(
+                    &key,
+                    file_path.to_str().unwrap(),
+                    PutOptions::default().with_priority(StorageRequestPriority::P0),
+                )
                 .await;
             match res {
                 Ok(_) => {

@@ -359,7 +359,7 @@ impl Internal {
 
         let path = self.path_for_bucket(bucket);
         let buffer = construct_parquet(items)?;
-        let options = PutOptions::default();
+        let options = PutOptions::default().with_priority(StorageRequestPriority::P0);
         let options = if let Some(e_tag) = e_tag.as_ref() {
             options.with_mode(PutMode::IfMatch(e_tag.clone()))
         } else {

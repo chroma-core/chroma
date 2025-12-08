@@ -227,7 +227,9 @@ impl Snapshot {
                     Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
                 })?
                 .into_bytes();
-            let options = PutOptions::default().with_mode(PutMode::IfNotExist);
+            let options = PutOptions::default()
+                .with_priority(StorageRequestPriority::P0)
+                .with_mode(PutMode::IfNotExist);
             match storage.put_bytes(&path, payload, options).await {
                 Ok(_) => {
                     return Ok(self.to_pointer());
@@ -716,7 +718,9 @@ impl Manifest {
             .put_bytes(
                 &manifest_path(prefix),
                 payload,
-                PutOptions::default().with_mode(PutMode::IfNotExist),
+                PutOptions::default()
+                    .with_priority(StorageRequestPriority::P0)
+                    .with_mode(PutMode::IfNotExist),
             )
             .await
             .map_err(Arc::new)?;
@@ -809,7 +813,7 @@ impl Manifest {
                     Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
                 })?
                 .into_bytes();
-            let options = PutOptions::default();
+            let options = PutOptions::default().with_priority(StorageRequestPriority::P0);
             let options = if let Some(e_tag) = current {
                 options.with_mode(PutMode::IfMatch(e_tag.clone()))
             } else {

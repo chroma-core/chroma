@@ -18,7 +18,7 @@ impl CursorName<'_> {
     ///
     /// The caller must ensure that the name is a valid cursor name.  This means a non-empty
     /// alphanumeric string with underscores.
-    pub const unsafe fn from_string_unchecked(name: &str) -> CursorName {
+    pub const unsafe fn from_string_unchecked(name: &'_ str) -> CursorName<'_> {
         CursorName(Cow::Borrowed(name))
     }
 
@@ -149,7 +149,9 @@ impl CursorStore {
         self.put(
             name,
             cursor,
-            PutOptions::default().with_mode(PutMode::IfNotExist),
+            PutOptions::default()
+                .with_priority(StorageRequestPriority::P0)
+                .with_mode(PutMode::IfNotExist),
         )
         .await
     }
@@ -164,7 +166,9 @@ impl CursorStore {
         self.put(
             name,
             cursor.clone(),
-            PutOptions::default().with_mode(PutMode::IfMatch(witness.e_tag.clone())),
+            PutOptions::default()
+                .with_priority(StorageRequestPriority::P0)
+                .with_mode(PutMode::IfMatch(witness.e_tag.clone())),
         )
         .await
     }

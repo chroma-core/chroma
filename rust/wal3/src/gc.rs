@@ -225,7 +225,7 @@ impl Garbage {
                     Error::CorruptManifest(format!("could not encode JSON garbage: {e:?}"))
                 })?
                 .into_bytes();
-            let options = PutOptions::default();
+            let options = PutOptions::default().with_priority(StorageRequestPriority::P0);
             let options = if let Some(e_tag) = existing {
                 options.with_mode(PutMode::IfMatch(e_tag.clone()))
             } else {

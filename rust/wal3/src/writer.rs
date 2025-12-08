@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
+use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{PutMode, PutOptions, Storage, StorageError};
 use opentelemetry::trace::TraceContextExt;
 use parquet::arrow::ArrowWriter;
@@ -1111,7 +1112,9 @@ pub async fn upload_parquet(
             .put_bytes(
                 &path,
                 buffer.clone(),
-                PutOptions::default().with_mode(PutMode::IfNotExist),
+                PutOptions::default()
+                    .with_priority(StorageRequestPriority::P0)
+                    .with_mode(PutMode::IfNotExist),
             )
             .await
         {
