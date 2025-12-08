@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spanner-deployment
+  namespace: chroma
+spec:
+  selector:
+    matchLabels:
+      app: spanner
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: spanner
+    spec:
+      containers:
+        - name: spanner
+          image: gcr.io/cloud-spanner-emulator/emulator:1.5.45
+          ports:
+            - containerPort: 9010
+              name: grpc
+            - containerPort: 9020
+              name: rest
+          readinessProbe:
+            tcpSocket:
+              port: 9010
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 9010
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spanner
+  namespace: chroma
+spec:
+  ports:
+    - name: grpc
+      port: 9010
+      targetPort: 9010
+    - name: rest
+      port: 9020
+      targetPort: 9020
+  selector:
+    app: spanner
+  type: ClusterIP
