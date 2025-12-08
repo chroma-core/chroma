@@ -31,12 +31,12 @@ use crate::{
 const GCP_CMEK_HEADER: &str = "x-goog-encryption-kms-key-name";
 
 #[derive(Debug)]
-struct ChromaHttpClient {
+struct HttpClientWrapper {
     reqwest_client: HttpClient,
 }
 
 #[async_trait::async_trait]
-impl HttpService for ChromaHttpClient {
+impl HttpService for HttpClientWrapper {
     async fn call(&self, mut req: HttpRequest) -> Result<HttpResponse, HttpError> {
         // Attach customer managed encryption key if configured
         if let Some(cmek) = req.extensions_mut().remove::<Cmek>() {
@@ -61,7 +61,7 @@ struct ChromaHttpConnector;
 impl HttpConnector for ChromaHttpConnector {
     fn connect(&self, options: &ClientOptions) -> object_store::Result<HttpClient> {
         let reqwest_client = ReqwestConnector::default().connect(options)?;
-        Ok(HttpClient::new(ChromaHttpClient { reqwest_client }))
+        Ok(HttpClient::new(HttpClientWrapper { reqwest_client }))
     }
 }
 

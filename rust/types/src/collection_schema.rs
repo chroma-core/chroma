@@ -1,7 +1,8 @@
 use chroma_error::{ChromaError, ErrorCodes};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use thiserror::Error;
 use validator::Validate;
 
@@ -143,6 +144,12 @@ pub const BOOL_INVERTED_INDEX_NAME: &str = "bool_inverted_index";
 pub const DOCUMENT_KEY: &str = "#document";
 pub const EMBEDDING_KEY: &str = "#embedding";
 
+// Static regex pattern to validate CMEK for GCP
+static CMEK_GCP_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"projects/\w+/locations/\w+/keyRings/\w+/cryptoKeys/\w+")
+        .expect("The CMEK pattern for GCP should be valid")
+});
+
 /// Customer-managed encryption key
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum Cmek {
@@ -153,6 +160,12 @@ impl Cmek {
     /// Create a GCP CMEK from a KMS resource name
     pub fn gcp(resource: String) -> Self {
         Cmek::Gcp(Arc::new(resource))
+    }
+
+    pub fn validate_pattern(&self) -> bool {
+        match self {
+            Cmek::Gcp(resource) => CMEK_GCP_RE.is_match(resource),
+        }
     }
 }
 

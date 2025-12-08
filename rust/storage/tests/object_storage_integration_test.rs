@@ -18,7 +18,10 @@
 //!
 //! ### For CMEK (Customer-Managed Encryption Keys):
 //! 1. Follow GCS setup above
-//! 2. Update `GCS_CMEK_KEY_NAME` constant with your KMS key resource name
+//! 2. Set `TEST_CMEK_GCS` to your service account JSON key:
+//!    ```
+//!    export TEST_CMEK_GCS="your_cmek_resource_name_on_gcs"
+//!    ```
 //! 3. Ensure your service account has `cloudkms.cryptoKeyVersions.useToEncrypt` permission
 //!
 //! ## Running Tests:
@@ -38,6 +41,8 @@
 
 mod utils;
 
+use std::env;
+
 use chroma_storage::admissioncontrolleds3::AdmissionControlledS3Storage;
 use chroma_storage::config::{ObjectStorageConfig, ObjectStorageProvider};
 use chroma_storage::object_storage::ObjectStorage;
@@ -52,12 +57,7 @@ use chroma_types::Cmek;
 const GCS_BUCKET_NAME: &str = "storage-client-test";
 
 /// Test prefix to namespace all test objects
-const TEST_PREFIX: &str = "object-store/";
-
-/// CMEK key resource name for testing
-/// Update this with your actual KMS key for CMEK tests
-/// Format: projects/PROJECT_ID/locations/LOCATION/keyRings/RING/cryptoKeys/KEY
-const GCS_CMEK_KEY_NAME: &str = GCS_INVALID_CMEK_KEY_NAME;
+const TEST_PREFIX: &str = "object-store-integration/";
 
 /// Fake CMEK key for negative testing (should always fail)
 const GCS_INVALID_CMEK_KEY_NAME: &str =
@@ -92,12 +92,17 @@ fn test_prefix(test_name: &str) -> String {
 }
 
 /// Helper to create valid CMEK instance from constant
-fn test_cmek() -> Cmek {
-    Cmek::gcp(GCS_CMEK_KEY_NAME.to_string())
+fn test_cmek_gcs() -> Cmek {
+    let cmek = Cmek::gcp(
+        env::var("TEST_CMEK_GCS")
+            .expect("CMEK for GCS should be configured for testing with `TEST_CMEK_GCS` variable"),
+    );
+    assert!(cmek.validate_pattern(), "Invalid GCS {cmek:?}");
+    cmek
 }
 
 /// Helper to create invalid CMEK for negative testing
-fn test_invalid_cmek() -> Cmek {
+fn test_invalid_cmek_gcs() -> Cmek {
     Cmek::gcp(GCS_INVALID_CMEK_KEY_NAME.to_string())
 }
 
@@ -142,7 +147,7 @@ async fn test_gcs_cmek_basic_operations() {
     let storage = Storage::Object(obj_storage);
     let prefix = test_prefix("gcs-cmek-basic");
 
-    utils::test_basic_operations(&storage, &prefix, Some(test_cmek())).await;
+    utils::test_basic_operations(&storage, &prefix, Some(test_cmek_gcs())).await;
 }
 
 #[tokio::test]
@@ -152,7 +157,7 @@ async fn test_gcs_cmek_multipart_operations() {
     let storage = Storage::Object(obj_storage);
     let prefix = test_prefix("gcs-cmek-multipart");
 
-    utils::test_multipart_operations(&storage, &prefix, Some(test_cmek())).await;
+    utils::test_multipart_operations(&storage, &prefix, Some(test_cmek_gcs())).await;
 }
 
 #[tokio::test]
@@ -162,7 +167,7 @@ async fn test_gcs_cmek_conditional_operations() {
     let storage = Storage::Object(obj_storage);
     let prefix = test_prefix("gcs-cmek-conditional");
 
-    utils::test_conditional_operations(&storage, &prefix, Some(test_cmek())).await;
+    utils::test_conditional_operations(&storage, &prefix, Some(test_cmek_gcs())).await;
 }
 
 #[tokio::test]
@@ -172,7 +177,7 @@ async fn test_gcs_cmek_invalid_key_fails() {
     let storage = Storage::Object(obj_storage);
     let prefix = test_prefix("gcs-cmek-invalid");
 
-    utils::test_invalid_cmek_fails(&storage, &prefix, test_invalid_cmek()).await;
+    utils::test_invalid_cmek_fails(&storage, &prefix, test_invalid_cmek_gcs()).await;
 }
 
 // ============================================================================
@@ -211,7 +216,6 @@ async fn test_s3_conditional_operations() {
 // ============================================================================
 
 #[tokio::test]
-#[ignore] // Requires GCS credentials and bucket access
 async fn test_gcs_ac_basic_operations() {
     let obj_storage = create_gcs_storage().await;
     let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
@@ -222,7 +226,6 @@ async fn test_gcs_ac_basic_operations() {
 }
 
 #[tokio::test]
-#[ignore] // Requires GCS credentials and bucket access
 async fn test_gcs_ac_multipart_operations() {
     let obj_storage = create_gcs_storage().await;
     let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
@@ -233,7 +236,6 @@ async fn test_gcs_ac_multipart_operations() {
 }
 
 #[tokio::test]
-#[ignore] // Requires GCS credentials and bucket access
 async fn test_gcs_ac_conditional_operations() {
     let obj_storage = create_gcs_storage().await;
     let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
@@ -244,36 +246,33 @@ async fn test_gcs_ac_conditional_operations() {
 }
 
 #[tokio::test]
-#[ignore] // Requires GCS credentials, bucket access, and valid CMEK setup
 async fn test_gcs_ac_cmek_basic_operations() {
     let obj_storage = create_gcs_storage().await;
     let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
     let storage = Storage::AdmissionControlledS3(ac_storage);
     let prefix = test_prefix("gcs-ac-cmek-basic");
 
-    utils::test_basic_operations(&storage, &prefix, Some(test_cmek())).await;
+    utils::test_basic_operations(&storage, &prefix, Some(test_cmek_gcs())).await;
 }
 
 #[tokio::test]
-#[ignore] // Requires GCS credentials, bucket access, and valid CMEK setup
 async fn test_gcs_ac_cmek_multipart_operations() {
     let obj_storage = create_gcs_storage().await;
     let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
     let storage = Storage::AdmissionControlledS3(ac_storage);
     let prefix = test_prefix("gcs-ac-cmek-multipart");
 
-    utils::test_multipart_operations(&storage, &prefix, Some(test_cmek())).await;
+    utils::test_multipart_operations(&storage, &prefix, Some(test_cmek_gcs())).await;
 }
 
 #[tokio::test]
-#[ignore] // Requires GCS credentials and bucket access
 async fn test_gcs_ac_cmek_invalid_key_fails() {
     let obj_storage = create_gcs_storage().await;
     let ac_storage = AdmissionControlledS3Storage::new_object_with_default_policy(obj_storage);
     let storage = Storage::AdmissionControlledS3(ac_storage);
     let prefix = test_prefix("gcs-ac-cmek-invalid");
 
-    utils::test_invalid_cmek_fails(&storage, &prefix, test_invalid_cmek()).await;
+    utils::test_invalid_cmek_fails(&storage, &prefix, test_invalid_cmek_gcs()).await;
 }
 
 // ============================================================================

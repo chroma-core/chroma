@@ -505,10 +505,10 @@ pub fn test_storage() -> (TempDir, Storage) {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct PutOptions {
-    cmek: Option<Cmek>,
     if_not_exists: bool,
     if_match: Option<ETag>,
     priority: StorageRequestPriority,
+    cmek: Option<Cmek>,
 }
 
 #[derive(Error, Debug)]
