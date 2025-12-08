@@ -566,6 +566,7 @@ message AttachFunctionRequest {
 
 message AttachFunctionResponse {
   AttachedFunction attached_function = 1;
+  bool created = 2;  // True if newly created, false if already existed (idempotent)
 }
 
 message GetAttachedFunctionByNameRequest {
@@ -624,7 +625,9 @@ message FinishCreateAttachedFunctionRequest {
   string id = 1;
 }
 
-message FinishCreateAttachedFunctionResponse {}
+message FinishCreateAttachedFunctionResponse {
+  bool created = 1;  // True if newly created, false if already existed (idempotent)
+}
 
 message CleanupExpiredPartialAttachedFunctionsRequest {
   // Attached functions older than this will be deleted

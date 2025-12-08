@@ -2330,6 +2330,8 @@ pub struct AttachedFunctionInfo {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AttachFunctionResponse {
     pub attached_function: AttachedFunctionInfo,
+    /// True if newly created, false if already existed (idempotent request)
+    pub created: bool,
 }
 
 /// API response struct for attached function with function_name instead of function_id

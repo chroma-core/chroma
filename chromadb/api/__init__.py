@@ -36,7 +36,7 @@ from chromadb.execution.expression import (  # noqa: F401, F403
 )
 
 from abc import ABC, abstractmethod
-from typing import Sequence, Optional, List, Dict, Any
+from typing import Sequence, Optional, List, Dict, Any, Tuple
 from uuid import UUID
 
 from overrides import override
@@ -824,7 +824,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         params: Optional[Dict[str, Any]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> "AttachedFunction":
+    ) -> Tuple["AttachedFunction", bool]:
         """Attach a function to a collection.
 
         Args:
@@ -837,7 +837,8 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
             database: The database name
 
         Returns:
-            AttachedFunction: Object representing the attached function
+            Tuple of (AttachedFunction, created) where created is True if newly created,
+            False if already existed (idempotent request)
         """
         pass
 

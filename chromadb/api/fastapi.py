@@ -773,7 +773,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         params: Optional[Dict[str, Any]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> "AttachedFunction":
+    ) -> Tuple["AttachedFunction", bool]:
         """Attach a function to a collection."""
         resp_json = self._make_request(
             "post",
@@ -786,7 +786,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             },
         )
 
-        return AttachedFunction(
+        attached_function = AttachedFunction(
             client=self,
             id=UUID(resp_json["attached_function"]["id"]),
             name=resp_json["attached_function"]["name"],
@@ -797,6 +797,10 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             tenant=tenant,
             database=database,
         )
+        created = resp_json.get(
+            "created", True
+        )  # Default to True for backwards compatibility
+        return (attached_function, created)
 
     @trace_method("FastAPI.get_attached_function", OpenTelemetryGranularity.ALL)
     @override

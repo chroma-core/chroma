@@ -705,7 +705,7 @@ impl SysDb {
     pub async fn finish_create_attached_function(
         &mut self,
         attached_function_id: AttachedFunctionUuid,
-    ) -> Result<(), FinishCreateAttachedFunctionError> {
+    ) -> Result<bool, FinishCreateAttachedFunctionError> {
         match self {
             SysDb::Grpc(grpc) => {
                 grpc.finish_create_attached_function(attached_function_id)
@@ -1747,11 +1747,12 @@ impl GrpcSysDb {
     async fn finish_create_attached_function(
         &mut self,
         attached_function_id: AttachedFunctionUuid,
-    ) -> Result<(), FinishCreateAttachedFunctionError> {
+    ) -> Result<bool, FinishCreateAttachedFunctionError> {
         let req = chroma_proto::FinishCreateAttachedFunctionRequest {
             id: attached_function_id.0.to_string(),
         };
-        self.client
+        let response = self
+            .client
             .finish_create_attached_function(req)
             .await
             .map_err(|e| match e.code() {
@@ -1759,7 +1760,7 @@ impl GrpcSysDb {
                 Code::AlreadyExists => FinishCreateAttachedFunctionError::OutputCollectionExists,
                 _ => FinishCreateAttachedFunctionError::FailedToFinishCreateAttachedFunction(e),
             })?;
-        Ok(())
+        Ok(response.into_inner().created)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1773,7 +1774,7 @@ impl GrpcSysDb {
         tenant_name: String,
         database_name: String,
         min_records_for_invocation: u64,
-    ) -> Result<chroma_types::AttachedFunctionUuid, AttachFunctionError> {
+    ) -> Result<(chroma_types::AttachedFunctionUuid, bool), AttachFunctionError> {
         // Convert serde_json::Value to prost_types::Struct for gRPC
         // Params must be an object (or null/empty object)
         let params_struct = match params {
@@ -1833,7 +1834,7 @@ impl GrpcSysDb {
                 AttachFunctionError::ServerReturnedInvalidData
             })?,
         );
-        Ok(attached_function_id)
+        Ok((attached_function_id, response.created))
     }
 
     /// Helper function to convert a proto AttachedFunction to a chroma_types::AttachedFunction
@@ -2208,7 +2209,7 @@ impl SysDb {
         tenant_name: String,
         database_name: String,
         min_records_for_invocation: u64,
-    ) -> Result<chroma_types::AttachedFunctionUuid, AttachFunctionError> {
+    ) -> Result<(chroma_types::AttachedFunctionUuid, bool), AttachFunctionError> {
         match self {
             SysDb::Grpc(grpc) => {
                 grpc.create_attached_function(

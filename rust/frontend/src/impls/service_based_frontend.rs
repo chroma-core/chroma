@@ -1910,7 +1910,7 @@ impl ServiceBasedFrontend {
             })?);
 
         // Step 1: Create attached function with is_ready = false
-        let attached_function_id = self
+        let (attached_function_id, created) = self
             .sysdb_client
             .create_attached_function(
                 name.clone(),
@@ -1924,12 +1924,28 @@ impl ServiceBasedFrontend {
             )
             .await?;
 
-        // Step 2: Start backfill
+        // If this was an idempotent request (function already exists and is ready),
+        // skip backfill and finish steps - just return the existing function
+        if !created {
+            return Ok(AttachFunctionResponse {
+                attached_function: chroma_types::AttachedFunctionInfo {
+                    id: attached_function_id.to_string(),
+                    name,
+                    function_name: function_id,
+                },
+                created,
+            });
+        }
+
+        // Step 2: Start backfill (only for newly created functions)
         self.start_backfill(tenant_name, input_collection_id, attached_function_id)
             .await?;
 
         // Step 3: Create output collection and set is_ready = true
-        self.sysdb_client
+        // The returned `created` flag from finish is for idempotency at this layer,
+        // but we already handle it via the initial create call's `created` flag
+        let _finish_created = self
+            .sysdb_client
             .finish_create_attached_function(attached_function_id)
             .await
             .map_err(|e| match e {
@@ -1947,6 +1963,7 @@ impl ServiceBasedFrontend {
                 name,
                 function_name: function_id,
             },
+            created,
         })
     }
 

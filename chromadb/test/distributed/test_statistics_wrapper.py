@@ -35,8 +35,9 @@ def test_statistics_wrapper(basic_http_client: System) -> None:
     )
 
     # Enable statistics
-    attached_fn = attach_statistics_function(collection, "test_collection_statistics")
+    attached_fn, created = attach_statistics_function(collection, "test_collection_statistics")
     assert attached_fn is not None
+    assert created is True
     assert attached_fn.function_name == "statistics"
     assert attached_fn.output_collection == "test_collection_statistics"
 
@@ -128,7 +129,8 @@ def test_backfill_statistics(basic_http_client: System) -> None:
     initial_version = get_collection_version(client, collection.name)
 
     # Enable statistics
-    attached_fn = attach_statistics_function(collection, "my_collection_statistics")
+    attached_fn, created = attach_statistics_function(collection, "my_collection_statistics")
+    assert created is True
     assert attached_fn.function_name == "statistics"
     assert attached_fn.output_collection == "my_collection_statistics"
 
@@ -177,9 +179,10 @@ def test_statistics_wrapper_custom_output_collection(basic_http_client: System) 
     collection = client.create_collection(name="my_collection")
 
     # Enable statistics with custom output collection name
-    attached_fn = attach_statistics_function(
+    attached_fn, created = attach_statistics_function(
         collection, stats_collection_name="my_custom_stats"
     )
+    assert created is True
     assert attached_fn.output_collection == "my_custom_stats"
 
     initial_version = get_collection_version(client, collection.name)
@@ -210,7 +213,8 @@ def test_statistics_wrapper_key_filter(basic_http_client: System) -> None:
     collection = client.create_collection(name="key_filter_test")
 
     # Enable statistics
-    attach_statistics_function(collection, "key_filter_test_statistics")
+    _, created = attach_statistics_function(collection, "key_filter_test_statistics")
+    assert created is True
 
     initial_version = get_collection_version(client, collection.name)
 
@@ -295,7 +299,8 @@ def test_statistics_wrapper_incremental_updates(basic_http_client: System) -> No
     client.reset()
 
     collection = client.create_collection(name="incremental_test")
-    attach_statistics_function(collection, "incremental_test_statistics")
+    _, created = attach_statistics_function(collection, "incremental_test_statistics")
+    assert created is True
 
     initial_version = get_collection_version(client, collection.name)
 
@@ -365,7 +370,8 @@ def test_sparse_vector_statistics(basic_http_client: System) -> None:
             {"category": "A", "vec": sparse_vec3},
         ],
     )
-    attach_statistics_function(collection, "sparse_vector_test1_statistics")
+    _, created = attach_statistics_function(collection, "sparse_vector_test1_statistics")
+    assert created is True
 
     initial_version = get_collection_version(client, collection.name)
 
@@ -441,7 +447,8 @@ def test_statistics_high_cardinality(basic_http_client: System) -> None:
     initial_version = get_collection_version(client, collection.name)
 
     # Enable statistics
-    attach_statistics_function(collection, "high_cardinality_test_statistics")
+    _, created = attach_statistics_function(collection, "high_cardinality_test_statistics")
+    assert created is True
 
     # Wait for statistics to be computed
     wait_for_version_increase(client, collection.name, initial_version)

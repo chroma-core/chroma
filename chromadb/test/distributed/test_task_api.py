@@ -33,7 +33,7 @@ def test_count_function_attach_and_detach(basic_http_client: System) -> None:
     )
 
     # Create a task that counts records in the collection
-    attached_fn = collection.attach_function(
+    attached_fn, created = collection.attach_function(
         name="count_my_docs",
         function=RECORD_COUNTER_FUNCTION,
         output_collection="my_documents_counts",
@@ -42,6 +42,7 @@ def test_count_function_attach_and_detach(basic_http_client: System) -> None:
 
     # Verify task creation succeeded
     assert attached_fn is not None
+    assert created is True
     initial_version = get_collection_version(client, collection.name)
 
     # Add documents
@@ -98,7 +99,7 @@ def test_attach_function_returns_function_name(basic_http_client: System) -> Non
     collection.add(ids=["id1"], documents=["doc1"])
 
     # Attach a function and verify function_name field in response
-    attached_fn = collection.attach_function(
+    attached_fn, created = collection.attach_function(
         function=RECORD_COUNTER_FUNCTION,
         name="my_counter",
         output_collection="output_collection",
@@ -106,6 +107,7 @@ def test_attach_function_returns_function_name(basic_http_client: System) -> Non
     )
 
     # Verify the attached function has function_name (not function_id UUID)
+    assert created is True
     assert attached_fn.function_name == "record_counter"
     assert attached_fn.name == "my_counter"
 
@@ -126,7 +128,7 @@ def test_function_multiple_collections(basic_http_client: System) -> None:
     collection1 = client.create_collection(name="collection_1")
     collection1.add(ids=["id1", "id2"], documents=["doc1", "doc2"])
 
-    attached_fn1 = collection1.attach_function(
+    attached_fn1, created1 = collection1.attach_function(
         function=RECORD_COUNTER_FUNCTION,
         name="task_1",
         output_collection="output_1",
@@ -134,12 +136,13 @@ def test_function_multiple_collections(basic_http_client: System) -> None:
     )
 
     assert attached_fn1 is not None
+    assert created1 is True
 
     # Create second collection and task
     collection2 = client.create_collection(name="collection_2")
     collection2.add(ids=["id3", "id4"], documents=["doc3", "doc4"])
 
-    attached_fn2 = collection2.attach_function(
+    attached_fn2, created2 = collection2.attach_function(
         function=RECORD_COUNTER_FUNCTION,
         name="task_2",
         output_collection="output_2",
@@ -147,6 +150,7 @@ def test_function_multiple_collections(basic_http_client: System) -> None:
     )
 
     assert attached_fn2 is not None
+    assert created2 is True
 
     # Task IDs should be different
     assert attached_fn1.id != attached_fn2.id
@@ -174,7 +178,7 @@ def test_functions_one_attached_function_per_collection(
     collection.add(ids=["id1", "id2", "id3"], documents=["doc1", "doc2", "doc3"])
 
     # Create first task on the collection
-    attached_fn1 = collection.attach_function(
+    attached_fn1, created = collection.attach_function(
         function=RECORD_COUNTER_FUNCTION,
         name="task_1",
         output_collection="output_1",
@@ -182,6 +186,7 @@ def test_functions_one_attached_function_per_collection(
     )
 
     assert attached_fn1 is not None
+    assert created is True
 
     # Attempt to create a second task with a different name should fail
     # (only one attached function allowed per collection)
@@ -215,7 +220,7 @@ def test_functions_one_attached_function_per_collection(
     )
 
     # Now we should be able to attach a new function
-    attached_fn2 = collection.attach_function(
+    attached_fn2, created2 = collection.attach_function(
         function=RECORD_COUNTER_FUNCTION,
         name="task_2",
         output_collection="output_2",
@@ -223,6 +228,7 @@ def test_functions_one_attached_function_per_collection(
     )
 
     assert attached_fn2 is not None
+    assert created2 is True
     assert attached_fn2.id != attached_fn1.id
 
     # Clean up
@@ -288,7 +294,7 @@ def test_function_remove_nonexistent(basic_http_client: System) -> None:
 
     collection = client.create_collection(name="test_collection")
     collection.add(ids=["id1"], documents=["test"])
-    attached_fn = collection.attach_function(
+    attached_fn, _ = collection.attach_function(
         function=RECORD_COUNTER_FUNCTION,
         name="test_function",
         output_collection="output_collection",
@@ -311,7 +317,7 @@ def test_attach_to_output_collection_fails(basic_http_client: System) -> None:
     input_collection = client.create_collection(name="input_collection")
     input_collection.add(ids=["id1"], documents=["test"])
 
-    _ = input_collection.attach_function(
+    _, _ = input_collection.attach_function(
         name="test_function",
         function=RECORD_COUNTER_FUNCTION,
         output_collection="output_collection",
@@ -339,13 +345,14 @@ def test_delete_output_collection_detaches_function(basic_http_client: System) -
     input_collection = client.create_collection(name="input_collection")
     input_collection.add(ids=["id1"], documents=["test"])
 
-    attached_fn = input_collection.attach_function(
+    attached_fn, created = input_collection.attach_function(
         name="my_function",
         function=RECORD_COUNTER_FUNCTION,
         output_collection="output_collection",
         params=None,
     )
     assert attached_fn is not None
+    assert created is True
 
     # Delete the output collection directly
     client.delete_collection("output_collection")
@@ -364,13 +371,14 @@ def test_delete_orphaned_output_collection(basic_http_client: System) -> None:
     input_collection = client.create_collection(name="input_collection")
     input_collection.add(ids=["id1"], documents=["test"])
 
-    attached_fn = input_collection.attach_function(
+    attached_fn, created = input_collection.attach_function(
         name="my_function",
         function=RECORD_COUNTER_FUNCTION,
         output_collection="output_collection",
         params=None,
     )
     assert attached_fn is not None
+    assert created is True
 
     input_collection.detach_function(attached_fn.name, delete_output_collection=False)
 
@@ -385,7 +393,6 @@ def test_delete_orphaned_output_collection(basic_http_client: System) -> None:
         # Try to use the function - it should fail since it's detached
         client.get_collection("output_collection")
 
-
 def test_partial_attach_function_repair(
     basic_http_client: System,
 ) -> None:
@@ -399,12 +406,13 @@ def test_partial_attach_function_repair(
     )
 
     # Create a task that counts records in the collection
-    attached_fn = collection.attach_function(
+    attached_fn, created = collection.attach_function(
         name="count_my_docs",
         function=RECORD_COUNTER_FUNCTION,
         output_collection="my_documents_counts",
         params=None,
     )
+    assert created is True
 
     # Verify task creation succeeded
     assert attached_fn is not None
@@ -418,7 +426,7 @@ def test_partial_attach_function_repair(
     with pytest.raises(
         ChromaError, match=r"Output collection \[my_documents_counts\] already exists"
     ):
-        attached_fn = collection2.attach_function(
+        attached_fn, _ = collection2.attach_function(
             name="count_my_docs",
             function=RECORD_COUNTER_FUNCTION,
             output_collection="my_documents_counts",
@@ -432,13 +440,14 @@ def test_partial_attach_function_repair(
     )
 
     # Create a task that counts records in the collection
-    attached_fn = collection2.attach_function(
+    attached_fn, created = collection2.attach_function(
         name="count_my_docs",
         function=RECORD_COUNTER_FUNCTION,
         output_collection="my_documents_counts",
         params=None,
     )
     assert attached_fn is not None
+    assert created is True
 
 
 def test_count_function_attach_and_detach_attach_attach(
@@ -455,7 +464,7 @@ def test_count_function_attach_and_detach_attach_attach(
     )
 
     # Create a task that counts records in the collection
-    attached_fn = collection.attach_function(
+    attached_fn, created = collection.attach_function(
         name="count_my_docs",
         function=RECORD_COUNTER_FUNCTION,
         output_collection="my_documents_counts",
@@ -463,6 +472,7 @@ def test_count_function_attach_and_detach_attach_attach(
     )
 
     # Verify task creation succeeded
+    assert created is True
     assert attached_fn is not None
     initial_version = get_collection_version(client, collection.name)
 
@@ -491,20 +501,56 @@ def test_count_function_attach_and_detach_attach_attach(
     # Verify task removal succeeded
     assert success is True
 
-    # Create a task that counts records in the collection
-    attached_fn = collection.attach_function(
+    # Attach a function that counts records in the collection
+    attached_fn, created = collection.attach_function(
         name="count_my_docs",
         function=RECORD_COUNTER_FUNCTION,
         output_collection="my_documents_counts",
         params=None,
     )
+    assert attached_fn is not None
+    assert created is True
+
+    # Attach a function that counts records in the collection
+    attached_fn, created = collection.attach_function(
+        name="count_my_docs",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="my_documents_counts",
+        params=None,
+    )
+    assert created is False
     assert attached_fn is not None
 
-    # Create a task that counts records in the collection
-    attached_fn = collection.attach_function(
-        name="count_my_docs",
+def test_attach_function_idempotency(basic_http_client: System) -> None:
+    """Test that attach_function is idempotent - calling it twice with same params returns created=False"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    collection = client.create_collection(name="idempotency_test")
+    collection.add(ids=["id1"], documents=["test document"])
+
+    # First attach - should be newly created
+    attached_fn1, created1 = collection.attach_function(
+        name="my_function",
         function=RECORD_COUNTER_FUNCTION,
-        output_collection="my_documents_counts",
+        output_collection="output_collection",
         params=None,
     )
-    assert attached_fn is not None
+    assert attached_fn1 is not None
+    assert created1 is True
+
+    # Second attach with identical params - should be idempotent (created=False)
+    attached_fn2, created2 = collection.attach_function(
+        name="my_function",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="output_collection",
+        params=None,
+    )
+    assert attached_fn2 is not None
+    assert created2 is False
+
+    # Both should return the same function ID
+    assert attached_fn1.id == attached_fn2.id
+
+    # Clean up
+    collection.detach_function(attached_fn1.name, delete_output_collection=True)
