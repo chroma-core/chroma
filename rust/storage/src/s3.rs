@@ -1379,6 +1379,7 @@ mod tests {
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
                 PutOptions {
+                    cmek: None,
                     if_not_exists: true,
                     if_match: None,
                     priority: StorageRequestPriority::P0,
@@ -1393,6 +1394,7 @@ mod tests {
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
                 PutOptions {
+                    cmek: None,
                     if_not_exists: true,
                     if_match: None,
                     priority: StorageRequestPriority::P0,
@@ -1419,6 +1421,7 @@ mod tests {
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
                 PutOptions {
+                    cmek: None,
                     if_not_exists: true,
                     if_match: None,
                     priority: StorageRequestPriority::P0,
@@ -1435,6 +1438,7 @@ mod tests {
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
                 PutOptions {
+                    cmek: None,
                     if_not_exists: false,
                     if_match: e_tag,
                     priority: StorageRequestPriority::P0,
@@ -1453,6 +1457,7 @@ mod tests {
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
                 PutOptions {
+                    cmek: None,
                     if_not_exists: true,
                     if_match: None,
                     priority: StorageRequestPriority::P0,
@@ -1467,6 +1472,7 @@ mod tests {
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
                 PutOptions {
+                    cmek: None,
                     if_not_exists: false,
                     if_match: Some(ETag("e_tag".to_string())),
                     priority: StorageRequestPriority::P0,
@@ -1507,6 +1513,7 @@ mod tests {
                 9,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::from("ABC123XYZ"))))) as _,
                 PutOptions {
+                    cmek: None,
                     if_not_exists: true,
                     if_match: None,
                     priority: StorageRequestPriority::P0,
@@ -1532,6 +1539,7 @@ mod tests {
                     0,
                     |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
                     PutOptions {
+                        cmek: None,
                         if_not_exists: true,
                         if_match: None,
                         priority: StorageRequestPriority::P0,
@@ -1564,6 +1572,7 @@ mod tests {
                     0,
                     |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
                     PutOptions {
+                        cmek: None,
                         if_not_exists: true,
                         if_match: None,
                         priority: StorageRequestPriority::P0,
