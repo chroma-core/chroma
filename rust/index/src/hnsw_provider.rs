@@ -342,8 +342,7 @@ impl HnswIndexProvider {
             .map(|s| Self::format_key(prefix_path, source_id, s))
             .collect();
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
-        let s3_fetch_span =
-            tracing::trace_span!(parent: Span::current(), "Read hnsw files from s3 into index");
+        let s3_fetch_span = tracing::trace_span!(parent: Span::current(), "Read hnsw files from s3 into index", index_id = %source_id, prefix_path = %prefix_path);
         let result = self
             .storage
             .fetch_batch(
