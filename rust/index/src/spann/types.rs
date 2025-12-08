@@ -2380,7 +2380,7 @@ impl SpannIndexWriter {
         tracing::info!("Committed max head id");
 
         // Hnsw.
-        let (hnsw_id, prefix_path) = {
+        let (hnsw_id, prefix_path, hnsw_index) = {
             let stopwatch = Stopwatch::new(
                 &self.metrics.hnsw_commit_latency,
                 &[],
@@ -2403,7 +2403,7 @@ impl SpannIndexWriter {
                     (id, prefix_path, self.hnsw_index.clone())
                 }
             };
-            self.hnsw_provider.commit(hnsw_index).map_err(|e| {
+            self.hnsw_provider.commit(hnsw_index.clone()).map_err(|e| {
                 tracing::error!("Error committing hnsw index: {}", e);
                 SpannIndexWriterError::HnswIndexCommitError(e)
             })?;
@@ -2411,7 +2411,7 @@ impl SpannIndexWriter {
                 "Committed hnsw index in {} ms",
                 stopwatch.elapsed_micros() / 1000
             );
-            (hnsw_id, prefix_path)
+            (hnsw_id, prefix_path, hnsw_index)
         };
 
         Ok(SpannIndexFlusher {
@@ -2422,7 +2422,7 @@ impl SpannIndexWriter {
                 provider: self.hnsw_provider,
                 prefix_path,
                 index_id: hnsw_id,
-                hnsw_index: self.hnsw_index,
+                hnsw_index,
             },
             metrics: SpannIndexFlusherMetrics {
                 pl_flush_latency: self.metrics.pl_flush_latency.clone(),
