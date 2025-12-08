@@ -243,7 +243,6 @@ def test_attach_to_output_collection_fails(basic_http_client: System) -> None:
         output_collection="output_collection",
         params=None,
     )
-
     output_collection = client.get_collection(name="output_collection")
 
     with pytest.raises(ChromaError, match="cannot attach function to an output collection"):
@@ -253,3 +252,57 @@ def test_attach_to_output_collection_fails(basic_http_client: System) -> None:
             output_collection="output_collection_2",
             params=None,
         )
+
+def test_delete_output_collection_detaches_function(basic_http_client: System) -> None:
+    """Test that deleting an output collection also detaches the attached function"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    # Create input collection and attach a function
+    input_collection = client.create_collection(name="input_collection")
+    input_collection.add(ids=["id1"], documents=["test"])
+
+    attached_fn = input_collection.attach_function(
+        name="my_function",
+        function_id="record_counter",
+        output_collection="output_collection",
+        params=None,
+    )
+    assert attached_fn is not None
+
+    # Delete the output collection directly
+    client.delete_collection("output_collection")
+
+    # The attached function should now be gone - trying to get it should raise NotFoundError
+    with pytest.raises(NotFoundError):
+        input_collection.get_attached_function("my_function")
+
+def test_delete_orphaned_output_collection(basic_http_client: System) -> None:
+    """Test that deleting an output collection from a recently detached function works"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    # Create input collection and attach a function
+    input_collection = client.create_collection(name="input_collection")
+    input_collection.add(ids=["id1"], documents=["test"])
+
+    attached_fn = input_collection.attach_function(
+        name="my_function",
+        function_id="record_counter",
+        output_collection="output_collection",
+        params=None,
+    )
+    assert attached_fn is not None
+
+    attached_fn.detach(delete_output_collection=False)
+
+    # Delete the output collection directly
+    client.delete_collection("output_collection")
+
+    # The attached function should still exist but be marked as detached
+    with pytest.raises(NotFoundError):
+        input_collection.get_attached_function("my_function")
+    
+    with pytest.raises(NotFoundError):
+        # Try to use the function - it should fail since it's detached
+        client.get_collection("output_collection")
