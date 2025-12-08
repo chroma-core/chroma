@@ -44,7 +44,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: test-memberlist-reader
-  namespace: chroma
 subjects:
 - kind: ServiceAccount
   name: default
