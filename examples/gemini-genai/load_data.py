@@ -5,8 +5,9 @@ from tqdm import tqdm
 
 import chromadb
 from chromadb.utils import embedding_functions
-import google.generativeai as genai
+from google import genai
 
+GENAI_EMBED_MODEL = 'gemini-embedding-001'
 
 def main(
     documents_directory: str = "documents",
@@ -29,23 +30,20 @@ def main(
                     continue
                 documents.append(line)
                 metadatas.append({"filename": filename, "line_number": line_number})
-
+    print(f'Read {len(documents)} documents (document lines).' )
+    
     # Instantiate a persistent chroma client in the persist_directory.
     # Learn more at docs.trychroma.com
     client = chromadb.PersistentClient(path=persist_directory)
 
-    google_api_key = None
     if "GOOGLE_API_KEY" not in os.environ:
         gapikey = input("Please enter your Google API Key: ")
-        genai.configure(api_key=gapikey)
-        google_api_key = gapikey
-    else:
-        google_api_key = os.environ["GOOGLE_API_KEY"]
+        #genai.configure(api_key=gapikey)
+        #google_api_key = gapikey
+        os.environ['GOOGLE_API_KEY'] = gapikey
 
     # create embedding function
-    embedding_function = embedding_functions.GoogleGenerativeAIEmbeddingFunction(
-        api_key=google_api_key
-    )
+    embedding_function = embedding_functions.GoogleGenaiEmbeddingFunction(model_name=GENAI_EMBED_MODEL)
 
     # If the collection already exists, we just return it. This allows us to add more
     # data to an existing collection.
@@ -54,22 +52,37 @@ def main(
     )
 
     # Create ids from the current count
-    count = collection.count()
-    print(f"Collection already contains {count} documents")
-    ids = [str(i) for i in range(count, count + len(documents))]
+    orig_collection_document_count = collection.count()
+    print(f"Collection already contains {orig_collection_document_count} documents")
+    if orig_collection_document_count < len(documents):
+        print('Adding remaining documents to collection')
+        ids = [str(i) for i in range(orig_collection_document_count, len(documents))]
 
-    # Load the documents in batches of 100
-    for i in tqdm(
-        range(0, len(documents), 100), desc="Adding documents", unit_scale=100
-    ):
-        collection.add(
-            ids=ids[i : i + 100],
-            documents=documents[i : i + 100],
-            metadatas=metadatas[i : i + 100],  # type: ignore
-        )
+        batch_size = 5  # Using small batch size to work better with Free Tier
+        if batch_size > 1:
+            # Load the documents in batches
+            for i in tqdm(
+                range(orig_collection_document_count, len(documents), batch_size), desc="Adding documents", unit_scale=batch_size):
+                collection.add(
+                    ids=ids[i : i + batch_size],
+                    documents=documents[orig_collection_document_count : orig_collection_document_count + batch_size],
+                    metadatas=metadatas[orig_collection_document_count : orig_collection_document_count + batch_size],
+                )
+        else:
+            # Load the documents individually
+            indicator_size = 10
+            for i in range(orig_collection_document_count, len(documents)):
+                collection.add(
+                    ids=ids[i],
+                    documents=documents[orig_collection_document_count+i],
+                    metadatas=metadatas[orig_collection_document_count+i],
+                )
+                if (i%indicator_size) == 0:
+                    print('.', end='')
+            print()
 
     new_count = collection.count()
-    print(f"Added {new_count - count} documents")
+    print(f"Added {new_count - orig_collection_document_count} documents")
 
 
 if __name__ == "__main__":

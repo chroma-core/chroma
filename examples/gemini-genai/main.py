@@ -2,11 +2,14 @@ import argparse
 import os
 from typing import List
 
-import google.generativeai as genai
+#import google.generativeai as genai
+from google import genai
 import chromadb
 from chromadb.utils import embedding_functions
 
-model = genai.GenerativeModel("gemini-pro")
+#model = genai.GenerativeModel('gemini-2.5-flash') #("gemini-2.0-flash-lite") # ("gemini-pro")
+GENAI_MODEL = 'gemini-2.5-flash'
+GENAI_EMBED_MODEL = 'gemini-embedding-001'
 
 
 def build_prompt(query: str, context: List[str]) -> str:
@@ -43,7 +46,7 @@ def build_prompt(query: str, context: List[str]) -> str:
     return system
 
 
-def get_gemini_response(query: str, context: List[str]) -> str:
+def get_gemini_response(genai_client, query: str, context: List[str]) -> str:
     """
     Queries the Gemini API to get a response to the question.
 
@@ -55,7 +58,7 @@ def get_gemini_response(query: str, context: List[str]) -> str:
     A response to the question.
     """
 
-    response = model.generate_content(build_prompt(query, context))
+    response = genai_client.models.generate_content(model=GENAI_MODEL, contents=build_prompt(query, context))
 
     return response.text
 
@@ -64,28 +67,28 @@ def main(
     collection_name: str = "documents_collection", persist_directory: str = "."
 ) -> None:
     # Check if the GOOGLE_API_KEY environment variable is set. Prompt the user to set it if not.
-    google_api_key = None
     if "GOOGLE_API_KEY" not in os.environ:
         gapikey = input("Please enter your Google API Key: ")
-        genai.configure(api_key=gapikey)
-        google_api_key = gapikey
-    else:
-        google_api_key = os.environ["GOOGLE_API_KEY"]
+        os.environ['GOOGLE_API_KEY'] = gapikey
 
     # Instantiate a persistent chroma client in the persist_directory.
     # This will automatically load any previously saved collections.
     # Learn more at docs.trychroma.com
-    client = chromadb.PersistentClient(path=persist_directory)
+    chroma_client = chromadb.PersistentClient(path=persist_directory)
 
     # create embedding function
-    embedding_function = embedding_functions.GoogleGenerativeAIEmbeddingFunction(
-        api_key=google_api_key, task_type="RETRIEVAL_QUERY"
-    )
+    #embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
+    #    api_key=google_api_key, task_type="RETRIEVAL_QUERY"
+    #)
+    embedding_function = embedding_functions.GoogleGenaiEmbeddingFunction(model_name=GENAI_EMBED_MODEL)
 
     # Get the collection.
-    collection = client.get_collection(
+    collection = chroma_client.get_collection(
         name=collection_name, embedding_function=embedding_function
     )
+
+    # Create Google genai client
+    genai_client = embedding_function.client #genai.Client(api_key=google_api_key)
 
     # We use a simple input loop.
     while True:
@@ -107,15 +110,14 @@ def main(
                 for result in results["metadatas"][0]  # type: ignore
             ]
         )
+        document_data = "\n".join(results["documents"][0]) 
+        print(f"Most relevant source documents from chroma collection:\n{sources}\n")
+        print(f"Most relevant source document_data:\n{document_data}\n")
+        #print(f"Collection Query Results:\n{results}")
 
         # Get the response from Gemini
-        response = get_gemini_response(query, results["documents"][0])  # type: ignore
-
-        # Output, with sources
-        print(response)
-        print("\n")
-        print(f"Source documents:\n{sources}")
-        print("\n")
+        response = get_gemini_response(genai_client, query, results["documents"][0])  # type: ignore
+        print(f"Gemini Response:\n{response}\n")
 
 
 if __name__ == "__main__":
