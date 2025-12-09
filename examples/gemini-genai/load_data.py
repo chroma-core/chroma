@@ -15,6 +15,7 @@ def main(
     persist_directory: str = ".",
 ) -> None:
     # Read all files in the data directory
+    ids = []
     documents = []
     metadatas = []
     files = os.listdir(documents_directory)
@@ -28,6 +29,7 @@ def main(
                 # Skip empty lines
                 if len(line) == 0:
                     continue
+                ids.append(str(len(ids))) # unique ID for the document
                 documents.append(line)
                 metadatas.append({"filename": filename, "line_number": line_number})
     print(f'Read {len(documents)} documents (document lines).' )
@@ -56,8 +58,6 @@ def main(
     print(f"Collection already contains {orig_collection_document_count} documents")
     if orig_collection_document_count < len(documents):
         print('Adding remaining documents to collection')
-        ids = [str(i) for i in range(orig_collection_document_count, len(documents))]
-
         batch_size = 5  # Using small batch size to work better with Free Tier
         if batch_size > 1:
             # Load the documents in batches
@@ -65,8 +65,8 @@ def main(
                 range(orig_collection_document_count, len(documents), batch_size), desc="Adding documents", unit_scale=batch_size):
                 collection.add(
                     ids=ids[i : i + batch_size],
-                    documents=documents[orig_collection_document_count : orig_collection_document_count + batch_size],
-                    metadatas=metadatas[orig_collection_document_count : orig_collection_document_count + batch_size],
+                    documents=documents[i : i + batch_size],
+                    metadatas=metadatas[i : i + batch_size],
                 )
         else:
             # Load the documents individually
@@ -74,8 +74,8 @@ def main(
             for i in range(orig_collection_document_count, len(documents)):
                 collection.add(
                     ids=ids[i],
-                    documents=documents[orig_collection_document_count+i],
-                    metadatas=metadatas[orig_collection_document_count+i],
+                    documents=documents[i],
+                    metadatas=metadatas[i],
                 )
                 if (i%indicator_size) == 0:
                     print('.', end='')
