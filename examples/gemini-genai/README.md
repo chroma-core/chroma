@@ -1,6 +1,6 @@
 # Chat with your documents
 
-This folder contains a (very) minimal, self-contained example of how to make an application to chat with your documents, using Chroma and Google Gemini's API.
+This folder contains a (very) minimal, self-contained example of how to make an application to chat with your documents, using Chroma and Google Gemini's google.genai API.
 It uses the 2022 and 2023 U.S state of the union addresses as example documents.
 
 ## How it works
