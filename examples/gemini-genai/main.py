@@ -7,7 +7,6 @@ from google import genai
 import chromadb
 from chromadb.utils import embedding_functions
 
-#model = genai.GenerativeModel('gemini-2.5-flash') #("gemini-2.0-flash-lite") # ("gemini-pro")
 GENAI_MODEL = 'gemini-2.5-flash'
 GENAI_EMBED_MODEL = 'gemini-embedding-001'
 
@@ -77,9 +76,6 @@ def main(
     chroma_client = chromadb.PersistentClient(path=persist_directory)
 
     # create embedding function
-    #embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
-    #    api_key=google_api_key, task_type="RETRIEVAL_QUERY"
-    #)
     embedding_function = embedding_functions.GoogleGenaiEmbeddingFunction(model_name=GENAI_EMBED_MODEL)
 
     # Get the collection.
@@ -113,7 +109,6 @@ def main(
         document_data = "\n".join(results["documents"][0]) 
         print(f"Most relevant source documents from chroma collection:\n{sources}\n")
         print(f"Most relevant source document_data:\n{document_data}\n")
-        #print(f"Collection Query Results:\n{results}")
 
         # Get the response from Gemini
         response = get_gemini_response(genai_client, query, results["documents"][0])  # type: ignore
