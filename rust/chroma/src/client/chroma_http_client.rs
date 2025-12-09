@@ -11,6 +11,7 @@ use reqwest::Method;
 use reqwest::StatusCode;
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 
 use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse};
@@ -176,6 +177,7 @@ impl ChromaHttpClient {
 
         let client = reqwest::Client::builder()
             .default_headers(headers)
+            .pool_idle_timeout(Duration::from_secs(30))
             .build()
             .expect("Failed to initialize TLS backend");
 
