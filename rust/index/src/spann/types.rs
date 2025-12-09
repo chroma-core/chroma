@@ -16,8 +16,7 @@ use chroma_config::{registry::Registry, Configurable};
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_tracing::util::Stopwatch;
-use chroma_types::SpannPostingList;
-use chroma_types::{CollectionUuid, InternalSpannConfiguration};
+use chroma_types::{Cmek, CollectionUuid, InternalSpannConfiguration, SpannPostingList};
 use futures::future;
 use opentelemetry::global;
 use rand::seq::SliceRandom;
@@ -320,6 +319,7 @@ pub struct SpannIndexWriter {
     pub prefix_path: String,
     metrics: SpannMetrics,
     stats: WriteStats,
+    cmek: Option<Cmek>,
 }
 
 #[derive(Error, Debug)]
@@ -444,6 +444,7 @@ impl SpannIndexWriter {
         collection_id: CollectionUuid,
         metrics: SpannMetrics,
         prefix_path: String,
+        cmek: Option<Cmek>,
     ) -> Self {
         SpannIndexWriter {
             hnsw_index,
@@ -461,6 +462,7 @@ impl SpannIndexWriter {
             metrics,
             stats: WriteStats::default(),
             prefix_path,
+            cmek,
         }
     }
 
@@ -570,10 +572,14 @@ impl SpannIndexWriter {
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
         prefix_path: &str,
+        cmek: Option<Cmek>,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
         let mut bf_options = BlockfileWriterOptions::new(prefix_path.to_string());
         bf_options = bf_options.unordered_mutations();
         bf_options = bf_options.fork(*blockfile_id);
+        if let Some(cmek) = cmek {
+            bf_options = bf_options.with_cmek(cmek);
+        }
         match blockfile_provider
             .write::<u32, &SpannPostingList<'_>>(bf_options)
             .await
@@ -594,10 +600,14 @@ impl SpannIndexWriter {
         blockfile_provider: &BlockfileProvider,
         prefix_path: &str,
         pl_block_size: usize,
+        cmek: Option<Cmek>,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
         let mut bf_options = BlockfileWriterOptions::new(prefix_path.to_string())
             .max_block_size_bytes(pl_block_size);
         bf_options = bf_options.unordered_mutations();
+        if let Some(cmek) = cmek {
+            bf_options = bf_options.with_cmek(cmek);
+        }
         match blockfile_provider
             .write::<u32, &SpannPostingList<'_>>(bf_options)
             .await
@@ -625,6 +635,7 @@ impl SpannIndexWriter {
         gc_context: GarbageCollectionContext,
         pl_block_size: usize,
         metrics: SpannMetrics,
+        cmek: Option<Cmek>,
     ) -> Result<Self, SpannIndexWriterError> {
         let distance_function = DistanceFunction::from(params.space.clone());
         // Create the HNSW index.
@@ -667,10 +678,22 @@ impl SpannIndexWriter {
         // Fork the posting list writer.
         let posting_list_writer = match posting_list_id {
             Some(posting_list_id) => {
-                Self::fork_postings_list(posting_list_id, blockfile_provider, prefix_path).await?
+                Self::fork_postings_list(
+                    posting_list_id,
+                    blockfile_provider,
+                    prefix_path,
+                    cmek.clone(),
+                )
+                .await?
             }
             None => {
-                Self::create_posting_list(blockfile_provider, prefix_path, pl_block_size).await?
+                Self::create_posting_list(
+                    blockfile_provider,
+                    prefix_path,
+                    pl_block_size,
+                    cmek.clone(),
+                )
+                .await?
             }
         };
 
@@ -706,6 +729,7 @@ impl SpannIndexWriter {
             *collection_id,
             metrics,
             prefix_path.to_string(),
+            cmek,
         ))
     }
 
@@ -2315,6 +2339,9 @@ impl SpannIndexWriter {
             // Versions map. Create a writer, write all the data and commit.
             let mut bf_options = BlockfileWriterOptions::new(self.prefix_path.clone());
             bf_options = bf_options.unordered_mutations();
+            if let Some(cmek) = &self.cmek {
+                bf_options = bf_options.with_cmek(cmek.clone());
+            }
             let versions_map_bf_writer = self
                 .blockfile_provider
                 .write::<u32, u32>(bf_options)
@@ -2357,6 +2384,9 @@ impl SpannIndexWriter {
         // Next head.
         let mut bf_options = BlockfileWriterOptions::new(self.prefix_path.clone());
         bf_options = bf_options.unordered_mutations();
+        if let Some(cmek) = &self.cmek {
+            bf_options = bf_options.with_cmek(cmek.clone());
+        }
         let max_head_id_bf = self
             .blockfile_provider
             .write::<&str, u32>(bf_options)
@@ -2423,6 +2453,7 @@ impl SpannIndexWriter {
                 prefix_path,
                 index_id: hnsw_id,
                 hnsw_index,
+                cmek: self.cmek,
             },
             metrics: SpannIndexFlusherMetrics {
                 pl_flush_latency: self.metrics.pl_flush_latency.clone(),
@@ -2538,6 +2569,7 @@ impl SpannIndexFlusher {
                     &self.hnsw_flusher.prefix_path,
                     &self.hnsw_flusher.index_id,
                     &self.hnsw_flusher.hnsw_index,
+                    self.hnsw_flusher.cmek.clone(),
                 )
                 .await
                 .map_err(|e| {
@@ -3031,6 +3063,7 @@ mod tests {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann index writer");
@@ -3252,6 +3285,7 @@ mod tests {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann index writer");
@@ -3517,6 +3551,7 @@ mod tests {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann index writer");
@@ -3747,6 +3782,7 @@ mod tests {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann index writer");
@@ -4019,6 +4055,7 @@ mod tests {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann index writer");
@@ -4333,6 +4370,7 @@ mod tests {
                 gc_context,
                 pl_block_size,
                 SpannMetrics::default(),
+                None,
             )
             .await
             .expect("Error creating spann index writer");
@@ -4449,6 +4487,7 @@ mod tests {
                 gc_context,
                 pl_block_size,
                 SpannMetrics::default(),
+                None,
             )
             .await
             .expect("Error creating spann index writer");
@@ -4589,6 +4628,7 @@ mod tests {
                     gc_context.clone(),
                     pl_block_size,
                     SpannMetrics::default(),
+                    None,
                 )
                 .await
                 .expect("Error creating spann index writer");
@@ -4732,6 +4772,7 @@ mod tests {
                     gc_context.clone(),
                     pl_block_size,
                     SpannMetrics::default(),
+                    None,
                 )
                 .await
                 .expect("Error creating spann index writer");
@@ -4896,6 +4937,7 @@ mod tests {
                     gc_context.clone(),
                     pl_block_size,
                     SpannMetrics::default(),
+                    None,
                 )
                 .await
                 .expect("Error creating spann index writer");
@@ -5012,6 +5054,7 @@ mod tests {
                 gc_context.clone(),
                 pl_block_size,
                 SpannMetrics::default(),
+                None,
             )
             .await
             .expect("Error creating spann index writer");
@@ -5135,6 +5178,7 @@ mod tests {
                 gc_context,
                 pl_block_size,
                 SpannMetrics::default(),
+                None,
             )
             .await
             .expect("Error creating spann index writer");

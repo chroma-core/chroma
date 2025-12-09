@@ -21,6 +21,7 @@ use chroma_storage::{
     admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage, StorageError,
 };
 use chroma_tracing::util::{LogSlowOperation, Stopwatch};
+use chroma_types::Cmek;
 use futures::{stream::FuturesUnordered, StreamExt};
 use opentelemetry::global;
 use std::{
@@ -188,6 +189,7 @@ impl ArrowBlockfileProvider {
                         self.block_manager.clone(),
                         self.root_manager.clone(),
                         new_root,
+                        options.cmek,
                     );
 
                     Ok(BlockfileWriter::ArrowOrderedBlockfileWriter(file))
@@ -198,6 +200,7 @@ impl ArrowBlockfileProvider {
                         self.block_manager.clone(),
                         self.root_manager.clone(),
                         new_root,
+                        options.cmek,
                     );
                     Ok(BlockfileWriter::ArrowUnorderedBlockfileWriter(file))
                 }
@@ -216,6 +219,7 @@ impl ArrowBlockfileProvider {
                         self.block_manager.clone(),
                         self.root_manager.clone(),
                         max_block_size_bytes,
+                        options.cmek,
                     );
 
                     Ok(BlockfileWriter::ArrowOrderedBlockfileWriter(file))
@@ -227,6 +231,7 @@ impl ArrowBlockfileProvider {
                         self.block_manager.clone(),
                         self.root_manager.clone(),
                         max_block_size_bytes,
+                        options.cmek,
                     );
                     Ok(BlockfileWriter::ArrowUnorderedBlockfileWriter(file))
                 }
@@ -307,7 +312,7 @@ pub enum GetError {
     #[error(transparent)]
     BlockLoadError(#[from] BlockLoadError),
     #[error(transparent)]
-    StorageGetError(#[from] chroma_storage::StorageError),
+    StorageGetError(#[from] StorageError),
 }
 
 impl ChromaError for GetError {
@@ -538,6 +543,7 @@ impl BlockManager {
         &self,
         block: &Block,
         prefix_path: &str,
+        cmek: Option<Cmek>,
     ) -> Result<(), Box<dyn ChromaError>> {
         let bytes = match block.to_bytes() {
             Ok(bytes) => bytes,
@@ -553,14 +559,11 @@ impl BlockManager {
             chroma_tracing::util::StopWatchUnit::Millis,
         );
         let block_bytes_len = bytes.len();
-        let res = self
-            .storage
-            .put_bytes(
-                &key,
-                bytes,
-                PutOptions::default().with_priority(StorageRequestPriority::P0),
-            )
-            .await;
+        let mut options = PutOptions::default().with_priority(StorageRequestPriority::P0);
+        if let Some(cmek) = cmek {
+            options = options.with_cmek(cmek);
+        }
+        let res = self.storage.put_bytes(&key, bytes, options).await;
         match res {
             Ok(_) => {
                 tracing::debug!(
@@ -614,7 +617,7 @@ pub enum RootManagerError {
     #[error(transparent)]
     UUIDParseError(#[from] uuid::Error),
     #[error(transparent)]
-    StorageGetError(#[from] chroma_storage::StorageError),
+    StorageGetError(#[from] StorageError),
     #[error(transparent)]
     FromBytesError(#[from] FromBytesError),
 }
@@ -729,6 +732,7 @@ impl RootManager {
     pub async fn flush<'read, K: ArrowWriteableKey + 'read>(
         &self,
         root: &RootWriter,
+        cmek: Option<Cmek>,
     ) -> Result<(), Box<dyn ChromaError>> {
         let bytes = match root.to_bytes::<K>() {
             Ok(bytes) => bytes,
@@ -738,14 +742,11 @@ impl RootManager {
             }
         };
         let key = Self::get_storage_key(&root.prefix_path, &root.id);
-        let res = self
-            .storage
-            .put_bytes(
-                &key,
-                bytes,
-                PutOptions::default().with_priority(StorageRequestPriority::P0),
-            )
-            .await;
+        let mut options = PutOptions::default().with_priority(StorageRequestPriority::P0);
+        if let Some(cmek) = cmek {
+            options = options.with_cmek(cmek);
+        }
+        let res = self.storage.put_bytes(&key, bytes, options).await;
         match res {
             Ok(_) => {
                 tracing::info!("Root written to storage");
