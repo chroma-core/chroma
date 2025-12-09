@@ -147,7 +147,7 @@ pub const EMBEDDING_KEY: &str = "#embedding";
 
 // Static regex pattern to validate CMEK for GCP
 static CMEK_GCP_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"projects/.+/locations/.+/keyRings/.+/cryptoKeys/.+")
+    Regex::new(r"^projects/.+/locations/.+/keyRings/.+/cryptoKeys/.+$")
         .expect("The CMEK pattern for GCP should be valid")
 });
 
@@ -156,6 +156,7 @@ static CMEK_GCP_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// CMEK allows you to use your own encryption keys managed by cloud providers'
 /// key management services (KMS) instead of default provider-managed keys.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Cmek {
     /// Google Cloud Platform KMS key resource name.
     ///
@@ -6293,6 +6294,7 @@ mod tests {
                         Schema {
                             defaults,
                             keys: extra_keys,
+                            cmek: None,
                         }
                     },
                 )
