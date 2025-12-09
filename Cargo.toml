@@ -76,7 +76,7 @@ petgraph = { version = "0.8.1" }
 base64 = "0.22"
 tikv-jemallocator = { version = "0.6.0", features = ["profiling"] }
 
-chroma = { path = "rust/chroma", version = "0.7.0" }
+chroma = { path = "rust/chroma", version = "0.8.0" }
 chroma-api-types = { path = "rust/api-types", version = "0.6.0" }
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
