@@ -1575,6 +1575,7 @@ mod tests {
 
             let target_name = unique_collection_name("test_fork_target");
             let forked = collection.fork(target_name.clone()).await.unwrap();
+            client.track(&forked);
             println!("Forked collection: {:?}", forked);
 
             assert_eq!(forked.collection.name, target_name);
@@ -1609,6 +1610,7 @@ mod tests {
 
             let target_name = unique_collection_name("test_fork_preserves_target");
             let forked = collection.fork(target_name).await.unwrap();
+            client.track(&forked);
 
             let forked_get_response = forked
                 .get(
@@ -1646,6 +1648,7 @@ mod tests {
 
             let target_name = unique_collection_name("test_fork_independence_target");
             let forked = collection.fork(target_name).await.unwrap();
+            client.track(&forked);
 
             forked
                 .add(
