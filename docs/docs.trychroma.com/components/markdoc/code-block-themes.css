@@ -1,0 +1,7 @@
+/* Light theme - default */
+@import 'highlight.js/styles/atom-one-light.css';
+
+/* Override with dark theme when .dark class is present */
+.dark {
+  @import 'highlight.js/styles/atom-one-dark.css';
+}
