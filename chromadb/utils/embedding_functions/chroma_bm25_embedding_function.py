@@ -22,6 +22,7 @@ DEFAULT_TOKEN_MAX_LENGTH = 40
 
 DEFAULT_CHROMA_BM25_STOPWORDS: List[str] = list(_DEFAULT_STOPWORDS)
 
+
 class _HashedToken:
     __slots__ = ("hash", "label")
 
@@ -70,17 +71,17 @@ class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
 
         if stopwords is not None:
             self.stopwords: Optional[List[str]] = [str(word) for word in stopwords]
-            stopword_list: Iterable[str] = self.stopwords
+            self._stopword_list: Iterable[str] = self.stopwords
         else:
             self.stopwords = None
-            stopword_list = DEFAULT_CHROMA_BM25_STOPWORDS
+            self._stopword_list = DEFAULT_CHROMA_BM25_STOPWORDS
 
-        stemmer = get_english_stemmer()
-        self._tokenizer = Bm25Tokenizer(stemmer, stopword_list, self.token_max_length)
         self._hasher = Murmur3AbsHasher()
 
     def _encode(self, text: str) -> SparseVector:
-        tokens = self._tokenizer.tokenize(text)
+        stemmer = get_english_stemmer()
+        tokenizer = Bm25Tokenizer(stemmer, self._stopword_list, self.token_max_length)
+        tokens = tokenizer.tokenize(text)
 
         if not tokens:
             return SparseVector(indices=[], values=[])
@@ -94,7 +95,7 @@ class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
         sorted_keys = sorted(counts.keys())
         indices: List[int] = []
         values: List[float] = []
-        tokens: Optional[List[str]] = [] if self.store_tokens else None
+        token_labels: Optional[List[str]] = [] if self.store_tokens else None
 
         for key in sorted_keys:
             tf = float(counts[key])
@@ -102,13 +103,13 @@ class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
                 1 - self.b + (self.b * doc_len) / self.avg_doc_length
             )
             score = tf * (self.k + 1) / denominator
-            
+
             indices.append(key.hash)
             values.append(score)
-            if tokens is not None:
-                tokens.append(key.label)
+            if token_labels is not None and key.label is not None:
+                token_labels.append(key.label)
 
-        return SparseVector(indices=indices, values=values, labels=tokens)
+        return SparseVector(indices=indices, values=values, labels=token_labels)
 
     def __call__(self, input: Documents) -> SparseVectors:
         sparse_vectors: SparseVectors = []
@@ -130,7 +131,7 @@ class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
 
     @staticmethod
     def build_from_config(
-        config: Dict[str, Any]
+        config: Dict[str, Any],
     ) -> "SparseEmbeddingFunction[Documents]":
         return ChromaBm25EmbeddingFunction(
             k=config.get("k", DEFAULT_K),
@@ -158,7 +159,14 @@ class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
-        mutable_keys = {"k", "b", "avg_doc_length", "token_max_length", "stopwords", "store_tokens"}
+        mutable_keys = {
+            "k",
+            "b",
+            "avg_doc_length",
+            "token_max_length",
+            "stopwords",
+            "store_tokens",
+        }
         for key in new_config:
             if key not in mutable_keys:
                 raise ValueError(f"Updating '{key}' is not supported for {NAME}")

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from functools import lru_cache
 from typing import Iterable, List, Protocol, cast
 
 
@@ -213,10 +212,8 @@ class _SnowballStemmerAdapter:
         return cast(str, self._stemmer.stemWord(token))
 
 
-@lru_cache(maxsize=1)
 def get_english_stemmer() -> SnowballStemmer:
-    """Return a cached Snowball stemmer for English."""
-
+    """Return a Snowball stemmer for English."""
     return _SnowballStemmerAdapter()
 
 

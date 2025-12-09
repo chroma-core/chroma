@@ -1,7 +1,9 @@
 import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytest
 
+from chromadb import SparseVector
 from chromadb.utils.embedding_functions.chroma_bm25_embedding_function import (
     DEFAULT_CHROMA_BM25_STOPWORDS,
     ChromaBm25EmbeddingFunction,
@@ -137,3 +139,57 @@ def test_validate_config_update_allows_known_keys() -> None:
     embedder.validate_config_update(
         embedder.get_config(), {"k": 1.1, "stopwords": ["custom"]}
     )
+
+
+def test_multithreaded_usage() -> None:
+    embedder = ChromaBm25EmbeddingFunction()
+    texts = [
+        "Usain Bolt's top speed reached ~27.8 mph (44.72 km/h)",
+        "The   space-time   continuum   WARPS   near   massive   objects...",
+        "BM25 is great for sparse retrieval tasks",
+        "Machine learning models require careful tuning",
+        "Natural language processing enables text understanding",
+        "Vector databases store high-dimensional embeddings",
+        "Information retrieval systems use ranking algorithms",
+        "Semantic search improves query understanding",
+    ]
+
+    num_threads = 10
+    num_iterations = 20
+
+    def process_documents(thread_id: int) -> list[tuple[int, SparseVector]]:
+        results = []
+        for i in range(num_iterations):
+            text_index = (thread_id * num_iterations + i) % len(texts)
+            embedding = embedder([texts[text_index]])[0]
+            results.append((text_index, embedding))
+        return results
+
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = [
+            executor.submit(process_documents, thread_id)
+            for thread_id in range(num_threads)
+        ]
+        all_results = []
+        for future in as_completed(futures):
+            all_results.extend(future.result())
+
+    assert len(all_results) == num_threads * num_iterations
+
+    for text_index, embedding in all_results:
+        assert embedding.indices
+        assert len(embedding.indices) == len(embedding.values)
+        assert _is_sorted(embedding.indices)
+        for value in embedding.values:
+            assert value > 0
+            assert math.isfinite(value)
+
+    single_threaded_results = {}
+    for i, text in enumerate(texts):
+        embedding = embedder([text])[0]
+        single_threaded_results[i] = (embedding.indices, embedding.values)
+
+    for text_index, embedding in all_results:
+        expected_indices, expected_values = single_threaded_results[text_index]
+        assert embedding.indices == expected_indices
+        assert embedding.values == expected_values
