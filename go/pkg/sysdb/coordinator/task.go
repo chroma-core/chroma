@@ -99,43 +99,36 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 	err := s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// Check if there's any active (ready, non-deleted) attached function for this collection
 		// We only allow one active attached function per collection
-		existingAttachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetByCollectionID(req.InputCollectionId)
+		existingAttachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAnyByCollectionID(req.InputCollectionId)
 		if err != nil {
 			log.Error("AttachFunction: failed to check for existing attached function", zap.Error(err))
 			return err
 		}
-		if len(existingAttachedFunctions) > 0 {
-			if len(existingAttachedFunctions) > 1 {
-				log.Error("AttachFunction: collection has multiple attached functions")
-				return status.Errorf(codes.Internal, "data inconsistency: collection has %d attached functions, expected at most 1", len(existingAttachedFunctions))
-			}
 
-			existingAttachedFunction := existingAttachedFunctions[0]
-
-			// Same name - validate it matches our request (idempotency)
-			log.Info("AttachFunction: attached function exists with same name, validating parameters",
-				zap.String("attached_function_id", existingAttachedFunction.ID.String()))
-
-			matches, err := s.validateAttachedFunctionMatchesRequest(txCtx, existingAttachedFunction, req)
+		for _, attachedFunction := range existingAttachedFunctions {
+			matches, err := s.validateAttachedFunctionMatchesRequest(txCtx, attachedFunction, req)
 			if err != nil {
 				return err
 			}
-			if !matches {
-				functionName, err := dbmodel.GetFunctionNameByID(existingAttachedFunction.FunctionID)
+			if matches {
+				// If the attached function matches the request, use it
+				attachedFunctionID = attachedFunction.ID
+				return nil
+			}
+
+			if attachedFunction.IsReady {
+				log.Error("AttachFunction: collection already has an attached function", zap.String("name", attachedFunction.Name))
+				functionName, err := dbmodel.GetFunctionNameByID(attachedFunction.FunctionID)
 				if err != nil {
 					log.Error("AttachFunction: unknown function ID", zap.Error(err))
 					return err
 				}
 				return status.Errorf(codes.AlreadyExists,
 					"collection already has an attached function: name=%s, function=%s, output_collection=%s",
-					existingAttachedFunction.Name,
+					attachedFunction.Name,
 					functionName,
-					existingAttachedFunction.OutputCollectionName)
+					attachedFunction.OutputCollectionName)
 			}
-
-			// Validation passed, reuse the existing attached function ID (idempotent)
-			attachedFunctionID = existingAttachedFunction.ID
-			return nil
 		}
 
 		// Look up database_id
@@ -624,6 +617,17 @@ func (s *Coordinator) FinishCreateAttachedFunction(ctx context.Context, req *coo
 		if err != nil {
 			log.Error("FinishCreateAttachedFunction: failed to update output collection ID and set ready", zap.Error(err))
 			return err
+		}
+
+		// 7. Validate that there is only one ready attached function for this collection
+		existingAttachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetByCollectionID(attachedFunction.InputCollectionID)
+		if err != nil {
+			log.Error("FinishCreateAttachedFunction: failed to get attached functions", zap.Error(err))
+			return err
+		}
+		if len(existingAttachedFunctions) > 1 {
+			log.Error("FinishCreateAttachedFunction: multiple attached functions found for collection", zap.String("collection_id", attachedFunction.InputCollectionID))
+			return common.ErrAttachedFunctionAlreadyExists
 		}
 
 		log.Info("FinishCreateAttachedFunction: successfully created output collection and set is_ready=true",

@@ -384,3 +384,127 @@ def test_delete_orphaned_output_collection(basic_http_client: System) -> None:
     with pytest.raises(NotFoundError):
         # Try to use the function - it should fail since it's detached
         client.get_collection("output_collection")
+
+
+def test_partial_attach_function_repair(
+    basic_http_client: System,
+) -> None:
+    """Test creating and removing a function with the record_counter operator"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    # Create a collection
+    collection = client.get_or_create_collection(
+        name="my_document",
+    )
+
+    # Create a task that counts records in the collection
+    attached_fn = collection.attach_function(
+        name="count_my_docs",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="my_documents_counts",
+        params=None,
+    )
+
+    # Verify task creation succeeded
+    assert attached_fn is not None
+
+    collection2 = client.get_or_create_collection(
+        name="my_document2",
+    )
+
+    # Create a task that counts records in the collection
+    # This should fail
+    with pytest.raises(
+        ChromaError, match=r"Output collection \[my_documents_counts\] already exists"
+    ):
+        attached_fn = collection2.attach_function(
+            name="count_my_docs",
+            function=RECORD_COUNTER_FUNCTION,
+            output_collection="my_documents_counts",
+            params=None,
+        )
+
+    # Detach the function
+    assert (
+        collection.detach_function(attached_fn.name, delete_output_collection=True)
+        is True
+    )
+
+    # Create a task that counts records in the collection
+    attached_fn = collection2.attach_function(
+        name="count_my_docs",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="my_documents_counts",
+        params=None,
+    )
+    assert attached_fn is not None
+
+
+def test_count_function_attach_and_detach_attach_attach(
+    basic_http_client: System,
+) -> None:
+    """Test creating and removing a function with the record_counter operator"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    # Create a collection
+    collection = client.get_or_create_collection(
+        name="my_document",
+        metadata={"description": "Sample documents for task processing"},
+    )
+
+    # Create a task that counts records in the collection
+    attached_fn = collection.attach_function(
+        name="count_my_docs",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="my_documents_counts",
+        params=None,
+    )
+
+    # Verify task creation succeeded
+    assert attached_fn is not None
+    initial_version = get_collection_version(client, collection.name)
+
+    # Add documents
+    collection.add(
+        ids=["doc_{}".format(i) for i in range(0, 300)],
+        documents=["test document"] * 300,
+    )
+
+    # Verify documents were added
+    assert collection.count() == 300
+
+    wait_for_version_increase(client, collection.name, initial_version)
+    # Give some time to invalidate the frontend query cache
+    sleep(60)
+
+    result = client.get_collection("my_documents_counts").get("function_output")
+    assert result["metadatas"] is not None
+    assert result["metadatas"][0]["total_count"] == 300
+
+    # Remove the task
+    success = collection.detach_function(
+        attached_fn.name, delete_output_collection=True
+    )
+
+    # Verify task removal succeeded
+    assert success is True
+
+    # Create a task that counts records in the collection
+    attached_fn = collection.attach_function(
+        name="count_my_docs",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="my_documents_counts",
+        params=None,
+    )
+    assert attached_fn is not None
+
+    # Create a task that counts records in the collection
+    attached_fn = collection.attach_function(
+        name="count_my_docs",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="my_documents_counts",
+        params=None,
+    )
+    assert attached_fn is not None
