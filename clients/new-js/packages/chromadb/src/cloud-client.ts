@@ -39,8 +39,8 @@ export class CloudClient extends ChromaClient {
     const database = args.database || process.env.CHROMA_DATABASE;
 
     super({
-      host: args.host ?? "api.trychroma.com",
-      port: args.port ?? 443,
+      host: args.host || "api.trychroma.com",
+      port: args.port || 443,
       ssl: true,
       tenant,
       database,
@@ -83,8 +83,8 @@ export class AdminCloudClient extends AdminClient {
     }
 
     super({
-      host: args.host ?? "api.trychroma.com",
-      port: args.port ?? 443,
+      host: args.host || "api.trychroma.com",
+      port: args.port || 443,
       ssl: true,
       headers: { "x-chroma-token": apiKey },
       fetchOptions: args.fetchOptions,
