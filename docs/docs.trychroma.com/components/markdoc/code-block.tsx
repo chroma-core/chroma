@@ -54,7 +54,7 @@ const CodeBlock: React.FC<CodeBlockProps> = async ({
         <CodeBlockHeader language={language} content={content} />
       )}
       <pre
-         className={`rounded-none rounded-b-sm m-0 bg-[var(--tw-prose-invert-bg)] dark:bg-black text-black dark:text-[var(--tw-prose-pre-code)] border border-t-0 dark:border-gray-700 ${className ? className : ""}`}
+        className={`rounded-none rounded-b-sm m-0 bg-[var(--tw-prose-invert-bg)] dark:bg-black text-black dark:text-[var(--tw-prose-pre-code)] border border-t-0 dark:border-gray-700 ${className ? className : ""}`}
       >
         <div
           dangerouslySetInnerHTML={{

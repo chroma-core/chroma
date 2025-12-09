@@ -5,21 +5,20 @@
 /* Use Tailwind's dark mode selector to control which theme applies */
 /* Override dark theme colors when NOT in dark mode */
 html:not(.dark) .hljs {
-  color: #383a42 !important;
-  background: #fafafa !important;
+  color: #383a42;
+  background: #fafafa;
 }
 
 /* These selectors ensure light theme syntax colors apply when not in dark mode */
 html:not(.dark) .hljs-comment,
 html:not(.dark) .hljs-quote {
-  color: #a0a1a7 !important;
-  font-style: italic !important;
+  color: #a0a1a7;
 }
 
 html:not(.dark) .hljs-doctag,
 html:not(.dark) .hljs-keyword,
 html:not(.dark) .hljs-formula {
-  color: #a626a4 !important;
+  color: #a626a4;
 }
 
 html:not(.dark) .hljs-section,
@@ -27,11 +26,11 @@ html:not(.dark) .hljs-name,
 html:not(.dark) .hljs-selector-tag,
 html:not(.dark) .hljs-deletion,
 html:not(.dark) .hljs-subst {
-  color: #e45649 !important;
+  color: #e45649;
 }
 
 html:not(.dark) .hljs-literal {
-  color: #0184bb !important;
+  color: #0184bb;
 }
 
 html:not(.dark) .hljs-string,
@@ -39,7 +38,7 @@ html:not(.dark) .hljs-regexp,
 html:not(.dark) .hljs-addition,
 html:not(.dark) .hljs-attribute,
 html:not(.dark) .hljs-meta .hljs-string {
-  color: #50a14f !important;
+  color: #50a14f;
 }
 
 html:not(.dark) .hljs-attr,
@@ -50,7 +49,7 @@ html:not(.dark) .hljs-selector-class,
 html:not(.dark) .hljs-selector-attr,
 html:not(.dark) .hljs-selector-pseudo,
 html:not(.dark) .hljs-number {
-  color: #986801 !important;
+  color: #986801;
 }
 
 html:not(.dark) .hljs-symbol,
@@ -59,23 +58,11 @@ html:not(.dark) .hljs-link,
 html:not(.dark) .hljs-meta,
 html:not(.dark) .hljs-selector-id,
 html:not(.dark) .hljs-title {
-  color: #4078f2 !important;
+  color: #4078f2;
 }
 
 html:not(.dark) .hljs-built_in,
 html:not(.dark) .hljs-title.class_,
 html:not(.dark) .hljs-class .hljs-title {
-  color: #c18401 !important;
-}
-
-html:not(.dark) .hljs-emphasis {
-  font-style: italic !important;
-}
-
-html:not(.dark) .hljs-strong {
-  font-weight: bold !important;
-}
-
-html:not(.dark) .hljs-link {
-  text-decoration: underline !important;
+  color: #c18401;
 }
