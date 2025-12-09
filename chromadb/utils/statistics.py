@@ -29,7 +29,7 @@ Example:
 from typing import TYPE_CHECKING, Optional, Dict, Any, cast
 from collections import defaultdict
 
-from chromadb.api.types import Where
+from chromadb.api.types import OneOrMany, Where, maybe_cast_one_to_many
 
 if TYPE_CHECKING:
     from chromadb.api.models.Collection import Collection
@@ -121,7 +121,9 @@ def detach_statistics_function(
 
 
 def get_statistics(
-    collection: "Collection", stats_collection_name: str, key: Optional[str] = None
+    collection: "Collection",
+    stats_collection_name: str,
+    keys: Optional[OneOrMany[str]] = None,
 ) -> Dict[str, Any]:
     """Get the current statistics for a collection.
 
@@ -131,8 +133,9 @@ def get_statistics(
     Args:
         collection: The collection to get statistics for
         stats_collection_name: Name of the statistics collection to read from.
-        key: Optional metadata key to filter statistics for. If provided,
-             only returns statistics for that specific key.
+        keys: Optional metadata key(s) to filter statistics for. Can be a single key
+              string or a list of keys. If provided, only returns statistics for
+              those specific keys.
 
     Returns:
         Dict[str, Any]: A dictionary with the structure:
@@ -174,7 +177,22 @@ def get_statistics(
                 "total_count": 2
             }
         }
+
+    Raises:
+        ValueError: If more than 30 keys are provided in the keys filter.
     """
+    # Normalize keys to list
+    keys_list = maybe_cast_one_to_many(keys)
+
+    # Validate keys count to avoid issues with large $in queries
+    MAX_KEYS = 30
+    if keys_list is not None and len(keys_list) > MAX_KEYS:
+        raise ValueError(
+            f"Too many keys provided: {len(keys_list)}. "
+            f"Maximum allowed is {MAX_KEYS} keys per request. "
+            "Consider calling get_statistics multiple times with smaller key batches."
+        )
+
     # Import here to avoid circular dependency
     from chromadb.api.models.Collection import Collection
 
@@ -198,10 +216,10 @@ def get_statistics(
     summary: Dict[str, Any] = {}
 
     offset = 0
-    # When filtering by key, also include "summary" entries to get total_count
+    # When filtering by keys, also include "summary" entries to get total_count
     where_filter: Optional[Where] = (
-        cast(Where, {"$or": [{"key": key}, {"key": "summary"}]})
-        if key is not None
+        cast(Where, {"key": {"$in": keys_list + ["summary"]}})
+        if keys_list is not None
         else None
     )
 
