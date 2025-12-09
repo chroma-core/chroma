@@ -9302,6 +9302,7 @@ dependencies = [
  "chroma-config",
  "chroma-error",
  "chroma-storage",
+ "chroma-types",
  "futures",
  "guacamole",
  "opentelemetry",

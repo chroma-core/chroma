@@ -52,6 +52,7 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
         "test_k8s_integration_AB_stringy_setsum_mismatch",
         "test writer",
         (),
+        None,
     )
     .await
     .unwrap();

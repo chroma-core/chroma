@@ -142,6 +142,7 @@ impl ChromaGrpcClients {
         let push_req = PushLogsRequest {
             collection_id: collection_id.to_string(),
             records,
+            cmek: None,
         };
 
         let response = self.log_service.push_logs(push_req).await?;

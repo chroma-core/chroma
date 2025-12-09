@@ -22,7 +22,7 @@ use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn, Search},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    AttachFunctionRequest, AttachFunctionResponse, Collection, CollectionUuid,
+    AttachFunctionRequest, AttachFunctionResponse, Cmek, Collection, CollectionUuid,
     CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse, CountRequest,
     CountResponse, CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse,
     CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
@@ -810,9 +810,10 @@ impl ServiceBasedFrontend {
         tenant_id: &str,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
+        cmek: Option<Cmek>,
     ) -> Result<(), Box<dyn ChromaError>> {
         self.log_client
-            .push_logs(tenant_id, collection_id, records)
+            .push_logs(tenant_id, collection_id, records, cmek)
             .await
     }
 
@@ -844,14 +845,19 @@ impl ServiceBasedFrontend {
             to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
+        // TODO: Extract CMEK from collection metadata
+        // For now, pass None until collection-level CMEK storage is implemented
+        let cmek = None;
+
         let retries = Arc::new(AtomicUsize::new(0));
         let add_to_retry = || {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
             let tenant_id_clone = tenant_id.clone();
+            let cmek_clone = cmek.clone();
             async move {
                 self_clone
-                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone, cmek_clone)
                     .await
             }
         };
@@ -932,14 +938,19 @@ impl ServiceBasedFrontend {
         )
         .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
+        // TODO: Extract CMEK from collection metadata
+        // For now, pass None until collection-level CMEK storage is implemented
+        let cmek = None;
+
         let retries = Arc::new(AtomicUsize::new(0));
         let add_to_retry = || {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
             let tenant_id_clone = tenant_id.clone();
+            let cmek_clone = cmek.clone();
             async move {
                 self_clone
-                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone, cmek_clone)
                     .await
             }
         };
@@ -1025,14 +1036,19 @@ impl ServiceBasedFrontend {
         )
         .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
+        // TODO: Extract CMEK from collection metadata
+        // For now, pass None until collection-level CMEK storage is implemented
+        let cmek = None;
+
         let retries = Arc::new(AtomicUsize::new(0));
         let add_to_retry = || {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
             let tenant_id_clone = tenant_id.clone();
+            let cmek_clone = cmek.clone();
             async move {
                 self_clone
-                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone, cmek_clone)
                     .await
             }
         };
@@ -1213,8 +1229,10 @@ impl ServiceBasedFrontend {
 
             let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
 
+            // TODO: Extract CMEK from collection metadata
+            // For now, pass None until collection-level CMEK storage is implemented
             self.log_client
-                .push_logs(&tenant_id, collection_id, records)
+                .push_logs(&tenant_id, collection_id, records, None)
                 .await
                 .map_err(|err| {
                     if err.code() == ErrorCodes::Unavailable {
@@ -1988,8 +2006,10 @@ impl ServiceBasedFrontend {
             };
             num_fake_logs
         ];
+        // TODO: Extract CMEK from collection metadata
+        // For now, pass None until collection-level CMEK storage is implemented
         self.log_client
-            .push_logs(&tenant, collection_id, logs)
+            .push_logs(&tenant, collection_id, logs, None)
             .await?;
         Ok(())
     }
