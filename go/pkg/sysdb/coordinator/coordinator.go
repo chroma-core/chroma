@@ -331,3 +331,7 @@ func (s *Coordinator) FinishDatabaseDeletion(ctx context.Context, req *coordinat
 	}
 	return res, nil
 }
+
+func (s *Coordinator) IncrementCompactionFailureCount(ctx context.Context, collectionID types.UniqueID) error {
+	return s.catalog.IncrementCompactionFailureCount(ctx, collectionID)
+}

@@ -62,7 +62,8 @@ func convertCollectionToProto(collection *model.Collection) *coordinatorpb.Colle
 			Seconds: collection.UpdatedAt,
 			Nanos:   0,
 		},
-		DatabaseId: &dbId,
+		DatabaseId:             &dbId,
+		CompactionFailureCount: collection.CompactionFailureCount,
 	}
 
 	if collection.RootCollectionID != nil {

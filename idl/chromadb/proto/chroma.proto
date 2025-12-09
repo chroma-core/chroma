@@ -74,6 +74,9 @@ message Collection {
   // This is the database id of the collection.
   optional string database_id = 17;
   optional string schema_str = 18;
+  // Number of consecutive compaction failures for this collection
+  // Defaults to 0.
+  int32 compaction_failure_count = 19;
 }
 
 message Database {
