@@ -1,7 +1,9 @@
 # Chat with your documents
 
 This folder contains a (very) minimal, self-contained example of how to make an application to chat with your documents, using Chroma and Google Gemini's google.genai API.
-It uses the 2022 and 2023 U.S state of the union addresses as example documents.
+It uses the 2022 and 2023 U.S. State of the Union addresses as example documents.
+
+See `examples/gemini` for a similar script example using Google's older google.generativeai API.
 
 ## How it works
 
@@ -15,7 +17,7 @@ The basic flow is as follows:
 
 ## Running the example
 
-You will need an Google API key to run this demo.
+You will need a Google API key to run this demo.
 
 Install dependencies and run the example:
 
