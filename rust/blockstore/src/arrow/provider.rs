@@ -469,7 +469,7 @@ impl BlockManager {
         id: &Uuid,
         priority: StorageRequestPriority,
     ) -> Result<Option<Block>, GetError> {
-        let block = self.block_cache.obtain(*id).await.ok().flatten();
+        let block = self.block_cache.get(id).await.ok().flatten();
         if let Some(block) = block {
             return Ok(Some(block));
         }
@@ -664,7 +664,7 @@ impl RootManager {
         prefix_path: &str,
         max_block_size_bytes: usize,
     ) -> Result<Option<RootReader>, RootManagerError> {
-        let index = self.cache.obtain(*id).await.ok().flatten();
+        let index = self.cache.get(id).await.ok().flatten();
         match index {
             Some(index) => Ok(Some(index)),
             None => {
