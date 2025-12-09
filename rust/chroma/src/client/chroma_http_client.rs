@@ -177,6 +177,9 @@ impl ChromaHttpClient {
 
         let client = reqwest::Client::builder()
             .default_headers(headers)
+            // Set a pool idle timeout to prevent the client from using connections that are
+            // about to be closed by the server (which often have a 60s timeout).
+            // Ref: https://github.com/hyperium/hyper/issues/2136#issuecomment-589488526
             .pool_idle_timeout(Duration::from_secs(30))
             .build()
             .expect("Failed to initialize TLS backend");
