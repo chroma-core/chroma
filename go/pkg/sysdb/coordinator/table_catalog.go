@@ -2465,3 +2465,7 @@ func (tc *Catalog) GetVersionFileNamesForCollection(ctx context.Context, tenantI
 func (tc *Catalog) FinishDatabaseDeletion(ctx context.Context, cutoffTime time.Time) (uint64, error) {
 	return tc.metaDomain.DatabaseDb(ctx).FinishDatabaseDeletion(cutoffTime)
 }
+
+func (tc *Catalog) IncrementCompactionFailureCount(ctx context.Context, collectionID types.UniqueID) error {
+	return tc.metaDomain.CollectionDb(ctx).IncrementCompactionFailureCount(collectionID.String())
+}
