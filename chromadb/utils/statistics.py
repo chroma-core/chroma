@@ -11,8 +11,8 @@ Example:
     >>> client = chromadb.Client()
     >>> collection = client.get_or_create_collection("my_collection")
     >>>
-    >>> # Attach statistics function
-    >>> attach_statistics_function(collection)
+    >>> # Attach statistics function with output collection name
+    >>> attach_statistics_function(collection, "my_collection_statistics")
     >>>
     >>> # Add some data
     >>> collection.add(
@@ -21,8 +21,8 @@ Example:
     ...     metadatas=[{"category": "A"}, {"category": "B"}]
     ... )
     >>>
-    >>> # Get statistics
-    >>> stats = get_statistics(collection)
+    >>> # Get statistics from the named output collection
+    >>> stats = get_statistics(collection, "my_collection_statistics")
     >>> print(stats)
 """
 
@@ -49,7 +49,7 @@ def get_statistics_fn_name(collection: "Collection") -> str:
 
 
 def attach_statistics_function(
-    collection: "Collection", stats_collection_name: Optional[str] = None
+    collection: "Collection", stats_collection_name: str
 ) -> "AttachedFunction":
     """Attach statistics collection function to a collection.
 
@@ -60,20 +60,16 @@ def attach_statistics_function(
     Args:
         collection: The collection to enable statistics for
         stats_collection_name: Name of the collection where statistics will be stored.
-                               If None, defaults to "{collection_name}_statistics".
 
     Returns:
         AttachedFunction: The attached statistics function
 
     Example:
-        >>> attach_statistics_function(collection)
+        >>> attach_statistics_function(collection, "my_collection_statistics")
         >>> collection.add(ids=["id1"], documents=["doc1"], metadatas=[{"key": "value"}])
         >>> # Statistics are automatically computed
-        >>> stats = get_statistics(collection)
+        >>> stats = get_statistics(collection, "my_collection_statistics")
     """
-    if stats_collection_name is None:
-        stats_collection_name = f"{collection.name}_statistics"
-
     return collection.attach_function(
         name=get_statistics_fn_name(collection),
         function_id="statistics",
@@ -125,7 +121,7 @@ def detach_statistics_function(
 
 
 def get_statistics(
-    collection: "Collection", key: Optional[str] = None
+    collection: "Collection", stats_collection_name: str, key: Optional[str] = None
 ) -> Dict[str, Any]:
     """Get the current statistics for a collection.
 
@@ -134,6 +130,7 @@ def get_statistics(
 
     Args:
         collection: The collection to get statistics for
+        stats_collection_name: Name of the statistics collection to read from.
         key: Optional metadata key to filter statistics for. If provided,
              only returns statistics for that specific key.
 
@@ -154,14 +151,14 @@ def get_statistics(
             }
 
     Example:
-        >>> attach_statistics_function(collection)
+        >>> attach_statistics_function(collection, "my_collection_statistics")
         >>> collection.add(
         ...     ids=["id1", "id2"],
         ...     documents=["doc1", "doc2"],
         ...     metadatas=[{"category": "A", "score": 10}, {"category": "B", "score": 10}]
         ... )
         >>> # Wait for statistics to be computed
-        >>> stats = get_statistics(collection)
+        >>> stats = get_statistics(collection, "my_collection_statistics")
         >>> print(stats)
         {
             "statistics": {
@@ -181,11 +178,9 @@ def get_statistics(
     # Import here to avoid circular dependency
     from chromadb.api.models.Collection import Collection
 
-    af = get_statistics_fn(collection)
-
     # Get the statistics output collection model from the server
     stats_collection_model = collection._client.get_collection(
-        name=af.output_collection,
+        name=stats_collection_name,
         tenant=collection.tenant,
         database=collection.database,
     )
