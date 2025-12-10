@@ -59,7 +59,7 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
     let position1 = log.append(vec![10, 11, 12, 13]).await.unwrap();
     let fragment1 = FragmentCondition {
         path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
-        seq_no: FragmentIdentifier(1),
+        seq_no: FragmentIdentifier::SeqNo(1),
         start: 1,
         limit: 2,
         num_bytes: 1044,
@@ -68,7 +68,7 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
     let position2 = log.append(vec![20, 21, 22, 23]).await.unwrap();
     let fragment2 = FragmentCondition {
         path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000002.parquet".to_string(),
-        seq_no: FragmentIdentifier(2),
+        seq_no: FragmentIdentifier::SeqNo(2),
         start: 2,
         limit: 3,
         num_bytes: 1044,
@@ -77,7 +77,7 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
     let position3 = log.append(vec![30, 31, 32, 33]).await.unwrap();
     let fragment3 = FragmentCondition {
         path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000003.parquet".to_string(),
-        seq_no: FragmentIdentifier(3),
+        seq_no: FragmentIdentifier::SeqNo(3),
         start: 3,
         limit: 4,
         num_bytes: 1044,
@@ -86,7 +86,7 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
     let position4 = log.append(vec![40, 41, 42, 43]).await.unwrap();
     let fragment4 = FragmentCondition {
         path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000004.parquet".to_string(),
-        seq_no: FragmentIdentifier(4),
+        seq_no: FragmentIdentifier::SeqNo(4),
         start: 4,
         limit: 5,
         num_bytes: 1044,
@@ -144,8 +144,8 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
     let postconditions = [
         Condition::Garbage(GarbageCondition {
             first_to_keep: LogPosition::from_offset(2),
-            fragments_to_drop_start: FragmentIdentifier(1),
-            fragments_to_drop_limit: FragmentIdentifier(2),
+            fragments_to_drop_start: FragmentIdentifier::SeqNo(1),
+            fragments_to_drop_limit: FragmentIdentifier::SeqNo(2),
             snapshot_for_root: Some(SnapshotCondition {
                 depth: 1,
                 start: LogPosition::from_offset(2),

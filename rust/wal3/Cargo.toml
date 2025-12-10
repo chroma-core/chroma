@@ -17,6 +17,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
+uuid = { workspace = true }
 
 chroma-storage = { workspace = true }
 chroma-error.workspace = true
@@ -25,5 +26,5 @@ chroma-types = { workspace = true }
 
 [dev-dependencies]
 guacamole = { version = "0.11", default-features = false }
-proptest.workspace = true
-rand.workspace = true
+proptest = { workspace = true }
+rand = { workspace = true }

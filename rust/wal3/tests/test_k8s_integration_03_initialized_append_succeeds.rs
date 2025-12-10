@@ -45,7 +45,7 @@ async fn test_k8s_integration_03_initialized_append_succeeds() {
     let position = log.append(vec![42, 43, 44, 45]).await.unwrap();
     let fragment1 = FragmentCondition {
         path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
-        seq_no: FragmentIdentifier(1),
+        seq_no: FragmentIdentifier::SeqNo(1),
         start: 1,
         limit: 2,
         num_bytes: 1044,

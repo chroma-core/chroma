@@ -28,7 +28,7 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
         &LogWriterOptions::default(),
         &storage,
         "test_k8s_integration_05_crash_safety_initialize_fails",
-        FragmentIdentifier(1),
+        FragmentIdentifier::SeqNo(1),
         position,
         vec![vec![42, 43, 44, 45]],
         None,
@@ -41,7 +41,7 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
     );
     let fragment1 = FragmentCondition {
         path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
-        seq_no: FragmentIdentifier(1),
+        seq_no: FragmentIdentifier::SeqNo(1),
         start: 1,
         limit: 2,
         num_bytes: size,
@@ -56,7 +56,7 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
         }),
         Condition::Fragment(FragmentCondition {
             path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
-            seq_no: FragmentIdentifier(1),
+            seq_no: FragmentIdentifier::SeqNo(1),
             start: 1,
             limit: 2,
             num_bytes: size,
@@ -83,7 +83,7 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
     let position = log.append(vec![81, 82, 83, 84]).await.unwrap();
     let fragment2 = FragmentCondition {
         path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000002.parquet".to_string(),
-        seq_no: FragmentIdentifier(2),
+        seq_no: FragmentIdentifier::SeqNo(2),
         start: 2,
         limit: 3,
         num_bytes: 1044,
