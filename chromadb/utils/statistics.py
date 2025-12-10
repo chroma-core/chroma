@@ -26,7 +26,7 @@ Example:
     >>> print(stats)
 """
 
-from typing import TYPE_CHECKING, Optional, Dict, Any, cast
+from typing import TYPE_CHECKING, Optional, Dict, Any, cast, Tuple
 from collections import defaultdict
 from chromadb.api.types import OneOrMany, Where, maybe_cast_one_to_many
 from chromadb.api.functions import STATISTICS_FUNCTION
@@ -50,7 +50,7 @@ def get_statistics_fn_name(collection: "Collection") -> str:
 
 def attach_statistics_function(
     collection: "Collection", stats_collection_name: str
-) -> "AttachedFunction":
+) -> Tuple["AttachedFunction", bool]:
     """Attach statistics collection function to a collection.
 
     This attaches the statistics function which will automatically compute
@@ -62,10 +62,13 @@ def attach_statistics_function(
         stats_collection_name: Name of the collection where statistics will be stored.
 
     Returns:
-        AttachedFunction: The attached statistics function
+        Tuple of (AttachedFunction, created) where created is True if newly created,
+        False if already existed (idempotent request)
 
     Example:
-        >>> attach_statistics_function(collection, "my_collection_statistics")
+        >>> attached_fn, created = attach_statistics_function(collection, "my_collection_statistics")
+        >>> if created:
+        ...     print("Statistics function newly attached")
         >>> collection.add(ids=["id1"], documents=["doc1"], metadatas=[{"key": "value"}])
         >>> # Statistics are automatically computed
         >>> stats = get_statistics(collection, "my_collection_statistics")

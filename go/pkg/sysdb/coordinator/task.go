@@ -94,6 +94,7 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 	}
 
 	var attachedFunctionID uuid.UUID = uuid.New()
+	var created bool = true // Track if we created a new function or reused existing
 
 	// ===== Step 1: Create attached function with is_ready = false =====
 	err := s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
@@ -113,6 +114,7 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			if matches {
 				// If the attached function matches the request, use it
 				attachedFunctionID = attachedFunction.ID
+				created = !attachedFunction.IsReady // This was an idempotent request, not a new creation
 				return nil
 			}
 
@@ -225,6 +227,7 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 		AttachedFunction: &coordinatorpb.AttachedFunction{
 			Id: attachedFunctionID.String(),
 		},
+		Created: created,
 	}, nil
 }
 
@@ -523,6 +526,8 @@ func (s *Coordinator) FinishCreateAttachedFunction(ctx context.Context, req *coo
 		return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
 	}
 
+	var created bool = true // Track if we created output collection or it already existed
+
 	// Execute all operations in a transaction for atomicity
 	err = s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// 1. Get the attached function to retrieve metadata
@@ -539,6 +544,7 @@ func (s *Coordinator) FinishCreateAttachedFunction(ctx context.Context, req *coo
 		// 2. Check if output collection already exists (idempotency)
 		if attachedFunction.IsReady {
 			log.Info("FinishCreateAttachedFunction: attached function is already ready", zap.String("attached_function_id", attachedFunctionID.String()))
+			created = false // This was an idempotent request, not a new creation
 			return nil
 		}
 
@@ -640,7 +646,9 @@ func (s *Coordinator) FinishCreateAttachedFunction(ctx context.Context, req *coo
 		return nil, err
 	}
 
-	return &coordinatorpb.FinishCreateAttachedFunctionResponse{}, nil
+	return &coordinatorpb.FinishCreateAttachedFunctionResponse{
+		Created: created,
+	}, nil
 }
 
 // CleanupExpiredPartialAttachedFunctions finds and soft deletes attached functions that were partially created

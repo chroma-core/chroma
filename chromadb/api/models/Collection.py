@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Union, List, cast, Dict, Any
+from typing import TYPE_CHECKING, Optional, Union, List, cast, Dict, Any, Tuple
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
 from chromadb.api.types import (
@@ -506,7 +506,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         name: str,
         output_collection: str,
         params: Optional[Dict[str, Any]] = None,
-    ) -> "AttachedFunction":
+    ) -> Tuple["AttachedFunction", bool]:
         """Attach a function to this collection.
 
         Args:
@@ -516,7 +516,8 @@ class Collection(CollectionCommon["ServerAPI"]):
             params: Optional dictionary with function-specific parameters
 
         Returns:
-            AttachedFunction: Object representing the attached function
+            Tuple of (AttachedFunction, created) where created is True if newly created,
+            False if already existed (idempotent request)
 
         Example:
             >>> from chromadb.api.functions import STATISTICS_FUNCTION
@@ -525,6 +526,10 @@ class Collection(CollectionCommon["ServerAPI"]):
             ...     name="mycoll_stats_fn",
             ...     output_collection="mycoll_stats",
             ... )
+            >>> if created:
+            ...     print("New function attached")
+            ... else:
+            ...     print("Function already existed")
         """
         function_id = function.value if isinstance(function, Function) else function
         return self._client.attach_function(

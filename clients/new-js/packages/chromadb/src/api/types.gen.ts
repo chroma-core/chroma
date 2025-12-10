@@ -21,6 +21,10 @@ export type AttachFunctionRequest = {
 
 export type AttachFunctionResponse = {
     attached_function: AttachedFunctionInfo;
+    /**
+     * True if newly created, false if already existed (idempotent request)
+     */
+    created: boolean;
 };
 
 /**
