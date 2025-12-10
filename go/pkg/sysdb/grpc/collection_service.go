@@ -10,6 +10,7 @@ import (
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
+	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
@@ -77,6 +78,20 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 		}
 		res.Created = false
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	// Validate that user is not trying to set system-reserved metadata keys.
+	// This check is intentionally at the gRPC API layer so internal code (e.g., task.go
+	// creating output collections for attached functions) can set these keys directly
+	// by calling catalog methods, bypassing this validation.
+	if createCollection.Metadata != nil {
+		for key := range createCollection.Metadata.Metadata {
+			if coordinator.SystemCollectionMetadataKeys[key] {
+				log.Warn("CreateCollection failed. attempt to set system-reserved metadata key", zap.String("key", key), zap.String("collection_id", req.Id))
+				grpcErr, _ := grpcutils.BuildInvalidArgumentGrpcError("metadata", common.ErrSystemMetadataKeyNotAllowed.Error())
+				return res, grpcErr
+			}
+		}
 	}
 
 	// Convert the request segments to create segment models

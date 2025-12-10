@@ -450,6 +450,67 @@ def test_partial_attach_function_repair(
     assert created is True
 
 
+def test_cannot_modify_system_metadata_key(basic_http_client: System) -> None:
+    """Test that users cannot modify the system-reserved metadata key on output collections"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    # Create input collection and attach a function
+    input_collection = client.create_collection(name="input_collection")
+    input_collection.add(ids=["id1"], documents=["test"])
+
+    attached_fn, created = input_collection.attach_function(
+        name="my_function",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="output_collection",
+        params=None,
+    )
+    assert attached_fn is not None
+    assert created is True
+
+    # Get the output collection
+    output_collection = client.get_collection(name="output_collection")
+
+    # Verify the output collection has the system metadata key
+    assert output_collection.metadata is not None
+    assert "chroma:source_attached_function_id" in output_collection.metadata
+
+    # Attempt to modify the system-reserved metadata key should fail
+    with pytest.raises(
+        ChromaError, match="cannot set or modify system-reserved metadata key"
+    ):
+        output_collection.modify(
+            metadata={"chroma:source_attached_function_id": "fake-value"}
+        )
+
+    # Verify the metadata was not changed
+    output_collection = client.get_collection(name="output_collection")
+    assert output_collection.metadata["chroma:source_attached_function_id"] == str(
+        attached_fn.id
+    )
+
+    # Clean up
+    input_collection.detach_function(attached_fn.name, delete_output_collection=True)
+
+
+def test_cannot_create_collection_with_system_metadata_key(
+    basic_http_client: System,
+) -> None:
+    """Test that users cannot create a collection with a system-reserved metadata key"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    # Attempt to create a collection with the system-reserved metadata key should fail
+    # The error message contains "invalid metadata" as the gRPC status message
+    with pytest.raises(
+        ChromaError, match="invalid metadata"
+    ):
+        client.create_collection(
+            name="test_collection",
+            metadata={"chroma:source_attached_function_id": "fake-value"},
+        )
+
+
 def test_count_function_attach_and_detach_attach_attach(
     basic_http_client: System,
 ) -> None:
