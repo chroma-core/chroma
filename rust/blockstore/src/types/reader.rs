@@ -137,9 +137,10 @@ impl<
         }
     }
 
-    pub async fn load_blocks_for_keys(&self, keys: impl IntoIterator<Item = (String, K)>) {
+    // NOTE(sicheng): This loads the underlying data concurrently
+    pub async fn load_data_for_keys(&self, keys: impl IntoIterator<Item = (String, K)>) {
         match self {
-            BlockfileReader::MemoryBlockfileReader(_reader) => unimplemented!(),
+            BlockfileReader::MemoryBlockfileReader(_) => (),
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.load_blocks_for_keys(keys).await
             }

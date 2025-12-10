@@ -533,7 +533,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             if !self.block_manager.cached(block_id).await
                 && !self.loaded_blocks.read().contains_key(block_id)
             {
-                futures.push(self.get_block(*block_id, StorageRequestPriority::P1));
+                futures.push(self.get_block(*block_id, StorageRequestPriority::P0));
             }
         }
         join_all(futures).await;

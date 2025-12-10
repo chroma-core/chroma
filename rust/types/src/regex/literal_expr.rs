@@ -79,7 +79,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
     // Return the max branching factor during the search
     fn maximum_branching_factor(&self) -> usize;
 
-    async fn prefetch_ngrams<'me, Ngrams>(&'me self, _ngrams: Ngrams)
+    async fn load_ngrams<'me, Ngrams>(&'me self, _ngrams: Ngrams)
     where
         Ngrams: IntoIterator<Item = &'me str> + Send + Sync,
     {
@@ -180,7 +180,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
             return Ok(HashSet::new());
         }
 
-        self.prefetch_ngrams(
+        self.load_ngrams(
             ngram_vec
                 .iter()
                 .flat_map(|ngrams| ngrams.iter().map(|ngram| ngram.as_str())),
