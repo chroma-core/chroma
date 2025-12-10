@@ -102,8 +102,8 @@ impl From<object_store::Error> for StorageError {
             object_store::Error::InvalidPath { source } => StorageError::Generic {
                 source: Arc::new(source),
             },
-            object_store::Error::Generic { store, source } => StorageError::Generic {
-                source: Arc::new(std::io::Error::other(format!("{}: {}", store, source))),
+            err @ object_store::Error::Generic { .. } => StorageError::Generic {
+                source: Arc::new(err),
             },
             object_store::Error::JoinError { source } => StorageError::Generic {
                 source: Arc::new(source),
@@ -111,8 +111,8 @@ impl From<object_store::Error> for StorageError {
             object_store::Error::UnknownConfigurationKey { store, key } => {
                 StorageError::UnknownConfigurationKey { store, key }
             }
-            _ => StorageError::Generic {
-                source: Arc::new(e),
+            err => StorageError::Generic {
+                source: Arc::new(err),
             },
         }
     }
