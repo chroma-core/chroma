@@ -6,7 +6,7 @@ import google.generativeai as genai
 import chromadb
 from chromadb.utils import embedding_functions
 
-model = genai.GenerativeModel("gemini-pro")
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 
 def build_prompt(query: str, context: List[str]) -> str:
