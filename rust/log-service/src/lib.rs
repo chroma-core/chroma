@@ -2328,7 +2328,7 @@ impl Configurable<LogServerConfig> for LogServer {
         let storage = Storage::try_from_config(&config.storage, registry).await?;
         let storage = Arc::new(storage);
         let dirty_log = LogWriter::open_or_initialize(
-            config.dirty.clone().unwrap_or(config.writer.clone()),
+            config.dirty.as_ref().unwrap_or(&config.writer).clone(),
             Arc::clone(&storage),
             &MarkDirty::path_for_hostname(&config.my_member_id),
             "dirty log writer",
