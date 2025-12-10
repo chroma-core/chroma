@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use setsum::Setsum;
+use uuid::Uuid;
 
 mod backoff;
 mod batch_manager;
@@ -143,7 +144,7 @@ impl chroma_error::ChromaError for Error {
 #[derive(Clone, Debug)]
 pub enum SnapshotPointerOrFragmentIdentifier {
     SnapshotPointer(SnapshotPointer),
-    FragmentIdentifier(u64),
+    FragmentIdentifier(FragmentIdentifier),
     Stringy(String),
 }
 
@@ -153,8 +154,8 @@ impl From<SnapshotPointer> for SnapshotPointerOrFragmentIdentifier {
     }
 }
 
-impl From<u64> for SnapshotPointerOrFragmentIdentifier {
-    fn from(inner: u64) -> Self {
+impl From<FragmentIdentifier> for SnapshotPointerOrFragmentIdentifier {
+    fn from(inner: FragmentIdentifier) -> Self {
         Self::FragmentIdentifier(inner)
     }
 }
@@ -163,7 +164,7 @@ impl std::fmt::Display for SnapshotPointerOrFragmentIdentifier {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::SnapshotPointer(ptr) => write!(f, "Snapshot({:?})", ptr.path_to_snapshot),
-            Self::FragmentIdentifier(seq) => write!(f, "Fragment({})", *seq),
+            Self::FragmentIdentifier(ident) => write!(f, "Fragment({ident})"),
             Self::Stringy(s) => write!(f, "Stringy({s})"),
         }
     }
@@ -502,64 +503,97 @@ pub struct GarbageCollectionOptions {
 
 /////////////////////////////////////////// FragmentIdentifier //////////////////////////////////////////
 
-/// A FragmentIdentifier is an identifier that corresponds to the the number of fragments that have been
-/// issued prior to the segment with this FragmentIdentifier.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash, serde::Deserialize, serde::Serialize,
-)]
-pub struct FragmentIdentifier(pub u64);
+/// A FragmentIdentifier uniquely identifies a fragment within a log.
+///
+/// There are two variants:
+/// - `SeqNo(u64)`: A sequential number assigned in order of fragment creation. This variant
+///   supports operations like `successor()` and range-based garbage collection.
+/// - `Uuid(Uuid)`: A universally unique identifier. UUIDs are ordered by their byte
+///   representation, which for UUID v7 corresponds to temporal ordering.
+///
+/// A manifest must contain fragments of only one variant type (enforced by scrubbing).
+///
+/// Ordering: `SeqNo` variants compare by their inner u64. `Uuid` variants compare by their byte
+/// representation. Cross-variant comparison orders all `SeqNo` values before all `Uuid` values,
+/// but this should not occur in practice since manifests enforce uniformity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
+#[serde(untagged)]
+pub enum FragmentIdentifier {
+    /// Sequential fragment identifier. Supports successor() and range-based operations.
+    SeqNo(u64),
+    /// UUID-based fragment identifier. Ordered by byte representation.
+    Uuid(Uuid),
+}
+
+impl PartialOrd for FragmentIdentifier {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FragmentIdentifier {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (FragmentIdentifier::SeqNo(a), FragmentIdentifier::SeqNo(b)) => a.cmp(b),
+            (FragmentIdentifier::Uuid(a), FragmentIdentifier::Uuid(b)) => a.cmp(b),
+            // Cross-variant: SeqNo < Uuid (should not occur in practice due to manifest uniformity)
+            (FragmentIdentifier::SeqNo(_), FragmentIdentifier::Uuid(_)) => std::cmp::Ordering::Less,
+            (FragmentIdentifier::Uuid(_), FragmentIdentifier::SeqNo(_)) => {
+                std::cmp::Ordering::Greater
+            }
+        }
+    }
+}
 
 impl FragmentIdentifier {
-    const BEGIN: FragmentIdentifier = FragmentIdentifier(1);
+    pub const BEGIN: FragmentIdentifier = FragmentIdentifier::SeqNo(1);
 
-    /// Returns the successor of this FragmentIdentifier, or None if this FragmentIdentifier is the maximum
-    pub fn successor(&self) -> Option<Self> {
-        if self.0 == u64::MAX {
-            None
-        } else {
-            Some(FragmentIdentifier(self.0 + 1))
+    /// Returns the inner u64 for SeqNo variants, or None for Uuid variants.
+    pub fn as_seq_no(&self) -> Option<u64> {
+        match self {
+            FragmentIdentifier::SeqNo(x) => Some(*x),
+            FragmentIdentifier::Uuid(_) => None,
         }
     }
 
-    // Round down to the nearest multiple of 5k.
-    pub fn bucket(&self) -> u64 {
-        (self.0 / 4_096) * 4_096
+    /// Returns the inner Uuid for Uuid variants, or None for SeqNo variants.
+    pub fn as_uuid(&self) -> Option<Uuid> {
+        match self {
+            FragmentIdentifier::SeqNo(_) => None,
+            FragmentIdentifier::Uuid(u) => Some(*u),
+        }
+    }
+
+    /// Returns the successor of this FragmentIdentifier, or None if this FragmentIdentifier is the
+    /// maximum or is a Uuid.
+    pub fn successor(&self) -> Option<Self> {
+        match self {
+            FragmentIdentifier::SeqNo(x) => {
+                if *x == u64::MAX {
+                    None
+                } else {
+                    Some(FragmentIdentifier::SeqNo(x + 1))
+                }
+            }
+            FragmentIdentifier::Uuid(_) => None,
+        }
+    }
+
+    /// Round down to the nearest multiple of 4k. Returns None for Uuid variants.
+    pub fn bucket(&self) -> Option<u64> {
+        match self {
+            FragmentIdentifier::SeqNo(x) => Some((x / 4_096) * 4_096),
+            FragmentIdentifier::Uuid(_) => None,
+        }
     }
 }
 
 impl std::fmt::Display for FragmentIdentifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::ops::Add<FragmentIdentifier> for u64 {
-    type Output = FragmentIdentifier;
-
-    fn add(self, rhs: FragmentIdentifier) -> Self::Output {
-        FragmentIdentifier(self.wrapping_add(rhs.0))
-    }
-}
-
-impl std::ops::Add<u64> for FragmentIdentifier {
-    type Output = FragmentIdentifier;
-
-    fn add(self, rhs: u64) -> Self::Output {
-        FragmentIdentifier(self.0.wrapping_add(rhs))
-    }
-}
-
-impl std::ops::Sub<FragmentIdentifier> for FragmentIdentifier {
-    type Output = u64;
-
-    fn sub(self, rhs: FragmentIdentifier) -> Self::Output {
-        self.0.wrapping_sub(rhs.0)
-    }
-}
-
-impl std::ops::AddAssign<u64> for FragmentIdentifier {
-    fn add_assign(&mut self, rhs: u64) {
-        self.0 = self.0.wrapping_add(rhs);
+        match self {
+            FragmentIdentifier::SeqNo(x) => write!(f, "{x}"),
+            FragmentIdentifier::Uuid(u) => write!(f, "{u}"),
+        }
     }
 }
 
@@ -610,34 +644,45 @@ where
 
 ////////////////////////////////////////// Fragment Paths //////////////////////////////////////////
 
-pub fn fragment_prefix() -> String {
-    "log/".to_string()
+const FRAGMENT_PREFIX_WITH_TRAILING_SLASH: &str = "log/";
+
+pub fn prefixed_fragment_path(prefix: &str, fragment_id: FragmentIdentifier) -> String {
+    format!("{prefix}/{}", unprefixed_fragment_path(fragment_id))
 }
 
-pub fn prefixed_fragment_path(prefix: &str, fragment_identifier: FragmentIdentifier) -> String {
-    format!(
-        "{}/{}Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
-        prefix,
-        fragment_prefix(),
-        fragment_identifier.bucket(),
-        fragment_identifier.0,
-    )
-}
-
-pub fn unprefixed_fragment_path(fragment_identifier: FragmentIdentifier) -> String {
-    format!(
-        "log/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
-        fragment_identifier.bucket(),
-        fragment_identifier.0,
-    )
+pub fn unprefixed_fragment_path(fragment_id: FragmentIdentifier) -> String {
+    match fragment_id {
+        FragmentIdentifier::SeqNo(seq_no) => {
+            let bucket = fragment_id.bucket().expect("SeqNo always has a bucket");
+            format!(
+                "{}Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
+                FRAGMENT_PREFIX_WITH_TRAILING_SLASH, bucket, seq_no,
+            )
+        }
+        FragmentIdentifier::Uuid(uuid) => {
+            format!(
+                "{}Hash={}/Uuid={}.parquet",
+                FRAGMENT_PREFIX_WITH_TRAILING_SLASH,
+                uuid.to_u128_le() as u64 & 0xffff,
+                uuid,
+            )
+        }
+    }
 }
 
 pub fn parse_fragment_path(path: &str) -> Option<FragmentIdentifier> {
     // FragmentIdentifier is always in the basename.
     let (_, basename) = path.rsplit_once('/')?;
-    let fsn_equals_number = basename.strip_suffix(".parquet")?;
-    let number = fsn_equals_number.strip_prefix("FragmentSeqNo=")?;
-    u64::from_str_radix(number, 16).ok().map(FragmentIdentifier)
+    let name = basename.strip_suffix(".parquet")?;
+    if let Some(number) = name.strip_prefix("FragmentSeqNo=") {
+        u64::from_str_radix(number, 16)
+            .ok()
+            .map(FragmentIdentifier::SeqNo)
+    } else if let Some(uuid_str) = name.strip_prefix("Uuid=") {
+        uuid_str.parse().ok().map(FragmentIdentifier::Uuid)
+    } else {
+        None
+    }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -650,7 +695,220 @@ mod tests {
     fn paths() {
         assert_eq!(
             "THIS_IS_THE_COLLECTION/log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet",
-            prefixed_fragment_path("THIS_IS_THE_COLLECTION", FragmentIdentifier(1))
+            prefixed_fragment_path("THIS_IS_THE_COLLECTION", FragmentIdentifier::SeqNo(1))
         );
+    }
+
+    #[test]
+    fn paths_uuid() {
+        let uuid = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let path = prefixed_fragment_path("THIS_IS_THE_COLLECTION", FragmentIdentifier::Uuid(uuid));
+        println!("prefixed_fragment_path(Uuid(...)): {path}");
+        assert_eq!(
+            "THIS_IS_THE_COLLECTION/log/Hash=3669/Uuid=550e8400-e29b-41d4-a716-446655440000.parquet",
+            path
+        );
+    }
+
+    #[test]
+    fn prefixed_fragment_path_seq_no_round_trip() {
+        let original = FragmentIdentifier::SeqNo(4097);
+        let path = prefixed_fragment_path("test_prefix", original);
+        println!("prefixed_fragment_path(SeqNo(4097)): {path}");
+        let parsed = parse_fragment_path(&path);
+        assert_eq!(parsed, Some(original));
+    }
+
+    #[test]
+    fn prefixed_fragment_path_uuid_round_trip() {
+        let uuid = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let original = FragmentIdentifier::Uuid(uuid);
+        let path = prefixed_fragment_path("test_prefix", original);
+        println!("prefixed_fragment_path(Uuid(...)): {path}");
+        let parsed = parse_fragment_path(&path);
+        assert_eq!(parsed, Some(original));
+    }
+
+    #[test]
+    fn fragment_identifier_serde_round_trip() {
+        let original = FragmentIdentifier::SeqNo(42);
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized FragmentIdentifier::SeqNo(42): {serialized}");
+        let deserialized: FragmentIdentifier =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn fragment_identifier_uuid_serde_round_trip() {
+        let uuid = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let original = FragmentIdentifier::Uuid(uuid);
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized FragmentIdentifier::Uuid(...): {serialized}");
+        let deserialized: FragmentIdentifier =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn parse_fragment_path_seq_no() {
+        let path = "prefix/log/Bucket=0000000000001000/FragmentSeqNo=0000000000001234.parquet";
+        let result = parse_fragment_path(path);
+        assert_eq!(result, Some(FragmentIdentifier::SeqNo(0x1234)));
+    }
+
+    #[test]
+    fn parse_fragment_path_uuid() {
+        let uuid = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let path = "prefix/log/Uuid=550e8400-e29b-41d4-a716-446655440000.parquet";
+        let result = parse_fragment_path(path);
+        assert_eq!(result, Some(FragmentIdentifier::Uuid(uuid)));
+    }
+
+    #[test]
+    fn parse_fragment_path_invalid() {
+        let path = "prefix/log/Unknown=something.parquet";
+        let result = parse_fragment_path(path);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn unprefixed_fragment_path_seq_no_round_trip() {
+        let original = FragmentIdentifier::SeqNo(4097);
+        let path = unprefixed_fragment_path(original);
+        println!("unprefixed_fragment_path(SeqNo(4097)): {path}");
+        let parsed = parse_fragment_path(&path);
+        assert_eq!(parsed, Some(original));
+    }
+
+    #[test]
+    fn unprefixed_fragment_path_uuid_round_trip() {
+        let uuid = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let original = FragmentIdentifier::Uuid(uuid);
+        let path = unprefixed_fragment_path(original);
+        println!("unprefixed_fragment_path(Uuid(...)): {path}");
+        let parsed = parse_fragment_path(&path);
+        assert_eq!(parsed, Some(original));
+    }
+
+    #[test]
+    fn fragment_identifier_seq_no_ordering() {
+        let a = FragmentIdentifier::SeqNo(1);
+        let b = FragmentIdentifier::SeqNo(2);
+        let c = FragmentIdentifier::SeqNo(100);
+
+        assert!(a < b);
+        assert!(b < c);
+        assert!(a < c);
+        assert!(b > a);
+        assert!(c > b);
+        assert!(c > a);
+
+        let same1 = FragmentIdentifier::SeqNo(42);
+        let same2 = FragmentIdentifier::SeqNo(42);
+        assert_eq!(same1.cmp(&same2), std::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn fragment_identifier_uuid_ordering() {
+        // UUIDs are ordered by their byte representation.
+        // These UUIDs differ in their last byte for easy comparison.
+        let uuid1 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap();
+        let uuid2 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap();
+        let uuid3 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440003").unwrap();
+
+        let a = FragmentIdentifier::Uuid(uuid1);
+        let b = FragmentIdentifier::Uuid(uuid2);
+        let c = FragmentIdentifier::Uuid(uuid3);
+
+        println!("uuid1: {uuid1}");
+        println!("uuid2: {uuid2}");
+        println!("uuid3: {uuid3}");
+
+        assert!(a < b, "uuid1 should be less than uuid2");
+        assert!(b < c, "uuid2 should be less than uuid3");
+        assert!(a < c, "uuid1 should be less than uuid3");
+        assert!(b > a, "uuid2 should be greater than uuid1");
+        assert!(c > b, "uuid3 should be greater than uuid2");
+        assert!(c > a, "uuid3 should be greater than uuid1");
+
+        let same1 = FragmentIdentifier::Uuid(uuid2);
+        let same2 = FragmentIdentifier::Uuid(uuid2);
+        assert_eq!(same1.cmp(&same2), std::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn fragment_identifier_cross_variant_ordering() {
+        // Cross-variant comparison: SeqNo < Uuid
+        let seq_no = FragmentIdentifier::SeqNo(u64::MAX);
+        let uuid = FragmentIdentifier::Uuid(uuid::Uuid::nil());
+
+        assert!(
+            seq_no < uuid,
+            "SeqNo should always be less than Uuid in cross-variant comparison"
+        );
+        assert!(
+            uuid > seq_no,
+            "Uuid should always be greater than SeqNo in cross-variant comparison"
+        );
+    }
+
+    #[test]
+    fn fragment_identifier_sorting() {
+        let uuid1 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap();
+        let uuid2 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap();
+
+        let mut seq_nos = vec![
+            FragmentIdentifier::SeqNo(3),
+            FragmentIdentifier::SeqNo(1),
+            FragmentIdentifier::SeqNo(2),
+        ];
+        seq_nos.sort();
+        assert_eq!(
+            seq_nos,
+            vec![
+                FragmentIdentifier::SeqNo(1),
+                FragmentIdentifier::SeqNo(2),
+                FragmentIdentifier::SeqNo(3),
+            ]
+        );
+
+        let mut uuids = vec![
+            FragmentIdentifier::Uuid(uuid2),
+            FragmentIdentifier::Uuid(uuid1),
+        ];
+        uuids.sort();
+        assert_eq!(
+            uuids,
+            vec![
+                FragmentIdentifier::Uuid(uuid1),
+                FragmentIdentifier::Uuid(uuid2),
+            ]
+        );
+    }
+
+    #[test]
+    fn fragment_identifier_max_finds_correct_value() {
+        // Test that .max() works correctly for SeqNo
+        let fragments_seq = [
+            FragmentIdentifier::SeqNo(5),
+            FragmentIdentifier::SeqNo(2),
+            FragmentIdentifier::SeqNo(8),
+            FragmentIdentifier::SeqNo(1),
+        ];
+        let max_seq = fragments_seq.iter().max();
+        assert_eq!(max_seq, Some(&FragmentIdentifier::SeqNo(8)));
+
+        // Test that .max() works correctly for Uuid
+        let uuid1 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap();
+        let uuid2 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap();
+        let uuid3 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440003").unwrap();
+        let fragments_uuid = [
+            FragmentIdentifier::Uuid(uuid2),
+            FragmentIdentifier::Uuid(uuid1),
+            FragmentIdentifier::Uuid(uuid3),
+        ];
+        let max_uuid = fragments_uuid.iter().max();
+        assert_eq!(max_uuid, Some(&FragmentIdentifier::Uuid(uuid3)));
     }
 }

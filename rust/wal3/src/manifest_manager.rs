@@ -71,7 +71,15 @@ impl Staging {
         for (fragment, tx) in fragments.into_iter() {
             if fragment.seq_no == next_seq_no_to_apply && new_manifest.can_apply_fragment(&fragment)
             {
-                next_seq_no_to_apply += 1;
+                let Some(next) = next_seq_no_to_apply.successor() else {
+                    tracing::error!(
+                        "fragment sequence number exhausted at {:?}",
+                        next_seq_no_to_apply
+                    );
+                    self.fragments = postpone;
+                    return None;
+                };
+                next_seq_no_to_apply = next;
                 new_manifest.apply_fragment(fragment);
                 notifiers.push(tx);
             } else {
@@ -330,7 +338,11 @@ impl ManifestManager {
             .offset
             .saturating_add(record_count as u64);
         let seq_no = staging.next_seq_no_to_assign;
-        staging.next_seq_no_to_assign += 1u64;
+        let Some(next_seq_no) = seq_no.successor() else {
+            tracing::error!("fragment sequence number exhausted at {:?}", seq_no);
+            return None;
+        };
+        staging.next_seq_no_to_assign = next_seq_no;
         if position.offset < u64::MAX {
             Some((seq_no, position))
         } else {
@@ -554,7 +566,7 @@ mod tests {
         manager.push_work(
             Fragment {
                 path: "path2".to_string(),
-                seq_no: FragmentIdentifier(2),
+                seq_no: FragmentIdentifier::SeqNo(2),
                 num_bytes: 20,
                 start: LogPosition::from_offset(22),
                 limit: LogPosition::from_offset(42),
@@ -573,7 +585,7 @@ mod tests {
         manager.push_work(
             Fragment {
                 path: "path1".to_string(),
-                seq_no: FragmentIdentifier(1),
+                seq_no: FragmentIdentifier::SeqNo(1),
                 num_bytes: 30,
                 start: LogPosition::from_offset(1),
                 limit: LogPosition::from_offset(22),
@@ -618,7 +630,7 @@ mod tests {
                 fragments: vec![
                     Fragment {
                         path: "path1".to_string(),
-                        seq_no: FragmentIdentifier(1),
+                        seq_no: FragmentIdentifier::SeqNo(1),
                         num_bytes: 30,
                         start: LogPosition::from_offset(1),
                         limit: LogPosition::from_offset(22),
@@ -626,7 +638,7 @@ mod tests {
                     },
                     Fragment {
                         path: "path2".to_string(),
-                        seq_no: FragmentIdentifier(2),
+                        seq_no: FragmentIdentifier::SeqNo(2),
                         num_bytes: 20,
                         start: LogPosition::from_offset(22),
                         limit: LogPosition::from_offset(42),

@@ -41,8 +41,8 @@ impl Garbage {
             snapshots_to_drop: Vec::new(),
             snapshots_to_make: Vec::new(),
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier(0),
-            fragments_to_drop_limit: FragmentIdentifier(0),
+            fragments_to_drop_start: FragmentIdentifier::SeqNo(0),
+            fragments_to_drop_limit: FragmentIdentifier::SeqNo(0),
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         }
@@ -89,8 +89,8 @@ impl Garbage {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier(0),
-            fragments_to_drop_limit: FragmentIdentifier(0),
+            fragments_to_drop_start: FragmentIdentifier::SeqNo(0),
+            fragments_to_drop_limit: FragmentIdentifier::SeqNo(0),
             setsum_to_discard: Setsum::default(),
             first_to_keep,
         };
@@ -252,18 +252,22 @@ impl Garbage {
         }
     }
 
+    // TODO(mcmr.wal3.gc): This method silently produces an empty range when
+    // fragments_to_drop_start or fragments_to_drop_limit are Uuid variants. If UUID-based garbage
+    // collection is needed, this will need to track a Vec<FragmentIdentifier> or similar structure
+    // instead of a range.
     pub fn prefixed_paths_to_delete(&self, prefix: &str) -> impl Iterator<Item = String> {
         let prefix = Arc::new(prefix.to_string());
         let mut paths = vec![];
         for snap in self.snapshots_to_drop.iter() {
             paths.push(format!("{}/{}", prefix, snap.path_to_snapshot));
         }
+        let start = self.fragments_to_drop_start.as_seq_no().unwrap_or(0);
+        let limit = self.fragments_to_drop_limit.as_seq_no().unwrap_or(0);
         paths.into_iter().chain(
-            (self.fragments_to_drop_start.0..self.fragments_to_drop_limit.0)
-                .map(move |seq_no| (seq_no, Arc::clone(&prefix)))
-                .map(|(seq_no, prefix)| {
-                    prefixed_fragment_path(&prefix, FragmentIdentifier(seq_no))
-                }),
+            (start..limit).map(move |seq_no| {
+                prefixed_fragment_path(&prefix, FragmentIdentifier::SeqNo(seq_no))
+            }),
         )
     }
 
@@ -293,7 +297,11 @@ impl Garbage {
         if *first {
             self.fragments_to_drop_start = frag.seq_no;
         }
-        self.fragments_to_drop_limit = frag.seq_no + 1;
+        self.fragments_to_drop_limit = frag.seq_no.successor().ok_or_else(|| {
+            Error::ScrubError(Box::new(ScrubError::Internal(
+                "fragment sequence number has no successor".to_string(),
+            )))
+        })?;
         self.setsum_to_discard += frag.setsum;
         *first = false;
         *first_to_keep = frag.limit;
@@ -584,11 +592,17 @@ mod tests {
         let manifest: Manifest = serde_json::from_str(manifest_json).unwrap();
         let output = Garbage::bug_patch_construct_garbage_from_manifest(
             &manifest,
-            FragmentIdentifier(806913),
+            FragmentIdentifier::SeqNo(806913),
             LogPosition::from_offset(900883),
         );
-        assert_eq!(output.fragments_to_drop_start, FragmentIdentifier(806913));
-        assert_eq!(output.fragments_to_drop_limit, FragmentIdentifier(806913));
+        assert_eq!(
+            output.fragments_to_drop_start,
+            FragmentIdentifier::SeqNo(806913)
+        );
+        assert_eq!(
+            output.fragments_to_drop_limit,
+            FragmentIdentifier::SeqNo(806913)
+        );
         assert_eq!(
             output.setsum_to_discard.hexdigest(),
             "c921d21a0820be5d3b6f2d90942648f2853188bb0e3c6a22fe3dbd81c1e1c380"

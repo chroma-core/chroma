@@ -178,13 +178,13 @@ impl LogWriter {
                 options,
                 storage,
                 prefix,
-                FragmentIdentifier(1),
+                FragmentIdentifier::SeqNo(1),
                 first_record_offset,
                 messages,
                 cmek,
             )
             .await?;
-            let seq_no = FragmentIdentifier(1);
+            let seq_no = FragmentIdentifier::SeqNo(1);
             let num_bytes = num_bytes as u64;
             let frag = Fragment {
                 path,
