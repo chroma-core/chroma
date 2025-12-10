@@ -860,10 +860,13 @@ impl Manifest {
     pub fn apply_garbage(&self, garbage: Garbage) -> Result<Option<Self>, Error> {
         if garbage.is_empty() {
             return Err(Error::GarbageCollectionPrecondition(
-                SnapshotPointerOrFragmentIdentifier::Stringy("cannot apply empty garbage".to_string()),
+                SnapshotPointerOrFragmentIdentifier::Stringy(
+                    "cannot apply empty garbage".to_string(),
+                ),
             ));
         }
-        if garbage.fragments_to_drop_limit <= self.initial_seq_no.unwrap_or(FragmentIdentifier::BEGIN)
+        if garbage.fragments_to_drop_limit
+            <= self.initial_seq_no.unwrap_or(FragmentIdentifier::BEGIN)
             && !garbage
                 .snapshots_to_drop
                 .iter()
@@ -1248,8 +1251,14 @@ mod tests {
             LogPosition::from_offset(100)
         );
         assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(100));
-        assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentIdentifier(10)));
-        assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentIdentifier(10)));
+        assert_eq!(
+            manifest.next_fragment_seq_no(),
+            Some(FragmentIdentifier(10))
+        );
+        assert_eq!(
+            manifest.next_fragment_seq_no(),
+            Some(FragmentIdentifier(10))
+        );
 
         let fragment = Fragment {
             path: "path1".to_string(),
@@ -1300,7 +1309,10 @@ mod tests {
             manifest.next_write_timestamp(),
             LogPosition::from_offset(100)
         );
-        assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentIdentifier(10)));
+        assert_eq!(
+            manifest.next_fragment_seq_no(),
+            Some(FragmentIdentifier(10))
+        );
 
         let fragment = Fragment {
             path: "path1".to_string(),
@@ -1446,7 +1458,10 @@ mod tests {
         };
 
         assert_eq!(manifest, expected_manifest);
-        assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentIdentifier(51)));
+        assert_eq!(
+            manifest.next_fragment_seq_no(),
+            Some(FragmentIdentifier(51))
+        );
     }
 
     #[test]

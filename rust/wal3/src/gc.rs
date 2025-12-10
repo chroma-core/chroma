@@ -13,9 +13,9 @@ use chroma_storage::{
 use crate::manifest::unprefixed_snapshot_path;
 use crate::writer::OnceLogWriter;
 use crate::{
-    deserialize_setsum, prefixed_fragment_path, serialize_setsum, Error, Fragment, FragmentIdentifier,
-    GarbageCollectionOptions, LogPosition, LogWriterOptions, Manifest, ScrubError, Snapshot,
-    SnapshotCache, SnapshotPointer, ThrottleOptions,
+    deserialize_setsum, prefixed_fragment_path, serialize_setsum, Error, Fragment,
+    FragmentIdentifier, GarbageCollectionOptions, LogPosition, LogWriterOptions, Manifest,
+    ScrubError, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
@@ -261,7 +261,9 @@ impl Garbage {
         paths.into_iter().chain(
             (self.fragments_to_drop_start.0..self.fragments_to_drop_limit.0)
                 .map(move |seq_no| (seq_no, Arc::clone(&prefix)))
-                .map(|(seq_no, prefix)| prefixed_fragment_path(&prefix, FragmentIdentifier(seq_no))),
+                .map(|(seq_no, prefix)| {
+                    prefixed_fragment_path(&prefix, FragmentIdentifier(seq_no))
+                }),
         )
     }
 

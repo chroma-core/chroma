@@ -18,9 +18,9 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::{
     unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
-    ExponentialBackoff, Fragment, FragmentIdentifier, Garbage, GarbageCollectionOptions, LogPosition,
-    LogReader, LogReaderOptions, LogWriterOptions, Manifest, ManifestAndETag, ManifestManager,
-    ThrottleOptions,
+    ExponentialBackoff, Fragment, FragmentIdentifier, Garbage, GarbageCollectionOptions,
+    LogPosition, LogReader, LogReaderOptions, LogWriterOptions, Manifest, ManifestAndETag,
+    ManifestManager, ThrottleOptions,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes

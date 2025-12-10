@@ -9,7 +9,8 @@ use crate::reader::read_fragment;
 use crate::writer::MarkDirty;
 use crate::{
     unprefixed_fragment_path, Error, Fragment, FragmentIdentifier, GarbageCollectionOptions,
-    LogPosition, SnapshotCache, SnapshotOptions, SnapshotPointerOrFragmentIdentifier, ThrottleOptions,
+    LogPosition, SnapshotCache, SnapshotOptions, SnapshotPointerOrFragmentIdentifier,
+    ThrottleOptions,
 };
 
 ////////////////////////////////////////////// Staging /////////////////////////////////////////////
@@ -315,7 +316,10 @@ impl ManifestManager {
     }
 
     /// Assign a timestamp to a record.
-    pub fn assign_timestamp(&self, record_count: usize) -> Option<(FragmentIdentifier, LogPosition)> {
+    pub fn assign_timestamp(
+        &self,
+        record_count: usize,
+    ) -> Option<(FragmentIdentifier, LogPosition)> {
         // SAFETY(rescrv):  Mutex poisoning.
         let mut staging = self.staging.lock().unwrap();
         // Steal the offset.

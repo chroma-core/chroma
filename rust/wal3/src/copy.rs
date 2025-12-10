@@ -5,7 +5,8 @@ use setsum::Setsum;
 
 use crate::reader::LogReader;
 use crate::{
-    prefixed_fragment_path, Error, FragmentIdentifier, Limits, LogPosition, LogWriterOptions, Manifest,
+    prefixed_fragment_path, Error, FragmentIdentifier, Limits, LogPosition, LogWriterOptions,
+    Manifest,
 };
 
 pub async fn copy(

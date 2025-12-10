@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
-use wal3::{upload_parquet, FragmentIdentifier, LogPosition, LogWriter, LogWriterOptions, Manifest};
+use wal3::{
+    upload_parquet, FragmentIdentifier, LogPosition, LogWriter, LogWriterOptions, Manifest,
+};
 
 mod common;
 
