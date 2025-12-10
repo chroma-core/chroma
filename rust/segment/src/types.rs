@@ -597,7 +597,7 @@ pub async fn materialize_logs(
         user_ids.sort_unstable();
         user_ids.dedup();
         async {
-            reader.prefetch_user_id_to_id(&user_ids).await;
+            reader.load_user_id_to_id(user_ids.iter().cloned()).await;
 
             let mut existing_offset_ids = Vec::with_capacity(user_ids.len());
             for user_id in user_ids {
@@ -610,7 +610,9 @@ pub async fn materialize_logs(
                 };
             }
 
-            reader.prefetch_id_to_data(&existing_offset_ids).await;
+            reader
+                .load_id_to_data(existing_offset_ids.iter().cloned())
+                .await;
             Ok::<_, LogMaterializerError>(())
         }
         .instrument(Span::current())

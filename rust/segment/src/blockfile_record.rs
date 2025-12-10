@@ -923,15 +923,15 @@ impl RecordSegmentReader<'_> {
         self.id_to_user_id.count().await
     }
 
-    pub async fn prefetch_id_to_data(&self, keys: &[u32]) {
+    pub async fn load_id_to_data(&self, keys: impl Iterator<Item = u32>) {
         self.id_to_data
-            .load_blocks_for_keys(keys.iter().map(|k| ("".to_string(), *k)))
+            .load_data_for_keys(keys.map(|k| ("".to_string(), k)))
             .await
     }
 
-    pub(crate) async fn prefetch_user_id_to_id(&self, keys: &[&str]) {
+    pub async fn load_user_id_to_id(&self, keys: impl Iterator<Item = &str>) {
         self.user_id_to_id
-            .load_blocks_for_keys(keys.iter().map(|k| ("".to_string(), *k)))
+            .load_data_for_keys(keys.map(|k| ("".to_string(), k)))
             .await
     }
 
