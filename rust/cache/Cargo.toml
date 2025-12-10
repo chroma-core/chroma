@@ -8,7 +8,7 @@ path = "src/lib.rs"
 
 [dependencies]
 clap = { workspace = true }
-foyer = { version = "0.21.0", features = ["tracing", "serde"] }
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "d86a8879cbf261e0456ebdccedd65ebf71d42815", features = ["tracing", "serde"] }
 mixtrics = { version = "0.2.3", features = ["opentelemetry_0_27"] }
 anyhow = "1.0"
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }

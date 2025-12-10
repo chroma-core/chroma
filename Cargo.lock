@@ -3208,8 +3208,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d6e14f449dffa7c8e7bf17c4847f3a1072a4115cce4e5c84f0e25b5326df561"
+source = "git+https://github.com/foyer-rs/foyer?rev=d86a8879cbf261e0456ebdccedd65ebf71d42815#d86a8879cbf261e0456ebdccedd65ebf71d42815"
 dependencies = [
  "anyhow",
  "equivalent",
@@ -3229,8 +3228,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "269e6bab6c54c5e3d5cc50e1466304aebef2f91e29223db51f395edc06fa2d50"
+source = "git+https://github.com/foyer-rs/foyer?rev=d86a8879cbf261e0456ebdccedd65ebf71d42815#d86a8879cbf261e0456ebdccedd65ebf71d42815"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3250,8 +3248,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive-collections"
 version = "0.10.0-dev"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e4fee46bea69e0596130e3210e65d3424e0ac1e6df3bde6636304bdf1ca4a3b"
+source = "git+http://github.com/foyer-rs/intrusive-rs?rev=bcac4152f9b2a9a3eba688944520de5762d3d825#bcac4152f9b2a9a3eba688944520de5762d3d825"
 dependencies = [
  "memoffset",
 ]
@@ -3259,8 +3256,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41abc6230d1dcb24f1ac6746a2542a2c1381406f1f5b6ef4a0860ca17fd0900c"
+source = "git+https://github.com/foyer-rs/foyer?rev=d86a8879cbf261e0456ebdccedd65ebf71d42815#d86a8879cbf261e0456ebdccedd65ebf71d42815"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3286,8 +3282,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3d238ff6f0ea10c1cc585f3046fb7227a5033d1f31f180890ad17806eebf2ed"
+source = "git+https://github.com/foyer-rs/foyer?rev=d86a8879cbf261e0456ebdccedd65ebf71d42815#d86a8879cbf261e0456ebdccedd65ebf71d42815"
 dependencies = [
  "allocator-api2",
  "anyhow",
