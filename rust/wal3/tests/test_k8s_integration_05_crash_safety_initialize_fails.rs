@@ -29,7 +29,7 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
         &storage,
         "test_k8s_integration_05_crash_safety_initialize_fails",
         FragmentIdentifier::SeqNo(1),
-        position,
+        Some(position),
         vec![vec![42, 43, 44, 45]],
         None,
     )
