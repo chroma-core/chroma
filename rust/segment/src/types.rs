@@ -609,10 +609,6 @@ pub async fn materialize_logs(
                     );
                 };
             }
-
-            reader
-                .load_id_to_data(existing_offset_ids.iter().cloned())
-                .await;
             Ok::<_, LogMaterializerError>(())
         }
         .instrument(Span::current())

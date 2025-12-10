@@ -3,7 +3,7 @@ use chroma_error::ChromaError;
 use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError};
 use chroma_segment::types::{materialize_logs, LogMaterializerError, MaterializeLogsResult};
 use chroma_system::Operator;
-use chroma_types::{Chunk, LogRecord};
+use chroma_types::{Chunk, LogRecord, MaterializedLogOperation};
 use futures::TryFutureExt;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -76,6 +76,18 @@ impl Operator<MaterializeLogInput, MaterializeLogOutput> for MaterializeLogOpera
         )
         .map_err(MaterializeLogOperatorError::LogMaterializationFailed)
         .await?;
+
+        if let Some(reader) = input.record_reader.as_ref() {
+            reader
+                .load_id_to_data(result.iter().filter_map(|log| {
+                    matches!(
+                        log.get_operation(),
+                        MaterializedLogOperation::UpdateExisting
+                    )
+                    .then_some(log.get_offset_id())
+                }))
+                .await;
+        }
 
         let mut collection_logical_size_delta = 0;
         for record in &result {
