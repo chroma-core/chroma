@@ -14,6 +14,7 @@ def main(
     persist_directory: str = ".",
 ) -> None:
     # Read all files in the data directory
+    ids = []
     documents = []
     metadatas = []
     files = os.listdir(documents_directory)
@@ -27,6 +28,7 @@ def main(
                 # Skip empty lines
                 if len(line) == 0:
                     continue
+                ids.append(str(len(ids))) # unique ID for the document
                 documents.append(line)
                 metadatas.append({"filename": filename, "line_number": line_number})
 
@@ -44,7 +46,8 @@ def main(
 
     # create embedding function
     embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
-        api_key=google_api_key
+        api_key=google_api_key,
+        model_name='gemini-embedding-001',
     )
 
     # If the collection already exists, we just return it. This allows us to add more
@@ -56,16 +59,16 @@ def main(
     # Create ids from the current count
     count = collection.count()
     print(f"Collection already contains {count} documents")
-    ids = [str(i) for i in range(count, count + len(documents))]
 
-    # Load the documents in batches of 100
+    # Load the documents in batches
+    batch_size = 5  # Using small batch size to work better with Free Tier
     for i in tqdm(
-        range(0, len(documents), 100), desc="Adding documents", unit_scale=100
+        range(count, len(documents), batch_size), desc="Adding documents", unit_scale=batch_size
     ):
         collection.add(
-            ids=ids[i : i + 100],
-            documents=documents[i : i + 100],
-            metadatas=metadatas[i : i + 100],  # type: ignore
+            ids=ids[i : i + batch_size],
+            documents=documents[i : i + batch_size],
+            metadatas=metadatas[i : i + batch_size],  # type: ignore
         )
 
     new_count = collection.count()
