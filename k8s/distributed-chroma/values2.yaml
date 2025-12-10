@@ -1,6 +1,6 @@
 # Default values for distributed-chroma.
 # Strongly prefer single quotes.
-namespace: 'chroma'
+namespace: 'chroma2'
 rustFrontendService:
   image:
     repository: 'rust-frontend-service'

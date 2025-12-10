@@ -8,7 +8,7 @@ open_telemetry:
       filter_level: "trace"
 sysdb:
   grpc:
-    host: "sysdb.chroma"
+    host: "sysdb.chroma2"
     port: 50051
     connect_timeout_ms: 60000
     request_timeout_ms: 60000
@@ -24,13 +24,13 @@ collections_with_segments_provider:
     max_retries: 3
 log:
   grpc:
-    host: "rust-log-service.chroma"
+    host: "rust-log-service.chroma2"
     port: 50051
     connect_timeout_ms: 5000
     request_timeout_ms: 60000 # 1 minute
     memberlist_provider:
       custom_resource:
-        kube_namespace: "chroma"
+        kube_namespace: "chroma2"
         memberlist_name: "rust-log-service-memberlist"
         queue_size: 100
 
@@ -45,7 +45,7 @@ executor:
         hasher: Murmur3
     memberlist_provider:
       custom_resource:
-        kube_namespace: "chroma"
+        kube_namespace: "chroma2"
         memberlist_name: "query-service-memberlist"
         queue_size: 100
     client_selection:
