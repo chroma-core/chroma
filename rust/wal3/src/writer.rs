@@ -1138,10 +1138,18 @@ pub async fn upload_parquet(
             Ok(_) => {
                 return Ok((unprefixed_path, setsum, buffer.len()));
             }
+            // NOTE(sicheng): Permission denied requests should continue to fail if retried
+            Err(err @ StorageError::PermissionDenied { .. }) => {
+                return Err(Error::StorageError(Arc::new(err)));
+            }
             Err(StorageError::Precondition { path: _, source: _ }) => {
                 return Err(Error::LogContentionFailure);
             }
             Err(err) => {
+                tracing::error!(
+                    error = err.to_string(),
+                    "failed to upload parquet, backing off"
+                );
                 if start.elapsed() > Duration::from_secs(60) {
                     return Err(Error::StorageError(Arc::new(err)));
                 }
