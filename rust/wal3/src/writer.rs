@@ -1147,7 +1147,7 @@ pub async fn upload_parquet(
             }
             Err(err) => {
                 tracing::error!(
-                    error = err.to_string(),
+                    error.message = err.to_string(),
                     "failed to upload parquet, backing off"
                 );
                 if start.elapsed() > Duration::from_secs(60) {
