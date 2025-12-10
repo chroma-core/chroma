@@ -79,7 +79,8 @@ def main(
 
     # create embedding function
     embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
-        api_key=google_api_key, task_type="RETRIEVAL_QUERY"
+        api_key=google_api_key, 
+        model_name='gemini-embedding-001',
     )
 
     # Get the collection.
