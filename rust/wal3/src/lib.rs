@@ -651,7 +651,7 @@ pub fn fragment_prefix() -> String {
 pub fn prefixed_fragment_path(prefix: &str, fragment_id: FragmentIdentifier) -> String {
     match fragment_id {
         FragmentIdentifier::SeqNo(seq_no) => {
-            let bucket = (seq_no / 4_096) * 4_096;
+            let bucket = fragment_id.bucket().expect("SeqNo always has a bucket");
             format!(
                 "{}/{}Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
                 prefix,
@@ -669,7 +669,7 @@ pub fn prefixed_fragment_path(prefix: &str, fragment_id: FragmentIdentifier) -> 
 pub fn unprefixed_fragment_path(fragment_id: FragmentIdentifier) -> String {
     match fragment_id {
         FragmentIdentifier::SeqNo(seq_no) => {
-            let bucket = (seq_no / 4_096) * 4_096;
+            let bucket = fragment_id.bucket().expect("SeqNo always has a bucket");
             format!(
                 "log/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
                 bucket, seq_no,
