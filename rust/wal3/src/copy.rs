@@ -5,7 +5,7 @@ use setsum::Setsum;
 
 use crate::reader::LogReader;
 use crate::{
-    prefixed_fragment_path, Error, FragmentSeqNo, Limits, LogPosition, LogWriterOptions, Manifest,
+    prefixed_fragment_path, Error, FragmentIdentifier, Limits, LogPosition, LogWriterOptions, Manifest,
 };
 
 pub async fn copy(
@@ -56,7 +56,7 @@ pub async fn copy(
                 .iter()
                 .map(|f| f.seq_no)
                 .min()
-                .unwrap_or(FragmentSeqNo::BEGIN),
+                .unwrap_or(FragmentIdentifier::BEGIN),
         );
         let manifest = Manifest {
             setsum,

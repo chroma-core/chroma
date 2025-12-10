@@ -18,7 +18,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::{
     unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
-    ExponentialBackoff, Fragment, FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition,
+    ExponentialBackoff, Fragment, FragmentIdentifier, Garbage, GarbageCollectionOptions, LogPosition,
     LogReader, LogReaderOptions, LogWriterOptions, Manifest, ManifestAndETag, ManifestManager,
     ThrottleOptions,
 };
@@ -178,13 +178,13 @@ impl LogWriter {
                 options,
                 storage,
                 prefix,
-                FragmentSeqNo(1),
+                FragmentIdentifier(1),
                 first_record_offset,
                 messages,
                 cmek,
             )
             .await?;
-            let seq_no = FragmentSeqNo(1);
+            let seq_no = FragmentIdentifier(1);
             let num_bytes = num_bytes as u64;
             let frag = Fragment {
                 path,
@@ -687,7 +687,7 @@ impl OnceLogWriter {
     #[allow(clippy::type_complexity)]
     async fn append_batch(
         self: Arc<Self>,
-        fragment_seq_no: FragmentSeqNo,
+        fragment_seq_no: FragmentIdentifier,
         log_position: LogPosition,
         work: Vec<(
             Vec<Vec<u8>>,
@@ -740,7 +740,7 @@ impl OnceLogWriter {
     #[tracing::instrument(skip(self, messages))]
     async fn append_batch_internal(
         &self,
-        fragment_seq_no: FragmentSeqNo,
+        fragment_seq_no: FragmentIdentifier,
         log_position: LogPosition,
         messages: Vec<Vec<u8>>,
     ) -> Result<LogPosition, Error> {
@@ -1109,7 +1109,7 @@ pub async fn upload_parquet(
     options: &LogWriterOptions,
     storage: &Storage,
     prefix: &str,
-    fragment_seq_no: FragmentSeqNo,
+    fragment_seq_no: FragmentIdentifier,
     log_position: LogPosition,
     messages: Vec<Vec<u8>>,
     cmek: Option<Cmek>,

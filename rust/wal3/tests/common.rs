@@ -5,7 +5,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 extern crate wal3;
 
 use wal3::{
-    FragmentSeqNo, Garbage, LogPosition, Manifest, Snapshot, SnapshotPointer, ThrottleOptions,
+    FragmentIdentifier, Garbage, LogPosition, Manifest, Snapshot, SnapshotPointer, ThrottleOptions,
 };
 
 ///////////////////////////////////////////// Condition ////////////////////////////////////////////
@@ -112,7 +112,7 @@ impl SnapshotCondition {
 #[derive(Clone, Debug)]
 pub struct FragmentCondition {
     pub path: String,
-    pub seq_no: FragmentSeqNo,
+    pub seq_no: FragmentIdentifier,
     pub start: u64,
     pub limit: u64,
     pub num_bytes: usize,
@@ -174,8 +174,8 @@ pub struct GarbageCondition {
     pub snapshots_to_drop: Vec<SnapshotCondition>,
     pub snapshots_to_make: Vec<SnapshotCondition>,
     pub snapshot_for_root: Option<SnapshotCondition>,
-    pub fragments_to_drop_start: FragmentSeqNo,
-    pub fragments_to_drop_limit: FragmentSeqNo,
+    pub fragments_to_drop_start: FragmentIdentifier,
+    pub fragments_to_drop_limit: FragmentIdentifier,
     pub first_to_keep: LogPosition,
 }
 
