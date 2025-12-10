@@ -38,6 +38,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
         embedding_type: Optional[str] = None,
         normalized: Optional[bool] = None,
         query_config: Optional[JinaQueryConfig] = None,
+        timeout: Optional[float] = None,
     ):
         """
         Initialize the JinaEmbeddingFunction.
@@ -59,6 +60,8 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 Defaults to None.
             normalized (bool, optional): Whether to normalize the Jina AI API.
                 Defaults to None.
+            timeout (float, optional): The timeout in seconds for API requests.
+                Defaults to None (uses httpx default of 5 seconds).
 
         """
         try:
@@ -102,9 +105,13 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
         self.embedding_type = embedding_type
         self.normalized = normalized
         self.query_config = query_config
+        self.timeout = timeout
 
         self._api_url = "https://api.jina.ai/v1/embeddings"
-        self._session = httpx.Client()
+        client_kwargs = {}
+        if self.timeout is not None:
+            client_kwargs["timeout"] = self.timeout
+        self._session = httpx.Client(**client_kwargs)
         self._session.headers.update(
             {"Authorization": f"Bearer {self.api_key}", "Accept-Encoding": "identity"}
         )
@@ -232,6 +239,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
         embedding_type = config.get("embedding_type")
         normalized = config.get("normalized")
         query_config = config.get("query_config")
+        timeout = config.get("timeout")
 
         if api_key_env_var is None or model_name is None:
             assert False, "This code should not be reached"  # this is for type checking
@@ -246,6 +254,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
             embedding_type=embedding_type,
             normalized=normalized,
             query_config=query_config,
+            timeout=timeout,
         )
 
     def get_config(self) -> Dict[str, Any]:
@@ -259,6 +268,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
             "embedding_type": self.embedding_type,
             "normalized": self.normalized,
             "query_config": self.query_config,
+            "timeout": self.timeout,
         }
 
     def validate_config_update(
