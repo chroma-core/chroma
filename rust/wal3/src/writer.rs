@@ -1150,12 +1150,14 @@ pub async fn upload_parquet(
                     error.message = err.to_string(),
                     "failed to upload parquet, backing off"
                 );
-                if start.elapsed() > Duration::from_secs(60) {
+                // NOTE(sicheng): The frontend will fail the request on its end if we retry for too long here
+                // TODO(sicheng): Organize the magic numbers in the code at one place
+                if start.elapsed() > Duration::from_secs(20) {
                     return Err(Error::StorageError(Arc::new(err)));
                 }
                 let mut backoff = exp_backoff.next();
-                if backoff > Duration::from_secs(60) {
-                    backoff = Duration::from_secs(60);
+                if backoff > Duration::from_secs(10) {
+                    backoff = Duration::from_secs(10);
                 }
                 tokio::time::sleep(backoff).await;
             }
