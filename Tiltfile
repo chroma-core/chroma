@@ -332,7 +332,7 @@ groups = {
   ],
 }
 
-if os.environ['MULTI_REGION'] == 'true':
+if os.environ.get('MULTI_REGION') == 'true':
   config.set_enabled_resources(groups['basic'] + groups['multi_region'])
 else:
   config.set_enabled_resources(groups['basic'])
