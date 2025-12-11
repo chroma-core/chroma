@@ -34,6 +34,7 @@ async fn test_k8s_integration_83_bootstrap() {
         mark_dirty,
         first_record_offset_position,
         messages.clone(),
+        None,
     )
     .await
     .unwrap();

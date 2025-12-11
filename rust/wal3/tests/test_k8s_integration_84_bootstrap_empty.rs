@@ -29,6 +29,7 @@ async fn test_k8s_integration_84_bootstrap_empty() {
         mark_dirty,
         first_record_offset_position,
         messages.clone(),
+        None,
     )
     .await
     .unwrap();
@@ -55,9 +56,16 @@ async fn test_k8s_integration_84_bootstrap_empty() {
         .await
         .unwrap();
 
-    let writer = LogWriter::open(options, Arc::clone(&storage), PREFIX, WRITER, mark_dirty)
-        .await
-        .unwrap();
+    let writer = LogWriter::open(
+        options,
+        Arc::clone(&storage),
+        PREFIX,
+        WRITER,
+        mark_dirty,
+        None,
+    )
+    .await
+    .unwrap();
     writer.manifest().unwrap().scrub().unwrap();
     writer
         .append_many(vec![Vec::from("fresh-write".to_string())])

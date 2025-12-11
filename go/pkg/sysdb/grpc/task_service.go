@@ -8,6 +8,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/status"
 )
 
 func (s *Server) AttachFunction(ctx context.Context, req *coordinatorpb.AttachFunctionRequest) (*coordinatorpb.AttachFunctionResponse, error) {
@@ -18,6 +19,9 @@ func (s *Server) AttachFunction(ctx context.Context, req *coordinatorpb.AttachFu
 		log.Error("AttachFunction failed", zap.Error(err))
 		if err == common.ErrAttachedFunctionAlreadyExists {
 			return nil, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
+		}
+		if err == common.ErrFunctionNotFound {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
 		return nil, err
 	}
@@ -68,11 +72,14 @@ func (s *Server) GetAttachedFunctionByUuid(ctx context.Context, req *coordinator
 }
 
 func (s *Server) DetachFunction(ctx context.Context, req *coordinatorpb.DetachFunctionRequest) (*coordinatorpb.DetachFunctionResponse, error) {
-	log.Info("DetachFunction", zap.String("attached_function_id", req.AttachedFunctionId))
+	log.Info("DetachFunction", zap.String("name", req.Name), zap.String("input_collection_id", req.InputCollectionId))
 
 	res, err := s.coordinator.DetachFunction(ctx, req)
 	if err != nil {
 		log.Error("DetachFunction failed", zap.Error(err))
+		if err == common.ErrAttachedFunctionNotFound {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
 		return nil, err
 	}
 
@@ -123,6 +130,10 @@ func (s *Server) FinishCreateAttachedFunction(ctx context.Context, req *coordina
 	res, err := s.coordinator.FinishCreateAttachedFunction(ctx, req)
 	if err != nil {
 		log.Error("FinishCreateAttachedFunction failed", zap.Error(err))
+		// If it's already a gRPC status error, return it directly
+		if _, ok := status.FromError(err); ok {
+			return nil, err
+		}
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 

@@ -2330,6 +2330,8 @@ pub struct AttachedFunctionInfo {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AttachFunctionResponse {
     pub attached_function: AttachedFunctionInfo,
+    /// True if newly created, false if already existed (idempotent request)
+    pub created: bool,
 }
 
 /// API response struct for attached function with function_name instead of function_id
@@ -2396,16 +2398,24 @@ pub struct GetAttachedFunctionResponse {
 
 #[derive(Error, Debug)]
 pub enum AttachFunctionError {
-    #[error(" Attached Function with name [{0}] already exists")]
+    #[error("{0}")]
     AlreadyExists(String),
+    #[error("{0}")]
+    CollectionAlreadyHasFunction(String),
     #[error("Failed to get collection and segments")]
     GetCollectionError(#[from] GetCollectionError),
     #[error("Input collection [{0}] does not exist")]
     InputCollectionNotFound(String),
     #[error("Output collection [{0}] already exists")]
     OutputCollectionExists(String),
+    #[error("{0}")]
+    InvalidArgument(String),
+    #[error("{0}")]
+    FunctionNotFound(String),
     #[error(transparent)]
     Validation(#[from] ChromaValidationError),
+    #[error(transparent)]
+    FinishCreate(#[from] crate::FinishCreateAttachedFunctionError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
@@ -2414,10 +2424,14 @@ impl ChromaError for AttachFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
             AttachFunctionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            AttachFunctionError::CollectionAlreadyHasFunction(_) => ErrorCodes::FailedPrecondition,
             AttachFunctionError::GetCollectionError(err) => err.code(),
             AttachFunctionError::InputCollectionNotFound(_) => ErrorCodes::NotFound,
             AttachFunctionError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
+            AttachFunctionError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
+            AttachFunctionError::FunctionNotFound(_) => ErrorCodes::NotFound,
             AttachFunctionError::Validation(err) => err.code(),
+            AttachFunctionError::FinishCreate(err) => err.code(),
             AttachFunctionError::Internal(err) => err.code(),
         }
     }
@@ -2447,22 +2461,14 @@ impl ChromaError for GetAttachedFunctionError {
 #[derive(Clone, Debug, Deserialize, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DetachFunctionRequest {
-    /// ID of the input collection
-    pub input_collection_id: String,
     /// Whether to delete the output collection as well
     #[serde(default)]
     pub delete_output: bool,
 }
 
 impl DetachFunctionRequest {
-    pub fn try_new(
-        input_collection_id: String,
-        delete_output: bool,
-    ) -> Result<Self, ChromaValidationError> {
-        let request = Self {
-            input_collection_id,
-            delete_output,
-        };
+    pub fn try_new(delete_output: bool) -> Result<Self, ChromaValidationError> {
+        let request = Self { delete_output };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }

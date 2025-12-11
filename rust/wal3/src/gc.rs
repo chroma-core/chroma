@@ -2,6 +2,7 @@ use std::ops::Add;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chroma_storage::PutMode;
 use setsum::Setsum;
 
 use chroma_storage::{
@@ -224,10 +225,11 @@ impl Garbage {
                     Error::CorruptManifest(format!("could not encode JSON garbage: {e:?}"))
                 })?
                 .into_bytes();
+            let options = PutOptions::default().with_priority(StorageRequestPriority::P0);
             let options = if let Some(e_tag) = existing {
-                PutOptions::if_matches(e_tag, StorageRequestPriority::P0)
+                options.with_mode(PutMode::IfMatch(e_tag.clone()))
             } else {
-                PutOptions::if_not_exists(StorageRequestPriority::P0)
+                options.with_mode(PutMode::IfNotExist)
             };
             match storage.put_bytes(&path, payload, options).await {
                 Ok(e_tag) => return Ok(e_tag),

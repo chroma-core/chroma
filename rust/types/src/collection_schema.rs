@@ -1,9 +1,12 @@
 use chroma_error::{ChromaError, ErrorCodes};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::{Arc, LazyLock};
 use thiserror::Error;
 use validator::Validate;
 
+use crate::chroma_proto;
 use crate::collection_configuration::{
     EmbeddingFunctionConfiguration, InternalCollectionConfiguration,
     UpdateVectorIndexConfiguration, VectorIndexConfiguration,
@@ -18,7 +21,7 @@ use crate::{
     default_num_threads, default_reassign_neighbor_count, default_resize_factor, default_search_ef,
     default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
     default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
-    default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor,
+    default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor, ConversionError,
     HnswParametersFromSegmentError, InternalHnswConfiguration, InternalSpannConfiguration,
     InternalUpdateCollectionConfiguration, KnnIndex, Segment, CHROMA_KEY,
 };
@@ -142,6 +145,72 @@ pub const BOOL_INVERTED_INDEX_NAME: &str = "bool_inverted_index";
 pub const DOCUMENT_KEY: &str = "#document";
 pub const EMBEDDING_KEY: &str = "#embedding";
 
+// Static regex pattern to validate CMEK for GCP
+static CMEK_GCP_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^projects/.+/locations/.+/keyRings/.+/cryptoKeys/.+$")
+        .expect("The CMEK pattern for GCP should be valid")
+});
+
+/// Customer-managed encryption key for storage encryption.
+///
+/// CMEK allows you to use your own encryption keys managed by cloud providers'
+/// key management services (KMS) instead of default provider-managed keys.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Cmek {
+    /// Google Cloud Platform KMS key resource name.
+    ///
+    /// Format: `projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}`
+    Gcp(Arc<String>),
+}
+
+impl Cmek {
+    /// Create a GCP CMEK from a KMS resource name
+    ///
+    /// # Example
+    /// ```
+    /// use chroma_types::Cmek;
+    /// let cmek = Cmek::gcp(
+    ///     "projects/my-project/locations/us-central1/keyRings/my-ring/cryptoKeys/my-key".to_string()
+    /// );
+    /// ```
+    pub fn gcp(resource: String) -> Self {
+        Cmek::Gcp(Arc::new(resource))
+    }
+
+    /// Validates that the CMEK resource name matches the expected pattern.
+    ///
+    /// Returns `true` if the resource name is well-formed according to the
+    /// provider's format requirements. Does not verify that the key exists
+    /// or is accessible.
+    pub fn validate_pattern(&self) -> bool {
+        match self {
+            Cmek::Gcp(resource) => CMEK_GCP_RE.is_match(resource),
+        }
+    }
+}
+
+impl TryFrom<chroma_proto::Cmek> for Cmek {
+    type Error = ConversionError;
+
+    fn try_from(proto: chroma_proto::Cmek) -> Result<Self, Self::Error> {
+        match proto.provider {
+            Some(chroma_proto::cmek::Provider::Gcp(resource)) => Ok(Cmek::gcp(resource)),
+            None => Err(ConversionError::DecodeError),
+        }
+    }
+}
+
+impl From<Cmek> for chroma_proto::Cmek {
+    fn from(cmek: Cmek) -> Self {
+        match cmek {
+            Cmek::Gcp(resource) => chroma_proto::Cmek {
+                provider: Some(chroma_proto::cmek::Provider::Gcp((*resource).clone())),
+            },
+        }
+    }
+}
+
 // ============================================================================
 // SCHEMA STRUCTURES
 // ============================================================================
@@ -159,6 +228,10 @@ pub struct Schema {
     /// TODO(Sanket): Needed for backwards compatibility. Should remove after deploy.
     #[serde(rename = "keys", alias = "key_overrides")]
     pub keys: HashMap<String, ValueTypes>,
+    /// Customer-managed encryption key for collection data
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<Object>))]
+    pub cmek: Option<Cmek>,
 }
 
 impl Schema {
@@ -369,7 +442,11 @@ impl Default for Schema {
             },
         );
 
-        Schema { defaults, keys }
+        Schema {
+            defaults,
+            keys,
+            cmek: None,
+        }
     }
 }
 
@@ -744,7 +821,11 @@ impl Schema {
         };
         keys.insert(DOCUMENT_KEY.to_string(), document_defaults);
 
-        Schema { defaults, keys }
+        Schema {
+            defaults,
+            keys,
+            cmek: None,
+        }
     }
 
     pub fn get_internal_spann_config(&self) -> Option<InternalSpannConfiguration> {
@@ -851,6 +932,7 @@ impl Schema {
                 Ok(Schema {
                     defaults: merged_defaults,
                     keys: merged_keys,
+                    cmek: user.cmek.clone().or(default_schema.cmek.clone()),
                 })
             }
             None => Ok(default_schema),
@@ -877,6 +959,7 @@ impl Schema {
         Ok(Schema {
             defaults: self.defaults.clone(),
             keys,
+            cmek: other.cmek.clone().or(self.cmek.clone()),
         })
     }
 
@@ -1525,6 +1608,11 @@ impl Schema {
             }
         }
 
+        // Check CMEK is None (default)
+        if self.cmek.is_some() {
+            return false;
+        }
+
         true
     }
 
@@ -2084,6 +2172,28 @@ impl Schema {
         }
 
         Ok(self)
+    }
+
+    /// Set customer-managed encryption key for the collection (builder pattern)
+    ///
+    /// This method allows setting CMEK on a schema for fluent, chainable configuration.
+    ///
+    /// # Arguments
+    /// * `cmek` - Customer-managed encryption key configuration
+    ///
+    /// # Returns
+    /// `Self` for method chaining
+    ///
+    /// # Examples
+    /// ```
+    /// use chroma_types::{Schema, Cmek};
+    ///
+    /// let schema = Schema::default()
+    ///     .with_cmek(Cmek::gcp("projects/my-project/locations/us/keyRings/my-ring/cryptoKeys/my-key".to_string()));
+    /// ```
+    pub fn with_cmek(mut self, cmek: Cmek) -> Self {
+        self.cmek = Some(cmek);
+        self
     }
 
     /// Set vector index config globally (applies to #embedding)
@@ -2731,6 +2841,7 @@ mod tests {
         let user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
+            cmek: None,
         };
 
         let result = Schema::reconcile_with_defaults(Some(&user_schema), KnnIndex::Spann).unwrap();
@@ -2744,6 +2855,7 @@ mod tests {
         let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
+            cmek: None,
         };
 
         user_schema.defaults.string = Some(StringValueType {
@@ -2779,6 +2891,7 @@ mod tests {
         let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
+            cmek: None,
         };
 
         user_schema.defaults.float_list = Some(FloatListValueType {
@@ -2828,6 +2941,7 @@ mod tests {
             Schema {
                 defaults: merged_defaults,
                 keys: merged_keys,
+                cmek: None,
             }
         };
 
@@ -2864,6 +2978,7 @@ mod tests {
         let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
+            cmek: None,
         };
 
         // Add a custom key override
@@ -2911,6 +3026,7 @@ mod tests {
         let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
+            cmek: None,
         };
 
         // Override the #embedding key with custom settings
@@ -3432,6 +3548,7 @@ mod tests {
         let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
+            cmek: None,
         };
 
         // Set up complex user defaults
@@ -3508,6 +3625,7 @@ mod tests {
             Schema {
                 defaults: merged_defaults,
                 keys: merged_keys,
+                cmek: None,
             }
         };
 
@@ -5601,5 +5719,808 @@ mod tests {
         assert!(schema.keys.contains_key(DOCUMENT_KEY));
         assert!(schema.keys.contains_key(EMBEDDING_KEY));
         assert_eq!(schema.keys.len(), 3);
+    }
+
+    #[cfg(feature = "testing")]
+    mod proptests {
+        use super::*;
+        use crate::strategies::{
+            embedding_function_strategy, internal_collection_configuration_strategy,
+            internal_hnsw_configuration_strategy, internal_spann_configuration_strategy,
+            knn_index_strategy, space_strategy, TEST_NAME_PATTERN,
+        };
+        use crate::{
+            HnswIndexConfig, SpannIndexConfig, VectorIndexConfig, DOCUMENT_KEY, EMBEDDING_KEY,
+        };
+        use proptest::prelude::*;
+        use proptest::strategy::BoxedStrategy;
+        use proptest::string::string_regex;
+        use serde_json::json;
+
+        fn default_embedding_function_strategy(
+        ) -> impl Strategy<Value = Option<EmbeddingFunctionConfiguration>> {
+            proptest::option::of(prop_oneof![
+                Just(EmbeddingFunctionConfiguration::Unknown),
+                Just(EmbeddingFunctionConfiguration::Known(
+                    EmbeddingFunctionNewConfiguration {
+                        name: "default".to_string(),
+                        config: json!({ "alpha": 1 }),
+                    }
+                )),
+            ])
+        }
+
+        fn sparse_embedding_function_strategy(
+        ) -> impl Strategy<Value = Option<EmbeddingFunctionConfiguration>> {
+            let known_strategy = string_regex(TEST_NAME_PATTERN).unwrap().prop_map(|name| {
+                EmbeddingFunctionConfiguration::Known(EmbeddingFunctionNewConfiguration {
+                    name,
+                    config: json!({ "alpha": 1 }),
+                })
+            });
+
+            proptest::option::of(prop_oneof![
+                Just(EmbeddingFunctionConfiguration::Unknown),
+                known_strategy,
+            ])
+        }
+
+        fn non_default_internal_collection_configuration_strategy(
+        ) -> impl Strategy<Value = InternalCollectionConfiguration> {
+            internal_collection_configuration_strategy()
+                .prop_filter("non-default configuration", |config| !config.is_default())
+        }
+
+        fn partial_hnsw_index_config_strategy() -> impl Strategy<Value = HnswIndexConfig> {
+            (
+                proptest::option::of(1usize..=512),
+                proptest::option::of(1usize..=128),
+                proptest::option::of(1usize..=512),
+                proptest::option::of(1usize..=64),
+                proptest::option::of(2usize..=4096),
+                proptest::option::of(2usize..=4096),
+                proptest::option::of(prop_oneof![
+                    Just(0.5f64),
+                    Just(1.0f64),
+                    Just(1.5f64),
+                    Just(2.0f64)
+                ]),
+            )
+                .prop_map(
+                    |(
+                        ef_construction,
+                        max_neighbors,
+                        ef_search,
+                        num_threads,
+                        batch_size,
+                        sync_threshold,
+                        resize_factor,
+                    )| HnswIndexConfig {
+                        ef_construction,
+                        max_neighbors,
+                        ef_search,
+                        num_threads,
+                        batch_size,
+                        sync_threshold,
+                        resize_factor,
+                    },
+                )
+        }
+
+        fn partial_spann_index_config_strategy() -> impl Strategy<Value = SpannIndexConfig> {
+            let epsilon_strategy = prop_oneof![Just(5.0f32), Just(7.5f32), Just(10.0f32)];
+            (
+                (
+                    proptest::option::of(1u32..=128),               // search_nprobe
+                    proptest::option::of(Just(1.0f32)), // search_rng_factor (must be 1.0)
+                    proptest::option::of(epsilon_strategy.clone()), // search_rng_epsilon
+                    proptest::option::of(1u32..=8),     // nreplica_count
+                    proptest::option::of(Just(1.0f32)), // write_rng_factor (must be 1.0)
+                    proptest::option::of(epsilon_strategy), // write_rng_epsilon
+                    proptest::option::of(50u32..=200),  // split_threshold
+                    proptest::option::of(1usize..=1000), // num_samples_kmeans
+                ),
+                (
+                    proptest::option::of(Just(100.0f32)), // initial_lambda (must be 100.0)
+                    proptest::option::of(1u32..=64),      // reassign_neighbor_count
+                    proptest::option::of(25u32..=100),    // merge_threshold
+                    proptest::option::of(1u32..=8),       // num_centers_to_merge_to
+                    proptest::option::of(1u32..=64),      // write_nprobe
+                    proptest::option::of(1usize..=200),   // ef_construction
+                    proptest::option::of(1usize..=200),   // ef_search
+                    proptest::option::of(1usize..=64),    // max_neighbors
+                ),
+            )
+                .prop_map(
+                    |(
+                        (
+                            search_nprobe,
+                            search_rng_factor,
+                            search_rng_epsilon,
+                            nreplica_count,
+                            write_rng_factor,
+                            write_rng_epsilon,
+                            split_threshold,
+                            num_samples_kmeans,
+                        ),
+                        (
+                            initial_lambda,
+                            reassign_neighbor_count,
+                            merge_threshold,
+                            num_centers_to_merge_to,
+                            write_nprobe,
+                            ef_construction,
+                            ef_search,
+                            max_neighbors,
+                        ),
+                    )| SpannIndexConfig {
+                        search_nprobe,
+                        search_rng_factor,
+                        search_rng_epsilon,
+                        nreplica_count,
+                        write_rng_factor,
+                        write_rng_epsilon,
+                        split_threshold,
+                        num_samples_kmeans,
+                        initial_lambda,
+                        reassign_neighbor_count,
+                        merge_threshold,
+                        num_centers_to_merge_to,
+                        write_nprobe,
+                        ef_construction,
+                        ef_search,
+                        max_neighbors,
+                    },
+                )
+        }
+
+        proptest! {
+            #[test]
+            fn merge_hnsw_configs_preserves_user_overrides(
+                base in partial_hnsw_index_config_strategy(),
+                user in partial_hnsw_index_config_strategy(),
+            ) {
+                let merged = Schema::merge_hnsw_configs(Some(&base), Some(&user))
+                    .expect("merge should return Some when both are Some");
+
+                // Property: user values always take precedence when Some
+                if user.ef_construction.is_some() {
+                    prop_assert_eq!(merged.ef_construction, user.ef_construction);
+                }
+                if user.max_neighbors.is_some() {
+                    prop_assert_eq!(merged.max_neighbors, user.max_neighbors);
+                }
+                if user.ef_search.is_some() {
+                    prop_assert_eq!(merged.ef_search, user.ef_search);
+                }
+                if user.num_threads.is_some() {
+                    prop_assert_eq!(merged.num_threads, user.num_threads);
+                }
+                if user.batch_size.is_some() {
+                    prop_assert_eq!(merged.batch_size, user.batch_size);
+                }
+                if user.sync_threshold.is_some() {
+                    prop_assert_eq!(merged.sync_threshold, user.sync_threshold);
+                }
+                if user.resize_factor.is_some() {
+                    prop_assert_eq!(merged.resize_factor, user.resize_factor);
+                }
+            }
+
+            #[test]
+            fn merge_hnsw_configs_falls_back_to_base_when_user_is_none(
+                base in partial_hnsw_index_config_strategy(),
+            ) {
+                let merged = Schema::merge_hnsw_configs(Some(&base), None)
+                    .expect("merge should return Some when base is Some");
+
+                // Property: when user is None, base values are preserved
+                prop_assert_eq!(merged, base);
+            }
+
+            #[test]
+            fn merge_hnsw_configs_returns_user_when_base_is_none(
+                user in partial_hnsw_index_config_strategy(),
+            ) {
+                let merged = Schema::merge_hnsw_configs(None, Some(&user))
+                    .expect("merge should return Some when user is Some");
+
+                // Property: when base is None, user values are preserved
+                prop_assert_eq!(merged, user);
+            }
+
+            #[test]
+            fn merge_spann_configs_preserves_user_overrides(
+                base in partial_spann_index_config_strategy(),
+                user in partial_spann_index_config_strategy(),
+            ) {
+                let merged = Schema::merge_spann_configs(Some(&base), Some(&user))
+                    .expect("merge should return Some when both are Some");
+
+                // Property: user values always take precedence when Some
+                if user.search_nprobe.is_some() {
+                    prop_assert_eq!(merged.search_nprobe, user.search_nprobe);
+                }
+                if user.search_rng_epsilon.is_some() {
+                    prop_assert_eq!(merged.search_rng_epsilon, user.search_rng_epsilon);
+                }
+                if user.split_threshold.is_some() {
+                    prop_assert_eq!(merged.split_threshold, user.split_threshold);
+                }
+                if user.ef_construction.is_some() {
+                    prop_assert_eq!(merged.ef_construction, user.ef_construction);
+                }
+                if user.ef_search.is_some() {
+                    prop_assert_eq!(merged.ef_search, user.ef_search);
+                }
+                if user.max_neighbors.is_some() {
+                    prop_assert_eq!(merged.max_neighbors, user.max_neighbors);
+                }
+            }
+
+            #[test]
+            fn merge_spann_configs_falls_back_to_base_when_user_is_none(
+                base in partial_spann_index_config_strategy(),
+            ) {
+                let merged = Schema::merge_spann_configs(Some(&base), None)
+                    .expect("merge should return Some when base is Some");
+
+                // Property: when user is None, base values are preserved
+                prop_assert_eq!(merged, base);
+            }
+
+            #[test]
+            fn merge_vector_index_config_preserves_user_overrides(
+                base in vector_index_config_strategy(),
+                user in vector_index_config_strategy(),
+                knn in knn_index_strategy(),
+            ) {
+                let merged = Schema::merge_vector_index_config(&base, &user, knn);
+
+                // Property: user values take precedence for top-level fields
+                if user.space.is_some() {
+                    prop_assert_eq!(merged.space, user.space);
+                }
+                if user.embedding_function.is_some() {
+                    prop_assert_eq!(merged.embedding_function, user.embedding_function);
+                }
+                if user.source_key.is_some() {
+                    prop_assert_eq!(merged.source_key, user.source_key);
+                }
+
+                // Property: nested configs are merged according to merge rules
+                match knn {
+                    KnnIndex::Hnsw => {
+                        if let (Some(_base_hnsw), Some(user_hnsw)) = (&base.hnsw, &user.hnsw) {
+                            let merged_hnsw = merged.hnsw.as_ref().expect("hnsw should be Some");
+                            if user_hnsw.ef_construction.is_some() {
+                                prop_assert_eq!(merged_hnsw.ef_construction, user_hnsw.ef_construction);
+                            }
+                        }
+                    }
+                    KnnIndex::Spann => {
+                        if let (Some(_base_spann), Some(user_spann)) = (&base.spann, &user.spann) {
+                            let merged_spann = merged.spann.as_ref().expect("spann should be Some");
+                            if user_spann.search_nprobe.is_some() {
+                                prop_assert_eq!(merged_spann.search_nprobe, user_spann.search_nprobe);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        fn expected_vector_index_config(
+            config: &InternalCollectionConfiguration,
+        ) -> VectorIndexConfig {
+            match &config.vector_index {
+                VectorIndexConfiguration::Hnsw(hnsw_config) => VectorIndexConfig {
+                    space: Some(hnsw_config.space.clone()),
+                    embedding_function: config.embedding_function.clone(),
+                    source_key: None,
+                    hnsw: Some(HnswIndexConfig {
+                        ef_construction: Some(hnsw_config.ef_construction),
+                        max_neighbors: Some(hnsw_config.max_neighbors),
+                        ef_search: Some(hnsw_config.ef_search),
+                        num_threads: Some(hnsw_config.num_threads),
+                        batch_size: Some(hnsw_config.batch_size),
+                        sync_threshold: Some(hnsw_config.sync_threshold),
+                        resize_factor: Some(hnsw_config.resize_factor),
+                    }),
+                    spann: None,
+                },
+                VectorIndexConfiguration::Spann(spann_config) => VectorIndexConfig {
+                    space: Some(spann_config.space.clone()),
+                    embedding_function: config.embedding_function.clone(),
+                    source_key: None,
+                    hnsw: None,
+                    spann: Some(SpannIndexConfig {
+                        search_nprobe: Some(spann_config.search_nprobe),
+                        search_rng_factor: Some(spann_config.search_rng_factor),
+                        search_rng_epsilon: Some(spann_config.search_rng_epsilon),
+                        nreplica_count: Some(spann_config.nreplica_count),
+                        write_rng_factor: Some(spann_config.write_rng_factor),
+                        write_rng_epsilon: Some(spann_config.write_rng_epsilon),
+                        split_threshold: Some(spann_config.split_threshold),
+                        num_samples_kmeans: Some(spann_config.num_samples_kmeans),
+                        initial_lambda: Some(spann_config.initial_lambda),
+                        reassign_neighbor_count: Some(spann_config.reassign_neighbor_count),
+                        merge_threshold: Some(spann_config.merge_threshold),
+                        num_centers_to_merge_to: Some(spann_config.num_centers_to_merge_to),
+                        write_nprobe: Some(spann_config.write_nprobe),
+                        ef_construction: Some(spann_config.ef_construction),
+                        ef_search: Some(spann_config.ef_search),
+                        max_neighbors: Some(spann_config.max_neighbors),
+                    }),
+                },
+            }
+        }
+
+        fn non_special_key_strategy() -> BoxedStrategy<String> {
+            string_regex(TEST_NAME_PATTERN)
+                .unwrap()
+                .prop_filter("exclude special keys", |key| {
+                    key != DOCUMENT_KEY && key != EMBEDDING_KEY
+                })
+                .boxed()
+        }
+
+        fn source_key_strategy() -> BoxedStrategy<Option<String>> {
+            proptest::option::of(prop_oneof![
+                Just(DOCUMENT_KEY.to_string()),
+                string_regex(TEST_NAME_PATTERN).unwrap(),
+            ])
+            .boxed()
+        }
+
+        fn fts_index_type_strategy() -> impl Strategy<Value = FtsIndexType> {
+            any::<bool>().prop_map(|enabled| FtsIndexType {
+                enabled,
+                config: FtsIndexConfig {},
+            })
+        }
+
+        fn string_inverted_index_type_strategy() -> impl Strategy<Value = StringInvertedIndexType> {
+            any::<bool>().prop_map(|enabled| StringInvertedIndexType {
+                enabled,
+                config: StringInvertedIndexConfig {},
+            })
+        }
+
+        fn string_value_type_strategy() -> BoxedStrategy<Option<StringValueType>> {
+            proptest::option::of(
+                (
+                    proptest::option::of(string_inverted_index_type_strategy()),
+                    proptest::option::of(fts_index_type_strategy()),
+                )
+                    .prop_map(|(string_inverted_index, fts_index)| {
+                        StringValueType {
+                            string_inverted_index,
+                            fts_index,
+                        }
+                    }),
+            )
+            .boxed()
+        }
+
+        fn float_inverted_index_type_strategy() -> impl Strategy<Value = FloatInvertedIndexType> {
+            any::<bool>().prop_map(|enabled| FloatInvertedIndexType {
+                enabled,
+                config: FloatInvertedIndexConfig {},
+            })
+        }
+
+        fn float_value_type_strategy() -> BoxedStrategy<Option<FloatValueType>> {
+            proptest::option::of(
+                proptest::option::of(float_inverted_index_type_strategy()).prop_map(
+                    |float_inverted_index| FloatValueType {
+                        float_inverted_index,
+                    },
+                ),
+            )
+            .boxed()
+        }
+
+        fn int_inverted_index_type_strategy() -> impl Strategy<Value = IntInvertedIndexType> {
+            any::<bool>().prop_map(|enabled| IntInvertedIndexType {
+                enabled,
+                config: IntInvertedIndexConfig {},
+            })
+        }
+
+        fn int_value_type_strategy() -> BoxedStrategy<Option<IntValueType>> {
+            proptest::option::of(
+                proptest::option::of(int_inverted_index_type_strategy())
+                    .prop_map(|int_inverted_index| IntValueType { int_inverted_index }),
+            )
+            .boxed()
+        }
+
+        fn bool_inverted_index_type_strategy() -> impl Strategy<Value = BoolInvertedIndexType> {
+            any::<bool>().prop_map(|enabled| BoolInvertedIndexType {
+                enabled,
+                config: BoolInvertedIndexConfig {},
+            })
+        }
+
+        fn bool_value_type_strategy() -> BoxedStrategy<Option<BoolValueType>> {
+            proptest::option::of(
+                proptest::option::of(bool_inverted_index_type_strategy()).prop_map(
+                    |bool_inverted_index| BoolValueType {
+                        bool_inverted_index,
+                    },
+                ),
+            )
+            .boxed()
+        }
+
+        fn sparse_vector_index_config_strategy() -> impl Strategy<Value = SparseVectorIndexConfig> {
+            (
+                sparse_embedding_function_strategy(),
+                source_key_strategy(),
+                proptest::option::of(any::<bool>()),
+            )
+                .prop_map(|(embedding_function, source_key, bm25)| {
+                    SparseVectorIndexConfig {
+                        embedding_function,
+                        source_key,
+                        bm25,
+                    }
+                })
+        }
+
+        fn sparse_vector_value_type_strategy() -> BoxedStrategy<Option<SparseVectorValueType>> {
+            proptest::option::of(
+                (
+                    any::<bool>(),
+                    proptest::option::of(sparse_vector_index_config_strategy()),
+                )
+                    .prop_map(|(enabled, config)| SparseVectorValueType {
+                        sparse_vector_index: config.map(|cfg| SparseVectorIndexType {
+                            enabled,
+                            config: cfg,
+                        }),
+                    }),
+            )
+            .boxed()
+        }
+
+        fn hnsw_index_config_strategy() -> impl Strategy<Value = HnswIndexConfig> {
+            internal_hnsw_configuration_strategy().prop_map(|config| HnswIndexConfig {
+                ef_construction: Some(config.ef_construction),
+                max_neighbors: Some(config.max_neighbors),
+                ef_search: Some(config.ef_search),
+                num_threads: Some(config.num_threads),
+                batch_size: Some(config.batch_size),
+                sync_threshold: Some(config.sync_threshold),
+                resize_factor: Some(config.resize_factor),
+            })
+        }
+
+        fn spann_index_config_strategy() -> impl Strategy<Value = SpannIndexConfig> {
+            internal_spann_configuration_strategy().prop_map(|config| SpannIndexConfig {
+                search_nprobe: Some(config.search_nprobe),
+                search_rng_factor: Some(config.search_rng_factor),
+                search_rng_epsilon: Some(config.search_rng_epsilon),
+                nreplica_count: Some(config.nreplica_count),
+                write_rng_factor: Some(config.write_rng_factor),
+                write_rng_epsilon: Some(config.write_rng_epsilon),
+                split_threshold: Some(config.split_threshold),
+                num_samples_kmeans: Some(config.num_samples_kmeans),
+                initial_lambda: Some(config.initial_lambda),
+                reassign_neighbor_count: Some(config.reassign_neighbor_count),
+                merge_threshold: Some(config.merge_threshold),
+                num_centers_to_merge_to: Some(config.num_centers_to_merge_to),
+                write_nprobe: Some(config.write_nprobe),
+                ef_construction: Some(config.ef_construction),
+                ef_search: Some(config.ef_search),
+                max_neighbors: Some(config.max_neighbors),
+            })
+        }
+
+        fn vector_index_config_strategy() -> impl Strategy<Value = VectorIndexConfig> {
+            (
+                proptest::option::of(space_strategy()),
+                embedding_function_strategy(),
+                source_key_strategy(),
+                proptest::option::of(hnsw_index_config_strategy()),
+                proptest::option::of(spann_index_config_strategy()),
+            )
+                .prop_map(|(space, embedding_function, source_key, hnsw, spann)| {
+                    VectorIndexConfig {
+                        space,
+                        embedding_function,
+                        source_key,
+                        hnsw,
+                        spann,
+                    }
+                })
+        }
+
+        fn vector_index_type_strategy() -> impl Strategy<Value = VectorIndexType> {
+            (any::<bool>(), vector_index_config_strategy())
+                .prop_map(|(enabled, config)| VectorIndexType { enabled, config })
+        }
+
+        fn float_list_value_type_strategy() -> BoxedStrategy<Option<FloatListValueType>> {
+            proptest::option::of(
+                proptest::option::of(vector_index_type_strategy())
+                    .prop_map(|vector_index| FloatListValueType { vector_index }),
+            )
+            .boxed()
+        }
+
+        fn value_types_strategy() -> BoxedStrategy<ValueTypes> {
+            (
+                string_value_type_strategy(),
+                float_list_value_type_strategy(),
+                sparse_vector_value_type_strategy(),
+                int_value_type_strategy(),
+                float_value_type_strategy(),
+                bool_value_type_strategy(),
+            )
+                .prop_map(
+                    |(string, float_list, sparse_vector, int, float, boolean)| ValueTypes {
+                        string,
+                        float_list,
+                        sparse_vector,
+                        int,
+                        float,
+                        boolean,
+                    },
+                )
+                .boxed()
+        }
+
+        fn schema_strategy() -> BoxedStrategy<Schema> {
+            (
+                value_types_strategy(),
+                proptest::collection::hash_map(
+                    non_special_key_strategy(),
+                    value_types_strategy(),
+                    0..=3,
+                ),
+                proptest::option::of(value_types_strategy()),
+                proptest::option::of(value_types_strategy()),
+            )
+                .prop_map(
+                    |(defaults, mut extra_keys, document_override, embedding_override)| {
+                        if let Some(doc) = document_override {
+                            extra_keys.insert(DOCUMENT_KEY.to_string(), doc);
+                        }
+                        if let Some(embed) = embedding_override {
+                            extra_keys.insert(EMBEDDING_KEY.to_string(), embed);
+                        }
+                        Schema {
+                            defaults,
+                            keys: extra_keys,
+                            cmek: None,
+                        }
+                    },
+                )
+                .boxed()
+        }
+
+        fn force_non_default_schema(mut schema: Schema) -> Schema {
+            if schema.is_default() {
+                if let Some(string_value) = schema
+                    .defaults
+                    .string
+                    .as_mut()
+                    .and_then(|string_value| string_value.string_inverted_index.as_mut())
+                {
+                    string_value.enabled = !string_value.enabled;
+                } else {
+                    schema.defaults.string = Some(StringValueType {
+                        string_inverted_index: Some(StringInvertedIndexType {
+                            enabled: false,
+                            config: StringInvertedIndexConfig {},
+                        }),
+                        fts_index: None,
+                    });
+                }
+            }
+            schema
+        }
+
+        fn non_default_schema_strategy() -> BoxedStrategy<Schema> {
+            schema_strategy().prop_map(force_non_default_schema).boxed()
+        }
+
+        fn extract_vector_configs(schema: &Schema) -> (VectorIndexConfig, VectorIndexConfig) {
+            let defaults = schema
+                .defaults
+                .float_list
+                .as_ref()
+                .and_then(|fl| fl.vector_index.as_ref())
+                .map(|vi| vi.config.clone())
+                .expect("defaults vector index missing");
+
+            let embedding = schema
+                .keys
+                .get(EMBEDDING_KEY)
+                .and_then(|value_types| value_types.float_list.as_ref())
+                .and_then(|fl| fl.vector_index.as_ref())
+                .map(|vi| vi.config.clone())
+                .expect("#embedding vector index missing");
+
+            (defaults, embedding)
+        }
+
+        proptest! {
+            #[test]
+            fn reconcile_schema_and_config_matches_convert_for_config_only(
+                config in internal_collection_configuration_strategy(),
+                knn in knn_index_strategy(),
+            ) {
+                let result = Schema::reconcile_schema_and_config(None, Some(&config), knn)
+                    .expect("reconciliation should succeed");
+
+                let (defaults_vi, embedding_vi) = extract_vector_configs(&result);
+                let expected_config = expected_vector_index_config(&config);
+
+                prop_assert_eq!(defaults_vi, expected_config.clone());
+
+                let mut expected_embedding_config = expected_config;
+                expected_embedding_config.source_key = Some(DOCUMENT_KEY.to_string());
+                prop_assert_eq!(embedding_vi, expected_embedding_config);
+
+                prop_assert_eq!(result.keys.len(), 2);
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn reconcile_schema_and_config_errors_when_both_non_default(
+                config in non_default_internal_collection_configuration_strategy(),
+                knn in knn_index_strategy(),
+            ) {
+                let schema = Schema::try_from(&config)
+                    .expect("conversion should succeed");
+                prop_assume!(!schema.is_default());
+
+                let result = Schema::reconcile_schema_and_config(Some(&schema), Some(&config), knn);
+
+                prop_assert!(matches!(result, Err(SchemaError::ConfigAndSchemaConflict)));
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn reconcile_schema_and_config_matches_schema_only_path(
+                schema in schema_strategy(),
+                knn in knn_index_strategy(),
+            ) {
+                let result = Schema::reconcile_schema_and_config(Some(&schema), None, knn)
+                    .expect("reconciliation should succeed");
+
+                let (defaults_vi, embedding_vi) = extract_vector_configs(&result);
+
+                // Property: schema defaults.float_list vector_index config should be merged into defaults
+                if let Some(schema_float_list) = schema.defaults.float_list.as_ref() {
+                    if let Some(schema_vi) = schema_float_list.vector_index.as_ref() {
+                        // Property: schema values take precedence over defaults
+                        if let Some(schema_space) = &schema_vi.config.space {
+                            prop_assert_eq!(defaults_vi.space, Some(schema_space.clone()));
+                        }
+                        if let Some(schema_ef) = &schema_vi.config.embedding_function {
+                            prop_assert_eq!(defaults_vi.embedding_function, Some(schema_ef.clone()));
+                        }
+                        // Test nested config merging properties
+                        match knn {
+                            KnnIndex::Hnsw => {
+                                if let Some(schema_hnsw) = &schema_vi.config.hnsw {
+                                    if let Some(merged_hnsw) = &defaults_vi.hnsw {
+                                        if let Some(schema_ef_construction) = schema_hnsw.ef_construction {
+                                            prop_assert_eq!(merged_hnsw.ef_construction, Some(schema_ef_construction));
+                                        }
+                                    }
+                                }
+                            }
+                            KnnIndex::Spann => {
+                                if let Some(schema_spann) = &schema_vi.config.spann {
+                                    if let Some(merged_spann) = &defaults_vi.spann {
+                                        if let Some(schema_search_nprobe) = schema_spann.search_nprobe {
+                                            prop_assert_eq!(merged_spann.search_nprobe, Some(schema_search_nprobe));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Property: schema #embedding float_list vector_index config should be merged into embedding
+                if let Some(embedding_values) = schema.keys.get(EMBEDDING_KEY) {
+                    if let Some(embedding_float_list) = embedding_values.float_list.as_ref() {
+                        if let Some(embedding_vi_type) = embedding_float_list.vector_index.as_ref() {
+                            if let Some(schema_space) = &embedding_vi_type.config.space {
+                                prop_assert_eq!(embedding_vi.space, Some(schema_space.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn reconcile_schema_and_config_with_default_schema_and_default_config_applies_embedding_function(
+                embedding_function in default_embedding_function_strategy(),
+                knn in knn_index_strategy(),
+            ) {
+                let schema = Schema::new_default(knn);
+                let mut config = match knn {
+                    KnnIndex::Hnsw => InternalCollectionConfiguration::default_hnsw(),
+                    KnnIndex::Spann => InternalCollectionConfiguration::default_spann(),
+                };
+                config.embedding_function = embedding_function.clone();
+
+                let result = Schema::reconcile_schema_and_config(
+                    Some(&schema),
+                    Some(&config),
+                    knn,
+                )
+                .expect("reconciliation should succeed");
+
+                let (defaults_vi, embedding_vi) = extract_vector_configs(&result);
+
+                // Property: embedding function from config should be applied to both defaults and embedding
+                if let Some(ef) = embedding_function {
+                    prop_assert_eq!(defaults_vi.embedding_function, Some(ef.clone()));
+                    prop_assert_eq!(embedding_vi.embedding_function, Some(ef));
+                } else {
+                    // Property: when embedding function is None, it should remain None
+                    prop_assert_eq!(defaults_vi.embedding_function, None);
+                    prop_assert_eq!(embedding_vi.embedding_function, None);
+                }
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn reconcile_schema_and_config_with_default_config_keeps_non_default_schema(
+                schema in non_default_schema_strategy(),
+                knn in knn_index_strategy(),
+            ) {
+                let default_config = match knn {
+                    KnnIndex::Hnsw => InternalCollectionConfiguration::default_hnsw(),
+                    KnnIndex::Spann => InternalCollectionConfiguration::default_spann(),
+                };
+
+                let result = Schema::reconcile_schema_and_config(
+                    Some(&schema),
+                    Some(&default_config),
+                    knn,
+                )
+                .expect("reconciliation should succeed");
+
+                let (defaults_vi, embedding_vi) = extract_vector_configs(&result);
+
+                // Property: when config is default, schema values should be preserved
+                // Test that schema defaults.float_list vector_index config is applied
+                if let Some(schema_float_list) = schema.defaults.float_list.as_ref() {
+                    if let Some(schema_vi) = schema_float_list.vector_index.as_ref() {
+                        if let Some(schema_space) = &schema_vi.config.space {
+                            prop_assert_eq!(defaults_vi.space, Some(schema_space.clone()));
+                        }
+                        if let Some(schema_ef) = &schema_vi.config.embedding_function {
+                            prop_assert_eq!(defaults_vi.embedding_function, Some(schema_ef.clone()));
+                        }
+                    }
+                }
+
+                // Property: schema #embedding float_list vector_index config should be applied
+                if let Some(embedding_values) = schema.keys.get(EMBEDDING_KEY) {
+                    if let Some(embedding_float_list) = embedding_values.float_list.as_ref() {
+                        if let Some(embedding_vi_type) = embedding_float_list.vector_index.as_ref() {
+                            if let Some(schema_space) = &embedding_vi_type.config.space {
+                                prop_assert_eq!(embedding_vi.space, Some(schema_space.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

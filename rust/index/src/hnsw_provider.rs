@@ -14,7 +14,7 @@ use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{GetOptions, PutOptions, Storage};
-use chroma_types::CollectionUuid;
+use chroma_types::{Cmek, CollectionUuid};
 use futures::TryFutureExt;
 use parking_lot::RwLock;
 use std::fmt::Debug;
@@ -68,6 +68,7 @@ pub struct HnswIndexFlusher {
     pub prefix_path: String,
     pub index_id: IndexUuid,
     pub hnsw_index: HnswIndexRef,
+    pub cmek: Option<Cmek>,
 }
 
 #[derive(Clone)]
@@ -342,8 +343,7 @@ impl HnswIndexProvider {
             .map(|s| Self::format_key(prefix_path, source_id, s))
             .collect();
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
-        let s3_fetch_span =
-            tracing::trace_span!(parent: Span::current(), "Read hnsw files from s3 into index");
+        let s3_fetch_span = tracing::trace_span!(parent: Span::current(), "Read hnsw files from s3 into index", index_id = %source_id, prefix_path = %prefix_path);
         let result = self
             .storage
             .fetch_batch(
@@ -611,6 +611,7 @@ impl HnswIndexProvider {
         prefix_path: &str,
         index_uuid: &IndexUuid,
         hnsw_index: &HnswIndexRef,
+        cmek: Option<Cmek>,
     ) -> Result<(), Box<HnswIndexProviderFlushError>> {
         let hnsw_data = hnsw_index
             .inner
@@ -625,6 +626,11 @@ impl HnswIndexProvider {
             hnsw_data.link_list_buffer(),
         ];
 
+        let mut options = PutOptions::default().with_priority(StorageRequestPriority::P0);
+        if let Some(cmek) = cmek {
+            options = options.with_cmek(cmek);
+        }
+
         let upload_futures = FILES
             .iter()
             .zip(buffers)
@@ -632,13 +638,10 @@ impl HnswIndexProvider {
                 let key = Self::format_key(prefix_path, index_uuid, file);
                 let storage = &self.storage;
                 let file = *file; // Copy for the closure
+                let options = options.clone();
                 async move {
                     storage
-                        .put_bytes(
-                            &key,
-                            buffer.to_vec(),
-                            PutOptions::with_priority(StorageRequestPriority::P0),
-                        )
+                        .put_bytes(&key, buffer.to_vec(), options)
                         .await
                         .map(|k| {
                             tracing::info!("Flushed hnsw index file: {} with etag: {:?}", file, k);
@@ -662,11 +665,20 @@ impl HnswIndexProvider {
         prefix_path: &str,
         id: &IndexUuid,
         hnsw_index: &HnswIndexRef,
+        cmek: Option<Cmek>,
     ) -> Result<(), Box<HnswIndexProviderFlushError>> {
         if self.use_direct_hnsw {
-            return self.flush_from_memory(prefix_path, id, hnsw_index).await;
+            return self
+                .flush_from_memory(prefix_path, id, hnsw_index, cmek)
+                .await;
         }
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
+
+        let mut options = PutOptions::default().with_priority(StorageRequestPriority::P0);
+        if let Some(cmek) = cmek {
+            options = options.with_cmek(cmek);
+        }
+
         for file in FILES.iter() {
             let file_path = index_storage_path.join(file);
             // fsync the file to ensure all writes are flushed to disk
@@ -681,11 +693,7 @@ impl HnswIndexProvider {
             let key = Self::format_key(prefix_path, id, file);
             let res = self
                 .storage
-                .put_file(
-                    &key,
-                    file_path.to_str().unwrap(),
-                    PutOptions::with_priority(StorageRequestPriority::P0),
-                )
+                .put_file(&key, file_path.to_str().unwrap(), options.clone())
                 .await;
             match res {
                 Ok(_) => {
@@ -913,7 +921,7 @@ mod tests {
         let created_index_id = created_index.inner.read().hnsw_index.id;
         provider.commit(created_index.clone()).unwrap();
         provider
-            .flush(prefix_path, &created_index_id, &created_index)
+            .flush(prefix_path, &created_index_id, &created_index, None)
             .await
             .unwrap();
 
@@ -972,7 +980,7 @@ mod tests {
             .commit(created_index.clone())
             .expect("Expected to commit");
         provider
-            .flush(prefix_path, &created_index_id, &created_index)
+            .flush(prefix_path, &created_index_id, &created_index, None)
             .await
             .expect("Expected to flush");
         // clear the cache.
@@ -1068,7 +1076,7 @@ mod tests {
 
         // Attempt to flush - this should fail because we can't write files to read-only directory
         let result = provider
-            .flush_from_memory(prefix_path, &created_index_id, &created_index)
+            .flush_from_memory(prefix_path, &created_index_id, &created_index, None)
             .await;
 
         // Restore permissions for cleanup (do this before assertions in case they panic)

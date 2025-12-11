@@ -30,6 +30,7 @@ async fn test_k8s_integration_copy_with_deep_snapshots() {
         "copy_with_deep_snapshots_source",
         "writer",
         (),
+        None,
     )
     .await
     .unwrap();
@@ -110,6 +111,7 @@ async fn test_k8s_integration_copy_at_specific_offset() {
         "copy_at_specific_offset_source",
         "writer",
         (),
+        None,
     )
     .await
     .unwrap();
@@ -178,6 +180,7 @@ async fn test_k8s_integration_copy_verifies_manifest_consistency() {
         "copy_verifies_manifest_source",
         "writer",
         (),
+        None,
     )
     .await
     .unwrap();
@@ -256,6 +259,7 @@ async fn test_k8s_integration_copy_empty_with_advanced_manifest() {
         "copy_empty_advanced_source",
         "writer",
         (),
+        None,
     )
     .await
     .unwrap();
@@ -345,6 +349,7 @@ async fn test_k8s_integration_copy_with_large_fragments() {
         "copy_large_fragments_source",
         "writer",
         (),
+        None,
     )
     .await
     .unwrap();

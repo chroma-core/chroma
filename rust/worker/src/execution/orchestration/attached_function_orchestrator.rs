@@ -605,6 +605,15 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             }
         };
 
+        // Extract CMEK from input collection schema (inherit for output collection segments)
+        // The output collection inherits the input collection's encryption policy
+        let cmek = self
+            .get_input_collection_info()
+            .collection
+            .schema
+            .as_ref()
+            .and_then(|s| s.cmek.clone());
+
         let record_writer = match self
             .ok_or_terminate(
                 RecordSegmentWriter::from_segment(
@@ -612,6 +621,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                     &collection.database_id,
                     &message.record_segment,
                     &self.output_context.blockfile_provider,
+                    cmek.clone(),
                 )
                 .await,
                 ctx,
@@ -629,6 +639,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                     &collection.database_id,
                     &message.metadata_segment,
                     &self.output_context.blockfile_provider,
+                    cmek.clone(),
                 )
                 .await,
                 ctx,
@@ -644,7 +655,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                 .ok_or_terminate(
                     self.output_context
                         .spann_provider
-                        .write(collection, &message.vector_segment, dimension)
+                        .write(collection, &message.vector_segment, dimension, cmek)
                         .await,
                     ctx,
                 )
@@ -660,6 +671,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                         &message.vector_segment,
                         dimension,
                         self.output_context.hnsw_provider.clone(),
+                        cmek,
                     )
                     .await
                     .map_err(|err| *err),

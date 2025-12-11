@@ -393,7 +393,7 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
         }
     }
 
-    pub fn get_data_record(&self) -> Option<&DataRecord> {
+    pub fn get_data_record(&'_ self) -> Option<&'_ DataRecord<'_>> {
         self.segment_data_record.as_ref()
     }
 
@@ -494,7 +494,7 @@ impl MaterializeLogsResult {
         self.has_backfill
     }
 
-    pub fn iter(&self) -> MaterializeLogsResultIter {
+    pub fn iter(&'_ self) -> MaterializeLogsResultIter<'_> {
         MaterializeLogsResultIter {
             logs: &self.logs,
             chunk: &self.materialized,
@@ -1160,6 +1160,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1168,6 +1169,7 @@ mod tests {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1317,6 +1319,7 @@ mod tests {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1325,6 +1328,7 @@ mod tests {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1462,6 +1466,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1470,6 +1475,7 @@ mod tests {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1610,6 +1616,7 @@ mod tests {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1618,6 +1625,7 @@ mod tests {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1756,6 +1764,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1764,6 +1773,7 @@ mod tests {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1924,6 +1934,7 @@ mod tests {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1932,6 +1943,7 @@ mod tests {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -2060,6 +2072,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -2305,6 +2318,7 @@ mod tests {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");

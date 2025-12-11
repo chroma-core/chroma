@@ -32,6 +32,7 @@ use chroma_types::chroma_proto::{
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::dirty_log_path_from_hostname;
+use chroma_types::Cmek;
 use chroma_types::{CollectionUuid, DirtyMarker};
 use figment::providers::{Env, Format, Yaml};
 use futures::stream::StreamExt;
@@ -247,9 +248,11 @@ async fn get_log_from_handle<'a>(
     storage: &Arc<Storage>,
     prefix: &str,
     mark_dirty: MarkDirty,
+    cmek: Option<Cmek>,
 ) -> Result<LogRef<'a>, wal3::Error> {
     let active = handle.active.lock().await;
-    get_log_from_handle_with_mutex_held(handle, active, options, storage, prefix, mark_dirty).await
+    get_log_from_handle_with_mutex_held(handle, active, options, storage, prefix, mark_dirty, cmek)
+        .await
 }
 
 async fn get_log_from_handle_with_mutex_held<'a>(
@@ -259,6 +262,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
     storage: &Arc<Storage>,
     prefix: &str,
     mark_dirty: MarkDirty,
+    cmek: Option<Cmek>,
 ) -> Result<LogRef<'a>, wal3::Error> {
     if active.log.is_some() {
         active.keep_alive(Duration::from_secs(60));
@@ -276,6 +280,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
         // TODO(rescrv):  Configurable params.
         "log writer",
         mark_dirty.clone(),
+        cmek,
     )
     .await?;
     active.keep_alive(Duration::from_secs(60));
@@ -624,6 +629,7 @@ impl LogServer {
             &self.storage,
             &storage_prefix,
             mark_dirty,
+            None, // Offset updates don't use CMEK
         )
         .await
         .map_err(|err| Status::unknown(err.to_string()))?;
@@ -1107,6 +1113,16 @@ impl LogServer {
         }
         self.check_for_backpressure(collection_id)?;
 
+        // Extract CMEK from request
+        let cmek = push_logs
+            .cmek
+            .map(Cmek::try_from)
+            .transpose()
+            .map_err(|e| {
+                tracing::error!("Failed to convert CMEK: {}", e);
+                Status::invalid_argument("Invalid CMEK configuration")
+            })?;
+
         tracing::info!("Pushing logs for collection {}", collection_id);
         let prefix = collection_id.storage_prefix_for_log();
         let key = LogKey { collection_id };
@@ -1121,6 +1137,7 @@ impl LogServer {
             &self.storage,
             &prefix,
             mark_dirty,
+            cmek,
         )
         .await
         {
@@ -1756,6 +1773,7 @@ impl LogServer {
                     &self.storage,
                     &prefix,
                     mark_dirty,
+                    None, // GC doesn't use CMEK
                 )
                 .await
                 .map_err(handle_error_properly)?;
@@ -2312,6 +2330,7 @@ impl Configurable<LogServerConfig> for LogServer {
             &MarkDirty::path_for_hostname(&config.my_member_id),
             "dirty log writer",
             (),
+            None, // Dirty log doesn't use CMEK
         )
         .await
         .map_err(|err| -> Box<dyn ChromaError> { Box::new(err) as _ })?;
@@ -3524,6 +3543,7 @@ mod tests {
                 "test-rust-log-service",
                 "test-dirty-log-writer",
                 (),
+                None, // Test doesn't use CMEK
             )
             .await
             .expect("Dirty log should be initializable"),
@@ -3560,6 +3580,7 @@ mod tests {
                     .map(TryInto::try_into)
                     .collect::<Result<_, _>>()
                     .expect("Logs should be valid"),
+                cmek: None,
             });
             if let Err(err) = server.push_logs(proto_push_log_req).await {
                 if err.code() == Code::Unavailable {
@@ -4074,6 +4095,7 @@ mod tests {
             "dirty-test",
             "dirty log writer",
             (),
+            None, // Test doesn't use CMEK
         )
         .await
         .expect("Failed to create dirty log");
@@ -4104,6 +4126,7 @@ mod tests {
             &storage_prefix,
             "test log writer",
             (),
+            None, // Test doesn't use CMEK
         )
         .await
         .expect("Failed to initialize collection log");

@@ -8,9 +8,10 @@ spec:
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: rust-log-service-memberlist-readerwriter
+  namespace: {{ .Values.namespace }}
 rules:
 - apiGroups:
     - chroma.cluster
@@ -30,12 +31,13 @@ rules:
 
 # Allows the sysdb service to read and write to the memberlist
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: sysdb-rust-log-service-memberlist-binding
+  namespace: {{ .Values.namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: rust-log-service-memberlist-readerwriter
 subjects:
 - kind: ServiceAccount
@@ -46,12 +48,13 @@ subjects:
 
 # Allows the rust-frontend-service to read and write to the memberlist
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: rust-frontend-service-rust-log-service-memberlist-binding
+  namespace: {{ .Values.namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: rust-log-service-memberlist-readerwriter
 subjects:
 - kind: ServiceAccount

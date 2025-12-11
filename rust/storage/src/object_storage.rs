@@ -10,17 +10,60 @@ use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
+use chroma_types::Cmek;
 use futures::stream::{self, StreamExt, TryStreamExt};
-use object_store::ObjectMeta;
-use object_store::{gcp::GoogleCloudStorageBuilder, GetRange, ObjectStore, PutMode, UpdateVersion};
+use object_store::{
+    client::{
+        HttpClient, HttpConnector, HttpError, HttpErrorKind, HttpRequest, HttpResponse,
+        HttpService, ReqwestConnector,
+    },
+    gcp::GoogleCloudStorageBuilder,
+    ClientOptions, GetRange, HeaderValue, ObjectMeta, ObjectStore, UpdateVersion,
+};
 use serde::{Deserialize, Serialize};
 
-use crate::config::ObjectStorageProvider;
 use crate::{
-    config::{ObjectStorageConfig, StorageConfig},
+    config::{ObjectStorageConfig, ObjectStorageProvider, StorageConfig},
     s3::DeletedObjects,
-    ETag, GetOptions, PutOptions, StorageConfigError, StorageError,
+    ETag, GetOptions, PutMode, PutOptions, StorageConfigError, StorageError,
 };
+
+const GCP_CMEK_HEADER: &str = "x-goog-encryption-kms-key-name";
+
+#[derive(Debug)]
+struct HttpClientWrapper {
+    reqwest_client: HttpClient,
+}
+
+#[async_trait::async_trait]
+impl HttpService for HttpClientWrapper {
+    async fn call(&self, mut req: HttpRequest) -> Result<HttpResponse, HttpError> {
+        // Attach customer managed encryption key if configured
+        if let Some(cmek) = req.extensions_mut().remove::<Cmek>() {
+            let header = req.headers_mut();
+            match cmek {
+                Cmek::Gcp(resource) => {
+                    header.insert(
+                        GCP_CMEK_HEADER,
+                        HeaderValue::from_str(&resource)
+                            .map_err(|err| HttpError::new(HttpErrorKind::Request, err))?,
+                    );
+                }
+            }
+        }
+        self.reqwest_client.execute(req).await
+    }
+}
+
+#[derive(Debug)]
+struct ChromaHttpConnector;
+
+impl HttpConnector for ChromaHttpConnector {
+    fn connect(&self, options: &ClientOptions) -> object_store::Result<HttpClient> {
+        let reqwest_client = ReqwestConnector::default().connect(options)?;
+        Ok(HttpClient::new(HttpClientWrapper { reqwest_client }))
+    }
+}
 
 impl From<object_store::Error> for StorageError {
     fn from(e: object_store::Error) -> Self {
@@ -59,8 +102,8 @@ impl From<object_store::Error> for StorageError {
             object_store::Error::InvalidPath { source } => StorageError::Generic {
                 source: Arc::new(source),
             },
-            object_store::Error::Generic { store, source } => StorageError::Generic {
-                source: Arc::new(std::io::Error::other(format!("{}: {}", store, source))),
+            err @ object_store::Error::Generic { .. } => StorageError::Generic {
+                source: Arc::new(err),
             },
             object_store::Error::JoinError { source } => StorageError::Generic {
                 source: Arc::new(source),
@@ -68,8 +111,8 @@ impl From<object_store::Error> for StorageError {
             object_store::Error::UnknownConfigurationKey { store, key } => {
                 StorageError::UnknownConfigurationKey { store, key }
             }
-            _ => StorageError::Generic {
-                source: Arc::new(e),
+            err => StorageError::Generic {
+                source: Arc::new(err),
             },
         }
     }
@@ -141,6 +184,18 @@ impl TryFrom<&ETag> for UpdateVersion {
     }
 }
 
+impl TryFrom<PutMode> for object_store::PutMode {
+    type Error = StorageError;
+
+    fn try_from(value: PutMode) -> Result<Self, Self::Error> {
+        Ok(match value {
+            PutMode::IfMatch(etag) => Self::Update((&etag).try_into()?),
+            PutMode::IfNotExist => Self::Create,
+            PutMode::Upsert => Self::Overwrite,
+        })
+    }
+}
+
 #[derive(Clone)]
 pub struct ObjectStorage {
     pub(crate) bucket: String,
@@ -166,10 +221,11 @@ impl ObjectStorage {
                     ..Default::default()
                 })
                 .with_client_options(
-                    object_store::ClientOptions::new()
+                    ClientOptions::new()
                         .with_timeout(Duration::from_millis(config.request_timeout_ms))
                         .with_connect_timeout(Duration::from_millis(config.connect_timeout_ms)),
                 )
+                .with_http_connector(ChromaHttpConnector)
                 .build()
                 .map_err(|e| {
                     Box::new(StorageConfigError::FailedToCreateBucket(format!(
@@ -181,9 +237,9 @@ impl ObjectStorage {
 
         Ok(ObjectStorage {
             bucket: config.bucket.clone(),
+            download_part_size_bytes: config.download_part_size_bytes,
             store: Arc::new(store),
             upload_part_size_bytes: config.upload_part_size_bytes,
-            download_part_size_bytes: config.download_part_size_bytes,
         })
     }
 
@@ -274,10 +330,25 @@ impl ObjectStorage {
         }
     }
 
-    async fn multipart_put(&self, key: &str, bytes: Bytes) -> Result<ETag, StorageError> {
+    async fn multipart_put(
+        &self,
+        key: &str,
+        bytes: Bytes,
+        options: PutOptions,
+    ) -> Result<ETag, StorageError> {
+        let mut put_options = object_store::PutMultipartOptions::default();
+
+        // Apply customer managed encryption key
+        if let Some(cmek) = options.cmek {
+            put_options.extensions.insert(cmek);
+        }
+
         let chunk_ranges = Self::partition(bytes.len() as u64, self.upload_part_size_bytes)
-            .map(|(start, end)| (start as usize..end as usize));
-        let mut upload_handle = self.store.put_multipart(&key.into()).await?;
+            .map(|(start, end)| start as usize..end as usize);
+        let mut upload_handle = self
+            .store
+            .put_multipart_opts(&key.into(), put_options)
+            .await?;
         let upload_parts = chunk_ranges
             .map(|range| upload_handle.put_part(bytes.slice(range).into()))
             .collect::<Vec<_>>();
@@ -306,12 +377,13 @@ impl ObjectStorage {
     ) -> Result<ETag, StorageError> {
         let mut put_options = object_store::PutOptions::default();
 
-        // Apply conditional operations
-        if options.if_not_exists {
-            put_options.mode = PutMode::Create;
-        } else if let Some(etag) = &options.if_match {
-            put_options.mode = PutMode::Update(etag.try_into()?);
+        // Apply customer managed encryption key
+        if let Some(cmek) = options.cmek {
+            put_options.extensions.insert(cmek);
         }
+
+        // Apply conditional operations
+        put_options.mode = options.mode.try_into()?;
 
         let result = self
             .store
@@ -330,8 +402,10 @@ impl ObjectStorage {
         // NOTE(sicheng): GCS has no support for conditional multipart upload
         // https://docs.cloud.google.com/storage/docs/multipart-uploads
         total_size_bytes <= self.upload_part_size_bytes
-            || options.if_match.is_some()
-            || options.if_not_exists
+            || matches!(
+                options.mode,
+                crate::PutMode::IfMatch(_) | crate::PutMode::IfNotExist
+            )
     }
 
     pub async fn put(
@@ -343,7 +417,7 @@ impl ObjectStorage {
         if self.is_oneshot_upload(bytes.len() as u64, &options) {
             self.oneshot_put(key, bytes, options).await
         } else {
-            self.multipart_put(key, bytes).await
+            self.multipart_put(key, bytes, options).await
         }
     }
 
