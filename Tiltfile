@@ -150,19 +150,31 @@ k8s_yaml(
   ['k8s/distributed-chroma/crds/memberlist_crd.yaml'],
 )
 
+rfe_config_file = os.environ.get('RFE_CONFIG_FILE') or "rust/frontend/sample_configs/distributed.yaml"
+
+distributed_chroma_values = "k8s/distributed-chroma/values.yaml,k8s/distributed-chroma/values.dev.yaml"
+if os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA_VALUES'):
+  distributed_chroma_values += ',' + os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA_VALUES')
 
 # We manually call helm template so we can call set-file
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=rust/frontend/sample_configs/distributed.yaml,rustLogService.configuration=rust/worker/chroma_config.yaml,heapTenderService.configuration=rust/worker/chroma_config.yaml,compactionService.configuration=rust/worker/chroma_config.yaml,queryService.configuration=rust/worker/chroma_config.yaml,garbageCollector.configuration=rust/worker/chroma_config.yaml --values k8s/distributed-chroma/values.yaml,k8s/distributed-chroma/values.dev.yaml k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=rust/worker/chroma_config.yaml,heapTenderService.configuration=rust/worker/chroma_config.yaml,compactionService.configuration=rust/worker/chroma_config.yaml,queryService.configuration=rust/worker/chroma_config.yaml,garbageCollector.configuration=rust/worker/chroma_config.yaml --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
   ),
 )
 
+rfe2_config_file = os.environ.get('RFE2_CONFIG_FILE') or "rust/frontend/sample_configs/distributed2.yaml"
+
+distributed_chroma2_values = "k8s/distributed-chroma/values2.yaml,k8s/distributed-chroma/values2.dev.yaml"
+if os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA2_VALUES'):
+  distributed_chroma2_values += ',' + os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA2_VALUES')
+
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=rust/frontend/sample_configs/distributed2.yaml,rustLogService.configuration=rust/worker/chroma_config2.yaml,heapTenderService.configuration=rust/worker/chroma_config2.yaml,compactionService.configuration=rust/worker/chroma_config2.yaml,queryService.configuration=rust/worker/chroma_config2.yaml,garbageCollector.configuration=rust/worker/chroma_config2.yaml --values k8s/distributed-chroma/values2.yaml,k8s/distributed-chroma/values2.dev.yaml k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=' + rfe2_config_file + ',rustLogService.configuration=rust/worker/chroma_config2.yaml,heapTenderService.configuration=rust/worker/chroma_config2.yaml,compactionService.configuration=rust/worker/chroma_config2.yaml,queryService.configuration=rust/worker/chroma_config2.yaml,garbageCollector.configuration=rust/worker/chroma_config2.yaml --values ' + distributed_chroma2_values + ' k8s/distributed-chroma'
   ),
 )
+
 
 watch_file('rust/frontend/sample_configs/distributed.yaml')
 watch_file('rust/frontend/sample_configs/distributed2.yaml')
