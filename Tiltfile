@@ -1,7 +1,3 @@
-# Enable to test multi-region deployment
-config.define_bool('multi_region')
-cfg = config.parse()
-
 update_settings(max_parallel_updates=6)
 
 # *:ci images are defined in .github/actions/tilt/docker-bake.hcl and used for .github/actions/tilt/action.yaml.
@@ -336,9 +332,7 @@ groups = {
   ],
 }
 
-if cfg.get('multi_region'):
+if os.environ['MULTI_REGION'] == 'true':
   config.set_enabled_resources(groups['basic'] + groups['multi_region'])
-  os.environ['MULTI_REGION'] = 'true'
 else:
   config.set_enabled_resources(groups['basic'])
-  os.environ['MULTI_REGION'] = 'false'
