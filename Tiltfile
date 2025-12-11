@@ -175,7 +175,6 @@ k8s_yaml(
   ),
 )
 
-
 watch_file('rust/frontend/sample_configs/distributed.yaml')
 watch_file('rust/frontend/sample_configs/distributed2.yaml')
 watch_file('rust/worker/chroma_config.yaml')
