@@ -566,6 +566,7 @@ message AttachFunctionRequest {
 
 message AttachFunctionResponse {
   AttachedFunction attached_function = 1;
+  bool created = 2;  // True if newly created, false if already existed (idempotent)
 }
 
 message GetAttachedFunctionByNameRequest {
@@ -611,7 +612,7 @@ message ListAttachedFunctionsResponse {
 }
 
 message DetachFunctionRequest {
-  string attached_function_id = 1;
+  string name = 1;
   bool delete_output = 2; // If true and output_collection_id is not null, atomically soft-delete the output collection
   string input_collection_id = 3;
 }
@@ -624,7 +625,9 @@ message FinishCreateAttachedFunctionRequest {
   string id = 1;
 }
 
-message FinishCreateAttachedFunctionResponse {}
+message FinishCreateAttachedFunctionResponse {
+  bool created = 1;  // True if newly created, false if already existed (idempotent)
+}
 
 message CleanupExpiredPartialAttachedFunctionsRequest {
   // Attached functions older than this will be deleted

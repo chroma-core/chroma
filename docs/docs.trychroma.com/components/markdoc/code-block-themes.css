@@ -1,0 +1,68 @@
+/* Import both themes - dark theme second so it has natural cascade priority */
+@import 'highlight.js/styles/atom-one-light.css';
+@import 'highlight.js/styles/atom-one-dark.css';
+
+/* Use Tailwind's dark mode selector to control which theme applies */
+/* Override dark theme colors when NOT in dark mode */
+html:not(.dark) .hljs {
+  color: #383a42;
+  background: #fafafa;
+}
+
+/* These selectors ensure light theme syntax colors apply when not in dark mode */
+html:not(.dark) .hljs-comment,
+html:not(.dark) .hljs-quote {
+  color: #a0a1a7;
+}
+
+html:not(.dark) .hljs-doctag,
+html:not(.dark) .hljs-keyword,
+html:not(.dark) .hljs-formula {
+  color: #a626a4;
+}
+
+html:not(.dark) .hljs-section,
+html:not(.dark) .hljs-name,
+html:not(.dark) .hljs-selector-tag,
+html:not(.dark) .hljs-deletion,
+html:not(.dark) .hljs-subst {
+  color: #e45649;
+}
+
+html:not(.dark) .hljs-literal {
+  color: #0184bb;
+}
+
+html:not(.dark) .hljs-string,
+html:not(.dark) .hljs-regexp,
+html:not(.dark) .hljs-addition,
+html:not(.dark) .hljs-attribute,
+html:not(.dark) .hljs-meta .hljs-string {
+  color: #50a14f;
+}
+
+html:not(.dark) .hljs-attr,
+html:not(.dark) .hljs-variable,
+html:not(.dark) .hljs-template-variable,
+html:not(.dark) .hljs-type,
+html:not(.dark) .hljs-selector-class,
+html:not(.dark) .hljs-selector-attr,
+html:not(.dark) .hljs-selector-pseudo,
+html:not(.dark) .hljs-number {
+  color: #986801;
+}
+
+html:not(.dark) .hljs-symbol,
+html:not(.dark) .hljs-bullet,
+html:not(.dark) .hljs-link,
+html:not(.dark) .hljs-meta,
+html:not(.dark) .hljs-selector-id,
+html:not(.dark) .hljs-title {
+  color: #4078f2;
+}
+
+html:not(.dark) .hljs-built_in,
+html:not(.dark) .hljs-title.class_,
+html:not(.dark) .hljs-class .hljs-title {
+  color: #c18401;
+}

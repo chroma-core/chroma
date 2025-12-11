@@ -88,6 +88,7 @@ impl TestDistributedSegment {
             &self.collection.database_id,
             &self.metadata_segment,
             &self.blockfile_provider,
+            None,
         )
         .await
         .expect("Should be able to initialize metadata writer.");
@@ -113,6 +114,7 @@ impl TestDistributedSegment {
             &self.collection.database_id,
             &self.record_segment,
             &self.blockfile_provider,
+            None,
         )
         .await
         .expect("Should be able to initiaize record writer.");
@@ -137,6 +139,7 @@ impl TestDistributedSegment {
                 .dimension
                 .expect("Collection dimension should be set") as usize,
             self.hnsw_provider.clone(),
+            None,
         )
         .await
         .expect("Should be able to initialize vector writer");

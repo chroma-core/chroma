@@ -7,8 +7,6 @@ import rehypeStringify from "rehype-stringify";
 import { visit } from "unist-util-visit";
 import CodeBlockHeader from "@/components/markdoc/code-block-header";
 
-import "highlight.js/styles/atom-one-dark.css";
-
 export interface CodeBlockProps {
   content: React.ReactNode;
   language: string;
@@ -56,7 +54,7 @@ const CodeBlock: React.FC<CodeBlockProps> = async ({
         <CodeBlockHeader language={language} content={content} />
       )}
       <pre
-        className={`rounded-none rounded-b-sm m-0 ${className ? className : ""}`}
+        className={`rounded-none rounded-b-sm m-0 bg-[var(--tw-prose-invert-bg)] dark:bg-black text-black dark:text-[var(--tw-prose-pre-code)] border border-t-0 dark:border-gray-700 ${className ? className : ""}`}
       >
         <div
           dangerouslySetInnerHTML={{

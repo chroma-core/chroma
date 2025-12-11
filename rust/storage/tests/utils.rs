@@ -4,12 +4,32 @@
 //! any Storage backend (GCS, S3, Azure, Local, AdmissionControlled, etc.)
 //! via the unified Storage enum interface.
 
-use chroma_storage::{DeleteOptions, GetOptions, PutOptions, Storage};
+use chroma_storage::{DeleteOptions, ETag, GetOptions, PutMode, PutOptions, Storage};
+use chroma_types::Cmek;
+
+/// Helper to create PutOptions with optional CMEK
+fn make_put_options(cmek: Option<Cmek>) -> PutOptions {
+    let mut options = PutOptions::default();
+    if let Some(cmek) = cmek {
+        options = options.with_cmek(cmek);
+    }
+    options
+}
+
+/// Helper to create PutOptions with if_not_exists and optional CMEK
+fn make_put_options_if_not_exists(cmek: Option<Cmek>) -> PutOptions {
+    make_put_options(cmek).with_mode(PutMode::IfNotExist)
+}
+
+/// Helper to create PutOptions with if_match and optional CMEK
+fn make_put_options_if_match(cmek: Option<Cmek>, etag: &ETag) -> PutOptions {
+    make_put_options(cmek).with_mode(PutMode::IfMatch(etag.clone()))
+}
 
 /// Test Group 1: Basic operations (non-concurrency aware APIs)
 ///
 /// Tests: list_prefix, put, get, copy, delete, delete_many
-pub async fn test_basic_operations(storage: &Storage, test_prefix: &str) {
+pub async fn test_basic_operations(storage: &Storage, test_prefix: &str, cmek: Option<Cmek>) {
     // Cleanup any leftover objects from previous test runs
     let existing = storage
         .list_prefix(test_prefix, GetOptions::default())
@@ -42,7 +62,7 @@ pub async fn test_basic_operations(storage: &Storage, test_prefix: &str) {
 
     for key in &test_keys {
         storage
-            .put_bytes(key, key.as_bytes().to_vec(), PutOptions::default())
+            .put_bytes(key, key.as_bytes().to_vec(), make_put_options(cmek.clone()))
             .await
             .unwrap_or_else(|e| panic!("Failed to put {}: {}", key, e));
 
@@ -127,7 +147,7 @@ pub async fn test_basic_operations(storage: &Storage, test_prefix: &str) {
 /// Test Group 2: Multipart upload/download
 ///
 /// Tests: large file uploads, multipart downloads with parallelism
-pub async fn test_multipart_operations(storage: &Storage, test_prefix: &str) {
+pub async fn test_multipart_operations(storage: &Storage, test_prefix: &str, cmek: Option<Cmek>) {
     // Cleanup
     let existing = storage
         .list_prefix(test_prefix, GetOptions::default())
@@ -145,7 +165,7 @@ pub async fn test_multipart_operations(storage: &Storage, test_prefix: &str) {
         .put_bytes(
             &small_key,
             small_content.as_bytes().to_vec(),
-            PutOptions::default(),
+            make_put_options(cmek.clone()),
         )
         .await
         .expect("Failed to put small file");
@@ -168,7 +188,7 @@ pub async fn test_multipart_operations(storage: &Storage, test_prefix: &str) {
         .put_bytes(
             &large_key,
             large_content.as_bytes().to_vec(),
-            PutOptions::default(),
+            make_put_options(cmek.clone()),
         )
         .await
         .expect("Failed to put large file");
@@ -197,7 +217,7 @@ pub async fn test_multipart_operations(storage: &Storage, test_prefix: &str) {
 
     // Cleanup
     storage
-        .delete_many(vec![small_key, large_key])
+        .delete_many([small_key, large_key])
         .await
         .expect("Failed to cleanup");
 }
@@ -209,7 +229,7 @@ pub async fn test_multipart_operations(storage: &Storage, test_prefix: &str) {
 /// Note: Conditional operations always use oneshot uploads (not multipart),
 /// even for large files, because multipart uploads don't support ETags.
 /// The race condition test uses ~800KB content to verify this behavior.
-pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
+pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str, cmek: Option<Cmek>) {
     // Cleanup
     let existing = storage
         .list_prefix(test_prefix, GetOptions::default())
@@ -227,7 +247,7 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
         .put_bytes(
             &key1,
             content1.as_bytes().to_vec(),
-            PutOptions::if_not_exists(Default::default()),
+            make_put_options_if_not_exists(cmek.clone()),
         )
         .await
         .expect("First if_not_exists should succeed");
@@ -244,7 +264,7 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
         .put_bytes(
             &key1,
             "different".as_bytes().to_vec(),
-            PutOptions::if_not_exists(Default::default()),
+            make_put_options_if_not_exists(cmek.clone()),
         )
         .await;
     assert!(result.is_err(), "Second if_not_exists should fail");
@@ -255,7 +275,11 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
     let content_v2 = format!("{}-v2", key2);
 
     let etag_v1 = storage
-        .put_bytes(&key2, content_v1.as_bytes().to_vec(), PutOptions::default())
+        .put_bytes(
+            &key2,
+            content_v1.as_bytes().to_vec(),
+            make_put_options(cmek.clone()),
+        )
         .await
         .expect("Initial put failed")
         .expect("ETag required");
@@ -265,7 +289,7 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
         .put_bytes(
             &key2,
             content_v2.as_bytes().to_vec(),
-            PutOptions::if_matches(&etag_v1, Default::default()),
+            make_put_options_if_match(cmek.clone(), &etag_v1),
         )
         .await
         .expect("Update with correct ETag should succeed");
@@ -282,7 +306,7 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
         .put_bytes(
             &key2,
             "v3".as_bytes().to_vec(),
-            PutOptions::if_matches(&etag_v1, Default::default()),
+            make_put_options_if_match(cmek.clone(), &etag_v1),
         )
         .await;
     assert!(result.is_err(), "Update with stale ETag should fail");
@@ -296,7 +320,7 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
         .put_bytes(
             &key3,
             content3_v1.as_bytes().to_vec(),
-            PutOptions::default(),
+            make_put_options(cmek.clone()),
         )
         .await
         .expect("Put failed")
@@ -313,7 +337,7 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
         .put_bytes(
             &key3,
             content3_v2.as_bytes().to_vec(),
-            PutOptions::default(),
+            make_put_options(cmek.clone()),
         )
         .await
         .expect("Update failed");
@@ -335,7 +359,7 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
         .put_file(
             &key4,
             temp_file.path().to_str().unwrap(),
-            PutOptions::if_not_exists(Default::default()),
+            make_put_options_if_not_exists(cmek.clone()),
         )
         .await
         .expect("put_file should succeed");
@@ -352,7 +376,7 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
         .put_file(
             &key4,
             temp_file.path().to_str().unwrap(),
-            PutOptions::if_not_exists(Default::default()),
+            make_put_options_if_not_exists(cmek.clone()),
         )
         .await;
     assert!(result.is_err(), "Second put_file should fail");
@@ -366,7 +390,11 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
     let initial = "initial-data-".repeat(500_000); // ~6.5 MB - over 5MB threshold
 
     let race_etag = storage
-        .put_bytes(&key5, initial.as_bytes().to_vec(), PutOptions::default())
+        .put_bytes(
+            &key5,
+            initial.as_bytes().to_vec(),
+            make_put_options(cmek.clone()),
+        )
         .await
         .expect("Initial put failed")
         .expect("ETag required");
@@ -378,6 +406,8 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
     let key5_b = key5.clone();
     let etag_a = race_etag.clone();
     let etag_b = race_etag.clone();
+    let cmek_a = cmek.clone();
+    let cmek_b = cmek.clone();
     let writer_a_content = "writer-a-data-".repeat(500_000); // ~7 MB - over 5MB threshold
     let writer_b_content = "writer-b-data-".repeat(500_000); // ~7 MB - over 5MB threshold
 
@@ -390,7 +420,7 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
             .put_bytes(
                 &key5_a,
                 writer_a_content.as_bytes().to_vec(),
-                PutOptions::if_matches(&etag_a, Default::default()),
+                make_put_options_if_match(cmek_a, &etag_a),
             )
             .await
     });
@@ -400,7 +430,7 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
             .put_bytes(
                 &key5_b,
                 writer_b_content.as_bytes().to_vec(),
-                PutOptions::if_matches(&etag_b, Default::default()),
+                make_put_options_if_match(cmek_b, &etag_b),
             )
             .await
     });
@@ -430,7 +460,49 @@ pub async fn test_conditional_operations(storage: &Storage, test_prefix: &str) {
 
     // Cleanup
     storage
-        .delete_many(vec![key1, key2, key3, key4, key5])
+        .delete_many([key1, key2, key3, key4, key5])
         .await
         .expect("Failed to cleanup");
+}
+
+/// Test Group 4: Negative test - invalid CMEK should fail
+///
+/// Tests: Verifies that CMEK header is actually being sent by using an invalid key
+pub async fn test_invalid_cmek_fails(storage: &Storage, test_prefix: &str, invalid_cmek: Cmek) {
+    // Cleanup
+    let existing = storage
+        .list_prefix(test_prefix, GetOptions::default())
+        .await
+        .unwrap_or_default();
+    if !existing.is_empty() {
+        storage.delete_many(existing).await.ok();
+    }
+
+    let key = format!("{}invalid-cmek-test.txt", test_prefix);
+    let content = b"test content".to_vec();
+
+    let put_opts = PutOptions::default().with_cmek(invalid_cmek);
+
+    // This should fail because the CMEK key is invalid/inaccessible
+    let result = storage.put_bytes(&key, content, put_opts).await;
+
+    assert!(
+        result.is_err(),
+        "Upload with invalid CMEK should fail, proving CMEK header is being sent"
+    );
+
+    // Verify error is related to encryption/permissions
+    if let Err(e) = result {
+        let error_msg = format!("{}", e).to_lowercase();
+        // GCS typically returns 400 Bad Request or 403 Forbidden for invalid CMEK
+        assert!(
+            error_msg.contains("400")
+                || error_msg.contains("403")
+                || error_msg.contains("permission")
+                || error_msg.contains("kms")
+                || error_msg.contains("key"),
+            "Expected CMEK-related error, got: {}",
+            error_msg
+        );
+    }
 }

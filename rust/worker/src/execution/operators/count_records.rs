@@ -239,6 +239,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &in_memory_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");

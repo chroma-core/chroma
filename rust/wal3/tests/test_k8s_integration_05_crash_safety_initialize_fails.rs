@@ -29,6 +29,7 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
         FragmentSeqNo(1),
         position,
         vec![vec![42, 43, 44, 45]],
+        None,
     )
     .await
     .unwrap();
@@ -72,6 +73,7 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
         "test_k8s_integration_05_crash_safety_initialize_fails",
         "test writer",
         (),
+        None,
     )
     .await
     .unwrap();

@@ -75,6 +75,7 @@ from typing import (
     Dict,
     Callable,
     TypeVar,
+    Tuple,
 )
 from overrides import override
 from uuid import UUID, uuid4
@@ -922,7 +923,7 @@ class SegmentAPI(ServerAPI):
         params: Optional[Dict[str, Any]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> "AttachedFunction":
+    ) -> Tuple["AttachedFunction", bool]:
         """Attached functions are not supported in the Segment API (local embedded mode)."""
         raise NotImplementedError(
             "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
@@ -946,26 +947,12 @@ class SegmentAPI(ServerAPI):
     @override
     def detach_function(
         self,
-        attached_function_id: UUID,
+        name: str,
         input_collection_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        """Attached functions are not supported in the Segment API (local embedded mode)."""
-        raise NotImplementedError(
-            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
-            "The Segment API (embedded mode) does not support attached function operations."
-        )
-
-    @override
-    def get_attached_function(
-        self,
-        name: str,
-        input_collection_id: UUID,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> "AttachedFunction":
         """Attached functions are not supported in the Segment API (local embedded mode)."""
         raise NotImplementedError(
             "Attached functions are only supported when connecting to a Chroma server via HttpClient. "

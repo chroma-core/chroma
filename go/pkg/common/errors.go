@@ -49,11 +49,12 @@ var (
 	ErrUnknownSegmentMetadataType = errors.New("segment metadata value type not supported")
 
 	// AttachedFunction errors
-	ErrAttachedFunctionAlreadyExists = errors.New("the attached function that was being created already exists for this collection")
-	ErrAttachedFunctionNotFound      = errors.New("the requested attached function was not found")
-	ErrAttachedFunctionNotReady      = errors.New("the requested attached function exists but is still initializing")
-	ErrInvalidAttachedFunctionName   = errors.New("attached function name cannot start with reserved prefix '_deleted_'")
-	ErrHeapServiceNotEnabled         = errors.New("heap service is not enabled")
+	ErrAttachedFunctionAlreadyExists  = errors.New("the attached function that was being created already exists for this collection")
+	ErrAttachedFunctionNotFound       = errors.New("the requested attached function was not found")
+	ErrAttachedFunctionNotReady       = errors.New("the requested attached function exists but is still initializing")
+	ErrInvalidAttachedFunctionName    = errors.New("attached function name cannot start with reserved prefix '_deleted_'")
+	ErrHeapServiceNotEnabled          = errors.New("heap service is not enabled")
+	ErrCannotAttachToOutputCollection = errors.New("cannot attach function to an output collection")
 
 	// Function errors
 	ErrFunctionNotFound = errors.New("function not found")

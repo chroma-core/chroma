@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, PutOptions, Storage,
+    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, PutMode, PutOptions, Storage,
     StorageError,
 };
 use setsum::Setsum;
@@ -227,7 +227,9 @@ impl Snapshot {
                     Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
                 })?
                 .into_bytes();
-            let options = PutOptions::if_not_exists(StorageRequestPriority::P0);
+            let options = PutOptions::default()
+                .with_priority(StorageRequestPriority::P0)
+                .with_mode(PutMode::IfNotExist);
             match storage.put_bytes(&path, payload, options).await {
                 Ok(_) => {
                     return Ok(self.to_pointer());
@@ -716,7 +718,9 @@ impl Manifest {
             .put_bytes(
                 &manifest_path(prefix),
                 payload,
-                PutOptions::if_not_exists(StorageRequestPriority::P0),
+                PutOptions::default()
+                    .with_priority(StorageRequestPriority::P0)
+                    .with_mode(PutMode::IfNotExist),
             )
             .await
             .map_err(Arc::new)?;
@@ -809,10 +813,11 @@ impl Manifest {
                     Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
                 })?
                 .into_bytes();
+            let options = PutOptions::default().with_priority(StorageRequestPriority::P0);
             let options = if let Some(e_tag) = current {
-                PutOptions::if_matches(e_tag, StorageRequestPriority::P0)
+                options.with_mode(PutMode::IfMatch(e_tag.clone()))
             } else {
-                PutOptions::if_not_exists(StorageRequestPriority::P0)
+                options.with_mode(PutMode::IfNotExist)
             };
             match storage
                 .put_bytes(&manifest_path(prefix), payload, options)

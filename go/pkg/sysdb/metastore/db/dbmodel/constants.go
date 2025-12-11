@@ -1,6 +1,10 @@
 package dbmodel
 
-import "github.com/google/uuid"
+import (
+	"fmt"
+
+	"github.com/google/uuid"
+)
 
 // Constants for pre-populated functions.
 // These UUIDs must match what's in the database migrations.
@@ -28,6 +32,22 @@ const (
 	// FunctionNameStatistics must match rust/types/src/functions.rs::FUNCTION_STATISTICS_NAME
 	FunctionNameStatistics = "statistics"
 )
+
+// functionIDToName maps function UUIDs to their names.
+// This avoids DB lookups for known built-in functions.
+var functionIDToName = map[uuid.UUID]string{
+	FunctionRecordCounter: FunctionNameRecordCounter,
+	FunctionStatistics:    FunctionNameStatistics,
+}
+
+// GetFunctionNameByID returns the function name for a given function ID.
+// Returns an error if the function ID is not a known built-in.
+func GetFunctionNameByID(id uuid.UUID) (string, error) {
+	if name, ok := functionIDToName[id]; ok {
+		return name, nil
+	}
+	return "", fmt.Errorf("unknown function ID: %s", id.String())
+}
 
 // Function metadata
 const (

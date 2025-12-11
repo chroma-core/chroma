@@ -163,6 +163,11 @@ mod tests {
                 .await
                 .unwrap()
         }
+
+        pub fn track(&mut self, collection: &ChromaCollection) {
+            let mut collections = self.collections.lock().unwrap();
+            collections.insert(collection.collection.name.clone());
+        }
     }
 
     impl std::ops::Deref for TestClient {

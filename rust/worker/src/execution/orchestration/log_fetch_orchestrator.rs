@@ -508,6 +508,8 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             vector_segment.file_path = Default::default();
         }
 
+        let cmek = collection.schema.as_ref().and_then(|s| s.cmek.clone());
+
         let record_writer = match self
             .ok_or_terminate(
                 RecordSegmentWriter::from_segment(
@@ -515,6 +517,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     &collection.database_id,
                     &record_segment,
                     &self.context.blockfile_provider,
+                    cmek.clone(),
                 )
                 .await,
                 ctx,
@@ -531,6 +534,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     &collection.database_id,
                     &metadata_segment,
                     &self.context.blockfile_provider,
+                    cmek.clone(),
                 )
                 .await,
                 ctx,
@@ -546,7 +550,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 .ok_or_terminate(
                     self.context
                         .spann_provider
-                        .write(&collection, &vector_segment, dimension)
+                        .write(&collection, &vector_segment, dimension, cmek)
                         .await,
                     ctx,
                 )
@@ -566,6 +570,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                         &vector_segment,
                         dimension,
                         self.context.hnsw_provider.clone(),
+                        cmek,
                     )
                     .await
                     .map_err(|err| *err),

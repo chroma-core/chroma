@@ -11,7 +11,6 @@ import { capitalize, cn } from "@/lib/utils";
 import { tabLabelStyle } from "@/components/markdoc/code-block-header";
 import AppContext from "@/context/app-context";
 import CodeBlock from "@/components/markdoc/code-block";
-import { Playfair_Display } from "next/font/google";
 
 export interface TabProps {
   label: string;

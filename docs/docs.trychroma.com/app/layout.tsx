@@ -8,6 +8,8 @@ import PostHogProvider from "@/components/posthog/posthog-provider";
 import CloudSignUp from "@/components/header/cloud-signup";
 import HeaderNav from "@/components/header/header-nav";
 
+import "@/components/markdoc/code-block-themes.css";
+
 export const metadata: Metadata = {
   title: 'Chroma Docs',
   description: 'Documentation for ChromaDB',

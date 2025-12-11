@@ -36,7 +36,7 @@ from chromadb.execution.expression import (  # noqa: F401, F403
 )
 
 from abc import ABC, abstractmethod
-from typing import Sequence, Optional, List, Dict, Any
+from typing import Sequence, Optional, List, Dict, Any, Tuple
 from uuid import UUID
 
 from overrides import override
@@ -824,7 +824,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         params: Optional[Dict[str, Any]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> "AttachedFunction":
+    ) -> Tuple["AttachedFunction", bool]:
         """Attach a function to a collection.
 
         Args:
@@ -837,7 +837,8 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
             database: The database name
 
         Returns:
-            AttachedFunction: Object representing the attached function
+            Tuple of (AttachedFunction, created) where created is True if newly created,
+            False if already existed (idempotent request)
         """
         pass
 
@@ -868,7 +869,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     @abstractmethod
     def detach_function(
         self,
-        attached_function_id: UUID,
+        name: str,
         input_collection_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -877,7 +878,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         """Detach a function and prevent any further runs.
 
         Args:
-            attached_function_id: ID of the attached function to remove
+            name: Name of the attached function to remove
             input_collection_id: ID of the input collection
             delete_output: Whether to also delete the output collection
             tenant: The tenant name
@@ -885,29 +886,5 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
 
         Returns:
             bool: True if successful
-        """
-        pass
-
-    @abstractmethod
-    def get_attached_function(
-        self,
-        name: str,
-        input_collection_id: UUID,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> "AttachedFunction":
-        """Get an attached function by name for a specific collection.
-
-        Args:
-            name: Name of the attached function
-            input_collection_id: ID of the input collection
-            tenant: The tenant name
-            database: The database name
-
-        Returns:
-            AttachedFunction: The attached function object
-
-        Raises:
-            NotFoundError: If the attached function doesn't exist
         """
         pass

@@ -315,6 +315,12 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
             ));
         }
     }
+    if let Some(cmek) = &schema.cmek {
+        if !cmek.validate_pattern() {
+            return Err(ValidationError::new("schema")
+                .with_message(format!("CMEK does not match expected pattern: {cmek:?}").into()));
+        }
+    }
     Ok(())
 }
 

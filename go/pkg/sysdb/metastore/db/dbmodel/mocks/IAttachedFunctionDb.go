@@ -202,6 +202,36 @@ func (_m *IAttachedFunctionDb) GetAnyByName(inputCollectionID string, name strin
 	return r0, r1
 }
 
+// GetAnyByCollectionID provides a mock function with given fields: inputCollectionID
+func (_m *IAttachedFunctionDb) GetAnyByCollectionID(inputCollectionID string) ([]*dbmodel.AttachedFunction, error) {
+	ret := _m.Called(inputCollectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAnyByCollectionID")
+	}
+
+	var r0 []*dbmodel.AttachedFunction
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) ([]*dbmodel.AttachedFunction, error)); ok {
+		return rf(inputCollectionID)
+	}
+	if rf, ok := ret.Get(0).(func(string) []*dbmodel.AttachedFunction); ok {
+		r0 = rf(inputCollectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*dbmodel.AttachedFunction)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(inputCollectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetAnyByID provides a mock function with given fields: id
 func (_m *IAttachedFunctionDb) GetAnyByID(id uuid.UUID) (*dbmodel.AttachedFunction, error) {
 	ret := _m.Called(id)

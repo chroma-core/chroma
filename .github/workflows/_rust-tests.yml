@@ -60,6 +60,28 @@ jobs:
         env:
           CHROMA_CLOUD_API_KEY: ${{ secrets.TEST_CHROMA_CLOUD_API_KEY }}
 
+  test-storage-gcs:
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+      RUST_MIN_STACK_SIZE: 8388608
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Extract credentials
+        run: |
+          echo '${{ secrets.TEST_CRED_GCS }}' > ${{ github.workspace }}/cred_gcs.json
+      - name: Test
+        run: cargo nextest run --profile storage_gcs
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/cred_gcs.json
+          TEST_CMEK_GCS: ${{ secrets.TEST_CMEK_GCS }}
+
   test-integration:
     strategy:
       matrix:

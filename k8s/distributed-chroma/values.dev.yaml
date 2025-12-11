@@ -15,23 +15,17 @@ rustFrontendService:
       value: "true"
     - name: RUST_BACKTRACE
       value: 'value: "1"'
-    - name: CONFIG_PATH
-      value: "chroma_config.yaml"
 
 queryService:
   env:
     - name: RUST_BACKTRACE
       value: 'value: "1"'
-    - name: CONFIG_PATH
-      value: 'value: "/chroma_config.yaml"'
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
 
 compactionService:
   env:
     - name: RUST_BACKTRACE
       value: 'value: "1"'
-    - name: CONFIG_PATH
-      value: 'value: "/chroma_config.yaml"'
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
 
 rustLogService:
