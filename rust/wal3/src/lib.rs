@@ -7,11 +7,11 @@ use setsum::Setsum;
 use uuid::Uuid;
 
 mod backoff;
-mod batch_manager;
 mod copy;
 mod cursors;
 mod destroy;
 mod gc;
+mod interfaces;
 mod manifest;
 mod manifest_manager;
 mod reader;
@@ -19,11 +19,12 @@ mod snapshot_cache;
 mod writer;
 
 pub use backoff::ExponentialBackoff;
-pub use batch_manager::BatchManager;
 pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, Witness};
 pub use destroy::destroy;
 pub use gc::{Garbage, GarbageCollector};
+pub use interfaces::s3::BatchManager;
+pub use interfaces::FragmentPublisher;
 pub use manifest::{
     unprefixed_snapshot_path, Manifest, ManifestAndETag, Snapshot, SnapshotPointer,
 };
