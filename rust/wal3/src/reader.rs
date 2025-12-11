@@ -13,8 +13,8 @@ use chroma_storage::{
 };
 
 use crate::{
-    parse_fragment_path, Error, Fragment, LogPosition, LogReaderOptions, Manifest, ManifestAndETag,
-    ScrubError, ScrubSuccess, Snapshot, SnapshotCache,
+    parse_fragment_path, Error, Fragment, FragmentIdentifier, LogPosition, LogReaderOptions,
+    Manifest, ManifestAndETag, ScrubError, ScrubSuccess, Snapshot, SnapshotCache,
 };
 
 fn ranges_overlap(lhs: (LogPosition, LogPosition), rhs: (LogPosition, LogPosition)) -> bool {
@@ -335,7 +335,13 @@ impl LogReader {
         &self,
         fragment: &Fragment,
     ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
-        read_parquet(&self.storage, &self.prefix, &fragment.path).await
+        read_parquet(
+            &self.storage,
+            &self.prefix,
+            &fragment.path,
+            Some(fragment.start),
+        )
+        .await
     }
 
     #[tracing::instrument(skip(self), ret)]
@@ -476,6 +482,7 @@ pub async fn read_parquet(
     storage: &Storage,
     prefix: &str,
     path: &str,
+    starting_log_position: Option<LogPosition>,
 ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
     let path = fragment_path(prefix, path);
     let parquet = storage
@@ -490,16 +497,24 @@ pub async fn read_parquet(
     let mut records = vec![];
     for batch in reader {
         let batch = batch.map_err(|_| Error::CorruptFragment(path.to_string()))?;
-        let offset = batch
-            .column_by_name("offset")
-            .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
+        let (offset_column, relative_offset_base) =
+            if let Some(offset) = batch.column_by_name("offset") {
+                (offset.clone(), 0u64)
+            } else if let (Some(relative_offset), Some(starting_log_position)) = (
+                batch.column_by_name("relative_offset"),
+                starting_log_position,
+            ) {
+                (relative_offset.clone(), starting_log_position.offset())
+            } else {
+                return Err(Error::CorruptFragment(path.to_string()));
+            };
         let epoch_micros = batch
             .column_by_name("timestamp_us")
             .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
         let body = batch
             .column_by_name("body")
             .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
-        let offset = offset
+        let offset_array = offset_column
             .as_any()
             .downcast_ref::<arrow::array::UInt64Array>()
             .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
@@ -512,7 +527,7 @@ pub async fn read_parquet(
             .downcast_ref::<arrow::array::BinaryArray>()
             .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
         for i in 0..batch.num_rows() {
-            let offset = offset.value(i);
+            let offset = offset_array.value(i) + relative_offset_base;
             let epoch_micros = epoch_micros.value(i);
             let body = body.value(i);
             setsum.insert_vectored(&[&offset.to_be_bytes(), &epoch_micros.to_be_bytes(), body]);
@@ -529,7 +544,10 @@ pub async fn read_fragment(
 ) -> Result<Option<Fragment>, Error> {
     let seq_no = parse_fragment_path(path)
         .ok_or_else(|| Error::MissingFragmentSequenceNumber(path.to_string()))?;
-    let (setsum, data, num_bytes) = match read_parquet(storage, prefix, path).await {
+    let FragmentIdentifier::SeqNo(_) = seq_no else {
+        return Err(Error::internal(file!(), line!()));
+    };
+    let (setsum, data, num_bytes) = match read_parquet(storage, prefix, path, None).await {
         Ok((setsum, data, num_bytes)) => (setsum, data, num_bytes),
         Err(Error::StorageError(storage)) => {
             if matches!(&*storage, StorageError::NotFound { .. }) {
