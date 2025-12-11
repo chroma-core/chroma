@@ -33,7 +33,7 @@ rustLogService:
     repository: 'rust-log-service'
     tag: 'latest'
   cache:
-    hostPath: '/local/cache/chroma-log-service'
+    hostPath: '/local/cache2/chroma-log-service'
     type: DirectoryOrCreate
     mountPath: '/cache/'
     additionalVolumes: []
@@ -43,7 +43,7 @@ queryService:
     tag: 'latest'
   env:
   cache:
-    hostPath: '/local/cache/chroma-query-service'
+    hostPath: '/local/cache2/chroma-query-service'
     type: DirectoryOrCreate
     mountPath: '/cache/'
     additionalVolumes: []
@@ -54,7 +54,7 @@ compactionService:
     tag: 'latest'
   env:
   cache:
-    hostPath: '/local/cache/chroma-compaction-service'
+    hostPath: '/local/cache2/chroma-compaction-service'
     type: DirectoryOrCreate
     mountPath: '/cache/'
     additionalVolumes: []
@@ -83,5 +83,5 @@ garbageCollector:
       cpu: '100m'
       memory: '128Mi'
   cache:
-    hostPath: '/local/cache/chroma-garbage-collector'
+    hostPath: '/local/cache2/chroma-garbage-collector'
     mountPath: '/cache/'
