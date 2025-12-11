@@ -333,6 +333,7 @@ groups = {
     'minio-deployment',
   ],
   'multi_region': [
+    'k8s_setup2',
     'postgres:deployment:chroma2',
     'sysdb-migration-latest:job:chroma2',
     'rust-log-service:statefulset:chroma2',
