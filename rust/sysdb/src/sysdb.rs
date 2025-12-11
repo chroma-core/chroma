@@ -705,11 +705,15 @@ impl SysDb {
     pub async fn finish_create_attached_function(
         &mut self,
         attached_function_id: AttachedFunctionUuid,
+        output_collection_schema_str: String,
     ) -> Result<bool, FinishCreateAttachedFunctionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.finish_create_attached_function(attached_function_id)
-                    .await
+                grpc.finish_create_attached_function(
+                    attached_function_id,
+                    output_collection_schema_str,
+                )
+                .await
             }
             SysDb::Sqlite(_) => unimplemented!(),
             SysDb::Test(_) => unimplemented!(),
@@ -1747,9 +1751,11 @@ impl GrpcSysDb {
     async fn finish_create_attached_function(
         &mut self,
         attached_function_id: AttachedFunctionUuid,
+        output_collection_schema_str: String,
     ) -> Result<bool, FinishCreateAttachedFunctionError> {
         let req = chroma_proto::FinishCreateAttachedFunctionRequest {
             id: attached_function_id.0.to_string(),
+            output_collection_schema_str,
         };
         let response = self
             .client

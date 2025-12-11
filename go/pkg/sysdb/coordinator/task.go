@@ -167,12 +167,10 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 
 		// Check if input collection is an output collection (prevent chaining)
 		inputCollection := collections[0]
-		for _, meta := range inputCollection.CollectionMetadata {
-			if meta.Key != nil && *meta.Key == common.SourceAttachedFunctionIDKey {
-				log.Error("AttachFunction: cannot attach function to an output collection",
-					zap.String("input_collection_id", req.InputCollectionId))
-				return common.ErrCannotAttachToOutputCollection
-			}
+		if model.GetSourceAttachedFunctionIDFromSchema(inputCollection.Collection.SchemaStr) != nil {
+			log.Error("AttachFunction: cannot attach function to an output collection",
+				zap.String("input_collection_id", req.InputCollectionId))
+			return common.ErrCannotAttachToOutputCollection
 		}
 
 		// Validate params - currently no functions accept params
@@ -565,21 +563,20 @@ func (s *Coordinator) FinishCreateAttachedFunction(ctx context.Context, req *coo
 		// 5. Create the output collection with segments
 		dimension := int32(1) // Default dimension for attached function output collections
 
-		// Add metadata to mark this as an output collection
-		outputCollectionMetadata := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
-		outputCollectionMetadata.Add(common.SourceAttachedFunctionIDKey, &model.CollectionMetadataValueStringType{Value: attachedFunctionID.String()})
+		// Use the schema string passed from Rust (contains default schema + source_attached_function_id)
+		schemaStr := req.OutputCollectionSchemaStr
 
 		collection := &model.CreateCollection{
 			ID:                   collectionID,
 			Name:                 attachedFunction.OutputCollectionName,
 			ConfigurationJsonStr: "{}", // Empty JSON object for default config
+			SchemaStr:            &schemaStr,
 			TenantID:             attachedFunction.TenantID,
 			DatabaseName:         database.Name,
 			Dimension:            &dimension,
-			Metadata:             outputCollectionMetadata,
 		}
 
-		// Create segments for the collection (distributed setup)
+		// Create segments for the collection (distributed setup with HNSW)
 		segments := []*model.Segment{
 			{
 				ID:           types.NewUniqueID(),
