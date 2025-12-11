@@ -299,7 +299,7 @@ k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], 
 
 # Set the enabled resources
 # - Basic resources are always enabled.
-# - Multi-region resources are only enabled if the multi-region flag is set.
+# - Multi-region resources are only enabled if the env var MULTI_REGION is set to true.
 config.clear_enabled_resources()
 
 groups = {
