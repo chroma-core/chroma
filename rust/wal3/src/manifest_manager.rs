@@ -308,21 +308,6 @@ impl ManifestManager {
         }
     }
 
-    /// Check for log contention at the cost of a read to S3.
-    pub async fn heartbeat(&self) -> Result<(), Error> {
-        let Some((_, e_tag)) = Manifest::load(&self.throttle, &self.storage, &self.prefix).await?
-        else {
-            return Err(Error::UninitializedLog);
-        };
-        // SAFETY(rescrv):  Mutex poisoning.
-        let staging = self.staging.lock().unwrap();
-        if e_tag == staging.stable.e_tag {
-            Ok(())
-        } else {
-            Err(Error::LogContentionFailure)
-        }
-    }
-
     /// Assign a timestamp to a record.
     pub fn assign_timestamp(
         &self,

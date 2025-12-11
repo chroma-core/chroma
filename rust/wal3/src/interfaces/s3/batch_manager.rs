@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use tracing::Span;
 
+use crate::interfaces::FragmentPublisher;
 use crate::{Error, FragmentIdentifier, LogPosition, ManifestManager, ThrottleOptions};
 
 /////////////////////////////////////////// ManagerState ///////////////////////////////////////////
@@ -95,7 +96,28 @@ impl BatchManager {
         })
     }
 
-    pub fn push_work(
+    pub fn count_waiters(&self) -> usize {
+        let state = self.state.lock().unwrap();
+        state.enqueued.len()
+    }
+
+    pub fn debug_dump(&self) -> String {
+        let mut output = "[batch manager]\n".to_string();
+        let state = self.state.lock().unwrap();
+        output += &format!("backoff: {:?}\n", state.backoff);
+        output += &format!("next_write: {:?}\n", state.next_write);
+        output += &format!("writers_active: {:?}\n", state.writers_active);
+        output += &format!("enqueued: {}\n", state.enqueued.len());
+        output
+    }
+}
+
+#[async_trait::async_trait]
+impl FragmentPublisher for BatchManager {
+    type FragmentPointer = (FragmentIdentifier, LogPosition);
+
+    /// Enqueue work to be published.
+    async fn push_work(
         &self,
         messages: Vec<Vec<u8>>,
         tx: tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
@@ -114,33 +136,13 @@ impl BatchManager {
         }
     }
 
-    pub async fn wait_for_writable(&self) {
-        self.write_finished.notified().await;
-    }
-
-    pub fn pump_write_finished(&self) {
-        self.write_finished.notify_one();
-    }
-
-    pub fn until_next_time(&self) -> Duration {
-        // SAFETY(rescrv): Mutex poisoning.
-        let state = self.state.lock().unwrap();
-        let now = Instant::now();
-        if now < state.next_write {
-            state.next_write - now
-        } else {
-            Duration::ZERO
-        }
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub fn take_work(
+    /// Take enqueued work to be published.
+    async fn take_work(
         &self,
         manifest_manager: &ManifestManager,
     ) -> Result<
         Option<(
-            FragmentIdentifier,
-            LogPosition,
+            Self::FragmentPointer,
             Vec<(
                 Vec<Vec<u8>>,
                 tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
@@ -212,15 +214,34 @@ impl BatchManager {
         } else {
             state.backoff = false;
         }
-        Ok(Some((fragment_identifier, log_position, work)))
+        Ok(Some(((fragment_identifier, log_position), work)))
     }
 
-    pub fn finish_write(&self) {
+    /// Finish the previous call to take_work.
+    async fn finish_write(&self) {
         self.state.lock().unwrap().finish_write();
         self.write_finished.notify_one();
     }
 
-    pub fn shutdown(&self) {
+    /// Wait until take_work might have work.
+    async fn wait_for_writable(&self) {
+        self.write_finished.notified().await;
+    }
+
+    /// How long to sleep until take work might have work.
+    fn until_next_time(&self) -> Duration {
+        // SAFETY(rescrv): Mutex poisoning.
+        let state = self.state.lock().unwrap();
+        let now = Instant::now();
+        if now < state.next_write {
+            state.next_write - now
+        } else {
+            Duration::ZERO
+        }
+    }
+
+    /// Start shutting down.  The shutdown is split for historical and unprincipled reasons.
+    fn shutdown_prepare(&self) {
         let enqueued = {
             let mut state = self.state.lock().unwrap();
             state.tearing_down = true;
@@ -231,19 +252,9 @@ impl BatchManager {
         }
     }
 
-    pub fn count_waiters(&self) -> usize {
-        let state = self.state.lock().unwrap();
-        state.enqueued.len()
-    }
-
-    pub fn debug_dump(&self) -> String {
-        let mut output = "[batch manager]\n".to_string();
-        let state = self.state.lock().unwrap();
-        output += &format!("backoff: {:?}\n", state.backoff);
-        output += &format!("next_write: {:?}\n", state.next_write);
-        output += &format!("writers_active: {:?}\n", state.writers_active);
-        output += &format!("enqueued: {}\n", state.enqueued.len());
-        output
+    /// Finish shutting down.
+    fn shutdown_finish(&self) {
+        self.write_finished.notify_one();
     }
 }
 
@@ -285,13 +296,22 @@ mod tests {
         .await
         .unwrap();
         let (tx, _rx1) = tokio::sync::oneshot::channel();
-        batch_manager.push_work(vec![vec![1]], tx, tracing::Span::current());
+        batch_manager
+            .push_work(vec![vec![1]], tx, tracing::Span::current())
+            .await;
         let (tx, _rx2) = tokio::sync::oneshot::channel();
-        batch_manager.push_work(vec![vec![2, 3]], tx, tracing::Span::current());
+        batch_manager
+            .push_work(vec![vec![2, 3]], tx, tracing::Span::current())
+            .await;
         let (tx, _rx3) = tokio::sync::oneshot::channel();
-        batch_manager.push_work(vec![vec![4, 5, 6]], tx, tracing::Span::current());
-        let (seq_no, log_position, work) =
-            batch_manager.take_work(&manifest_manager).unwrap().unwrap();
+        batch_manager
+            .push_work(vec![vec![4, 5, 6]], tx, tracing::Span::current())
+            .await;
+        let ((seq_no, log_position), work) = batch_manager
+            .take_work(&manifest_manager)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(seq_no, FragmentIdentifier::SeqNo(1));
         assert_eq!(log_position.offset(), 1);
         assert_eq!(2, work.len());
