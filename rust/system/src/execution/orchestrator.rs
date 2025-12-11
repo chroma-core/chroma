@@ -368,8 +368,9 @@ mod tests {
         }
     }
 
+    // TODO(tanujnay112): Write a test that actually tests cancellation
     #[tokio::test]
-    async fn test_operator_cancellation() {
+    async fn test_simple_operator() {
         let system = System::new();
         let num_workers = 2;
 
@@ -377,7 +378,8 @@ mod tests {
         let dispatcher = Dispatcher::new(DispatcherConfig {
             num_worker_threads: num_workers,
             task_queue_limit: 1,
-            dispatcher_queue_size: 1,
+            // 1 message for the task + 1 for each worker thread's TaskRequestMessage
+            dispatcher_queue_size: 3,
             worker_queue_size: 1,
             active_io_tasks: 10,
         });
