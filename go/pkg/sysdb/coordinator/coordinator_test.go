@@ -2009,17 +2009,16 @@ func (suite *APIsTestSuite) TestCannotAttachToOutputCollection() {
 	_, _, err := suite.coordinator.CreateCollection(ctx, createInputCollection)
 	suite.NoError(err)
 
-	// Create a collection that simulates an output collection (has chroma:source_attached_function_id metadata)
+	// Create a collection that simulates an output collection (has source_attached_function_id in schema)
 	outputCollectionID := types.NewUniqueID()
 	outputCollectionName := "simulated_output_collection"
-	outputCollectionMetadata := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
-	outputCollectionMetadata.Add(common.SourceAttachedFunctionIDKey, &model.CollectionMetadataValueStringType{Value: "some-function-id"})
+	outputSchemaStr := `{"defaults":{},"keys":{},"source_attached_function_id":"some-function-id"}`
 	createOutputCollection := &model.CreateCollection{
 		ID:           outputCollectionID,
 		Name:         outputCollectionName,
 		TenantID:     suite.tenantName,
 		DatabaseName: suite.databaseName,
-		Metadata:     outputCollectionMetadata,
+		SchemaStr:    &outputSchemaStr,
 	}
 	_, _, err = suite.coordinator.CreateCollection(ctx, createOutputCollection)
 	suite.NoError(err)
@@ -2105,15 +2104,14 @@ func (suite *APIsTestSuite) TestDeleteOutputCollectionDeletesAttachedFunction() 
 	}).Error
 	suite.NoError(err)
 
-	// Create an output collection with metadata pointing to the attached function
-	outputCollectionMetadata := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
-	outputCollectionMetadata.Add(common.SourceAttachedFunctionIDKey, &model.CollectionMetadataValueStringType{Value: attachedFunctionID.String()})
+	// Create an output collection with schema pointing to the attached function
+	outputSchemaStr := fmt.Sprintf(`{"defaults":{},"keys":{},"source_attached_function_id":"%s"}`, attachedFunctionID.String())
 	createOutputCollection := &model.CreateCollection{
 		ID:           outputCollectionID,
 		Name:         "test_output_for_delete",
 		TenantID:     suite.tenantName,
 		DatabaseName: suite.databaseName,
-		Metadata:     outputCollectionMetadata,
+		SchemaStr:    &outputSchemaStr,
 	}
 	_, _, err = suite.coordinator.CreateCollection(ctx, createOutputCollection)
 	suite.NoError(err)

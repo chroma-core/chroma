@@ -623,6 +623,7 @@ message DetachFunctionResponse {
 
 message FinishCreateAttachedFunctionRequest {
   string id = 1;
+  string output_collection_schema_str = 2;  // Schema JSON for the output collection
 }
 
 message FinishCreateAttachedFunctionResponse {

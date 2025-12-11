@@ -450,6 +450,37 @@ def test_partial_attach_function_repair(
     assert created is True
 
 
+def test_output_collection_created_with_schema(basic_http_client: System) -> None:
+    """Test that output collections are created with the source_attached_function_id in the schema"""
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    # Create input collection and attach a function
+    input_collection = client.create_collection(name="input_collection")
+    input_collection.add(ids=["id1"], documents=["test"])
+
+    attached_fn, created = input_collection.attach_function(
+        name="my_function",
+        function=RECORD_COUNTER_FUNCTION,
+        output_collection="output_collection",
+        params=None,
+    )
+    assert attached_fn is not None
+    assert created is True
+
+    # Get the output collection - it should exist
+    output_collection = client.get_collection(name="output_collection")
+    assert output_collection is not None
+
+    # The source_attached_function_id is stored in the schema (not metadata)
+    # We can't directly access the schema from the client, but we verify the collection exists
+    # and the attached function orchestrator will use this field internally
+    assert "source_attached_function_id" in output_collection._model.pretty_schema()
+
+    # Clean up
+    input_collection.detach_function(attached_fn.name, delete_output_collection=True)
+
+
 def test_count_function_attach_and_detach_attach_attach(
     basic_http_client: System,
 ) -> None:
