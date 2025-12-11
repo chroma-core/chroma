@@ -196,6 +196,7 @@ k8s_yaml([
   'k8s/test/jaeger.yaml',
   'k8s/test/load-service.yaml',
   'k8s/test/minio.yaml',
+  'k8s/test/spanner.yaml',
   'k8s/test/prometheus.yaml',
   'k8s/test/test-memberlist-cr.yaml',
   'k8s/test/postgres.yaml',
@@ -306,6 +307,8 @@ k8s_resource('otel-collector', resource_deps=['k8s_setup'], labels=["observabili
 
 # Local S3
 k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards=['9000:9000', '9005:9005'])
+# Local Spanner
+k8s_resource('spanner-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards=['9010:9010', '9020:9020'])
 
 
 # Set the enabled resources
@@ -341,6 +344,7 @@ groups = {
     'query-service:statefulset:chroma2',
     'compaction-service:statefulset:chroma2',
     'garbage-collector:statefulset:chroma2',
+    'spanner-deployment',
   ],
 }
 
