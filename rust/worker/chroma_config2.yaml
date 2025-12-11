@@ -15,19 +15,19 @@ query_service:
       hasher: Murmur3
   memberlist_provider:
     custom_resource:
-      kube_namespace: "chroma"
+      kube_namespace: "chroma2"
       memberlist_name: "query-service-memberlist"
       queue_size: 100
   sysdb:
     grpc:
-      host: "sysdb.chroma"
+      host: "sysdb.chroma2"
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 5000
   storage:
     admission_controlled_s3:
       s3_config:
-        bucket: "chroma-storage"
+        bucket: "chroma-storage2"
         credentials: "Minio"
         connect_timeout_ms: 5000
         request_timeout_ms: 30000 # 1 minute
@@ -39,13 +39,13 @@ query_service:
           bandwidth_allocation: [0.7, 0.3]
   log:
     grpc:
-      host: "rust-log-service.chroma"
+      host: "rust-log-service.chroma2"
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 60000 # 1 minute
       memberlist_provider:
         custom_resource:
-          kube_namespace: "chroma"
+          kube_namespace: "chroma2"
           memberlist_name: "rust-log-service-memberlist"
           queue_size: 100
   dispatcher:
@@ -103,19 +103,19 @@ compaction_service:
       hasher: Murmur3
   memberlist_provider:
     custom_resource:
-      kube_namespace: "chroma"
+      kube_namespace: "chroma2"
       memberlist_name: "compaction-service-memberlist"
       queue_size: 100
   sysdb:
     grpc:
-      host: "sysdb.chroma"
+      host: "sysdb.chroma2"
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 5000
   storage:
     admission_controlled_s3:
       s3_config:
-        bucket: "chroma-storage"
+        bucket: "chroma-storage2"
         credentials: "Minio"
         connect_timeout_ms: 5000
         request_timeout_ms: 60000 # 1 minute
@@ -127,13 +127,13 @@ compaction_service:
           bandwidth_allocation: [0.7, 0.3]
   log:
     grpc:
-      host: "rust-log-service.chroma"
+      host: "rust-log-service.chroma2"
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 60000 # 1 minute
       memberlist_provider:
         custom_resource:
-          kube_namespace: "chroma"
+          kube_namespace: "chroma2"
           memberlist_name: "rust-log-service-memberlist"
           queue_size: 100
   dispatcher:
@@ -198,7 +198,7 @@ log_service:
   storage:
     admission_controlled_s3:
       s3_config:
-        bucket: "chroma-storage"
+        bucket: "chroma-storage2"
         credentials: "Minio"
         connect_timeout_ms: 5000
         request_timeout_ms: 60000 # 1 minute
@@ -229,7 +229,7 @@ garbage_collector:
   disallow_collections: []
   default_mode: "deletev2"
   sysdb_config:
-    host: "sysdb.chroma"
+    host: "sysdb.chroma2"
     port: 50051
     connect_timeout_ms: 60000
     request_timeout_ms: 60000
@@ -239,23 +239,23 @@ garbage_collector:
     worker_queue_size: 100
   storage_config:
     s3:
-      bucket: "chroma-storage"
+      bucket: "chroma-storage2"
   assignment_policy:
     rendezvous_hashing:
       hasher: Murmur3
   memberlist_provider:
     custom_resource:
-      kube_namespace: "chroma"
+      kube_namespace: "chroma2"
       memberlist_name: "garbage-collection-service-memberlist"
       queue_size: 100
   log:
     grpc:
-      host: "rust-log-service.chroma"
+      host: "rust-log-service.chroma2"
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 5000
       memberlist_provider:
         custom_resource:
-          kube_namespace: "chroma"
+          kube_namespace: "chroma2"
           memberlist_name: "rust-log-service-memberlist"
           queue_size: 100
