@@ -1597,7 +1597,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_garbage_equal_nonzero_fragment_seq_nos() {
+    fn apply_garbage_equal_nonzero_fragment_identifiers() {
         let manifest = Manifest {
             writer: "test_writer".to_string(),
             setsum: Setsum::default(),

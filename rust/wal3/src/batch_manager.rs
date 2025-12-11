@@ -193,7 +193,7 @@ impl BatchManager {
             self.write_finished.notify_one();
             return Ok(None);
         }
-        let Some((fragment_seq_no, log_position)) =
+        let Some((fragment_identifier, log_position)) =
             state.select_for_write(&self.options, manifest_manager, acc_count)?
         else {
             // Cannot yet select for write.  Notify will come from the timeout background is on.
@@ -212,7 +212,7 @@ impl BatchManager {
         } else {
             state.backoff = false;
         }
-        Ok(Some((fragment_seq_no, log_position, work)))
+        Ok(Some((fragment_identifier, log_position, work)))
     }
 
     pub fn finish_write(&self) {

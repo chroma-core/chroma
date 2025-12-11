@@ -614,21 +614,21 @@ pub fn fragment_prefix() -> String {
     "log/".to_string()
 }
 
-pub fn prefixed_fragment_path(prefix: &str, fragment_seq_no: FragmentIdentifier) -> String {
+pub fn prefixed_fragment_path(prefix: &str, fragment_identifier: FragmentIdentifier) -> String {
     format!(
         "{}/{}Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
         prefix,
         fragment_prefix(),
-        fragment_seq_no.bucket(),
-        fragment_seq_no.0,
+        fragment_identifier.bucket(),
+        fragment_identifier.0,
     )
 }
 
-pub fn unprefixed_fragment_path(fragment_seq_no: FragmentIdentifier) -> String {
+pub fn unprefixed_fragment_path(fragment_identifier: FragmentIdentifier) -> String {
     format!(
         "log/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
-        fragment_seq_no.bucket(),
-        fragment_seq_no.0,
+        fragment_identifier.bucket(),
+        fragment_identifier.0,
     )
 }
 
