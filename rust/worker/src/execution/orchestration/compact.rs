@@ -2888,10 +2888,13 @@ mod tests {
             )
             .await
             .expect("Attached function creation should succeed");
+        let mut output_schema = chroma_types::Schema::new_default(chroma_types::KnnIndex::Hnsw);
+        output_schema.source_attached_function_id = Some(attached_function_id.0.to_string());
+        let output_schema_str = serde_json::to_string(&output_schema).unwrap();
         sysdb
-            .finish_create_attached_function(attached_function_id)
+            .finish_create_attached_function(attached_function_id, output_schema_str)
             .await
-            .expect("Attached function creation finish should succeed");
+            .unwrap();
 
         // First compaction - populates both input and output collections
         println!("Starting first compaction...");
