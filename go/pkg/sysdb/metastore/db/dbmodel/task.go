@@ -36,13 +36,13 @@ func (v AttachedFunction) TableName() string {
 //go:generate mockery --name=IAttachedFunctionDb
 type IAttachedFunctionDb interface {
 	Insert(attachedFunction *AttachedFunction) error
-	// TODO(tanujnay112): clean up this interface
-	GetByName(inputCollectionID string, name string) (*AttachedFunction, error)
-	GetAnyByName(inputCollectionID string, name string) (*AttachedFunction, error)
-	GetByID(id uuid.UUID) (*AttachedFunction, error)
-	GetAnyByID(id uuid.UUID) (*AttachedFunction, error) // TODO(tanujnay112): Consolidate all the getters.
-	GetByCollectionID(inputCollectionID string) ([]*AttachedFunction, error)
-	GetAnyByCollectionID(inputCollectionID string) ([]*AttachedFunction, error)
+	// GetAttachedFunctions is a consolidated getter that supports various query patterns
+	// Parameters can be nil to indicate they should not be filtered on
+	// - id: Filter by attached function ID
+	// - name: Filter by attached function name
+	// - inputCollectionID: Filter by input collection ID
+	// - onlyReady: If true, only returns attached functions where is_ready = true
+	GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, onlyReady bool) ([]*AttachedFunction, error)
 	Update(attachedFunction *AttachedFunction) error
 	Finish(id uuid.UUID) error
 	SoftDelete(inputCollectionID string, name string) error
