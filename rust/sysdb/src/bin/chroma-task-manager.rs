@@ -138,15 +138,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             input_collection_id,
             name,
         } => {
-            let request = chroma_proto::GetAttachedFunctionByNameRequest {
-                input_collection_id,
-                name,
+            let request = chroma_proto::GetAttachedFunctionsRequest {
+                id: None,
+                name: Some(name),
+                input_collection_id: Some(input_collection_id),
+                only_ready: Some(true),
             };
 
-            let response = client.get_attached_function_by_name(request).await?;
-            let attached_function = response
-                .into_inner()
-                .attached_function
+            let response = client.get_attached_functions(request).await?;
+            let attached_functions = response.into_inner().attached_functions;
+            let attached_function = attached_functions
+                .into_iter()
+                .next()
                 .ok_or("Server did not return attached function")?;
 
             println!("Attached Function ID: {:?}", attached_function.id);

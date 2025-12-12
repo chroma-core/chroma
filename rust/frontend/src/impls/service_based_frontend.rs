@@ -2029,9 +2029,19 @@ impl ServiceBasedFrontend {
             })?);
 
         // Get the attached function by name
-        self.sysdb_client
-            .get_attached_function_by_name(collection_uuid, function_name)
-            .await
+        let attached_functions = self
+            .sysdb_client
+            .get_attached_functions(
+                None,
+                Some(function_name.clone()),
+                Some(collection_uuid),
+                true,
+            )
+            .await?;
+        attached_functions
+            .into_iter()
+            .next()
+            .ok_or_else(|| chroma_sysdb::GetAttachedFunctionError::NotFound)
     }
 
     pub async fn detach_function(

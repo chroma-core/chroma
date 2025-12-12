@@ -100,7 +100,7 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 	err := s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// Check if there's any active (ready, non-deleted) attached function for this collection
 		// We only allow one active attached function per collection
-		existingAttachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAnyByCollectionID(req.InputCollectionId)
+		existingAttachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, &req.InputCollectionId, false)
 		if err != nil {
 			log.Error("AttachFunction: failed to check for existing attached function", zap.Error(err))
 			return err
@@ -275,56 +275,37 @@ func attachedFunctionToProto(attachedFunction *dbmodel.AttachedFunction, functio
 	return attachedFunctionProto, nil
 }
 
-// GetAttachedFunctionByName retrieves an attached function by name from the database
-func (s *Coordinator) GetAttachedFunctionByName(ctx context.Context, req *coordinatorpb.GetAttachedFunctionByNameRequest) (*coordinatorpb.GetAttachedFunctionByNameResponse, error) {
-	// Can do both calls with a JOIN
-	attachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetByName(req.InputCollectionId, req.Name)
+// GetAttachedFunctions retrieves attached functions using flexible query parameters
+// All parameters are optional - nil means don't filter on that field
+func (s *Coordinator) GetAttachedFunctions(ctx context.Context, req *coordinatorpb.GetAttachedFunctionsRequest) (*coordinatorpb.GetAttachedFunctionsResponse, error) {
+	// Parse optional ID parameter
+	var idPtr *uuid.UUID
+	if req.Id != nil {
+		parsed, err := uuid.Parse(*req.Id)
+		if err != nil {
+			log.Error("GetAttachedFunctions: invalid attached_function_id", zap.Error(err))
+			return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
+		}
+		idPtr = &parsed
+	}
+
+	// Default onlyReady to true if not specified
+	onlyReady := true
+	if req.OnlyReady != nil {
+		onlyReady = *req.OnlyReady
+	}
+
+	attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetAttachedFunctions(idPtr, req.Name, req.InputCollectionId, onlyReady)
 	if err != nil {
-		return nil, err
-	}
-
-	// If attached function not found, return empty response
-	if attachedFunction == nil {
-		return nil, common.ErrAttachedFunctionNotFound
-	}
-
-	// Look up function name from functions table
-	function, err := s.catalog.metaDomain.FunctionDb(ctx).GetByID(attachedFunction.FunctionID)
-	if err != nil {
-		log.Error("GetAttachedFunctionByName: failed to get function", zap.Error(err))
-		return nil, err
-	}
-	if function == nil {
-		log.Error("GetAttachedFunctionByName: function not found", zap.String("function_id", attachedFunction.FunctionID.String()))
-		return nil, common.ErrFunctionNotFound
-	}
-
-	// Debug logging
-	log.Info("Found attached function", zap.String("attached_function_id", attachedFunction.ID.String()), zap.String("name", attachedFunction.Name), zap.String("input_collection_id", attachedFunction.InputCollectionID), zap.String("output_collection_name", attachedFunction.OutputCollectionName))
-
-	attachedFunctionProto, err := attachedFunctionToProto(attachedFunction, function)
-	if err != nil {
-		log.Error("GetAttachedFunctionByName: failed to convert attached function to proto", zap.Error(err), zap.String("attached_function_id", attachedFunction.ID.String()))
-		return nil, err
-	}
-
-	return &coordinatorpb.GetAttachedFunctionByNameResponse{
-		AttachedFunction: attachedFunctionProto,
-	}, nil
-}
-
-// ListAttachedFunctions retrieves all attached functions for a given collection
-func (s *Coordinator) ListAttachedFunctions(ctx context.Context, req *coordinatorpb.ListAttachedFunctionsRequest) (*coordinatorpb.ListAttachedFunctionsResponse, error) {
-	attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetByCollectionID(req.InputCollectionId)
-	if err != nil {
-		log.Error("ListAttachedFunctions: failed to get attached functions", zap.Error(err))
+		log.Error("GetAttachedFunctions: failed to get attached functions", zap.Error(err))
 		return nil, err
 	}
 
 	if len(attachedFunctions) == 0 {
-		return &coordinatorpb.ListAttachedFunctionsResponse{AttachedFunctions: []*coordinatorpb.AttachedFunction{}}, nil
+		return &coordinatorpb.GetAttachedFunctionsResponse{AttachedFunctions: []*coordinatorpb.AttachedFunction{}}, nil
 	}
 
+	// Collect unique function IDs
 	functionIDsSet := make(map[uuid.UUID]struct{})
 	functionIDs := make([]uuid.UUID, 0, len(attachedFunctions))
 	for _, attachedFunction := range attachedFunctions {
@@ -336,7 +317,7 @@ func (s *Coordinator) ListAttachedFunctions(ctx context.Context, req *coordinato
 
 	functions, err := s.catalog.metaDomain.FunctionDb(ctx).GetByIDs(functionIDs)
 	if err != nil {
-		log.Error("ListAttachedFunctions: failed to get functions", zap.Error(err))
+		log.Error("GetAttachedFunctions: failed to get functions", zap.Error(err))
 		return nil, err
 	}
 
@@ -350,93 +331,49 @@ func (s *Coordinator) ListAttachedFunctions(ctx context.Context, req *coordinato
 
 	for _, functionID := range functionIDs {
 		if _, ok := functionsByID[functionID]; !ok {
-			log.Error("ListAttachedFunctions: function not found", zap.String("function_id", functionID.String()))
+			log.Error("GetAttachedFunctions: function not found", zap.String("function_id", functionID.String()))
 			return nil, common.ErrFunctionNotFound
 		}
 	}
 
 	protoFunctions := make([]*coordinatorpb.AttachedFunction, 0, len(attachedFunctions))
-
 	for _, attachedFunction := range attachedFunctions {
 		function := functionsByID[attachedFunction.FunctionID]
 
 		attachedFunctionProto, err := attachedFunctionToProto(attachedFunction, function)
 		if err != nil {
-			log.Error("ListAttachedFunctions: failed to convert attached function to proto", zap.Error(err), zap.String("attached_function_id", attachedFunction.ID.String()))
+			log.Error("GetAttachedFunctions: failed to convert attached function to proto", zap.Error(err), zap.String("attached_function_id", attachedFunction.ID.String()))
 			return nil, err
 		}
 
 		protoFunctions = append(protoFunctions, attachedFunctionProto)
 	}
 
-	log.Info("ListAttachedFunctions succeeded", zap.String("input_collection_id", req.InputCollectionId), zap.Int("count", len(protoFunctions)))
+	log.Info("GetAttachedFunctions succeeded",
+		zap.Any("id", req.Id),
+		zap.Any("name", req.Name),
+		zap.Any("input_collection_id", req.InputCollectionId),
+		zap.Bool("only_ready", onlyReady),
+		zap.Int("count", len(protoFunctions)))
 
-	return &coordinatorpb.ListAttachedFunctionsResponse{
+	return &coordinatorpb.GetAttachedFunctionsResponse{
 		AttachedFunctions: protoFunctions,
-	}, nil
-}
-
-// GetAttachedFunctionByUuid retrieves an attached function by UUID from the database
-func (s *Coordinator) GetAttachedFunctionByUuid(ctx context.Context, req *coordinatorpb.GetAttachedFunctionByUuidRequest) (*coordinatorpb.GetAttachedFunctionByUuidResponse, error) {
-	// Parse the attached function UUID
-	attachedFunctionID, err := uuid.Parse(req.Id)
-	if err != nil {
-		log.Error("GetAttachedFunctionByUuid: invalid attached_function_id", zap.Error(err))
-		return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
-	}
-
-	// Fetch attached function by ID
-	attachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetByID(attachedFunctionID)
-	if err != nil {
-		// Map ErrAttachedFunctionNotReady to NotFound so it appears non-existent to clients
-		if errors.Is(err, common.ErrAttachedFunctionNotReady) {
-			return nil, status.Error(codes.NotFound, "attached function not ready")
-		}
-		return nil, err
-	}
-
-	// If attached function not found, return error
-	if attachedFunction == nil {
-		return nil, status.Error(codes.NotFound, "attached function not found")
-	}
-
-	// Look up function name from functions table
-	function, err := s.catalog.metaDomain.FunctionDb(ctx).GetByID(attachedFunction.FunctionID)
-	if err != nil {
-		log.Error("GetAttachedFunctionByUuid: failed to get function", zap.Error(err))
-		return nil, err
-	}
-	if function == nil {
-		log.Error("GetAttachedFunctionByUuid: function not found", zap.String("function_id", attachedFunction.FunctionID.String()))
-		return nil, common.ErrFunctionNotFound
-	}
-
-	// Debug logging
-	log.Info("Found attached function by UUID", zap.String("attached_function_id", attachedFunction.ID.String()), zap.String("name", attachedFunction.Name), zap.String("input_collection_id", attachedFunction.InputCollectionID), zap.String("output_collection_name", attachedFunction.OutputCollectionName))
-
-	attachedFunctionProto, err := attachedFunctionToProto(attachedFunction, function)
-	if err != nil {
-		log.Error("GetAttachedFunctionByUuid: failed to convert attached function to proto", zap.Error(err), zap.String("attached_function_id", attachedFunction.ID.String()))
-		return nil, err
-	}
-
-	return &coordinatorpb.GetAttachedFunctionByUuidResponse{
-		AttachedFunction: attachedFunctionProto,
 	}, nil
 }
 
 // DetachFunction soft deletes an attached function by name
 func (s *Coordinator) DetachFunction(ctx context.Context, req *coordinatorpb.DetachFunctionRequest) (*coordinatorpb.DetachFunctionResponse, error) {
 	// First get the attached function to check if we need to delete the output collection
-	attachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetByName(req.InputCollectionId, req.Name)
+	attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetAttachedFunctions(nil, &req.Name, &req.InputCollectionId, true)
 	if err != nil {
 		log.Error("DetachFunction: failed to get attached function", zap.Error(err))
 		return nil, err
 	}
-	if attachedFunction == nil {
+	if len(attachedFunctions) == 0 {
 		log.Error("DetachFunction: attached function not found")
 		return nil, common.ErrAttachedFunctionNotFound
 	}
+	attachedFunction := attachedFunctions[0]
 
 	// Execute collection and attached function deletion in a single transaction
 	err = s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
@@ -529,15 +466,16 @@ func (s *Coordinator) FinishCreateAttachedFunction(ctx context.Context, req *coo
 	// Execute all operations in a transaction for atomicity
 	err = s.catalog.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// 1. Get the attached function to retrieve metadata
-		attachedFunction, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAnyByID(attachedFunctionID)
+		attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(&attachedFunctionID, nil, nil, false)
 		if err != nil {
 			log.Error("FinishCreateAttachedFunction: failed to get attached function", zap.Error(err))
 			return err
 		}
-		if attachedFunction == nil {
+		if len(attachedFunctions) == 0 {
 			log.Error("FinishCreateAttachedFunction: attached function not found")
 			return status.Errorf(codes.NotFound, "attached function not found")
 		}
+		attachedFunction := attachedFunctions[0]
 
 		// 2. Check if output collection already exists (idempotency)
 		if attachedFunction.IsReady {
@@ -623,7 +561,7 @@ func (s *Coordinator) FinishCreateAttachedFunction(ctx context.Context, req *coo
 		}
 
 		// 7. Validate that there is only one ready attached function for this collection
-		existingAttachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetByCollectionID(attachedFunction.InputCollectionID)
+		existingAttachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, &attachedFunction.InputCollectionID, true)
 		if err != nil {
 			log.Error("FinishCreateAttachedFunction: failed to get attached functions", zap.Error(err))
 			return err
