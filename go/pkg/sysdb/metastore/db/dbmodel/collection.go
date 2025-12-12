@@ -28,6 +28,7 @@ type Collection struct {
 	NumVersions                uint32          `gorm:"num_versions;type:integer;default:0"`
 	OldestVersionTs            time.Time       `gorm:"oldest_version_ts;type:timestamp"`
 	Tenant                     string          `gorm:"tenant"`
+	CompactionFailureCount     int32           `gorm:"compaction_failure_count;default:0"`
 }
 
 type CollectionToGc struct {
@@ -73,4 +74,5 @@ type ICollectionDb interface {
 	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath *string, newLineageFilePath string) error
 	BatchGetCollectionVersionFilePaths(collectionIDs []string) (map[string]string, error)
 	BatchGetCollectionSoftDeleteStatus(collectionIDs []string) (map[string]bool, error)
+	IncrementCompactionFailureCount(collectionID string) error
 }

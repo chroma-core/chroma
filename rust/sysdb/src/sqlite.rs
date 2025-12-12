@@ -379,6 +379,7 @@ impl SqliteSysDb {
             lineage_file_path: None,
             updated_at: SystemTime::UNIX_EPOCH,
             database_id: database_uuid,
+            compaction_failure_count: 0,
         })
     }
 
@@ -860,6 +861,7 @@ impl SqliteSysDb {
                     lineage_file_path: None,
                     updated_at: SystemTime::UNIX_EPOCH,
                     database_id,
+                    compaction_failure_count: 0,
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;
@@ -1132,6 +1134,24 @@ impl SqliteSysDb {
         } else {
             Some(metadata)
         }
+    }
+
+    /// Increment the compaction failure count for a collection.
+    pub async fn increment_compaction_failure_count(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE collections
+            SET compaction_failure_count = compaction_failure_count + 1
+            WHERE id = $1
+            "#,
+        )
+        .bind(collection_id.0.to_string())
+        .execute(self.db.get_conn())
+        .await?;
+        Ok(())
     }
 }
 
