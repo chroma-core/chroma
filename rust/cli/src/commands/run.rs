@@ -2,12 +2,12 @@ use crate::ui_utils::{HOLIDAY_LOGO, LOGO};
 use crate::utils::CliError;
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
+use chrono::{Datelike, Local};
 use clap::Parser;
 use colored::Colorize;
 use std::net::TcpListener;
 use std::sync::Arc;
 use thiserror::Error;
-use chrono::{Datelike, Local};
 
 #[derive(Debug, Error)]
 pub enum RunError {
