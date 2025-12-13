@@ -70,7 +70,7 @@ impl From<WhereError> for ChromaHttpClientError {
 static METRICS: std::sync::LazyLock<crate::client::metrics::Metrics> =
     std::sync::LazyLock::new(crate::client::metrics::Metrics::new);
 
-/// Client handle for interacting with a Chroma AI-native database deployment.
+/// Client handle for interacting with Chroma
 ///
 /// This is the primary entry point for all database-level operations. A `ChromaClient` manages
 /// connection state, authentication, automatic retries, and tenant/database resolution.
@@ -634,6 +634,45 @@ impl ChromaHttpClient {
         Ok(())
     }
 
+    /// Returns the total number of collections in the current database.
+    ///
+    /// This is more efficient than listing all collections when only the count is needed,
+    /// as it avoids transferring collection metadata over the network.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Network communication fails
+    /// - The database name cannot be resolved
+    /// - The authenticated user lacks read permissions
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let count = client.count_collections().await?;
+    /// println!("Total collections: {}", count);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn count_collections(&self) -> Result<u32, ChromaHttpClientError> {
+        let tenant_id = self.get_tenant_id().await?;
+        let database_name = self.get_database_name().await?;
+
+        self.send::<(), (), _>(
+            "count_collections",
+            Method::GET,
+            format!(
+                "/api/v2/tenants/{}/databases/{}/collections_count",
+                tenant_id, database_name
+            ),
+            None,
+            None,
+        )
+        .await
+    }
+
     /// Enumerates collections in the specified database with pagination support.
     ///
     /// Returns collection handles that can be used to perform read and write operations.
@@ -1057,6 +1096,20 @@ mod tests {
                 .filter(|(_, collection)| collection.name() == first || collection.name() == second)
                 .collect::<Vec<_>>();
             assert_eq!(positions.len(), 2);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_live_cloud_count_collections() {
+        with_client(|mut client| async move {
+            let initial_count = client.count_collections().await.unwrap();
+
+            let _collection = client.new_collection("count_test").await;
+
+            let new_count = client.count_collections().await.unwrap();
+            assert_eq!(new_count, initial_count + 1);
         })
         .await;
     }
