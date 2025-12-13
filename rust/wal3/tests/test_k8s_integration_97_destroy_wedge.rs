@@ -21,6 +21,7 @@ async fn test_k8s_integration_97_destroy_wedge() {
         PREFIX,
         WRITER,
         (),
+        None,
     )
     .await
     .unwrap();

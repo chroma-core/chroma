@@ -75,6 +75,7 @@ from typing import (
     Dict,
     Callable,
     TypeVar,
+    Tuple,
 )
 from overrides import override
 from uuid import UUID, uuid4
@@ -922,7 +923,7 @@ class SegmentAPI(ServerAPI):
         params: Optional[Dict[str, Any]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> "AttachedFunction":
+    ) -> Tuple["AttachedFunction", bool]:
         """Attached functions are not supported in the Segment API (local embedded mode)."""
         raise NotImplementedError(
             "Attached functions are only supported when connecting to a Chroma server via HttpClient. "

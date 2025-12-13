@@ -1,0 +1,87 @@
+# Default values for distributed-chroma.
+# Strongly prefer single quotes.
+namespace: 'chroma2'
+rustFrontendService:
+  image:
+    repository: 'rust-frontend-service'
+    tag: 'latest'
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: '2000m'
+      memory: '1Gi'
+    requests:
+      cpu: '1000m'
+      memory: '512Mi'
+sysdb:
+  image:
+    repository: 'sysdb'
+    tag: 'latest'
+  replicaCount: 1
+  env:
+    - name: OPTL_TRACING_ENDPOINT
+      value: 'value: "jaeger.chroma.svc.cluster.local:4317"'
+  resources:
+    limits:
+      cpu: '2000m'
+      memory: '1Gi'
+    requests:
+      cpu: '1000m'
+      memory: '512Mi'
+rustLogService:
+  image:
+    repository: 'rust-log-service'
+    tag: 'latest'
+  cache:
+    hostPath: '/local/cache2/chroma-log-service'
+    type: DirectoryOrCreate
+    mountPath: '/cache/'
+    additionalVolumes: []
+queryService:
+  image:
+    repository: 'query-service'
+    tag: 'latest'
+  env:
+  cache:
+    hostPath: '/local/cache2/chroma-query-service'
+    type: DirectoryOrCreate
+    mountPath: '/cache/'
+    additionalVolumes: []
+  replicaCount: 2
+compactionService:
+  image:
+    repository: 'compaction-service'
+    tag: 'latest'
+  env:
+  cache:
+    hostPath: '/local/cache2/chroma-compaction-service'
+    type: DirectoryOrCreate
+    mountPath: '/cache/'
+    additionalVolumes: []
+  replicaCount: 1
+sysdbMigration:
+  image:
+    repository: 'sysdb-migration'
+    tag: 'latest'
+  username: chroma
+  password: chroma
+  netloc: postgres
+  port: 5432
+  dbName: sysdb
+  sslmode: disable
+# Add the garbage collector configuration
+garbageCollector:
+  image:
+    repository: 'garbage-collector'
+    tag: 'latest'
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: '200m'
+      memory: '256Mi'
+    requests:
+      cpu: '100m'
+      memory: '128Mi'
+  cache:
+    hostPath: '/local/cache2/chroma-garbage-collector'
+    mountPath: '/cache/'

@@ -5,9 +5,17 @@ option go_package = "github.com/chroma-core/chroma/go/pkg/proto/logservicepb";
 
 import "chromadb/proto/chroma.proto";
 
+// Customer-managed encryption key
+message Cmek {
+  oneof provider {
+    string gcp = 1;  // GCP KMS resource name
+  }
+}
+
 message PushLogsRequest {
   string collection_id = 1;
   repeated OperationRecord records = 2;
+  optional Cmek cmek = 3;  // Encryption key for log fragments
 }
 
 message PushLogsResponse {

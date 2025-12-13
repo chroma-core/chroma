@@ -4,7 +4,7 @@
 # for now we nest it in the worker directory
 query_service:
   service_name: "query-service"
-  otel_endpoint: "http://otel-collector:4317"
+  otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
   otel_filters:
     - crate_name: "worker"
       filter_level: "trace"
@@ -43,6 +43,11 @@ query_service:
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 60000 # 1 minute
+      memberlist_provider:
+        custom_resource:
+          kube_namespace: "chroma"
+          memberlist_name: "rust-log-service-memberlist"
+          queue_size: 100
   dispatcher:
     num_worker_threads: 4
     dispatcher_queue_size: 1000
@@ -87,7 +92,7 @@ query_service:
   fetch_log_batch_size: 1000
 compaction_service:
   service_name: "compaction-service"
-  otel_endpoint: "http://otel-collector:4317"
+  otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
   otel_filters:
     - crate_name: "worker"
       filter_level: "trace"
@@ -126,6 +131,11 @@ compaction_service:
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 60000 # 1 minute
+      memberlist_provider:
+        custom_resource:
+          kube_namespace: "chroma"
+          memberlist_name: "rust-log-service-memberlist"
+          queue_size: 100
   dispatcher:
     num_worker_threads: 4
     dispatcher_queue_size: 1000
@@ -179,7 +189,7 @@ log_service:
   reinsert_threshold: 0
   opentelemetry:
     service_name: "rust-log-service"
-    endpoint: "http://otel-collector:4317"
+    endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
     filters:
       - crate_name: "chroma_log"
         filter_level: "trace"
@@ -209,7 +219,7 @@ log_service:
       headroom: 200
 garbage_collector:
   service_name: "garbage-collector"
-  otel_endpoint: "http://otel-collector:4317"
+  otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
   otel_filters:
     - crate_name: "garbage_collector"
       filter_level: "debug"
@@ -244,3 +254,8 @@ garbage_collector:
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 5000
+      memberlist_provider:
+        custom_resource:
+          kube_namespace: "chroma"
+          memberlist_name: "rust-log-service-memberlist"
+          queue_size: 100

@@ -440,7 +440,7 @@ impl NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'_> {
         6
     }
 
-    async fn prefetch_ngrams<'me, Ngrams>(&'me self, ngrams: Ngrams)
+    async fn load_ngrams<'me, Ngrams>(&'me self, ngrams: Ngrams)
     where
         Ngrams: IntoIterator<Item = &'me str> + Send + Sync,
     {

@@ -201,7 +201,10 @@ mod test {
             values_before_flush.push(read.to_vec());
         }
         let prefix_path = "";
-        block_manager.flush(&block, prefix_path).await.unwrap();
+        block_manager
+            .flush(&block, prefix_path, None)
+            .await
+            .unwrap();
         let block = block_manager
             .get(prefix_path, &block.id, StorageRequestPriority::P0)
             .await
@@ -250,7 +253,10 @@ mod test {
             values_before_flush.push(read.unwrap().to_string());
         }
         let prefix_path = "";
-        block_manager.flush(&block, prefix_path).await.unwrap();
+        block_manager
+            .flush(&block, prefix_path, None)
+            .await
+            .unwrap();
 
         let block = block_manager
             .get(prefix_path, &delta_id, StorageRequestPriority::P0)
@@ -282,7 +288,10 @@ mod test {
             .unwrap();
         let new_id = forked_block.id;
         let block = block_manager.commit::<&str, String>(forked_block).await;
-        block_manager.flush(&block, prefix_path).await.unwrap();
+        block_manager
+            .flush(&block, prefix_path, None)
+            .await
+            .unwrap();
         let forked_block = block_manager
             .get(prefix_path, &new_id, StorageRequestPriority::P0)
             .await
@@ -327,7 +336,10 @@ mod test {
             values_before_flush.push(read);
         }
         let prefix_path = "";
-        block_manager.flush(&block, prefix_path).await.unwrap();
+        block_manager
+            .flush(&block, prefix_path, None)
+            .await
+            .unwrap();
         let block = block_manager
             .get(prefix_path, &delta_id, StorageRequestPriority::P0)
             .await
@@ -370,7 +382,10 @@ mod test {
         let delta_id = delta.id;
         let block = block_manager.commit::<&str, RoaringBitmap>(delta).await;
         let prefix_path = "";
-        block_manager.flush(&block, prefix_path).await.unwrap();
+        block_manager
+            .flush(&block, prefix_path, None)
+            .await
+            .unwrap();
         let block = block_manager
             .get(prefix_path, &delta_id, StorageRequestPriority::P0)
             .await
@@ -445,7 +460,10 @@ mod test {
         let delta_id = delta.id;
         let block = block_manager.commit::<&str, &DataRecord>(delta).await;
         let prefix_path = "";
-        block_manager.flush(&block, prefix_path).await.unwrap();
+        block_manager
+            .flush(&block, prefix_path, None)
+            .await
+            .unwrap();
         let block = block_manager
             .get(prefix_path, &delta_id, StorageRequestPriority::P0)
             .await
@@ -490,7 +508,10 @@ mod test {
         let delta_id = delta.id;
         let block = block_manager.commit::<u32, String>(delta).await;
         let prefix_path = "";
-        block_manager.flush(&block, prefix_path).await.unwrap();
+        block_manager
+            .flush(&block, prefix_path, None)
+            .await
+            .unwrap();
         let block = block_manager
             .get(prefix_path, &delta_id, StorageRequestPriority::P0)
             .await
@@ -535,7 +556,10 @@ mod test {
             values_before_flush.push(read.unwrap().to_string());
         }
         let prefix_path = "";
-        block_manager.flush(&block, prefix_path).await.unwrap();
+        block_manager
+            .flush(&block, prefix_path, None)
+            .await
+            .unwrap();
 
         let block = block_manager
             .get(prefix_path, &delta_id, StorageRequestPriority::P0)
@@ -567,7 +591,10 @@ mod test {
             .unwrap();
         let new_id = forked_block.id;
         let block = block_manager.commit::<u32, u32>(forked_block).await;
-        block_manager.flush(&block, prefix_path).await.unwrap();
+        block_manager
+            .flush(&block, prefix_path, None)
+            .await
+            .unwrap();
         let forked_block = block_manager
             .get(prefix_path, &new_id, StorageRequestPriority::P0)
             .await

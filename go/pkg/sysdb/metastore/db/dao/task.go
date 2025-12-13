@@ -153,6 +153,21 @@ func (s *attachedFunctionDb) GetByCollectionID(inputCollectionID string) ([]*dbm
 	return attachedFunctions, nil
 }
 
+func (s *attachedFunctionDb) GetAnyByCollectionID(inputCollectionID string) ([]*dbmodel.AttachedFunction, error) {
+	var attachedFunctions []*dbmodel.AttachedFunction
+	err := s.db.
+		Where("input_collection_id = ?", inputCollectionID).
+		Where("is_deleted = ?", false).
+		Find(&attachedFunctions).Error
+
+	if err != nil {
+		log.Error("GetAnyByCollectionID failed", zap.Error(err), zap.String("input_collection_id", inputCollectionID))
+		return nil, err
+	}
+
+	return attachedFunctions, nil
+}
+
 func (s *attachedFunctionDb) SoftDelete(inputCollectionID string, name string) error {
 	// Update name and is_deleted in a single query
 	// Format: _deleted_<original_name>_<id>

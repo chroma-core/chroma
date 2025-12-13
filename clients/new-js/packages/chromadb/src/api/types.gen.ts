@@ -21,6 +21,10 @@ export type AttachFunctionRequest = {
 
 export type AttachFunctionResponse = {
     attached_function: AttachedFunctionInfo;
+    /**
+     * True if newly created, false if already existed (idempotent request)
+     */
+    created: boolean;
 };
 
 /**
@@ -414,6 +418,12 @@ export type RawWhereFields = {
  * This represents the server-side schema structure used for index management
  */
 export type Schema = {
+    /**
+     * Customer-managed encryption key for collection data
+     */
+    cmek?: {
+        [key: string]: unknown;
+    } | null;
     /**
      * Default index configurations for each value type
      */

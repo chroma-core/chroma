@@ -1,0 +1,261 @@
+# Default configuration for query and compaction service
+# In the long term, every service should have an entry in this file
+# and this can become the global configuration file for Chroma
+# for now we nest it in the worker directory
+query_service:
+  service_name: "query-service"
+  otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
+  otel_filters:
+    - crate_name: "worker"
+      filter_level: "trace"
+  my_member_id: "query-service-0"
+  my_port: 50051
+  assignment_policy:
+    rendezvous_hashing:
+      hasher: Murmur3
+  memberlist_provider:
+    custom_resource:
+      kube_namespace: "chroma2"
+      memberlist_name: "query-service-memberlist"
+      queue_size: 100
+  sysdb:
+    grpc:
+      host: "sysdb.chroma2"
+      port: 50051
+      connect_timeout_ms: 5000
+      request_timeout_ms: 5000
+  storage:
+    admission_controlled_s3:
+      s3_config:
+        bucket: "chroma-storage2"
+        credentials: "Minio"
+        connect_timeout_ms: 5000
+        request_timeout_ms: 30000 # 1 minute
+        upload_part_size_bytes: 536870912 # 512MiB
+        download_part_size_bytes: 8388608 # 8MiB
+      rate_limiting_policy:
+        count_based_policy:
+          max_concurrent_requests: 30
+          bandwidth_allocation: [0.7, 0.3]
+  log:
+    grpc:
+      host: "rust-log-service.chroma2"
+      port: 50051
+      connect_timeout_ms: 5000
+      request_timeout_ms: 60000 # 1 minute
+      memberlist_provider:
+        custom_resource:
+          kube_namespace: "chroma2"
+          memberlist_name: "rust-log-service-memberlist"
+          queue_size: 100
+  dispatcher:
+    num_worker_threads: 4
+    dispatcher_queue_size: 1000
+    worker_queue_size: 100
+    task_queue_limit: 10000
+    active_io_tasks: 10000
+  blockfile_provider:
+    arrow:
+      block_manager_config:
+        max_block_size_bytes: 8388608 # 8MB
+        block_cache_config:
+          disk:
+            dir: "/cache/chroma/query-service/block-cache"
+            name: "block_cache"
+            # 1k blocks * 8MiB = 8GiB, this is actually ignored in the disk cache config. Leaving it set to 1k for consistency.
+            capacity: 1000
+            mem: 8000 # 8GiB
+            disk: 12884 # 12GiB
+            file_size: 256 #  256 MiB
+            flushers: 4
+            flush: false
+            reclaimers: 2
+            recover_concurrency: 16
+            admission_rate_limit: 256 # 256MiB/s
+            shards: 64
+            eviction: lru
+        num_concurrent_block_flushes: 40
+      sparse_index_manager_config:
+        sparse_index_cache_config:
+          lru:
+            name: "sparse_index_cache"
+            capacity: 1000
+  hnsw_provider:
+    hnsw_temporary_path: "~/tmp"
+    hnsw_cache_config:
+      weighted_lru:
+        name: "hnsw_cache"
+        capacity: 8589934592 # 8GB
+    permitted_parallelism: 180
+  spann_provider:
+    adaptive_search_nprobe: false
+  fetch_log_batch_size: 1000
+compaction_service:
+  service_name: "compaction-service"
+  otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
+  otel_filters:
+    - crate_name: "worker"
+      filter_level: "trace"
+  my_member_id: "compaction-service-0"
+  my_port: 50051
+  assignment_policy:
+    rendezvous_hashing:
+      hasher: Murmur3
+  memberlist_provider:
+    custom_resource:
+      kube_namespace: "chroma2"
+      memberlist_name: "compaction-service-memberlist"
+      queue_size: 100
+  sysdb:
+    grpc:
+      host: "sysdb.chroma2"
+      port: 50051
+      connect_timeout_ms: 5000
+      request_timeout_ms: 5000
+  storage:
+    admission_controlled_s3:
+      s3_config:
+        bucket: "chroma-storage2"
+        credentials: "Minio"
+        connect_timeout_ms: 5000
+        request_timeout_ms: 60000 # 1 minute
+        upload_part_size_bytes: 536870912 # 512MiB
+        download_part_size_bytes: 8388608 # 8MiB
+      rate_limiting_policy:
+        count_based_policy:
+          max_concurrent_requests: 30
+          bandwidth_allocation: [0.7, 0.3]
+  log:
+    grpc:
+      host: "rust-log-service.chroma2"
+      port: 50051
+      connect_timeout_ms: 5000
+      request_timeout_ms: 60000 # 1 minute
+      memberlist_provider:
+        custom_resource:
+          kube_namespace: "chroma2"
+          memberlist_name: "rust-log-service-memberlist"
+          queue_size: 100
+  dispatcher:
+    num_worker_threads: 4
+    dispatcher_queue_size: 1000
+    worker_queue_size: 100
+    task_queue_limit: 10000
+    active_io_tasks: 10000
+  compactor:
+    compaction_manager_queue_size: 1000
+    max_concurrent_jobs: 50
+    compaction_interval_sec: 10
+    min_compaction_size: 10
+    max_compaction_size: 10000
+    max_partition_size: 5000
+    disabled_collections: [] # uuids to disable compaction for
+    fetch_log_batch_size: 1000
+  task_runner:
+    enabled: true
+  blockfile_provider:
+    arrow:
+      block_manager_config:
+        max_block_size_bytes: 8388608 # 8MB
+        block_cache_config:
+          lru:
+            name: "block_cache"
+            capacity: 1000
+        num_concurrent_block_flushes: 40
+      sparse_index_manager_config:
+        sparse_index_cache_config:
+          lru:
+            name: "sparse_index_cache"
+            capacity: 1000
+  hnsw_provider:
+    hnsw_temporary_path: "~/tmp"
+    hnsw_cache_config:
+      weighted_lru:
+        name: "hnsw_cache"
+        capacity: 8192 # 8192 MiB = 8GB
+    permitted_parallelism: 180
+  spann_provider:
+    pl_block_size: 5242880 # 5MiB
+    pl_garbage_collection:
+      enabled: true
+      policy:
+        random_sample:
+          sample_size: 0.1
+    hnsw_garbage_collection:
+      enabled: true
+      policy: "full_rebuild"
+log_service:
+  num_records_before_backpressure: 100000
+  reinsert_threshold: 0
+  opentelemetry:
+    service_name: "rust-log-service"
+    endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
+    filters:
+      - crate_name: "chroma_log"
+        filter_level: "trace"
+      - crate_name: "wal3"
+        filter_level: "trace"
+  storage:
+    admission_controlled_s3:
+      s3_config:
+        bucket: "chroma-storage2"
+        credentials: "Minio"
+        connect_timeout_ms: 5000
+        request_timeout_ms: 60000 # 1 minute
+        upload_part_size_bytes: 536870912 # 512MiB
+        download_part_size_bytes: 8388608 # 8MiB
+      rate_limiting_policy:
+        count_based_policy:
+          max_concurrent_requests: 500
+          bandwidth_allocation: [1.0]
+  cache:
+    memory:
+      capacity: 100000000 # 100 MB
+  writer:
+    throttle_fragment:
+      batch_interval_us: 100000
+      batch_size_bytes: 8388608 # 8MiB
+      throughput: 3300
+      headroom: 200
+garbage_collector:
+  service_name: "garbage-collector"
+  otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
+  otel_filters:
+    - crate_name: "garbage_collector"
+      filter_level: "debug"
+  relative_cutoff_time_seconds: 60 # GC all versions created at time < now() - relative_cutoff_time_seconds (1 minute)
+  max_collections_to_gc: 1000
+  gc_interval_mins: 1
+  disallow_collections: []
+  default_mode: "deletev2"
+  sysdb_config:
+    host: "sysdb.chroma2"
+    port: 50051
+    connect_timeout_ms: 60000
+    request_timeout_ms: 60000
+  dispatcher_config:
+    num_worker_threads: 4
+    dispatcher_queue_size: 100
+    worker_queue_size: 100
+  storage_config:
+    s3:
+      bucket: "chroma-storage2"
+  assignment_policy:
+    rendezvous_hashing:
+      hasher: Murmur3
+  memberlist_provider:
+    custom_resource:
+      kube_namespace: "chroma2"
+      memberlist_name: "garbage-collection-service-memberlist"
+      queue_size: 100
+  log:
+    grpc:
+      host: "rust-log-service.chroma2"
+      port: 50051
+      connect_timeout_ms: 5000
+      request_timeout_ms: 5000
+      memberlist_provider:
+        custom_resource:
+          kube_namespace: "chroma2"
+          memberlist_name: "rust-log-service-memberlist"
+          queue_size: 100

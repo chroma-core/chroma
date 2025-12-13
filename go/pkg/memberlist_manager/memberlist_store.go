@@ -144,7 +144,7 @@ func (s *CRMemberlistStore) UpdateMemberlist(ctx context.Context, memberlist Mem
 	log.Debug("Updating memberlist store", zap.Any("memberlist", memberlist))
 	unstructured := memberlist.toCr(s.coordinatorNamespace, s.memberlistCustomResource, resourceVersion)
 	log.Debug("Setting memberlist to unstructured object", zap.Any("unstructured", unstructured))
-	_, err := s.dynamicClient.Resource(gvr).Namespace("chroma").Update(context.Background(), unstructured, metav1.UpdateOptions{})
+	_, err := s.dynamicClient.Resource(gvr).Namespace(s.coordinatorNamespace).Update(context.Background(), unstructured, metav1.UpdateOptions{})
 	if err != nil {
 		return err
 	}

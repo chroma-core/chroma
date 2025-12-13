@@ -1,11 +1,12 @@
 sysdb:
   flags:
     version-file-enabled: true
-    s3-endpoint: "http://minio:9000"
+    s3-endpoint: "http://minio.chroma.svc.cluster.local:9000"
     s3-access-key-id: "minio"
     s3-secret-access-key: "minio123"
     s3-force-path-style: true
     create-bucket-if-not-exists: true
+    kubernetes-namespace: chroma
 rustFrontendService:
   # We have to specify the command, because the Dockerfile uses the CLI since its shared with
   # single node, so in values.dev we pass the CONFIG_PATH into the chroma run command
@@ -15,23 +16,17 @@ rustFrontendService:
       value: "true"
     - name: RUST_BACKTRACE
       value: 'value: "1"'
-    - name: CONFIG_PATH
-      value: "chroma_config.yaml"
 
 queryService:
   env:
     - name: RUST_BACKTRACE
       value: 'value: "1"'
-    - name: CONFIG_PATH
-      value: 'value: "/chroma_config.yaml"'
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
 
 compactionService:
   env:
     - name: RUST_BACKTRACE
       value: 'value: "1"'
-    - name: CONFIG_PATH
-      value: 'value: "/chroma_config.yaml"'
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
 
 rustLogService:

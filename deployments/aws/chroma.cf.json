@@ -16,7 +16,7 @@
     "ChromaVersion": {
       "Description": "Chroma version to install",
       "Type": "String",
-      "Default": "1.3.5"
+      "Default": "1.3.7"
     },
     "ChromaOtelCollectionEndpoint": {
       "Description": "Chroma OTEL endpoint",

@@ -1,7 +1,8 @@
-use crate::ui_utils::LOGO;
+use crate::ui_utils::{HOLIDAY_LOGO, LOGO};
 use crate::utils::CliError;
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
+use chrono::{Datelike, Local};
 use clap::Parser;
 use colored::Colorize;
 use std::net::TcpListener;
@@ -78,7 +79,14 @@ fn override_default_config_with_args(args: RunArgs) -> Result<FrontendServerConf
 }
 
 fn display_run_message(config: &FrontendServerConfig) {
-    println!("{}", LOGO);
+    let now = Local::now();
+
+    if now.month() == 12 {
+        println!("{}", HOLIDAY_LOGO);
+    } else {
+        println!("{}", LOGO);
+    }
+
     println!("Saving data to: {}", config.persist_path.bold());
     println!(
         "Connect to Chroma at: {}",
@@ -93,9 +101,8 @@ fn display_run_message(config: &FrontendServerConfig) {
             .blue()
     );
     println!(
-        "☁️ To deploy your DB - try Chroma Cloud!\n- Sign up: {}\n- Docs: {}\n- Copy your data to Cloud: {}\n",
+        "☁️ To deploy your DB - try Chroma Cloud!\n- Sign up: {}\n- Copy your data to Cloud: {}\n",
         "https://trychroma.com/signup".underline().blue(),
-        "https://docs.trychroma.com/cloud/getting-started".underline().blue(),
         "chroma copy --to-cloud --all".yellow()
     );
 }

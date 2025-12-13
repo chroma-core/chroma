@@ -24,7 +24,7 @@ export const TableHeader = React.forwardRef<
   HTMLTableSectionElement,
   React.HTMLAttributes<HTMLTableSectionElement>
 >(({ ...props }, ref) => (
-  <UITableHeader ref={ref} className="border-none bg-gray-900" {...props} />
+  <UITableHeader ref={ref} className="border-none bg-neutral-100 dark:bg-gray-900" {...props} />
 ));
 TableHeader.displayName = "TableHeader";
 
@@ -46,7 +46,7 @@ export const TableHead = React.forwardRef<
 >(({ ...props }, ref) => (
   <UITableHead
     ref={ref}
-    className="text-gray-200 dark:text-gray-200 py-1"
+    className="text-gray-800 dark:text-gray-200 py-1"
     {...props}
   />
 ));

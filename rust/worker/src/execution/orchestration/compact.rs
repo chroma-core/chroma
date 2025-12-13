@@ -2875,7 +2875,7 @@ mod tests {
         let output_collection_name = format!("test_rebuild_output_{}", test_run_id);
 
         // Create statistics attached function via sysdb
-        let attached_function_id = sysdb
+        let (attached_function_id, _created) = sysdb
             .create_attached_function(
                 attached_function_name.clone(),
                 "statistics".to_string(),
