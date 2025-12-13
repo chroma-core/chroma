@@ -178,6 +178,9 @@ pub struct KnnFilterOrchestrator {
     // Fetched logs
     fetched_logs: Option<FetchLogOutput>,
 
+    // Skip log fetching for eventual consistency queries
+    skip_log: bool,
+
     // Pipelined operators
     filter: Filter,
 
@@ -186,6 +189,7 @@ pub struct KnnFilterOrchestrator {
 }
 
 impl KnnFilterOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
@@ -194,6 +198,7 @@ impl KnnFilterOrchestrator {
         collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
         filter: Filter,
+        skip_log: bool,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -204,9 +209,28 @@ impl KnnFilterOrchestrator {
             collection_and_segments,
             fetch_log,
             fetched_logs: None,
+            skip_log,
             filter,
             result_channel: None,
         }
+    }
+
+    fn create_filter_task(
+        &self,
+        logs: FetchLogOutput,
+        ctx: &ComponentContext<Self>,
+    ) -> TaskMessage {
+        wrap(
+            Box::new(self.filter.clone()),
+            FilterInput {
+                logs,
+                blockfile_provider: self.blockfile_provider.clone(),
+                metadata_segment: self.collection_and_segments.metadata_segment.clone(),
+                record_segment: self.collection_and_segments.record_segment.clone(),
+            },
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        )
     }
 }
 
@@ -272,14 +296,25 @@ impl Orchestrator for KnnFilterOrchestrator {
         Span::current().add_link(prefetch_span.context().span().span_context().clone());
         tasks.push((prefetch_metadata_task, Some(prefetch_span)));
 
-        // Fetch log task.
-        let fetch_log_task = wrap(
-            Box::new(self.fetch_log.clone()),
-            (),
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-        tasks.push((fetch_log_task, Some(Span::current())));
+        if self.skip_log {
+            // For eventual consistency queries, skip log fetching and use empty logs
+            tracing::debug!("Skipping log fetch for eventual consistency query");
+            let empty_logs = FetchLogOutput::new(Vec::new().into());
+            self.fetched_logs = Some(empty_logs.clone());
+
+            // Immediately schedule the filter task with empty logs
+            let filter_task = self.create_filter_task(empty_logs, ctx);
+            tasks.push((filter_task, Some(Span::current())));
+        } else {
+            // Fetch log task.
+            let fetch_log_task = wrap(
+                Box::new(self.fetch_log.clone()),
+                (),
+                ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
+            );
+            tasks.push((fetch_log_task, Some(Span::current())));
+        }
 
         tasks
     }
@@ -326,17 +361,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrato
 
         self.fetched_logs = Some(output.clone());
 
-        let task = wrap(
-            Box::new(self.filter.clone()),
-            FilterInput {
-                logs: output,
-                blockfile_provider: self.blockfile_provider.clone(),
-                metadata_segment: self.collection_and_segments.metadata_segment.clone(),
-                record_segment: self.collection_and_segments.record_segment.clone(),
-            },
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
+        let task = self.create_filter_task(output, ctx);
         self.send(task, ctx, Some(Span::current())).await;
     }
 }
