@@ -2201,6 +2201,8 @@ pub struct LogServerConfig {
     #[serde(default)]
     pub reader: LogReaderOptions,
     #[serde(default)]
+    pub dirty: Option<LogWriterOptions>,
+    #[serde(default)]
     pub cache: Option<CacheConfig>,
     #[serde(default = "LogServerConfig::default_record_count_threshold")]
     pub record_count_threshold: u64,
@@ -2290,6 +2292,7 @@ impl Default for LogServerConfig {
             storage: StorageConfig::default(),
             writer: LogWriterOptions::default(),
             reader: LogReaderOptions::default(),
+            dirty: None,
             cache: None,
             record_count_threshold: Self::default_record_count_threshold(),
             num_records_before_backpressure: Self::default_num_records_before_backpressure(),
@@ -2325,7 +2328,7 @@ impl Configurable<LogServerConfig> for LogServer {
         let storage = Storage::try_from_config(&config.storage, registry).await?;
         let storage = Arc::new(storage);
         let dirty_log = LogWriter::open_or_initialize(
-            config.writer.clone(),
+            config.dirty.as_ref().unwrap_or(&config.writer).clone(),
             Arc::clone(&storage),
             &MarkDirty::path_for_hostname(&config.my_member_id),
             "dirty log writer",
