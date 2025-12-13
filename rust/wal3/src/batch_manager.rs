@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use tracing::Span;
 
-use crate::{Error, FragmentSeqNo, LogPosition, ManifestManager, ThrottleOptions};
+use crate::{Error, FragmentIdentifier, LogPosition, ManifestManager, ThrottleOptions};
 
 /////////////////////////////////////////// ManagerState ///////////////////////////////////////////
 
@@ -39,7 +39,7 @@ impl ManagerState {
         options: &ThrottleOptions,
         manifest_manager: &ManifestManager,
         record_count: usize,
-    ) -> Result<Option<(FragmentSeqNo, LogPosition)>, Error> {
+    ) -> Result<Option<(FragmentIdentifier, LogPosition)>, Error> {
         if self.next_write > Instant::now() {
             return Ok(None);
         }
@@ -139,7 +139,7 @@ impl BatchManager {
         manifest_manager: &ManifestManager,
     ) -> Result<
         Option<(
-            FragmentSeqNo,
+            FragmentIdentifier,
             LogPosition,
             Vec<(
                 Vec<Vec<u8>>,
@@ -193,7 +193,7 @@ impl BatchManager {
             self.write_finished.notify_one();
             return Ok(None);
         }
-        let Some((fragment_seq_no, log_position)) =
+        let Some((fragment_identifier, log_position)) =
             state.select_for_write(&self.options, manifest_manager, acc_count)?
         else {
             // Cannot yet select for write.  Notify will come from the timeout background is on.
@@ -212,7 +212,7 @@ impl BatchManager {
         } else {
             state.backoff = false;
         }
-        Ok(Some((fragment_seq_no, log_position, work)))
+        Ok(Some((fragment_identifier, log_position, work)))
     }
 
     pub fn finish_write(&self) {
@@ -292,7 +292,7 @@ mod tests {
         batch_manager.push_work(vec![vec![4, 5, 6]], tx, tracing::Span::current());
         let (seq_no, log_position, work) =
             batch_manager.take_work(&manifest_manager).unwrap().unwrap();
-        assert_eq!(seq_no, FragmentSeqNo(1));
+        assert_eq!(seq_no, FragmentIdentifier(1));
         assert_eq!(log_position.offset(), 1);
         assert_eq!(2, work.len());
         // Check batch 1

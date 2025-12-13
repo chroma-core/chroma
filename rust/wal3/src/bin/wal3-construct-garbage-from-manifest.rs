@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use wal3::{FragmentSeqNo, Garbage, LogPosition, Manifest};
+use wal3::{FragmentIdentifier, Garbage, LogPosition, Manifest};
 
 fn main() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -17,7 +17,7 @@ fn main() {
     eprintln!("offset: {offset:#?}");
     let garbage = Garbage::bug_patch_construct_garbage_from_manifest(
         &manifest,
-        FragmentSeqNo(seq_no),
+        FragmentIdentifier(seq_no),
         LogPosition::from_offset(offset),
     );
     println!("{}", serde_json::to_string(&garbage).unwrap());

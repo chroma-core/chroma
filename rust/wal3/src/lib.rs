@@ -91,7 +91,7 @@ pub enum Error {
     #[error("garbage collection: {0}")]
     GarbageCollection(String),
     #[error("garbage collection precondition failed: manifest missing this: {0}")]
-    GarbageCollectionPrecondition(SnapshotPointerOrFragmentSeqNo),
+    GarbageCollectionPrecondition(SnapshotPointerOrFragmentIdentifier),
     #[error("scrub error: {0}")]
     ScrubError(#[from] Box<ScrubError>),
     #[error("parquet error: {0}")]
@@ -141,29 +141,29 @@ impl chroma_error::ChromaError for Error {
 ///////////////////////////////////// SnapshotPointerOrFragment ////////////////////////////////////
 
 #[derive(Clone, Debug)]
-pub enum SnapshotPointerOrFragmentSeqNo {
+pub enum SnapshotPointerOrFragmentIdentifier {
     SnapshotPointer(SnapshotPointer),
-    FragmentSeqNo(u64),
+    FragmentIdentifier(u64),
     Stringy(String),
 }
 
-impl From<SnapshotPointer> for SnapshotPointerOrFragmentSeqNo {
+impl From<SnapshotPointer> for SnapshotPointerOrFragmentIdentifier {
     fn from(inner: SnapshotPointer) -> Self {
         Self::SnapshotPointer(inner)
     }
 }
 
-impl From<u64> for SnapshotPointerOrFragmentSeqNo {
+impl From<u64> for SnapshotPointerOrFragmentIdentifier {
     fn from(inner: u64) -> Self {
-        Self::FragmentSeqNo(inner)
+        Self::FragmentIdentifier(inner)
     }
 }
 
-impl std::fmt::Display for SnapshotPointerOrFragmentSeqNo {
+impl std::fmt::Display for SnapshotPointerOrFragmentIdentifier {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::SnapshotPointer(ptr) => write!(f, "Snapshot({:?})", ptr.path_to_snapshot),
-            Self::FragmentSeqNo(seq) => write!(f, "Fragment({})", *seq),
+            Self::FragmentIdentifier(seq) => write!(f, "Fragment({})", *seq),
             Self::Stringy(s) => write!(f, "Stringy({s})"),
         }
     }
@@ -187,7 +187,7 @@ pub enum ScrubError {
     #[error("CorruptFragment: {seq_no} {what}")]
     CorruptFragment {
         manifest: String,
-        seq_no: FragmentSeqNo,
+        seq_no: FragmentIdentifier,
         what: String,
     },
     #[error("MismatchedPath: {reference:?} expected {:?} got {:?}", reference.path, empirical.path)]
@@ -500,24 +500,24 @@ pub struct GarbageCollectionOptions {
     pub throttle: ThrottleOptions,
 }
 
-/////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////
+/////////////////////////////////////////// FragmentIdentifier //////////////////////////////////////////
 
-/// A FragmentSeqNo is an identifier that corresponds to the the number of fragments that have been
-/// issued prior to the segment with this FragmentSeqNo.
+/// A FragmentIdentifier is an identifier that corresponds to the the number of fragments that have been
+/// issued prior to the segment with this FragmentIdentifier.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash, serde::Deserialize, serde::Serialize,
 )]
-pub struct FragmentSeqNo(pub u64);
+pub struct FragmentIdentifier(pub u64);
 
-impl FragmentSeqNo {
-    const BEGIN: FragmentSeqNo = FragmentSeqNo(1);
+impl FragmentIdentifier {
+    const BEGIN: FragmentIdentifier = FragmentIdentifier(1);
 
-    /// Returns the successor of this FragmentSeqNo, or None if this FragmentSeqNo is the maximum
+    /// Returns the successor of this FragmentIdentifier, or None if this FragmentIdentifier is the maximum
     pub fn successor(&self) -> Option<Self> {
         if self.0 == u64::MAX {
             None
         } else {
-            Some(FragmentSeqNo(self.0 + 1))
+            Some(FragmentIdentifier(self.0 + 1))
         }
     }
 
@@ -527,37 +527,37 @@ impl FragmentSeqNo {
     }
 }
 
-impl std::fmt::Display for FragmentSeqNo {
+impl std::fmt::Display for FragmentIdentifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl std::ops::Add<FragmentSeqNo> for u64 {
-    type Output = FragmentSeqNo;
+impl std::ops::Add<FragmentIdentifier> for u64 {
+    type Output = FragmentIdentifier;
 
-    fn add(self, rhs: FragmentSeqNo) -> Self::Output {
-        FragmentSeqNo(self.wrapping_add(rhs.0))
+    fn add(self, rhs: FragmentIdentifier) -> Self::Output {
+        FragmentIdentifier(self.wrapping_add(rhs.0))
     }
 }
 
-impl std::ops::Add<u64> for FragmentSeqNo {
-    type Output = FragmentSeqNo;
+impl std::ops::Add<u64> for FragmentIdentifier {
+    type Output = FragmentIdentifier;
 
     fn add(self, rhs: u64) -> Self::Output {
-        FragmentSeqNo(self.0.wrapping_add(rhs))
+        FragmentIdentifier(self.0.wrapping_add(rhs))
     }
 }
 
-impl std::ops::Sub<FragmentSeqNo> for FragmentSeqNo {
+impl std::ops::Sub<FragmentIdentifier> for FragmentIdentifier {
     type Output = u64;
 
-    fn sub(self, rhs: FragmentSeqNo) -> Self::Output {
+    fn sub(self, rhs: FragmentIdentifier) -> Self::Output {
         self.0.wrapping_sub(rhs.0)
     }
 }
 
-impl std::ops::AddAssign<u64> for FragmentSeqNo {
+impl std::ops::AddAssign<u64> for FragmentIdentifier {
     fn add_assign(&mut self, rhs: u64) {
         self.0 = self.0.wrapping_add(rhs);
     }
@@ -569,7 +569,7 @@ impl std::ops::AddAssign<u64> for FragmentSeqNo {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Fragment {
     pub path: String,
-    pub seq_no: FragmentSeqNo,
+    pub seq_no: FragmentIdentifier,
     pub start: LogPosition,
     pub limit: LogPosition,
     pub num_bytes: u64,
@@ -614,30 +614,30 @@ pub fn fragment_prefix() -> String {
     "log/".to_string()
 }
 
-pub fn prefixed_fragment_path(prefix: &str, fragment_seq_no: FragmentSeqNo) -> String {
+pub fn prefixed_fragment_path(prefix: &str, fragment_identifier: FragmentIdentifier) -> String {
     format!(
         "{}/{}Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
         prefix,
         fragment_prefix(),
-        fragment_seq_no.bucket(),
-        fragment_seq_no.0,
+        fragment_identifier.bucket(),
+        fragment_identifier.0,
     )
 }
 
-pub fn unprefixed_fragment_path(fragment_seq_no: FragmentSeqNo) -> String {
+pub fn unprefixed_fragment_path(fragment_identifier: FragmentIdentifier) -> String {
     format!(
         "log/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
-        fragment_seq_no.bucket(),
-        fragment_seq_no.0,
+        fragment_identifier.bucket(),
+        fragment_identifier.0,
     )
 }
 
-pub fn parse_fragment_path(path: &str) -> Option<FragmentSeqNo> {
-    // FragmentSeqNo is always in the basename.
+pub fn parse_fragment_path(path: &str) -> Option<FragmentIdentifier> {
+    // FragmentIdentifier is always in the basename.
     let (_, basename) = path.rsplit_once('/')?;
     let fsn_equals_number = basename.strip_suffix(".parquet")?;
     let number = fsn_equals_number.strip_prefix("FragmentSeqNo=")?;
-    u64::from_str_radix(number, 16).ok().map(FragmentSeqNo)
+    u64::from_str_radix(number, 16).ok().map(FragmentIdentifier)
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -650,7 +650,7 @@ mod tests {
     fn paths() {
         assert_eq!(
             "THIS_IS_THE_COLLECTION/log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet",
-            prefixed_fragment_path("THIS_IS_THE_COLLECTION", FragmentSeqNo(1))
+            prefixed_fragment_path("THIS_IS_THE_COLLECTION", FragmentIdentifier(1))
         );
     }
 }
