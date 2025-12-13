@@ -22,6 +22,8 @@ const embedder = new OpenAIEmbeddingFunction({
   dimensions: 512,
   // Optional: specify organization ID
   organizationId: 'your-org-id'
+  // Optional: specify API base (e.g. for Azure OpenAI)
+  apiBase: 'your-api-base'
 });
 
 // Create a new ChromaClient
