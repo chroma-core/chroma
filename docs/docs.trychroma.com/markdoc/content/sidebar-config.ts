@@ -140,8 +140,15 @@ const sidebarConfig: AppSection[] = [
         pages: [
           { id: "overview", name: "Overview" },
           { id: "schema-basics", name: "Schema Basics" },
-          { id: "sparse-vector-search", name: "Sparse Vector Search Setup" },
           { id: "index-reference", name: "Index Configuration Reference" },
+        ],
+      },
+      {
+        id: "sparse-embeddings",
+        name: "Sparse Embeddings",
+        pages: [
+          { id: "sparse-vector-search", name: "Sparse Vector Search" },
+          { id: "sparse-embedding-functions", name: "Sparse Embedding Functions" },
         ],
       },
       {
