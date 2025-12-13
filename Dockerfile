@@ -49,7 +49,7 @@ WORKDIR /chroma
 RUN make -C idl proto_python
 RUN python3 -m maturin build
 RUN pip uninstall chromadb -y
-RUN pip install --prefix="/install" --find-links target/wheels/ --upgrade  chromadb
+RUN pip install --prefix="/install" target/wheels/chromadb*.whl
 
 FROM python:3.11-slim-bookworm AS final
 
