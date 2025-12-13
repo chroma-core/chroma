@@ -1109,7 +1109,10 @@ mod tests {
             let _collection = client.new_collection("count_test").await;
 
             let new_count = client.count_collections().await.unwrap();
-            assert_eq!(new_count, initial_count + 1);
+            // Since tests run in parallel we simply assert the count is greater than the initial count
+            // Note this can still race with some deletion but it's a good enough test for now until we move
+            // off of testing against cloud
+            assert!(new_count > initial_count);
         })
         .await;
     }
