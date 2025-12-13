@@ -60,6 +60,8 @@ import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 const embeddingFunction = new OpenAIEmbeddingFunction({
   apiKey: "apiKey",
   modelName: "text-embedding-3-small",
+  // Optional: specify API base (e.g. for Azure OpenAI)
+  apiBase: "your-api-base"
 });
 
 // use directly
