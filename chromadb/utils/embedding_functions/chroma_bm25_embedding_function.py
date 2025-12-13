@@ -71,17 +71,17 @@ class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
 
         if stopwords is not None:
             self.stopwords: Optional[List[str]] = [str(word) for word in stopwords]
-            stopword_list: Iterable[str] = self.stopwords
+            self._stopword_list: Iterable[str] = self.stopwords
         else:
             self.stopwords = None
-            stopword_list = DEFAULT_CHROMA_BM25_STOPWORDS
+            self._stopword_list = DEFAULT_CHROMA_BM25_STOPWORDS
 
-        stemmer = get_english_stemmer()
-        self._tokenizer = Bm25Tokenizer(stemmer, stopword_list, self.token_max_length)
         self._hasher = Murmur3AbsHasher()
 
     def _encode(self, text: str) -> SparseVector:
-        tokens = self._tokenizer.tokenize(text)
+        stemmer = get_english_stemmer()
+        tokenizer = Bm25Tokenizer(stemmer, self._stopword_list, self.token_max_length)
+        tokens = tokenizer.tokenize(text)
 
         if not tokens:
             return SparseVector(indices=[], values=[])
@@ -133,7 +133,7 @@ class ChromaBm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
 
     @staticmethod
     def build_from_config(
-        config: Dict[str, Any]
+        config: Dict[str, Any],
     ) -> "SparseEmbeddingFunction[Documents]":
         return ChromaBm25EmbeddingFunction(
             k=config.get("k", DEFAULT_K),

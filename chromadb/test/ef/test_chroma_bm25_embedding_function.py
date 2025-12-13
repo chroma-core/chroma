@@ -1,7 +1,9 @@
 import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytest
 
+from chromadb import SparseVector
 from chromadb.utils.embedding_functions.chroma_bm25_embedding_function import (
     DEFAULT_CHROMA_BM25_STOPWORDS,
     ChromaBm25EmbeddingFunction,
@@ -137,3 +139,64 @@ def test_validate_config_update_allows_known_keys() -> None:
     embedder.validate_config_update(
         embedder.get_config(), {"k": 1.1, "stopwords": ["custom"]}
     )
+
+
+def test_multithreaded_usage() -> None:
+    embedder = ChromaBm25EmbeddingFunction()
+    base_texts = [
+        """The gravitational wave background from massive black hole binaries emit bursts of
+        gravitational waves at periapse. Such events may be directly resolvable in the Galactic
+        centre. However, if the star does not spiral in, the emitted GWs are not resolvable for
+        extra-galactic MBHs, but constitute a source of background noise. We estimate the power
+        spectrum of this extreme mass ratio burst background.""",
+        """Dynamics of planets in exoplanetary systems with multiple stars showing how the
+        gravitational interactions between the stars and planets affect the orbital stability
+        and long-term evolution of the planetary system architectures.""",
+        """Diurnal Thermal Tides in a Non-rotating atmosphere with realistic heating profiles
+        and temperature gradients that demonstrate the complex interplay between radiation
+        and atmospheric dynamics in planetary atmospheres.""",
+        """Intermittent turbulence, noise and waves in stellar atmospheres create complex
+        patterns of energy transport and momentum deposition that influence the structure
+        and evolution of stellar interiors and surfaces.""",
+        """Superconductivity in quantum materials and condensed matter physics systems
+        exhibiting novel quantum phenomena including topological phases, strongly correlated
+        electron systems, and exotic superconducting pairing mechanisms.""",
+        """Machine learning models require careful tuning of hyperparameters including learning
+        rates, regularization coefficients, and architectural choices that demonstrate the
+        complex interplay between optimization algorithms and model capacity.""",
+        """Natural language processing enables text understanding through sophisticated
+        algorithms that analyze semantic relationships, syntactic structures, and contextual
+        information to extract meaningful representations from unstructured textual data.""",
+        """Vector databases store high-dimensional embeddings efficiently using advanced
+        indexing techniques including approximate nearest neighbor search algorithms that
+        balance accuracy and computational efficiency for large-scale similarity search.""",
+    ]
+    texts = base_texts * 30
+
+    num_threads = 10
+
+    def process_single_text(text: str) -> SparseVector:
+        return embedder([text])[0]
+
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = [executor.submit(process_single_text, text) for text in texts]
+        all_results = []
+        for future in as_completed(futures):
+            try:
+                embedding = future.result()
+                all_results.append(embedding)
+            except Exception as e:
+                pytest.fail(
+                    f"Threading error detected: {type(e).__name__}: {e}. "
+                    "This indicates the stemmer is not thread-safe when cached."
+                )
+
+    assert len(all_results) == len(texts)
+
+    for embedding in all_results:
+        assert embedding.indices
+        assert len(embedding.indices) == len(embedding.values)
+        assert _is_sorted(embedding.indices)
+        for value in embedding.values:
+            assert value > 0
+            assert math.isfinite(value)
