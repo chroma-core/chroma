@@ -134,6 +134,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
                                     .metadata
                                     .then_some(log.merged_metadata())
                                     .filter(|metadata| !metadata.is_empty()),
+                                version: self.version.then_some(log.get_version()),
                             }
                         }
                         // The offset id is in the record segment
@@ -143,6 +144,11 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
                                     reader.get_data_for_offset_id(*offset_id).await?.ok_or(
                                         ProjectionError::RecordSegmentPhantomRecord(*offset_id),
                                     )?;
+                                let version = if self.version {
+                                    reader.get_version_for_offset_id(*offset_id).await?
+                                } else {
+                                    None
+                                };
                                 ProjectionRecord {
                                     id: record.id.to_string(),
                                     document: record
@@ -151,6 +157,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
                                         .map(str::to_string),
                                     embedding: self.embedding.then_some(record.embedding.to_vec()),
                                     metadata: record.metadata.filter(|_| self.metadata),
+                                    version,
                                 }
                             } else {
                                 return Err(ProjectionError::RecordSegmentUninitialized);

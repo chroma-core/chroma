@@ -339,6 +339,7 @@ impl InMemoryFrontend {
             uris,
             metadatas,
             chroma_types::Operation::Add,
+            None, // expected_versions - Add operation doesn't use CAS
         )
         .map_err(|e| e.boxed())?;
 
@@ -376,6 +377,7 @@ impl InMemoryFrontend {
             documents,
             metadatas,
             uris,
+            expected_versions,
             ..
         } = request;
 
@@ -386,9 +388,11 @@ impl InMemoryFrontend {
             uris,
             metadatas,
             chroma_types::Operation::Update,
+            expected_versions,
         )
         .map_err(|e| e.boxed())?;
 
+        // TODO: Implement CAS validation for in-memory frontend
         collection
             .reference_impl
             .apply_operation_records(records, collection.metadata_segment.id);
@@ -423,6 +427,7 @@ impl InMemoryFrontend {
             documents,
             metadatas,
             uris,
+            expected_versions,
             ..
         } = request;
 
@@ -435,9 +440,11 @@ impl InMemoryFrontend {
             uris,
             metadatas,
             chroma_types::Operation::Upsert,
+            expected_versions,
         )
         .map_err(|e| e.boxed())?;
 
+        // TODO: Implement CAS validation for in-memory frontend
         collection
             .reference_impl
             .apply_operation_records(records, collection.metadata_segment.id);
@@ -496,6 +503,7 @@ impl InMemoryFrontend {
                 embedding: None,
                 document: None,
                 metadata: None,
+                expected_version: None,
             })
             .collect::<Vec<_>>();
         collection
@@ -591,6 +599,7 @@ impl InMemoryFrontend {
                     // If URI is requested, metadata is also requested so we can extract the URI.
                     metadata: (include.0.contains(&Include::Metadata)
                         || include.0.contains(&Include::Uri)),
+                    version: false,
                 },
             })
             .map_err(|e| e.boxed())?;
@@ -667,6 +676,7 @@ impl InMemoryFrontend {
                             // If URI is requested, metadata is also requested so we can extract the URI.
                             metadata: (include.0.contains(&Include::Metadata)
                                 || include.0.contains(&Include::Uri)),
+                            version: false,
                         },
                         distance: include.0.contains(&Include::Distance),
                     },

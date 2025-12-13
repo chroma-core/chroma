@@ -21,6 +21,9 @@ message PushLogsRequest {
 message PushLogsResponse {
   int32 record_count = 1;
   bool log_is_sealed = 2;
+  // If any CAS operations failed, this contains the errors.
+  // When CAS errors are present, record_count will be 0 (all-or-nothing semantics).
+  repeated CASError cas_errors = 3;
 }
 
 message ScoutLogsRequest {

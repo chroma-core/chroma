@@ -1500,6 +1500,7 @@ async fn collection_update(
         payload.documents,
         payload.uris,
         payload.metadatas,
+        None, // expected_versions - TODO: add to payload
     )?;
 
     Ok(Json(
@@ -1603,6 +1604,7 @@ async fn collection_upsert(
         payload.documents,
         payload.uris,
         payload.metadatas,
+        None, // expected_versions - TODO: add to payload
     )?;
 
     Ok(Json(
@@ -1688,6 +1690,7 @@ async fn collection_delete(
         collection_id,
         payload.ids,
         r#where,
+        None, // expected_versions - TODO: add to payload
     )?;
 
     Box::pin(

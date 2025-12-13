@@ -191,6 +191,7 @@ class BaseAPI(ABC):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
+        expected_versions: Optional[List[int]] = None,
     ) -> bool:
         """[Internal] Update entries in a collection specified by UUID.
 
@@ -201,8 +202,11 @@ class BaseAPI(ABC):
             metadatas: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
             uris: URIs of data sources for each embedding. Defaults to None.
+            expected_versions: For CAS operations - expected version for each record. Defaults to None.
         Returns:
             True if the embeddings were updated successfully.
+        Raises:
+            CASConflictError: If expected_versions is provided and any version doesn't match.
         """
         pass
 
@@ -215,6 +219,7 @@ class BaseAPI(ABC):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
+        expected_versions: Optional[List[Optional[int]]] = None,
     ) -> bool:
         """[Internal] Add or update entries in the a collection specified by UUID.
         If an entry with the same id already exists, it will be updated,
@@ -227,6 +232,9 @@ class BaseAPI(ABC):
             metadatas: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
             uris: URIs of data sources for each embedding. Defaults to None.
+            expected_versions: For CAS operations - expected version for each record. Defaults to None.
+        Raises:
+            CASConflictError: If expected_versions is provided and any existing record's version doesn't match.
         """
         pass
 
@@ -292,6 +300,7 @@ class BaseAPI(ABC):
         ids: Optional[IDs],
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
+        expected_versions: Optional[List[int]] = None,
     ) -> None:
         """[Internal] Deletes entries from a collection specified by UUID.
 
@@ -300,9 +309,12 @@ class BaseAPI(ABC):
             ids: The IDs of the entries to delete. Defaults to None.
             where: Conditional filtering on metadata. Defaults to None.
             where_document: Conditional filtering on documents. Defaults to None.
+            expected_versions: For CAS operations - expected version for each record. Defaults to None.
 
         Returns:
             IDs: The list of IDs of the entries that were deleted.
+        Raises:
+            CASConflictError: If expected_versions is provided and any version doesn't match.
         """
         pass
 
@@ -767,6 +779,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         uris: Optional[URIs] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        expected_versions: Optional[List[int]] = None,
     ) -> bool:
         pass
 
@@ -782,6 +795,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         uris: Optional[URIs] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        expected_versions: Optional[List[Optional[int]]] = None,
     ) -> bool:
         pass
 
@@ -811,6 +825,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         where_document: Optional[WhereDocument] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        expected_versions: Optional[List[int]] = None,
     ) -> None:
         pass
 

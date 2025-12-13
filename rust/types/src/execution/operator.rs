@@ -481,6 +481,7 @@ pub struct Projection {
     pub document: bool,
     pub embedding: bool,
     pub metadata: bool,
+    pub version: bool,
 }
 
 impl From<chroma_proto::ProjectionOperator> for Projection {
@@ -489,6 +490,7 @@ impl From<chroma_proto::ProjectionOperator> for Projection {
             document: value.document,
             embedding: value.embedding,
             metadata: value.metadata,
+            version: value.version,
         }
     }
 }
@@ -499,6 +501,7 @@ impl From<Projection> for chroma_proto::ProjectionOperator {
             document: value.document,
             embedding: value.embedding,
             metadata: value.metadata,
+            version: value.version,
         }
     }
 }
@@ -509,6 +512,7 @@ pub struct ProjectionRecord {
     pub document: Option<String>,
     pub embedding: Option<Vec<f32>>,
     pub metadata: Option<Metadata>,
+    pub version: Option<i64>,
 }
 
 impl ProjectionRecord {
@@ -546,6 +550,7 @@ impl TryFrom<chroma_proto::ProjectionRecord> for ProjectionRecord {
                 .map(|vec| vec.try_into().map(|(v, _)| v))
                 .transpose()?,
             metadata: value.metadata.map(TryInto::try_into).transpose()?,
+            version: value.version,
         })
     }
 }
@@ -569,6 +574,7 @@ impl TryFrom<ProjectionRecord> for chroma_proto::ProjectionRecord {
                 })
                 .transpose()?,
             metadata: value.metadata.map(|metadata| metadata.into()),
+            version: value.version,
         })
     }
 }
@@ -2244,6 +2250,7 @@ pub struct SearchRecord {
     pub embedding: Option<Vec<f32>>,
     pub metadata: Option<Metadata>,
     pub score: Option<f32>,
+    pub version: Option<i64>,
 }
 
 impl TryFrom<chroma_proto::SearchRecord> for SearchRecord {
@@ -2259,6 +2266,7 @@ impl TryFrom<chroma_proto::SearchRecord> for SearchRecord {
                 .transpose()?,
             metadata: value.metadata.map(TryInto::try_into).transpose()?,
             score: value.score,
+            version: value.version,
         })
     }
 }
@@ -2283,6 +2291,7 @@ impl TryFrom<SearchRecord> for chroma_proto::SearchRecord {
                 .transpose()?,
             metadata: value.metadata.map(Into::into),
             score: value.score,
+            version: value.version,
         })
     }
 }

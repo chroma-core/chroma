@@ -262,6 +262,7 @@ impl TestReferenceSegment {
             metadata,
             document,
             operation,
+            ..
         } in operations
         {
             let mut record = ProjectionRecord {
@@ -269,6 +270,7 @@ impl TestReferenceSegment {
                 document,
                 embedding,
                 metadata: None,
+                version: None,
             };
             match operation {
                 Operation::Add => {
@@ -368,6 +370,7 @@ impl TestReferenceSegment {
                             document,
                             embedding,
                             metadata,
+                            ..
                         } = plan.proj;
                         if !document {
                             rec.document = None;

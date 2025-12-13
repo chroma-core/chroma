@@ -42,6 +42,7 @@ class ProjectionRecord(TypedDict):
     document: Optional[str]
     embedding: Optional[Vector]
     metadata: Optional[Metadata]
+    version: Optional[int]
 
 
 class KNNProjectionRecord(TypedDict):
@@ -144,6 +145,11 @@ def from_proto_submit(
     operation_record: chroma_pb.OperationRecord, seq_id: SeqId
 ) -> LogRecord:
     embedding, encoding = from_proto_vector(operation_record.vector)
+    expected_version = (
+        operation_record.expected_version
+        if operation_record.HasField("expected_version")
+        else None
+    )
     record = LogRecord(
         log_offset=seq_id,
         record=OperationRecord(
@@ -152,6 +158,7 @@ def from_proto_submit(
             encoding=encoding,
             metadata=from_proto_update_metadata(operation_record.metadata),
             operation=from_proto_operation(operation_record.operation),
+            expected_version=expected_version,
         ),
     )
     return record
@@ -298,11 +305,14 @@ def to_proto_submit(
     if submit_record["metadata"] is not None:
         metadata = to_proto_update_metadata(submit_record["metadata"])
 
+    expected_version = submit_record.get("expected_version")
+
     return chroma_pb.OperationRecord(
         id=submit_record["id"],
         vector=vector,
         metadata=metadata,
         operation=to_proto_operation(submit_record["operation"]),
+        expected_version=expected_version,
     )
 
 
@@ -621,6 +631,7 @@ def to_proto_projection(projection: Projection) -> query_pb.ProjectionOperator:
         document=projection.document,
         embedding=projection.embedding,
         metadata=projection.metadata,
+        version=projection.version,
     )
 
 
@@ -655,6 +666,7 @@ def from_proto_projection_record(record: query_pb.ProjectionRecord) -> Projectio
         if record.embedding is not None
         else None,
         metadata=from_proto_metadata(record.metadata),
+        version=record.version if record.HasField("version") else None,
     )
 
 

@@ -67,6 +67,7 @@ impl Operator<SourceRecordSegmentInput, SourceRecordSegmentOutput> for SourceRec
                                 }),
                                 document: rec.document.map(ToString::to_string),
                                 operation: chroma_types::Operation::Add,
+                                expected_version: None,
                             },
                         })
                     })

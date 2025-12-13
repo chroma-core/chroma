@@ -391,6 +391,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
+        expected_versions: Optional[OneOrMany[int]] = None,
     ) -> None:
         """Update the embeddings, metadatas or documents for provided ids.
 
@@ -400,8 +401,15 @@ class Collection(CollectionCommon["ServerAPI"]):
             metadatas:  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
             images: The images to associate with the embeddings. Optional.
+            expected_versions: For CAS (compare-and-swap) operations - the expected version (log offset)
+                of each record. If provided, the update will only succeed if all records' current
+                versions match the expected values. Use get() with include=["versions"] to obtain
+                current versions. Raises CASConflictError on mismatch. Optional.
         Returns:
             None
+
+        Raises:
+            CASConflictError: If expected_versions is provided and any record's version doesn't match.
         """
         update_request = self._validate_and_prepare_update_request(
             ids=ids,
@@ -412,6 +420,15 @@ class Collection(CollectionCommon["ServerAPI"]):
             uris=uris,
         )
 
+        # Normalize expected_versions to a list if provided
+        versions_list: Optional[List[int]] = None
+        if expected_versions is not None:
+            versions_list = maybe_cast_one_to_many(expected_versions)
+            if len(versions_list) != len(update_request["ids"]):
+                raise ValueError(
+                    f"expected_versions length ({len(versions_list)}) must match ids length ({len(update_request['ids'])})"
+                )
+
         self._client._update(
             collection_id=self.id,
             ids=update_request["ids"],
@@ -421,6 +438,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             uris=update_request["uris"],
             tenant=self.tenant,
             database=self.database,
+            expected_versions=versions_list,
         )
 
     def upsert(
@@ -436,6 +454,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
+        expected_versions: Optional[OneOrMany[int]] = None,
     ) -> None:
         """Update the embeddings, metadatas or documents for provided ids, or create them if they don't exist.
 
@@ -444,9 +463,16 @@ class Collection(CollectionCommon["ServerAPI"]):
             embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
             metadatas:  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
+            expected_versions: For CAS (compare-and-swap) operations - the expected version (log offset)
+                of each record. If provided, the upsert will only succeed if existing records' current
+                versions match. For new records (that don't exist), set expected_version to None in the list.
+                Raises CASConflictError on mismatch. Optional.
 
         Returns:
             None
+
+        Raises:
+            CASConflictError: If expected_versions is provided and any existing record's version doesn't match.
         """
         upsert_request = self._validate_and_prepare_upsert_request(
             ids=ids,
@@ -457,6 +483,15 @@ class Collection(CollectionCommon["ServerAPI"]):
             uris=uris,
         )
 
+        # Normalize expected_versions to a list if provided
+        versions_list: Optional[List[Optional[int]]] = None
+        if expected_versions is not None:
+            versions_list = maybe_cast_one_to_many(expected_versions)
+            if len(versions_list) != len(upsert_request["ids"]):
+                raise ValueError(
+                    f"expected_versions length ({len(versions_list)}) must match ids length ({len(upsert_request['ids'])})"
+                )
+
         self._client._upsert(
             collection_id=self.id,
             ids=upsert_request["ids"],
@@ -466,6 +501,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             uris=upsert_request["uris"],
             tenant=self.tenant,
             database=self.database,
+            expected_versions=versions_list,
         )
 
     def delete(
@@ -473,6 +509,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
+        expected_versions: Optional[List[int]] = None,
     ) -> None:
         """Delete the embeddings based on ids and/or a where filter
 
@@ -480,13 +517,32 @@ class Collection(CollectionCommon["ServerAPI"]):
             ids: The ids of the embeddings to delete
             where: A Where type dict used to filter the delection by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}]}}`. Optional.
             where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. `{"$contains": "hello"}`. Optional.
+            expected_versions: For CAS (compare-and-swap) operations - the expected version (log offset)
+                of each record. Only valid when ids are provided (not with where/where_document).
+                If provided, the delete will only succeed if all records' current versions match.
+                Raises CASConflictError on mismatch. Optional.
 
         Returns:
             None
 
         Raises:
             ValueError: If you don't provide either ids, where, or where_document
+            ValueError: If expected_versions is provided without ids or with where/where_document
+            CASConflictError: If expected_versions is provided and any record's version doesn't match
         """
+        # Validate CAS parameters
+        if expected_versions is not None:
+            if ids is None:
+                raise ValueError("expected_versions requires ids to be provided")
+            if where is not None or where_document is not None:
+                raise ValueError(
+                    "expected_versions cannot be used with where or where_document filters"
+                )
+            if len(expected_versions) != len(ids):
+                raise ValueError(
+                    f"expected_versions length ({len(expected_versions)}) must match ids length ({len(ids)})"
+                )
+
         delete_request = self._validate_and_prepare_delete_request(
             ids, where, where_document
         )
@@ -498,6 +554,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             where_document=delete_request["where_document"],
             tenant=self.tenant,
             database=self.database,
+            expected_versions=expected_versions,
         )
 
     def attach_function(

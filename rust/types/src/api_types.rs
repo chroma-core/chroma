@@ -1293,6 +1293,10 @@ pub struct UpdateCollectionRecordsRequest {
     pub uris: Option<Vec<Option<String>>>,
     #[validate(custom(function = "validate_update_metadata_vec"))]
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
+    /// Expected versions for CAS (Compare-and-Swap) validation.
+    /// If provided, each element corresponds to the expected version of the record at the same index.
+    /// A None value means no version check for that record.
+    pub expected_versions: Option<Vec<Option<i64>>>,
 }
 
 impl UpdateCollectionRecordsRequest {
@@ -1306,6 +1310,7 @@ impl UpdateCollectionRecordsRequest {
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
+        expected_versions: Option<Vec<Option<i64>>>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -1316,6 +1321,7 @@ impl UpdateCollectionRecordsRequest {
             documents,
             uris,
             metadatas,
+            expected_versions,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1379,6 +1385,10 @@ pub struct UpsertCollectionRecordsRequest {
     pub uris: Option<Vec<Option<String>>>,
     #[validate(custom(function = "validate_update_metadata_vec"))]
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
+    /// Expected versions for CAS (Compare-and-Swap) validation.
+    /// If provided, each element corresponds to the expected version of the record at the same index.
+    /// A None value means no version check for that record.
+    pub expected_versions: Option<Vec<Option<i64>>>,
 }
 
 impl UpsertCollectionRecordsRequest {
@@ -1392,6 +1402,7 @@ impl UpsertCollectionRecordsRequest {
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
+        expected_versions: Option<Vec<Option<i64>>>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -1402,6 +1413,7 @@ impl UpsertCollectionRecordsRequest {
             documents,
             uris,
             metadatas,
+            expected_versions,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1458,6 +1470,10 @@ pub struct DeleteCollectionRecordsRequest {
     pub collection_id: CollectionUuid,
     pub ids: Option<Vec<String>>,
     pub r#where: Option<Where>,
+    /// Expected versions for CAS (Compare-and-Swap) validation.
+    /// Only applies when deleting by ids. Each element corresponds to the expected version
+    /// of the record at the same index. A None value means no version check for that record.
+    pub expected_versions: Option<Vec<Option<i64>>>,
 }
 
 impl DeleteCollectionRecordsRequest {
@@ -1467,6 +1483,7 @@ impl DeleteCollectionRecordsRequest {
         collection_id: CollectionUuid,
         ids: Option<Vec<String>>,
         r#where: Option<Where>,
+        expected_versions: Option<Vec<Option<i64>>>,
     ) -> Result<Self, ChromaValidationError> {
         if ids.as_ref().map(|ids| ids.is_empty()).unwrap_or(false) && r#where.is_none() {
             return Err(ChromaValidationError::from((
@@ -1482,6 +1499,7 @@ impl DeleteCollectionRecordsRequest {
             collection_id,
             ids,
             r#where,
+            expected_versions,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1816,6 +1834,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
             document,
             embedding,
             mut metadata,
+            ..
         } in result.result.records
         {
             res.ids.push(id);
@@ -2040,6 +2059,7 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
                         document,
                         embedding,
                         mut metadata,
+                        ..
                     },
                 distance,
             } in query_result.records

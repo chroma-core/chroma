@@ -13,7 +13,8 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::types::FullTextIndexError;
 use chroma_types::{
     Cmek, DataRecord, DatabaseUuid, MaterializedLogOperation, SchemaError, Segment, SegmentType,
-    SegmentUuid, MAX_OFFSET_ID, OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_TO_OFFSET_ID,
+    SegmentUuid, MAX_OFFSET_ID, OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, OFFSET_ID_TO_VERSION,
+    USER_ID_TO_OFFSET_ID,
 };
 use futures::{Stream, StreamExt, TryStreamExt};
 use std::collections::HashMap;
@@ -33,6 +34,9 @@ pub struct RecordSegmentWriter {
     // TODO: for now we store the max offset ID in a separate blockfile, this is not ideal
     // we should store it in metadata of one of the blockfiles
     max_offset_id: Option<BlockfileWriter>,
+    // Maps offset_id to version (log_offset as string). Used for CAS operations.
+    // Stored as String because blockstore doesn't support i64 values directly.
+    id_to_version: Option<BlockfileWriter>,
     max_new_offset_id: Arc<AtomicU32>,
     pub id: SegmentUuid,
 }
@@ -121,7 +125,7 @@ impl RecordSegmentWriter {
         if segment.r#type != SegmentType::BlockfileRecord {
             return Err(RecordSegmentWriterCreationError::InvalidSegmentType);
         }
-        let (user_id_to_id, id_to_user_id, id_to_data, max_offset_id) = match segment
+        let (user_id_to_id, id_to_user_id, id_to_data, max_offset_id, id_to_version) = match segment
             .file_path
             .len()
         {
@@ -162,9 +166,9 @@ impl RecordSegmentWriter {
                     }
                 };
 
-                let mut options = BlockfileWriterOptions::new(prefix_path);
-                if let Some(cmek) = cmek {
-                    options = options.with_cmek(cmek);
+                let mut options = BlockfileWriterOptions::new(prefix_path.clone());
+                if let Some(cmek) = &cmek {
+                    options = options.with_cmek(cmek.clone());
                 }
                 let max_offset_id = match blockfile_provider.write::<&str, u32>(options).await {
                     Ok(max_offset_id) => max_offset_id,
@@ -173,9 +177,20 @@ impl RecordSegmentWriter {
                     }
                 };
 
-                (user_id_to_id, id_to_user_id, id_to_data, max_offset_id)
+                let mut options = BlockfileWriterOptions::new(prefix_path);
+                if let Some(cmek) = cmek {
+                    options = options.with_cmek(cmek);
+                }
+                let id_to_version = match blockfile_provider.write::<u32, String>(options).await {
+                    Ok(id_to_version) => id_to_version,
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
+                };
+
+                (user_id_to_id, id_to_user_id, id_to_data, max_offset_id, id_to_version)
             }
-            4 => {
+            4 | 5 => {
                 tracing::debug!("Found files, loading blockfiles for record segment");
                 let user_id_to_id_bf_path = match segment.file_path.get(USER_ID_TO_OFFSET_ID) {
                     Some(user_id_to_id_bf_id) => match user_id_to_id_bf_id.first() {
@@ -310,8 +325,8 @@ impl RecordSegmentWriter {
 
                 let mut options = BlockfileWriterOptions::new(user_id_to_id_bf_prefix.to_string())
                     .fork(max_offset_id_bf_uuid);
-                if let Some(cmek) = cmek {
-                    options = options.with_cmek(cmek);
+                if let Some(cmek) = &cmek {
+                    options = options.with_cmek(cmek.clone());
                 }
                 let max_offset_id_bf = match blockfile_provider.write::<&str, u32>(options).await {
                     Ok(max_offset_id) => max_offset_id,
@@ -319,7 +334,56 @@ impl RecordSegmentWriter {
                         return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
                     }
                 };
-                (user_id_to_id, id_to_user_id, id_to_data, max_offset_id_bf)
+
+                // Handle id_to_version blockfile - create new if not present (backwards compatibility)
+                let id_to_version = match segment.file_path.get(OFFSET_ID_TO_VERSION) {
+                    Some(id_to_version_bf_path) => match id_to_version_bf_path.first() {
+                        Some(path) => {
+                            let (prefix, uuid) = Segment::extract_prefix_and_id(path).map_err(|_| {
+                                RecordSegmentWriterCreationError::InvalidUuid(path.to_string())
+                            })?;
+                            let mut options = BlockfileWriterOptions::new(prefix.to_string())
+                                .fork(uuid);
+                            if let Some(cmek) = cmek {
+                                options = options.with_cmek(cmek);
+                            }
+                            match blockfile_provider.write::<u32, String>(options).await {
+                                Ok(writer) => writer,
+                                Err(e) => {
+                                    return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                                }
+                            }
+                        }
+                        None => {
+                            // Create new blockfile for version tracking
+                            let mut options = BlockfileWriterOptions::new(user_id_to_id_bf_prefix.to_string());
+                            if let Some(cmek) = cmek {
+                                options = options.with_cmek(cmek);
+                            }
+                            match blockfile_provider.write::<u32, String>(options).await {
+                                Ok(writer) => writer,
+                                Err(e) => {
+                                    return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                                }
+                            }
+                        }
+                    },
+                    None => {
+                        // Create new blockfile for version tracking (backwards compatibility)
+                        let mut options = BlockfileWriterOptions::new(user_id_to_id_bf_prefix.to_string());
+                        if let Some(cmek) = cmek {
+                            options = options.with_cmek(cmek);
+                        }
+                        match blockfile_provider.write::<u32, String>(options).await {
+                            Ok(writer) => writer,
+                            Err(e) => {
+                                return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                            }
+                        }
+                    }
+                };
+
+                (user_id_to_id, id_to_user_id, id_to_data, max_offset_id_bf, id_to_version)
             }
             _ => return Err(RecordSegmentWriterCreationError::IncorrectNumberOfFiles),
         };
@@ -329,6 +393,7 @@ impl RecordSegmentWriter {
             id_to_user_id: Some(id_to_user_id),
             id_to_data: Some(id_to_data),
             max_offset_id: Some(max_offset_id),
+            id_to_version: Some(id_to_version),
             // The max new offset id introduced by materialized logs is initialized as zero
             // Since offset id should start from 1, we use this to indicate no new offset id
             // has been introduced in the materialized logs
@@ -397,6 +462,19 @@ impl RecordSegmentWriter {
                             return Err(e);
                         }
                     }
+                    // Set version (log_offset) for CAS operations.
+                    match self
+                        .id_to_version
+                        .as_ref()
+                        .unwrap()
+                        .set::<u32, String>("", log_record.get_offset_id(), log_record.get_version().to_string())
+                        .await
+                    {
+                        Ok(()) => (),
+                        Err(_) => {
+                            return Err(ApplyMaterializedLogError::BlockfileSet);
+                        }
+                    };
                     // Set max offset id.
                     max_new_offset_id = max_new_offset_id.max(log_record.get_offset_id());
                 }
@@ -428,6 +506,32 @@ impl RecordSegmentWriter {
                             return Err(e);
                         }
                     }
+                    // Update version - delete old and insert new.
+                    match self
+                        .id_to_version
+                        .as_ref()
+                        .unwrap()
+                        .delete::<u32, String>("", log_record.get_offset_id())
+                        .await
+                    {
+                        Ok(()) => (),
+                        Err(e) => {
+                            tracing::error!("Error deleting from id_to_version {:?}", e);
+                            return Err(ApplyMaterializedLogError::BlockfileDelete);
+                        }
+                    }
+                    match self
+                        .id_to_version
+                        .as_ref()
+                        .unwrap()
+                        .set::<u32, String>("", log_record.get_offset_id(), log_record.get_version().to_string())
+                        .await
+                    {
+                        Ok(()) => (),
+                        Err(_) => {
+                            return Err(ApplyMaterializedLogError::BlockfileSet);
+                        }
+                    };
                 }
                 MaterializedLogOperation::DeleteExisting => {
                     // Delete user id to offset id.
@@ -469,6 +573,20 @@ impl RecordSegmentWriter {
                         Ok(()) => (),
                         Err(e) => {
                             tracing::error!("Error deleting from id_to_data {:?}", e);
+                            return Err(ApplyMaterializedLogError::BlockfileDelete);
+                        }
+                    }
+                    // Delete version record.
+                    match self
+                        .id_to_version
+                        .as_ref()
+                        .unwrap()
+                        .delete::<u32, String>("", log_record.get_offset_id())
+                        .await
+                    {
+                        Ok(()) => (),
+                        Err(e) => {
+                            tracing::error!("Error deleting from id_to_version {:?}", e);
                             return Err(ApplyMaterializedLogError::BlockfileDelete);
                         }
                     }
@@ -543,6 +661,19 @@ impl RecordSegmentWriter {
             }
         };
 
+        let flusher_id_to_version = self
+            .id_to_version
+            .take()
+            .unwrap()
+            .commit::<u32, String>()
+            .await;
+        let flusher_id_to_version = match flusher_id_to_version {
+            Ok(f) => f,
+            Err(e) => {
+                return Err(e);
+            }
+        };
+
         // Return a flusher that can be used to flush the blockfiles
         Ok(RecordSegmentFlusher {
             id: self.id,
@@ -550,6 +681,7 @@ impl RecordSegmentWriter {
             id_to_user_id_flusher: flusher_id_to_user_id,
             id_to_data_flusher: flusher_id_to_data,
             max_offset_id_flusher: flusher_max_offset_id,
+            id_to_version_flusher: flusher_id_to_version,
         })
     }
 }
@@ -602,6 +734,7 @@ pub struct RecordSegmentFlusher {
     id_to_user_id_flusher: BlockfileFlusher,
     id_to_data_flusher: BlockfileFlusher,
     max_offset_id_flusher: BlockfileFlusher,
+    id_to_version_flusher: BlockfileFlusher,
 }
 
 impl Debug for RecordSegmentFlusher {
@@ -684,6 +817,24 @@ impl RecordSegmentFlusher {
             }
         }
 
+        let id_to_version_bf_id = self.id_to_version_flusher.id();
+        let res_id_to_version = self.id_to_version_flusher.flush::<u32, String>().await;
+
+        match res_id_to_version {
+            Ok(_) => {
+                flushed_files.insert(
+                    OFFSET_ID_TO_VERSION.to_string(),
+                    vec![ChromaSegmentFlusher::flush_key(
+                        &prefix_path,
+                        &id_to_version_bf_id,
+                    )],
+                );
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        }
+
         Ok(flushed_files)
     }
 
@@ -697,6 +848,9 @@ pub struct RecordSegmentReader<'me> {
     user_id_to_id: BlockfileReader<'me, &'me str, u32>,
     id_to_user_id: BlockfileReader<'me, u32, &'me str>,
     id_to_data: BlockfileReader<'me, u32, DataRecord<'me>>,
+    // Optional for backwards compatibility with segments created before version tracking
+    // Stored as String because blockstore doesn't support i64 values directly.
+    id_to_version: Option<BlockfileReader<'me, u32, &'me str>>,
     max_offset_id: u32,
 }
 
@@ -773,9 +927,9 @@ impl RecordSegmentReader<'_> {
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<Self, Box<RecordSegmentReaderCreationError>> {
-        let (user_id_to_id, id_to_user_id, id_to_data, existing_max_offset_id) =
+        let (user_id_to_id, id_to_user_id, id_to_data, id_to_version, existing_max_offset_id) =
             match segment.file_path.len() {
-                4 => {
+                4 | 5 => {
                     let user_id_to_id_future =
                         Self::load_index_reader(segment, USER_ID_TO_OFFSET_ID, blockfile_provider)
                             .instrument(Span::current());
@@ -815,10 +969,21 @@ impl RecordSegmentReader<'_> {
                             Ok(None) | Err(_) => 0,
                         };
 
+                    // Try to load version reader if available (backwards compatible)
+                    let id_to_version = if segment.file_path.contains_key(OFFSET_ID_TO_VERSION) {
+                        match Self::load_index_reader::<u32, &str>(segment, OFFSET_ID_TO_VERSION, blockfile_provider).await {
+                            Ok(reader) => Some(reader),
+                            Err(_) => None,
+                        }
+                    } else {
+                        None
+                    };
+
                     (
                         user_id_to_id,
                         id_to_user_id,
                         id_to_data,
+                        id_to_version,
                         exising_max_offset_id,
                     )
                 }
@@ -838,6 +1003,7 @@ impl RecordSegmentReader<'_> {
             user_id_to_id,
             id_to_user_id,
             id_to_data,
+            id_to_version,
             max_offset_id: existing_max_offset_id,
         })
     }
@@ -858,6 +1024,40 @@ impl RecordSegmentReader<'_> {
         offset_id: u32,
     ) -> Result<Option<DataRecord<'_>>, Box<dyn ChromaError>> {
         self.id_to_data.get("", offset_id).await
+    }
+
+    /// Get the version (log offset) for a record by its offset_id.
+    /// Returns None if version tracking is not available (backwards compatibility)
+    /// or if the record has no version.
+    pub async fn get_version_for_offset_id(
+        &self,
+        offset_id: u32,
+    ) -> Result<Option<i64>, Box<dyn ChromaError>> {
+        match &self.id_to_version {
+            Some(reader) => {
+                match reader.get("", offset_id).await? {
+                    Some(version_str) => {
+                        // Parse the string back to i64
+                        Ok(version_str.parse::<i64>().ok())
+                    }
+                    None => Ok(None),
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Get the version (log offset) for a record by its user_id.
+    /// Returns None if version tracking is not available or the record doesn't exist.
+    pub async fn get_version_for_user_id(
+        &self,
+        user_id: &str,
+    ) -> Result<Option<i64>, Box<dyn ChromaError>> {
+        let offset_id = match self.get_offset_id_for_user_id(user_id).await? {
+            Some(id) => id,
+            None => return Ok(None),
+        };
+        self.get_version_for_offset_id(offset_id).await
     }
 
     pub async fn data_exists_for_user_id(

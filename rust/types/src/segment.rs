@@ -13,6 +13,9 @@ pub const USER_ID_TO_OFFSET_ID: &str = "user_id_to_offset_id";
 pub const OFFSET_ID_TO_USER_ID: &str = "offset_id_to_user_id";
 pub const OFFSET_ID_TO_DATA: &str = "offset_id_to_data";
 pub const MAX_OFFSET_ID: &str = "max_offset_id";
+/// Blockfile mapping offset_id to record version (log offset of last modification).
+/// Used for CAS (compare-and-swap) operations.
+pub const OFFSET_ID_TO_VERSION: &str = "offset_id_to_version";
 
 pub const FULL_TEXT_PLS: &str = "full_text_pls";
 pub const STRING_METADATA: &str = "string_metadata";

@@ -23,6 +23,7 @@ impl From<ErrorCodes> for tonic::Code {
             ErrorCodes::Unauthenticated => tonic::Code::Unauthenticated,
             ErrorCodes::VersionMismatch => tonic::Code::Internal,
             ErrorCodes::UnprocessableEntity => tonic::Code::ResourceExhausted,
+            ErrorCodes::CASConflict => tonic::Code::FailedPrecondition,
         }
     }
 }

@@ -130,14 +130,59 @@ class BatchSizeExceededError(ChromaError):
 
 
 class VersionMismatchError(ChromaError):
+    """Raised when a CAS operation fails due to version mismatch.
+
+    This indicates that the record was modified between the time it was read
+    and the time the update was attempted (optimistic concurrency conflict).
+    """
+
     @overrides
     def code(self) -> int:
-        return 500
+        return 409  # Conflict
 
     @classmethod
     @overrides
     def name(cls) -> str:
         return "VersionMismatchError"
+
+
+class CASConflictError(ChromaError):
+    """Raised when one or more CAS (Compare-and-Swap) operations fail.
+
+    Attributes:
+        conflicts: List of (record_id, expected_version, actual_version) tuples.
+            actual_version is None if the record doesn't exist.
+    """
+
+    def __init__(
+        self,
+        conflicts: list[tuple[str, int, Optional[int]]],
+        *args: object,
+    ) -> None:
+        self.conflicts = conflicts
+        if not args:
+            # Generate a default message
+            conflict_msgs = []
+            for record_id, expected, actual in conflicts:
+                if actual is None:
+                    conflict_msgs.append(
+                        f"Record '{record_id}': expected version {expected}, but record does not exist"
+                    )
+                else:
+                    conflict_msgs.append(
+                        f"Record '{record_id}': expected version {expected}, but found {actual}"
+                    )
+            args = ("; ".join(conflict_msgs),)
+        super().__init__(*args)
+
+    @overrides
+    def code(self) -> int:
+        return 409  # Conflict
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "CASConflictError"
 
 
 class InternalError(ChromaError):
@@ -184,6 +229,7 @@ error_types: Dict[str, Type[ChromaError]] = {
     "NotFoundError": NotFoundError,
     "BatchSizeExceededError": BatchSizeExceededError,
     "VersionMismatchError": VersionMismatchError,
+    "CASConflictError": CASConflictError,
     "RateLimitError": RateLimitError,
     "AuthError": ChromaAuthError,
     "UniqueConstraintError": UniqueConstraintError,

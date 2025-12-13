@@ -907,6 +907,7 @@ impl SqliteMetadataReader {
                 document: None,
                 embedding: None,
                 metadata: (document || metadata).then_some(HashMap::new()),
+                version: None,
             });
 
             if document || metadata {

@@ -514,7 +514,7 @@ def _validate_record_set_contains(
 Parameter = TypeVar("Parameter", Document, Image, Embedding, Metadata, ID)
 
 Include = List[
-    Literal["documents", "embeddings", "metadatas", "distances", "uris", "data"]
+    Literal["documents", "embeddings", "metadatas", "distances", "uris", "data", "versions"]
 ]
 IncludeMetadataDocuments: Include = ["metadatas", "documents"]
 IncludeMetadataDocumentsEmbeddings: Include = ["metadatas", "documents", "embeddings"]
@@ -582,6 +582,9 @@ class GetResult(TypedDict):
     data: Optional[Loadable]
     metadatas: Optional[List[Metadata]]
     included: Include
+    # Record versions (log offsets) for CAS operations. Only populated if
+    # include_versions=True is passed to the get() call.
+    versions: Optional[List[int]]
 
 
 class QueryRequest(TypedDict):
@@ -608,6 +611,9 @@ class QueryResult(TypedDict):
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
     included: Include
+    # Record versions (log offsets) for CAS operations. Only populated if
+    # "versions" is included in the include parameter.
+    versions: Optional[List[List[int]]]
 
 
 class SearchResultRow(TypedDict, total=False):

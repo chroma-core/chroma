@@ -85,6 +85,7 @@ pub fn upsert_generator(offset: usize) -> OperationRecord {
         metadata: Some(modulo_metadata(offset)),
         document: Some(random_document(6)),
         operation: Operation::Upsert,
+        expected_version: None,
     }
 }
 
@@ -101,6 +102,7 @@ pub fn add_delete_generator(offset: usize) -> OperationRecord {
             metadata: None,
             document: None,
             operation: Operation::Delete,
+            expected_version: None,
         }
     } else {
         let int_id = offset - offset / 6;
@@ -111,6 +113,7 @@ pub fn add_delete_generator(offset: usize) -> OperationRecord {
             metadata: Some(modulo_metadata(int_id)),
             document: Some(modulo_document(int_id)),
             operation: Operation::Add,
+            expected_version: None,
         }
     }
 }
@@ -128,6 +131,7 @@ pub fn add_delete_net_zero_generator(offset: usize) -> OperationRecord {
             metadata: None,
             document: None,
             operation: Operation::Delete,
+            expected_version: None,
         }
     } else {
         let int_id = offset / 2;
@@ -138,6 +142,7 @@ pub fn add_delete_net_zero_generator(offset: usize) -> OperationRecord {
             metadata: Some(modulo_metadata(int_id)),
             document: Some(modulo_document(int_id)),
             operation: Operation::Add,
+            expected_version: None,
         }
     }
 }

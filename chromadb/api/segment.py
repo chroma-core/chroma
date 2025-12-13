@@ -532,6 +532,7 @@ class SegmentAPI(ServerAPI):
         uris: Optional[URIs] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        expected_versions: Optional[List[int]] = None,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
@@ -547,6 +548,7 @@ class SegmentAPI(ServerAPI):
                 metadatas=metadatas,
                 documents=documents,
                 uris=uris,
+                expected_versions=expected_versions,
             )
         )
         self._validate_embedding_record_set(coll, records_to_submit)
@@ -589,6 +591,7 @@ class SegmentAPI(ServerAPI):
         uris: Optional[URIs] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        expected_versions: Optional[List[Optional[int]]] = None,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
@@ -604,6 +607,7 @@ class SegmentAPI(ServerAPI):
                 metadatas=metadatas,
                 documents=documents,
                 uris=uris,
+                expected_versions=expected_versions,
             )
         )
         self._validate_embedding_record_set(coll, records_to_submit)
@@ -707,6 +711,7 @@ class SegmentAPI(ServerAPI):
         where_document: Optional[WhereDocument] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        expected_versions: Optional[List[int]] = None,
     ) -> None:
         add_attributes_to_current_span(
             {
@@ -752,18 +757,26 @@ class SegmentAPI(ServerAPI):
 
         self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
+        # For CAS, expected_versions can only be used with direct IDs
+        versions_for_delete: Optional[List[Optional[int]]] = None
         if (where or where_document) or not ids:
             ids_to_delete = self._executor.get(
                 GetPlan(scan, Filter(ids, where, where_document))
             )["ids"]
+            # expected_versions not supported for filter-based delete
         else:
             ids_to_delete = ids
+            versions_for_delete = expected_versions  # type: ignore[assignment]
 
         if len(ids_to_delete) == 0:
             return
 
         records_to_submit = list(
-            _records(operation=t.Operation.DELETE, ids=ids_to_delete)
+            _records(
+                operation=t.Operation.DELETE,
+                ids=ids_to_delete,
+                expected_versions=versions_for_delete,
+            )
         )
         self._validate_embedding_record_set(scan.collection, records_to_submit)
         self._producer.submit_embeddings(collection_id, records_to_submit)
@@ -1030,9 +1043,15 @@ def _records(
     metadatas: Optional[Metadatas] = None,
     documents: Optional[Documents] = None,
     uris: Optional[URIs] = None,
+    expected_versions: Optional[List[Optional[int]]] = None,
 ) -> Generator[t.OperationRecord, None, None]:
     """Convert parallel lists of embeddings, metadatas and documents to a sequence of
-    SubmitEmbeddingRecords"""
+    SubmitEmbeddingRecords
+
+    Args:
+        expected_versions: For CAS operations - expected version for each record.
+            If provided, must be same length as ids.
+    """
 
     # Presumes that callers were invoked via  Collection model, which means
     # that we know that the embeddings, metadatas and documents have already been
@@ -1060,11 +1079,14 @@ def _records(
             else:
                 metadata = {"chroma:uri": uri}
 
+        expected_version = expected_versions[i] if expected_versions else None
+
         record = t.OperationRecord(
             id=id,
             embedding=embeddings[i] if embeddings is not None else None,
             encoding=t.ScalarEncoding.FLOAT32,  # Hardcode for now
             metadata=metadata,
             operation=operation,
+            expected_version=expected_version,
         )
         yield record

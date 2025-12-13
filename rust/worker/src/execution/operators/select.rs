@@ -186,6 +186,7 @@ impl Operator<SelectInput, SelectOutput> for Select {
                     } else {
                         None
                     },
+                    version: None,
                 })
             })
             .collect::<Vec<_>>();

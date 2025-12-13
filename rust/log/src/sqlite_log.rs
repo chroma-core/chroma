@@ -314,6 +314,7 @@ impl SqliteLog {
                     metadata,
                     document,
                     operation,
+                    expected_version: None,
                 },
             });
         }

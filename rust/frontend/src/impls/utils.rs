@@ -28,6 +28,7 @@ pub(crate) fn to_records<
     uris: Option<Vec<Option<String>>>,
     metadatas: Option<Vec<Option<M>>>,
     operation: Operation,
+    expected_versions: Option<Vec<Option<i64>>>,
 ) -> Result<(Vec<OperationRecord>, u64), ToRecordsError> {
     let mut total_bytes = 0;
     let len = ids.len();
@@ -37,6 +38,7 @@ pub(crate) fn to_records<
         || documents.as_ref().is_some_and(|v| v.len() != len)
         || uris.as_ref().is_some_and(|v| v.len() != len)
         || metadatas.as_ref().is_some_and(|v| v.len() != len)
+        || expected_versions.as_ref().is_some_and(|v| v.len() != len)
     {
         return Err(ToRecordsError::InconsistentLength);
     }
@@ -45,6 +47,7 @@ pub(crate) fn to_records<
     let mut documents_iter = documents.into_iter().flat_map(|v| v.into_iter());
     let mut uris_iter = uris.into_iter().flat_map(|v| v.into_iter());
     let mut metadatas_iter = metadatas.into_iter().flat_map(|v| v.into_iter());
+    let mut expected_versions_iter = expected_versions.into_iter().flat_map(|v| v.into_iter());
 
     let mut records = Vec::with_capacity(len);
 
@@ -56,6 +59,7 @@ pub(crate) fn to_records<
         let document = documents_iter.next().flatten();
         let uri = uris_iter.next().flatten();
         let metadata = metadatas_iter.next().flatten();
+        let expected_version = expected_versions_iter.next().flatten();
 
         let encoding = embedding.as_ref().map(|_| ScalarEncoding::FLOAT32);
 
@@ -83,6 +87,7 @@ pub(crate) fn to_records<
             encoding,
             metadata: Some(metadata),
             operation,
+            expected_version,
         };
 
         total_bytes += record.size_bytes();

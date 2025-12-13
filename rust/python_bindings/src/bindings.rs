@@ -474,6 +474,7 @@ impl Bindings {
             documents,
             uris,
             metadatas,
+            None, // expected_versions - TODO: add to Python API
         )?;
 
         self.runtime
@@ -521,6 +522,7 @@ impl Bindings {
             documents,
             uris,
             metadatas,
+            None, // expected_versions - TODO: add to Python API
         )?;
 
         self.runtime
@@ -557,6 +559,7 @@ impl Bindings {
             collection_id,
             ids,
             r#where,
+            None, // expected_versions - TODO: add to Python API
         )?;
 
         let mut frontend_clone = self.frontend.clone();

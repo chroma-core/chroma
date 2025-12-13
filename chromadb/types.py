@@ -251,12 +251,36 @@ class MetadataEmbeddingRecord(TypedDict):
     metadata: Optional[Metadata]
 
 
-class OperationRecord(TypedDict):
+class OperationRecord(TypedDict, total=False):
+    """An operation record submitted to the log service.
+
+    Attributes:
+        id: The record ID
+        embedding: The embedding vector (optional)
+        encoding: The scalar encoding of the embedding (optional)
+        metadata: The metadata to update (optional)
+        operation: The operation type (ADD, UPDATE, UPSERT, DELETE)
+        expected_version: For CAS operations - the expected log offset of the record.
+            If set, the operation only succeeds if the record's current version matches.
+            - For UPDATE/UPSERT: fails if record exists with different version
+            - For ADD: fails if record already exists (insert-if-absent semantics)
+            - For DELETE: fails if record has different version
+    """
+
     id: str
     embedding: Optional[Vector]
     encoding: Optional[ScalarEncoding]
     metadata: Optional[UpdateMetadata]
     operation: Operation
+    expected_version: Optional[int]
+
+
+class CASError(TypedDict):
+    """Error details when a CAS operation fails due to version mismatch."""
+
+    record_id: str
+    expected_version: int
+    actual_version: Optional[int]  # None if record doesn't exist
 
 
 class LogRecord(TypedDict):

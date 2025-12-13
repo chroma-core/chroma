@@ -580,6 +580,7 @@ impl ChromaCollection {
             documents,
             uris,
             metadatas,
+            None, // expected_versions - not yet exposed via client API
         )?;
         let request = request.into_payload();
         self.send("update", "update", Method::POST, Some(request))
@@ -631,6 +632,7 @@ impl ChromaCollection {
             documents,
             uris,
             metadatas,
+            None, // expected_versions - not yet exposed via client API
         )?;
         let request = request.into_payload();
         self.send("upsert", "upsert", Method::POST, Some(request))
@@ -672,6 +674,7 @@ impl ChromaCollection {
             self.collection.collection_id,
             ids,
             r#where,
+            None, // expected_versions - not yet exposed via client API
         )?;
         let request = request.into_payload()?;
         self.send("delete", "delete", Method::POST, Some(request))

@@ -145,6 +145,9 @@ struct MaterializedLogRecord {
     // If log has [Upsert] and the record does not exist in storage then final
     // operation is Insert.
     final_operation: MaterializedLogOperation,
+    // The log offset of the final operation. Used for version tracking in CAS operations.
+    // This is the log_offset from the LogRecord that represents the final state of the record.
+    final_log_offset: i64,
     // This is the metadata obtained by combining all the operations
     // present in the log for this id.
     // E.g. if has log has [Insert(a: h), Update(a: b, c: d), Update(a: e, f: g)] then this
@@ -173,6 +176,9 @@ impl MaterializedLogRecord {
             offset_id,
             user_id_at_log_index: None,
             final_operation: MaterializedLogOperation::Initial,
+            // For records from segment, version will be read from segment's version blockfile
+            // when needed. Initialize to 0 as placeholder - will be updated during apply.
+            final_log_offset: 0,
             metadata_to_be_merged: None,
             metadata_to_be_deleted: None,
             final_document_at_log_index: None,
@@ -220,6 +226,7 @@ impl MaterializedLogRecord {
             offset_id,
             user_id_at_log_index: Some(log_index),
             final_operation: MaterializedLogOperation::AddNew,
+            final_log_offset: log_record.log_offset,
             metadata_to_be_merged: merged_metadata,
             metadata_to_be_deleted: deleted_metadata,
             final_document_at_log_index,
@@ -243,6 +250,12 @@ impl<'log_data> BorrowedMaterializedLogRecord<'log_data> {
 
     pub fn get_operation(&self) -> MaterializedLogOperation {
         self.materialized_log_record.final_operation
+    }
+
+    /// Returns the log offset of the final operation for this record.
+    /// This is used as the record's version for CAS operations.
+    pub fn get_version(&self) -> i64 {
+        self.materialized_log_record.final_log_offset
     }
 
     /// Reads any record segment data that this log record may reference and returns a hydrated version of this record.
@@ -281,6 +294,12 @@ pub struct HydratedMaterializedLogRecord<'log_data, 'segment_data> {
 impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_data, 'segment_data> {
     pub fn get_offset_id(&self) -> u32 {
         self.materialized_log_record.offset_id
+    }
+
+    /// Returns the log offset of the final operation for this record.
+    /// This is used as the record's version for CAS operations.
+    pub fn get_version(&self) -> i64 {
+        self.materialized_log_record.final_log_offset
     }
 
     pub fn get_operation(&self) -> MaterializedLogOperation {
@@ -705,6 +724,7 @@ pub async fn materialize_logs(
                             .get_mut(log_record.record.id.as_str())
                             .unwrap();
                         record_from_map.final_operation = MaterializedLogOperation::DeleteExisting;
+                        record_from_map.final_log_offset = log_record.log_offset;
                         record_from_map.final_document_at_log_index = None;
                         record_from_map.final_embedding_at_log_index = None;
                         record_from_map.metadata_to_be_merged = None;
@@ -759,6 +779,9 @@ pub async fn materialize_logs(
                     if log_record.record.embedding.is_some() {
                         record_from_map.final_embedding_at_log_index = Some(log_index);
                     }
+
+                    // Update the version to reflect this modification
+                    record_from_map.final_log_offset = log_record.log_offset;
 
                     match record_from_map.final_operation {
                         MaterializedLogOperation::Initial => {
@@ -820,6 +843,9 @@ pub async fn materialize_logs(
                                             record_from_map.final_embedding_at_log_index = Some(log_index);
                                         }
 
+                                        // Update the version to reflect this modification
+                                        record_from_map.final_log_offset = log_record.log_offset;
+
                                         match record_from_map.final_operation {
                                             MaterializedLogOperation::Initial => {
                                                 record_from_map.final_operation =
@@ -864,6 +890,9 @@ pub async fn materialize_logs(
                         if log_record.record.embedding.is_some() {
                             record_from_map.final_embedding_at_log_index = Some(log_index);
                         }
+
+                        // Update the version to reflect this modification
+                        record_from_map.final_log_offset = log_record.log_offset;
 
                         // This record is not present on storage yet hence final operation is
                         // AddNew and not UpdateExisting.

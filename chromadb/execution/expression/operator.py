@@ -574,6 +574,7 @@ class Projection:
     metadata: bool = False
     rank: bool = False
     uri: bool = False
+    version: bool = False  # For CAS operations - include record version (log offset)
 
     @property
     def included(self) -> Include:
@@ -588,6 +589,8 @@ class Projection:
             includes.append("distances")
         if self.uri:
             includes.append("uris")
+        if self.version:
+            includes.append("versions")
         return includes  # type: ignore[return-value]
 
 

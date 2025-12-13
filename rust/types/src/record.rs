@@ -20,6 +20,12 @@ pub struct OperationRecord {
     // only let that concept live in the transport layer
     pub document: Option<String>,
     pub operation: Operation,
+    /// For compare-and-swap (CAS) operations: the expected version (log offset) of the record.
+    /// If set, the operation will only succeed if the record's current version matches.
+    /// - For UPDATE/UPSERT: fails if record exists with different version
+    /// - For ADD: if set, fails if record already exists (insert-if-absent)
+    /// - For DELETE: if set, fails if record has different version
+    pub expected_version: Option<i64>,
 }
 
 impl OperationRecord {
@@ -62,6 +68,7 @@ impl Debug for OperationRecord {
             .field("embedding", &self.embedding.as_ref().map(|_| "[...]"))
             .field("metadata", &self.metadata)
             .field("operation", &self.operation)
+            .field("expected_version", &self.expected_version)
             .finish()
     }
 }
@@ -139,6 +146,7 @@ impl TryFrom<OperationRecord> for chroma_proto::OperationRecord {
             vector: proto_vector,
             metadata: proto_metadata,
             operation: operation_record.operation as i32,
+            expected_version: operation_record.expected_version,
         })
     }
 }
@@ -187,6 +195,7 @@ impl TryFrom<chroma_proto::OperationRecord> for OperationRecord {
             metadata,
             document,
             operation,
+            expected_version: operation_record_proto.expected_version,
         })
     }
 }
@@ -207,6 +216,45 @@ impl TryFrom<chroma_proto::LogRecord> for LogRecord {
             log_offset: log_record_proto.log_offset,
             record,
         })
+    }
+}
+
+/// Error details when a CAS operation fails due to version mismatch.
+#[derive(Clone, Debug)]
+pub struct CASError {
+    pub record_id: String,
+    pub expected_version: i64,
+    /// The actual version found. None if record doesn't exist.
+    pub actual_version: Option<i64>,
+}
+
+impl CASError {
+    pub fn new(record_id: String, expected_version: i64, actual_version: Option<i64>) -> Self {
+        Self {
+            record_id,
+            expected_version,
+            actual_version,
+        }
+    }
+}
+
+impl From<CASError> for chroma_proto::CasError {
+    fn from(error: CASError) -> Self {
+        chroma_proto::CasError {
+            record_id: error.record_id,
+            expected_version: error.expected_version,
+            actual_version: error.actual_version,
+        }
+    }
+}
+
+impl From<chroma_proto::CasError> for CASError {
+    fn from(proto_error: chroma_proto::CasError) -> Self {
+        CASError {
+            record_id: proto_error.record_id,
+            expected_version: proto_error.expected_version,
+            actual_version: proto_error.actual_version,
+        }
     }
 }
 

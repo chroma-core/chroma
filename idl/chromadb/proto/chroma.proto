@@ -109,6 +109,29 @@ message OperationRecord {
     optional Vector vector = 2;
     optional UpdateMetadata metadata = 3;
     Operation operation = 4;
+    // For compare-and-swap (CAS) operations: the expected version (log offset)
+    // of the record. If set, the operation will only succeed if the record's
+    // current version matches this value. Use for optimistic concurrency control.
+    // - For UPDATE/UPSERT: fails if record exists with different version
+    // - For ADD: if set, fails if record already exists (insert-if-absent)
+    // - For DELETE: if set, fails if record has different version
+    optional int64 expected_version = 5;
+}
+
+// Version information for a record, used in CAS operations
+message RecordVersion {
+    string id = 1;
+    // The log offset at which this record was last modified.
+    // Returns -1 if record doesn't exist (for CAS error responses).
+    int64 version = 2;
+}
+
+// Error details when a CAS operation fails due to version mismatch
+message CASError {
+    string record_id = 1;
+    int64 expected_version = 2;
+    // The actual version found. Not set if record doesn't exist.
+    optional int64 actual_version = 3;
 }
 
 message RequestVersionContext {

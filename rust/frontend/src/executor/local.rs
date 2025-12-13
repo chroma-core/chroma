@@ -255,6 +255,7 @@ impl LocalExecutor {
                                 .map_err(|err| ExecutorError::Internal(Box::new(err)))?,
                         ),
                         metadata: None,
+                        version: None,
                     },
                     distance: plan.proj.distance.then_some(measure),
                 };
@@ -279,6 +280,7 @@ impl LocalExecutor {
                     document: plan.proj.projection.document,
                     embedding: false,
                     metadata: plan.proj.projection.metadata,
+                    version: false,
                 },
             };
 
@@ -290,6 +292,7 @@ impl LocalExecutor {
                 document,
                 embedding: _,
                 metadata,
+                ..
             } in hydrated_records.result.records
             {
                 user_id_to_document.insert(id.clone(), document);

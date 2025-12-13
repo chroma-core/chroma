@@ -129,6 +129,7 @@ impl AttachedFunctionExecutor for CountAttachedFunction {
                     records_count, new_total_count
                 )),
                 operation: Operation::Upsert,
+                expected_version: None,
             },
         };
 

@@ -58,6 +58,9 @@ pub enum ErrorCodes {
     VersionMismatch = 17,
     // UNPROCESSABLE_ENTITY indicates the request is valid but cannot be processed.
     UnprocessableEntity = 18,
+    // CAS_CONFLICT indicates a compare-and-swap operation failed due to version mismatch.
+    // This is specific to Chroma and used for record-level optimistic concurrency control.
+    CASConflict = 19,
 }
 
 impl ErrorCodes {
@@ -67,6 +70,7 @@ impl ErrorCodes {
             ErrorCodes::NotFound => "NotFoundError",
             ErrorCodes::Internal => "InternalError",
             ErrorCodes::VersionMismatch => "VersionMismatchError",
+            ErrorCodes::CASConflict => "CASConflictError",
             _ => "ChromaError",
         }
     }
@@ -95,6 +99,7 @@ impl From<ErrorCodes> for http::StatusCode {
             ErrorCodes::Unauthenticated => http::StatusCode::UNAUTHORIZED,
             ErrorCodes::VersionMismatch => http::StatusCode::INTERNAL_SERVER_ERROR,
             ErrorCodes::UnprocessableEntity => http::StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCodes::CASConflict => http::StatusCode::CONFLICT,
         }
     }
 }

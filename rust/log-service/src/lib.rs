@@ -1184,6 +1184,7 @@ impl LogServer {
         Ok(Response::new(PushLogsResponse {
             record_count,
             log_is_sealed: false,
+            cas_errors: vec![],
         }))
     }
 

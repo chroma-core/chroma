@@ -442,6 +442,7 @@ impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
                             metadata: None,
                             document: None,
                             operation: Operation::Delete,
+                            expected_version: None,
                         },
                     });
                     continue;
@@ -475,6 +476,7 @@ impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
                         metadata: Some(metadata),
                         document: Some(document),
                         operation: Operation::Upsert,
+                        expected_version: None,
                     },
                 });
             }

@@ -33,6 +33,8 @@ message ProjectionOperator {
     bool document = 1;
     bool embedding = 2;
     bool metadata = 3;
+    // If true, include record version (log offset of last modification) in results
+    bool version = 4;
 }
 
 message KNNProjectionOperator {
@@ -61,6 +63,8 @@ message ProjectionRecord {
     optional string document = 2;
     optional Vector embedding = 3;
     optional UpdateMetadata metadata = 4;
+    // The log offset at which this record was last modified (for CAS operations)
+    optional int64 version = 5;
 }
 
 message GetResult {
@@ -156,6 +160,8 @@ message SearchRecord {
     optional Vector embedding = 3;
     optional UpdateMetadata metadata = 4;
     optional float score = 5;
+    // The log offset at which this record was last modified (for CAS operations)
+    optional int64 version = 6;
 }
 
 message SearchPayloadResult {

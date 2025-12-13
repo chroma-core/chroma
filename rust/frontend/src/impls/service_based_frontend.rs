@@ -825,7 +825,7 @@ impl ServiceBasedFrontend {
         let embeddings = Some(embeddings.into_iter().map(Some).collect());
 
         let (records, log_size_bytes) =
-            to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
+            to_records(ids, embeddings, documents, uris, metadatas, Operation::Add, None)
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
         let retries = Arc::new(AtomicUsize::new(0));
@@ -901,6 +901,7 @@ impl ServiceBasedFrontend {
             documents,
             uris,
             metadatas,
+            expected_versions,
             ..
         }: UpdateCollectionRecordsRequest,
     ) -> Result<UpdateCollectionRecordsResponse, UpdateCollectionRecordsError> {
@@ -918,6 +919,7 @@ impl ServiceBasedFrontend {
             uris,
             metadatas,
             Operation::Update,
+            expected_versions,
         )
         .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
@@ -994,6 +996,7 @@ impl ServiceBasedFrontend {
             documents,
             uris,
             metadatas,
+            expected_versions,
             ..
         }: UpsertCollectionRecordsRequest,
     ) -> Result<UpsertCollectionRecordsResponse, UpsertCollectionRecordsError> {
@@ -1016,6 +1019,7 @@ impl ServiceBasedFrontend {
             uris,
             metadatas,
             Operation::Upsert,
+            expected_versions,
         )
         .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
@@ -1138,6 +1142,7 @@ impl ServiceBasedFrontend {
                         document: false,
                         embedding: false,
                         metadata: false,
+                        version: false,
                     },
                 })
                 .await?;
@@ -1152,6 +1157,7 @@ impl ServiceBasedFrontend {
                     embedding: None,
                     encoding: None,
                     metadata: None,
+                    expected_version: None,
                 });
             }
 
@@ -1182,6 +1188,7 @@ impl ServiceBasedFrontend {
                 embedding: None,
                 encoding: None,
                 metadata: None,
+                expected_version: None,
             }));
             None
         } else {
@@ -1468,6 +1475,7 @@ impl ServiceBasedFrontend {
                     // If URI is requested, metadata is also requested so we can extract the URI.
                     metadata: (include.0.contains(&Include::Metadata)
                         || include.0.contains(&Include::Uri)),
+                    version: false,
                 },
             })
             .await?;
@@ -1618,6 +1626,7 @@ impl ServiceBasedFrontend {
                         // If URI is requested, metadata is also requested so we can extract the URI.
                         metadata: (include.0.contains(&Include::Metadata)
                             || include.0.contains(&Include::Uri)),
+                        version: false,
                     },
                     distance: include.0.contains(&Include::Distance),
                 },
@@ -1988,6 +1997,7 @@ impl ServiceBasedFrontend {
                 metadata: None,
                 document: None,
                 operation: Operation::BackfillFn,
+                expected_version: None,
             };
             num_fake_logs
         ];
