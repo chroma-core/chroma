@@ -152,14 +152,6 @@ async def check_http_version_middleware(
 D = TypeVar("D", bound=BaseModel, contravariant=True)
 
 
-def validate_model(model: Type[D], data: Any) -> D:  # type: ignore
-    """Used for backward compatibility with Pydantic 1.x"""
-    try:
-        return model.model_validate(data)  # pydantic 2.x
-    except AttributeError:
-        return model.parse_obj(data)  # pydantic 1.x
-
-
 class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
     # A simple subclass of fastapi's APIRouter which treats URLs with a
     # trailing "/" the same as URLs without. Docs will only contain URLs
@@ -569,7 +561,7 @@ class FastAPI(Server):
         def process_create_database(
             tenant: str, headers: Headers, raw_body: bytes
         ) -> None:
-            db = validate_model(CreateDatabase, orjson.loads(raw_body))
+            db = CreateDatabase.model_validate(orjson.loads(raw_body))
 
             # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
@@ -647,7 +639,7 @@ class FastAPI(Server):
         request: Request,
     ) -> None:
         def process_create_tenant(request: Request, raw_body: bytes) -> None:
-            tenant = validate_model(CreateTenant, orjson.loads(raw_body))
+            tenant = CreateTenant.model_validate(orjson.loads(raw_body))
 
             # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
@@ -799,7 +791,7 @@ class FastAPI(Server):
         def process_create_collection(
             request: Request, tenant: str, database: str, raw_body: bytes
         ) -> CollectionModel:
-            create = validate_model(CreateCollection, orjson.loads(raw_body))
+            create = CreateCollection.model_validate(orjson.loads(raw_body))
             if not create.configuration:
                 if create.metadata:
                     configuration = (
@@ -891,7 +883,7 @@ class FastAPI(Server):
         def process_update_collection(
             request: Request, collection_id: str, raw_body: bytes
         ) -> None:
-            update = validate_model(UpdateCollection, orjson.loads(raw_body))
+            update = UpdateCollection.model_validate(orjson.loads(raw_body))
             # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
                 request.headers,
@@ -1061,7 +1053,7 @@ class FastAPI(Server):
         try:
 
             def process_add(request: Request, raw_body: bytes) -> bool:
-                add = validate_model(AddEmbedding, orjson.loads(raw_body))
+                add = AddEmbedding.model_validate(orjson.loads(raw_body))
                 # NOTE(rescrv, iron will auth):  Implemented.
                 self.sync_auth_request(
                     request.headers,
@@ -1110,7 +1102,7 @@ class FastAPI(Server):
         collection_id: str,
     ) -> None:
         def process_update(request: Request, raw_body: bytes) -> bool:
-            update = validate_model(UpdateEmbedding, orjson.loads(raw_body))
+            update = UpdateEmbedding.model_validate(orjson.loads(raw_body))
 
             # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
@@ -1153,7 +1145,7 @@ class FastAPI(Server):
         collection_id: str,
     ) -> None:
         def process_upsert(request: Request, raw_body: bytes) -> bool:
-            upsert = validate_model(AddEmbedding, orjson.loads(raw_body))
+            upsert = AddEmbedding.model_validate(orjson.loads(raw_body))
 
             # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
@@ -1199,7 +1191,7 @@ class FastAPI(Server):
         request: Request,
     ) -> GetResult:
         def process_get(request: Request, raw_body: bytes) -> GetResult:
-            get = validate_model(GetEmbedding, orjson.loads(raw_body))
+            get = GetEmbedding.model_validate(orjson.loads(raw_body))
             # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
                 request.headers,
@@ -1250,7 +1242,7 @@ class FastAPI(Server):
         request: Request,
     ) -> None:
         def process_delete(request: Request, raw_body: bytes) -> None:
-            delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
+            delete = DeleteEmbedding.model_validate(orjson.loads(raw_body))
             # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
                 request.headers,
@@ -1343,7 +1335,7 @@ class FastAPI(Server):
             "internal.get_nearest_neighbors", OpenTelemetryGranularity.OPERATION
         )
         def process_query(request: Request, raw_body: bytes) -> QueryResult:
-            query = validate_model(QueryEmbedding, orjson.loads(raw_body))
+            query = QueryEmbedding.model_validate(orjson.loads(raw_body))
 
             # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
@@ -1632,7 +1624,7 @@ class FastAPI(Server):
         def process_create_database(
             tenant: str, headers: Headers, raw_body: bytes
         ) -> None:
-            db = validate_model(CreateDatabase, orjson.loads(raw_body))
+            db = CreateDatabase.model_validate(orjson.loads(raw_body))
 
             (
                 maybe_tenant,
@@ -1700,7 +1692,7 @@ class FastAPI(Server):
         request: Request,
     ) -> None:
         def process_create_tenant(request: Request, raw_body: bytes) -> None:
-            tenant = validate_model(CreateTenant, orjson.loads(raw_body))
+            tenant = CreateTenant.model_validate(orjson.loads(raw_body))
 
             # NOTE(rescrv, iron will auth):  v1
             maybe_tenant, _ = self.sync_auth_and_get_tenant_and_database_for_request(
@@ -1831,7 +1823,7 @@ class FastAPI(Server):
         def process_create_collection(
             request: Request, tenant: str, database: str, raw_body: bytes
         ) -> CollectionModel:
-            create = validate_model(CreateCollection, orjson.loads(raw_body))
+            create = CreateCollection.model_validate(orjson.loads(raw_body))
             configuration = (
                 CreateCollectionConfiguration()
                 if not create.configuration
@@ -1927,7 +1919,7 @@ class FastAPI(Server):
         def process_update_collection(
             request: Request, collection_id: str, raw_body: bytes
         ) -> None:
-            update = validate_model(UpdateCollection, orjson.loads(raw_body))
+            update = UpdateCollection.model_validate(orjson.loads(raw_body))
             # NOTE(rescrv, iron will auth):  v1
             self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
@@ -2000,7 +1992,7 @@ class FastAPI(Server):
         try:
 
             def process_add(request: Request, raw_body: bytes) -> bool:
-                add = validate_model(AddEmbedding, orjson.loads(raw_body))
+                add = AddEmbedding.model_validate(orjson.loads(raw_body))
                 # NOTE(rescrv, iron will auth):  v1
                 self.sync_auth_and_get_tenant_and_database_for_request(
                     request.headers,
@@ -2042,7 +2034,7 @@ class FastAPI(Server):
         collection_id: str,
     ) -> None:
         def process_update(request: Request, raw_body: bytes) -> bool:
-            update = validate_model(UpdateEmbedding, orjson.loads(raw_body))
+            update = UpdateEmbedding.model_validate(orjson.loads(raw_body))
 
             # NOTE(rescrv, iron will auth):  v1
             self.sync_auth_and_get_tenant_and_database_for_request(
@@ -2079,7 +2071,7 @@ class FastAPI(Server):
         collection_id: str,
     ) -> None:
         def process_upsert(request: Request, raw_body: bytes) -> bool:
-            upsert = validate_model(AddEmbedding, orjson.loads(raw_body))
+            upsert = AddEmbedding.model_validate(orjson.loads(raw_body))
 
             # NOTE(rescrv, iron will auth):  v1
             self.sync_auth_and_get_tenant_and_database_for_request(
@@ -2119,7 +2111,7 @@ class FastAPI(Server):
         request: Request,
     ) -> GetResult:
         def process_get(request: Request, raw_body: bytes) -> GetResult:
-            get = validate_model(GetEmbedding, orjson.loads(raw_body))
+            get = GetEmbedding.model_validate(orjson.loads(raw_body))
             # NOTE(rescrv, iron will auth):  v1
             self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
@@ -2164,7 +2156,7 @@ class FastAPI(Server):
         request: Request,
     ) -> None:
         def process_delete(request: Request, raw_body: bytes) -> None:
-            delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
+            delete = DeleteEmbedding.model_validate(orjson.loads(raw_body))
             # NOTE(rescrv, iron will auth):  v1
             self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
@@ -2243,7 +2235,7 @@ class FastAPI(Server):
         request: Request,
     ) -> QueryResult:
         def process_query(request: Request, raw_body: bytes) -> QueryResult:
-            query = validate_model(QueryEmbedding, orjson.loads(raw_body))
+            query = QueryEmbedding.model_validate(orjson.loads(raw_body))
 
             # NOTE(rescrv, iron will auth):  v1
             self.sync_auth_and_get_tenant_and_database_for_request(
