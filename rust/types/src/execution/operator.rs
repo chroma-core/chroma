@@ -2200,6 +2200,115 @@ impl TryFrom<Select> for chroma_proto::SelectOperator {
     }
 }
 
+/// Aggregation function applied within each group.
+///
+/// Determines which records to keep from each group and their ordering.
+///
+/// # Variants
+///
+/// * `MinK` - Returns k records with minimum values (ascending order).
+///   Use with `Key::Score` to get best matches (lower score = better in Chroma).
+/// * `MaxK` - Returns k records with maximum values (descending order).
+///
+/// # Multi-level Ordering
+///
+/// The `keys` field supports multi-level ordering. Records are sorted by
+/// the first key, then by the second key for ties, and so on.
+///
+/// # Examples
+///
+/// ```
+/// use chroma_types::operator::{Aggregate, Key};
+///
+/// // Best 3 by score per group
+/// let agg = Aggregate::MinK {
+///     keys: vec![Key::Score],
+///     k: 3,
+/// };
+///
+/// // Best 3 by score, then by date for ties
+/// let agg = Aggregate::MinK {
+///     keys: vec![Key::Score, Key::field("date")],
+///     k: 3,
+/// };
+///
+/// // Top 5 by recency (highest date first)
+/// let agg = Aggregate::MaxK {
+///     keys: vec![Key::field("date")],
+///     k: 5,
+/// };
+/// ```
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum Aggregate {
+    /// Returns k records with minimum values (ascending order)
+    #[serde(rename = "$min_k")]
+    MinK {
+        /// Keys for multi-level ordering
+        keys: Vec<Key>,
+        /// Number of records to return per group
+        k: u32,
+    },
+    /// Returns k records with maximum values (descending order)
+    #[serde(rename = "$max_k")]
+    MaxK {
+        /// Keys for multi-level ordering
+        keys: Vec<Key>,
+        /// Number of records to return per group
+        k: u32,
+    },
+}
+
+/// Groups results by metadata keys and aggregates within each group.
+///
+/// Results are grouped by the specified metadata keys (like SQL GROUP BY),
+/// then aggregated within each group using MinK or MaxK ordering.
+/// The final output is flattened and sorted by score.
+///
+/// # Fields
+///
+/// * `keys` - Metadata keys to group by (composite grouping)
+/// * `aggregate` - Aggregation function to apply within each group
+///
+/// # Behavior
+///
+/// * Missing metadata keys are treated as Null (forming their own group)
+/// * Empty groups are omitted from results
+/// * Final output is flattened (group structure not preserved)
+/// * Results are sorted by score after aggregation
+///
+/// # Examples
+///
+/// ```
+/// use chroma_types::operator::{GroupBy, Aggregate, Key};
+///
+/// // Top 3 documents per category
+/// let group_by = GroupBy {
+///     keys: vec![Key::field("category")],
+///     aggregate: Some(Aggregate::MinK {
+///         keys: vec![Key::Score],
+///         k: 3,
+///     }),
+/// };
+///
+/// // Top 2 per (category, author) combination
+/// let group_by = GroupBy {
+///     keys: vec![Key::field("category"), Key::field("author")],
+///     aggregate: Some(Aggregate::MinK {
+///         keys: vec![Key::Score, Key::field("date")],
+///         k: 2,
+///     }),
+/// };
+/// ```
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct GroupBy {
+    /// Metadata keys to group by
+    #[serde(default)]
+    pub keys: Vec<Key>,
+    /// Aggregation to apply within each group (required when keys is non-empty)
+    #[serde(default)]
+    pub aggregate: Option<Aggregate>,
+}
+
 /// A single search result record.
 ///
 /// Contains the document ID and optionally document content, embeddings, metadata,
