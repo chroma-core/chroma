@@ -1,6 +1,6 @@
 {
   "name": "@chroma-core/all",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": false,
   "description": "All AI embedding providers for Chroma",
   "main": "dist/cjs/index.cjs",
