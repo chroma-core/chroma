@@ -2309,6 +2309,71 @@ pub struct GroupBy {
     pub aggregate: Option<Aggregate>,
 }
 
+impl TryFrom<chroma_proto::Aggregate> for Aggregate {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::Aggregate) -> Result<Self, Self::Error> {
+        match value
+            .aggregate
+            .ok_or(QueryConversionError::field("aggregate"))?
+        {
+            chroma_proto::aggregate::Aggregate::MinK(min_k) => {
+                let keys = min_k.keys.into_iter().map(Key::from).collect();
+                Ok(Aggregate::MinK { keys, k: min_k.k })
+            }
+            chroma_proto::aggregate::Aggregate::MaxK(max_k) => {
+                let keys = max_k.keys.into_iter().map(Key::from).collect();
+                Ok(Aggregate::MaxK { keys, k: max_k.k })
+            }
+        }
+    }
+}
+
+impl From<Aggregate> for chroma_proto::Aggregate {
+    fn from(value: Aggregate) -> Self {
+        let aggregate = match value {
+            Aggregate::MinK { keys, k } => {
+                chroma_proto::aggregate::Aggregate::MinK(chroma_proto::aggregate::MinK {
+                    keys: keys.into_iter().map(|k| k.to_string()).collect(),
+                    k,
+                })
+            }
+            Aggregate::MaxK { keys, k } => {
+                chroma_proto::aggregate::Aggregate::MaxK(chroma_proto::aggregate::MaxK {
+                    keys: keys.into_iter().map(|k| k.to_string()).collect(),
+                    k,
+                })
+            }
+        };
+
+        chroma_proto::Aggregate {
+            aggregate: Some(aggregate),
+        }
+    }
+}
+
+impl TryFrom<chroma_proto::GroupByOperator> for GroupBy {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::GroupByOperator) -> Result<Self, Self::Error> {
+        let keys = value.keys.into_iter().map(Key::from).collect();
+        let aggregate = value.aggregate.map(TryInto::try_into).transpose()?;
+
+        Ok(Self { keys, aggregate })
+    }
+}
+
+impl TryFrom<GroupBy> for chroma_proto::GroupByOperator {
+    type Error = QueryConversionError;
+
+    fn try_from(value: GroupBy) -> Result<Self, Self::Error> {
+        let keys = value.keys.into_iter().map(|k| k.to_string()).collect();
+        let aggregate = value.aggregate.map(Into::into);
+
+        Ok(Self { keys, aggregate })
+    }
+}
+
 /// A single search result record.
 ///
 /// Contains the document ID and optionally document content, embeddings, metadata,
