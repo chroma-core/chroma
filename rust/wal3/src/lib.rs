@@ -502,7 +502,7 @@ pub struct GarbageCollectionOptions {
 
 /////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////
 
-/// A FragmentSeqNo is an identifier that corresponds to the the number of fragments that have been
+/// A FragmentSeqNo is an identifier that corresponds to the number of fragments that have been
 /// issued prior to the segment with this FragmentSeqNo.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash, serde::Deserialize, serde::Serialize,
