@@ -62,6 +62,7 @@ async fn test_k8s_integration_84_bootstrap_empty() {
         PREFIX,
         WRITER,
         mark_dirty,
+        (),
         None,
     )
     .await

@@ -4,13 +4,14 @@ use std::time::Instant;
 use chroma_storage::{ETag, Storage};
 
 use crate::gc::Garbage;
+use crate::interfaces::ManifestPublisher;
 use crate::manifest::{Manifest, ManifestAndETag, Snapshot};
 use crate::reader::read_fragment;
 use crate::writer::MarkDirty;
 use crate::{
     unprefixed_fragment_path, Error, Fragment, FragmentIdentifier, GarbageCollectionOptions,
     LogPosition, SnapshotCache, SnapshotOptions, SnapshotPointerOrFragmentIdentifier,
-    ThrottleOptions,
+    ThrottleOptions, UnboundFragment,
 };
 
 ////////////////////////////////////////////// Staging /////////////////////////////////////////////
@@ -210,6 +211,10 @@ pub struct ManifestManager {
     staging: Mutex<Staging>,
     /// Only one thread doing work at a time.
     do_work_mutex: tokio::sync::Mutex<()>,
+    // Mark dirty.
+    mark_dirty: Arc<dyn MarkDirty>,
+    // Snapshot cache.
+    snapshot_cache: Arc<dyn SnapshotCache>,
 }
 
 impl ManifestManager {
@@ -220,6 +225,8 @@ impl ManifestManager {
         storage: Arc<Storage>,
         prefix: String,
         writer: String,
+        mark_dirty: Arc<dyn MarkDirty>,
+        snapshot_cache: Arc<dyn SnapshotCache>,
     ) -> Result<Self, Error> {
         let Some((manifest, e_tag)) = Manifest::load(&throttle, &storage, &prefix).await? else {
             return Err(Error::UninitializedLog);
@@ -249,90 +256,15 @@ impl ManifestManager {
             writer,
             staging,
             do_work_mutex,
+            mark_dirty,
+            snapshot_cache,
         })
-    }
-
-    /// Signal log contention to anyone writing on the manifest.
-    pub fn shutdown(&self) {
-        let (fragments, garbage) = {
-            let mut staging = self.staging.lock().unwrap();
-            staging.tearing_down = true;
-            (
-                std::mem::take(&mut staging.fragments),
-                std::mem::take(&mut staging.garbage),
-            )
-        };
-        for (_, tx) in fragments {
-            let _ = tx.send(Some(Error::LogContentionDurable));
-        }
-        if let Some((_, tx)) = garbage {
-            let _ = tx.send(Some(Error::LogContentionDurable));
-        }
     }
 
     /// Return the latest stable manifest
     pub fn latest(&self) -> ManifestAndETag {
         let staging = self.staging.lock().unwrap();
         staging.stable.clone()
-    }
-
-    /// Recover from a fault in writing.  It is possible that fragments have been written that are
-    /// not referenced by the manifest.  Scout ahead until an empty slot is observed.  Then write
-    /// the manifest that includes the new fragments.
-    pub async fn recover(&mut self, mark_dirty: &dyn MarkDirty) -> Result<(), Error> {
-        let next_seq_no_to_apply = {
-            // SAFETY(rescrv):  Mutex poisoning.
-            let staging = self.staging.lock().unwrap();
-            staging.next_seq_no_to_apply
-        };
-        let next_fragment = read_fragment(
-            &self.storage,
-            &self.prefix,
-            &unprefixed_fragment_path(next_seq_no_to_apply),
-        )
-        .await?;
-        if let Some(fragment) = next_fragment {
-            mark_dirty
-                .mark_dirty(fragment.start, (fragment.limit - fragment.start) as usize)
-                .await?;
-            // NOTE(rescrv):  This is a hack.  We are recovering, we want to reset staging to
-            // be totally consistent.  It's easier to throw it away and restart than to get the
-            // adjustment right.
-            match self.publish_fragment(fragment).await {
-                Ok(()) => Err(Error::LogContentionRetry),
-                Err(Error::LogContentionDurable) => Err(Error::LogContentionRetry),
-                err => err,
-            }
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Assign a timestamp to a record.
-    pub fn assign_timestamp(
-        &self,
-        record_count: usize,
-    ) -> Option<(FragmentIdentifier, LogPosition)> {
-        // SAFETY(rescrv):  Mutex poisoning.
-        let mut staging = self.staging.lock().unwrap();
-        // Steal the offset.
-        let position = staging.next_log_position;
-        // Advance the offset for the next assign_timestamp call.
-        staging.next_log_position.offset = staging
-            .next_log_position
-            .offset
-            .saturating_add(record_count as u64);
-        let seq_no = staging.next_seq_no_to_assign;
-        let Some(next_seq_no) = seq_no.successor() else {
-            tracing::error!("fragment sequence number exhausted at {:?}", seq_no);
-            return None;
-        };
-        staging.next_seq_no_to_assign = next_seq_no;
-        if position.offset < u64::MAX {
-            Some((seq_no, position))
-        } else {
-            None
-        }
     }
 
     fn push_work(&self, fragment: Fragment, tx: tokio::sync::oneshot::Sender<Option<Error>>) {
@@ -342,65 +274,6 @@ impl ManifestManager {
             let _ = tx.send(Some(Error::LogContentionDurable));
         } else {
             staging.fragments.push((fragment, tx));
-        }
-    }
-
-    /// Given a fragment, add it to the manifest, batch its application and wait for it to apply.
-    #[tracing::instrument(skip(self, fragment))]
-    pub async fn publish_fragment(&self, fragment: Fragment) -> Result<(), Error> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.push_work(fragment, tx);
-        self.do_work().await;
-        match rx.await {
-            Ok(None) => Ok(()),
-            Ok(Some(err)) => Err(err),
-            // NOTE(rescrv):  This is an error on a channel.  We made the oneshot above.  The
-            // background push work call does not fail.  Do work does not fail.  The only way this
-            // can fail is if some other thread picks up our work and encounters a failure that
-            // causes it to enter a backoff-retry condition.
-            //
-            // See [LogWriter::handle_errors_and_contention] for more information.
-            Err(_) => Err(Error::LogContentionFailure),
-        }
-    }
-
-    pub fn garbage_applies_cleanly(&self, garbage: &Garbage) -> bool {
-        let latest = {
-            let staging = self.staging.lock().unwrap();
-            staging.stable.manifest.clone()
-        };
-        matches!(latest.apply_garbage(garbage.clone()), Ok(Some(_)))
-    }
-
-    // Given garbage that has already been written to S3, apply the garbage collection to this
-    // manifest.
-    pub async fn apply_garbage(&self, garbage: Garbage) -> Result<(), Error> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        // SAFETY(rescrv):  Mutex poisoning.
-        {
-            let mut staging = self.staging.lock().unwrap();
-            if staging.garbage.is_some() {
-                return Err(Error::GarbageCollection(
-                    "tried collecting garbage twice".to_string(),
-                ));
-            }
-            staging.garbage = Some((garbage, tx));
-        }
-        self.do_work().await;
-        match rx.await {
-            Ok(None) => Ok(()),
-            Ok(Some(err)) => {
-                tracing::error!("Unable to apply garbage: {err}");
-                Err(err)
-            }
-            Err(err) => {
-                tracing::error!(
-                    "Unable to receive message for garbage application completion: {err}"
-                );
-                Err(Error::GarbageCollection(format!(
-                    "Unable to receive message for garbage application completion: {err}"
-                )))
-            }
         }
     }
 
@@ -473,28 +346,6 @@ impl ManifestManager {
         }
     }
 
-    pub async fn compute_garbage(
-        &self,
-        options: &GarbageCollectionOptions,
-        first_to_keep: LogPosition,
-        cache: &dyn SnapshotCache,
-    ) -> Result<Option<Garbage>, Error> {
-        // SAFETY(rescrv):  Mutex poisoning.
-        let stable = {
-            let staging = self.staging.lock().unwrap();
-            staging.stable.manifest.clone()
-        };
-        Garbage::new(
-            &self.storage,
-            &self.prefix,
-            &stable,
-            &options.throttle,
-            cache,
-            first_to_keep,
-        )
-        .await
-    }
-
     pub fn count_waiters(&self) -> usize {
         // SAFETY(rescrv):  Mutex poisoning.
         let staging = self.staging.lock().unwrap();
@@ -514,6 +365,199 @@ impl ManifestManager {
         output += &format!("tearing_down: {:?}\n", staging.tearing_down);
         output += &format!("fragments: {}\n", staging.fragments.len());
         output
+    }
+}
+
+#[async_trait::async_trait]
+impl ManifestPublisher<(FragmentIdentifier, LogPosition)> for ManifestManager {
+    /// Signal log contention to anyone writing on the manifest.
+    fn shutdown(&self) {
+        let (fragments, garbage) = {
+            let mut staging = self.staging.lock().unwrap();
+            staging.tearing_down = true;
+            (
+                std::mem::take(&mut staging.fragments),
+                std::mem::take(&mut staging.garbage),
+            )
+        };
+        for (_, tx) in fragments {
+            let _ = tx.send(Some(Error::LogContentionDurable));
+        }
+        if let Some((_, tx)) = garbage {
+            let _ = tx.send(Some(Error::LogContentionDurable));
+        }
+    }
+
+    /// Recover from a fault in writing.  It is possible that fragments have been written that are
+    /// not referenced by the manifest.  Scout ahead until an empty slot is observed.  Then write
+    /// the manifest that includes the new fragments.
+    async fn recover(&mut self) -> Result<(), Error> {
+        let next_seq_no_to_apply = {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let staging = self.staging.lock().unwrap();
+            staging.next_seq_no_to_apply
+        };
+        let next_fragment = read_fragment(
+            &self.storage,
+            &self.prefix,
+            &unprefixed_fragment_path(next_seq_no_to_apply),
+        )
+        .await?;
+        if let Some(fragment) = next_fragment {
+            self.mark_dirty
+                .mark_dirty(fragment.start, (fragment.limit - fragment.start) as usize)
+                .await?;
+            let fragment_identifier = fragment.seq_no;
+            let log_position = fragment.start;
+            let unbound = UnboundFragment {
+                path: fragment.path.clone(),
+                identifier: fragment_identifier,
+                num_records: fragment
+                    .limit
+                    .offset()
+                    .saturating_sub(fragment.start.offset()),
+                num_bytes: fragment.num_bytes,
+                setsum: fragment.setsum,
+            };
+            match self
+                .publish_fragment((fragment_identifier, log_position), unbound)
+                .await
+            {
+                Ok(()) => Err(Error::LogContentionRetry),
+                // NOTE(rescrv):  This is a hack.  We are recovering, we want to reset staging to
+                // be totally consistent.  It's easier to throw it away and restart than to get the
+                // adjustment right.
+                Err(Error::LogContentionDurable) => Err(Error::LogContentionRetry),
+                err => err,
+            }
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Assign a timestamp to a record.
+    fn assign_timestamp(&self, record_count: usize) -> Option<(FragmentIdentifier, LogPosition)> {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let mut staging = self.staging.lock().unwrap();
+        // Steal the offset.
+        let position = staging.next_log_position;
+        // Advance the offset for the next assign_timestamp call.
+        staging.next_log_position.offset = staging
+            .next_log_position
+            .offset
+            .saturating_add(record_count as u64);
+        let seq_no = staging.next_seq_no_to_assign;
+        let Some(next_seq_no) = seq_no.successor() else {
+            tracing::error!("fragment sequence number exhausted at {:?}", seq_no);
+            return None;
+        };
+        staging.next_seq_no_to_assign = next_seq_no;
+        if position.offset < u64::MAX {
+            Some((seq_no, position))
+        } else {
+            None
+        }
+    }
+
+    /// Given a fragment, add it to the manifest, batch its application and wait for it to apply.
+    #[tracing::instrument(skip(self))]
+    async fn publish_fragment(
+        &self,
+        (seq_no, log_position): (FragmentIdentifier, LogPosition),
+        UnboundFragment {
+            path,
+            identifier: unbound_ident,
+            num_records,
+            num_bytes,
+            setsum,
+        }: UnboundFragment,
+    ) -> Result<(), Error> {
+        if seq_no != unbound_ident {
+            return Err(Error::internal(file!(), line!()));
+        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let fragment = Fragment {
+            path,
+            seq_no,
+            start: log_position,
+            limit: log_position + num_records,
+            num_bytes,
+            setsum,
+        };
+        self.push_work(fragment, tx);
+        self.do_work().await;
+        match rx.await {
+            Ok(None) => Ok(()),
+            Ok(Some(err)) => Err(err),
+            // NOTE(rescrv):  This is an error on a channel.  We made the oneshot above.  The
+            // background push work call does not fail.  Do work does not fail.  The only way this
+            // can fail is if some other thread picks up our work and encounters a failure that
+            // causes it to enter a backoff-retry condition.
+            //
+            // See [LogWriter::handle_errors_and_contention] for more information.
+            Err(_) => Err(Error::LogContentionFailure),
+        }
+    }
+
+    async fn garbage_applies_cleanly(&self, garbage: &Garbage) -> Result<bool, Error> {
+        let latest = {
+            let staging = self.staging.lock().unwrap();
+            staging.stable.manifest.clone()
+        };
+        Ok(matches!(latest.apply_garbage(garbage.clone()), Ok(Some(_))))
+    }
+
+    // Given garbage that has already been written to S3, apply the garbage collection to this
+    // manifest.
+    async fn apply_garbage(&self, garbage: Garbage) -> Result<(), Error> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        // SAFETY(rescrv):  Mutex poisoning.
+        {
+            let mut staging = self.staging.lock().unwrap();
+            if staging.garbage.is_some() {
+                return Err(Error::GarbageCollection(
+                    "tried collecting garbage twice".to_string(),
+                ));
+            }
+            staging.garbage = Some((garbage, tx));
+        }
+        self.do_work().await;
+        match rx.await {
+            Ok(None) => Ok(()),
+            Ok(Some(err)) => {
+                tracing::error!("Unable to apply garbage: {err}");
+                Err(err)
+            }
+            Err(err) => {
+                tracing::error!(
+                    "Unable to receive message for garbage application completion: {err}"
+                );
+                Err(Error::GarbageCollection(format!(
+                    "Unable to receive message for garbage application completion: {err}"
+                )))
+            }
+        }
+    }
+
+    async fn compute_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+        first_to_keep: LogPosition,
+    ) -> Result<Option<Garbage>, Error> {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let stable = {
+            let staging = self.staging.lock().unwrap();
+            staging.stable.manifest.clone()
+        };
+        Garbage::new(
+            &self.storage,
+            &self.prefix,
+            &stable,
+            &options.throttle,
+            &*self.snapshot_cache,
+            first_to_keep,
+        )
+        .await
     }
 }
 
@@ -544,6 +588,8 @@ mod tests {
             storage,
             "prefix".to_string(),
             "manager in test".to_string(),
+            Arc::new(()),
+            Arc::new(()),
         )
         .await
         .unwrap();

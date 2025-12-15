@@ -16,12 +16,12 @@ use setsum::Setsum;
 use tracing::{Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::interfaces::FragmentPublisher;
+use crate::interfaces::{FragmentPublisher, ManifestPublisher};
 use crate::{
     unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
     ExponentialBackoff, Fragment, FragmentIdentifier, Garbage, GarbageCollectionOptions,
     LogPosition, LogReader, LogReaderOptions, LogWriterOptions, Manifest, ManifestAndETag,
-    ManifestManager, ThrottleOptions,
+    ManifestManager, SnapshotCache, ThrottleOptions, UnboundFragment,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -56,6 +56,7 @@ pub struct LogWriter {
     prefix: String,
     writer: String,
     mark_dirty: Arc<dyn MarkDirty>,
+    snapshot_cache: Arc<dyn SnapshotCache>,
     inner: Mutex<EpochWriter>,
     reopen_protection: tokio::sync::Mutex<()>,
     cmek: Option<Cmek>,
@@ -72,15 +73,17 @@ impl LogWriter {
     }
 
     /// Open the log, possibly writing a new manifest to recover it.
-    pub async fn open<D: MarkDirty>(
+    pub async fn open<D: MarkDirty, S: SnapshotCache>(
         options: LogWriterOptions,
         storage: Arc<Storage>,
         prefix: &str,
         writer: &str,
         mark_dirty: D,
+        snapshot_cache: S,
         cmek: Option<Cmek>,
     ) -> Result<Self, Error> {
         let mark_dirty = Arc::new(mark_dirty) as _;
+        let snapshot_cache = Arc::new(snapshot_cache) as _;
         let inner = EpochWriter::default();
         let prefix = prefix.to_string();
         let writer = writer.to_string();
@@ -91,6 +94,7 @@ impl LogWriter {
             prefix,
             writer,
             mark_dirty,
+            snapshot_cache,
             inner: Mutex::new(inner),
             reopen_protection,
             cmek,
@@ -100,15 +104,17 @@ impl LogWriter {
     }
 
     /// Open or try once to initialize the log.
-    pub async fn open_or_initialize<D: MarkDirty>(
+    pub async fn open_or_initialize<D: MarkDirty, S: SnapshotCache>(
         options: LogWriterOptions,
         storage: Arc<Storage>,
         prefix: &str,
         writer: &str,
         mark_dirty: D,
+        snapshot_cache: S,
         cmek: Option<Cmek>,
     ) -> Result<Self, Error> {
         let mark_dirty = Arc::new(mark_dirty) as _;
+        let snapshot_cache = Arc::new(snapshot_cache) as _;
         let inner = EpochWriter::default();
         let prefix = prefix.to_string();
         let writer = writer.to_string();
@@ -119,6 +125,7 @@ impl LogWriter {
             prefix,
             writer,
             mark_dirty,
+            snapshot_cache,
             inner: Mutex::new(inner),
             reopen_protection,
             cmek,
@@ -442,6 +449,7 @@ impl LogWriter {
                 self.prefix.clone(),
                 self.writer.clone(),
                 Arc::clone(&self.mark_dirty),
+                Arc::clone(&self.snapshot_cache),
                 self.cmek.clone(),
             )
             .await
@@ -540,6 +548,7 @@ impl OnceLogWriter {
         prefix: String,
         writer: String,
         mark_dirty: Arc<dyn MarkDirty>,
+        snapshot_cache: Arc<dyn SnapshotCache>,
         cmek: Option<Cmek>,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
@@ -551,9 +560,11 @@ impl OnceLogWriter {
             Arc::clone(&storage),
             prefix.clone(),
             writer,
+            Arc::clone(&mark_dirty),
+            Arc::clone(&snapshot_cache),
         )
         .await?;
-        manifest_manager.recover(&*mark_dirty).await?;
+        manifest_manager.recover().await?;
         let this = Arc::new(Self {
             options,
             storage,
@@ -604,6 +615,7 @@ impl OnceLogWriter {
         prefix: String,
         writer: String,
         mark_dirty: Arc<dyn MarkDirty>,
+        snapshot_cache: Arc<dyn SnapshotCache>,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
         let batch_manager = BatchManager::new(options.throttle_fragment)
@@ -614,6 +626,8 @@ impl OnceLogWriter {
             Arc::clone(&storage),
             prefix.clone(),
             writer,
+            Arc::clone(&mark_dirty),
+            Arc::clone(&snapshot_cache),
         )
         .await?;
         Ok(Arc::new(Self {
@@ -772,16 +786,15 @@ impl OnceLogWriter {
             self.shutdown();
         })?;
         // Upload to a coalesced manifest.
-        let fragment = Fragment {
-            path: path.to_string(),
-            seq_no: fragment_identifier,
-            start: log_position,
-            limit: log_position + messages_len,
+        let unbound = UnboundFragment {
+            path,
+            identifier: fragment_identifier,
+            num_records: messages_len as u64,
             num_bytes: num_bytes as u64,
             setsum,
         };
         self.manifest_manager
-            .publish_fragment(fragment)
+            .publish_fragment((fragment_identifier, log_position), unbound)
             .await
             .inspect_err(|_| {
                 self.shutdown();
@@ -827,7 +840,11 @@ impl OnceLogWriter {
             .await
             {
                 Ok(Some((garbage, e_tag))) => {
-                    if garbage.is_empty() || self.manifest_manager.garbage_applies_cleanly(&garbage)
+                    if garbage.is_empty()
+                        || self
+                            .manifest_manager
+                            .garbage_applies_cleanly(&garbage)
+                            .await?
                     {
                         Some((garbage, e_tag))
                     } else if let Some(e_tag) = e_tag {
@@ -862,7 +879,7 @@ impl OnceLogWriter {
             };
             let garbage = self
                 .manifest_manager
-                .compute_garbage(options, cutoff, &())
+                .compute_garbage(options, cutoff)
                 .await?;
             let Some(garbage) = garbage else {
                 return Ok(false);

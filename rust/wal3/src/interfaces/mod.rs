@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use tracing::Span;
 
-use crate::{Error, LogPosition, ManifestManager};
+use crate::{Error, Garbage, GarbageCollectionOptions, LogPosition, UnboundFragment};
 
 pub mod s3;
 
@@ -20,7 +20,7 @@ pub trait FragmentPublisher {
     /// Take enqueued work to be published.
     async fn take_work(
         &self,
-        manifest_manager: &ManifestManager,
+        manifest_manager: &(dyn ManifestPublisher<Self::FragmentPointer> + Sync),
     ) -> Result<
         Option<(
             Self::FragmentPointer,
@@ -44,4 +44,32 @@ pub trait FragmentPublisher {
     fn shutdown_prepare(&self);
     /// Finish shutting down.
     fn shutdown_finish(&self);
+}
+
+#[async_trait::async_trait]
+pub trait ManifestPublisher<FragmentPointer> {
+    /// Recover the manifest so that it can do work.
+    async fn recover(&mut self) -> Result<(), Error>;
+    /// Assign a timestamp for the next fragment that's going to be published on this manifest.
+    fn assign_timestamp(&self, record_count: usize) -> Option<FragmentPointer>;
+    /// Publish a fragment previously assigned a timestamp using assign_timestamp.
+    async fn publish_fragment(
+        &self,
+        pointer: FragmentPointer,
+        fragment: UnboundFragment,
+    ) -> Result<(), Error>;
+    /// Check if the garbge will apply "cleanly", that is without violating invariants.
+    async fn garbage_applies_cleanly(&self, garbage: &Garbage) -> Result<bool, Error>;
+    /// Apply a garbage file to the manifest.
+    async fn apply_garbage(&self, garbage: Garbage) -> Result<(), Error>;
+    /// Compute the garbage assuming at least log position will be kept.
+    async fn compute_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+        first_to_keep: LogPosition,
+    ) -> Result<Option<Garbage>, Error>;
+
+    /// Shutdown the manifest manager.  Must be called between prepare and finish of
+    /// FragmentPublisher shutdown.
+    fn shutdown(&self);
 }

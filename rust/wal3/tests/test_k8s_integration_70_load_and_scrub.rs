@@ -29,6 +29,7 @@ async fn test_k8s_integration_70_load_and_scrub() {
         "test_k8s_integration_70_load_and_scrub",
         "load and scrub writer",
         (),
+        (),
         None,
     )
     .await

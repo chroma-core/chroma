@@ -38,6 +38,7 @@ async fn test_k8s_integration_03_initialized_append_succeeds() {
         "test_k8s_integration_03_initialized_append_succeeds",
         "test writer",
         (),
+        (),
         None,
     )
     .await

@@ -18,6 +18,7 @@ async fn test_k8s_integration_82_copy_empty_log_initializes() {
         "test_k8s_integration_82_copy_empty_log_initializes_source",
         "writer",
         (),
+        (),
         None,
     )
     .await

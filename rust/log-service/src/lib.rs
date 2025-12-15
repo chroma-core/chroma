@@ -48,7 +48,8 @@ use uuid::Uuid;
 use wal3::{
     Cursor, CursorName, CursorStore, CursorStoreOptions, Fragment, GarbageCollectionOptions,
     Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
-    ManifestAndETag, MarkDirty as MarkDirtyTrait, Witness,
+    ManifestAndETag, MarkDirty as MarkDirtyTrait, Snapshot, SnapshotCache, SnapshotPointer,
+    Witness,
 };
 
 mod scrub;
@@ -248,13 +249,24 @@ async fn get_log_from_handle<'a>(
     storage: &Arc<Storage>,
     prefix: &str,
     mark_dirty: MarkDirty,
+    snapshot_cache: Arc<dyn SnapshotCache>,
     cmek: Option<Cmek>,
 ) -> Result<LogRef<'a>, wal3::Error> {
     let active = handle.active.lock().await;
-    get_log_from_handle_with_mutex_held(handle, active, options, storage, prefix, mark_dirty, cmek)
-        .await
+    get_log_from_handle_with_mutex_held(
+        handle,
+        active,
+        options,
+        storage,
+        prefix,
+        mark_dirty,
+        snapshot_cache,
+        cmek,
+    )
+    .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn get_log_from_handle_with_mutex_held<'a>(
     handle: &'a crate::state_hash_table::Handle<LogKey, LogStub>,
     mut active: tokio::sync::MutexGuard<'_, ActiveLog>,
@@ -262,6 +274,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
     storage: &Arc<Storage>,
     prefix: &str,
     mark_dirty: MarkDirty,
+    snapshot_cache: Arc<dyn SnapshotCache>,
     cmek: Option<Cmek>,
 ) -> Result<LogRef<'a>, wal3::Error> {
     if active.log.is_some() {
@@ -280,6 +293,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
         // TODO(rescrv):  Configurable params.
         "log writer",
         mark_dirty.clone(),
+        snapshot_cache,
         cmek,
     )
     .await?;
@@ -339,6 +353,55 @@ pub struct CachedBytes {
 impl chroma_cache::Weighted for CachedBytes {
     fn weight(&self) -> usize {
         self.bytes.len()
+    }
+}
+
+//////////////////////////////////////// PersistentSnapshotCache ////////////////////////////////////
+
+/// A wrapper that adapts `PersistentCache<String, CachedBytes>` to the `SnapshotCache` trait.
+struct PersistentSnapshotCache {
+    collection_id: CollectionUuid,
+    cache: Arc<dyn chroma_cache::PersistentCache<String, CachedBytes>>,
+}
+
+impl PersistentSnapshotCache {
+    fn cache_key(&self, ptr: &SnapshotPointer) -> String {
+        format!("{}::snapshot::{}", self.collection_id, ptr.path_to_snapshot)
+    }
+}
+
+#[async_trait::async_trait]
+impl SnapshotCache for PersistentSnapshotCache {
+    async fn get(&self, ptr: &SnapshotPointer) -> Result<Option<Snapshot>, wal3::Error> {
+        let key = self.cache_key(ptr);
+        match self.cache.get(&key).await {
+            Ok(Some(cached)) => match serde_json::from_slice(&cached.bytes) {
+                Ok(snapshot) => Ok(Some(snapshot)),
+                Err(err) => {
+                    tracing::error!("failed to deserialize snapshot from cache: {err:?}");
+                    Ok(None)
+                }
+            },
+            Ok(None) => Ok(None),
+            Err(err) => {
+                tracing::error!("failed to get snapshot from cache: {err:?}");
+                Ok(None)
+            }
+        }
+    }
+
+    async fn put(&self, ptr: &SnapshotPointer, snapshot: &Snapshot) -> Result<(), wal3::Error> {
+        let key = self.cache_key(ptr);
+        let bytes = match serde_json::to_vec(snapshot) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                tracing::error!("failed to serialize snapshot for cache: {err:?}");
+                return Ok(());
+            }
+        };
+        let cached = CachedBytes { bytes };
+        let _ = self.cache.insert(key, cached).await;
+        Ok(())
     }
 }
 
@@ -552,11 +615,24 @@ pub struct LogServer {
     rolling_up: tokio::sync::Mutex<()>,
     backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
     need_to_compact: Mutex<HashMap<CollectionUuid, RollupPerCollection>>,
-    cache: Option<Box<dyn chroma_cache::PersistentCache<String, CachedBytes>>>,
+    cache: Option<Arc<dyn chroma_cache::PersistentCache<String, CachedBytes>>>,
     metrics: Metrics,
 }
 
 impl LogServer {
+    fn snapshot_cache_for_collection(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Arc<dyn SnapshotCache> {
+        match &self.cache {
+            Some(cache) => Arc::new(PersistentSnapshotCache {
+                collection_id,
+                cache: Arc::clone(cache),
+            }),
+            None => Arc::new(()),
+        }
+    }
+
     fn set_backpressure(&self, to_pressure: &[CollectionUuid]) {
         let mut new_backpressure = Arc::new(HashSet::from_iter(to_pressure.iter().cloned()));
         let mut backpressure = self.backpressure.lock();
@@ -622,6 +698,7 @@ impl LogServer {
         //
         // The writer will read the manifest, and try to read the next fragment.  This adds
         // latency, but improves correctness.
+        let snapshot_cache = self.snapshot_cache_for_collection(collection_id);
         let log = get_log_from_handle_with_mutex_held(
             &handle,
             active,
@@ -629,6 +706,7 @@ impl LogServer {
             &self.storage,
             &storage_prefix,
             mark_dirty,
+            snapshot_cache,
             None, // Offset updates don't use CMEK
         )
         .await
@@ -1131,12 +1209,14 @@ impl LogServer {
             collection_id,
             dirty_log: self.dirty_log.clone(),
         };
+        let snapshot_cache = self.snapshot_cache_for_collection(collection_id);
         let log = match get_log_from_handle(
             &handle,
             &self.config.writer,
             &self.storage,
             &prefix,
             mark_dirty,
+            snapshot_cache,
             cmek,
         )
         .await
@@ -1767,12 +1847,14 @@ impl LogServer {
                     dirty_log: self.dirty_log.clone(),
                 };
                 let handle = self.open_logs.get_or_create_state(key);
+                let snapshot_cache = self.snapshot_cache_for_collection(collection_id);
                 let log = get_log_from_handle(
                     &handle,
                     &self.config.writer,
                     &self.storage,
                     &prefix,
                     mark_dirty,
+                    snapshot_cache,
                     None, // GC doesn't use CMEK
                 )
                 .await
@@ -2311,25 +2393,30 @@ impl Configurable<LogServerConfig> for LogServer {
         config: &LogServerConfig,
         registry: &chroma_config::registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let cache = if let Some(cache_config) = &config.cache {
-            match chroma_cache::from_config_persistent::<String, CachedBytes>(cache_config).await {
-                Ok(cache) => Some(cache),
-                Err(err) => {
-                    tracing::error!("cache not configured: {err:?}");
-                    None
+        let cache: Option<Arc<dyn chroma_cache::PersistentCache<String, CachedBytes>>> =
+            if let Some(cache_config) = &config.cache {
+                match chroma_cache::from_config_persistent::<String, CachedBytes>(cache_config)
+                    .await
+                {
+                    Ok(cache) => Some(cache.into()),
+                    Err(err) => {
+                        tracing::error!("cache not configured: {err:?}");
+                        None
+                    }
                 }
-            }
-        } else {
-            None
-        };
+            } else {
+                None
+            };
         let storage = Storage::try_from_config(&config.storage, registry).await?;
         let storage = Arc::new(storage);
+        let dirty_log_snapshot_cache: Arc<dyn SnapshotCache> = Arc::new(());
         let dirty_log = LogWriter::open_or_initialize(
             config.writer.clone(),
             Arc::clone(&storage),
             &MarkDirty::path_for_hostname(&config.my_member_id),
             "dirty log writer",
             (),
+            dirty_log_snapshot_cache,
             None, // Dirty log doesn't use CMEK
         )
         .await
@@ -3536,6 +3623,7 @@ mod tests {
             },
             ..Default::default()
         };
+        let snapshot_cache: Arc<dyn SnapshotCache> = Arc::new(());
         let dirty_log = Some(Arc::new(
             LogWriter::open_or_initialize(
                 writer_options.clone(),
@@ -3543,6 +3631,7 @@ mod tests {
                 "test-rust-log-service",
                 "test-dirty-log-writer",
                 (),
+                snapshot_cache,
                 None, // Test doesn't use CMEK
             )
             .await
@@ -4089,12 +4178,14 @@ mod tests {
         let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
 
         // Create the dirty log writer
+        let snapshot_cache: Arc<dyn SnapshotCache> = Arc::new(());
         let dirty_log = LogWriter::open_or_initialize(
             LogWriterOptions::default(),
             Arc::clone(&storage),
             "dirty-test",
             "dirty log writer",
             (),
+            Arc::clone(&snapshot_cache),
             None, // Test doesn't use CMEK
         )
         .await
@@ -4126,6 +4217,7 @@ mod tests {
             &storage_prefix,
             "test log writer",
             (),
+            Arc::clone(&snapshot_cache),
             None, // Test doesn't use CMEK
         )
         .await
