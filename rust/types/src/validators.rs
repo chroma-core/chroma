@@ -1,5 +1,6 @@
 use crate::{
-    operator::{Rank, RankExpr},
+    execution::plan::SearchPayload,
+    operator::{Aggregate, GroupBy, Rank},
     CollectionMetadataUpdate, Metadata, MetadataValue, Schema, UpdateMetadata, UpdateMetadataValue,
     DOCUMENT_KEY, EMBEDDING_KEY,
 };
@@ -143,38 +144,50 @@ pub fn validate_optional_metadata(metadata: &Metadata) -> Result<(), ValidationE
 
 /// Validate rank operator for sparse vectors
 pub fn validate_rank(rank: &Rank) -> Result<(), ValidationError> {
-    if let Some(expr) = &rank.expr {
-        validate_rank_expr(expr)?;
+    for knn in rank.knn_queries() {
+        if let crate::operator::QueryVector::Sparse(sv) = &knn.query {
+            sv.validate().map_err(|e| {
+                ValidationError::new("sparse_vector")
+                    .with_message(format!("Invalid sparse vector in KNN query: {}", e).into())
+            })?;
+        }
     }
     Ok(())
 }
 
-fn validate_rank_expr(expr: &RankExpr) -> Result<(), ValidationError> {
-    match expr {
-        RankExpr::Knn { query, .. } => {
-            if let crate::operator::QueryVector::Sparse(sv) = query {
-                sv.validate().map_err(|e| {
-                    ValidationError::new("sparse_vector")
-                        .with_message(format!("Invalid sparse vector in KNN query: {}", e).into())
-                })?;
-            }
+/// Validate group_by operator
+pub fn validate_group_by(group_by: &GroupBy) -> Result<(), ValidationError> {
+    let has_keys = !group_by.keys.is_empty();
+    let has_aggregate = group_by.aggregate.is_some();
+
+    if has_keys != has_aggregate {
+        return Err(ValidationError::new("group_by").with_message(
+            "group_by keys and aggregate must both be specified or both be omitted".into(),
+        ));
+    }
+
+    if let Some(agg) = &group_by.aggregate {
+        let (agg_keys, k) = match agg {
+            Aggregate::MinK { keys, k } | Aggregate::MaxK { keys, k } => (keys, *k),
+        };
+        if agg_keys.is_empty() {
+            return Err(ValidationError::new("group_by")
+                .with_message("aggregate keys must not be empty".into()));
         }
-        RankExpr::Absolute(inner)
-        | RankExpr::Exponentiation(inner)
-        | RankExpr::Logarithm(inner) => validate_rank_expr(inner)?,
-        RankExpr::Division { left, right } | RankExpr::Subtraction { left, right } => {
-            validate_rank_expr(left)?;
-            validate_rank_expr(right)?;
+        if k == 0 {
+            return Err(ValidationError::new("group_by")
+                .with_message("aggregate k must be greater than 0".into()));
         }
-        RankExpr::Maximum(exprs)
-        | RankExpr::Minimum(exprs)
-        | RankExpr::Multiplication(exprs)
-        | RankExpr::Summation(exprs) => {
-            for expr in exprs {
-                validate_rank_expr(expr)?;
-            }
-        }
-        RankExpr::Value(_) => {}
+    }
+
+    Ok(())
+}
+
+/// Validate SearchPayload
+pub fn validate_search_payload(payload: &SearchPayload) -> Result<(), ValidationError> {
+    if !payload.group_by.keys.is_empty() && payload.rank.expr.is_none() {
+        return Err(ValidationError::new("group_by")
+            .with_message("group_by requires rank expression to be specified".into()));
     }
     Ok(())
 }

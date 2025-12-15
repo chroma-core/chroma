@@ -8,7 +8,7 @@ use super::{
 use crate::{
     chroma_proto,
     operator::{Key, RankExpr},
-    validators::validate_rank,
+    validators::{validate_group_by, validate_rank, validate_search_payload},
     Where,
 };
 use serde::{Deserialize, Serialize};
@@ -227,6 +227,7 @@ impl TryFrom<Knn> for chroma_proto::KnnPlan {
 ///     .select([Key::Document, Key::Score]);
 /// ```
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Validate)]
+#[validate(schema(function = "validate_search_payload"))]
 pub struct SearchPayload {
     #[serde(default)]
     pub filter: Filter,
@@ -234,6 +235,7 @@ pub struct SearchPayload {
     #[validate(custom(function = "validate_rank"))]
     pub rank: Rank,
     #[serde(default)]
+    #[validate(custom(function = "validate_group_by"))]
     pub group_by: GroupBy,
     #[serde(default)]
     pub limit: Limit,
@@ -467,7 +469,10 @@ impl PartialSchema for SearchPayload {
                             ArrayBuilder::new()
                                 .items(Object::with_type(SchemaType::Type(Type::String))),
                         )
-                        .property("aggregate", Object::with_type(SchemaType::Type(Type::Object))),
+                        .property(
+                            "aggregate",
+                            Object::with_type(SchemaType::Type(Type::Object)),
+                        ),
                 )
                 .property(
                     "limit",
