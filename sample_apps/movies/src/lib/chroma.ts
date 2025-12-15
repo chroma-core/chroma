@@ -47,6 +47,9 @@ function getChromaClient(): ChromaClient {
 }
 
 export async function queryMovies(query: string) {
+  console.log("\n🔍 [Chroma] Searching movies...");
+  console.log(`   Query: "${query}"`);
+
   const moviesCollection = await getChromaClient().getCollection({
     name: "movies",
   });
@@ -54,6 +57,10 @@ export async function queryMovies(query: string) {
   if (!knownSparseEmbeddingFunctions.has("chroma-bm25")) {
     registerSparseEmbeddingFunction("chroma-bm25", ChromaBm25EmbeddingFunction);
   }
+
+  console.log("   Strategy: Hybrid search (RRF)");
+  console.log("   - Dense embeddings (semantic similarity)");
+  console.log("   - BM25 sparse vectors (keyword matching)");
 
   const rank = Rrf({
     ranks: [
@@ -77,8 +84,21 @@ export async function queryMovies(query: string) {
     .limit(10)
     .select(K.ID, K.DOCUMENT, K.METADATA, K.SCORE);
 
+  const startTime = performance.now();
   const searchResult = await moviesCollection.search(search);
+  const elapsed = (performance.now() - startTime).toFixed(0);
   const rows = searchResult.rows()[0] ?? [];
+
+  console.log(`   Found ${rows.length} results in ${elapsed}ms`);
+  console.log("   Top results:");
+  rows.forEach((row, i) => {
+    const title = row.metadata?.title || row.id;
+    const score = row.score?.toFixed(3) ?? "n/a";
+    console.log(`     ${i + 1}. ${title} (score: ${score})`);
+  });
+  if (rows.length > 3) {
+    console.log(`     ... and ${rows.length - 3} more`);
+  }
 
   const sanitizedRows = rows.map((item) => {
     const { metadata, ...rest } = item;
