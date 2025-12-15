@@ -396,7 +396,7 @@ impl From<Limit> for chroma_proto::LimitOperator {
 }
 
 /// The `RecordDistance` represents a measure of embedding (identified by `offset_id`) with respect to query embedding
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct RecordMeasure {
     pub offset_id: u32,
     pub measure: f32,
