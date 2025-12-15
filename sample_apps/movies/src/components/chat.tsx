@@ -29,13 +29,20 @@ export default function Chat() {
                 switch (part.type) {
                   case "text":
                     return <p key={`part-${index}`}>{part.text}</p>;
-                  case "data-context":
-                    return (
-                      <ContextRow
-                        key={`part-${index}`}
-                        context={part.data as ContextItem}
-                      />
-                    );
+                  case "tool-searchMovies": {
+                    if (part.state === "output-available") {
+                      const output = part.output as {
+                        results: SearchResultRow[];
+                      };
+                      return (
+                        <ContextRow
+                          key={`part-${index}`}
+                          context={{ documents: output.results }}
+                        />
+                      );
+                    }
+                    return null;
+                  }
                 }
               })}
             </div>
