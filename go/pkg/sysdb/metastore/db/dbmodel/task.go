@@ -50,6 +50,6 @@ type IAttachedFunctionDb interface {
 	DeleteAll() error
 	GetMinCompletionOffsetForCollection(inputCollectionID string) (*int64, error)
 	CleanupExpiredPartial(maxAgeSeconds uint64) ([]uuid.UUID, error)
-	GetSoftDeletedAttachedFunctions(cutoffTime time.Time, limit int32) ([]*AttachedFunction, error)
+	GetAttachedFunctionsToGc(cutoffTime time.Time, limit int32) ([]*AttachedFunction, error)
 	HardDeleteAttachedFunction(id uuid.UUID) error
 }

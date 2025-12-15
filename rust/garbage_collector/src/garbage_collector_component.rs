@@ -149,13 +149,13 @@ impl GarbageCollector {
 
     async fn garbage_collect_attached_functions(
         &mut self,
-        attached_function_soft_delete_absolute_cutoff_time: SystemTime,
+        attached_function_gc_absolute_cutoff_time: SystemTime,
     ) -> (u32, u32) {
-        tracing::info!("Checking for soft-deleted attached functions to hard delete");
+        tracing::info!("Checking for attached functions to garbage collect (deleted or not ready)");
         match self
             .sysdb_client
-            .get_soft_deleted_attached_functions(
-                attached_function_soft_delete_absolute_cutoff_time,
+            .get_attached_functions_to_gc(
+                attached_function_gc_absolute_cutoff_time,
                 self.config.max_attached_functions_to_gc_per_run,
             )
             .await
@@ -163,7 +163,7 @@ impl GarbageCollector {
             Ok(attached_functions_to_delete) => {
                 if !attached_functions_to_delete.is_empty() {
                     tracing::info!(
-                        "Found {} soft-deleted attached functions to hard delete",
+                        "Found {} attached functions to garbage collect (deleted or not ready)",
                         attached_functions_to_delete.len()
                     );
 
@@ -212,12 +212,12 @@ impl GarbageCollector {
                     );
                     (num_deleted, num_failed)
                 } else {
-                    tracing::debug!("No soft-deleted attached functions found to hard delete");
+                    tracing::debug!("No attached functions found to garbage collect");
                     (0, 0)
                 }
             }
             Err(e) => {
-                tracing::error!("Failed to get soft-deleted attached functions: {}", e);
+                tracing::error!("Failed to get attached functions to garbage collect: {}", e);
                 (0, 0)
             }
         }
