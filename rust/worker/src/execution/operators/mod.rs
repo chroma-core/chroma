@@ -25,6 +25,7 @@ pub mod prefetch_segment;
 pub mod projection;
 pub mod purge_dirty_log;
 pub mod rank;
+pub mod ranked_group_by;
 pub mod repair_log_offsets;
 pub mod select;
 pub mod source_record_segment;
