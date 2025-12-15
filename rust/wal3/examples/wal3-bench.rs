@@ -8,7 +8,9 @@ use guacamole::Guacamole;
 use chroma_storage::s3::s3_client_for_test_with_bucket_name;
 use chroma_storage::Storage;
 
-use wal3::{Error, LogWriter, LogWriterOptions};
+use wal3::{
+    Error, FragmentPublisherFactory, LogWriter, LogWriterOptions, ManifestPublisherFactory,
+};
 
 ///////////////////////////////////////////// benchmark ////////////////////////////////////////////
 
@@ -33,7 +35,13 @@ impl Default for Options {
     }
 }
 
-async fn append_once(mut guac: Guacamole, log: Arc<LogWriter>) {
+type DefaultLogWriter = LogWriter<
+    (wal3::FragmentSeqNo, wal3::LogPosition),
+    wal3::FragmentPublisherFactory,
+    wal3::ManifestPublisherFactory,
+>;
+
+async fn append_once(mut guac: Guacamole, log: Arc<DefaultLogWriter>) {
     let mut record = vec![0; 1 << 13];
     guac.generate(&mut record);
     match log.append(record).await {
@@ -48,14 +56,29 @@ async fn append_once(mut guac: Guacamole, log: Arc<LogWriter>) {
 }
 
 async fn garbage_collect_in_a_loop(options: LogWriterOptions, storage: Arc<Storage>, prefix: &str) {
+    let writer = "benchmark gc'er";
     loop {
+        let fragment_factory = FragmentPublisherFactory {
+            options: options.clone(),
+            storage: Arc::clone(&storage),
+            prefix: prefix.to_string(),
+            mark_dirty: Arc::new(()),
+        };
+        let manifest_factory = ManifestPublisherFactory {
+            options: options.clone(),
+            storage: Arc::clone(&storage),
+            prefix: prefix.to_string(),
+            writer: writer.to_string(),
+            mark_dirty: Arc::new(()),
+            snapshot_cache: Arc::new(()),
+        };
         let log = match LogWriter::open(
             options.clone(),
             Arc::clone(&storage),
             prefix,
-            "benchmark gc'er",
-            (),
-            (),
+            writer,
+            fragment_factory,
+            manifest_factory,
             None,
         )
         .await
@@ -72,7 +95,7 @@ async fn garbage_collect_in_a_loop(options: LogWriterOptions, storage: Arc<Stora
     }
 }
 
-async fn garbage_collect_once(_log: &LogWriter) -> Result<(), Error> {
+async fn garbage_collect_once(_log: &DefaultLogWriter) -> Result<(), Error> {
     Ok(())
 }
 
@@ -81,15 +104,30 @@ async fn main() {
     let options = Options::default();
 
     let storage = Arc::new(s3_client_for_test_with_bucket_name("wal3-testing").await);
-
+    let prefix = "wal3bench";
+    let writer = "benchmark writer";
+    let fragment_factory = FragmentPublisherFactory {
+        options: options.log.clone(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        mark_dirty: Arc::new(()),
+    };
+    let manifest_factory = ManifestPublisherFactory {
+        options: options.log.clone(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        writer: writer.to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
     let log = Arc::new(
         LogWriter::open_or_initialize(
             options.log.clone(),
             Arc::clone(&storage),
-            "wal3bench",
-            "benchmark writer",
-            (),
-            (),
+            prefix,
+            writer,
+            fragment_factory,
+            manifest_factory,
             None,
         )
         .await
@@ -106,7 +144,7 @@ async fn main() {
     let gcer = tokio::task::spawn(garbage_collect_in_a_loop(
         options.log.clone(),
         Arc::clone(&storage),
-        "wal3bench",
+        prefix,
     ));
     let mut guac = Guacamole::new(0);
     let start = Instant::now();
@@ -139,10 +177,8 @@ async fn main() {
         }
     }
     println!("done offering load");
-    println!("{:?}", log.count_waiters());
     let drained = Instant::now();
     drop(tx);
-    println!("{}", log.debug_dump());
     reaper.await.unwrap();
     println!("done with benchmark");
     gcer.abort();

@@ -6,8 +6,8 @@ use proptest::prelude::{ProptestConfig, Strategy};
 use rand::RngCore;
 
 use wal3::{
-    Error, Fragment, FragmentIdentifier, Garbage, LogPosition, Manifest, Snapshot, SnapshotOptions,
-    SnapshotPointer, ThrottleOptions,
+    Error, Fragment, FragmentIdentifier, FragmentSeqNo, Garbage, LogPosition, Manifest, Snapshot,
+    SnapshotOptions, SnapshotPointer, ThrottleOptions,
 };
 
 #[derive(Default)]
@@ -69,10 +69,12 @@ fn deltas_to_fragment_sequence(deltas: &[FragmentDelta]) -> Vec<Fragment> {
             }
         } else {
             Fragment {
-                path: wal3::unprefixed_fragment_path(FragmentIdentifier::SeqNo(1)),
+                path: wal3::unprefixed_fragment_path(FragmentIdentifier::SeqNo(
+                    FragmentSeqNo::from_u64(1),
+                )),
                 num_bytes: delta.num_bytes,
                 setsum: delta.setsum,
-                seq_no: FragmentIdentifier::SeqNo(1),
+                seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
                 start: LogPosition::from_offset(1),
                 limit: LogPosition::from_offset(1) + delta.num_records,
             }
@@ -202,7 +204,7 @@ proptest::proptest! {
             snapshots: snapshots.clone(),
         };
         eprintln!("[{:?}, {:?})", start, limit);
-        let mut last_initial_seq_no = FragmentIdentifier::SeqNo(0);
+        let mut last_initial_seq_no = FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(0));
         for offset in start.offset()..=limit.offset() {
             let position = LogPosition::from_offset(offset);
             eprintln!("position = {position:?}");

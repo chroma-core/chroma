@@ -3,10 +3,50 @@ use std::sync::Arc;
 use chroma_storage::Storage;
 use chroma_sysdb::{SysDb, TestSysDb};
 use chroma_types::{CollectionUuid, DirtyMarker};
-use wal3::{CursorStore, CursorStoreOptions, LogPosition, LogReader, LogReaderOptions};
+use wal3::{
+    CursorStore, CursorStoreOptions, FragmentPublisherFactory, FragmentSeqNo, LogPosition,
+    LogReader, LogReaderOptions, LogWriter, LogWriterOptions, ManifestPublisherFactory, MarkDirty,
+    SnapshotCache,
+};
 
 use s3heap::{HeapPruner, HeapReader, HeapWriter};
 use s3heap_service::{HeapTender, HEAP_TENDER_CURSOR_NAME};
+
+/// Concrete type alias for the LogWriter with S3 factories.
+type S3LogWriter =
+    LogWriter<(FragmentSeqNo, LogPosition), FragmentPublisherFactory, ManifestPublisherFactory>;
+
+/// Helper to create a test log writer with the new factory interfaces.
+async fn create_test_log_writer(storage: &Storage, prefix: &str, writer_name: &str) -> S3LogWriter {
+    let options = LogWriterOptions::default();
+    let mark_dirty: Arc<dyn MarkDirty> = Arc::new(());
+    let snapshot_cache: Arc<dyn SnapshotCache> = Arc::new(());
+    let fragment_publisher_factory = FragmentPublisherFactory {
+        options: options.clone(),
+        storage: Arc::new(storage.clone()),
+        prefix: prefix.to_string(),
+        mark_dirty: Arc::clone(&mark_dirty),
+    };
+    let manifest_publisher_factory = ManifestPublisherFactory {
+        options: options.clone(),
+        storage: Arc::new(storage.clone()),
+        prefix: prefix.to_string(),
+        writer: writer_name.to_string(),
+        mark_dirty: Arc::clone(&mark_dirty),
+        snapshot_cache,
+    };
+    S3LogWriter::open_or_initialize(
+        options,
+        Arc::new(storage.clone()),
+        prefix,
+        writer_name,
+        fragment_publisher_factory,
+        manifest_publisher_factory,
+        None,
+    )
+    .await
+    .unwrap()
+}
 
 // Dummy scheduler for testing purposes
 struct DummyScheduler;
@@ -102,17 +142,12 @@ async fn test_k8s_integration_single_mark_dirty_returns_collection() {
         initial_insertion_epoch_us: 1234567890,
     };
 
-    let log_writer = wal3::LogWriter::open_or_initialize(
-        wal3::LogWriterOptions::default(),
-        Arc::new(storage.clone()),
+    let log_writer = create_test_log_writer(
+        &storage,
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
-        (),
-        (),
-        None,
     )
-    .await
-    .unwrap();
+    .await;
     let marker_bytes = serde_json::to_vec(&marker).unwrap();
     log_writer.append(marker_bytes).await.unwrap();
 
@@ -158,17 +193,12 @@ async fn test_k8s_integration_multiple_markers_same_collection_keeps_max() {
         },
     ];
 
-    let log_writer = wal3::LogWriter::open_or_initialize(
-        wal3::LogWriterOptions::default(),
-        Arc::new(storage.clone()),
+    let log_writer = create_test_log_writer(
+        &storage,
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
-        (),
-        (),
-        None,
     )
-    .await
-    .unwrap();
+    .await;
     for marker in markers {
         let marker_bytes = serde_json::to_vec(&marker).unwrap();
         log_writer.append(marker_bytes).await.unwrap();
@@ -210,17 +240,12 @@ async fn test_k8s_integration_reinsert_count_nonzero_filters_marker() {
         },
     ];
 
-    let log_writer = wal3::LogWriter::open_or_initialize(
-        wal3::LogWriterOptions::default(),
-        Arc::new(storage.clone()),
+    let log_writer = create_test_log_writer(
+        &storage,
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
-        (),
-        (),
-        None,
     )
-    .await
-    .unwrap();
+    .await;
     for marker in markers {
         let marker_bytes = serde_json::to_vec(&marker).unwrap();
         log_writer.append(marker_bytes).await.unwrap();
@@ -266,17 +291,12 @@ async fn test_k8s_integration_purge_and_cleared_markers_ignored() {
         },
     ];
 
-    let log_writer = wal3::LogWriter::open_or_initialize(
-        wal3::LogWriterOptions::default(),
-        Arc::new(storage.clone()),
+    let log_writer = create_test_log_writer(
+        &storage,
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
-        (),
-        (),
-        None,
     )
-    .await
-    .unwrap();
+    .await;
     for marker in markers {
         let marker_bytes = serde_json::to_vec(&marker).unwrap();
         log_writer.append(marker_bytes).await.unwrap();
@@ -313,17 +333,12 @@ async fn test_k8s_integration_multiple_collections_all_processed() {
         })
         .collect();
 
-    let log_writer = wal3::LogWriter::open_or_initialize(
-        wal3::LogWriterOptions::default(),
-        Arc::new(storage.clone()),
+    let log_writer = create_test_log_writer(
+        &storage,
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
-        (),
-        (),
-        None,
     )
-    .await
-    .unwrap();
+    .await;
     for marker in markers {
         let marker_bytes = serde_json::to_vec(&marker).unwrap();
         log_writer.append(marker_bytes).await.unwrap();
@@ -358,17 +373,12 @@ async fn test_k8s_integration_cursor_initialized_on_first_run() {
         initial_insertion_epoch_us: 1234567890,
     };
 
-    let log_writer = wal3::LogWriter::open_or_initialize(
-        wal3::LogWriterOptions::default(),
-        Arc::new(storage.clone()),
+    let log_writer = create_test_log_writer(
+        &storage,
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
-        (),
-        (),
-        None,
     )
-    .await
-    .unwrap();
+    .await;
     let marker_bytes = serde_json::to_vec(&marker).unwrap();
     log_writer.append(marker_bytes).await.unwrap();
 
@@ -396,17 +406,12 @@ async fn test_k8s_integration_cursor_advances_on_subsequent_runs() {
     let dirty_log_prefix = format!("test-cursor-advance-{}", test_id);
     let heap_prefix = format!("test-heap-{}", test_id);
 
-    let log_writer = wal3::LogWriter::open_or_initialize(
-        wal3::LogWriterOptions::default(),
-        Arc::new(storage.clone()),
+    let log_writer = create_test_log_writer(
+        &storage,
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
-        (),
-        (),
-        None,
     )
-    .await
-    .unwrap();
+    .await;
 
     let collection_id1 = CollectionUuid::new();
     let marker1 = DirtyMarker::MarkDirty {
@@ -472,17 +477,12 @@ async fn test_k8s_integration_cursor_not_updated_when_no_new_data() {
         initial_insertion_epoch_us: 1234567890,
     };
 
-    let log_writer = wal3::LogWriter::open_or_initialize(
-        wal3::LogWriterOptions::default(),
-        Arc::new(storage.clone()),
+    let log_writer = create_test_log_writer(
+        &storage,
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
-        (),
-        (),
-        None,
     )
-    .await
-    .unwrap();
+    .await;
     log_writer
         .append(serde_json::to_vec(&marker).unwrap())
         .await
@@ -516,17 +516,12 @@ async fn test_k8s_integration_invalid_json_in_dirty_log_fails() {
     let dirty_log_prefix = format!("test-invalid-json-{}", test_id);
     let heap_prefix = format!("test-heap-{}", test_id);
 
-    let log_writer = wal3::LogWriter::open_or_initialize(
-        wal3::LogWriterOptions::default(),
-        Arc::new(storage.clone()),
+    let log_writer = create_test_log_writer(
+        &storage,
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
-        (),
-        (),
-        None,
     )
-    .await
-    .unwrap();
+    .await;
     let invalid_json = b"not valid json at all".to_vec();
     log_writer.append(invalid_json).await.unwrap();
 
@@ -561,17 +556,12 @@ async fn test_k8s_integration_handles_empty_markers_after_filtering() {
         DirtyMarker::Cleared,
     ];
 
-    let log_writer = wal3::LogWriter::open_or_initialize(
-        wal3::LogWriterOptions::default(),
-        Arc::new(storage.clone()),
+    let log_writer = create_test_log_writer(
+        &storage,
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
-        (),
-        (),
-        None,
     )
-    .await
-    .unwrap();
+    .await;
     for marker in markers {
         log_writer
             .append(serde_json::to_vec(&marker).unwrap())

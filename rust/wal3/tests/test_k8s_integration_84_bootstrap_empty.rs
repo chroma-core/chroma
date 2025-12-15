@@ -3,7 +3,8 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, SnapshotOptions,
+    FragmentPublisherFactory, Limits, LogPosition, LogReader, LogReaderOptions, LogWriter,
+    LogWriterOptions, ManifestPublisherFactory, SnapshotOptions,
 };
 
 #[tokio::test]
@@ -21,12 +22,28 @@ async fn test_k8s_integration_84_bootstrap_empty() {
     let mark_dirty = ();
     let first_record_offset_position = LogPosition::from_offset(42);
     let messages = vec![];
+    let fragment_factory = FragmentPublisherFactory {
+        options: options.clone(),
+        storage: Arc::clone(&storage),
+        prefix: PREFIX.to_string(),
+        mark_dirty: Arc::new(()),
+    };
+    let manifest_factory = ManifestPublisherFactory {
+        options: options.clone(),
+        storage: Arc::clone(&storage),
+        prefix: PREFIX.to_string(),
+        writer: WRITER.to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
     LogWriter::bootstrap(
         &options,
         &storage,
         PREFIX,
         WRITER,
         mark_dirty,
+        fragment_factory,
+        manifest_factory,
         first_record_offset_position,
         messages.clone(),
         None,
@@ -56,13 +73,34 @@ async fn test_k8s_integration_84_bootstrap_empty() {
         .await
         .unwrap();
 
+    let options2 = LogWriterOptions {
+        snapshot_manifest: SnapshotOptions {
+            snapshot_rollover_threshold: 2,
+            fragment_rollover_threshold: 2,
+        },
+        ..LogWriterOptions::default()
+    };
+    let fragment_factory2 = FragmentPublisherFactory {
+        options: options2.clone(),
+        storage: Arc::clone(&storage),
+        prefix: PREFIX.to_string(),
+        mark_dirty: Arc::new(()),
+    };
+    let manifest_factory2 = ManifestPublisherFactory {
+        options: options2.clone(),
+        storage: Arc::clone(&storage),
+        prefix: PREFIX.to_string(),
+        writer: WRITER.to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
     let writer = LogWriter::open(
-        options,
+        options2,
         Arc::clone(&storage),
         PREFIX,
         WRITER,
-        mark_dirty,
-        (),
+        fragment_factory2,
+        manifest_factory2,
         None,
     )
     .await

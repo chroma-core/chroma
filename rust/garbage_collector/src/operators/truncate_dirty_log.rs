@@ -7,7 +7,10 @@ use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
 use futures::future::try_join_all;
 use thiserror::Error;
-use wal3::{GarbageCollectionOptions, GarbageCollector, LogWriterOptions};
+use wal3::{
+    FragmentPublisherFactory, FragmentSeqNo, GarbageCollectionOptions, GarbageCollector,
+    LogPosition, LogWriterOptions, ManifestPublisherFactory, MarkDirty, SnapshotCache,
+};
 
 #[derive(Clone, Debug)]
 pub struct TruncateDirtyLogOperator {
@@ -56,11 +59,34 @@ impl Operator<TruncateDirtyLogInput, TruncateDirtyLogOutput> for TruncateDirtyLo
         let mut replica_id = 0u64;
         loop {
             let dirty_log_prefix = format!("dirty-rust-log-service-{replica_id}");
-            match GarbageCollector::open(
-                LogWriterOptions::default(),
+            let options = LogWriterOptions::default();
+            // GC doesn't mark anything dirty.
+            let mark_dirty: Arc<dyn MarkDirty> = Arc::new(());
+            let snapshot_cache: Arc<dyn SnapshotCache> = Arc::new(());
+            let fragment_publisher_factory = FragmentPublisherFactory {
+                options: options.clone(),
+                storage: storage_arc.clone(),
+                prefix: dirty_log_prefix.clone(),
+                mark_dirty: Arc::clone(&mark_dirty),
+            };
+            let manifest_publisher_factory = ManifestPublisherFactory {
+                options: options.clone(),
+                storage: storage_arc.clone(),
+                prefix: dirty_log_prefix.clone(),
+                writer: "garbage collection service".to_string(),
+                mark_dirty: Arc::clone(&mark_dirty),
+                snapshot_cache,
+            };
+            match GarbageCollector::<
+                (FragmentSeqNo, LogPosition),
+                FragmentPublisherFactory,
+                ManifestPublisherFactory,
+            >::open(
+                options,
                 storage_arc.clone(),
+                fragment_publisher_factory,
+                manifest_publisher_factory,
                 &dirty_log_prefix,
-                "garbage collection service",
             )
             .await
             {

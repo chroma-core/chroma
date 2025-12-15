@@ -12,7 +12,10 @@ use chroma_types::CollectionUuid;
 use futures::future::try_join_all;
 use thiserror::Error;
 use tracing::Level;
-use wal3::{GarbageCollectionOptions, GarbageCollector, LogPosition, LogWriterOptions};
+use wal3::{
+    FragmentPublisherFactory, FragmentSeqNo, GarbageCollectionOptions, GarbageCollector,
+    LogPosition, LogWriterOptions, ManifestPublisherFactory, MarkDirty, SnapshotCache,
+};
 
 use crate::types::CleanupMode;
 
@@ -77,11 +80,35 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                 let storage_clone = storage_arc.clone();
                 let mut logs = self.logs.clone();
                 log_gc_futures.push(async move {
-                    let writer = match GarbageCollector::open(
-                        LogWriterOptions::default(),
+                    let prefix = collection_id.storage_prefix_for_log();
+                    let options = LogWriterOptions::default();
+                    // GC doesn't mark anything dirty.
+                    let mark_dirty: Arc<dyn MarkDirty> = Arc::new(());
+                    let snapshot_cache: Arc<dyn SnapshotCache> = Arc::new(());
+                    let fragment_publisher_factory = FragmentPublisherFactory {
+                        options: options.clone(),
+                        storage: storage_clone.clone(),
+                        prefix: prefix.clone(),
+                        mark_dirty: Arc::clone(&mark_dirty),
+                    };
+                    let manifest_publisher_factory = ManifestPublisherFactory {
+                        options: options.clone(),
+                        storage: storage_clone.clone(),
+                        prefix: prefix.clone(),
+                        writer: "garbage collection service".to_string(),
+                        mark_dirty: Arc::clone(&mark_dirty),
+                        snapshot_cache,
+                    };
+                    let writer = match GarbageCollector::<
+                        (FragmentSeqNo, LogPosition),
+                        FragmentPublisherFactory,
+                        ManifestPublisherFactory,
+                    >::open(
+                        options,
                         storage_clone,
-                        &collection_id.storage_prefix_for_log(),
-                        "garbage collection service",
+                        fragment_publisher_factory,
+                        manifest_publisher_factory,
+                        &prefix,
                     )
                     .await
                     {

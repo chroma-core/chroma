@@ -4,8 +4,8 @@ use tokio::sync::Barrier;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
-    ThrottleOptions,
+    FragmentPublisherFactory, LogPosition, LogReader, LogReaderOptions, LogWriter,
+    LogWriterOptions, Manifest, ManifestPublisherFactory, ThrottleOptions,
 };
 
 #[tokio::test]
@@ -76,20 +76,36 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
     let prefix_clone = prefix.clone();
 
     let writer_task = tokio::spawn(async move {
-        let log = LogWriter::open(
-            LogWriterOptions {
-                throttle_fragment: ThrottleOptions {
-                    batch_size_bytes: 1,
-                    batch_interval_us: 1,
-                    ..ThrottleOptions::default()
-                },
-                ..LogWriterOptions::default()
+        let writer = "concurrent_writer";
+        let options = LogWriterOptions {
+            throttle_fragment: ThrottleOptions {
+                batch_size_bytes: 1,
+                batch_interval_us: 1,
+                ..ThrottleOptions::default()
             },
+            ..LogWriterOptions::default()
+        };
+        let fragment_factory = FragmentPublisherFactory {
+            options: options.clone(),
+            storage: Arc::clone(&storage_clone),
+            prefix: prefix_clone.clone(),
+            mark_dirty: Arc::new(()),
+        };
+        let manifest_factory = ManifestPublisherFactory {
+            options: options.clone(),
+            storage: Arc::clone(&storage_clone),
+            prefix: prefix_clone.clone(),
+            writer: writer.to_string(),
+            mark_dirty: Arc::new(()),
+            snapshot_cache: Arc::new(()),
+        };
+        let log = LogWriter::open(
+            options,
             storage_clone,
             &prefix_clone,
-            "concurrent_writer",
-            (),
-            (),
+            writer,
+            fragment_factory,
+            manifest_factory,
             None,
         )
         .await

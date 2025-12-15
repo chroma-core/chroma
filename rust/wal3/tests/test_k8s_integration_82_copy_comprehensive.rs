@@ -3,34 +3,47 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    Cursor, CursorName, CursorStoreOptions, LogPosition, LogReader, LogReaderOptions, LogWriter,
-    LogWriterOptions, Manifest, SnapshotOptions,
+    Cursor, CursorName, CursorStoreOptions, FragmentPublisherFactory, LogPosition, LogReader,
+    LogReaderOptions, LogWriter, LogWriterOptions, Manifest, ManifestPublisherFactory,
+    SnapshotOptions,
 };
 
 #[tokio::test]
 async fn test_k8s_integration_copy_with_deep_snapshots() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
-    Manifest::initialize(
-        &LogWriterOptions::default(),
-        &storage,
-        "copy_with_deep_snapshots_source",
-        "init",
-    )
-    .await
-    .unwrap();
-    let log = LogWriter::open(
-        LogWriterOptions {
-            snapshot_manifest: SnapshotOptions {
-                snapshot_rollover_threshold: 3,
-                fragment_rollover_threshold: 3,
-            },
-            ..LogWriterOptions::default()
+    let prefix = "copy_with_deep_snapshots_source";
+    let writer = "writer";
+    Manifest::initialize(&LogWriterOptions::default(), &storage, prefix, "init")
+        .await
+        .unwrap();
+    let options = LogWriterOptions {
+        snapshot_manifest: SnapshotOptions {
+            snapshot_rollover_threshold: 3,
+            fragment_rollover_threshold: 3,
         },
+        ..LogWriterOptions::default()
+    };
+    let fragment_factory = FragmentPublisherFactory {
+        options: options.clone(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        mark_dirty: Arc::new(()),
+    };
+    let manifest_factory = ManifestPublisherFactory {
+        options: options.clone(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        writer: writer.to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
+    let log = LogWriter::open(
+        options,
         Arc::clone(&storage),
-        "copy_with_deep_snapshots_source",
-        "writer",
-        (),
-        (),
+        prefix,
+        writer,
+        fragment_factory,
+        manifest_factory,
         None,
     )
     .await
@@ -45,7 +58,7 @@ async fn test_k8s_integration_copy_with_deep_snapshots() {
     let reader = LogReader::open(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "copy_with_deep_snapshots_source".to_string(),
+        prefix.to_string(),
     )
     .await
     .unwrap();
@@ -92,27 +105,39 @@ async fn test_k8s_integration_copy_with_deep_snapshots() {
 #[tokio::test]
 async fn test_k8s_integration_copy_at_specific_offset() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
-    Manifest::initialize(
-        &LogWriterOptions::default(),
-        &storage,
-        "copy_at_specific_offset_source",
-        "init",
-    )
-    .await
-    .unwrap();
-    let log = LogWriter::open(
-        LogWriterOptions {
-            snapshot_manifest: SnapshotOptions {
-                snapshot_rollover_threshold: 5,
-                fragment_rollover_threshold: 5,
-            },
-            ..LogWriterOptions::default()
+    let prefix = "copy_at_specific_offset_source";
+    let writer = "writer";
+    Manifest::initialize(&LogWriterOptions::default(), &storage, prefix, "init")
+        .await
+        .unwrap();
+    let options = LogWriterOptions {
+        snapshot_manifest: SnapshotOptions {
+            snapshot_rollover_threshold: 5,
+            fragment_rollover_threshold: 5,
         },
+        ..LogWriterOptions::default()
+    };
+    let fragment_factory = FragmentPublisherFactory {
+        options: options.clone(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        mark_dirty: Arc::new(()),
+    };
+    let manifest_factory = ManifestPublisherFactory {
+        options: options.clone(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        writer: writer.to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
+    let log = LogWriter::open(
+        options,
         Arc::clone(&storage),
-        "copy_at_specific_offset_source",
-        "writer",
-        (),
-        (),
+        prefix,
+        writer,
+        fragment_factory,
+        manifest_factory,
         None,
     )
     .await
@@ -131,7 +156,7 @@ async fn test_k8s_integration_copy_at_specific_offset() {
     let reader = LogReader::open(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "copy_at_specific_offset_source".to_string(),
+        prefix.to_string(),
     )
     .await
     .unwrap();
@@ -168,21 +193,33 @@ async fn test_k8s_integration_copy_at_specific_offset() {
 #[tokio::test]
 async fn test_k8s_integration_copy_verifies_manifest_consistency() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
-    Manifest::initialize(
-        &LogWriterOptions::default(),
-        &storage,
-        "copy_verifies_manifest_source",
-        "init",
-    )
-    .await
-    .unwrap();
+    let prefix = "copy_verifies_manifest_source";
+    let writer = "writer";
+    Manifest::initialize(&LogWriterOptions::default(), &storage, prefix, "init")
+        .await
+        .unwrap();
+    let options = LogWriterOptions::default();
+    let fragment_factory = FragmentPublisherFactory {
+        options: options.clone(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        mark_dirty: Arc::new(()),
+    };
+    let manifest_factory = ManifestPublisherFactory {
+        options: options.clone(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        writer: writer.to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
     let log = LogWriter::open(
-        LogWriterOptions::default(),
+        options,
         Arc::clone(&storage),
-        "copy_verifies_manifest_source",
-        "writer",
-        (),
-        (),
+        prefix,
+        writer,
+        fragment_factory,
+        manifest_factory,
         None,
     )
     .await
@@ -194,7 +231,7 @@ async fn test_k8s_integration_copy_verifies_manifest_consistency() {
     let reader = LogReader::open(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "copy_verifies_manifest_source".to_string(),
+        prefix.to_string(),
     )
     .await
     .unwrap();
@@ -256,13 +293,30 @@ async fn test_k8s_integration_copy_verifies_manifest_consistency() {
 #[tokio::test]
 async fn test_k8s_integration_copy_empty_with_advanced_manifest() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+    let prefix = "copy_empty_advanced_source";
+    let writer = "writer";
+    let options = LogWriterOptions::default();
+    let fragment_factory = FragmentPublisherFactory {
+        options: options.clone(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        mark_dirty: Arc::new(()),
+    };
+    let manifest_factory = ManifestPublisherFactory {
+        options: options.clone(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        writer: writer.to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
     let log = LogWriter::open_or_initialize(
-        LogWriterOptions::default(),
+        options,
         Arc::clone(&storage),
-        "copy_empty_advanced_source",
-        "writer",
-        (),
-        (),
+        prefix,
+        writer,
+        fragment_factory,
+        manifest_factory,
         None,
     )
     .await
@@ -290,7 +344,7 @@ async fn test_k8s_integration_copy_empty_with_advanced_manifest() {
     let reader = LogReader::open(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "copy_empty_advanced_source".to_string(),
+        prefix.to_string(),
     )
     .await
     .unwrap();
@@ -333,27 +387,39 @@ async fn test_k8s_integration_copy_empty_with_advanced_manifest() {
 #[tokio::test]
 async fn test_k8s_integration_copy_with_large_fragments() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
-    Manifest::initialize(
-        &LogWriterOptions::default(),
-        &storage,
-        "copy_large_fragments_source",
-        "init",
-    )
-    .await
-    .unwrap();
-    let log = LogWriter::open(
-        LogWriterOptions {
-            snapshot_manifest: SnapshotOptions {
-                snapshot_rollover_threshold: 10,
-                fragment_rollover_threshold: 10,
-            },
-            ..LogWriterOptions::default()
+    let prefix = "copy_large_fragments_source";
+    let writer = "writer";
+    Manifest::initialize(&LogWriterOptions::default(), &storage, prefix, "init")
+        .await
+        .unwrap();
+    let options = LogWriterOptions {
+        snapshot_manifest: SnapshotOptions {
+            snapshot_rollover_threshold: 10,
+            fragment_rollover_threshold: 10,
         },
+        ..LogWriterOptions::default()
+    };
+    let fragment_factory = FragmentPublisherFactory {
+        options: options.clone(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        mark_dirty: Arc::new(()),
+    };
+    let manifest_factory = ManifestPublisherFactory {
+        options: options.clone(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        writer: writer.to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
+    let log = LogWriter::open(
+        options,
         Arc::clone(&storage),
-        "copy_large_fragments_source",
-        "writer",
-        (),
-        (),
+        prefix,
+        writer,
+        fragment_factory,
+        manifest_factory,
         None,
     )
     .await
@@ -368,7 +434,7 @@ async fn test_k8s_integration_copy_with_large_fragments() {
     let reader = LogReader::open(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "copy_large_fragments_source".to_string(),
+        prefix.to_string(),
     )
     .await
     .unwrap();

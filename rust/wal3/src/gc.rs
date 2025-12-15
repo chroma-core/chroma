@@ -10,12 +10,13 @@ use chroma_storage::{
     StorageError,
 };
 
+use crate::interfaces::{FragmentPointer, FragmentPublisherFactory, ManifestPublisherFactory};
 use crate::manifest::unprefixed_snapshot_path;
 use crate::writer::OnceLogWriter;
 use crate::{
     deserialize_setsum, prefixed_fragment_path, serialize_setsum, Error, Fragment,
-    FragmentIdentifier, GarbageCollectionOptions, LogPosition, LogWriterOptions, Manifest,
-    ScrubError, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
+    FragmentIdentifier, FragmentSeqNo, GarbageCollectionOptions, LogPosition, LogWriterOptions,
+    Manifest, ScrubError, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
@@ -41,8 +42,8 @@ impl Garbage {
             snapshots_to_drop: Vec::new(),
             snapshots_to_make: Vec::new(),
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(0),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(0),
+            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::ZERO),
+            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::ZERO),
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         }
@@ -89,8 +90,8 @@ impl Garbage {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(0),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(0),
+            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::ZERO),
+            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::ZERO),
             setsum_to_discard: Setsum::default(),
             first_to_keep,
         };
@@ -262,13 +263,22 @@ impl Garbage {
         for snap in self.snapshots_to_drop.iter() {
             paths.push(format!("{}/{}", prefix, snap.path_to_snapshot));
         }
-        let start = self.fragments_to_drop_start.as_seq_no().unwrap_or(0);
-        let limit = self.fragments_to_drop_limit.as_seq_no().unwrap_or(0);
-        paths.into_iter().chain(
-            (start..limit).map(move |seq_no| {
-                prefixed_fragment_path(&prefix, FragmentIdentifier::SeqNo(seq_no))
-            }),
-        )
+        let start = self
+            .fragments_to_drop_start
+            .as_seq_no()
+            .unwrap_or(FragmentSeqNo::ZERO)
+            .as_u64();
+        let limit = self
+            .fragments_to_drop_limit
+            .as_seq_no()
+            .unwrap_or(FragmentSeqNo::ZERO)
+            .as_u64();
+        paths.into_iter().chain((start..limit).map(move |seq_no| {
+            prefixed_fragment_path(
+                &prefix,
+                FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(seq_no)),
+            )
+        }))
     }
 
     pub async fn install_new_snapshots(
@@ -536,25 +546,36 @@ impl Garbage {
 
 ///////////////////////////////////////// GarbageCollector /////////////////////////////////////////
 
-pub struct GarbageCollector {
-    log: Arc<OnceLogWriter>,
+pub struct GarbageCollector<
+    P: FragmentPointer,
+    FP: FragmentPublisherFactory<FragmentPointer = P>,
+    MP: ManifestPublisherFactory<FragmentPointer = P>,
+> {
+    log: Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>,
 }
 
-impl GarbageCollector {
+impl<
+        P: FragmentPointer,
+        FP: FragmentPublisherFactory<FragmentPointer = P>,
+        MP: ManifestPublisherFactory<FragmentPointer = P>,
+    > GarbageCollector<P, FP, MP>
+{
     /// Open the log into a state where it can be garbage collected.
     pub async fn open(
         options: LogWriterOptions,
         storage: Arc<Storage>,
+        new_fragment_publisher: FP,
+        new_manifest_publisher: MP,
         prefix: &str,
-        writer: &str,
     ) -> Result<Self, Error> {
+        let batch_manager = new_fragment_publisher.make().await?;
+        let manifest_manager = new_manifest_publisher.make().await?;
         let log = OnceLogWriter::open_for_read_only_and_stale_ops(
             options.clone(),
             Arc::clone(&storage),
+            batch_manager,
+            manifest_manager,
             prefix.to_string(),
-            writer.to_string(),
-            Arc::new(()),
-            Arc::new(()),
         )
         .await?;
         Ok(Self { log })
@@ -593,16 +614,16 @@ mod tests {
         let manifest: Manifest = serde_json::from_str(manifest_json).unwrap();
         let output = Garbage::bug_patch_construct_garbage_from_manifest(
             &manifest,
-            FragmentIdentifier::SeqNo(806913),
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(806913)),
             LogPosition::from_offset(900883),
         );
         assert_eq!(
             output.fragments_to_drop_start,
-            FragmentIdentifier::SeqNo(806913)
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(806913))
         );
         assert_eq!(
             output.fragments_to_drop_limit,
-            FragmentIdentifier::SeqNo(806913)
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(806913))
         );
         assert_eq!(
             output.setsum_to_discard.hexdigest(),

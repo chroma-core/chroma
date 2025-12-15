@@ -3,8 +3,9 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    Cursor, CursorName, CursorStoreOptions, GarbageCollectionOptions, Limits, LogPosition,
-    LogReader, LogReaderOptions, LogWriter, LogWriterOptions,
+    Cursor, CursorName, CursorStoreOptions, FragmentPublisherFactory, GarbageCollectionOptions,
+    Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions,
+    ManifestPublisherFactory,
 };
 
 #[tokio::test]
@@ -12,13 +13,30 @@ async fn test_k8s_integration_82_copy_empty_log_initializes() {
     // Appending to a log that has failed to write its manifest fails with log contention.
     // Subsequent writes will repair the log and continue to make progress.
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+    let prefix = "test_k8s_integration_82_copy_empty_log_initializes_source";
+    let writer = "writer";
+    let options = LogWriterOptions::default();
+    let fragment_factory = FragmentPublisherFactory {
+        options: options.clone(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        mark_dirty: Arc::new(()),
+    };
+    let manifest_factory = ManifestPublisherFactory {
+        options: options.clone(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        writer: writer.to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
     let log = LogWriter::open_or_initialize(
-        LogWriterOptions::default(),
+        options,
         Arc::clone(&storage),
-        "test_k8s_integration_82_copy_empty_log_initializes_source",
-        "writer",
-        (),
-        (),
+        prefix,
+        writer,
+        fragment_factory,
+        manifest_factory,
         None,
     )
     .await
@@ -50,7 +68,7 @@ async fn test_k8s_integration_82_copy_empty_log_initializes() {
     let reader = LogReader::open(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "test_k8s_integration_82_copy_empty_log_initializes_source".to_string(),
+        prefix.to_string(),
     )
     .await
     .unwrap();

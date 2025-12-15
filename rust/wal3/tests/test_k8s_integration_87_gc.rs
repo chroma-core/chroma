@@ -5,8 +5,8 @@ use setsum::Setsum;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    unprefixed_snapshot_path, Error, Fragment, FragmentIdentifier, Garbage, LogPosition, Snapshot,
-    SnapshotCache, SnapshotPointer, ThrottleOptions,
+    unprefixed_snapshot_path, Error, Fragment, FragmentIdentifier, FragmentSeqNo, Garbage,
+    LogPosition, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
 // Mock implementations for testing
@@ -59,7 +59,7 @@ fn create_snapshot_for_split_test() -> (SnapshotPointer, Snapshot, MockSnapshotC
             create_fragment(
                 5,
                 8,
-                FragmentIdentifier::SeqNo(1),
+                FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
                 Setsum::from_hexdigest(
                     "00000000aaaaaaaa000000000000000000000000000000000000000000000000",
                 )
@@ -68,7 +68,7 @@ fn create_snapshot_for_split_test() -> (SnapshotPointer, Snapshot, MockSnapshotC
             create_fragment(
                 8,
                 15,
-                FragmentIdentifier::SeqNo(2),
+                FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
                 Setsum::from_hexdigest(
                     "0000000000000000bbbbbbbb0000000000000000000000000000000000000000",
                 )
@@ -100,8 +100,8 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_one_level(
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(1),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(1),
+        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
         setsum_to_discard: Setsum::default(),
         first_to_keep,
     };
@@ -152,7 +152,7 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_one_level(
             fragments: vec![create_fragment(
                 8,
                 15,
-                FragmentIdentifier::SeqNo(2),
+                FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
                 Setsum::from_hexdigest(
                     "0000000000000000bbbbbbbb0000000000000000000000000000000000000000",
                 )
@@ -203,8 +203,8 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_two_level(
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(1),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(1),
+        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
         setsum_to_discard: Setsum::default(),
         first_to_keep,
     };
@@ -245,7 +245,7 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_two_level(
             fragments: vec![create_fragment(
                 8,
                 15,
-                FragmentIdentifier::SeqNo(2),
+                FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
                 Setsum::from_hexdigest(
                     "0000000000000000bbbbbbbb0000000000000000000000000000000000000000",
                 )
@@ -282,8 +282,8 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_three_leve
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(1),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(1),
+        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
         setsum_to_discard: Setsum::default(),
         first_to_keep,
     };
@@ -334,7 +334,7 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_three_leve
             fragments: vec![create_fragment(
                 8,
                 15,
-                FragmentIdentifier::SeqNo(2),
+                FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
                 Setsum::from_hexdigest(
                     "0000000000000000bbbbbbbb0000000000000000000000000000000000000000",
                 )
@@ -351,14 +351,19 @@ fn test_k8s_integration_test_k8s_integration_drop_frag() {
     let setsum =
         Setsum::from_hexdigest("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
             .unwrap();
-    let fragment = create_fragment(10, 20, FragmentIdentifier::SeqNo(1), setsum);
+    let fragment = create_fragment(
+        10,
+        20,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        setsum,
+    );
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(1),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(1),
+        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
         setsum_to_discard: Setsum::default(),
         first_to_keep: LogPosition::from_offset(10),
     };
@@ -373,7 +378,7 @@ fn test_k8s_integration_test_k8s_integration_drop_frag() {
     // Test the garbage structure
     assert_eq!(
         garbage.fragments_to_drop_limit,
-        FragmentIdentifier::SeqNo(2)
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2))
     );
     assert_eq!(garbage.setsum_to_discard, setsum);
 }
@@ -392,8 +397,18 @@ async fn test_k8s_integration_drop_snapshot() {
             .unwrap();
     let total_setsum = frag1_setsum + frag2_setsum;
 
-    let fragment1 = create_fragment(10, 20, FragmentIdentifier::SeqNo(1), frag1_setsum);
-    let fragment2 = create_fragment(20, 30, FragmentIdentifier::SeqNo(2), frag2_setsum);
+    let fragment1 = create_fragment(
+        10,
+        20,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        frag1_setsum,
+    );
+    let fragment2 = create_fragment(
+        20,
+        30,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+        frag2_setsum,
+    );
 
     // Create nested snapshot with fragment1
     let nested_snapshot = Snapshot {
@@ -427,8 +442,8 @@ async fn test_k8s_integration_drop_snapshot() {
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(1),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(1),
+        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
         setsum_to_discard: Setsum::default(),
         first_to_keep: LogPosition::from_offset(35),
     };
@@ -452,7 +467,7 @@ async fn test_k8s_integration_drop_snapshot() {
     // Test the garbage structure
     assert_eq!(
         garbage.fragments_to_drop_limit,
-        FragmentIdentifier::SeqNo(3)
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3))
     );
     assert_eq!(garbage.snapshots_to_drop.len(), 2);
     assert_eq!(garbage.snapshots_to_drop[0], nested_snapshot.to_pointer());
@@ -475,9 +490,24 @@ async fn test_k8s_integration_replace_snapshot_flat() {
         Setsum::from_hexdigest("0000000000000000333333330000000000000000000000000000000000000000")
             .unwrap();
 
-    let fragment1 = create_fragment(5, 10, FragmentIdentifier::SeqNo(1), frag1_setsum); // Will be dropped
-    let fragment2 = create_fragment(10, 20, FragmentIdentifier::SeqNo(2), frag2_setsum); // Will be kept
-    let fragment3 = create_fragment(20, 30, FragmentIdentifier::SeqNo(3), frag3_setsum); // Will be kept
+    let fragment1 = create_fragment(
+        5,
+        10,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        frag1_setsum,
+    ); // Will be dropped
+    let fragment2 = create_fragment(
+        10,
+        20,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+        frag2_setsum,
+    ); // Will be kept
+    let fragment3 = create_fragment(
+        20,
+        30,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
+        frag3_setsum,
+    ); // Will be kept
 
     let total_setsum = frag1_setsum + frag2_setsum + frag3_setsum;
 
@@ -499,8 +529,8 @@ async fn test_k8s_integration_replace_snapshot_flat() {
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(1),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(1),
+        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
         setsum_to_discard: Setsum::default(),
         first_to_keep,
     };
@@ -525,7 +555,7 @@ async fn test_k8s_integration_replace_snapshot_flat() {
     // Test the garbage structure
     assert_eq!(
         garbage.fragments_to_drop_limit,
-        FragmentIdentifier::SeqNo(2)
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2))
     );
     assert_eq!(garbage.snapshots_to_make.len(), 1);
 
@@ -553,9 +583,24 @@ async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff()
         Setsum::from_hexdigest("0000000000000000333333330000000000000000000000000000000000000000")
             .unwrap();
 
-    let fragment1 = create_fragment(5, 10, FragmentIdentifier::SeqNo(1), frag1_setsum);
-    let fragment2 = create_fragment(15, 20, FragmentIdentifier::SeqNo(2), frag2_setsum);
-    let fragment3 = create_fragment(25, 30, FragmentIdentifier::SeqNo(3), frag3_setsum); // Additional fragment for parent
+    let fragment1 = create_fragment(
+        5,
+        10,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        frag1_setsum,
+    );
+    let fragment2 = create_fragment(
+        15,
+        20,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+        frag2_setsum,
+    );
+    let fragment3 = create_fragment(
+        25,
+        30,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
+        frag3_setsum,
+    ); // Additional fragment for parent
 
     // Child snapshot before cutoff (will be dropped)
     let child_snapshot1 = Snapshot {
@@ -611,8 +656,8 @@ async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff()
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(1),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(1),
+        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
         setsum_to_discard: Setsum::default(),
         first_to_keep,
     };
@@ -637,7 +682,7 @@ async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff()
     // Test the garbage structure
     assert_eq!(
         garbage.fragments_to_drop_limit,
-        FragmentIdentifier::SeqNo(2)
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2))
     );
     assert_eq!(garbage.snapshots_to_make.len(), 1);
 
@@ -665,9 +710,24 @@ async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff()
         Setsum::from_hexdigest("3333333333333333333333333333333333333333333333333333333333333333")
             .unwrap();
 
-    let fragment1 = create_fragment(5, 8, FragmentIdentifier::SeqNo(1), frag1_setsum); // Will be dropped
-    let fragment2 = create_fragment(8, 10, FragmentIdentifier::SeqNo(2), frag2_setsum); // Will be dropped
-    let fragment3 = create_fragment(15, 20, FragmentIdentifier::SeqNo(3), frag3_setsum); // Will be kept
+    let fragment1 = create_fragment(
+        5,
+        8,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        frag1_setsum,
+    ); // Will be dropped
+    let fragment2 = create_fragment(
+        8,
+        10,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+        frag2_setsum,
+    ); // Will be dropped
+    let fragment3 = create_fragment(
+        15,
+        20,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
+        frag3_setsum,
+    ); // Will be kept
 
     let total_setsum = frag1_setsum + frag2_setsum + frag3_setsum;
 
@@ -689,8 +749,8 @@ async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff()
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(1),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(1),
+        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
         setsum_to_discard: Setsum::default(),
         first_to_keep,
     };
@@ -715,7 +775,7 @@ async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff()
     // Test the garbage structure
     assert_eq!(
         garbage.fragments_to_drop_limit,
-        FragmentIdentifier::SeqNo(3)
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3))
     );
     assert_eq!(garbage.snapshots_to_make.len(), 1);
 
@@ -742,9 +802,24 @@ async fn test_k8s_integration_replace_snapshot_two_levels_rightmost_leaf() {
         Setsum::from_hexdigest("3333333333333333333333333333333333333333333333333333333333333333")
             .unwrap();
 
-    let fragment1 = create_fragment(5, 10, FragmentIdentifier::SeqNo(1), frag1_setsum);
-    let fragment2 = create_fragment(15, 20, FragmentIdentifier::SeqNo(2), frag2_setsum);
-    let fragment3 = create_fragment(25, 30, FragmentIdentifier::SeqNo(3), frag3_setsum); // Additional fragment for interior
+    let fragment1 = create_fragment(
+        5,
+        10,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        frag1_setsum,
+    );
+    let fragment2 = create_fragment(
+        15,
+        20,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+        frag2_setsum,
+    );
+    let fragment3 = create_fragment(
+        25,
+        30,
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
+        frag3_setsum,
+    ); // Additional fragment for interior
 
     // Left leaf snapshot (will be dropped entirely)
     let left_leaf = Snapshot {
@@ -792,8 +867,8 @@ async fn test_k8s_integration_replace_snapshot_two_levels_rightmost_leaf() {
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(1),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(1),
+        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
         setsum_to_discard: Setsum::default(),
         first_to_keep,
     };
@@ -818,7 +893,7 @@ async fn test_k8s_integration_replace_snapshot_two_levels_rightmost_leaf() {
     // Test the garbage structure
     assert_eq!(
         garbage.fragments_to_drop_limit,
-        FragmentIdentifier::SeqNo(2)
+        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2))
     );
     assert_eq!(garbage.snapshots_to_make.len(), 1);
 
