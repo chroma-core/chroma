@@ -444,6 +444,12 @@ export type SearchPayload = {
             [key: string]: unknown;
         };
     };
+    group_by?: {
+        aggregate?: {
+            [key: string]: unknown;
+        };
+        keys?: Array<string>;
+    };
     limit?: {
         limit?: number;
         offset?: number;

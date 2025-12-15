@@ -3517,4 +3517,112 @@ mod tests {
         let result = merge.merge(input);
         assert_eq!(result, vec![15, 10, 5, 0, -5]);
     }
+
+    #[test]
+    fn test_aggregate_json_serialization() {
+        // Test MinK serialization
+        let min_k = Aggregate::MinK {
+            keys: vec![Key::Score, Key::field("date")],
+            k: 3,
+        };
+        let json = serde_json::to_value(&min_k).unwrap();
+        assert!(json.get("$min_k").is_some());
+        assert_eq!(json["$min_k"]["k"], 3);
+
+        // Test MinK deserialization
+        let min_k_json = serde_json::json!({
+            "$min_k": {
+                "keys": ["#score", "date"],
+                "k": 5
+            }
+        });
+        let deserialized: Aggregate = serde_json::from_value(min_k_json).unwrap();
+        match deserialized {
+            Aggregate::MinK { keys, k } => {
+                assert_eq!(k, 5);
+                assert_eq!(keys.len(), 2);
+                assert_eq!(keys[0], Key::Score);
+                assert_eq!(keys[1], Key::field("date"));
+            }
+            _ => panic!("Expected MinK"),
+        }
+
+        // Test MaxK serialization
+        let max_k = Aggregate::MaxK {
+            keys: vec![Key::field("timestamp")],
+            k: 10,
+        };
+        let json = serde_json::to_value(&max_k).unwrap();
+        assert!(json.get("$max_k").is_some());
+        assert_eq!(json["$max_k"]["k"], 10);
+
+        // Test MaxK deserialization
+        let max_k_json = serde_json::json!({
+            "$max_k": {
+                "keys": ["timestamp"],
+                "k": 2
+            }
+        });
+        let deserialized: Aggregate = serde_json::from_value(max_k_json).unwrap();
+        match deserialized {
+            Aggregate::MaxK { keys, k } => {
+                assert_eq!(k, 2);
+                assert_eq!(keys.len(), 1);
+                assert_eq!(keys[0], Key::field("timestamp"));
+            }
+            _ => panic!("Expected MaxK"),
+        }
+    }
+
+    #[test]
+    fn test_group_by_json_serialization() {
+        // Test GroupBy with MinK
+        let group_by = GroupBy {
+            keys: vec![Key::field("category"), Key::field("author")],
+            aggregate: Some(Aggregate::MinK {
+                keys: vec![Key::Score],
+                k: 3,
+            }),
+        };
+
+        let json = serde_json::to_value(&group_by).unwrap();
+        assert_eq!(json["keys"].as_array().unwrap().len(), 2);
+        assert!(json["aggregate"]["$min_k"].is_object());
+
+        // Test roundtrip
+        let deserialized: GroupBy = serde_json::from_value(json).unwrap();
+        assert_eq!(deserialized.keys.len(), 2);
+        assert_eq!(deserialized.keys[0], Key::field("category"));
+        assert_eq!(deserialized.keys[1], Key::field("author"));
+        assert!(deserialized.aggregate.is_some());
+
+        // Test empty GroupBy
+        let empty_group_by = GroupBy::default();
+        let json = serde_json::to_value(&empty_group_by).unwrap();
+        let deserialized: GroupBy = serde_json::from_value(json).unwrap();
+        assert!(deserialized.keys.is_empty());
+        assert!(deserialized.aggregate.is_none());
+
+        // Test deserialization from JSON
+        let json = serde_json::json!({
+            "keys": ["category"],
+            "aggregate": {
+                "$max_k": {
+                    "keys": ["#score", "priority"],
+                    "k": 5
+                }
+            }
+        });
+        let group_by: GroupBy = serde_json::from_value(json).unwrap();
+        assert_eq!(group_by.keys.len(), 1);
+        assert_eq!(group_by.keys[0], Key::field("category"));
+        match group_by.aggregate {
+            Some(Aggregate::MaxK { keys, k }) => {
+                assert_eq!(k, 5);
+                assert_eq!(keys.len(), 2);
+                assert_eq!(keys[0], Key::Score);
+            }
+            _ => panic!("Expected MaxK aggregate"),
+        }
+    }
 }

@@ -1,6 +1,6 @@
 use crate::{
     execution::plan::SearchPayload,
-    operator::{Aggregate, GroupBy, Rank},
+    operator::{Aggregate, GroupBy, QueryVector, Rank},
     CollectionMetadataUpdate, Metadata, MetadataValue, Schema, UpdateMetadata, UpdateMetadataValue,
     DOCUMENT_KEY, EMBEDDING_KEY,
 };
@@ -145,7 +145,7 @@ pub fn validate_optional_metadata(metadata: &Metadata) -> Result<(), ValidationE
 /// Validate rank operator for sparse vectors
 pub fn validate_rank(rank: &Rank) -> Result<(), ValidationError> {
     for knn in rank.knn_queries() {
-        if let crate::operator::QueryVector::Sparse(sv) = &knn.query {
+        if let QueryVector::Sparse(sv) = &knn.query {
             sv.validate().map_err(|e| {
                 ValidationError::new("sparse_vector")
                     .with_message(format!("Invalid sparse vector in KNN query: {}", e).into())
@@ -166,18 +166,41 @@ pub fn validate_group_by(group_by: &GroupBy) -> Result<(), ValidationError> {
         ));
     }
 
-    if let Some(agg) = &group_by.aggregate {
-        let (agg_keys, k) = match agg {
-            Aggregate::MinK { keys, k } | Aggregate::MaxK { keys, k } => (keys, *k),
-        };
-        if agg_keys.is_empty() {
-            return Err(ValidationError::new("group_by")
-                .with_message("aggregate keys must not be empty".into()));
+    // Validate group_by keys: only metadata fields are allowed
+    for key in &group_by.keys {
+        match key {
+            crate::operator::Key::MetadataField(_) => {}
+            _ => {
+                return Err(ValidationError::new("group_by").with_message(
+                    "group_by keys must be metadata fields (cannot use #score, #document, #embedding, or #metadata)".into(),
+                ));
+            }
         }
-        if k == 0 {
-            return Err(ValidationError::new("group_by")
-                .with_message("aggregate k must be greater than 0".into()));
+    }
+
+    match &group_by.aggregate {
+        Some(Aggregate::MinK { keys, k }) | Some(Aggregate::MaxK { keys, k }) => {
+            if keys.is_empty() {
+                return Err(ValidationError::new("group_by")
+                    .with_message("aggregate keys must not be empty".into()));
+            }
+            if *k == 0 {
+                return Err(ValidationError::new("group_by")
+                    .with_message("aggregate k must be greater than 0".into()));
+            }
+            // Validate aggregate keys: only metadata fields and score are allowed
+            for key in keys {
+                match key {
+                    crate::operator::Key::MetadataField(_) | crate::operator::Key::Score => {}
+                    _ => {
+                        return Err(ValidationError::new("group_by").with_message(
+                            "aggregate keys must be metadata fields or #score (cannot use #document, #embedding, or #metadata)".into(),
+                        ));
+                    }
+                }
+            }
         }
+        None => {}
     }
 
     Ok(())
@@ -340,6 +363,7 @@ pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operator::Key;
     use crate::{MetadataValue, SparseVector};
 
     #[test]
@@ -383,5 +407,149 @@ mod tests {
             MetadataValue::SparseVector(invalid_sparse),
         );
         assert!(validate_metadata(&metadata).is_err());
+    }
+
+    #[test]
+    fn test_validate_group_by() {
+        // Valid: both keys and aggregate present
+        let group_by = GroupBy {
+            keys: vec![Key::field("category")],
+            aggregate: Some(Aggregate::MinK {
+                keys: vec![Key::Score],
+                k: 3,
+            }),
+        };
+        assert!(validate_group_by(&group_by).is_ok());
+
+        // Valid: both empty
+        let group_by = GroupBy {
+            keys: vec![],
+            aggregate: None,
+        };
+        assert!(validate_group_by(&group_by).is_ok());
+
+        // Invalid: keys present, aggregate missing
+        let group_by = GroupBy {
+            keys: vec![Key::field("category")],
+            aggregate: None,
+        };
+        assert!(validate_group_by(&group_by).is_err());
+
+        // Invalid: aggregate present, keys missing
+        let group_by = GroupBy {
+            keys: vec![],
+            aggregate: Some(Aggregate::MinK {
+                keys: vec![Key::Score],
+                k: 3,
+            }),
+        };
+        assert!(validate_group_by(&group_by).is_err());
+
+        // Invalid: aggregate k = 0
+        let group_by = GroupBy {
+            keys: vec![Key::field("category")],
+            aggregate: Some(Aggregate::MinK {
+                keys: vec![Key::Score],
+                k: 0,
+            }),
+        };
+        assert!(validate_group_by(&group_by).is_err());
+
+        // Invalid: aggregate keys empty
+        let group_by = GroupBy {
+            keys: vec![Key::field("category")],
+            aggregate: Some(Aggregate::MaxK { keys: vec![], k: 5 }),
+        };
+        assert!(validate_group_by(&group_by).is_err());
+
+        // Invalid: group_by key must be metadata field (not #score)
+        let group_by = GroupBy {
+            keys: vec![Key::Score],
+            aggregate: Some(Aggregate::MinK {
+                keys: vec![Key::Score],
+                k: 3,
+            }),
+        };
+        assert!(validate_group_by(&group_by).is_err());
+
+        // Invalid: aggregate key cannot be #document
+        let group_by = GroupBy {
+            keys: vec![Key::field("category")],
+            aggregate: Some(Aggregate::MinK {
+                keys: vec![Key::Document],
+                k: 3,
+            }),
+        };
+        assert!(validate_group_by(&group_by).is_err());
+
+        // Valid: aggregate key can be metadata field
+        let group_by = GroupBy {
+            keys: vec![Key::field("category")],
+            aggregate: Some(Aggregate::MinK {
+                keys: vec![Key::field("date"), Key::Score],
+                k: 3,
+            }),
+        };
+        assert!(validate_group_by(&group_by).is_ok());
+    }
+
+    #[test]
+    fn test_validate_search_payload() {
+        use crate::operator::{QueryVector, RankExpr};
+
+        // Valid: group_by with rank expression
+        let payload = SearchPayload {
+            rank: Rank {
+                expr: Some(RankExpr::Knn {
+                    query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+                    key: Key::Embedding,
+                    limit: 100,
+                    default: None,
+                    return_rank: false,
+                }),
+            },
+            group_by: GroupBy {
+                keys: vec![Key::field("category")],
+                aggregate: Some(Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 3,
+                }),
+            },
+            ..Default::default()
+        };
+        assert!(validate_search_payload(&payload).is_ok());
+
+        // Valid: no group_by, no rank
+        let payload = SearchPayload::default();
+        assert!(validate_search_payload(&payload).is_ok());
+
+        // Valid: rank without group_by
+        let payload = SearchPayload {
+            rank: Rank {
+                expr: Some(RankExpr::Knn {
+                    query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+                    key: Key::Embedding,
+                    limit: 100,
+                    default: None,
+                    return_rank: false,
+                }),
+            },
+            ..Default::default()
+        };
+        assert!(validate_search_payload(&payload).is_ok());
+
+        // Invalid: group_by without rank expression
+        let payload = SearchPayload {
+            rank: Rank { expr: None },
+            group_by: GroupBy {
+                keys: vec![Key::field("category")],
+                aggregate: Some(Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 3,
+                }),
+            },
+            ..Default::default()
+        };
+        assert!(validate_search_payload(&payload).is_err());
     }
 }

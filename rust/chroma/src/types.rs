@@ -8,6 +8,7 @@ pub use chroma_types::operator::Filter;
 pub use chroma_types::operator::GroupBy;
 pub use chroma_types::operator::Key;
 pub use chroma_types::operator::Limit;
+pub use chroma_types::operator::QueryVector;
 pub use chroma_types::operator::Rank;
 pub use chroma_types::operator::RankExpr;
 pub use chroma_types::operator::Select;
