@@ -3,7 +3,9 @@
 pub use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse};
 
 pub use chroma_types::operator::rrf;
+pub use chroma_types::operator::Aggregate;
 pub use chroma_types::operator::Filter;
+pub use chroma_types::operator::GroupBy;
 pub use chroma_types::operator::Key;
 pub use chroma_types::operator::Limit;
 pub use chroma_types::operator::Rank;
