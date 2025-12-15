@@ -32,6 +32,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
         "test_k8s_integration_82_copy_then_update_dst_source",
         "load and scrub writer",
         (),
+        (),
         None,
     )
     .await
@@ -85,6 +86,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
         Arc::clone(&storage),
         "test_k8s_integration_82_copy_then_update_dst_target",
         "load and scrub writer",
+        (),
         (),
         None,
     )

@@ -554,6 +554,7 @@ impl GarbageCollector {
             prefix.to_string(),
             writer.to_string(),
             Arc::new(()),
+            Arc::new(()),
         )
         .await?;
         Ok(Self { log })

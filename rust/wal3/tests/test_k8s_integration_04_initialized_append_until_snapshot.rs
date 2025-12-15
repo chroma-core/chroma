@@ -45,6 +45,7 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
         "test_k8s_integration_04_initialized_append_until_snapshot",
         "test writer",
         (),
+        (),
         None,
     )
     .await

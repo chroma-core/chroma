@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 
 use tracing::Span;
 
-use crate::interfaces::FragmentPublisher;
-use crate::{Error, FragmentIdentifier, LogPosition, ManifestManager, ThrottleOptions};
+use crate::interfaces::{FragmentPublisher, ManifestPublisher};
+use crate::{Error, FragmentIdentifier, LogPosition, ThrottleOptions};
 
 /////////////////////////////////////////// ManagerState ///////////////////////////////////////////
 
@@ -38,7 +38,7 @@ impl ManagerState {
     fn select_for_write(
         &mut self,
         options: &ThrottleOptions,
-        manifest_manager: &ManifestManager,
+        manifest_manager: &dyn ManifestPublisher<(FragmentIdentifier, LogPosition)>,
         record_count: usize,
     ) -> Result<Option<(FragmentIdentifier, LogPosition)>, Error> {
         if self.next_write > Instant::now() {
@@ -139,7 +139,7 @@ impl FragmentPublisher for BatchManager {
     /// Take enqueued work to be published.
     async fn take_work(
         &self,
-        manifest_manager: &ManifestManager,
+        manifest_manager: &(dyn ManifestPublisher<(FragmentIdentifier, LogPosition)> + Sync),
     ) -> Result<
         Option<(
             Self::FragmentPointer,
@@ -262,10 +262,12 @@ impl FragmentPublisher for BatchManager {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use chroma_storage::s3_client_for_test_with_new_bucket;
 
     use super::*;
-    use crate::manifest_manager::ManifestManager;
+    use crate::interfaces::s3::manifest_manager::ManifestManager;
     use crate::{LogWriterOptions, Manifest, SnapshotOptions, ThrottleOptions};
 
     #[tokio::test]
@@ -292,6 +294,8 @@ mod tests {
             storage.into(),
             "test-batches-prefix".to_string(),
             "writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
         )
         .await
         .unwrap();

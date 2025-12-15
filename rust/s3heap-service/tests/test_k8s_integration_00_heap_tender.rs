@@ -108,6 +108,7 @@ async fn test_k8s_integration_single_mark_dirty_returns_collection() {
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
         (),
+        (),
         None,
     )
     .await
@@ -163,6 +164,7 @@ async fn test_k8s_integration_multiple_markers_same_collection_keeps_max() {
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
         (),
+        (),
         None,
     )
     .await
@@ -213,6 +215,7 @@ async fn test_k8s_integration_reinsert_count_nonzero_filters_marker() {
         Arc::new(storage.clone()),
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
+        (),
         (),
         None,
     )
@@ -269,6 +272,7 @@ async fn test_k8s_integration_purge_and_cleared_markers_ignored() {
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
         (),
+        (),
         None,
     )
     .await
@@ -315,6 +319,7 @@ async fn test_k8s_integration_multiple_collections_all_processed() {
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
         (),
+        (),
         None,
     )
     .await
@@ -359,6 +364,7 @@ async fn test_k8s_integration_cursor_initialized_on_first_run() {
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
         (),
+        (),
         None,
     )
     .await
@@ -395,6 +401,7 @@ async fn test_k8s_integration_cursor_advances_on_subsequent_runs() {
         Arc::new(storage.clone()),
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
+        (),
         (),
         None,
     )
@@ -471,6 +478,7 @@ async fn test_k8s_integration_cursor_not_updated_when_no_new_data() {
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
         (),
+        (),
         None,
     )
     .await
@@ -513,6 +521,7 @@ async fn test_k8s_integration_invalid_json_in_dirty_log_fails() {
         Arc::new(storage.clone()),
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
+        (),
         (),
         None,
     )
@@ -557,6 +566,7 @@ async fn test_k8s_integration_handles_empty_markers_after_filtering() {
         Arc::new(storage.clone()),
         &dirty_log_prefix,
         &format!("test-writer-{}", test_id),
+        (),
         (),
         None,
     )
