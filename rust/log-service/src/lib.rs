@@ -81,6 +81,12 @@ pub struct Metrics {
     dirty_log_records_read: opentelemetry::metrics::Counter<u64>,
     /// A gauge for the number of dirty log collections as of the last rollup.
     dirty_log_collections: opentelemetry::metrics::Gauge<u64>,
+    /// The number of cache get errors.
+    snapshot_cache_get_errors: opentelemetry::metrics::Counter<u64>,
+    /// The number of cache serialization errors during put.
+    snapshot_cache_serialization_errors: opentelemetry::metrics::Counter<u64>,
+    /// The number of cache deserialization errors during get.
+    snapshot_cache_deserialization_errors: opentelemetry::metrics::Counter<u64>,
 }
 
 impl Metrics {
@@ -95,6 +101,13 @@ impl Metrics {
             log_likely_needs_purge_dirty: meter.f64_gauge("log_likely_needs_purge_dirty").build(),
             dirty_log_records_read: meter.u64_counter("dirty_log_records_read").build(),
             dirty_log_collections: meter.u64_gauge("dirty_log_collections").build(),
+            snapshot_cache_get_errors: meter.u64_counter("snapshot_cache_get_errors").build(),
+            snapshot_cache_serialization_errors: meter
+                .u64_counter("snapshot_cache_serialization_errors")
+                .build(),
+            snapshot_cache_deserialization_errors: meter
+                .u64_counter("snapshot_cache_deserialization_errors")
+                .build(),
         }
     }
 }
@@ -362,6 +375,9 @@ impl chroma_cache::Weighted for CachedBytes {
 struct PersistentSnapshotCache {
     collection_id: CollectionUuid,
     cache: Arc<dyn chroma_cache::PersistentCache<String, CachedBytes>>,
+    get_errors: opentelemetry::metrics::Counter<u64>,
+    serialization_errors: opentelemetry::metrics::Counter<u64>,
+    deserialization_errors: opentelemetry::metrics::Counter<u64>,
 }
 
 impl PersistentSnapshotCache {
@@ -378,13 +394,15 @@ impl SnapshotCache for PersistentSnapshotCache {
             Ok(Some(cached)) => match serde_json::from_slice(&cached.bytes) {
                 Ok(snapshot) => Ok(Some(snapshot)),
                 Err(err) => {
-                    tracing::error!("failed to deserialize snapshot from cache: {err:?}");
+                    self.deserialization_errors.add(1, &[]);
+                    tracing::warn!("failed to deserialize snapshot from cache: {err:?}");
                     Ok(None)
                 }
             },
             Ok(None) => Ok(None),
             Err(err) => {
-                tracing::error!("failed to get snapshot from cache: {err:?}");
+                self.get_errors.add(1, &[]);
+                tracing::warn!("failed to get snapshot from cache: {err:?}");
                 Ok(None)
             }
         }
@@ -395,12 +413,13 @@ impl SnapshotCache for PersistentSnapshotCache {
         let bytes = match serde_json::to_vec(snapshot) {
             Ok(bytes) => bytes,
             Err(err) => {
-                tracing::error!("failed to serialize snapshot for cache: {err:?}");
+                self.serialization_errors.add(1, &[]);
+                tracing::warn!("failed to serialize snapshot for cache: {err:?}");
                 return Ok(());
             }
         };
         let cached = CachedBytes { bytes };
-        let _ = self.cache.insert(key, cached).await;
+        self.cache.insert(key, cached).await;
         Ok(())
     }
 }
@@ -628,6 +647,9 @@ impl LogServer {
             Some(cache) => Arc::new(PersistentSnapshotCache {
                 collection_id,
                 cache: Arc::clone(cache),
+                get_errors: self.metrics.snapshot_cache_get_errors.clone(),
+                serialization_errors: self.metrics.snapshot_cache_serialization_errors.clone(),
+                deserialization_errors: self.metrics.snapshot_cache_deserialization_errors.clone(),
             }),
             None => Arc::new(()),
         }
