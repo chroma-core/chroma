@@ -36,6 +36,7 @@ var (
 	// Collection metadata errors
 	ErrUnknownCollectionMetadataType = errors.New("collection metadata value type not supported")
 	ErrInvalidMetadataUpdate         = errors.New("invalid metadata update, reest metadata true and metadata value not empty")
+	ErrSystemMetadataKeyNotAllowed   = errors.New("cannot set or modify system-reserved metadata key")
 
 	// Segment errors
 	ErrSegmentIDFormat                  = errors.New("segment id format error")

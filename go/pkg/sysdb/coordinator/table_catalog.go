@@ -44,6 +44,52 @@ func NewTableCatalog(tx dbmodel.ITransaction, metaDomain dbmodel.IMetaDomain, s3
 	}
 }
 
+// SystemCollectionMetadataKeys contains metadata keys that are reserved for system use.
+// Users cannot set or modify these keys - they are managed internally by Chroma.
+var SystemCollectionMetadataKeys = map[string]bool{
+	common.SourceAttachedFunctionIDKey: true,
+}
+
+// validateSystemMetadataKeysUnchanged checks that system-reserved keys in the new metadata
+// have not been changed from their existing values. Returns an error if any system key value differs.
+func validateSystemMetadataKeysUnchanged(existingMetadata []*dbmodel.CollectionMetadata, newMetadata *model.CollectionMetadata[model.CollectionMetadataValueType]) error {
+	if newMetadata == nil {
+		return nil
+	}
+
+	// Build a map of existing system key values
+	existingSystemValues := make(map[string]model.CollectionMetadataValueType)
+	for _, m := range existingMetadata {
+		if SystemCollectionMetadataKeys[*m.Key] {
+			if m.StrValue != nil {
+				existingSystemValues[*m.Key] = &model.CollectionMetadataValueStringType{Value: *m.StrValue}
+			} else if m.IntValue != nil {
+				existingSystemValues[*m.Key] = &model.CollectionMetadataValueInt64Type{Value: *m.IntValue}
+			} else if m.FloatValue != nil {
+				existingSystemValues[*m.Key] = &model.CollectionMetadataValueFloat64Type{Value: *m.FloatValue}
+			} else if m.BoolValue != nil {
+				existingSystemValues[*m.Key] = &model.CollectionMetadataValueBoolType{Value: *m.BoolValue}
+			}
+		}
+	}
+
+	// Check if any system key in new metadata differs from existing
+	for key, newValue := range newMetadata.Metadata {
+		if SystemCollectionMetadataKeys[key] {
+			existingValue, exists := existingSystemValues[key]
+			if !exists {
+				// System key doesn't exist yet - user is trying to set it
+				return common.ErrSystemMetadataKeyNotAllowed
+			}
+			// Compare values - if different, reject
+			if !existingValue.Equals(newValue) {
+				return common.ErrSystemMetadataKeyNotAllowed
+			}
+		}
+	}
+	return nil
+}
+
 func (tc *Catalog) ResetState(ctx context.Context) error {
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		err := tc.metaDomain.CollectionMetadataDb(txCtx).DeleteAll()
@@ -987,6 +1033,10 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 			}
 		} else {
 			if metadata != nil { // Case 3
+				// Validate that system metadata keys are not being changed
+				if err := validateSystemMetadataKeysUnchanged(collection.CollectionMetadata, metadata); err != nil {
+					return err
+				}
 				_, err = tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(updateCollection.ID.String())
 				if err != nil {
 					return err
