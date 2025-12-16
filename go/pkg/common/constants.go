@@ -4,7 +4,8 @@ const (
 	DefaultTenant   = "default_tenant"
 	DefaultDatabase = "default_database"
 
-	// SourceAttachedFunctionIDKey is the metadata key used to mark output collections
-	// and link them to their attached function.
-	SourceAttachedFunctionIDKey = "chroma:source_attached_function_id"
+	// SourceAttachedFunctionIDKey is the schema field name used to mark output collections
+	// and link them to their attached function. This is stored in the collection schema,
+	// not in metadata.
+	SourceAttachedFunctionIDKey = "source_attached_function_id"
 )

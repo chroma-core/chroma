@@ -217,6 +217,13 @@ pub fn validate_search_payload(payload: &SearchPayload) -> Result<(), Validation
 
 /// Validate schema
 pub fn validate_schema(schema: &Schema) -> Result<(), ValidationError> {
+    // Prevent users from setting source_attached_function_id - only the system can set this
+    if schema.source_attached_function_id.is_some() {
+        return Err(ValidationError::new("schema").with_message(
+            "Cannot set source_attached_function_id. This field is reserved for system use.".into(),
+        ));
+    }
+
     let mut sparse_index_keys = Vec::new();
     if schema
         .defaults
