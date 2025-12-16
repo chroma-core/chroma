@@ -157,7 +157,6 @@ impl Operator<RankedGroupByInput, RankedGroupByOutput> for GroupBy {
                     .await?
                     .ok_or(RankedGroupByError::PhantomRecord(record.offset_id))?
                     .metadata
-                    .clone()
                     .unwrap_or_default();
                 enriched_records.push(EnrichedRecord { record, metadata });
             }
