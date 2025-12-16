@@ -2103,6 +2103,7 @@ pub struct SearchRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_id: CollectionUuid,
+    #[validate(nested)]
     pub searches: Vec<SearchPayload>,
 }
 

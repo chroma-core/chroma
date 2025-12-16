@@ -2200,6 +2200,180 @@ impl TryFrom<Select> for chroma_proto::SelectOperator {
     }
 }
 
+/// Aggregation function applied within each group.
+///
+/// Determines which records to keep from each group and their ordering.
+///
+/// # Variants
+///
+/// * `MinK` - Returns k records with minimum values (ascending order).
+///   Use with `Key::Score` to get best matches (lower score = better in Chroma).
+/// * `MaxK` - Returns k records with maximum values (descending order).
+///
+/// # Multi-level Ordering
+///
+/// The `keys` field supports multi-level ordering. Records are sorted by
+/// the first key, then by the second key for ties, and so on.
+///
+/// # Examples
+///
+/// ```
+/// use chroma_types::operator::{Aggregate, Key};
+///
+/// // Best 3 by score per group
+/// let agg = Aggregate::MinK {
+///     keys: vec![Key::Score],
+///     k: 3,
+/// };
+///
+/// // Best 3 by score, then by date for ties
+/// let agg = Aggregate::MinK {
+///     keys: vec![Key::Score, Key::field("date")],
+///     k: 3,
+/// };
+///
+/// // Top 5 by recency (highest date first)
+/// let agg = Aggregate::MaxK {
+///     keys: vec![Key::field("date")],
+///     k: 5,
+/// };
+/// ```
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum Aggregate {
+    /// Returns k records with minimum values (ascending order)
+    #[serde(rename = "$min_k")]
+    MinK {
+        /// Keys for multi-level ordering
+        keys: Vec<Key>,
+        /// Number of records to return per group
+        k: u32,
+    },
+    /// Returns k records with maximum values (descending order)
+    #[serde(rename = "$max_k")]
+    MaxK {
+        /// Keys for multi-level ordering
+        keys: Vec<Key>,
+        /// Number of records to return per group
+        k: u32,
+    },
+}
+
+/// Groups results by metadata keys and aggregates within each group.
+///
+/// Results are grouped by the specified metadata keys (like SQL GROUP BY),
+/// then aggregated within each group using MinK or MaxK ordering.
+/// The final output is flattened and sorted by score.
+///
+/// # Fields
+///
+/// * `keys` - Metadata keys to group by (composite grouping)
+/// * `aggregate` - Aggregation function to apply within each group
+///
+/// # Behavior
+///
+/// * Missing metadata keys are treated as Null (forming their own group)
+/// * Empty groups are omitted from results
+/// * Final output is flattened (group structure not preserved)
+/// * Results are sorted by score after aggregation
+///
+/// # Examples
+///
+/// ```
+/// use chroma_types::operator::{GroupBy, Aggregate, Key};
+///
+/// // Top 3 documents per category
+/// let group_by = GroupBy {
+///     keys: vec![Key::field("category")],
+///     aggregate: Some(Aggregate::MinK {
+///         keys: vec![Key::Score],
+///         k: 3,
+///     }),
+/// };
+///
+/// // Top 2 per (category, author) combination
+/// let group_by = GroupBy {
+///     keys: vec![Key::field("category"), Key::field("author")],
+///     aggregate: Some(Aggregate::MinK {
+///         keys: vec![Key::Score, Key::field("date")],
+///         k: 2,
+///     }),
+/// };
+/// ```
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct GroupBy {
+    /// Metadata keys to group by
+    #[serde(default)]
+    pub keys: Vec<Key>,
+    /// Aggregation to apply within each group (required when keys is non-empty)
+    #[serde(default)]
+    pub aggregate: Option<Aggregate>,
+}
+
+impl TryFrom<chroma_proto::Aggregate> for Aggregate {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::Aggregate) -> Result<Self, Self::Error> {
+        match value
+            .aggregate
+            .ok_or(QueryConversionError::field("aggregate"))?
+        {
+            chroma_proto::aggregate::Aggregate::MinK(min_k) => {
+                let keys = min_k.keys.into_iter().map(Key::from).collect();
+                Ok(Aggregate::MinK { keys, k: min_k.k })
+            }
+            chroma_proto::aggregate::Aggregate::MaxK(max_k) => {
+                let keys = max_k.keys.into_iter().map(Key::from).collect();
+                Ok(Aggregate::MaxK { keys, k: max_k.k })
+            }
+        }
+    }
+}
+
+impl From<Aggregate> for chroma_proto::Aggregate {
+    fn from(value: Aggregate) -> Self {
+        let aggregate = match value {
+            Aggregate::MinK { keys, k } => {
+                chroma_proto::aggregate::Aggregate::MinK(chroma_proto::aggregate::MinK {
+                    keys: keys.into_iter().map(|k| k.to_string()).collect(),
+                    k,
+                })
+            }
+            Aggregate::MaxK { keys, k } => {
+                chroma_proto::aggregate::Aggregate::MaxK(chroma_proto::aggregate::MaxK {
+                    keys: keys.into_iter().map(|k| k.to_string()).collect(),
+                    k,
+                })
+            }
+        };
+
+        chroma_proto::Aggregate {
+            aggregate: Some(aggregate),
+        }
+    }
+}
+
+impl TryFrom<chroma_proto::GroupByOperator> for GroupBy {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::GroupByOperator) -> Result<Self, Self::Error> {
+        let keys = value.keys.into_iter().map(Key::from).collect();
+        let aggregate = value.aggregate.map(TryInto::try_into).transpose()?;
+
+        Ok(Self { keys, aggregate })
+    }
+}
+
+impl TryFrom<GroupBy> for chroma_proto::GroupByOperator {
+    type Error = QueryConversionError;
+
+    fn try_from(value: GroupBy) -> Result<Self, Self::Error> {
+        let keys = value.keys.into_iter().map(|k| k.to_string()).collect();
+        let aggregate = value.aggregate.map(Into::into);
+
+        Ok(Self { keys, aggregate })
+    }
+}
+
 /// A single search result record.
 ///
 /// Contains the document ID and optionally document content, embeddings, metadata,
@@ -3342,5 +3516,113 @@ mod tests {
         let input = vec![vec![10i32, 0, -10, -20], vec![5, -5, -15], vec![15, -25]];
         let result = merge.merge(input);
         assert_eq!(result, vec![15, 10, 5, 0, -5]);
+    }
+
+    #[test]
+    fn test_aggregate_json_serialization() {
+        // Test MinK serialization
+        let min_k = Aggregate::MinK {
+            keys: vec![Key::Score, Key::field("date")],
+            k: 3,
+        };
+        let json = serde_json::to_value(&min_k).unwrap();
+        assert!(json.get("$min_k").is_some());
+        assert_eq!(json["$min_k"]["k"], 3);
+
+        // Test MinK deserialization
+        let min_k_json = serde_json::json!({
+            "$min_k": {
+                "keys": ["#score", "date"],
+                "k": 5
+            }
+        });
+        let deserialized: Aggregate = serde_json::from_value(min_k_json).unwrap();
+        match deserialized {
+            Aggregate::MinK { keys, k } => {
+                assert_eq!(k, 5);
+                assert_eq!(keys.len(), 2);
+                assert_eq!(keys[0], Key::Score);
+                assert_eq!(keys[1], Key::field("date"));
+            }
+            _ => panic!("Expected MinK"),
+        }
+
+        // Test MaxK serialization
+        let max_k = Aggregate::MaxK {
+            keys: vec![Key::field("timestamp")],
+            k: 10,
+        };
+        let json = serde_json::to_value(&max_k).unwrap();
+        assert!(json.get("$max_k").is_some());
+        assert_eq!(json["$max_k"]["k"], 10);
+
+        // Test MaxK deserialization
+        let max_k_json = serde_json::json!({
+            "$max_k": {
+                "keys": ["timestamp"],
+                "k": 2
+            }
+        });
+        let deserialized: Aggregate = serde_json::from_value(max_k_json).unwrap();
+        match deserialized {
+            Aggregate::MaxK { keys, k } => {
+                assert_eq!(k, 2);
+                assert_eq!(keys.len(), 1);
+                assert_eq!(keys[0], Key::field("timestamp"));
+            }
+            _ => panic!("Expected MaxK"),
+        }
+    }
+
+    #[test]
+    fn test_group_by_json_serialization() {
+        // Test GroupBy with MinK
+        let group_by = GroupBy {
+            keys: vec![Key::field("category"), Key::field("author")],
+            aggregate: Some(Aggregate::MinK {
+                keys: vec![Key::Score],
+                k: 3,
+            }),
+        };
+
+        let json = serde_json::to_value(&group_by).unwrap();
+        assert_eq!(json["keys"].as_array().unwrap().len(), 2);
+        assert!(json["aggregate"]["$min_k"].is_object());
+
+        // Test roundtrip
+        let deserialized: GroupBy = serde_json::from_value(json).unwrap();
+        assert_eq!(deserialized.keys.len(), 2);
+        assert_eq!(deserialized.keys[0], Key::field("category"));
+        assert_eq!(deserialized.keys[1], Key::field("author"));
+        assert!(deserialized.aggregate.is_some());
+
+        // Test empty GroupBy
+        let empty_group_by = GroupBy::default();
+        let json = serde_json::to_value(&empty_group_by).unwrap();
+        let deserialized: GroupBy = serde_json::from_value(json).unwrap();
+        assert!(deserialized.keys.is_empty());
+        assert!(deserialized.aggregate.is_none());
+
+        // Test deserialization from JSON
+        let json = serde_json::json!({
+            "keys": ["category"],
+            "aggregate": {
+                "$max_k": {
+                    "keys": ["#score", "priority"],
+                    "k": 5
+                }
+            }
+        });
+        let group_by: GroupBy = serde_json::from_value(json).unwrap();
+        assert_eq!(group_by.keys.len(), 1);
+        assert_eq!(group_by.keys[0], Key::field("category"));
+        match group_by.aggregate {
+            Some(Aggregate::MaxK { keys, k }) => {
+                assert_eq!(k, 5);
+                assert_eq!(keys.len(), 2);
+                assert_eq!(keys[0], Key::Score);
+            }
+            _ => panic!("Expected MaxK aggregate"),
+        }
     }
 }
