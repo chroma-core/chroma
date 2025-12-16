@@ -1297,7 +1297,7 @@ impl LogServer {
         };
         if let Some(cache) = self.cache.as_ref() {
             let cache_key = cache_key_for_manifest_and_etag(collection_id);
-            if let Some(manifest_and_etag) = log.manifest_and_etag() {
+            if let Ok(manifest_and_etag) = log.manifest_and_etag().await {
                 if let Ok(manifest_and_etag_bytes) = serde_json::to_vec(&manifest_and_etag) {
                     let cache_value = CachedBytes {
                         bytes: manifest_and_etag_bytes,
