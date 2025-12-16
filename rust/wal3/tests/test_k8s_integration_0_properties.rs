@@ -6,7 +6,7 @@ use proptest::prelude::{ProptestConfig, Strategy};
 use rand::RngCore;
 
 use wal3::{
-    Error, Fragment, FragmentSeqNo, Garbage, LogPosition, Manifest, Snapshot, SnapshotOptions,
+    Error, Fragment, FragmentIdentifier, Garbage, LogPosition, Manifest, Snapshot, SnapshotOptions,
     SnapshotPointer, ThrottleOptions,
 };
 
@@ -68,10 +68,10 @@ fn deltas_to_fragment_sequence(deltas: &[FragmentDelta]) -> Vec<Fragment> {
             }
         } else {
             Fragment {
-                path: wal3::unprefixed_fragment_path(FragmentSeqNo(1)),
+                path: wal3::unprefixed_fragment_path(FragmentIdentifier(1)),
                 num_bytes: delta.num_bytes,
                 setsum: delta.setsum,
-                seq_no: FragmentSeqNo(1),
+                seq_no: FragmentIdentifier(1),
                 start: LogPosition::from_offset(1),
                 limit: LogPosition::from_offset(1) + delta.num_records,
             }
@@ -201,7 +201,7 @@ proptest::proptest! {
             snapshots: snapshots.clone(),
         };
         eprintln!("[{:?}, {:?})", start, limit);
-        let mut last_initial_seq_no = FragmentSeqNo(0);
+        let mut last_initial_seq_no = FragmentIdentifier(0);
         for offset in start.offset()..=limit.offset() {
             let position = LogPosition::from_offset(offset);
             eprintln!("position = {position:?}");

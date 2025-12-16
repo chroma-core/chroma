@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use chroma_storage::{s3_client_for_test_with_new_bucket, PutOptions};
 
-use wal3::{unprefixed_fragment_path, FragmentSeqNo, LogWriter, LogWriterOptions, SnapshotOptions};
+use wal3::{
+    unprefixed_fragment_path, FragmentIdentifier, LogWriter, LogWriterOptions, SnapshotOptions,
+};
 
 #[tokio::test]
 async fn test_k8s_integration_97_destroy() {
@@ -39,7 +41,7 @@ async fn test_k8s_integration_97_destroy() {
             &format!(
                 "{}/{}",
                 PREFIX,
-                unprefixed_fragment_path(FragmentSeqNo(100_000))
+                unprefixed_fragment_path(FragmentIdentifier(100_000))
             ),
             Vec::from("CONTENT".to_string()),
             PutOptions::default(),

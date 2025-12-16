@@ -18,9 +18,9 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::{
     unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
-    ExponentialBackoff, Fragment, FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition,
-    LogReader, LogReaderOptions, LogWriterOptions, Manifest, ManifestAndETag, ManifestManager,
-    ThrottleOptions,
+    ExponentialBackoff, Fragment, FragmentIdentifier, Garbage, GarbageCollectionOptions,
+    LogPosition, LogReader, LogReaderOptions, LogWriterOptions, Manifest, ManifestAndETag,
+    ManifestManager, ThrottleOptions,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -178,13 +178,13 @@ impl LogWriter {
                 options,
                 storage,
                 prefix,
-                FragmentSeqNo(1),
+                FragmentIdentifier(1),
                 first_record_offset,
                 messages,
                 cmek,
             )
             .await?;
-            let seq_no = FragmentSeqNo(1);
+            let seq_no = FragmentIdentifier(1);
             let num_bytes = num_bytes as u64;
             let frag = Fragment {
                 path,
@@ -572,9 +572,9 @@ impl OnceLogWriter {
                 if !that.done.load(std::sync::atomic::Ordering::Relaxed) {
                     that.batch_manager.wait_for_writable().await;
                     match that.batch_manager.take_work(&that.manifest_manager) {
-                        Ok(Some((fragment_seq_no, log_position, work))) => {
+                        Ok(Some((fragment_identifier, log_position, work))) => {
                             Arc::clone(&that)
-                                .append_batch(fragment_seq_no, log_position, work)
+                                .append_batch(fragment_identifier, log_position, work)
                                 .await;
                         }
                         Ok(None) => {
@@ -661,10 +661,10 @@ impl OnceLogWriter {
             self.batch_manager.push_work(messages, tx, append_span);
             match self.batch_manager.take_work(&self.manifest_manager) {
                 Ok(Some(work)) => {
-                    let (fragment_seq_no, log_position, work) = work;
+                    let (fragment_identifier, log_position, work) = work;
                     {
                         tokio::task::spawn(Arc::clone(self).append_batch(
-                            fragment_seq_no,
+                            fragment_identifier,
                             log_position,
                             work,
                         ));
@@ -687,7 +687,7 @@ impl OnceLogWriter {
     #[allow(clippy::type_complexity)]
     async fn append_batch(
         self: Arc<Self>,
-        fragment_seq_no: FragmentSeqNo,
+        fragment_identifier: FragmentIdentifier,
         log_position: LogPosition,
         work: Vec<(
             Vec<Vec<u8>>,
@@ -713,7 +713,7 @@ impl OnceLogWriter {
                 return;
             }
             match self
-                .append_batch_internal(fragment_seq_no, log_position, messages)
+                .append_batch_internal(fragment_identifier, log_position, messages)
                 .await
             {
                 Ok(mut log_position) => {
@@ -740,7 +740,7 @@ impl OnceLogWriter {
     #[tracing::instrument(skip(self, messages))]
     async fn append_batch_internal(
         &self,
-        fragment_seq_no: FragmentSeqNo,
+        fragment_identifier: FragmentIdentifier,
         log_position: LogPosition,
         messages: Vec<Vec<u8>>,
     ) -> Result<LogPosition, Error> {
@@ -750,7 +750,7 @@ impl OnceLogWriter {
             &self.options,
             &self.storage,
             &self.prefix,
-            fragment_seq_no,
+            fragment_identifier,
             log_position,
             messages,
             self.cmek.clone(),
@@ -771,7 +771,7 @@ impl OnceLogWriter {
         // Upload to a coalesced manifest.
         let fragment = Fragment {
             path: path.to_string(),
-            seq_no: fragment_seq_no,
+            seq_no: fragment_identifier,
             start: log_position,
             limit: log_position + messages_len,
             num_bytes: num_bytes as u64,
@@ -1109,13 +1109,13 @@ pub async fn upload_parquet(
     options: &LogWriterOptions,
     storage: &Storage,
     prefix: &str,
-    fragment_seq_no: FragmentSeqNo,
+    fragment_identifier: FragmentIdentifier,
     log_position: LogPosition,
     messages: Vec<Vec<u8>>,
     cmek: Option<Cmek>,
 ) -> Result<(String, Setsum, usize), Error> {
     // Upload the log.
-    let unprefixed_path = unprefixed_fragment_path(fragment_seq_no);
+    let unprefixed_path = unprefixed_fragment_path(fragment_identifier);
     let path = format!("{prefix}/{unprefixed_path}");
     let exp_backoff: ExponentialBackoff = options.throttle_fragment.into();
     let start = Instant::now();

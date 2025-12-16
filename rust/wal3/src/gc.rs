@@ -13,9 +13,9 @@ use chroma_storage::{
 use crate::manifest::unprefixed_snapshot_path;
 use crate::writer::OnceLogWriter;
 use crate::{
-    deserialize_setsum, prefixed_fragment_path, serialize_setsum, Error, Fragment, FragmentSeqNo,
-    GarbageCollectionOptions, LogPosition, LogWriterOptions, Manifest, ScrubError, Snapshot,
-    SnapshotCache, SnapshotPointer, ThrottleOptions,
+    deserialize_setsum, prefixed_fragment_path, serialize_setsum, Error, Fragment,
+    FragmentIdentifier, GarbageCollectionOptions, LogPosition, LogWriterOptions, Manifest,
+    ScrubError, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
@@ -25,8 +25,8 @@ pub struct Garbage {
     pub snapshots_to_drop: Vec<SnapshotPointer>,
     pub snapshots_to_make: Vec<Snapshot>,
     pub snapshot_for_root: Option<SnapshotPointer>,
-    pub fragments_to_drop_start: FragmentSeqNo,
-    pub fragments_to_drop_limit: FragmentSeqNo,
+    pub fragments_to_drop_start: FragmentIdentifier,
+    pub fragments_to_drop_limit: FragmentIdentifier,
     #[serde(
         deserialize_with = "deserialize_setsum",
         serialize_with = "serialize_setsum"
@@ -41,8 +41,8 @@ impl Garbage {
             snapshots_to_drop: Vec::new(),
             snapshots_to_make: Vec::new(),
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentSeqNo(0),
-            fragments_to_drop_limit: FragmentSeqNo(0),
+            fragments_to_drop_start: FragmentIdentifier(0),
+            fragments_to_drop_limit: FragmentIdentifier(0),
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         }
@@ -89,8 +89,8 @@ impl Garbage {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentSeqNo(0),
-            fragments_to_drop_limit: FragmentSeqNo(0),
+            fragments_to_drop_start: FragmentIdentifier(0),
+            fragments_to_drop_limit: FragmentIdentifier(0),
             setsum_to_discard: Setsum::default(),
             first_to_keep,
         };
@@ -261,7 +261,9 @@ impl Garbage {
         paths.into_iter().chain(
             (self.fragments_to_drop_start.0..self.fragments_to_drop_limit.0)
                 .map(move |seq_no| (seq_no, Arc::clone(&prefix)))
-                .map(|(seq_no, prefix)| prefixed_fragment_path(&prefix, FragmentSeqNo(seq_no))),
+                .map(|(seq_no, prefix)| {
+                    prefixed_fragment_path(&prefix, FragmentIdentifier(seq_no))
+                }),
         )
     }
 
@@ -502,7 +504,7 @@ impl Garbage {
     // snapshot, recursively, until you find the first fragment.  That's your seq_no.
     pub fn bug_patch_construct_garbage_from_manifest(
         manifest: &Manifest,
-        seq_no: FragmentSeqNo,
+        seq_no: FragmentIdentifier,
         offset: LogPosition,
     ) -> Garbage {
         let mut garbage = Garbage {
@@ -582,11 +584,11 @@ mod tests {
         let manifest: Manifest = serde_json::from_str(manifest_json).unwrap();
         let output = Garbage::bug_patch_construct_garbage_from_manifest(
             &manifest,
-            FragmentSeqNo(806913),
+            FragmentIdentifier(806913),
             LogPosition::from_offset(900883),
         );
-        assert_eq!(output.fragments_to_drop_start, FragmentSeqNo(806913));
-        assert_eq!(output.fragments_to_drop_limit, FragmentSeqNo(806913));
+        assert_eq!(output.fragments_to_drop_start, FragmentIdentifier(806913));
+        assert_eq!(output.fragments_to_drop_limit, FragmentIdentifier(806913));
         assert_eq!(
             output.setsum_to_discard.hexdigest(),
             "c921d21a0820be5d3b6f2d90942648f2853188bb0e3c6a22fe3dbd81c1e1c380"

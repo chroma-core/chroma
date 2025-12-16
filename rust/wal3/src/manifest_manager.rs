@@ -8,8 +8,9 @@ use crate::manifest::{Manifest, ManifestAndETag, Snapshot};
 use crate::reader::read_fragment;
 use crate::writer::MarkDirty;
 use crate::{
-    unprefixed_fragment_path, Error, Fragment, FragmentSeqNo, GarbageCollectionOptions,
-    LogPosition, SnapshotCache, SnapshotOptions, SnapshotPointerOrFragmentSeqNo, ThrottleOptions,
+    unprefixed_fragment_path, Error, Fragment, FragmentIdentifier, GarbageCollectionOptions,
+    LogPosition, SnapshotCache, SnapshotOptions, SnapshotPointerOrFragmentIdentifier,
+    ThrottleOptions,
 };
 
 ////////////////////////////////////////////// Staging /////////////////////////////////////////////
@@ -24,9 +25,9 @@ struct Staging {
     /// The next timestamp to assign.
     next_log_position: LogPosition,
     /// The next fragment sequence number to assign to a not-yet completed fragment upload  .
-    next_seq_no_to_assign: FragmentSeqNo,
+    next_seq_no_to_assign: FragmentIdentifier,
     /// The next fragment sequence number to look for when applying fragments.
-    next_seq_no_to_apply: FragmentSeqNo,
+    next_seq_no_to_apply: FragmentIdentifier,
     /// A prefix of the log to be garbage collected.  This is added to the manager from somewhere
     /// else and the manager will apply the garbage to the next manifest that gets written.
     garbage: Option<(Garbage, tokio::sync::oneshot::Sender<Option<Error>>)>,
@@ -50,7 +51,7 @@ impl Staging {
         Manifest,
         ETag,
         Manifest,
-        FragmentSeqNo,
+        FragmentIdentifier,
         Option<Snapshot>,
         Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
     )> {
@@ -93,7 +94,7 @@ impl Staging {
                 Ok(None) => {
                     tracing::error!("given empty garbage that did not apply");
                     let _ = notifier.send(Some(Error::GarbageCollectionPrecondition(
-                        SnapshotPointerOrFragmentSeqNo::Stringy(
+                        SnapshotPointerOrFragmentIdentifier::Stringy(
                             "given empty garbage that did not apply".to_string(),
                         ),
                     )));
@@ -143,7 +144,7 @@ impl Staging {
         Manifest,
         ETag,
         Manifest,
-        FragmentSeqNo,
+        FragmentIdentifier,
         Option<Snapshot>,
         Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
     )> {
@@ -315,7 +316,10 @@ impl ManifestManager {
     }
 
     /// Assign a timestamp to a record.
-    pub fn assign_timestamp(&self, record_count: usize) -> Option<(FragmentSeqNo, LogPosition)> {
+    pub fn assign_timestamp(
+        &self,
+        record_count: usize,
+    ) -> Option<(FragmentIdentifier, LogPosition)> {
         // SAFETY(rescrv):  Mutex poisoning.
         let mut staging = self.staging.lock().unwrap();
         // Steal the offset.
@@ -550,7 +554,7 @@ mod tests {
         manager.push_work(
             Fragment {
                 path: "path2".to_string(),
-                seq_no: FragmentSeqNo(2),
+                seq_no: FragmentIdentifier(2),
                 num_bytes: 20,
                 start: LogPosition::from_offset(22),
                 limit: LogPosition::from_offset(42),
@@ -569,7 +573,7 @@ mod tests {
         manager.push_work(
             Fragment {
                 path: "path1".to_string(),
-                seq_no: FragmentSeqNo(1),
+                seq_no: FragmentIdentifier(1),
                 num_bytes: 30,
                 start: LogPosition::from_offset(1),
                 limit: LogPosition::from_offset(22),
@@ -614,7 +618,7 @@ mod tests {
                 fragments: vec![
                     Fragment {
                         path: "path1".to_string(),
-                        seq_no: FragmentSeqNo(1),
+                        seq_no: FragmentIdentifier(1),
                         num_bytes: 30,
                         start: LogPosition::from_offset(1),
                         limit: LogPosition::from_offset(22),
@@ -622,7 +626,7 @@ mod tests {
                     },
                     Fragment {
                         path: "path2".to_string(),
-                        seq_no: FragmentSeqNo(2),
+                        seq_no: FragmentIdentifier(2),
                         num_bytes: 20,
                         start: LogPosition::from_offset(22),
                         limit: LogPosition::from_offset(42),

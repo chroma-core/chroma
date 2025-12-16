@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
-use wal3::{FragmentSeqNo, LogPosition, LogWriter, LogWriterOptions, Manifest};
+use wal3::{FragmentIdentifier, LogPosition, LogWriter, LogWriterOptions, Manifest};
 
 mod common;
 
@@ -52,7 +52,7 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
     let position = log.append(vec![42, 43, 44, 45]).await.unwrap();
     let fragment1 = FragmentCondition {
         path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
-        seq_no: FragmentSeqNo(1),
+        seq_no: FragmentIdentifier(1),
         start: 1,
         limit: 2,
         num_bytes: 1044,
@@ -76,7 +76,7 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
     let position = log.append(vec![81, 82, 83, 84]).await.unwrap();
     let fragment2 = FragmentCondition {
         path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000002.parquet".to_string(),
-        seq_no: FragmentSeqNo(2),
+        seq_no: FragmentIdentifier(2),
         start: 2,
         limit: 3,
         num_bytes: 1044,
@@ -110,7 +110,7 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
     let position = log.append(vec![90, 91, 92, 93]).await.unwrap();
     let fragment3 = FragmentCondition {
         path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000003.parquet".to_string(),
-        seq_no: FragmentSeqNo(3),
+        seq_no: FragmentIdentifier(3),
         start: 3,
         limit: 4,
         num_bytes: 1044,
