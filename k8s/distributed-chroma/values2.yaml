@@ -85,9 +85,9 @@ garbageCollector:
   cache:
     hostPath: '/local/cache2/chroma-garbage-collector'
     mountPath: '/cache/'
-rustSysdb:
+rustSysdbService:
   image:
-    repository: 'rust-sysdb'
+    repository: 'rust-sysdb-service'
     tag: 'latest'
   replicaCount: 0
   resources:

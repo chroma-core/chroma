@@ -1,28 +1,28 @@
-{{- if gt (int .Values.rustSysdb.replicaCount) 0 }}
+{{- if gt (int .Values.rustSysdbService.replicaCount) 0 }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: rust-sysdb
+  name: rust-sysdb-service
   namespace: {{ .Values.namespace }}
 spec:
-  replicas: {{ .Values.rustSysdb.replicaCount }}
+  replicas: {{ .Values.rustSysdbService.replicaCount }}
   selector:
     matchLabels:
-      app: rust-sysdb
+      app: rust-sysdb-service
   template:
     metadata:
       labels:
-        app: rust-sysdb
+        app: rust-sysdb-service
     spec:
       containers:
-        - name: rust-sysdb
-          image: "{{ .Values.rustSysdb.image.repository }}:{{ .Values.rustSysdb.image.tag }}"
+        - name: rust-sysdb-service
+          image: "{{ .Values.rustSysdbService.image.repository }}:{{ .Values.rustSysdbService.image.tag }}"
           imagePullPolicy: IfNotPresent
           resources:
             limits:
-              cpu: {{ .Values.rustSysdb.resources.limits.cpu }}
-              memory: {{ .Values.rustSysdb.resources.limits.memory }}
+              cpu: {{ .Values.rustSysdbService.resources.limits.cpu }}
+              memory: {{ .Values.rustSysdbService.resources.limits.memory }}
             requests:
-              cpu: {{ .Values.rustSysdb.resources.requests.cpu }}
-              memory: {{ .Values.rustSysdb.resources.requests.memory }}
+              cpu: {{ .Values.rustSysdbService.resources.requests.cpu }}
+              memory: {{ .Values.rustSysdbService.resources.requests.memory }}
 {{- end }}
