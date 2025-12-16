@@ -32,8 +32,8 @@ use s3heap::{
     Triggerable,
 };
 use wal3::{
-    Cursor, CursorName, CursorStore, CursorStoreOptions, LogPosition, LogReader, LogReaderOptions,
-    Witness,
+    BatchManager, Cursor, CursorName, CursorStore, CursorStoreOptions, FragmentSeqNo, LogPosition,
+    LogReader, LogReaderOptions, ManifestManager, Witness,
 };
 
 /// gRPC client for heap tender service
@@ -213,11 +213,14 @@ pub static HEAP_TENDER_CURSOR_NAME: CursorName =
 
 //////////////////////////////////////////// HeapTender ////////////////////////////////////////////
 
+/// Concrete type alias for the LogReader with S3 publishers.
+type S3LogReader = LogReader<(FragmentSeqNo, LogPosition), BatchManager, ManifestManager>;
+
 /// Manages heap compaction by reading dirty logs and coordinating with HeapWriter.
 pub struct HeapTender {
     #[allow(dead_code)]
     sysdb: SysDb,
-    reader: LogReader,
+    reader: S3LogReader,
     cursor: CursorStore,
     writer: HeapWriter,
     heap_reader: HeapReader,
@@ -228,7 +231,7 @@ impl HeapTender {
     /// Creates a new HeapTender.
     pub fn new(
         sysdb: SysDb,
-        reader: LogReader,
+        reader: S3LogReader,
         cursor: CursorStore,
         writer: HeapWriter,
         heap_reader: HeapReader,

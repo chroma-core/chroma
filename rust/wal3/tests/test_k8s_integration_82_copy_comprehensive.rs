@@ -55,7 +55,7 @@ async fn test_k8s_integration_copy_with_deep_snapshots() {
         }
         log.append_many(batch).await.unwrap();
     }
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.to_string(),
@@ -82,7 +82,7 @@ async fn test_k8s_integration_copy_with_deep_snapshots() {
     )
     .await
     .unwrap();
-    let copied = LogReader::open(
+    let copied = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "copy_with_deep_snapshots_target".to_string(),
@@ -153,7 +153,7 @@ async fn test_k8s_integration_copy_at_specific_offset() {
             offset_at_50 = pos + 10u64;
         }
     }
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.to_string(),
@@ -169,7 +169,7 @@ async fn test_k8s_integration_copy_at_specific_offset() {
     )
     .await
     .unwrap();
-    let copied = LogReader::open(
+    let copied = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "copy_at_specific_offset_target".to_string(),
@@ -228,7 +228,7 @@ async fn test_k8s_integration_copy_verifies_manifest_consistency() {
         let batch = vec![Vec::from(format!("consistency:i={}", i))];
         log.append_many(batch).await.unwrap();
     }
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.to_string(),
@@ -245,7 +245,7 @@ async fn test_k8s_integration_copy_verifies_manifest_consistency() {
     )
     .await
     .unwrap();
-    let copied = LogReader::open(
+    let copied = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "copy_verifies_manifest_target".to_string(),
@@ -341,7 +341,7 @@ async fn test_k8s_integration_copy_empty_with_advanced_manifest() {
     log.garbage_collect(&wal3::GarbageCollectionOptions::default(), None)
         .await
         .unwrap();
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.to_string(),
@@ -359,7 +359,7 @@ async fn test_k8s_integration_copy_empty_with_advanced_manifest() {
     )
     .await
     .unwrap();
-    let copied = LogReader::open(
+    let copied = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "copy_empty_advanced_target".to_string(),
@@ -431,7 +431,7 @@ async fn test_k8s_integration_copy_with_large_fragments() {
         }
         log.append_many(batch).await.unwrap();
     }
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.to_string(),
@@ -448,7 +448,7 @@ async fn test_k8s_integration_copy_with_large_fragments() {
     )
     .await
     .unwrap();
-    let copied = LogReader::open(
+    let copied = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "copy_large_fragments_target".to_string(),

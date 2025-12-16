@@ -56,7 +56,7 @@ async fn test_k8s_integration_83_bootstrap() {
     .await
     .unwrap();
 
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "test_k8s_integration_83_bootstrap".to_string(),

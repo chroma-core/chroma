@@ -4,13 +4,16 @@ use chroma_storage::Storage;
 use chroma_sysdb::{SysDb, TestSysDb};
 use chroma_types::{CollectionUuid, DirtyMarker};
 use wal3::{
-    CursorStore, CursorStoreOptions, FragmentPublisherFactory, FragmentSeqNo, LogPosition,
-    LogReader, LogReaderOptions, LogWriter, LogWriterOptions, ManifestPublisherFactory, MarkDirty,
-    SnapshotCache,
+    BatchManager, CursorStore, CursorStoreOptions, FragmentPublisherFactory, FragmentSeqNo,
+    LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, ManifestManager,
+    ManifestPublisherFactory, MarkDirty, SnapshotCache,
 };
 
 use s3heap::{HeapPruner, HeapReader, HeapWriter};
 use s3heap_service::{HeapTender, HEAP_TENDER_CURSOR_NAME};
+
+/// Concrete type alias for the LogReader with S3 publishers.
+type S3LogReader = LogReader<(FragmentSeqNo, LogPosition), BatchManager, ManifestManager>;
 
 /// Concrete type alias for the LogWriter with S3 factories.
 type S3LogWriter =
@@ -80,11 +83,13 @@ async fn create_heap_tender(
     heap_prefix: &str,
 ) -> HeapTender {
     let sysdb = SysDb::Test(TestSysDb::new());
-    let reader = LogReader::new(
+    let reader = S3LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::new(storage.clone()),
         dirty_log_prefix.to_string(),
-    );
+    )
+    .await
+    .unwrap();
     let cursor = CursorStore::new(
         CursorStoreOptions::default(),
         Arc::new(storage.clone()),

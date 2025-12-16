@@ -211,8 +211,11 @@ impl<
         // LogContention.  Other errors fail transparently, too.
         if num_records > 0 {
             let fragment_publisher = new_fragment_publisher.make().await?;
-            let _manfiest_publisher = new_manifest_publisher.make().await?;
-            // TODO(rescrv):  Use the manifest_publisher.
+            // NOTE(rescrv): We intentionally don't call new_manifest_publisher.make() here.
+            // The manifest doesn't exist yet (it's created below), and ManifestManager::new
+            // requires a manifest to exist. The manifest_publisher would be used to batch
+            // fragment updates, but for bootstrap we directly install the manifest instead.
+            let _ = new_manifest_publisher;
             let pointer = P::bootstrap(first_record_offset);
             let (path, setsum, num_bytes) = fragment_publisher
                 .upload_parquet(&pointer, messages, cmek)
@@ -298,10 +301,16 @@ impl<
             .await
     }
 
-    // TODO(rescrv):  No option
-    pub fn reader(&self, options: LogReaderOptions) -> Option<LogReader> {
+    pub async fn reader(
+        &self,
+        options: LogReaderOptions,
+    ) -> Option<LogReader<P, FP::Publisher, MP::Publisher>> {
+        let batch_manager = self.new_fragment_publisher.make().await.ok()?;
+        let manifest_manager = self.new_manifest_publisher.make().await.ok()?;
         Some(LogReader::new(
             options,
+            batch_manager,
+            manifest_manager,
             Arc::clone(&self.storage),
             self.prefix.clone(),
         ))

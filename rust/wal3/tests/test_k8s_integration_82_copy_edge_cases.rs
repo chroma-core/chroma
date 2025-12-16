@@ -45,7 +45,7 @@ async fn test_k8s_integration_copy_single_fragment() {
     log.append_many(vec![Vec::from("single-record")])
         .await
         .unwrap();
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.to_string(),
@@ -61,7 +61,7 @@ async fn test_k8s_integration_copy_single_fragment() {
     )
     .await
     .unwrap();
-    let copied = LogReader::open(
+    let copied = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "copy_single_fragment_target".to_string(),
@@ -83,7 +83,7 @@ async fn test_k8s_integration_copy_immediately_after_initialization() {
     Manifest::initialize(&LogWriterOptions::default(), &storage, prefix, "init")
         .await
         .unwrap();
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.to_string(),
@@ -100,7 +100,7 @@ async fn test_k8s_integration_copy_immediately_after_initialization() {
     )
     .await
     .unwrap();
-    let copied = LogReader::open(
+    let copied = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "copy_immediate_target".to_string(),
@@ -176,7 +176,7 @@ async fn test_k8s_integration_copy_after_garbage_collection_leaves_empty() {
     log.garbage_collect(&GarbageCollectionOptions::default(), None)
         .await
         .unwrap();
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.to_string(),
@@ -198,7 +198,7 @@ async fn test_k8s_integration_copy_after_garbage_collection_leaves_empty() {
     )
     .await
     .unwrap();
-    let copied = LogReader::open(
+    let copied = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "copy_gc_empty_target".to_string(),
@@ -264,7 +264,7 @@ async fn test_k8s_integration_copy_preserves_fragment_boundaries() {
         }
         log.append_many(batch).await.unwrap();
     }
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.to_string(),
@@ -286,7 +286,7 @@ async fn test_k8s_integration_copy_preserves_fragment_boundaries() {
     )
     .await
     .unwrap();
-    let copied = LogReader::open(
+    let copied = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "copy_boundaries_target".to_string(),
@@ -350,7 +350,7 @@ async fn test_k8s_integration_copy_with_partial_offset_splits_correctly() {
         let batch = vec![Vec::from(format!("partial:i={}", i))];
         log.append_many(batch).await.unwrap();
     }
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.to_string(),
@@ -369,7 +369,7 @@ async fn test_k8s_integration_copy_with_partial_offset_splits_correctly() {
     )
     .await
     .unwrap();
-    let copied = LogReader::open(
+    let copied = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "copy_partial_target".to_string(),
@@ -427,7 +427,7 @@ async fn test_k8s_integration_copy_multiple_times_creates_independent_copies() {
             .await
             .unwrap();
     }
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.to_string(),
@@ -453,14 +453,14 @@ async fn test_k8s_integration_copy_multiple_times_creates_independent_copies() {
     )
     .await
     .unwrap();
-    let copied1 = LogReader::open(
+    let copied1 = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "copy_multiple_target1".to_string(),
     )
     .await
     .unwrap();
-    let copied2 = LogReader::open(
+    let copied2 = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "copy_multiple_target2".to_string(),

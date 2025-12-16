@@ -12,9 +12,14 @@ use chroma_storage::{
     admissioncontrolleds3::StorageRequestPriority, GetOptions, Storage, StorageError,
 };
 
+use crate::interfaces::{
+    FragmentPointer, FragmentPublisher, FragmentPublisherFactory as FragmentPublisherFactoryTrait,
+    ManifestPublisher, ManifestPublisherFactory as ManifestPublisherFactoryTrait,
+};
 use crate::{
-    parse_fragment_path, Error, Fragment, FragmentIdentifier, LogPosition, LogReaderOptions,
-    Manifest, ManifestAndETag, ScrubError, ScrubSuccess, Snapshot, SnapshotCache,
+    parse_fragment_path, BatchManager, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
+    LogPosition, LogReaderOptions, Manifest, ManifestAndETag, ManifestManager, ScrubError,
+    ScrubSuccess, SnapshotCache,
 };
 
 fn ranges_overlap(lhs: (LogPosition, LogPosition), rhs: (LogPosition, LogPosition)) -> bool {
@@ -37,19 +42,130 @@ impl Limits {
     };
 }
 
+/// Do a consistent stale read of the manifest.  If the read can be returned without I/O,
+/// return Some(Vec<Fragment>).  If the read would require reading from the future or
+/// snapshots, return None.  Scan is more appropriate for that.
+///
+/// 1. Up to, but not including, the offset of the log position.  This makes it a half-open
+///    interval.
+/// 2. Up to, and including, the number of files to return.
+/// 3. Up to, and including, the total number of bytes to return.
+pub fn scan_from_manifest(
+    manifest: &Manifest,
+    from: LogPosition,
+    limits: Limits,
+) -> Option<Vec<Fragment>> {
+    let log_position_range = if let Some(max_records) = limits.max_records {
+        if from.offset().saturating_add(max_records) == u64::MAX {
+            return None;
+        }
+        (from, from + max_records)
+    } else {
+        (from, LogPosition::MAX)
+    };
+    // If no there is no fragment with a start earlier than the from LogPosition, that means
+    // we'd need to load snapshots.  Since this is an in-memory only function, we return "None"
+    // to indicate that it's not satisfiable and do no I/O.
+    if !manifest
+        .fragments
+        .iter()
+        .any(|f| f.start <= log_position_range.0)
+    {
+        return None;
+    }
+    // If no there is no fragment with a limit later than the upper-bound LogPosition, that
+    // means we have a stale manifest.  Since this is an in-memory only function, we return
+    // "None" to indicate that it's not satisfiable and do no I/O.
+    if !manifest
+        .fragments
+        .iter()
+        .any(|f| f.limit > log_position_range.1)
+    {
+        return None;
+    }
+    let fragments = manifest
+        .fragments
+        .iter()
+        .filter(|f| ranges_overlap(log_position_range, (f.start, f.limit)))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut short_read = false;
+    Some(post_process_fragments(
+        fragments,
+        from,
+        limits,
+        &mut short_read,
+    ))
+}
+
+/// Post process the fragments such that only records starting at from and not exceeding limits
+/// will be processed.  Sets *short_read=true when the limits truncate the log.
+fn post_process_fragments(
+    mut fragments: Vec<Fragment>,
+    from: LogPosition,
+    limits: Limits,
+    short_read: &mut bool,
+) -> Vec<Fragment> {
+    fragments.sort_by_key(|f| f.start.offset());
+    if let Some(max_files) = limits.max_files {
+        if fragments.len() as u64 > max_files {
+            *short_read = true;
+            fragments.truncate(max_files as usize);
+        }
+    }
+    while fragments.len() > 1
+        // NOTE(rescrv):  We take the start of the last fragment, because if there are enough
+        // records without it we can pop.
+        && fragments[fragments.len() - 1].start - from
+            > limits.max_records.unwrap_or(u64::MAX)
+    {
+        fragments.pop();
+        *short_read = true;
+    }
+    while fragments.len() > 1
+        && fragments
+            .iter()
+            .map(|f| f.num_bytes)
+            .fold(0, u64::saturating_add)
+            > limits.max_bytes.unwrap_or(u64::MAX)
+    {
+        fragments.pop();
+        *short_read = true;
+    }
+    fragments
+}
+
 /// LogReader is a reader for the log.
-pub struct LogReader {
+pub struct LogReader<
+    P: FragmentPointer = (FragmentSeqNo, LogPosition),
+    FP: FragmentPublisher<FragmentPointer = P> = BatchManager,
+    MP: ManifestPublisher<P> = ManifestManager,
+> {
     options: LogReaderOptions,
+    // TODO(rescrv):  Fixup dead code.
+    #[allow(dead_code)]
+    fragment_publisher: FP,
+    manifest_publisher: MP,
     storage: Arc<Storage>,
     cache: Option<Arc<dyn SnapshotCache>>,
     pub(crate) prefix: String,
 }
 
-impl LogReader {
-    pub fn new(options: LogReaderOptions, storage: Arc<Storage>, prefix: String) -> Self {
+impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: ManifestPublisher<P>>
+    LogReader<P, FP, MP>
+{
+    pub fn new(
+        options: LogReaderOptions,
+        fragment_publisher: FP,
+        manifest_publisher: MP,
+        storage: Arc<Storage>,
+        prefix: String,
+    ) -> Self {
         let cache = None;
         Self {
             options,
+            fragment_publisher,
+            manifest_publisher,
             storage,
             cache,
             prefix,
@@ -58,12 +174,16 @@ impl LogReader {
 
     pub async fn open(
         options: LogReaderOptions,
+        fragment_publisher: FP,
+        manifest_publisher: MP,
         storage: Arc<Storage>,
         prefix: String,
     ) -> Result<Self, Error> {
         let cache = None;
         Ok(Self {
             options,
+            fragment_publisher,
+            manifest_publisher,
             storage,
             cache,
             prefix,
@@ -172,22 +292,19 @@ impl LogReader {
             let futures = snapshots
                 .iter()
                 .map(|s| {
-                    let options = self.options.clone();
-                    let storage = Arc::clone(&self.storage);
                     let cache = self.cache.as_ref().map(Arc::clone);
                     async move {
                         if let Some(cache) = cache {
                             if let Some(snapshot) = cache.get(s).await? {
                                 return Ok(Some(snapshot));
                             }
-                            let snap = Snapshot::load(&options.throttle, &storage, &self.prefix, s)
-                                .await?;
+                            let snap = self.manifest_publisher.snapshot_load(s).await?;
                             if let Some(snap) = snap.as_ref() {
                                 cache.put(s, snap).await?;
                             }
                             Ok(snap)
                         } else {
-                            Snapshot::load(&options.throttle, &storage, &self.prefix, s).await
+                            self.manifest_publisher.snapshot_load(s).await
                         }
                     }
                 })
@@ -211,102 +328,7 @@ impl LogReader {
         }
         fragments.retain(|f| f.limit > from);
         fragments.sort_by_key(|f| f.start.offset());
-        Ok(Self::post_process_fragments(
-            fragments, from, limits, short_read,
-        ))
-    }
-
-    /// Do a consistent stale read of the manifest.  If the read can be returned without I/O,
-    /// return Some(Vec<Fragment>).  If the read would require reading from the future or
-    /// snapshots, return None.  Scan is more appropriate for that.
-    ///
-    /// 1. Up to, but not including, the offset of the log position.  This makes it a half-open
-    ///    interval.
-    /// 2. Up to, and including, the number of files to return.
-    /// 3. Up to, and including, the total number of bytes to return.
-    pub fn scan_from_manifest(
-        manifest: &Manifest,
-        from: LogPosition,
-        limits: Limits,
-    ) -> Option<Vec<Fragment>> {
-        let log_position_range = if let Some(max_records) = limits.max_records {
-            if from.offset().saturating_add(max_records) == u64::MAX {
-                return None;
-            }
-            (from, from + max_records)
-        } else {
-            (from, LogPosition::MAX)
-        };
-        // If no there is no fragment with a start earlier than the from LogPosition, that means
-        // we'd need to load snapshots.  Since this is an in-memory only function, we return "None"
-        // to indicate that it's not satisfiable and do no I/O.
-        if !manifest
-            .fragments
-            .iter()
-            .any(|f| f.start <= log_position_range.0)
-        {
-            return None;
-        }
-        // If no there is no fragment with a limit later than the upper-bound LogPosition, that
-        // means we have a stale manifest.  Since this is an in-memory only function, we return
-        // "None" to indicate that it's not satisfiable and do no I/O.
-        if !manifest
-            .fragments
-            .iter()
-            .any(|f| f.limit > log_position_range.1)
-        {
-            return None;
-        }
-        let fragments = manifest
-            .fragments
-            .iter()
-            .filter(|f| ranges_overlap(log_position_range, (f.start, f.limit)))
-            .cloned()
-            .collect::<Vec<_>>();
-        let mut short_read = false;
-        Some(Self::post_process_fragments(
-            fragments,
-            from,
-            limits,
-            &mut short_read,
-        ))
-    }
-
-    // Post process the fragments such that only records starting at from and not exceeding limits
-    // will be processed.  Sets *short_read=true when the limits truncate the log.
-    fn post_process_fragments(
-        mut fragments: Vec<Fragment>,
-        from: LogPosition,
-        limits: Limits,
-        short_read: &mut bool,
-    ) -> Vec<Fragment> {
-        fragments.sort_by_key(|f| f.start.offset());
-        if let Some(max_files) = limits.max_files {
-            if fragments.len() as u64 > max_files {
-                *short_read = true;
-                fragments.truncate(max_files as usize);
-            }
-        }
-        while fragments.len() > 1
-            // NOTE(rescrv):  We take the start of the last fragment, because if there are enough
-            // records without it we can pop.
-            && fragments[fragments.len() - 1].start - from
-                > limits.max_records.unwrap_or(u64::MAX)
-        {
-            fragments.pop();
-            *short_read = true;
-        }
-        while fragments.len() > 1
-            && fragments
-                .iter()
-                .map(|f| f.num_bytes)
-                .fold(0, u64::saturating_add)
-                > limits.max_bytes.unwrap_or(u64::MAX)
-        {
-            fragments.pop();
-            *short_read = true;
-        }
-        fragments
+        Ok(post_process_fragments(fragments, from, limits, short_read))
     }
 
     #[tracing::instrument(skip(self))]
@@ -474,6 +496,44 @@ impl LogReader {
     }
 }
 
+impl LogReader<(FragmentSeqNo, LogPosition), BatchManager, ManifestManager> {
+    /// Open a LogReader with the classic S3-backed BatchManager and ManifestManager bindings.
+    ///
+    /// This is a convenience method that creates placeholder publishers since the LogReader
+    /// primarily uses storage directly for reading operations.
+    pub async fn open_classic(
+        options: LogReaderOptions,
+        storage: Arc<Storage>,
+        prefix: String,
+    ) -> Result<Self, Error> {
+        let writer_options = crate::LogWriterOptions::default();
+        let fragment_factory = crate::FragmentPublisherFactory {
+            options: writer_options.clone(),
+            storage: Arc::clone(&storage),
+            prefix: prefix.clone(),
+            mark_dirty: Arc::new(()),
+        };
+        let manifest_factory = crate::ManifestPublisherFactory {
+            options: writer_options,
+            storage: Arc::clone(&storage),
+            prefix: prefix.clone(),
+            writer: "classic-reader".to_string(),
+            mark_dirty: Arc::new(()),
+            snapshot_cache: Arc::new(()),
+        };
+        let fragment_publisher = fragment_factory.make().await?;
+        let manifest_publisher = manifest_factory.make().await?;
+        Self::open(
+            options,
+            fragment_publisher,
+            manifest_publisher,
+            storage,
+            prefix,
+        )
+        .await
+    }
+}
+
 pub fn fragment_path(prefix: &str, path: &str) -> String {
     format!("{prefix}/{path}")
 }
@@ -577,6 +637,10 @@ pub async fn read_fragment(
 mod tests {
     use setsum::Setsum;
 
+    use crate::interfaces::{
+        FragmentPublisherFactory as FragmentPublisherFactoryTrait,
+        ManifestPublisherFactory as ManifestPublisherFactoryTrait,
+    };
     use crate::{Fragment, FragmentIdentifier, FragmentSeqNo};
 
     use super::*;
@@ -620,8 +684,7 @@ mod tests {
         };
 
         let mut short_read = false;
-        let result =
-            LogReader::post_process_fragments(fragments.clone(), from, limits, &mut short_read);
+        let result = post_process_fragments(fragments.clone(), from, limits, &mut short_read);
 
         // With the fix: last fragment start (200) - from (125) = 75 records
         // This should be under the 100 record limit, so all fragments should remain
@@ -639,12 +702,8 @@ mod tests {
         };
 
         let mut short_read = false;
-        let result_strict = LogReader::post_process_fragments(
-            fragments.clone(),
-            from,
-            limits_strict,
-            &mut short_read,
-        );
+        let result_strict =
+            post_process_fragments(fragments.clone(), from, limits_strict, &mut short_read);
 
         // With the fix: 200 - 125 = 75 > 74, so last fragment should be removed
         assert_eq!(result_strict.len(), 2);
@@ -694,8 +753,7 @@ mod tests {
         };
 
         let mut short_read = false;
-        let result =
-            LogReader::post_process_fragments(fragments.clone(), from, limits, &mut short_read);
+        let result = post_process_fragments(fragments.clone(), from, limits, &mut short_read);
 
         // With the fix: both fragments should be returned
         // The calculation is: last fragment start (101) - from (50) = 51 records
@@ -725,12 +783,8 @@ mod tests {
         };
 
         let mut short_read = false;
-        let result_edge = LogReader::post_process_fragments(
-            fragments.clone(),
-            from,
-            limits_edge_case,
-            &mut short_read,
-        );
+        let result_edge =
+            post_process_fragments(fragments.clone(), from, limits_edge_case, &mut short_read);
 
         // With the fix: 101 - 50 = 51 > 50, so the second fragment should be removed
         assert_eq!(
@@ -887,7 +941,7 @@ mod tests {
             max_bytes: None,
             max_records: Some(100), // Would need data up to exactly offset 200
         };
-        let result = LogReader::scan_from_manifest(&manifest, from, limits);
+        let result = scan_from_manifest(&manifest, from, limits);
         assert!(
             result.is_some(),
             "Should succeed when request stays within manifest coverage"
@@ -899,7 +953,7 @@ mod tests {
             max_bytes: None,
             max_records: Some(101), // Would need data up to offset 201, manifest limit is 201
         };
-        let result_at_limit = LogReader::scan_from_manifest(&manifest, from, limits_at_limit);
+        let result_at_limit = scan_from_manifest(&manifest, from, limits_at_limit);
         assert!(
             result_at_limit.is_none(),
             "Should fail when request  exceeds limit"
@@ -911,7 +965,7 @@ mod tests {
             max_bytes: None,
             max_records: Some(102), // Would need data up to offset 202, beyond manifest limit of 201
         };
-        let result_beyond = LogReader::scan_from_manifest(&manifest, from, limits_beyond);
+        let result_beyond = scan_from_manifest(&manifest, from, limits_beyond);
         assert!(
             result_beyond.is_none(),
             "Should return None when request exceeds manifest coverage"
@@ -924,7 +978,7 @@ mod tests {
             max_bytes: None,
             max_records: Some(1), // Would need data up to offset 201, exactly at manifest limit
         };
-        let result_at_end = LogReader::scan_from_manifest(&manifest, from_end, limits_at_end);
+        let result_at_end = scan_from_manifest(&manifest, from_end, limits_at_end);
         assert!(
             result_at_end.is_none(),
             "Should fail when reading exactly at manifest boundary"
@@ -937,7 +991,7 @@ mod tests {
             max_bytes: None,
             max_records: Some(1),
         };
-        let result_beyond = LogReader::scan_from_manifest(&manifest, from_beyond, limits_beyond);
+        let result_beyond = scan_from_manifest(&manifest, from_beyond, limits_beyond);
         assert!(
             result_beyond.is_none(),
             "Should return None when starting beyond manifest coverage"
@@ -950,8 +1004,7 @@ mod tests {
             max_bytes: None,
             max_records: None, // This creates a range to LogPosition::MAX
         };
-        let result_unlimited =
-            LogReader::scan_from_manifest(&manifest, from_middle, limits_unlimited);
+        let result_unlimited = scan_from_manifest(&manifest, from_middle, limits_unlimited);
         assert!(
             result_unlimited.is_none(),
             "Should return None when unlimited range extends beyond manifest"
@@ -968,8 +1021,7 @@ mod tests {
             initial_offset: None,
             initial_seq_no: None,
         };
-        let result_empty =
-            LogReader::scan_from_manifest(&empty_manifest, LogPosition::from_offset(0), limits);
+        let result_empty = scan_from_manifest(&empty_manifest, LogPosition::from_offset(0), limits);
         assert!(
             result_empty.is_none(),
             "Should return None for empty manifest"
@@ -982,8 +1034,7 @@ mod tests {
             max_bytes: None,
             max_records: Some(20), // This would overflow if not handled properly
         };
-        let result_overflow =
-            LogReader::scan_from_manifest(&manifest, from_overflow_test, limits_overflow);
+        let result_overflow = scan_from_manifest(&manifest, from_overflow_test, limits_overflow);
         assert!(
             result_overflow.is_none(),
             "Should handle potential overflow gracefully"
@@ -3460,7 +3511,7 @@ mod tests {
             initial_offset: Some(LogPosition { offset: 1 }),
             initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))),
         };
-        let Some(fragments) = LogReader::scan_from_manifest(
+        let Some(fragments) = scan_from_manifest(
             &manifest,
             LogPosition::from_offset(20776),
             Limits {
@@ -3504,17 +3555,37 @@ mod tests {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "test-prefix".to_string();
         let options = LogReaderOptions::default();
-        let reader = LogReader::new(options, storage.clone(), prefix.clone());
+        let writer_options = crate::LogWriterOptions::default();
 
         let manifest = Manifest::new_empty("test-writer");
-        Manifest::initialize_from_manifest(
-            &crate::LogWriterOptions::default(),
-            &storage,
-            &prefix,
-            manifest.clone(),
-        )
-        .await
-        .unwrap();
+        Manifest::initialize_from_manifest(&writer_options, &storage, &prefix, manifest.clone())
+            .await
+            .unwrap();
+
+        let fragment_factory = crate::FragmentPublisherFactory {
+            options: writer_options.clone(),
+            storage: Arc::clone(&storage),
+            prefix: prefix.clone(),
+            mark_dirty: Arc::new(()),
+        };
+        let manifest_factory = crate::ManifestPublisherFactory {
+            options: writer_options,
+            storage: Arc::clone(&storage),
+            prefix: prefix.clone(),
+            writer: "test-writer".to_string(),
+            mark_dirty: Arc::new(()),
+            snapshot_cache: Arc::new(()),
+        };
+        let batch_manager = fragment_factory.make().await.unwrap();
+        let manifest_manager = manifest_factory.make().await.unwrap();
+
+        let reader = LogReader::new(
+            options,
+            batch_manager,
+            manifest_manager,
+            Arc::clone(&storage),
+            prefix.clone(),
+        );
 
         let (loaded_manifest, etag) = Manifest::load(&reader.options.throttle, &storage, &prefix)
             .await
@@ -3535,17 +3606,37 @@ mod tests {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "test-prefix".to_string();
         let options = LogReaderOptions::default();
-        let reader = LogReader::new(options, storage.clone(), prefix.clone());
+        let writer_options = crate::LogWriterOptions::default();
 
         let manifest = Manifest::new_empty("test-writer");
-        Manifest::initialize_from_manifest(
-            &crate::LogWriterOptions::default(),
-            &storage,
-            &prefix,
-            manifest.clone(),
-        )
-        .await
-        .unwrap();
+        Manifest::initialize_from_manifest(&writer_options, &storage, &prefix, manifest.clone())
+            .await
+            .unwrap();
+
+        let fragment_factory = crate::FragmentPublisherFactory {
+            options: writer_options.clone(),
+            storage: Arc::clone(&storage),
+            prefix: prefix.clone(),
+            mark_dirty: Arc::new(()),
+        };
+        let manifest_factory = crate::ManifestPublisherFactory {
+            options: writer_options,
+            storage: Arc::clone(&storage),
+            prefix: prefix.clone(),
+            writer: "test-writer".to_string(),
+            mark_dirty: Arc::new(()),
+            snapshot_cache: Arc::new(()),
+        };
+        let batch_manager = fragment_factory.make().await.unwrap();
+        let manifest_manager = manifest_factory.make().await.unwrap();
+
+        let reader = LogReader::new(
+            options,
+            batch_manager,
+            manifest_manager,
+            Arc::clone(&storage),
+            prefix.clone(),
+        );
 
         let fake_etag = chroma_storage::ETag("fake-etag-that-wont-match".to_string());
         let manifest_and_etag = ManifestAndETag {
@@ -3566,9 +3657,39 @@ mod tests {
         )));
         let prefix = "test-prefix".to_string();
         let options = LogReaderOptions::default();
-        let reader = LogReader::new(options, storage, prefix);
+        let writer_options = crate::LogWriterOptions::default();
 
+        // Initialize a manifest first so we can create the managers
         let manifest = Manifest::new_empty("test-writer");
+        Manifest::initialize_from_manifest(&writer_options, &storage, &prefix, manifest.clone())
+            .await
+            .unwrap();
+
+        let fragment_factory = crate::FragmentPublisherFactory {
+            options: writer_options.clone(),
+            storage: Arc::clone(&storage),
+            prefix: prefix.clone(),
+            mark_dirty: Arc::new(()),
+        };
+        let manifest_factory = crate::ManifestPublisherFactory {
+            options: writer_options,
+            storage: Arc::clone(&storage),
+            prefix: prefix.clone(),
+            writer: "test-writer".to_string(),
+            mark_dirty: Arc::new(()),
+            snapshot_cache: Arc::new(()),
+        };
+        let batch_manager = fragment_factory.make().await.unwrap();
+        let manifest_manager = manifest_factory.make().await.unwrap();
+
+        let reader = LogReader::new(
+            options,
+            batch_manager,
+            manifest_manager,
+            Arc::clone(&storage),
+            prefix.clone(),
+        );
+
         let fake_etag = chroma_storage::ETag("fake-etag".to_string());
         let manifest_and_etag = ManifestAndETag {
             manifest,
@@ -3594,17 +3715,37 @@ mod tests {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "test-prefix".to_string();
         let options = LogReaderOptions::default();
-        let reader = LogReader::new(options, storage.clone(), prefix.clone());
+        let writer_options = crate::LogWriterOptions::default();
 
         let manifest = Manifest::new_empty("test-writer");
-        Manifest::initialize_from_manifest(
-            &crate::LogWriterOptions::default(),
-            &storage,
-            &prefix,
-            manifest.clone(),
-        )
-        .await
-        .unwrap();
+        Manifest::initialize_from_manifest(&writer_options, &storage, &prefix, manifest.clone())
+            .await
+            .unwrap();
+
+        let fragment_factory = crate::FragmentPublisherFactory {
+            options: writer_options.clone(),
+            storage: Arc::clone(&storage),
+            prefix: prefix.clone(),
+            mark_dirty: Arc::new(()),
+        };
+        let manifest_factory = crate::ManifestPublisherFactory {
+            options: writer_options,
+            storage: Arc::clone(&storage),
+            prefix: prefix.clone(),
+            writer: "test-writer".to_string(),
+            mark_dirty: Arc::new(()),
+            snapshot_cache: Arc::new(()),
+        };
+        let batch_manager = fragment_factory.make().await.unwrap();
+        let manifest_manager = manifest_factory.make().await.unwrap();
+
+        let reader = LogReader::new(
+            options,
+            batch_manager,
+            manifest_manager,
+            Arc::clone(&storage),
+            prefix.clone(),
+        );
 
         let result = reader.manifest_and_e_tag().await.unwrap();
         assert!(
@@ -3624,8 +3765,47 @@ mod tests {
     async fn test_k8s_integration_manifest_and_e_tag_returns_none_when_no_manifest() {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "nonexistent-prefix".to_string();
+        let init_prefix = "init-prefix".to_string();
         let options = LogReaderOptions::default();
-        let reader = LogReader::new(options, storage, prefix);
+        let writer_options = crate::LogWriterOptions::default();
+
+        // We need to initialize *some* manifest so the factories can work
+        // but we'll point the reader at a nonexistent prefix
+        let manifest = Manifest::new_empty("test-writer");
+        Manifest::initialize_from_manifest(
+            &writer_options,
+            &storage,
+            &init_prefix,
+            manifest.clone(),
+        )
+        .await
+        .unwrap();
+
+        let fragment_factory = crate::FragmentPublisherFactory {
+            options: writer_options.clone(),
+            storage: Arc::clone(&storage),
+            prefix: init_prefix.clone(),
+            mark_dirty: Arc::new(()),
+        };
+        let manifest_factory = crate::ManifestPublisherFactory {
+            options: writer_options,
+            storage: Arc::clone(&storage),
+            prefix: init_prefix.clone(),
+            writer: "test-writer".to_string(),
+            mark_dirty: Arc::new(()),
+            snapshot_cache: Arc::new(()),
+        };
+        let batch_manager = fragment_factory.make().await.unwrap();
+        let manifest_manager = manifest_factory.make().await.unwrap();
+
+        // Point the reader at the nonexistent prefix
+        let reader = LogReader::new(
+            options,
+            batch_manager,
+            manifest_manager,
+            Arc::clone(&storage),
+            prefix,
+        );
 
         let result = reader.manifest_and_e_tag().await.unwrap();
         assert!(

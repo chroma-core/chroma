@@ -1,12 +1,14 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use chroma_storage::{ETag, Storage};
+use chroma_storage::{
+    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, Storage, StorageError,
+};
 use setsum::Setsum;
 
 use crate::gc::Garbage;
 use crate::interfaces::ManifestPublisher;
-use crate::manifest::{Manifest, ManifestAndETag, Snapshot};
+use crate::manifest::{Manifest, ManifestAndETag, Snapshot, SnapshotPointer};
 use crate::reader::read_fragment;
 use crate::writer::MarkDirty;
 use crate::{
@@ -548,7 +550,7 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
 
     async fn compute_garbage(
         &self,
-        options: &GarbageCollectionOptions,
+        _options: &GarbageCollectionOptions,
         first_to_keep: LogPosition,
     ) -> Result<Option<Garbage>, Error> {
         // SAFETY(rescrv):  Mutex poisoning.
@@ -556,15 +558,42 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
             let staging = self.staging.lock().unwrap();
             staging.stable.manifest.clone()
         };
-        Garbage::new(
-            &self.storage,
-            &self.prefix,
-            &stable,
-            &options.throttle,
-            &*self.snapshot_cache,
-            first_to_keep,
-        )
-        .await
+        Garbage::new(&stable, &*self.snapshot_cache, self, first_to_keep).await
+    }
+
+    async fn snapshot_load(&self, pointer: &SnapshotPointer) -> Result<Option<Snapshot>, Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            self.throttle.throughput as f64,
+            self.throttle.headroom as f64,
+        );
+        let mut retries = 0;
+        let path = format!("{}/{}", self.prefix, pointer.path_to_snapshot);
+        loop {
+            match self
+                .storage
+                .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
+                .await
+                .map_err(Arc::new)
+            {
+                Ok((ref snapshot, _)) => {
+                    let snapshot: Snapshot = serde_json::from_slice(snapshot).map_err(|e| {
+                        Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
+                    })?;
+                    return Ok(Some(snapshot));
+                }
+                Err(err) => match &*err {
+                    StorageError::NotFound { path: _, source: _ } => return Ok(None),
+                    err => {
+                        let backoff = exp_backoff.next();
+                        tokio::time::sleep(backoff).await;
+                        if retries >= 3 {
+                            return Err(Error::StorageError(Arc::new(err.clone())));
+                        }
+                        retries += 1;
+                    }
+                },
+            }
+        }
     }
 }
 

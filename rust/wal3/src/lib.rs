@@ -26,11 +26,14 @@ pub use interfaces::s3::{
     upload_parquet, BatchManager, FragmentPublisherFactory, ManifestManager,
     ManifestPublisherFactory,
 };
-pub use interfaces::{FragmentPublisher, ManifestPublisher};
+pub use interfaces::{
+    FragmentPointer, FragmentPublisher, FragmentPublisherFactory as FragmentPublisherFactoryTrait,
+    ManifestPublisher, ManifestPublisherFactory as ManifestPublisherFactoryTrait,
+};
 pub use manifest::{
     unprefixed_snapshot_path, Manifest, ManifestAndETag, Snapshot, SnapshotPointer,
 };
-pub use reader::{Limits, LogReader};
+pub use reader::{scan_from_manifest, Limits, LogReader};
 pub use snapshot_cache::SnapshotCache;
 pub use writer::{LogWriter, MarkDirty};
 

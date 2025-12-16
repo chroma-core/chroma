@@ -14,7 +14,8 @@ use thiserror::Error;
 use tracing::Level;
 use wal3::{
     FragmentPublisherFactory, FragmentSeqNo, GarbageCollectionOptions, GarbageCollector,
-    LogPosition, LogWriterOptions, ManifestPublisherFactory, MarkDirty, SnapshotCache,
+    LogPosition, LogWriterOptions, ManifestManager, ManifestPublisherFactory, MarkDirty,
+    SnapshotCache, SnapshotOptions, ThrottleOptions,
 };
 
 use crate::types::CleanupMode;
@@ -184,15 +185,37 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                         let collection_id = *collection_id;
                         let storage_clone = storage_arc.clone();
                         log_destroy_futures.push(async move {
-                            match wal3::destroy(storage_clone, &collection_id.storage_prefix_for_log())
-                                .await
+                            let prefix = collection_id.storage_prefix_for_log();
+                            let manifest_manager = match ManifestManager::new(
+                                ThrottleOptions::default(),
+                                SnapshotOptions::default(),
+                                storage_clone.clone(),
+                                prefix.clone(),
+                                "destroy service".to_string(),
+                                Arc::new(()),
+                                Arc::new(()),
+                            )
+                            .await
                             {
+                                Ok(mm) => mm,
+                                Err(wal3::Error::UninitializedLog) => return Ok(()),
+                                Err(err) => {
+                                    tracing::error!(
+                                        "Unable to create manifest manager for collection [{collection_id}]: {err:?}"
+                                    );
+                                    return Err(DeleteUnusedLogsError::Wal3 {
+                                        collection_id,
+                                        err,
+                                    });
+                                }
+                            };
+                            match wal3::destroy(storage_clone, &prefix, &manifest_manager).await {
                                 Ok(()) => Ok(()),
                                 Err(err) => {
                                     tracing::error!(
                                         "Unable to destroy log for collection [{collection_id}]: {err:?}"
                                     );
-                                    Err(DeleteUnusedLogsError::Wal3{ collection_id, err})
+                                    Err(DeleteUnusedLogsError::Wal3 { collection_id, err })
                                 }
                             }
                         })

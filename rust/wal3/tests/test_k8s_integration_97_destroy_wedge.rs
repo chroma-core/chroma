@@ -3,8 +3,8 @@ use std::sync::Arc;
 use chroma_storage::{s3_client_for_test_with_new_bucket, PutOptions};
 
 use wal3::{
-    Error, FragmentPublisherFactory, LogWriter, LogWriterOptions, ManifestPublisherFactory,
-    SnapshotOptions,
+    Error, FragmentPublisherFactory, LogWriter, LogWriterOptions, ManifestManager,
+    ManifestPublisherFactory, SnapshotOptions, ThrottleOptions,
 };
 
 #[tokio::test]
@@ -34,7 +34,7 @@ async fn test_k8s_integration_97_destroy_wedge() {
         snapshot_cache: Arc::new(()),
     };
     let log = LogWriter::open_or_initialize(
-        options,
+        options.clone(),
         Arc::clone(&storage),
         PREFIX,
         WRITER,
@@ -62,8 +62,22 @@ async fn test_k8s_integration_97_destroy_wedge() {
         .await
         .unwrap();
 
+    let manifest_manager = ManifestManager::new(
+        ThrottleOptions::default(),
+        options.snapshot_manifest,
+        Arc::clone(&storage),
+        PREFIX.to_string(),
+        WRITER.to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    )
+    .await
+    .unwrap();
+
     assert!(matches!(
-        wal3::destroy(storage, PREFIX).await.unwrap_err(),
+        wal3::destroy(storage, PREFIX, &manifest_manager)
+            .await
+            .unwrap_err(),
         Error::GarbageCollection(_)
     ));
 }

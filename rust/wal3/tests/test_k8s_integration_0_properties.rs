@@ -1,4 +1,6 @@
-use chroma_storage::s3_client_for_test_with_new_bucket;
+mod mocks;
+
+use std::sync::Arc;
 
 use setsum::Setsum;
 
@@ -7,12 +9,34 @@ use rand::RngCore;
 
 use wal3::{
     Error, Fragment, FragmentIdentifier, FragmentSeqNo, Garbage, LogPosition, Manifest, Snapshot,
-    SnapshotOptions, SnapshotPointer, ThrottleOptions,
+    SnapshotOptions, SnapshotPointer,
 };
 
-#[derive(Default)]
+use mocks::MockManifestPublisher;
+
+/// A mutable snapshot cache for testing that supports interior mutability.
 pub struct TestingSnapshotCache {
-    snapshots: Vec<Snapshot>,
+    snapshots: std::sync::Mutex<Vec<Snapshot>>,
+}
+
+impl Default for TestingSnapshotCache {
+    fn default() -> Self {
+        Self {
+            snapshots: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl TestingSnapshotCache {
+    pub fn with_snapshots(snapshots: Vec<Snapshot>) -> Self {
+        Self {
+            snapshots: std::sync::Mutex::new(snapshots),
+        }
+    }
+
+    pub fn add_snapshots(&self, new_snapshots: Vec<Snapshot>) {
+        self.snapshots.lock().unwrap().extend(new_snapshots);
+    }
 }
 
 #[async_trait::async_trait]
@@ -20,6 +44,8 @@ impl wal3::SnapshotCache for TestingSnapshotCache {
     async fn get(&self, ptr: &SnapshotPointer) -> Result<Option<Snapshot>, Error> {
         Ok(self
             .snapshots
+            .lock()
+            .unwrap()
             .iter()
             .find(|x| x.setsum == ptr.setsum)
             .cloned())
@@ -122,8 +148,6 @@ proptest::proptest! {
     #[test]
     fn test_k8s_integration_manifests_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1..75)) {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let storage = rt.block_on(s3_client_for_test_with_new_bucket());
-        let throttle = ThrottleOptions::default();
         let mut manifest = Manifest::new_empty("test");
         println!("deltas = {deltas:#?}");
         let fragments = deltas_to_fragment_sequence(&deltas);
@@ -135,13 +159,14 @@ proptest::proptest! {
         eprintln!("starting manifest = {manifest:#?}");
         let start = manifest.oldest_timestamp();
         let limit = manifest.next_write_timestamp();
-        let cache = TestingSnapshotCache::default();
+        let cache = Arc::new(TestingSnapshotCache::default());
+        let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
         let mut count = 0;
         let mut last_limit = 0;
         for offset in start.offset()..=limit.offset() {
             let position = LogPosition::from_offset(offset);
             eprintln!("position = {position:?}");
-            let Some(garbage) = rt.block_on(Garbage::new(&storage, "manifests_gargage", &manifest, &throttle, &cache, position)).unwrap() else {
+            let Some(garbage) = rt.block_on(Garbage::new(&manifest, &*cache, &mock_publisher, position)).unwrap() else {
                 continue;
             };
             eprintln!("garbage = {garbage:#?}");
@@ -179,8 +204,6 @@ proptest::proptest! {
     #[test]
     fn test_k8s_integration_manifests_with_snapshots_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1..100), snapshot_rollover_threshold in 2..3usize, fragment_rollover_threshold in 2..3usize) {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let storage = rt.block_on(s3_client_for_test_with_new_bucket());
-        let throttle = ThrottleOptions::default();
         let mut manifest = Manifest::new_empty("test");
         println!("deltas = {deltas:#?}");
         let fragments = deltas_to_fragment_sequence(&deltas);
@@ -200,21 +223,20 @@ proptest::proptest! {
         eprintln!("starting manifest = {manifest:#?}");
         let start = manifest.oldest_timestamp();
         let limit = manifest.next_write_timestamp();
-        let mut cache = TestingSnapshotCache {
-            snapshots: snapshots.clone(),
-        };
+        let cache = Arc::new(TestingSnapshotCache::with_snapshots(snapshots.clone()));
+        let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
         eprintln!("[{:?}, {:?})", start, limit);
         let mut last_initial_seq_no = FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(0));
         for offset in start.offset()..=limit.offset() {
             let position = LogPosition::from_offset(offset);
             eprintln!("position = {position:?}");
-            let garbage = rt.block_on(Garbage::new(&storage, "manifests_with_snapshots_gargage", &manifest, &throttle, &cache, position)).unwrap();
+            let garbage = rt.block_on(Garbage::new(&manifest, &*cache, &mock_publisher, position)).unwrap();
             let Some(garbage) = garbage else {
                 continue;
             };
             eprintln!("garbage = {garbage:#?}");
             let dropped = garbage.setsum_to_discard;
-            cache.snapshots.extend(garbage.snapshots_to_make.clone());
+            cache.add_snapshots(garbage.snapshots_to_make.clone());
             if garbage.is_empty() {
                 continue;
             }
@@ -256,7 +278,6 @@ proptest::proptest! {
         // [MANIFEST] -> [SNAP C] -> [SNAP B] -> [SNAP A] -> [ONE FRAG]
         // All three manifests will have the same setsum.
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let storage = rt.block_on(s3_client_for_test_with_new_bucket());
         let mut manifest = Manifest::new_empty("test");
         println!("deltas = {deltas:#?}");
         let fragments = deltas_to_fragment_sequence(&deltas);
@@ -273,16 +294,15 @@ proptest::proptest! {
                 snapshots.push(snapshot);
             }
         }
-        let cache = TestingSnapshotCache {
-            snapshots: snapshots.clone(),
-        };
+        let cache = Arc::new(TestingSnapshotCache::with_snapshots(snapshots.clone()));
+        let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
         // Pick as victim the most recent snapshot and select so that we keep just one snapshot and
         // one frag within that snapshot.
         assert!(!manifest.snapshots.is_empty());
         let victim = &manifest.snapshots[manifest.snapshots.len() - 1];
         eprintln!("victim = {victim:?}");
         eprintln!("position = {:?}", victim.limit - 1);
-        let garbage = rt.block_on(Garbage::new(&storage, "manifests_with_snapshots_that_collide", &manifest, &ThrottleOptions::default(), &cache, victim.limit - 1)).unwrap();
+        let garbage = rt.block_on(Garbage::new(&manifest, &*cache, &mock_publisher, victim.limit - 1)).unwrap();
         eprintln!("garbage = {garbage:?}");
     }
 }

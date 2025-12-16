@@ -1,12 +1,13 @@
+mod mocks;
+
 use std::sync::{Arc, Mutex};
 
 use setsum::Setsum;
 
-use chroma_storage::s3_client_for_test_with_new_bucket;
-
+use mocks::MockManifestPublisher;
 use wal3::{
     unprefixed_snapshot_path, Error, Fragment, FragmentIdentifier, FragmentSeqNo, Garbage,
-    LogPosition, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
+    LogPosition, Snapshot, SnapshotCache, SnapshotPointer,
 };
 
 // Mock implementations for testing
@@ -94,7 +95,8 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_one_level(
     // that spans from 8 to 15
     let mut first_to_keep = LogPosition::from_offset(10);
 
-    let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+    let cache = Arc::new(cache);
+    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
@@ -109,11 +111,9 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_one_level(
     // This should trigger the to_split case in replace_snapshot
     let dropped_setsum = garbage
         .replace_snapshot(
-            &storage,
-            "replace-snapshot",
             &nested_ptr,
-            &ThrottleOptions::default(),
-            &cache,
+            cache.as_ref(),
+            &mock_publisher,
             &mut first_to_keep,
             &mut true,
         )
@@ -197,7 +197,8 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_two_level(
     // that spans from 8 to 15
     let mut first_to_keep = LogPosition::from_offset(10);
 
-    let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+    let cache = Arc::new(cache);
+    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
@@ -212,11 +213,9 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_two_level(
     // This should trigger the to_split case in replace_snapshot
     let dropped_setsum = garbage
         .replace_snapshot(
-            &storage,
-            "replace-snapshot",
             &parent_ptr,
-            &ThrottleOptions::default(),
-            &cache,
+            cache.as_ref(),
+            &mock_publisher,
             &mut first_to_keep,
             &mut true,
         )
@@ -276,7 +275,8 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_three_leve
     // that spans from 8 to 15
     let mut first_to_keep = LogPosition::from_offset(10);
 
-    let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+    let cache = Arc::new(cache);
+    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
@@ -291,11 +291,9 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_three_leve
     // This should trigger the to_split case in replace_snapshot
     let dropped_setsum = garbage
         .replace_snapshot(
-            &storage,
-            "replace-snapshot",
             &parent_ptr,
-            &ThrottleOptions::default(),
-            &cache,
+            cache.as_ref(),
+            &mock_publisher,
             &mut first_to_keep,
             &mut true,
         )
@@ -385,7 +383,6 @@ fn test_k8s_integration_test_k8s_integration_drop_frag() {
 
 #[tokio::test]
 async fn test_k8s_integration_drop_snapshot() {
-    let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let cache = MockSnapshotCache::default();
 
     // Create a snapshot with nested snapshots and fragments
@@ -438,6 +435,9 @@ async fn test_k8s_integration_drop_snapshot() {
 
     let snapshot_ptr = main_snapshot.to_pointer();
 
+    let cache = Arc::new(cache);
+    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
@@ -450,11 +450,9 @@ async fn test_k8s_integration_drop_snapshot() {
 
     let dropped_setsum = garbage
         .drop_snapshot(
-            &storage,
-            "test-prefix",
             &snapshot_ptr,
-            &ThrottleOptions::default(),
-            &cache,
+            cache.as_ref(),
+            &mock_publisher,
             &mut true,
             &mut LogPosition::default(),
         )
@@ -476,7 +474,6 @@ async fn test_k8s_integration_drop_snapshot() {
 
 #[tokio::test]
 async fn test_k8s_integration_replace_snapshot_flat() {
-    let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let cache = MockSnapshotCache::default();
 
     // Create fragments with different ranges
@@ -525,6 +522,9 @@ async fn test_k8s_integration_replace_snapshot_flat() {
     let snapshot_ptr = snapshot.to_pointer();
     let mut first_to_keep = LogPosition::from_offset(10); // Keep fragments starting from offset 10
 
+    let cache = Arc::new(cache);
+    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
@@ -537,11 +537,9 @@ async fn test_k8s_integration_replace_snapshot_flat() {
 
     let dropped_setsum = garbage
         .replace_snapshot(
-            &storage,
-            "test-prefix",
             &snapshot_ptr,
-            &ThrottleOptions::default(),
-            &cache,
+            cache.as_ref(),
+            &mock_publisher,
             &mut first_to_keep,
             &mut true,
         )
@@ -569,7 +567,6 @@ async fn test_k8s_integration_replace_snapshot_flat() {
 
 #[tokio::test]
 async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff() {
-    let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let cache = MockSnapshotCache::default();
 
     // Create two child snapshots: one before cutoff (to be dropped), one after (to be kept)
@@ -652,6 +649,9 @@ async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff()
     let snapshot_ptr = parent_snapshot.to_pointer();
     let mut first_to_keep = LogPosition::from_offset(12); // Keep snapshots starting from offset 12
 
+    let cache = Arc::new(cache);
+    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
@@ -664,11 +664,9 @@ async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff()
 
     let dropped_setsum = garbage
         .replace_snapshot(
-            &storage,
-            "test-prefix",
             &snapshot_ptr,
-            &ThrottleOptions::default(),
-            &cache,
+            cache.as_ref(),
+            &mock_publisher,
             &mut first_to_keep,
             &mut true,
         )
@@ -696,7 +694,6 @@ async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff()
 
 #[tokio::test]
 async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff() {
-    let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let cache = MockSnapshotCache::default();
 
     // Create fragments: some before cutoff (to be dropped), some after (to be kept)
@@ -745,6 +742,9 @@ async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff()
     let snapshot_ptr = snapshot.to_pointer();
     let mut first_to_keep = LogPosition::from_offset(12); // Keep fragments starting from offset 12
 
+    let cache = Arc::new(cache);
+    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
@@ -757,11 +757,9 @@ async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff()
 
     let dropped_setsum = garbage
         .replace_snapshot(
-            &storage,
-            "test-prefix",
             &snapshot_ptr,
-            &ThrottleOptions::default(),
-            &cache,
+            cache.as_ref(),
+            &mock_publisher,
             &mut first_to_keep,
             &mut true,
         )
@@ -788,7 +786,6 @@ async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff()
 
 #[tokio::test]
 async fn test_k8s_integration_replace_snapshot_two_levels_rightmost_leaf() {
-    let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let cache = MockSnapshotCache::default();
 
     // Create fragments for leaf snapshots
@@ -863,6 +860,9 @@ async fn test_k8s_integration_replace_snapshot_two_levels_rightmost_leaf() {
     let snapshot_ptr = interior_snapshot.to_pointer();
     let mut first_to_keep = LogPosition::from_offset(12); // Keep snapshots starting from offset 12
 
+    let cache = Arc::new(cache);
+    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
@@ -875,11 +875,9 @@ async fn test_k8s_integration_replace_snapshot_two_levels_rightmost_leaf() {
 
     let dropped_setsum = garbage
         .replace_snapshot(
-            &storage,
-            "test-prefix",
             &snapshot_ptr,
-            &ThrottleOptions::default(),
-            &cache,
+            cache.as_ref(),
+            &mock_publisher,
             &mut first_to_keep,
             &mut true,
         )

@@ -56,7 +56,7 @@ async fn test_k8s_integration_81_copy_then_update_src() {
         }
         log.append_many(batch).await.unwrap();
     }
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.to_string(),
@@ -74,7 +74,7 @@ async fn test_k8s_integration_81_copy_then_update_src() {
     .await
     .unwrap();
     // Scrub the copy.
-    let copied = LogReader::open(
+    let copied = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "test_k8s_integration_80_copy_target".to_string(),

@@ -7,7 +7,7 @@ use chroma_types::Cmek;
 
 use crate::{
     Error, FragmentIdentifier, FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition,
-    ManifestAndETag,
+    ManifestAndETag, Snapshot, SnapshotPointer,
 };
 
 pub mod s3;
@@ -120,6 +120,9 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
         options: &GarbageCollectionOptions,
         first_to_keep: LogPosition,
     ) -> Result<Option<Garbage>, Error>;
+
+    /// Snapshot storers and accessors
+    async fn snapshot_load(&self, pointer: &SnapshotPointer) -> Result<Option<Snapshot>, Error>;
 
     /// Shutdown the manifest manager.  Must be called between prepare and finish of
     /// FragmentPublisher shutdown.

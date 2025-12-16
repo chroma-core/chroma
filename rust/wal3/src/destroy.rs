@@ -3,22 +3,22 @@ use std::sync::Arc;
 use chroma_storage::{DeleteOptions, GetOptions, Storage, StorageError};
 
 use crate::cursors::CursorStore;
+use crate::interfaces::{FragmentPointer, ManifestPublisher};
 use crate::manifest::{snapshot_prefix, snapshot_setsum, unprefixed_manifest_path};
 use crate::{
-    parse_fragment_path, CursorStoreOptions, Error, Fragment, Manifest, Snapshot, SnapshotPointer,
+    parse_fragment_path, CursorStoreOptions, Error, Fragment, Manifest, SnapshotPointer,
     ThrottleOptions, FRAGMENT_PREFIX_WITH_TRAILING_SLASH,
 };
 
-async fn destroy_snapshot(
+async fn destroy_snapshot<P: FragmentPointer>(
     storage: &Arc<Storage>,
     prefix: &str,
     snap: &SnapshotPointer,
+    manifest_publisher: &dyn ManifestPublisher<P>,
 ) -> Result<(), Error> {
-    if let Some(snapshot) =
-        Snapshot::load(&ThrottleOptions::default(), storage, prefix, snap).await?
-    {
+    if let Some(snapshot) = manifest_publisher.snapshot_load(snap).await? {
         for snap in snapshot.snapshots.iter() {
-            Box::pin(destroy_snapshot(storage, prefix, snap)).await?;
+            Box::pin(destroy_snapshot(storage, prefix, snap, manifest_publisher)).await?;
         }
         for frag in snapshot.fragments.iter() {
             destroy_fragment(storage, prefix, frag).await?;
@@ -142,14 +142,18 @@ async fn delete_file(
 }
 
 /// Destroys a wal3 log under the assumption that there are no concurrent writers.
-pub async fn destroy(storage: Arc<Storage>, prefix: &str) -> Result<(), Error> {
+pub async fn destroy<P: FragmentPointer>(
+    storage: Arc<Storage>,
+    prefix: &str,
+    manifest_publisher: &dyn ManifestPublisher<P>,
+) -> Result<(), Error> {
     let Some((manifest, _)) = Manifest::load(&ThrottleOptions::default(), &storage, prefix).await?
     else {
         tracing::warn!("strategically refusing to erase {prefix} without a manifest");
         return Ok(());
     };
     for snapshot in manifest.snapshots.iter() {
-        destroy_snapshot(&storage, prefix, snapshot).await?;
+        destroy_snapshot(&storage, prefix, snapshot, manifest_publisher).await?;
     }
     for fragment in manifest.fragments.iter() {
         destroy_fragment(&storage, prefix, fragment).await?;

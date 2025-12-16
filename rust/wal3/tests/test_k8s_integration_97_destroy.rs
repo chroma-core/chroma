@@ -4,7 +4,8 @@ use chroma_storage::{s3_client_for_test_with_new_bucket, PutOptions};
 
 use wal3::{
     unprefixed_fragment_path, FragmentIdentifier, FragmentPublisherFactory, FragmentSeqNo,
-    LogWriter, LogWriterOptions, ManifestPublisherFactory, SnapshotOptions,
+    LogWriter, LogWriterOptions, ManifestManager, ManifestPublisherFactory, SnapshotOptions,
+    ThrottleOptions,
 };
 
 #[tokio::test]
@@ -34,7 +35,7 @@ async fn test_k8s_integration_97_destroy() {
         snapshot_cache: Arc::new(()),
     };
     let log = LogWriter::open_or_initialize(
-        options,
+        options.clone(),
         Arc::clone(&storage),
         PREFIX,
         WRITER,
@@ -68,5 +69,19 @@ async fn test_k8s_integration_97_destroy() {
         .await
         .unwrap();
 
-    wal3::destroy(storage, PREFIX).await.unwrap();
+    let manifest_manager = ManifestManager::new(
+        ThrottleOptions::default(),
+        options.snapshot_manifest,
+        Arc::clone(&storage),
+        PREFIX.to_string(),
+        WRITER.to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    )
+    .await
+    .unwrap();
+
+    wal3::destroy(storage, PREFIX, &manifest_manager)
+        .await
+        .unwrap();
 }

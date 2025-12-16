@@ -10,7 +10,9 @@ use chroma_storage::{
     StorageError,
 };
 
-use crate::interfaces::{FragmentPointer, FragmentPublisherFactory, ManifestPublisherFactory};
+use crate::interfaces::{
+    FragmentPointer, FragmentPublisherFactory, ManifestPublisher, ManifestPublisherFactory,
+};
 use crate::manifest::unprefixed_snapshot_path;
 use crate::writer::OnceLogWriter;
 use crate::{
@@ -58,12 +60,10 @@ impl Garbage {
     }
 
     #[allow(clippy::result_large_err)]
-    pub async fn new(
-        storage: &Storage,
-        prefix: &str,
+    pub async fn new<P: FragmentPointer>(
         manifest: &Manifest,
-        throttle: &ThrottleOptions,
         snapshots: &dyn SnapshotCache,
+        manifest_publisher: &dyn ManifestPublisher<P>,
         mut first_to_keep: LogPosition,
     ) -> Result<Option<Self>, Error> {
         let dropped_snapshots = manifest
@@ -100,11 +100,9 @@ impl Garbage {
         for snap in dropped_snapshots {
             drop_acc += ret
                 .drop_snapshot(
-                    storage,
-                    prefix,
                     snap,
-                    throttle,
                     snapshots,
+                    manifest_publisher,
                     &mut first,
                     &mut first_to_keep,
                 )
@@ -116,11 +114,9 @@ impl Garbage {
         for snap in replaced_snapshots {
             let (drop_delta, root) = ret
                 .replace_snapshot(
-                    storage,
-                    prefix,
                     snap,
-                    throttle,
                     snapshots,
+                    manifest_publisher,
                     &mut first_to_keep,
                     &mut first,
                 )
@@ -319,19 +315,17 @@ impl Garbage {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn drop_snapshot(
+    pub async fn drop_snapshot<P: FragmentPointer>(
         &mut self,
-        storage: &Storage,
-        prefix: &str,
         ptr: &SnapshotPointer,
-        throttle: &ThrottleOptions,
         snapshot_cache: &dyn SnapshotCache,
+        manifest_publisher: &dyn ManifestPublisher<P>,
         first: &mut bool,
         first_to_keep: &mut LogPosition,
     ) -> Result<Setsum, Error> {
         let snapshot = match snapshot_cache.get(ptr).await? {
             Some(snapshot) => snapshot,
-            None => match Snapshot::load(throttle, storage, prefix, ptr).await? {
+            None => match manifest_publisher.snapshot_load(ptr).await? {
                 Some(snapshot) => snapshot,
                 None => {
                     return Err(Box::new(ScrubError::MissingSnapshot {
@@ -344,11 +338,9 @@ impl Garbage {
         let mut drop_acc = Setsum::default();
         for snap in snapshot.snapshots.iter() {
             drop_acc += Box::pin(self.drop_snapshot(
-                storage,
-                prefix,
                 snap,
-                throttle,
                 snapshot_cache,
+                manifest_publisher,
                 first,
                 first_to_keep,
             ))
@@ -371,19 +363,17 @@ impl Garbage {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn replace_snapshot(
+    pub async fn replace_snapshot<P: FragmentPointer>(
         &mut self,
-        storage: &Storage,
-        prefix: &str,
         ptr: &SnapshotPointer,
-        throttle: &ThrottleOptions,
         snapshot_cache: &dyn SnapshotCache,
+        manifest_publisher: &dyn ManifestPublisher<P>,
         first_to_keep: &mut LogPosition,
         first: &mut bool,
     ) -> Result<(Setsum, Option<SnapshotPointer>), Error> {
         let snapshot = match snapshot_cache.get(ptr).await? {
             Some(snapshot) => snapshot,
-            None => match Snapshot::load(throttle, storage, prefix, ptr).await? {
+            None => match manifest_publisher.snapshot_load(ptr).await? {
                 Some(snapshot) => snapshot,
                 None => {
                     return Err(Box::new(ScrubError::MissingSnapshot {
@@ -439,11 +429,9 @@ impl Garbage {
         for snap in snapshots_to_drop.iter() {
             drop_acc += self
                 .drop_snapshot(
-                    storage,
-                    prefix,
                     snap,
-                    throttle,
                     snapshot_cache,
+                    manifest_publisher,
                     first,
                     first_to_keep,
                 )
@@ -453,11 +441,9 @@ impl Garbage {
         // SAFETY(rescrv):  This has 0 or 1 elements by the snapshot balance check above.
         if let Some(to_split) = snapshots_to_split.pop() {
             let (drop_delta, new_child) = Box::pin(self.replace_snapshot(
-                storage,
-                prefix,
                 &to_split,
-                throttle,
                 snapshot_cache,
+                manifest_publisher,
                 first_to_keep,
                 first,
             ))

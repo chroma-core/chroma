@@ -57,7 +57,7 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
         .await
         .unwrap();
 
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.clone(),
@@ -136,7 +136,7 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
 
     writer_task.await.unwrap();
 
-    let copied_reader = LogReader::open(
+    let copied_reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         format!("{}_target", prefix),

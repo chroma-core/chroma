@@ -56,7 +56,7 @@ async fn test_k8s_integration_70_load_and_scrub() {
         }
         log.append_many(batch).await.unwrap();
     }
-    let log = LogReader::open(
+    let log = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.to_string(),

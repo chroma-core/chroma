@@ -198,46 +198,6 @@ impl Snapshot {
         })
     }
 
-    #[tracing::instrument(skip(storage))]
-    pub async fn load(
-        options: &ThrottleOptions,
-        storage: &Storage,
-        prefix: &str,
-        pointer: &SnapshotPointer,
-    ) -> Result<Option<Snapshot>, Error> {
-        let exp_backoff = crate::backoff::ExponentialBackoff::new(
-            options.throughput as f64,
-            options.headroom as f64,
-        );
-        let mut retries = 0;
-        let path = format!("{}/{}", prefix, pointer.path_to_snapshot);
-        loop {
-            match storage
-                .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
-                .await
-                .map_err(Arc::new)
-            {
-                Ok((ref snapshot, _)) => {
-                    let snapshot: Snapshot = serde_json::from_slice(snapshot).map_err(|e| {
-                        Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
-                    })?;
-                    return Ok(Some(snapshot));
-                }
-                Err(err) => match &*err {
-                    StorageError::NotFound { path: _, source: _ } => return Ok(None),
-                    err => {
-                        let backoff = exp_backoff.next();
-                        tokio::time::sleep(backoff).await;
-                        if retries >= 3 {
-                            return Err(Error::StorageError(Arc::new(err.clone())));
-                        }
-                        retries += 1;
-                    }
-                },
-            }
-        }
-    }
-
     #[tracing::instrument(skip(self, storage))]
     pub async fn install(
         &self,
@@ -1696,7 +1656,7 @@ mod tests {
         if let Err(crate::Error::GarbageCollection(msg)) = result {
             println!("GarbageCollection error message: {msg}");
             assert!(msg.contains("Garbage has start > limit"));
-            assert!(msg.contains("SeqNo(10) > SeqNo(5)"));
+            assert!(msg.contains("SeqNo(FragmentSeqNo(10)) > SeqNo(FragmentSeqNo(5))"));
         } else {
             panic!("Expected GarbageCollection error, got {:?}", result);
         }
