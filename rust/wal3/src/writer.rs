@@ -5,8 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
-use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::{PutMode, PutOptions, Storage, StorageError};
+use chroma_storage::{Storage, StorageError};
 use chroma_types::Cmek;
 use opentelemetry::trace::TraceContextExt;
 use parquet::arrow::ArrowWriter;
@@ -16,22 +15,39 @@ use setsum::Setsum;
 use tracing::{Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::interfaces::{FragmentPublisher, ManifestPublisher};
+use crate::interfaces::{
+    FragmentManagerFactory, FragmentPointer, FragmentPublisher, ManifestManagerFactory,
+    ManifestPublisher,
+};
 use crate::{
-    unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
-    ExponentialBackoff, Fragment, FragmentIdentifier, Garbage, GarbageCollectionOptions,
-    LogPosition, LogReader, LogReaderOptions, LogWriterOptions, Manifest, ManifestAndETag,
-    ManifestManager, SnapshotCache, ThrottleOptions, UnboundFragment,
+    BatchManager, CursorStore, CursorStoreOptions, Error, ExponentialBackoff, Fragment,
+    FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition, LogReader, LogReaderOptions,
+    LogWriterOptions, Manifest, ManifestAndETag, ManifestManager, ThrottleOptions,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
 /// unused->used->discarded.  The epoch of a writer is used to determine if and when log contention
 /// indicates that a new writer should be created.  The epoch is incremented when a new writer is
 /// created and checked before creating a new writer.
-#[derive(Clone, Default)]
-pub struct EpochWriter {
+#[derive(Clone)]
+pub struct EpochWriter<
+    P: FragmentPointer = (FragmentSeqNo, LogPosition),
+    FP: FragmentPublisher<FragmentPointer = P> = BatchManager,
+    MP: ManifestPublisher<P> = ManifestManager,
+> {
     epoch: u64,
-    writer: Option<Arc<OnceLogWriter>>,
+    writer: Option<Arc<OnceLogWriter<P, FP, MP>>>,
+}
+
+impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: ManifestPublisher<P>>
+    Default for EpochWriter<P, FP, MP>
+{
+    fn default() -> Self {
+        Self {
+            epoch: 0,
+            writer: None,
+        }
+    }
 }
 
 ///////////////////////////////////////////// MarkDirty ////////////////////////////////////////////
@@ -50,19 +66,29 @@ impl MarkDirty for () {
 
 ///////////////////////////////////////////// LogWriter ////////////////////////////////////////////
 
-pub struct LogWriter {
+pub struct LogWriter<
+    P: FragmentPointer,
+    FP: FragmentManagerFactory<FragmentPointer = P>,
+    MP: ManifestManagerFactory<FragmentPointer = P>,
+> {
     options: LogWriterOptions,
     storage: Arc<Storage>,
     prefix: String,
     writer: String,
-    mark_dirty: Arc<dyn MarkDirty>,
-    snapshot_cache: Arc<dyn SnapshotCache>,
-    inner: Mutex<EpochWriter>,
+    new_fragment_publisher: FP,
+    new_manifest_publisher: MP,
+    _phantom_p: std::marker::PhantomData<P>,
+    inner: Mutex<EpochWriter<P, FP::Publisher, MP::Publisher>>,
     reopen_protection: tokio::sync::Mutex<()>,
     cmek: Option<Cmek>,
 }
 
-impl LogWriter {
+impl<
+        P: FragmentPointer,
+        FP: FragmentManagerFactory<FragmentPointer = P>,
+        MP: ManifestManagerFactory<FragmentPointer = P>,
+    > LogWriter<P, FP, MP>
+{
     pub async fn initialize(
         options: &LogWriterOptions,
         storage: &Storage,
@@ -73,17 +99,16 @@ impl LogWriter {
     }
 
     /// Open the log, possibly writing a new manifest to recover it.
-    pub async fn open<D: MarkDirty, S: SnapshotCache>(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open(
         options: LogWriterOptions,
         storage: Arc<Storage>,
         prefix: &str,
         writer: &str,
-        mark_dirty: D,
-        snapshot_cache: S,
+        new_fragment_publisher: FP,
+        new_manifest_publisher: MP,
         cmek: Option<Cmek>,
     ) -> Result<Self, Error> {
-        let mark_dirty = Arc::new(mark_dirty) as _;
-        let snapshot_cache = Arc::new(snapshot_cache) as _;
         let inner = EpochWriter::default();
         let prefix = prefix.to_string();
         let writer = writer.to_string();
@@ -93,8 +118,9 @@ impl LogWriter {
             storage,
             prefix,
             writer,
-            mark_dirty,
-            snapshot_cache,
+            new_fragment_publisher,
+            new_manifest_publisher,
+            _phantom_p: std::marker::PhantomData,
             inner: Mutex::new(inner),
             reopen_protection,
             cmek,
@@ -104,17 +130,16 @@ impl LogWriter {
     }
 
     /// Open or try once to initialize the log.
-    pub async fn open_or_initialize<D: MarkDirty, S: SnapshotCache>(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_or_initialize(
         options: LogWriterOptions,
         storage: Arc<Storage>,
         prefix: &str,
         writer: &str,
-        mark_dirty: D,
-        snapshot_cache: S,
+        new_fragment_publisher: FP,
+        new_manifest_publisher: MP,
         cmek: Option<Cmek>,
     ) -> Result<Self, Error> {
-        let mark_dirty = Arc::new(mark_dirty) as _;
-        let snapshot_cache = Arc::new(snapshot_cache) as _;
         let inner = EpochWriter::default();
         let prefix = prefix.to_string();
         let writer = writer.to_string();
@@ -124,8 +149,9 @@ impl LogWriter {
             storage,
             prefix,
             writer,
-            mark_dirty,
-            snapshot_cache,
+            new_fragment_publisher,
+            new_manifest_publisher,
+            _phantom_p: std::marker::PhantomData,
             inner: Mutex::new(inner),
             reopen_protection,
             cmek,
@@ -156,11 +182,13 @@ impl LogWriter {
     /// go to the rust log services.
     #[allow(clippy::too_many_arguments)]
     pub async fn bootstrap<D: MarkDirty>(
-        options: &LogWriterOptions,
+        _options: &LogWriterOptions,
         storage: &Arc<Storage>,
         prefix: &str,
         writer: &str,
         mark_dirty: D,
+        new_fragment_publisher: FP,
+        new_manifest_publisher: MP,
         first_record_offset: LogPosition,
         messages: Vec<Vec<u8>>,
         cmek: Option<Cmek>,
@@ -182,21 +210,20 @@ impl LogWriter {
         // If the file exists, this will fail with LogContention, which fails us with
         // LogContention.  Other errors fail transparently, too.
         if num_records > 0 {
-            let (path, setsum, num_bytes) = upload_parquet(
-                options,
-                storage,
-                prefix,
-                FragmentIdentifier::SeqNo(1),
-                Some(first_record_offset),
-                messages,
-                cmek,
-            )
-            .await?;
-            let seq_no = FragmentIdentifier::SeqNo(1);
+            let fragment_publisher = new_fragment_publisher.make_publisher().await?;
+            // NOTE(rescrv): We intentionally don't call new_manifest_publisher.make() here.
+            // The manifest doesn't exist yet (it's created below), and ManifestManager::new
+            // requires a manifest to exist. The manifest_publisher would be used to batch
+            // fragment updates, but for bootstrap we directly install the manifest instead.
+            let _ = new_manifest_publisher;
+            let pointer = P::bootstrap(first_record_offset);
+            let (path, setsum, num_bytes) = fragment_publisher
+                .upload_parquet(&pointer, messages, cmek)
+                .await?;
             let num_bytes = num_bytes as u64;
             let frag = Fragment {
                 path,
-                seq_no,
+                seq_no: pointer.identifier(),
                 start,
                 limit,
                 num_bytes,
@@ -264,19 +291,26 @@ impl LogWriter {
 
     #[tracing::instrument(skip(self, messages))]
     pub async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
-        let once_log_append_many = move |log: &Arc<OnceLogWriter>| {
-            let messages = messages.clone();
-            let log = Arc::clone(log);
-            async move { log.append(messages).await }
-        };
+        let once_log_append_many =
+            move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
+                let messages = messages.clone();
+                let log = Arc::clone(log);
+                async move { log.append(messages).await }
+            };
         self.handle_errors_and_contention(once_log_append_many)
             .await
     }
 
-    // TODO(rescrv):  No option
-    pub fn reader(&self, options: LogReaderOptions) -> Option<LogReader> {
+    pub async fn reader(
+        &self,
+        options: LogReaderOptions,
+    ) -> Option<LogReader<P, FP::Consumer, MP::Consumer>> {
+        let fragment_consumer = self.new_fragment_publisher.make_consumer().await.ok()?;
+        let manifest_consumer = self.new_manifest_publisher.make_consumer().await.ok()?;
         Some(LogReader::new(
             options,
+            fragment_consumer,
+            manifest_consumer,
             Arc::clone(&self.storage),
             self.prefix.clone(),
         ))
@@ -292,17 +326,13 @@ impl LogWriter {
         ))
     }
 
-    pub fn manifest(&self) -> Option<Manifest> {
-        self.manifest_and_etag().map(|m| m.manifest)
-    }
-
-    pub fn manifest_and_etag(&self) -> Option<ManifestAndETag> {
-        // SAFETY(rescrv):  Mutex poisoning.
-        let inner = self.inner.lock().unwrap();
-        inner
-            .writer
-            .as_ref()
-            .map(|writer| writer.manifest_manager.latest())
+    pub async fn manifest_and_etag(&self) -> Result<ManifestAndETag, Error> {
+        let inner = {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let inner = self.inner.lock().unwrap();
+            Arc::clone(inner.writer.as_ref().ok_or_else(|| Error::LogClosed)?)
+        };
+        inner.manifest_and_etag().await
     }
 
     pub async fn garbage_collect_phase1_compute_garbage(
@@ -310,14 +340,15 @@ impl LogWriter {
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
     ) -> Result<bool, Error> {
-        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
-            let options = options.clone();
-            let log = Arc::clone(log);
-            async move {
-                log.garbage_collect_phase1_compute_garbage(&options, keep_at_least)
-                    .await
-            }
-        };
+        let once_log_garbage_collect =
+            move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
+                let options = options.clone();
+                let log = Arc::clone(log);
+                async move {
+                    log.garbage_collect_phase1_compute_garbage(&options, keep_at_least)
+                        .await
+                }
+            };
         self.handle_errors_and_contention(once_log_garbage_collect)
             .await
     }
@@ -326,11 +357,12 @@ impl LogWriter {
         &self,
         options: &GarbageCollectionOptions,
     ) -> Result<(), Error> {
-        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
-            let options = options.clone();
-            let log = Arc::clone(log);
-            async move { log.garbage_collect_phase2_update_manifest(&options).await }
-        };
+        let once_log_garbage_collect =
+            move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
+                let options = options.clone();
+                let log = Arc::clone(log);
+                async move { log.garbage_collect_phase2_update_manifest(&options).await }
+            };
         self.handle_errors_and_contention(once_log_garbage_collect)
             .await
     }
@@ -339,11 +371,12 @@ impl LogWriter {
         &self,
         options: &GarbageCollectionOptions,
     ) -> Result<(), Error> {
-        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
-            let options = options.clone();
-            let log = Arc::clone(log);
-            async move { log.garbage_collect_phase3_delete_garbage(&options).await }
-        };
+        let once_log_garbage_collect =
+            move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
+                let options = options.clone();
+                let log = Arc::clone(log);
+                async move { log.garbage_collect_phase3_delete_garbage(&options).await }
+            };
         self.handle_errors_and_contention(once_log_garbage_collect)
             .await
     }
@@ -353,18 +386,19 @@ impl LogWriter {
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
     ) -> Result<(), Error> {
-        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
-            let options = options.clone();
-            let log = Arc::clone(log);
-            async move { log.garbage_collect(&options, keep_at_least).await }
-        };
+        let once_log_garbage_collect =
+            move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
+                let options = options.clone();
+                let log = Arc::clone(log);
+                async move { log.garbage_collect(&options, keep_at_least).await }
+            };
         self.handle_errors_and_contention(once_log_garbage_collect)
             .await
     }
 
     async fn handle_errors_and_contention<O, F: Future<Output = Result<O, Error>>>(
         &self,
-        f: impl Fn(&Arc<OnceLogWriter>) -> F,
+        f: impl Fn(&Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>) -> F,
     ) -> Result<O, Error> {
         for _ in 0..3 {
             let (writer, epoch) = self.ensure_open().await?;
@@ -425,7 +459,9 @@ impl LogWriter {
         Err(Error::LogContentionFailure)
     }
 
-    async fn ensure_open(&self) -> Result<(Arc<OnceLogWriter>, u64), Error> {
+    async fn ensure_open(
+        &self,
+    ) -> Result<(Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>, u64), Error> {
         let _guard = self.reopen_protection.lock().await;
         for _ in 0..3 {
             let epoch = {
@@ -443,13 +479,14 @@ impl LogWriter {
                 }
                 inner.epoch
             };
+            let batch_manager = self.new_fragment_publisher.make_publisher().await?;
+            let manifest_manager = self.new_manifest_publisher.make_publisher().await?;
             let writer = match OnceLogWriter::open(
                 self.options.clone(),
                 self.storage.clone(),
+                batch_manager,
+                manifest_manager,
                 self.prefix.clone(),
-                self.writer.clone(),
-                Arc::clone(&self.mark_dirty),
-                Arc::clone(&self.snapshot_cache),
                 self.cmek.clone(),
             )
             .await
@@ -471,32 +508,14 @@ impl LogWriter {
         }
         Err(Error::LogContentionRetry)
     }
-
-    pub fn count_waiters(&self) -> Option<(usize, usize)> {
-        // SAFETY(rescrv):  Mutex poisoning.
-        let inner = self.inner.lock().unwrap();
-        inner.writer.as_ref().map(|writer| {
-            (
-                writer.batch_manager.count_waiters(),
-                writer.manifest_manager.count_waiters(),
-            )
-        })
-    }
-
-    pub fn debug_dump(&self) -> String {
-        // SAFETY(rescrv):  Mutex poisoning.
-        let inner = self.inner.lock().unwrap();
-        let Some(writer) = inner.writer.as_ref() else {
-            return "<no writer>\n".to_string();
-        };
-        let mut output = String::new();
-        output += &writer.batch_manager.debug_dump();
-        output += &writer.manifest_manager.debug_dump();
-        output
-    }
 }
 
-impl std::fmt::Debug for LogWriter {
+impl<
+        P: FragmentPointer,
+        FP: FragmentManagerFactory<FragmentPointer = P>,
+        MP: ManifestManagerFactory<FragmentPointer = P>,
+    > std::fmt::Debug for LogWriter<P, FP, MP>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LogWriter")
             .field("writer", &self.writer)
@@ -504,7 +523,12 @@ impl std::fmt::Debug for LogWriter {
     }
 }
 
-impl Drop for LogWriter {
+impl<
+        P: FragmentPointer,
+        FP: FragmentManagerFactory<FragmentPointer = P>,
+        MP: ManifestManagerFactory<FragmentPointer = P>,
+    > Drop for LogWriter<P, FP, MP>
+{
     fn drop(&mut self) {
         let mut inner = self.inner.lock().unwrap();
         if let Some(writer) = inner.writer.as_mut() {
@@ -520,7 +544,11 @@ impl Drop for LogWriter {
 /// structure as the recovery procedure does, this allows us to re-use exactly one code path for
 /// both.  That code path can then be well-tested because any contention state gets exercised from
 /// the perspective of initialization.
-pub(crate) struct OnceLogWriter {
+pub(crate) struct OnceLogWriter<
+    P: FragmentPointer = (FragmentSeqNo, LogPosition),
+    FP: FragmentPublisher<FragmentPointer = P> = BatchManager,
+    MP: ManifestPublisher<P> = ManifestManager,
+> {
     /// LogWriterOptions are fixed at log creation time.
     /// LogWriter is intentionally cheap to construct and destroy.
     /// Reopen the log to change the options.
@@ -531,46 +559,33 @@ pub(crate) struct OnceLogWriter {
     prefix: String,
     /// True iff the log is done.
     done: AtomicBool,
-    /// Mark each write dirty via this mechanism.
-    mark_dirty: Arc<dyn MarkDirty>,
     /// ManifestManager coordinates updates to the manifest.
-    manifest_manager: ManifestManager,
+    manifest_manager: MP,
     /// BatchManager coordinates batching writes to the log.
-    batch_manager: BatchManager,
+    batch_manager: FP,
     /// Customer-managed encryption key for encrypting log fragments.
     cmek: Option<Cmek>,
 }
 
-impl OnceLogWriter {
+impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: ManifestPublisher<P>>
+    OnceLogWriter<P, FP, MP>
+{
+    #[allow(clippy::too_many_arguments)]
     async fn open(
         options: LogWriterOptions,
         storage: Arc<Storage>,
+        batch_manager: FP,
+        mut manifest_manager: MP,
         prefix: String,
-        writer: String,
-        mark_dirty: Arc<dyn MarkDirty>,
-        snapshot_cache: Arc<dyn SnapshotCache>,
         cmek: Option<Cmek>,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
-        let batch_manager = BatchManager::new(options.throttle_fragment)
-            .ok_or_else(|| Error::internal(file!(), line!()))?;
-        let mut manifest_manager = ManifestManager::new(
-            options.throttle_manifest,
-            options.snapshot_manifest,
-            Arc::clone(&storage),
-            prefix.clone(),
-            writer,
-            Arc::clone(&mark_dirty),
-            Arc::clone(&snapshot_cache),
-        )
-        .await?;
         manifest_manager.recover().await?;
         let this = Arc::new(Self {
             options,
             storage,
             prefix,
             done,
-            mark_dirty,
             manifest_manager,
             batch_manager,
             cmek,
@@ -584,10 +599,8 @@ impl OnceLogWriter {
                 if !that.done.load(std::sync::atomic::Ordering::Relaxed) {
                     that.batch_manager.wait_for_writable().await;
                     match that.batch_manager.take_work(&that.manifest_manager).await {
-                        Ok(Some(((fragment_identifier, log_position), work))) => {
-                            Arc::clone(&that)
-                                .append_batch(fragment_identifier, log_position, work)
-                                .await;
+                        Ok(Some((pointer, work))) => {
+                            Arc::clone(&that).append_batch(pointer, work).await;
                         }
                         Ok(None) => {
                             let sleep_for = that.batch_manager.until_next_time();
@@ -612,34 +625,24 @@ impl OnceLogWriter {
     pub(crate) async fn open_for_read_only_and_stale_ops(
         options: LogWriterOptions,
         storage: Arc<Storage>,
+        batch_manager: FP,
+        manifest_manager: MP,
         prefix: String,
-        writer: String,
-        mark_dirty: Arc<dyn MarkDirty>,
-        snapshot_cache: Arc<dyn SnapshotCache>,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
-        let batch_manager = BatchManager::new(options.throttle_fragment)
-            .ok_or_else(|| Error::internal(file!(), line!()))?;
-        let manifest_manager = ManifestManager::new(
-            options.throttle_manifest,
-            options.snapshot_manifest,
-            Arc::clone(&storage),
-            prefix.clone(),
-            writer,
-            Arc::clone(&mark_dirty),
-            Arc::clone(&snapshot_cache),
-        )
-        .await?;
         Ok(Arc::new(Self {
             options,
             storage,
             prefix,
             done,
-            mark_dirty,
             manifest_manager,
             batch_manager,
             cmek: None, // Read-only operations don't need CMEK
         }))
+    }
+
+    async fn manifest_and_etag(&self) -> Result<ManifestAndETag, Error> {
+        self.manifest_manager.manifest_and_etag().await
     }
 
     fn shutdown(&self) {
@@ -678,13 +681,9 @@ impl OnceLogWriter {
                 .await;
             match self.batch_manager.take_work(&self.manifest_manager).await {
                 Ok(Some(work)) => {
-                    let ((fragment_identifier, log_position), work) = work;
+                    let (pointer, work) = work;
                     {
-                        tokio::task::spawn(Arc::clone(self).append_batch(
-                            fragment_identifier,
-                            log_position,
-                            work,
-                        ));
+                        tokio::task::spawn(Arc::clone(self).append_batch(pointer, work));
                     }
                 }
                 Ok(None) => {}
@@ -704,8 +703,7 @@ impl OnceLogWriter {
     #[allow(clippy::type_complexity)]
     async fn append_batch(
         self: Arc<Self>,
-        fragment_identifier: FragmentIdentifier,
-        log_position: LogPosition,
+        pointer: P,
         work: Vec<(
             Vec<Vec<u8>>,
             tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
@@ -729,10 +727,7 @@ impl OnceLogWriter {
                 tracing::error!("somehow got empty messages");
                 return;
             }
-            match self
-                .append_batch_internal(fragment_identifier, log_position, messages)
-                .await
-            {
+            match self.append_batch_internal(pointer, messages).await {
                 Ok(mut log_position) => {
                     for (num_messages, notify) in notifies.into_iter() {
                         if notify.send(Ok(log_position)).is_err() {
@@ -754,47 +749,30 @@ impl OnceLogWriter {
         .await
     }
 
-    #[tracing::instrument(skip(self, messages))]
+    #[tracing::instrument(skip(self, pointer, messages))]
     async fn append_batch_internal(
         &self,
-        fragment_identifier: FragmentIdentifier,
-        log_position: LogPosition,
+        pointer: P,
         messages: Vec<Vec<u8>>,
     ) -> Result<LogPosition, Error> {
         assert!(!messages.is_empty());
         let messages_len = messages.len();
-        let fut1 = upload_parquet(
-            &self.options,
-            &self.storage,
-            &self.prefix,
-            fragment_identifier,
-            Some(log_position),
-            messages,
-            self.cmek.clone(),
-        );
-        let fut2 = async {
-            match self.mark_dirty.mark_dirty(log_position, messages_len).await {
-                Ok(_) | Err(Error::LogContentionDurable) => Ok(()),
-                Err(err) => Err(err),
-            }
-        };
-        let (res1, res2) = futures::future::join(fut1, fut2).await;
-        res2.inspect_err(|_| {
+        let res = self
+            .batch_manager
+            .upload_parquet(&pointer, messages, self.cmek.clone())
+            .await;
+        let (path, setsum, num_bytes) = res.inspect_err(|_| {
             self.shutdown();
         })?;
-        let (path, setsum, num_bytes) = res1.inspect_err(|_| {
-            self.shutdown();
-        })?;
-        // Upload to a coalesced manifest.
-        let unbound = UnboundFragment {
-            path,
-            identifier: fragment_identifier,
-            num_records: messages_len as u64,
-            num_bytes: num_bytes as u64,
-            setsum,
-        };
-        self.manifest_manager
-            .publish_fragment((fragment_identifier, log_position), unbound)
+        let log_position = self
+            .manifest_manager
+            .publish_fragment(
+                &pointer,
+                &path,
+                messages_len as u64,
+                num_bytes as u64,
+                setsum,
+            )
             .await
             .inspect_err(|_| {
                 self.shutdown();
@@ -928,8 +906,8 @@ impl OnceLogWriter {
             };
         if !garbage.is_empty() {
             self.manifest_manager.apply_garbage(garbage.clone()).await.inspect_err(|err| {
-                if let Error::GarbageCollectionPrecondition(_) = err {
-                    tracing::event!(Level::ERROR, name = "garbage collection precondition failed", manifest =? self.manifest_manager.latest(), garbage =? garbage);
+                if let Error::GarbageCollectionPrecondition(err) = err {
+                    tracing::event!(Level::ERROR, name = "garbage collection precondition failed", error =? err, garbage =? garbage);
                 }
             })?;
         }
@@ -1067,7 +1045,9 @@ impl OnceLogWriter {
     }
 }
 
-impl Drop for OnceLogWriter {
+impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: ManifestPublisher<P>> Drop
+    for OnceLogWriter<P, FP, MP>
+{
     fn drop(&mut self) {
         self.shutdown();
     }
@@ -1129,67 +1109,6 @@ pub fn construct_parquet(
     writer.write(&batch).map_err(Arc::new)?;
     writer.close().map_err(Arc::new)?;
     Ok((buffer, setsum))
-}
-
-#[tracing::instrument(skip(options, storage, messages))]
-pub async fn upload_parquet(
-    options: &LogWriterOptions,
-    storage: &Storage,
-    prefix: &str,
-    fragment_identifier: FragmentIdentifier,
-    log_position: Option<LogPosition>,
-    messages: Vec<Vec<u8>>,
-    cmek: Option<Cmek>,
-) -> Result<(String, Setsum, usize), Error> {
-    // Upload the log.
-    let unprefixed_path = unprefixed_fragment_path(fragment_identifier);
-    let path = format!("{prefix}/{unprefixed_path}");
-    let exp_backoff: ExponentialBackoff = options.throttle_fragment.into();
-    let start = Instant::now();
-    let (buffer, setsum) = construct_parquet(log_position, &messages)?;
-    let mut put_options = PutOptions::default()
-        .with_priority(StorageRequestPriority::P0)
-        .with_mode(PutMode::IfNotExist);
-    if let Some(cmek) = cmek {
-        put_options = put_options.with_cmek(cmek);
-    }
-    loop {
-        tracing::info!("upload_parquet: {:?} with {} bytes", path, buffer.len());
-        // NOTE(rescrv):  This match block has been thoroughly reasoned through within the
-        // `bootstrap` call above.  Don't change the error handling here without re-reasoning
-        // there.
-        match storage
-            .put_bytes(&path, buffer.clone(), put_options.clone())
-            .await
-        {
-            Ok(_) => {
-                return Ok((unprefixed_path, setsum, buffer.len()));
-            }
-            // NOTE(sicheng): Permission denied requests should continue to fail if retried
-            Err(err @ StorageError::PermissionDenied { .. }) => {
-                return Err(Error::StorageError(Arc::new(err)));
-            }
-            Err(StorageError::Precondition { path: _, source: _ }) => {
-                return Err(Error::LogContentionFailure);
-            }
-            Err(err) => {
-                tracing::error!(
-                    error.message = err.to_string(),
-                    "failed to upload parquet, backing off"
-                );
-                // NOTE(sicheng): The frontend will fail the request on its end if we retry for too long here
-                // TODO(sicheng): Organize the magic numbers in the code at one place
-                if start.elapsed() > Duration::from_secs(20) {
-                    return Err(Error::StorageError(Arc::new(err)));
-                }
-                let mut backoff = exp_backoff.next();
-                if backoff > Duration::from_secs(10) {
-                    backoff = Duration::from_secs(10);
-                }
-                tokio::time::sleep(backoff).await;
-            }
-        }
-    }
 }
 
 #[cfg(test)]

@@ -3,7 +3,8 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, SnapshotOptions,
+    create_factories, Limits, LogPosition, LogReader, LogReaderOptions, LogWriter,
+    LogWriterOptions, SnapshotOptions,
 };
 
 #[tokio::test]
@@ -26,12 +27,23 @@ async fn test_k8s_integration_83_bootstrap() {
             messages.push(Vec::from(format!("key:i={},j={}", i, j)));
         }
     }
+    let (fragment_factory, manifest_factory) = create_factories(
+        options.clone(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        PREFIX.to_string(),
+        WRITER.to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
     LogWriter::bootstrap(
         &options,
         &storage,
         PREFIX,
         WRITER,
         mark_dirty,
+        fragment_factory,
+        manifest_factory,
         first_record_offset_position,
         messages.clone(),
         None,
@@ -39,7 +51,7 @@ async fn test_k8s_integration_83_bootstrap() {
     .await
     .unwrap();
 
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "test_k8s_integration_83_bootstrap".to_string(),

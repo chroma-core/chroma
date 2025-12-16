@@ -3,7 +3,8 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, SnapshotOptions,
+    create_factories, Limits, LogPosition, LogReader, LogReaderOptions, LogWriter,
+    LogWriterOptions, SnapshotOptions,
 };
 
 #[tokio::test]
@@ -21,12 +22,23 @@ async fn test_k8s_integration_84_bootstrap_empty() {
     let mark_dirty = ();
     let first_record_offset_position = LogPosition::from_offset(42);
     let messages = vec![];
+    let (fragment_factory, manifest_factory) = create_factories(
+        options.clone(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        PREFIX.to_string(),
+        WRITER.to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
     LogWriter::bootstrap(
         &options,
         &storage,
         PREFIX,
         WRITER,
         mark_dirty,
+        fragment_factory,
+        manifest_factory,
         first_record_offset_position,
         messages.clone(),
         None,
@@ -34,7 +46,7 @@ async fn test_k8s_integration_84_bootstrap_empty() {
     .await
     .unwrap();
 
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         "test_k8s_integration_84_bootstrap_empty".to_string(),
@@ -56,18 +68,40 @@ async fn test_k8s_integration_84_bootstrap_empty() {
         .await
         .unwrap();
 
+    let options2 = LogWriterOptions {
+        snapshot_manifest: SnapshotOptions {
+            snapshot_rollover_threshold: 2,
+            fragment_rollover_threshold: 2,
+        },
+        ..LogWriterOptions::default()
+    };
+    let (fragment_factory2, manifest_factory2) = create_factories(
+        options2.clone(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        PREFIX.to_string(),
+        WRITER.to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
     let writer = LogWriter::open(
-        options,
+        options2,
         Arc::clone(&storage),
         PREFIX,
         WRITER,
-        mark_dirty,
-        (),
+        fragment_factory2,
+        manifest_factory2,
         None,
     )
     .await
     .unwrap();
-    writer.manifest().unwrap().scrub().unwrap();
+    writer
+        .manifest_and_etag()
+        .await
+        .unwrap()
+        .manifest
+        .scrub()
+        .unwrap();
     writer
         .append_many(vec![Vec::from("fresh-write".to_string())])
         .await

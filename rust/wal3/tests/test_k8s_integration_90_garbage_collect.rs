@@ -3,8 +3,9 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    Cursor, CursorName, CursorStore, CursorStoreOptions, Error, GarbageCollectionOptions,
-    LogPosition, LogWriter, LogWriterOptions, SnapshotOptions,
+    create_factories, Cursor, CursorName, CursorStore, CursorStoreOptions, Error,
+    GarbageCollectionOptions, LogPosition, LogReaderOptions, LogWriter, LogWriterOptions,
+    SnapshotOptions,
 };
 
 #[tokio::test]
@@ -12,19 +13,29 @@ async fn test_k8s_integration_90_garbage_collect() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     const PREFIX: &str = "test_k8s_integration_90_garbage_collect";
     const WRITER: &str = "test_k8s_integration_90_garbage_collect writer";
-    let log = LogWriter::open_or_initialize(
-        LogWriterOptions {
-            snapshot_manifest: SnapshotOptions {
-                snapshot_rollover_threshold: 2,
-                fragment_rollover_threshold: 2,
-            },
-            ..LogWriterOptions::default()
+    let options = LogWriterOptions {
+        snapshot_manifest: SnapshotOptions {
+            snapshot_rollover_threshold: 2,
+            fragment_rollover_threshold: 2,
         },
+        ..LogWriterOptions::default()
+    };
+    let (fragment_factory, manifest_factory) = create_factories(
+        options.clone(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        PREFIX.to_string(),
+        WRITER.to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
+    let log = LogWriter::open_or_initialize(
+        options,
         Arc::clone(&storage),
         PREFIX,
         WRITER,
-        (),
-        (),
+        fragment_factory,
+        manifest_factory,
         None,
     )
     .await

@@ -6,14 +6,20 @@ use tokio::sync::Mutex;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    Cursor, CursorName, CursorStoreOptions, Error, GarbageCollectionOptions, LogReaderOptions,
-    LogWriter, LogWriterOptions, Manifest,
+    create_factories, Cursor, CursorName, CursorStoreOptions, Error, GarbageCollectionOptions,
+    LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
 };
 
 pub mod common;
 
+type DefaultLogWriter = LogWriter<
+    (wal3::FragmentSeqNo, wal3::LogPosition),
+    wal3::S3FragmentManagerFactory,
+    wal3::S3ManifestManagerFactory,
+>;
+
 async fn writer_thread(
-    writer: Arc<LogWriter>,
+    writer: Arc<DefaultLogWriter>,
     mutex: Arc<Mutex<()>>,
     wait: Arc<tokio::sync::Notify>,
     notify: Arc<tokio::sync::Notify>,
@@ -50,6 +56,7 @@ async fn writer_thread(
                         .unwrap();
                     writer
                         .reader(LogReaderOptions::default())
+                        .await
                         .unwrap()
                         .scrub(wal3::Limits::default())
                         .await
@@ -72,13 +79,13 @@ async fn writer_thread(
 }
 
 async fn garbage_collector_thread(
-    writer: Arc<LogWriter>,
+    writer: Arc<DefaultLogWriter>,
     mutex: Arc<Mutex<()>>,
     wait: Arc<tokio::sync::Notify>,
     notify: Arc<tokio::sync::Notify>,
     iterations: usize,
 ) -> (usize, usize) {
-    println!("gc {:?}", &*writer as *const LogWriter);
+    println!("gc {:?}", &*writer as *const DefaultLogWriter);
     let mut successes = 0;
     let mut contentions = 0;
     for i in 0..iterations {
@@ -133,14 +140,24 @@ async fn test_k8s_integration_98_garbage_alternate() {
     let mutex = Arc::new(Mutex::new(()));
 
     // Create two writers that will contend with each other
+    let options1 = LogWriterOptions::default();
+    let (fragment_factory1, manifest_factory1) = create_factories(
+        options1.clone(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        prefix.to_string(),
+        "writer1".to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
     let writer1 = Arc::new(
         LogWriter::open(
-            LogWriterOptions::default(),
+            options1,
             Arc::clone(&storage),
             prefix,
             "writer1",
-            (),
-            (),
+            fragment_factory1,
+            manifest_factory1,
             None,
         )
         .await
@@ -152,14 +169,24 @@ async fn test_k8s_integration_98_garbage_alternate() {
         .await
         .unwrap();
 
+    let options2 = LogWriterOptions::default();
+    let (fragment_factory2, manifest_factory2) = create_factories(
+        options2.clone(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        prefix.to_string(),
+        "writer2".to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
     let writer2 = Arc::new(
         LogWriter::open(
-            LogWriterOptions::default(),
+            options2,
             Arc::clone(&storage),
             prefix,
             "writer2",
-            (),
-            (),
+            fragment_factory2,
+            manifest_factory2,
             None,
         )
         .await

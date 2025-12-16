@@ -4,8 +4,8 @@ use tokio::sync::Barrier;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
-    ThrottleOptions,
+    create_factories, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions,
+    Manifest, ThrottleOptions,
 };
 
 #[tokio::test]
@@ -57,7 +57,7 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
         .await
         .unwrap();
 
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         prefix.clone(),
@@ -76,20 +76,31 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
     let prefix_clone = prefix.clone();
 
     let writer_task = tokio::spawn(async move {
-        let log = LogWriter::open(
-            LogWriterOptions {
-                throttle_fragment: ThrottleOptions {
-                    batch_size_bytes: 1,
-                    batch_interval_us: 1,
-                    ..ThrottleOptions::default()
-                },
-                ..LogWriterOptions::default()
+        let writer = "concurrent_writer";
+        let options = LogWriterOptions {
+            throttle_fragment: ThrottleOptions {
+                batch_size_bytes: 1,
+                batch_interval_us: 1,
+                ..ThrottleOptions::default()
             },
+            ..LogWriterOptions::default()
+        };
+        let (fragment_factory, manifest_factory) = create_factories(
+            options.clone(),
+            LogReaderOptions::default(),
+            Arc::clone(&storage_clone),
+            prefix_clone.clone(),
+            writer.to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let log = LogWriter::open(
+            options,
             storage_clone,
             &prefix_clone,
-            "concurrent_writer",
-            (),
-            (),
+            writer,
+            fragment_factory,
+            manifest_factory,
             None,
         )
         .await
@@ -120,7 +131,7 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
 
     writer_task.await.unwrap();
 
-    let copied_reader = LogReader::open(
+    let copied_reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
         format!("{}_target", prefix),

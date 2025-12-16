@@ -3,8 +3,8 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
-    SnapshotOptions,
+    create_factories, Limits, LogPosition, LogReader, LogReaderOptions, LogWriter,
+    LogWriterOptions, Manifest, SnapshotOptions,
 };
 
 #[tokio::test]
@@ -12,27 +12,34 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
     // Appending to a log that has failed to write its manifest fails with log contention.
     // Subsequent writes will repair the log and continue to make progress.
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
-    Manifest::initialize(
-        &LogWriterOptions::default(),
-        &storage,
-        "test_k8s_integration_82_copy_then_update_dst_source",
-        "init",
-    )
-    .await
-    .unwrap();
-    let log = LogWriter::open(
-        LogWriterOptions {
-            snapshot_manifest: SnapshotOptions {
-                snapshot_rollover_threshold: 2,
-                fragment_rollover_threshold: 2,
-            },
-            ..LogWriterOptions::default()
+    let prefix = "test_k8s_integration_82_copy_then_update_dst_source";
+    let writer = "load and scrub writer";
+    Manifest::initialize(&LogWriterOptions::default(), &storage, prefix, "init")
+        .await
+        .unwrap();
+    let options = LogWriterOptions {
+        snapshot_manifest: SnapshotOptions {
+            snapshot_rollover_threshold: 2,
+            fragment_rollover_threshold: 2,
         },
+        ..LogWriterOptions::default()
+    };
+    let (fragment_factory, manifest_factory) = create_factories(
+        options.clone(),
+        LogReaderOptions::default(),
         Arc::clone(&storage),
-        "test_k8s_integration_82_copy_then_update_dst_source",
-        "load and scrub writer",
-        (),
-        (),
+        prefix.to_string(),
+        writer.to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
+    let log = LogWriter::open(
+        options,
+        Arc::clone(&storage),
+        prefix,
+        writer,
+        fragment_factory,
+        manifest_factory,
         None,
     )
     .await
@@ -44,28 +51,29 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
         }
         log.append_many(batch).await.unwrap();
     }
-    let reader = LogReader::open(
+    let reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "test_k8s_integration_82_copy_then_update_dst_source".to_string(),
+        prefix.to_string(),
     )
     .await
     .unwrap();
     let scrubbed_source = reader.scrub(Limits::default()).await.unwrap();
+    let target_prefix = "test_k8s_integration_82_copy_then_update_dst_target";
     wal3::copy(
         &storage,
         &LogWriterOptions::default(),
         &reader,
         LogPosition::default(),
-        "test_k8s_integration_82_copy_then_update_dst_target".to_string(),
+        target_prefix.to_string(),
     )
     .await
     .unwrap();
     // Scrub the copy.
-    let copied = LogReader::open(
+    let copied = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "test_k8s_integration_82_copy_then_update_dst_target".to_string(),
+        target_prefix.to_string(),
     )
     .await
     .unwrap();
@@ -75,19 +83,29 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
         scrubbed_target.calculated_setsum,
     );
     // Append to the new log
-    let log = LogWriter::open(
-        LogWriterOptions {
-            snapshot_manifest: SnapshotOptions {
-                snapshot_rollover_threshold: 2,
-                fragment_rollover_threshold: 2,
-            },
-            ..LogWriterOptions::default()
+    let options2 = LogWriterOptions {
+        snapshot_manifest: SnapshotOptions {
+            snapshot_rollover_threshold: 2,
+            fragment_rollover_threshold: 2,
         },
+        ..LogWriterOptions::default()
+    };
+    let (fragment_factory2, manifest_factory2) = create_factories(
+        options2.clone(),
+        LogReaderOptions::default(),
         Arc::clone(&storage),
-        "test_k8s_integration_82_copy_then_update_dst_target",
-        "load and scrub writer",
-        (),
-        (),
+        target_prefix.to_string(),
+        writer.to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
+    let log = LogWriter::open(
+        options2,
+        Arc::clone(&storage),
+        target_prefix,
+        writer,
+        fragment_factory2,
+        manifest_factory2,
         None,
     )
     .await
