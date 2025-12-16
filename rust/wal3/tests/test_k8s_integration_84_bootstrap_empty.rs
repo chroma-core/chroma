@@ -105,7 +105,13 @@ async fn test_k8s_integration_84_bootstrap_empty() {
     )
     .await
     .unwrap();
-    writer.manifest().unwrap().scrub().unwrap();
+    writer
+        .manifest_and_etag()
+        .await
+        .unwrap()
+        .manifest
+        .scrub()
+        .unwrap();
     writer
         .append_many(vec![Vec::from("fresh-write".to_string())])
         .await

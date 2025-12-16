@@ -317,20 +317,13 @@ impl<
         ))
     }
 
-    pub fn manifest(&self) -> Option<Manifest> {
-        self.manifest_and_etag().map(|m| m.manifest)
-    }
-
-    pub fn manifest_and_etag(&self) -> Option<ManifestAndETag> {
-        /*
-        // SAFETY(rescrv):  Mutex poisoning.
-        let inner = self.inner.lock().unwrap();
-        inner
-            .writer
-            .as_ref()
-            .map(|writer| writer.manifest_manager.latest())
-        */
-        todo!();
+    pub async fn manifest_and_etag(&self) -> Result<ManifestAndETag, Error> {
+        let inner = {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let inner = self.inner.lock().unwrap();
+            Arc::clone(inner.writer.as_ref().ok_or_else(|| Error::LogClosed)?)
+        };
+        inner.manifest_and_etag().await
     }
 
     pub async fn garbage_collect_phase1_compute_garbage(
@@ -637,6 +630,10 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             batch_manager,
             cmek: None, // Read-only operations don't need CMEK
         }))
+    }
+
+    async fn manifest_and_etag(&self) -> Result<ManifestAndETag, Error> {
+        todo!();
     }
 
     fn shutdown(&self) {
