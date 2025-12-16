@@ -442,6 +442,12 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
         }
     }
 
+    /// Return a possibly-stale version of the manifest.
+    async fn manifest_and_etag(&self) -> Result<ManifestAndETag, Error> {
+        let staging = self.staging.lock().unwrap();
+        Ok(staging.stable.clone())
+    }
+
     /// Assign a timestamp to a record.
     fn assign_timestamp(&self, record_count: usize) -> Option<(FragmentSeqNo, LogPosition)> {
         // SAFETY(rescrv):  Mutex poisoning.

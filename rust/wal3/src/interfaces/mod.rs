@@ -7,6 +7,7 @@ use chroma_types::Cmek;
 
 use crate::{
     Error, FragmentIdentifier, FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition,
+    ManifestAndETag,
 };
 
 pub mod s3;
@@ -96,6 +97,8 @@ pub trait ManifestPublisherFactory {
 pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     /// Recover the manifest so that it can do work.
     async fn recover(&mut self) -> Result<(), Error>;
+    /// Return a possibly-stale version of the manifest.
+    async fn manifest_and_etag(&self) -> Result<ManifestAndETag, Error>;
     /// Assign a timestamp for the next fragment that's going to be published on this manifest.
     fn assign_timestamp(&self, record_count: usize) -> Option<FP>;
     /// Publish a fragment previously assigned a timestamp using assign_timestamp.

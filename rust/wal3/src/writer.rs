@@ -633,7 +633,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
     }
 
     async fn manifest_and_etag(&self) -> Result<ManifestAndETag, Error> {
-        todo!();
+        self.manifest_manager.manifest_and_etag().await
     }
 
     fn shutdown(&self) {
