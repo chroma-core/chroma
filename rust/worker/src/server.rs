@@ -599,6 +599,7 @@ impl WorkerServer {
             knn_filter_output,
             knn_results,
             search_payload.rank,
+            search_payload.group_by,
             search_payload.limit,
             search_payload.select,
             collection_and_segments,
