@@ -265,6 +265,8 @@ pub enum UsageType {
     NumSearchPayloads,               // Number of search payloads in a search
     NumRankKnn,                      // Number of knns in a rank expression
     NumFunctions,                    // Number of functions that may attach to a collection
+    NumGroupByKeys,                  // Number of group by keys in a search payload
+    NumAggregateKeys,                // Number of aggregate keys in a search payload
 }
 
 impl fmt::Display for UsageType {
@@ -303,6 +305,10 @@ impl fmt::Display for UsageType {
             UsageType::NumSearchPayloads => write!(f, "Number of search payloads in a search"),
             UsageType::NumRankKnn => write!(f, "Number of knn searches in a rank expression"),
             UsageType::NumFunctions => write!(f, "Number of functions attached to a collection"),
+            UsageType::NumGroupByKeys => write!(f, "Number of group by keys in a search payload"),
+            UsageType::NumAggregateKeys => {
+                write!(f, "Number of aggregate keys in a search payload")
+            }
         }
     }
 }
@@ -339,6 +345,8 @@ impl TryFrom<&str> for UsageType {
             "num_search_payloads" => Ok(UsageType::NumSearchPayloads),
             "num_rank_knn" => Ok(UsageType::NumRankKnn),
             "num_functions" => Ok(UsageType::NumFunctions),
+            "num_group_by_keys" => Ok(UsageType::NumGroupByKeys),
+            "num_aggregate_keys" => Ok(UsageType::NumAggregateKeys),
             _ => Err(format!("Invalid UsageType: {}", value)),
         }
     }
@@ -378,6 +386,8 @@ impl DefaultQuota for UsageType {
             UsageType::NumSearchPayloads => 5,
             UsageType::NumRankKnn => 5,
             UsageType::NumFunctions => 10,
+            UsageType::NumGroupByKeys => 16,
+            UsageType::NumAggregateKeys => 16,
         }
     }
 }
