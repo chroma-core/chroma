@@ -516,33 +516,15 @@ pub struct GarbageCollectionOptions {
 /// Ordering: `SeqNo` variants compare by their inner u64. `Uuid` variants compare by their byte
 /// representation. Cross-variant comparison orders all `SeqNo` values before all `Uuid` values,
 /// but this should not occur in practice since manifests enforce uniformity.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash, serde::Deserialize, serde::Serialize,
+)]
 #[serde(untagged)]
 pub enum FragmentIdentifier {
     /// Sequential fragment identifier. Supports successor() and range-based operations.
     SeqNo(u64),
     /// UUID-based fragment identifier. Ordered by byte representation.
     Uuid(Uuid),
-}
-
-impl PartialOrd for FragmentIdentifier {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for FragmentIdentifier {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match (self, other) {
-            (FragmentIdentifier::SeqNo(a), FragmentIdentifier::SeqNo(b)) => a.cmp(b),
-            (FragmentIdentifier::Uuid(a), FragmentIdentifier::Uuid(b)) => a.cmp(b),
-            // Cross-variant: SeqNo < Uuid (should not occur in practice due to manifest uniformity)
-            (FragmentIdentifier::SeqNo(_), FragmentIdentifier::Uuid(_)) => std::cmp::Ordering::Less,
-            (FragmentIdentifier::Uuid(_), FragmentIdentifier::SeqNo(_)) => {
-                std::cmp::Ordering::Greater
-            }
-        }
-    }
 }
 
 impl FragmentIdentifier {
@@ -653,6 +635,7 @@ pub fn prefixed_fragment_path(prefix: &str, fragment_id: FragmentIdentifier) -> 
 pub fn unprefixed_fragment_path(fragment_id: FragmentIdentifier) -> String {
     match fragment_id {
         FragmentIdentifier::SeqNo(seq_no) => {
+            // SAFETY(rescrv):  SeqNo variants always expose bucket and this function is tested.
             let bucket = fragment_id.bucket().expect("SeqNo always has a bucket");
             format!(
                 "{}Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
@@ -661,9 +644,9 @@ pub fn unprefixed_fragment_path(fragment_id: FragmentIdentifier) -> String {
         }
         FragmentIdentifier::Uuid(uuid) => {
             format!(
-                "{}Hash={}/Uuid={}.parquet",
+                "{}Hash={:08x}/Uuid={}.parquet",
                 FRAGMENT_PREFIX_WITH_TRAILING_SLASH,
-                uuid.to_u128_le() as u64 & 0xffff,
+                uuid.to_u128_le() as u64 & 0xffffffff,
                 uuid,
             )
         }
@@ -705,7 +688,7 @@ mod tests {
         let path = prefixed_fragment_path("THIS_IS_THE_COLLECTION", FragmentIdentifier::Uuid(uuid));
         println!("prefixed_fragment_path(Uuid(...)): {path}");
         assert_eq!(
-            "THIS_IS_THE_COLLECTION/log/Hash=3669/Uuid=550e8400-e29b-41d4-a716-446655440000.parquet",
+            "THIS_IS_THE_COLLECTION/log/Hash=00840e55/Uuid=550e8400-e29b-41d4-a716-446655440000.parquet",
             path
         );
     }

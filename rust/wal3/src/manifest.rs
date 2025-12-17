@@ -54,10 +54,9 @@ fn scrub_fragment_identifier_uniformity(
     manifest_name: &str,
     fragments: &[Fragment],
 ) -> Result<(), Box<ScrubError>> {
-    if fragments.is_empty() {
+    let Some(first_is_seq_no) = fragments.first().map(|s| s.seq_no.as_seq_no().is_some()) else {
         return Ok(());
-    }
-    let first_is_seq_no = fragments[0].seq_no.as_seq_no().is_some();
+    };
     for frag in fragments.iter().skip(1) {
         let is_seq_no = frag.seq_no.as_seq_no().is_some();
         if is_seq_no != first_is_seq_no {
