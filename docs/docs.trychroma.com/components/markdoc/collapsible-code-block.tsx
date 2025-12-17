@@ -38,7 +38,7 @@ const CollapsibleCodeBlock: React.FC<{ children: React.ReactNode }> = ({
   const className = "max-h-64 overflow-y-auto";
   const enhanced = injectIntoCodeBlock(children, className);
 
-  return <div className="bg-black">{enhanced}</div>;
+  return <div className="bg-[var(--tw-prose-invert-bg)] dark:bg-black">{enhanced}</div>;
 };
 
 export default CollapsibleCodeBlock;
