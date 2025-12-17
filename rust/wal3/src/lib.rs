@@ -633,6 +633,11 @@ pub fn prefixed_fragment_path(prefix: &str, fragment_id: FragmentIdentifier) -> 
 }
 
 pub fn unprefixed_fragment_path(fragment_id: FragmentIdentifier) -> String {
+    // NOTE(rescrv):  The SeqNo case uses a bucket prefix to FragmentSeqNo.  This was done to aid
+    // in spreading reads out.  Research since then has shown this to be unnecessary since 2018
+    // when Amazon started splitting at more than just '/' characters.
+    //
+    // For that reason we don't prefix the UUID.
     match fragment_id {
         FragmentIdentifier::SeqNo(seq_no) => {
             // SAFETY(rescrv):  SeqNo variants always expose bucket and this function is tested.
@@ -644,10 +649,8 @@ pub fn unprefixed_fragment_path(fragment_id: FragmentIdentifier) -> String {
         }
         FragmentIdentifier::Uuid(uuid) => {
             format!(
-                "{}Hash={:08x}/Uuid={}.parquet",
-                FRAGMENT_PREFIX_WITH_TRAILING_SLASH,
-                uuid.to_u128_le() as u64 & 0xffffffff,
-                uuid,
+                "{}Uuid={}.parquet",
+                FRAGMENT_PREFIX_WITH_TRAILING_SLASH, uuid,
             )
         }
     }
@@ -688,7 +691,7 @@ mod tests {
         let path = prefixed_fragment_path("THIS_IS_THE_COLLECTION", FragmentIdentifier::Uuid(uuid));
         println!("prefixed_fragment_path(Uuid(...)): {path}");
         assert_eq!(
-            "THIS_IS_THE_COLLECTION/log/Hash=00840e55/Uuid=550e8400-e29b-41d4-a716-446655440000.parquet",
+            "THIS_IS_THE_COLLECTION/log/Uuid=550e8400-e29b-41d4-a716-446655440000.parquet",
             path
         );
     }
