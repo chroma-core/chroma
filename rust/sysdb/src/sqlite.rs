@@ -682,21 +682,6 @@ impl SqliteSysDb {
         ))
     }
 
-    pub(crate) async fn get_attached_function_by_name(
-        &self,
-        _input_collection_id: chroma_types::CollectionUuid,
-        _attached_function_name: String,
-    ) -> Result<chroma_types::AttachedFunction, crate::GetAttachedFunctionError> {
-        // TODO: Implement this when attached function support is added to SqliteSysDb
-        Err(
-            crate::GetAttachedFunctionError::FailedToGetAttachedFunction(
-                tonic::Status::unimplemented(
-                    " Attached Function operations not yet implemented in SqliteSysDb",
-                ),
-            ),
-        )
-    }
-
     #[allow(clippy::too_many_arguments)]
     async fn get_collections_with_conn<'a, C>(
         &self,

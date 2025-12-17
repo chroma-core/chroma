@@ -1353,9 +1353,18 @@ mod tests {
         .expect("Compaction should succeed");
 
         // Verify statistics were generated
-        let updated_attached_function = sysdb
-            .get_attached_function_by_name(collection_id, attached_function_name.clone())
+        let attached_functions = sysdb
+            .get_attached_functions(
+                None,
+                Some(attached_function_name.clone()),
+                Some(collection_id),
+                true,
+            )
             .await
+            .expect("Attached function query should succeed");
+        let updated_attached_function = attached_functions
+            .into_iter()
+            .next()
             .expect("Attached function should be found");
 
         // Note: completion_offset is 14, all 15 records (0-14) were processed

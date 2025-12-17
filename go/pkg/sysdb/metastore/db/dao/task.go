@@ -61,107 +61,41 @@ func (s *attachedFunctionDb) Update(attachedFunction *dbmodel.AttachedFunction) 
 	return nil
 }
 
-func (s *attachedFunctionDb) GetByName(inputCollectionID string, name string) (*dbmodel.AttachedFunction, error) {
-	var attachedFunction dbmodel.AttachedFunction
-	err := s.db.
-		Where("input_collection_id = ?", inputCollectionID).
-		Where("name = ?", name).
-		Where("is_deleted = ?", false).
-		Where("is_ready = ?", true).
-		First(&attachedFunction).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		log.Error("GetByName failed", zap.Error(err))
-		return nil, err
-	}
-
-	return &attachedFunction, nil
-}
-
-func (s *attachedFunctionDb) GetAnyByName(inputCollectionID string, name string) (*dbmodel.AttachedFunction, error) {
-	var attachedFunction dbmodel.AttachedFunction
-	err := s.db.
-		Where("input_collection_id = ?", inputCollectionID).
-		Where("name = ?", name).
-		Where("is_deleted = ?", false).
-		First(&attachedFunction).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		log.Error("GetAnyByName failed", zap.Error(err))
-		return nil, err
-	}
-
-	return &attachedFunction, nil
-}
-
-func (s *attachedFunctionDb) GetByID(id uuid.UUID) (*dbmodel.AttachedFunction, error) {
-	var attachedFunction dbmodel.AttachedFunction
-	err := s.db.
-		Where("id = ?", id).
-		Where("is_deleted = ?", false).
-		Where("is_ready = ?", true).
-		First(&attachedFunction).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		log.Error("GetByID failed", zap.Error(err), zap.String("id", id.String()))
-		return nil, err
-	}
-
-	return &attachedFunction, nil
-}
-
-func (s *attachedFunctionDb) GetAnyByID(id uuid.UUID) (*dbmodel.AttachedFunction, error) {
-	var attachedFunction dbmodel.AttachedFunction
-	err := s.db.
-		Where("id = ?", id).
-		Where("is_deleted = ?", false).
-		First(&attachedFunction).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		log.Error("GetAnyByID failed", zap.Error(err), zap.String("id", id.String()))
-		return nil, err
-	}
-
-	return &attachedFunction, nil
-}
-
-func (s *attachedFunctionDb) GetByCollectionID(inputCollectionID string) ([]*dbmodel.AttachedFunction, error) {
+// GetAttachedFunctions is a consolidated getter that supports various query patterns
+// Parameters can be nil to indicate they should not be filtered on
+// - id: Filter by attached function ID
+// - name: Filter by attached function name
+// - inputCollectionID: Filter by input collection ID
+// - onlyReady: If true, only returns attached functions where is_ready = true
+func (s *attachedFunctionDb) GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, onlyReady bool) ([]*dbmodel.AttachedFunction, error) {
 	var attachedFunctions []*dbmodel.AttachedFunction
-	err := s.db.
-		Where("input_collection_id = ?", inputCollectionID).
-		Where("is_deleted = ?", false).
-		Where("is_ready = ?", true).
-		Find(&attachedFunctions).Error
 
-	if err != nil {
-		log.Error("GetByCollectionID failed", zap.Error(err), zap.String("input_collection_id", inputCollectionID))
-		return nil, err
+	query := s.db.Where("is_deleted = ?", false)
+
+	if id != nil {
+		query = query.Where("id = ?", *id)
 	}
 
-	return attachedFunctions, nil
-}
+	if name != nil {
+		query = query.Where("name = ?", *name)
+	}
 
-func (s *attachedFunctionDb) GetAnyByCollectionID(inputCollectionID string) ([]*dbmodel.AttachedFunction, error) {
-	var attachedFunctions []*dbmodel.AttachedFunction
-	err := s.db.
-		Where("input_collection_id = ?", inputCollectionID).
-		Where("is_deleted = ?", false).
-		Find(&attachedFunctions).Error
+	if inputCollectionID != nil {
+		query = query.Where("input_collection_id = ?", *inputCollectionID)
+	}
 
+	if onlyReady {
+		query = query.Where("is_ready = ?", true)
+	}
+
+	err := query.Find(&attachedFunctions).Error
 	if err != nil {
-		log.Error("GetAnyByCollectionID failed", zap.Error(err), zap.String("input_collection_id", inputCollectionID))
+		log.Error("GetAttachedFunctions failed",
+			zap.Error(err),
+			zap.Any("id", id),
+			zap.Any("name", name),
+			zap.Any("input_collection_id", inputCollectionID),
+			zap.Bool("only_ready", onlyReady))
 		return nil, err
 	}
 
