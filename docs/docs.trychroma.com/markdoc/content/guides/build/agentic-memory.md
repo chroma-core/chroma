@@ -172,8 +172,8 @@ async def for_planning(self, query: str) -> list[MemoryRecord]:
             type=records["metadatas"][0][i]["type"],
             phase=records["metadatas"][0][i]["phase"],
             created=datetime.fromisoformat(records["metadatas"][0][i]["created"]),
-            last_accessed: datetime.fromisoformat(records["metadatas"][0][i]["last_accessed"]),
-            access_count: int(records["metadatas"][0][i]["access_count"]),
+            last_accessed=datetime.fromisoformat(records["metadatas"][0][i]["last_accessed"]),
+            access_count=int(records["metadatas"][0][i]["access_count"]),
         )
         for i, id in records["ids"][0]
     ]
@@ -183,7 +183,7 @@ async def for_planning(self, query: str) -> list[MemoryRecord]:
 {% Tab label="typescript" %}
 ```typescript
 async forPlanning(query: string): Promise<MemoryRecord[]> {
-    const records = this.collection.query({
+    const records = await this.collection.query({
         queryTexts: [query],
         where: {
             $or: [
