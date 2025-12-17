@@ -1,6 +1,13 @@
+use crate::server::SysdbService;
+
+pub mod server;
+
 pub async fn sysdb_service_entrypoint() {
-    loop {
-        println!("Hello, rust sysdb service!");
-        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    // TODO(Sanket): Config.
+    let port = 50051;
+    let service = SysdbService::new(port);
+    if let Err(e) = service.run().await {
+        // TODO(Sanket): Switch to tracing instead of println.
+        println!("Server error: {} exiting", e);
     }
 }

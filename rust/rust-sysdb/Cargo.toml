@@ -10,3 +10,7 @@ path = "src/bin/sysdb_service.rs"
 [dependencies]
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+tonic = { workspace = true }
+tonic-health = { workspace = true }
+chroma-types = { workspace = true }
+chroma-tracing = { workspace = true, features = ["grpc"]}
