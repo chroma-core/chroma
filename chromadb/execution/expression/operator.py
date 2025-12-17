@@ -1024,7 +1024,7 @@ class Knn(Rank):
                - A dense vector (list or numpy array)
                - A sparse vector (SparseVector dict)
         key: The embedding key to search against. Can be:
-             - "#embedding" (default) - searches the main embedding field
+             - Key.EMBEDDING (default) - searches the main embedding field
              - A metadata field name (e.g., "my_custom_field") - searches that metadata field
         limit: Maximum number of results to consider (default: 16)
         default: Default score for records not in KNN results (default: None)
@@ -1054,7 +1054,7 @@ class Knn(Rank):
         "NDArray[np.float64]",
         "NDArray[np.int32]",
     ]
-    key: str = "#embedding"
+    key: Union[Key, str] = K.EMBEDDING
     limit: int = 16
     default: Optional[float] = None
     return_rank: bool = False
@@ -1069,8 +1069,12 @@ class Knn(Rank):
             # Convert numpy array to list
             query_value = query_value.tolist()
 
+        key_value = self.key
+        if isinstance(key_value, Key):
+            key_value = key_value.name
+
         # Build result dict - only include non-default values to keep JSON clean
-        result = {"query": query_value, "key": self.key, "limit": self.limit}
+        result = {"query": query_value, "key": key_value, "limit": self.limit}
 
         # Only include optional fields if they're set to non-default values
         if self.default is not None:
