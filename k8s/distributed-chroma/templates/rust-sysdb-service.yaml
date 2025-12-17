@@ -1,4 +1,17 @@
 {{- if gt (int .Values.rustSysdbService.replicaCount) 0 }}
+{{if .Values.rustSysdbService.configuration}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rust-sysdb-service-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{  .Values.rustSysdbService.configuration | indent 4 }}
+{{ end }}
+
+---
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,6 +27,12 @@ spec:
       labels:
         app: rust-sysdb-service
     spec:
+      volumes:
+        {{if .Values.rustSysdbService.configuration}}
+        - name: rust-sysdb-service-config
+          configMap:
+            name: rust-sysdb-service-config
+        {{ end }}
       containers:
         - name: rust-sysdb-service
           image: "{{ .Values.rustSysdbService.image.repository }}:{{ .Values.rustSysdbService.image.tag }}"
@@ -24,9 +43,17 @@ spec:
             grpc:
               port: 50051
               service: chroma.SysDB
+          volumeMounts:
+            {{if .Values.rustSysdbService.configuration}}
+            - name: rust-sysdb-service-config
+              mountPath: /config/
+            {{ end }}
           ports:
             - containerPort: 50051
               name: grpc
+          env:
+            - name: CONFIG_PATH
+              value: "/config/config.yaml"
           resources:
             limits:
               cpu: {{ .Values.rustSysdbService.resources.limits.cpu }}

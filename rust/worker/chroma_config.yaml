@@ -259,3 +259,23 @@ garbage_collector:
           kube_namespace: "chroma"
           memberlist_name: "rust-log-service-memberlist"
           queue_size: 100
+sysdb_service:
+  service_name: "rust-sysdb-service"
+  otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
+  otel_filters:
+    - crate_name: "rust_sysdb"
+      filter_level: "trace"
+  port: 50051
+  storage:
+    admission_controlled_s3:
+      s3_config:
+        bucket: "chroma-storage"
+        credentials: "Minio"
+        connect_timeout_ms: 5000
+        request_timeout_ms: 30000 # 30 seconds
+        upload_part_size_bytes: 536870912 # 512MiB
+        download_part_size_bytes: 8388608 # 8MiB
+      rate_limiting_policy:
+        count_based_policy:
+          max_concurrent_requests: 1000
+          bandwidth_allocation: [1.0]

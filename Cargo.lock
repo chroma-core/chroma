@@ -6954,12 +6954,20 @@ dependencies = [
 name = "rust-sysdb"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chroma-config",
+ "chroma-error",
+ "chroma-storage",
  "chroma-tracing",
  "chroma-types",
+ "figment",
+ "opentelemetry",
+ "serde",
  "tokio",
  "tokio-util",
  "tonic",
  "tonic-health",
+ "tracing",
 ]
 
 [[package]]
