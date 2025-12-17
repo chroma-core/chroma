@@ -41,7 +41,7 @@ Not an exhaustive list, but these are some of the core team’s biggest prioriti
 
 This is where you have a lot more free reign to contribute (without having to sync with us first)!
 
-If you're unsure about your contribution idea, feel free to chat with us (@chroma) in the `#general` channel on [our Discord](https://discord.gg/rahcMUU5XV)! We'd love to support you however we can.
+If you're unsure about your contribution idea, feel free to chat with us (@chroma) in the `#general` channel on [our Discord](https://discord.com/invite/MMeYNTmh3x)! We'd love to support you however we can.
 
 ### Example Templates
 
@@ -85,4 +85,4 @@ If you have a research background, we welcome contributions in the following are
 - Expanded vector search (MMR, Polytope)
 - Your research
 
-Please [reach out](https://discord.gg/MMeYNTmh3x) and talk to us before you get too far in your projects so that we can offer technical guidance/align on roadmap.
+Please [reach out](https://discord.com/invite/MMeYNTmh3x) and talk to us before you get too far in your projects so that we can offer technical guidance/align on roadmap.
