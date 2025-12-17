@@ -144,6 +144,7 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
 
     /// Snapshot storers and accessors
     async fn snapshot_load(&self, pointer: &SnapshotPointer) -> Result<Option<Snapshot>, Error>;
+    async fn snapshot_install(&self, snapshot: &Snapshot) -> Result<SnapshotPointer, Error>;
 
     /// Shutdown the manifest manager.  Must be called between prepare and finish of
     /// FragmentPublisher shutdown.

@@ -58,7 +58,7 @@ async fn test_k8s_integration_garbage_new_with_bad_manifest1_offset_9340() {
     let snapshot_cache = Arc::new(MockSnapshotCache::new());
     snapshot_cache.load_from_json(snapshots_json);
 
-    let mock_publisher = MockManifestPublisher::new(Arc::clone(&snapshot_cache));
+    let mock_publisher = MockManifestPublisher::new();
 
     // The bug should occur when calling Garbage::new with offset 9340
     let first_to_keep = LogPosition::from_offset(9340);

@@ -96,7 +96,7 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_one_level(
     let mut first_to_keep = LogPosition::from_offset(10);
 
     let cache = Arc::new(cache);
-    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+    let mock_publisher = MockManifestPublisher::new();
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
@@ -198,7 +198,7 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_two_level(
     let mut first_to_keep = LogPosition::from_offset(10);
 
     let cache = Arc::new(cache);
-    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+    let mock_publisher = MockManifestPublisher::new();
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
@@ -276,7 +276,7 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_three_leve
     let mut first_to_keep = LogPosition::from_offset(10);
 
     let cache = Arc::new(cache);
-    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+    let mock_publisher = MockManifestPublisher::new();
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
@@ -436,7 +436,7 @@ async fn test_k8s_integration_drop_snapshot() {
     let snapshot_ptr = main_snapshot.to_pointer();
 
     let cache = Arc::new(cache);
-    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+    let mock_publisher = MockManifestPublisher::new();
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
@@ -523,7 +523,7 @@ async fn test_k8s_integration_replace_snapshot_flat() {
     let mut first_to_keep = LogPosition::from_offset(10); // Keep fragments starting from offset 10
 
     let cache = Arc::new(cache);
-    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+    let mock_publisher = MockManifestPublisher::new();
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
@@ -650,7 +650,7 @@ async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff()
     let mut first_to_keep = LogPosition::from_offset(12); // Keep snapshots starting from offset 12
 
     let cache = Arc::new(cache);
-    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+    let mock_publisher = MockManifestPublisher::new();
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
@@ -743,7 +743,7 @@ async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff()
     let mut first_to_keep = LogPosition::from_offset(12); // Keep fragments starting from offset 12
 
     let cache = Arc::new(cache);
-    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+    let mock_publisher = MockManifestPublisher::new();
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
@@ -861,7 +861,7 @@ async fn test_k8s_integration_replace_snapshot_two_levels_rightmost_leaf() {
     let mut first_to_keep = LogPosition::from_offset(12); // Keep snapshots starting from offset 12
 
     let cache = Arc::new(cache);
-    let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+    let mock_publisher = MockManifestPublisher::new();
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],

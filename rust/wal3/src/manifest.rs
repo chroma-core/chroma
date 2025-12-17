@@ -78,7 +78,7 @@ fn scrub_fragment_identifier_uniformity(
 ////////////////////////////////////////// SnapshotPointer /////////////////////////////////////////
 
 /// A SnapshotPointer is a pointer to a snapshot.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize, serde::Serialize)]
 pub struct SnapshotPointer {
     #[serde(
         deserialize_with = "super::deserialize_setsum",
@@ -195,53 +195,6 @@ impl Snapshot {
             bytes_read,
             short_read: false,
         })
-    }
-
-    #[tracing::instrument(skip(self, storage))]
-    pub async fn install(
-        &self,
-        options: &ThrottleOptions,
-        storage: &Storage,
-        prefix: &str,
-    ) -> Result<SnapshotPointer, Error> {
-        let exp_backoff = crate::backoff::ExponentialBackoff::new(
-            options.throughput as f64,
-            options.headroom as f64,
-        );
-        let mut retry_count = 0;
-        loop {
-            let path = format!("{}/{}", prefix, self.path);
-            let payload = serde_json::to_string(&self)
-                .map_err(|e| {
-                    Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
-                })?
-                .into_bytes();
-            let options = PutOptions::default()
-                .with_priority(StorageRequestPriority::P0)
-                .with_mode(PutMode::IfNotExist);
-            match storage.put_bytes(&path, payload, options).await {
-                Ok(_) => {
-                    return Ok(self.to_pointer());
-                }
-                Err(StorageError::Precondition { path: _, source: _ }) => {
-                    // NOTE(rescrv):  This is something of a lie.  We know that someone put the
-                    // file before us, and we know the setsum of the file is embedded in the path.
-                    // Because the setsum is only calculable if you have the file and we assume
-                    // non-malicious code, anyone who puts the same setsum as us has, in all
-                    // likelihood, put something referencing the same content as us.
-                    return Ok(self.to_pointer());
-                }
-                Err(e) => {
-                    tracing::error!("error uploading manifest: {e:?}");
-                    let backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(60) || retry_count >= 3 {
-                        return Err(Arc::new(e).into());
-                    }
-                    tokio::time::sleep(backoff).await;
-                }
-            }
-            retry_count += 1;
-        }
     }
 
     /// Return the the next address to insert into the log.

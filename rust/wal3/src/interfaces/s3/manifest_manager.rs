@@ -1,7 +1,9 @@
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use chroma_storage::{ETag, Storage};
+use chroma_storage::{
+    admissioncontrolleds3::StorageRequestPriority, ETag, PutMode, PutOptions, Storage, StorageError,
+};
 use setsum::Setsum;
 
 use crate::gc::Garbage;
@@ -302,10 +304,7 @@ impl ManifestManager {
             )) = work
             {
                 if let Some(snapshot) = snapshot {
-                    if let Err(err) = snapshot
-                        .install(&self.throttle, &self.storage, &self.prefix)
-                        .await
-                    {
+                    if let Err(err) = self.snapshot_install(&snapshot).await {
                         for notifier in notifiers.into_iter() {
                             let _ = notifier.send(Some(err.clone()));
                         }
@@ -568,6 +567,47 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
             pointer,
         )
         .await
+    }
+
+    async fn snapshot_install(&self, snapshot: &Snapshot) -> Result<SnapshotPointer, Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            self.throttle.throughput as f64,
+            self.throttle.headroom as f64,
+        );
+        let mut retry_count = 0;
+        loop {
+            let path = format!("{}/{}", self.prefix, snapshot.path);
+            let payload = serde_json::to_string(&snapshot)
+                .map_err(|e| {
+                    Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
+                })?
+                .into_bytes();
+            let options = PutOptions::default()
+                .with_priority(StorageRequestPriority::P0)
+                .with_mode(PutMode::IfNotExist);
+            match self.storage.put_bytes(&path, payload, options).await {
+                Ok(_) => {
+                    return Ok(snapshot.to_pointer());
+                }
+                Err(StorageError::Precondition { path: _, source: _ }) => {
+                    // NOTE(rescrv):  This is something of a lie.  We know that someone put the
+                    // file before us, and we know the setsum of the file is embedded in the path.
+                    // Because the setsum is only calculable if you have the file and we assume
+                    // non-malicious code, anyone who puts the same setsum as us has, in all
+                    // likelihood, put something referencing the same content as us.
+                    return Ok(snapshot.to_pointer());
+                }
+                Err(e) => {
+                    tracing::error!("error uploading manifest: {e:?}");
+                    let backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(60) || retry_count >= 3 {
+                        return Err(Arc::new(e).into());
+                    }
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+            retry_count += 1;
+        }
     }
 }
 

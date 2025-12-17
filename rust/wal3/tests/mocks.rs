@@ -1,28 +1,28 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 use setsum::Setsum;
 
 use wal3::{
     FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition, ManifestAndETag,
-    ManifestPublisher, Snapshot, SnapshotCache, SnapshotPointer,
+    ManifestPublisher, Snapshot, SnapshotPointer,
 };
 
 /// A mock ManifestPublisher that delegates snapshot_load to a SnapshotCache.
 /// Used in tests to provide snapshot loading without needing full storage infrastructure.
-pub struct MockManifestPublisher<C: SnapshotCache> {
-    snapshot_cache: Arc<C>,
+#[derive(Debug, Default)]
+pub struct MockManifestPublisher {
+    snapshots: Mutex<HashMap<SnapshotPointer, Snapshot>>,
 }
 
-impl<C: SnapshotCache> MockManifestPublisher<C> {
-    pub fn new(snapshot_cache: Arc<C>) -> Self {
-        Self { snapshot_cache }
+impl MockManifestPublisher {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
 #[async_trait::async_trait]
-impl<C: SnapshotCache> ManifestPublisher<(FragmentSeqNo, LogPosition)>
-    for MockManifestPublisher<C>
-{
+impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for MockManifestPublisher {
     async fn recover(&mut self) -> Result<(), wal3::Error> {
         Ok(())
     }
@@ -62,11 +62,19 @@ impl<C: SnapshotCache> ManifestPublisher<(FragmentSeqNo, LogPosition)>
         Err(wal3::Error::UninitializedLog)
     }
 
+    async fn snapshot_install(&self, snapshot: &Snapshot) -> Result<SnapshotPointer, wal3::Error> {
+        let pointer = snapshot.to_pointer();
+        let mut snapshots = self.snapshots.lock().unwrap();
+        snapshots.insert(pointer.clone(), snapshot.clone());
+        Ok(pointer)
+    }
+
     async fn snapshot_load(
         &self,
         pointer: &SnapshotPointer,
     ) -> Result<Option<Snapshot>, wal3::Error> {
-        self.snapshot_cache.get(pointer).await
+        let snapshots = self.snapshots.lock().unwrap();
+        Ok(snapshots.get(pointer).cloned())
     }
 
     fn shutdown(&self) {}
