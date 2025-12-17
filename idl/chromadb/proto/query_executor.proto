@@ -138,9 +138,34 @@ message SelectOperator {
     repeated string keys = 1;
 }
 
+// Aggregation function for group by
+message Aggregate {
+    message MinK {
+        repeated string keys = 1;
+        uint32 k = 2;
+    }
+
+    message MaxK {
+        repeated string keys = 1;
+        uint32 k = 2;
+    }
+
+    oneof aggregate {
+        MinK min_k = 1;
+        MaxK max_k = 2;
+    }
+}
+
+// Groups results by metadata keys and aggregates within each group
+message GroupByOperator {
+    repeated string keys = 1;
+    Aggregate aggregate = 2;
+}
+
 message SearchPayload {
     FilterOperator filter = 1;
     RankOperator rank = 2;
+    GroupByOperator group_by = 5;
     LimitOperator limit = 3;
     SelectOperator select = 4;
 }
