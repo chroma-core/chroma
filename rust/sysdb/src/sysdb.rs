@@ -1992,11 +1992,11 @@ impl GrpcSysDb {
         }
     }
 
-    async fn get_soft_deleted_attached_functions(
+    async fn get_attached_functions_to_gc(
         &mut self,
         cutoff_time: SystemTime,
         limit: i32,
-    ) -> Result<Vec<chroma_types::AttachedFunctionUuid>, GetSoftDeletedAttachedFunctionsError> {
+    ) -> Result<Vec<chroma_types::AttachedFunctionUuid>, GetAttachedFunctionsToGcError> {
         let cutoff_timestamp = prost_types::Timestamp {
             seconds: cutoff_time
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -2005,18 +2005,16 @@ impl GrpcSysDb {
             nanos: 0,
         };
 
-        let req = chroma_proto::GetSoftDeletedAttachedFunctionsRequest {
+        let req = chroma_proto::GetAttachedFunctionsToGcRequest {
             cutoff_time: Some(cutoff_timestamp),
             limit,
         };
 
         let res = self
             .client
-            .get_soft_deleted_attached_functions(req)
+            .get_attached_functions_to_gc(req)
             .await
-            .map_err(|e| {
-                GetSoftDeletedAttachedFunctionsError::FailedToGetSoftDeletedAttachedFunctions(e)
-            })?;
+            .map_err(GetAttachedFunctionsToGcError::FailedToGetAttachedFunctionsToGc)?;
 
         let attached_function_ids: Result<Vec<chroma_types::AttachedFunctionUuid>, _> = res
             .into_inner()
@@ -2031,7 +2029,7 @@ impl GrpcSysDb {
                             error = %e,
                             "Server returned invalid attached_function_id UUID"
                         );
-                        GetSoftDeletedAttachedFunctionsError::ServerReturnedInvalidData
+                        GetAttachedFunctionsToGcError::ServerReturnedInvalidData
                     })
             })
             .collect();
@@ -2057,16 +2055,16 @@ impl GrpcSysDb {
 }
 
 #[derive(Error, Debug)]
-pub enum GetSoftDeletedAttachedFunctionsError {
-    #[error("Failed to get soft deleted attached functions: {0}")]
-    FailedToGetSoftDeletedAttachedFunctions(#[from] tonic::Status),
+pub enum GetAttachedFunctionsToGcError {
+    #[error("Failed to get attached functions to gc: {0}")]
+    FailedToGetAttachedFunctionsToGc(#[from] tonic::Status),
     #[error("Server returned invalid data - response contains corrupt attached function IDs")]
     ServerReturnedInvalidData,
     #[error("Not implemented for this SysDb backend")]
     NotImplemented,
 }
 
-impl ChromaError for GetSoftDeletedAttachedFunctionsError {
+impl ChromaError for GetAttachedFunctionsToGcError {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::Internal
     }
@@ -2264,18 +2262,15 @@ impl SysDb {
         }
     }
 
-    pub async fn get_soft_deleted_attached_functions(
+    pub async fn get_attached_functions_to_gc(
         &mut self,
         cutoff_time: SystemTime,
         limit: i32,
-    ) -> Result<Vec<chroma_types::AttachedFunctionUuid>, GetSoftDeletedAttachedFunctionsError> {
+    ) -> Result<Vec<chroma_types::AttachedFunctionUuid>, GetAttachedFunctionsToGcError> {
         match self {
-            SysDb::Grpc(grpc) => {
-                grpc.get_soft_deleted_attached_functions(cutoff_time, limit)
-                    .await
-            }
-            SysDb::Sqlite(_) => Err(GetSoftDeletedAttachedFunctionsError::NotImplemented),
-            SysDb::Test(_) => Err(GetSoftDeletedAttachedFunctionsError::NotImplemented),
+            SysDb::Grpc(grpc) => grpc.get_attached_functions_to_gc(cutoff_time, limit).await,
+            SysDb::Sqlite(_) => Err(GetAttachedFunctionsToGcError::NotImplemented),
+            SysDb::Test(_) => Err(GetAttachedFunctionsToGcError::NotImplemented),
         }
     }
 

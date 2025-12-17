@@ -646,12 +646,12 @@ message GetFunctionsResponse {
   repeated Function functions = 1;
 }
 
-message GetSoftDeletedAttachedFunctionsRequest {
+message GetAttachedFunctionsToGcRequest {
   google.protobuf.Timestamp cutoff_time = 1;
   int32 limit = 2;
 }
 
-message GetSoftDeletedAttachedFunctionsResponse {
+message GetAttachedFunctionsToGcResponse {
   repeated AttachedFunction attached_functions = 1;
 }
 
@@ -704,7 +704,7 @@ service SysDB {
   rpc FinishCreateAttachedFunction(FinishCreateAttachedFunctionRequest) returns (FinishCreateAttachedFunctionResponse) {}
   rpc CleanupExpiredPartialAttachedFunctions(CleanupExpiredPartialAttachedFunctionsRequest) returns (CleanupExpiredPartialAttachedFunctionsResponse) {}
   rpc GetFunctions(GetFunctionsRequest) returns (GetFunctionsResponse) {}
-  rpc GetSoftDeletedAttachedFunctions(GetSoftDeletedAttachedFunctionsRequest) returns (GetSoftDeletedAttachedFunctionsResponse) {}
+  rpc GetAttachedFunctionsToGc(GetAttachedFunctionsToGcRequest) returns (GetAttachedFunctionsToGcResponse) {}
   rpc FinishAttachedFunctionDeletion(FinishAttachedFunctionDeletionRequest) returns (FinishAttachedFunctionDeletionResponse) {}
   rpc FlushCollectionCompactionAndAttachedFunction(FlushCollectionCompactionAndAttachedFunctionRequest) returns (FlushCollectionCompactionAndAttachedFunctionResponse) {}
 }

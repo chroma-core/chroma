@@ -534,9 +534,9 @@ func TestAttachFunctionTestSuite(t *testing.T) {
 	suite.Run(t, new(AttachFunctionTestSuite))
 }
 
-// TestGetSoftDeletedAttachedFunctions_TimestampConsistency verifies that timestamps
+// TestGetAttachedFunctionsToGc_TimestampConsistency verifies that timestamps
 // are returned in microseconds (UnixMicro) to match other API methods
-func TestGetSoftDeletedAttachedFunctions_TimestampConsistency(t *testing.T) {
+func TestGetAttachedFunctionsToGc_TimestampConsistency(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test timestamps with known values
@@ -562,7 +562,7 @@ func TestGetSoftDeletedAttachedFunctions_TimestampConsistency(t *testing.T) {
 		},
 	}
 
-	mockAttachedFunctionDb.On("GetSoftDeletedAttachedFunctions", mock.Anything, mock.Anything).
+	mockAttachedFunctionDb.On("GetAttachedFunctionsToGc", mock.Anything, mock.Anything).
 		Return(attachedFunctions, nil)
 
 	coordinator := &Coordinator{
@@ -571,16 +571,16 @@ func TestGetSoftDeletedAttachedFunctions_TimestampConsistency(t *testing.T) {
 		},
 	}
 
-	// Call GetSoftDeletedAttachedFunctions
+	// Call GetAttachedFunctionsToGc
 	cutoffTime := timestamppb.New(testTime.Add(-24 * time.Hour))
-	resp, err := coordinator.GetSoftDeletedAttachedFunctions(ctx, &coordinatorpb.GetSoftDeletedAttachedFunctionsRequest{
+	resp, err := coordinator.GetAttachedFunctionsToGc(ctx, &coordinatorpb.GetAttachedFunctionsToGcRequest{
 		CutoffTime: cutoffTime,
 		Limit:      100,
 	})
 
 	// Verify response
 	if err != nil {
-		t.Fatalf("GetSoftDeletedAttachedFunctions failed: %v", err)
+		t.Fatalf("GetAttachedFunctionsToGc failed: %v", err)
 	}
 	if len(resp.AttachedFunctions) != 1 {
 		t.Fatalf("Expected 1 attached function, got %d", len(resp.AttachedFunctions))

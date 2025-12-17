@@ -85,16 +85,16 @@ func (s *Server) CleanupExpiredPartialAttachedFunctions(ctx context.Context, req
 	return res, nil
 }
 
-func (s *Server) GetSoftDeletedAttachedFunctions(ctx context.Context, req *coordinatorpb.GetSoftDeletedAttachedFunctionsRequest) (*coordinatorpb.GetSoftDeletedAttachedFunctionsResponse, error) {
-	log.Info("GetSoftDeletedAttachedFunctions", zap.Time("cutoff_time", req.CutoffTime.AsTime()), zap.Int32("limit", req.Limit))
+func (s *Server) GetAttachedFunctionsToGc(ctx context.Context, req *coordinatorpb.GetAttachedFunctionsToGcRequest) (*coordinatorpb.GetAttachedFunctionsToGcResponse, error) {
+	log.Info("GetAttachedFunctionsToGc", zap.Time("cutoff_time", req.CutoffTime.AsTime()), zap.Int32("limit", req.Limit))
 
-	res, err := s.coordinator.GetSoftDeletedAttachedFunctions(ctx, req)
+	res, err := s.coordinator.GetAttachedFunctionsToGc(ctx, req)
 	if err != nil {
-		log.Error("GetSoftDeletedAttachedFunctions failed", zap.Error(err))
+		log.Error("GetAttachedFunctionsToGc failed", zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
-	log.Info("GetSoftDeletedAttachedFunctions succeeded", zap.Int("count", len(res.AttachedFunctions)))
+	log.Info("GetAttachedFunctionsToGc succeeded", zap.Int("count", len(res.AttachedFunctions)))
 	return res, nil
 }
 

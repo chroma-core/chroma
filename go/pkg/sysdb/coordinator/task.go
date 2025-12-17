@@ -621,24 +621,25 @@ func (s *Coordinator) CleanupExpiredPartialAttachedFunctions(ctx context.Context
 	}, nil
 }
 
-// GetSoftDeletedAttachedFunctions retrieves attached functions that are soft deleted and were updated before the cutoff time
-func (s *Coordinator) GetSoftDeletedAttachedFunctions(ctx context.Context, req *coordinatorpb.GetSoftDeletedAttachedFunctionsRequest) (*coordinatorpb.GetSoftDeletedAttachedFunctionsResponse, error) {
-	log := log.With(zap.String("method", "GetSoftDeletedAttachedFunctions"))
+// GetAttachedFunctionsToGc retrieves attached functions eligible for garbage collection:
+// soft deleted or stuck in non-ready state, and updated before the cutoff time
+func (s *Coordinator) GetAttachedFunctionsToGc(ctx context.Context, req *coordinatorpb.GetAttachedFunctionsToGcRequest) (*coordinatorpb.GetAttachedFunctionsToGcResponse, error) {
+	log := log.With(zap.String("method", "GetAttachedFunctionsToGc"))
 
 	if req.CutoffTime == nil {
-		log.Error("GetSoftDeletedAttachedFunctions: cutoff_time is required")
+		log.Error("GetAttachedFunctionsToGc: cutoff_time is required")
 		return nil, status.Errorf(codes.InvalidArgument, "cutoff_time is required")
 	}
 
 	if req.Limit <= 0 {
-		log.Error("GetSoftDeletedAttachedFunctions: limit must be greater than 0")
+		log.Error("GetAttachedFunctionsToGc: limit must be greater than 0")
 		return nil, status.Errorf(codes.InvalidArgument, "limit must be greater than 0")
 	}
 
 	cutoffTime := req.CutoffTime.AsTime()
-	attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetSoftDeletedAttachedFunctions(cutoffTime, req.Limit)
+	attachedFunctions, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).GetAttachedFunctionsToGc(cutoffTime, req.Limit)
 	if err != nil {
-		log.Error("GetSoftDeletedAttachedFunctions: failed to get soft deleted attached functions", zap.Error(err))
+		log.Error("GetAttachedFunctionsToGc: failed to get attached functions to gc", zap.Error(err))
 		return nil, err
 	}
 
@@ -661,10 +662,10 @@ func (s *Coordinator) GetSoftDeletedAttachedFunctions(ctx context.Context, req *
 		}
 	}
 
-	log.Info("GetSoftDeletedAttachedFunctions: completed successfully",
+	log.Info("GetAttachedFunctionsToGc: completed successfully",
 		zap.Int("count", len(attachedFunctions)))
 
-	return &coordinatorpb.GetSoftDeletedAttachedFunctionsResponse{
+	return &coordinatorpb.GetAttachedFunctionsToGcResponse{
 		AttachedFunctions: protoAttachedFunctions,
 	}, nil
 }

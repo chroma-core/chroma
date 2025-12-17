@@ -292,12 +292,12 @@ func (_m *IAttachedFunctionDb) CleanupExpiredPartialAttachedFunctions(maxAgeSeco
 	return r0, r1
 }
 
-// GetSoftDeletedAttachedFunctions provides a mock function with given fields: cutoffTime, limit
-func (_m *IAttachedFunctionDb) GetSoftDeletedAttachedFunctions(cutoffTime time.Time, limit int32) ([]*dbmodel.AttachedFunction, error) {
+// GetAttachedFunctionsToGc provides a mock function with given fields: cutoffTime, limit
+func (_m *IAttachedFunctionDb) GetAttachedFunctionsToGc(cutoffTime time.Time, limit int32) ([]*dbmodel.AttachedFunction, error) {
 	ret := _m.Called(cutoffTime, limit)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetSoftDeletedAttachedFunctions")
+		panic("no return value specified for GetAttachedFunctionsToGc")
 	}
 
 	var r0 []*dbmodel.AttachedFunction
