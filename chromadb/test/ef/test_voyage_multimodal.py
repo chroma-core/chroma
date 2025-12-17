@@ -30,6 +30,10 @@ def multimodal_collection() -> Generator[chromadb.Collection, None, None]:
         settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
         settings.chroma_server_http_port = port
         settings.chroma_server_host = host
+    else:
+        # Use SegmentAPI for local testing (doesn't require Rust bindings)
+        settings.chroma_api_impl = "chromadb.api.segment.SegmentAPI"
+        settings.is_persistent = False
 
     client = chromadb.Client(settings=settings)
     collection = client.create_collection(
@@ -137,7 +141,9 @@ def test_multimodal(
     np.random.set_state(random_state)
 
 
-@pytest.mark.xfail
+@pytest.mark.xfail(
+    reason="Chroma limitation: updating with image doesn't clear document field"
+)
 def test_multimodal_update_with_image(
     multimodal_collection: chromadb.Collection,
 ) -> None:

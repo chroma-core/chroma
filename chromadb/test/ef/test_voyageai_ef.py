@@ -348,3 +348,43 @@ def test_multimodal_text_with_large_batch() -> None:
     embeddings = ef(texts)
     assert len(embeddings) == 10
     assert all(len(emb) > 0 for emb in embeddings)
+
+
+def test_with_multimodal_3_5_embeddings() -> None:
+    """Test voyage-multimodal-3.5 model with text embeddings."""
+    if os.environ.get("CHROMA_VOYAGE_API_KEY") is None:
+        pytest.skip("CHROMA_VOYAGE_API_KEY not set")
+    ef = VoyageAIEmbeddingFunction(
+        api_key=os.environ["CHROMA_VOYAGE_API_KEY"],
+        model_name="voyage-multimodal-3.5",
+    )
+    embeddings = ef(["hello world"])
+    assert embeddings is not None
+    assert len(embeddings) == 1
+    assert len(embeddings[0]) == 1024  # Default dimension for voyage-multimodal-3.5
+
+
+def test_multimodal_3_5_token_limit() -> None:
+    """Test that voyage-multimodal-3.5 has correct token limit."""
+    if os.environ.get("CHROMA_VOYAGE_API_KEY") is None:
+        pytest.skip("CHROMA_VOYAGE_API_KEY not set")
+    ef = VoyageAIEmbeddingFunction(
+        api_key=os.environ["CHROMA_VOYAGE_API_KEY"],
+        model_name="voyage-multimodal-3.5",
+    )
+    assert ef.get_token_limit() == 32_000
+
+
+def test_multimodal_3_5_text_batching() -> None:
+    """Test voyage-multimodal-3.5 model with text batching."""
+    if os.environ.get("CHROMA_VOYAGE_API_KEY") is None:
+        pytest.skip("CHROMA_VOYAGE_API_KEY not set")
+    ef = VoyageAIEmbeddingFunction(
+        api_key=os.environ["CHROMA_VOYAGE_API_KEY"],
+        model_name="voyage-multimodal-3.5",
+        batch_size=2,
+    )
+    texts = ["text1", "text2", "text3", "text4", "text5"]
+    embeddings = ef(texts)
+    assert len(embeddings) == 5
+    assert all(len(emb) > 0 for emb in embeddings)

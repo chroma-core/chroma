@@ -33,7 +33,8 @@ VOYAGE_TOTAL_TOKEN_LIMITS = {
     "voyage-3-lite": 120_000,
     "voyage-code-2": 120_000,
     "voyage-3-m-exp": 120_000,
-    "voyage-multimodal-3": 120_000,
+    "voyage-multimodal-3": 32_000,
+    "voyage-multimodal-3.5": 32_000,
 }
 
 

@@ -10,7 +10,7 @@ Chroma provides a convenient wrapper around VoyageAI's embedding API. This embed
 VoyageAI offers various embedding models including:
 - **General-purpose models** (e.g., `voyage-3.5`, `voyage-3.5-lite`, `voyage-3-large`, `voyage-3`, `voyage-2`)
 - **Contextual embedding models** (e.g., `voyage-context-3`)
-- **Multimodal models** (e.g., `voyage-multimodal-3`)
+- **Multimodal models** (e.g., `voyage-multimodal-3.5`, `voyage-multimodal-3`)
 - **Domain-specific models** (e.g., `voyage-code-3`, `voyage-finance-2`, `voyage-law-2`)
 
 ## Basic Usage
@@ -72,7 +72,7 @@ const collectionGet = await client.getCollection({
 
 ## Multimodal Embeddings
 
-VoyageAI's multimodal models (e.g., `voyage-multimodal-3`) can embed both text and images into the same vector space.
+VoyageAI's multimodal models (e.g., `voyage-multimodal-3.5`, `voyage-multimodal-3`) can embed both text and images into the same vector space. The `voyage-multimodal-3.5` model additionally supports video inputs and offers flexible output dimensions (256, 512, 1024, 2048).
 
 {% TabbedCodeBlock %}
 
