@@ -1,0 +1,50 @@
+{{- if .Values.rustSysdbMigration.configuration }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rust-sysdb-migration-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{ .Values.rustSysdbMigration.configuration | indent 4 }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rust-sysdb-migration-{{ .Values.rustSysdbMigration.image.tag }}
+  namespace: {{ .Values.namespace }}
+spec:
+  template:
+    metadata:
+      labels:
+        app: rust-sysdb-migration
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: rust-sysdb-migration
+          image: "{{ .Values.rustSysdbMigration.image.repository }}:{{ .Values.rustSysdbMigration.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: CONFIG_PATH
+              value: "/config/config.yaml"
+          volumeMounts:
+            {{- if .Values.rustSysdbMigration.configuration }}
+            - name: config
+              mountPath: /config/
+            {{- end }}
+      {{- if .Values.rustSysdbMigration.configuration }}
+      volumes:
+        - name: config
+          configMap:
+            name: rust-sysdb-migration-config
+      {{- end }}
+      {{- if .Values.rustSysdbMigration.tolerations }}
+      tolerations:
+        {{- toYaml .Values.rustSysdbMigration.tolerations | nindent 8 }}
+      {{- end }}
+      {{- if .Values.rustSysdbMigration.nodeSelector }}
+      nodeSelector:
+        {{- toYaml .Values.rustSysdbMigration.nodeSelector | nindent 8 }}
+      {{- end }}
+---

@@ -1,4 +1,4 @@
-FROM rust:1.85.0 AS builder
+FROM rust:1.88.0 AS builder
 
 ARG RELEASE_MODE=
 ARG PROTOC_VERSION=31.1
@@ -22,11 +22,11 @@ WORKDIR /chroma
 
 RUN ARCH=$(uname -m) && \
   if [ "$ARCH" = "x86_64" ]; then \
-    PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip; \
+  PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip; \
   elif [ "$ARCH" = "aarch64" ]; then \
-    PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-aarch_64.zip; \
+  PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-aarch_64.zip; \
   else \
-    echo "Unsupported architecture: $ARCH" && exit 1; \
+  echo "Unsupported architecture: $ARCH" && exit 1; \
   fi && \
   curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/$PROTOC_ZIP && \
   unzip -o $PROTOC_ZIP -d /usr/local bin/protoc && \
@@ -48,18 +48,18 @@ ENV EXCLUDED_PACKAGES="chromadb_rust_bindings chromadb-js-bindings chroma-benchm
 RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
   if [ "$ENABLE_AVX512" = "1" ]; then \
-    export CXXFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
-    export CFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
-    export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+avx,+fma" && \
-    echo "Building with AVX512 optimizations for hnswlib and AVX for Rust"; \
+  export CXXFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
+  export CFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
+  export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+avx,+fma" && \
+  echo "Building with AVX512 optimizations for hnswlib and AVX for Rust"; \
   else \
-    echo "Building without AVX512 optimizations"; \
+  echo "Building without AVX512 optimizations"; \
   fi && \
   build_target=$( [ "${ADDRESS_SANITIZER}" = "1" ] && echo '--target x86_64-unknown-linux-gnu' || echo '' ) && \
   if [ "$RELEASE_MODE" = "1" ]; then cargo build ${build_target} --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES) --release; else cargo build ${build_target} --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES); fi && \
   build_dir=$( [ "$RELEASE_MODE" = "1" ] && echo release || echo debug ) && \
   build_dir=$( [ "${ADDRESS_SANITIZER}" = "1" ] && echo "x86_64-unknown-linux-gnu/${build_dir}" || echo "${build_dir}" ) && \
-  for bin in chroma garbage_collector_service chroma-load log_service heap_tender_service query_service compaction_service sysdb_service; do \
+  for bin in chroma garbage_collector_service chroma-load log_service heap_tender_service query_service compaction_service sysdb_service spanner_migration; do \
   mv "target/${build_dir}/${bin}" "./${bin}"; \
   done
 
@@ -113,3 +113,7 @@ ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./compaction_service" ]
 FROM runner AS sysdb_service
 COPY --from=builder /chroma/sysdb_service .
 ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./sysdb_service" ]
+
+FROM runner AS rust-sysdb-migration
+COPY --from=builder /chroma/spanner_migration .
+ENTRYPOINT ["sh", "-c", "ulimit -c 0 && exec ./spanner_migration" ]

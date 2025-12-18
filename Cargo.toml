@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/metering-macros", "rust/metering", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server", "rust/s3heap", "rust/s3heap-service", "rust/api-types", "rust/rust-sysdb"]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/metering-macros", "rust/metering", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server", "rust/s3heap", "rust/s3heap-service", "rust/api-types", "rust/rust-sysdb", "rust/rust-sysdb/spanner-migrations"]
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -77,6 +77,7 @@ base64 = "0.22"
 tikv-jemallocator = { version = "0.6.0", features = ["profiling"] }
 google-cloud-spanner = { version = "0.33.0" }
 google-cloud-gax = { version = "0.19.2" }
+google-cloud-googleapis = { version = "0.16.1", features = ["spanner"] }
 
 chroma = { path = "rust/chroma", version = "0.10.0" }
 chroma-api-types = { path = "rust/api-types", version = "0.10.0" }
