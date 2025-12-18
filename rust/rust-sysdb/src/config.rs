@@ -5,6 +5,46 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
+/// Configuration for connecting to a Spanner emulator (local development)
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SpannerEmulatorConfig {
+    pub host: String,
+    pub grpc_port: u16,
+    pub rest_port: u16,
+    pub project: String,
+    pub instance: String,
+    pub database: String,
+}
+
+impl SpannerEmulatorConfig {
+    /// Returns the database path in the format required by the Spanner client
+    pub fn database_path(&self) -> String {
+        format!(
+            "projects/{}/instances/{}/databases/{}",
+            self.project, self.instance, self.database
+        )
+    }
+
+    /// Returns the gRPC endpoint for SPANNER_EMULATOR_HOST
+    pub fn grpc_endpoint(&self) -> String {
+        format!("{}:{}", self.host, self.grpc_port)
+    }
+
+    /// Returns the REST endpoint for admin operations
+    pub fn rest_endpoint(&self) -> String {
+        format!("http://{}:{}", self.host, self.rest_port)
+    }
+}
+
+/// Spanner configuration - either emulator or GCP (mutually exclusive)
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SpannerConfig {
+    /// Emulator configuration for local development
+    pub emulator: Option<SpannerEmulatorConfig>,
+    // TODO: Add GCP config later
+    // pub gcp: Option<SpannerGcpConfig>,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct SysDbServiceConfig {
     #[serde(default = "SysDbServiceConfig::default_service_name")]
@@ -17,6 +57,8 @@ pub struct SysDbServiceConfig {
     pub port: u16,
     #[serde(default)]
     pub storage: StorageConfig,
+    #[serde(default)]
+    pub spanner: SpannerConfig,
 }
 
 impl SysDbServiceConfig {

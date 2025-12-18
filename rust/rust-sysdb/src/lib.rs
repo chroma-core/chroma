@@ -2,9 +2,9 @@ use chroma_config::Configurable;
 
 use crate::config::RootConfig;
 
-pub mod server;
-
 pub mod config;
+pub mod server;
+pub mod spanner;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 

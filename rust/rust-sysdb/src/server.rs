@@ -42,16 +42,23 @@ use tokio::{
 use tonic::{transport::Server, Request, Response, Status};
 
 use crate::config::SysDbServiceConfig;
+use crate::spanner::Spanner;
 
 pub struct SysdbService {
     port: u16,
     #[allow(dead_code)]
     storage: Storage,
+    #[allow(dead_code)]
+    spanner: Option<Spanner>,
 }
 
 impl SysdbService {
-    pub fn new(port: u16, storage: Storage) -> Self {
-        Self { port, storage }
+    pub fn new(port: u16, storage: Storage, spanner: Option<Spanner>) -> Self {
+        Self {
+            port,
+            storage,
+            spanner,
+        }
     }
 
     pub async fn run(self) -> Result<(), tonic::transport::Error> {
@@ -106,7 +113,8 @@ impl Configurable<SysDbServiceConfig> for SysdbService {
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let storage = Storage::try_from_config(&config.storage, registry).await?;
-        Ok(SysdbService::new(config.port, storage))
+        let spanner = Spanner::try_from_config(&config.spanner, registry).await?;
+        Ok(SysdbService::new(config.port, storage, Some(spanner)))
     }
 }
 
