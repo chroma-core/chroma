@@ -49,11 +49,11 @@ pub struct SysdbService {
     #[allow(dead_code)]
     storage: Storage,
     #[allow(dead_code)]
-    spanner: Option<Spanner>,
+    spanner: Spanner,
 }
 
 impl SysdbService {
-    pub fn new(port: u16, storage: Storage, spanner: Option<Spanner>) -> Self {
+    pub fn new(port: u16, storage: Storage, spanner: Spanner) -> Self {
         Self {
             port,
             storage,
@@ -114,7 +114,7 @@ impl Configurable<SysDbServiceConfig> for SysdbService {
     ) -> Result<Self, Box<dyn ChromaError>> {
         let storage = Storage::try_from_config(&config.storage, registry).await?;
         let spanner = Spanner::try_from_config(&config.spanner, registry).await?;
-        Ok(SysdbService::new(config.port, storage, Some(spanner)))
+        Ok(SysdbService::new(config.port, storage, spanner))
     }
 }
 
