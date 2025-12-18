@@ -15,15 +15,25 @@ Creates a new ChromaClient instance.
 
 #### Parameters
 
-| Name     | Type                 | Description                              |
-| :------- | :------------------- | :--------------------------------------- |
-| `params` | `ChromaClientParams` | The parameters for creating a new client |
+| Name            | Type                 | Description                              |
+| :-------------- | :------------------- | :--------------------------------------- |
+| `params.host?`  | `string`             | The host address of the Chroma server. Defaults to `'localhost'`. |
+| `params.port?`  | `number`             | The port number of the Chroma server. Defaults to `8000`. |
+| `params.ssl?`   | `boolean`            | Whether to use SSL/HTTPS for connections. Defaults to `false`. |
+| `params.tenant?` | `string`             | The tenant name in the Chroma server to connect to. |
+| `params.database?` | `string`            | The database name to connect to. |
+| `params.headers?` | `Record<string, string>` | Additional HTTP headers to send with requests. |
+| `params.fetchOptions?` | `RequestInit`      | Additional fetch options for HTTP requests. |
 
 **Example**
 
 ```typescript
 const client = new ChromaClient({
-  path: "http://localhost:8000",
+  host: "localhost",
+  port: 8000,
+  ssl: false,
+  tenant: "my_tenant",
+  database: "my_database",
 });
 ```
 
@@ -59,9 +69,13 @@ Creates a new collection with the specified properties.
 
 #### Parameters
 
-| Name     | Type                     | Description                                   |
-| :------- | :----------------------- | :-------------------------------------------- |
-| `params` | `CreateCollectionParams` | The parameters for creating a new collection. |
+| Name                      | Type                        | Description                                   |
+| :------------------------ | :-------------------------- | :-------------------------------------------- |
+| `params.name`             | `string`                    | The name of the collection (required).        |
+| `params.configuration?`   | `CreateCollectionConfiguration` | Optional collection configuration.         |
+| `params.metadata?`        | `CollectionMetadata`       | Optional metadata for the collection.         |
+| `params.embeddingFunction?` | `EmbeddingFunction \| null` | Optional embedding function to use. Defaults to `DefaultEmbeddingFunction` from @chroma-core/default-embed. |
+| `params.schema?`          | `Schema`                    | Optional schema describing index configuration. |
 
 #### Returns
 
@@ -93,9 +107,9 @@ Deletes a collection with the specified name.
 
 #### Parameters
 
-| Name     | Type                     | Description                               |
-| :------- | :----------------------- | :---------------------------------------- |
-| `params` | `DeleteCollectionParams` | The parameters for deleting a collection. |
+| Name         | Type     | Description                               |
+| :----------- | :------- | :---------------------------------------- |
+| `params.name` | `string` | The name of the collection to delete (required). |
 
 #### Returns
 
@@ -117,15 +131,16 @@ await client.deleteCollection({
 
 ### getCollection
 
-`getCollection(params): Promise<Collection>`
+- `getCollection(params): Promise<Collection>`
 
 Gets a collection with the specified name.
 
 #### Parameters
 
-| Name     | Type                  | Description                              |
-| :------- | :-------------------- | :--------------------------------------- |
-| `params` | `GetCollectionParams` | The parameters for getting a collection. |
+| Name                      | Type                | Description                              |
+| :------------------------ | :------------------ | :--------------------------------------- |
+| `params.name`             | `string`            | The name of the collection to retrieve (required). |
+| `params.embeddingFunction?` | `EmbeddingFunction` | Optional embedding function. Should match the one used to create the collection. |
 
 #### Returns
 
@@ -153,9 +168,15 @@ Gets or creates a collection with the specified properties.
 
 #### Parameters
 
-| Name     | Type                     | Description                                   |
-| :------- | :----------------------- | :-------------------------------------------- |
-| `params` | `CreateCollectionParams` | The parameters for creating a new collection. |
+| Name                      | Type                        | Description                                   |
+| :------------------------ | :-------------------------- | :-------------------------------------------- |
+| `params.name`             | `string`                    | The name of the collection (required).        |
+| `params.configuration?`   | `CreateCollectionConfiguration` | Optional collection configuration (used only if creating). |
+| `params.metadata?`        | `CollectionMetadata`       | Optional metadata for the collection (used only if creating). |
+| `params.embeddingFunction?` | `EmbeddingFunction \| null` | Optional embedding function to use. |
+| `params.schema?`          | `Schema`                    | Optional schema describing index configuration (used only if creating). |
+
+
 
 #### Returns
 
@@ -202,21 +223,22 @@ const heartbeat = await client.heartbeat();
 
 ### listCollections
 
-- `listCollections(params?): Promise<CollectionParams>`
+- `listCollections(params?): Promise<Collection[]>`
 
 Lists all collections.
 
 #### Parameters
 
-| Name     | Type                    |
-| :------- | :---------------------- |
-| `params` | `ListCollectionsParams` |
+| Name            | Type     | Description                                                      |
+| :-------------- | :------- | :--------------------------------------------------------------- |
+| `params.limit?` | `number` | Maximum number of collections to return. Default: `100`.          |
+| `params.offset?` | `number` | Number of collections to skip. Default: `0`.                     |
 
 #### Returns
 
-`Promise<CollectionParams>`
+`Promise<Collection[]>`
 
-A promise that resolves to a list of collection names.
+A promise that resolves to an array of Collection instances.
 
 **Throws**
 
@@ -233,20 +255,20 @@ const collections = await client.listCollections({
 
 ### reset
 
-- `reset(): Promise<boolean>`
+- `reset(): Promise<void>`
 
-Resets the state of the object by making an API call to the reset endpoint.
+Resets the entire database, deleting all collections and data.
 
 #### Returns
 
-`Promise<boolean>`
+`Promise<void>`
 
-A promise that resolves when the reset operation is complete.
+A promise that resolves when the reset is complete.
 
 **Throws**
 
 - If the client is unable to connect to the server.
-- If the server experienced an error while the state.
+- If the server experienced an error while resetting.
 
 **Example**
 
