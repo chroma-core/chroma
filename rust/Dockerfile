@@ -59,7 +59,7 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   if [ "$RELEASE_MODE" = "1" ]; then cargo build ${build_target} --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES) --release; else cargo build ${build_target} --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES); fi && \
   build_dir=$( [ "$RELEASE_MODE" = "1" ] && echo release || echo debug ) && \
   build_dir=$( [ "${ADDRESS_SANITIZER}" = "1" ] && echo "x86_64-unknown-linux-gnu/${build_dir}" || echo "${build_dir}" ) && \
-  for bin in chroma garbage_collector_service chroma-load log_service heap_tender_service query_service compaction_service; do \
+  for bin in chroma garbage_collector_service chroma-load log_service heap_tender_service query_service compaction_service sysdb_service; do \
   mv "target/${build_dir}/${bin}" "./${bin}"; \
   done
 
@@ -109,3 +109,7 @@ ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./query_service" ]
 FROM runner AS compaction_service
 COPY --from=builder /chroma/compaction_service .
 ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./compaction_service" ]
+
+FROM runner AS sysdb_service
+COPY --from=builder /chroma/sysdb_service .
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./sysdb_service" ]

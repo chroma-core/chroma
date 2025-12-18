@@ -1,0 +1,12 @@
+[package]
+name = "rust-sysdb"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "sysdb_service"
+path = "src/bin/sysdb_service.rs"
+
+[dependencies]
+tokio = { workspace = true }
+tokio-util = { workspace = true }

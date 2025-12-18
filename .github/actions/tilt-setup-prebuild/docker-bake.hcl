@@ -4,6 +4,12 @@ target "rust-log-service" {
   tags = [ "rust-log-service:ci" ]
 }
 
+target "rust-sysdb-service" {
+  dockerfile = "rust/Dockerfile"
+  target = "sysdb_service"
+  tags = [ "rust-sysdb-service:ci" ]
+}
+
 target "sysdb" {
   dockerfile = "go/Dockerfile"
   target = "sysdb"
@@ -50,6 +56,7 @@ target "load-service" {
 group "default" {
   targets = [
     "rust-log-service",
+    "rust-sysdb-service",
     "sysdb",
     "sysdb-migration",
     "rust-frontend-service",
