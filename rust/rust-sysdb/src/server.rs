@@ -17,16 +17,14 @@ use chroma_types::chroma_proto::{
     FinishDatabaseDeletionResponse, FlushCollectionCompactionAndAttachedFunctionRequest,
     FlushCollectionCompactionAndAttachedFunctionResponse, FlushCollectionCompactionRequest,
     FlushCollectionCompactionResponse, ForkCollectionRequest, ForkCollectionResponse,
-    GetAttachedFunctionByNameRequest, GetAttachedFunctionByNameResponse,
-    GetAttachedFunctionByUuidRequest, GetAttachedFunctionByUuidResponse,
-    GetCollectionByResourceNameRequest, GetCollectionRequest, GetCollectionResponse,
-    GetCollectionSizeRequest, GetCollectionSizeResponse, GetCollectionWithSegmentsRequest,
-    GetCollectionWithSegmentsResponse, GetCollectionsRequest, GetCollectionsResponse,
-    GetDatabaseRequest, GetDatabaseResponse, GetFunctionsRequest, GetFunctionsResponse,
-    GetLastCompactionTimeForTenantRequest, GetLastCompactionTimeForTenantResponse,
-    GetSegmentsRequest, GetSegmentsResponse, GetSoftDeletedAttachedFunctionsRequest,
-    GetSoftDeletedAttachedFunctionsResponse, GetTenantRequest, GetTenantResponse,
-    ListAttachedFunctionsRequest, ListAttachedFunctionsResponse, ListCollectionVersionsRequest,
+    GetAttachedFunctionsRequest, GetAttachedFunctionsResponse, GetAttachedFunctionsToGcRequest,
+    GetAttachedFunctionsToGcResponse, GetCollectionByResourceNameRequest, GetCollectionRequest,
+    GetCollectionResponse, GetCollectionSizeRequest, GetCollectionSizeResponse,
+    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
+    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetFunctionsRequest,
+    GetFunctionsResponse, GetLastCompactionTimeForTenantRequest,
+    GetLastCompactionTimeForTenantResponse, GetSegmentsRequest, GetSegmentsResponse,
+    GetTenantRequest, GetTenantResponse, ListCollectionVersionsRequest,
     ListCollectionVersionsResponse, ListCollectionsToGcRequest, ListCollectionsToGcResponse,
     ListDatabasesRequest, ListDatabasesResponse, MarkVersionForDeletionRequest,
     MarkVersionForDeletionResponse, ResetStateResponse, RestoreCollectionRequest,
@@ -358,24 +356,10 @@ impl SysDb for SysdbService {
         todo!()
     }
 
-    async fn get_attached_function_by_name(
+    async fn get_attached_functions(
         &self,
-        _request: Request<GetAttachedFunctionByNameRequest>,
-    ) -> Result<Response<GetAttachedFunctionByNameResponse>, Status> {
-        todo!()
-    }
-
-    async fn get_attached_function_by_uuid(
-        &self,
-        _request: Request<GetAttachedFunctionByUuidRequest>,
-    ) -> Result<Response<GetAttachedFunctionByUuidResponse>, Status> {
-        todo!()
-    }
-
-    async fn list_attached_functions(
-        &self,
-        _request: Request<ListAttachedFunctionsRequest>,
-    ) -> Result<Response<ListAttachedFunctionsResponse>, Status> {
+        _request: Request<GetAttachedFunctionsRequest>,
+    ) -> Result<Response<GetAttachedFunctionsResponse>, Status> {
         todo!()
     }
 
@@ -407,10 +391,10 @@ impl SysDb for SysdbService {
         todo!()
     }
 
-    async fn get_soft_deleted_attached_functions(
+    async fn get_attached_functions_to_gc(
         &self,
-        _request: Request<GetSoftDeletedAttachedFunctionsRequest>,
-    ) -> Result<Response<GetSoftDeletedAttachedFunctionsResponse>, Status> {
+        _request: Request<GetAttachedFunctionsToGcRequest>,
+    ) -> Result<Response<GetAttachedFunctionsToGcResponse>, Status> {
         todo!()
     }
 
