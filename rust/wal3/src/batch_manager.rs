@@ -292,7 +292,7 @@ mod tests {
         batch_manager.push_work(vec![vec![4, 5, 6]], tx, tracing::Span::current());
         let (seq_no, log_position, work) =
             batch_manager.take_work(&manifest_manager).unwrap().unwrap();
-        assert_eq!(seq_no, FragmentIdentifier(1));
+        assert_eq!(seq_no, FragmentIdentifier::SeqNo(1));
         assert_eq!(log_position.offset(), 1);
         assert_eq!(2, work.len());
         // Check batch 1

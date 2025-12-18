@@ -5,8 +5,8 @@ use chroma_storage::{DeleteOptions, GetOptions, Storage, StorageError};
 use crate::cursors::CursorStore;
 use crate::manifest::{snapshot_prefix, snapshot_setsum, unprefixed_manifest_path};
 use crate::{
-    fragment_prefix, parse_fragment_path, CursorStoreOptions, Error, Fragment, Manifest, Snapshot,
-    SnapshotPointer, ThrottleOptions,
+    parse_fragment_path, CursorStoreOptions, Error, Fragment, Manifest, Snapshot, SnapshotPointer,
+    ThrottleOptions, FRAGMENT_PREFIX_WITH_TRAILING_SLASH,
 };
 
 async fn destroy_snapshot(
@@ -92,7 +92,7 @@ async fn destroy_dangling_fragments(storage: &Arc<Storage>, prefix: &str) -> Res
     loop {
         let possible_fragments = match storage
             .list_prefix(
-                &format!("{}/{}", prefix, fragment_prefix()),
+                &format!("{}/{}", prefix, FRAGMENT_PREFIX_WITH_TRAILING_SLASH),
                 GetOptions::default(),
             )
             .await

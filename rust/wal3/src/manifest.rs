@@ -47,6 +47,33 @@ pub fn snapshot_setsum(path: &str) -> Result<Setsum, Error> {
     Ok(setsum)
 }
 
+///////////////////////////////////////////// scrubbing /////////////////////////////////////////////
+
+/// Verify that all fragments have the same FragmentIdentifier variant (all SeqNo or all Uuid).
+fn scrub_fragment_identifier_uniformity(
+    manifest_name: &str,
+    fragments: &[Fragment],
+) -> Result<(), Box<ScrubError>> {
+    let Some(first_is_seq_no) = fragments.first().map(|s| s.seq_no.as_seq_no().is_some()) else {
+        return Ok(());
+    };
+    for frag in fragments.iter().skip(1) {
+        let is_seq_no = frag.seq_no.as_seq_no().is_some();
+        if is_seq_no != first_is_seq_no {
+            return Err(ScrubError::CorruptManifest {
+                manifest: manifest_name.to_string(),
+                what: format!(
+                    "contains mixed FragmentIdentifier variants: first is {} but found {}",
+                    if first_is_seq_no { "SeqNo" } else { "Uuid" },
+                    if is_seq_no { "SeqNo" } else { "Uuid" },
+                ),
+            }
+            .into());
+        }
+    }
+    Ok(())
+}
+
 ////////////////////////////////////////// SnapshotPointer /////////////////////////////////////////
 
 /// A SnapshotPointer is a pointer to a snapshot.
@@ -161,6 +188,7 @@ impl Snapshot {
                 path_setsum.hexdigest(),
             )}.into());
         }
+        scrub_fragment_identifier_uniformity(&self.path, &self.fragments)?;
         Ok(ScrubSuccess {
             calculated_setsum,
             bytes_read,
@@ -420,7 +448,7 @@ impl Manifest {
                         .iter()
                         .map(|f| f.seq_no)
                         .max()
-                        .unwrap_or(FragmentIdentifier(0))
+                        .unwrap_or(FragmentIdentifier::SeqNo(0))
                         != fragment.seq_no
                 {
                     setsum += fragment.setsum;
@@ -660,6 +688,7 @@ impl Manifest {
                 .into());
             }
         }
+        scrub_fragment_identifier_uniformity(&format!("{:?}", self), &self.fragments)?;
         // TODO(rescrv):  Check the sequence numbers for sequentiality.
         Ok(ScrubSuccess {
             calculated_setsum,
@@ -671,11 +700,7 @@ impl Manifest {
     /// The next sequence number to generate, or None if the log has exhausted them.
     pub fn next_fragment_seq_no(&self) -> Option<FragmentIdentifier> {
         if let Some(max_seq_no) = self.fragments.iter().map(|f| f.seq_no).max() {
-            if max_seq_no + 1 > max_seq_no {
-                Some(max_seq_no + 1)
-            } else {
-                None
-            }
+            max_seq_no.successor()
         } else {
             Some(self.initial_seq_no.unwrap_or(FragmentIdentifier::BEGIN))
         }
@@ -882,7 +907,7 @@ impl Manifest {
                 garbage.fragments_to_drop_start, garbage.fragments_to_drop_limit
             )));
         }
-        if garbage.fragments_to_drop_limit == FragmentIdentifier(0) {
+        if garbage.fragments_to_drop_limit == FragmentIdentifier::SeqNo(0) {
             return Ok(None);
         }
         let mut new = self.clone();
@@ -895,11 +920,16 @@ impl Manifest {
             }
         }
         // TODO(rescrv):  When Step stabilizes, revisit this ugliness.
-        for seq_no in garbage.fragments_to_drop_start.0..garbage.fragments_to_drop_limit.0 {
+        // TODO(mcmr.wal3.gc): This garbage collection loop only handles SeqNo variants. If Uuid
+        // variants need garbage collection, this logic will need to be extended to handle them
+        // explicitly.
+        let start = garbage.fragments_to_drop_start.as_seq_no().unwrap_or(0);
+        let limit = garbage.fragments_to_drop_limit.as_seq_no().unwrap_or(0);
+        for seq_no in start..limit {
             if let Some(index) = new
                 .fragments
                 .iter()
-                .position(|f| f.seq_no == FragmentIdentifier(seq_no))
+                .position(|f| f.seq_no == FragmentIdentifier::SeqNo(seq_no))
             {
                 setsum_to_discard += new.fragments[index].setsum;
                 new.fragments.remove(index);
@@ -972,7 +1002,7 @@ mod tests {
     fn fragment_contains_position() {
         let fragment = Fragment {
             path: "path".to_string(),
-            seq_no: FragmentIdentifier(1),
+            seq_no: FragmentIdentifier::SeqNo(1),
             start: LogPosition::from_offset(1),
             limit: LogPosition::from_offset(42),
             num_bytes: 4100,
@@ -989,7 +1019,7 @@ mod tests {
     fn manifest_contains_position() {
         let fragment1 = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentIdentifier(1),
+            seq_no: FragmentIdentifier::SeqNo(1),
             start: LogPosition::from_offset(1),
             limit: LogPosition::from_offset(22),
             num_bytes: 4100,
@@ -997,7 +1027,7 @@ mod tests {
         };
         let fragment2 = Fragment {
             path: "path2".to_string(),
-            seq_no: FragmentIdentifier(2),
+            seq_no: FragmentIdentifier::SeqNo(2),
             start: LogPosition::from_offset(22),
             limit: LogPosition::from_offset(42),
             num_bytes: 4100,
@@ -1025,7 +1055,7 @@ mod tests {
     fn manifest_scrub_setsum() {
         let fragment1 = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentIdentifier(1),
+            seq_no: FragmentIdentifier::SeqNo(1),
             start: LogPosition::from_offset(1),
             limit: LogPosition::from_offset(22),
             num_bytes: 4100,
@@ -1036,7 +1066,7 @@ mod tests {
         };
         let fragment2 = Fragment {
             path: "path2".to_string(),
-            seq_no: FragmentIdentifier(2),
+            seq_no: FragmentIdentifier::SeqNo(2),
             start: LogPosition::from_offset(22),
             limit: LogPosition::from_offset(42),
             num_bytes: 4100,
@@ -1079,7 +1109,7 @@ mod tests {
     fn apply_fragment() {
         let fragment1 = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentIdentifier(1),
+            seq_no: FragmentIdentifier::SeqNo(1),
             start: LogPosition::from_offset(1),
             limit: LogPosition::from_offset(22),
             num_bytes: 41,
@@ -1090,7 +1120,7 @@ mod tests {
         };
         let fragment2 = Fragment {
             path: "path2".to_string(),
-            seq_no: FragmentIdentifier(2),
+            seq_no: FragmentIdentifier::SeqNo(2),
             start: LogPosition::from_offset(22),
             limit: LogPosition::from_offset(42),
             num_bytes: 42,
@@ -1127,7 +1157,7 @@ mod tests {
                 fragments: vec![
                     Fragment {
                         path: "path1".to_string(),
-                        seq_no: FragmentIdentifier(1),
+                        seq_no: FragmentIdentifier::SeqNo(1),
                         start: LogPosition::from_offset(1),
                         limit: LogPosition::from_offset(22),
                         num_bytes: 41,
@@ -1138,7 +1168,7 @@ mod tests {
                     },
                     Fragment {
                         path: "path2".to_string(),
-                        seq_no: FragmentIdentifier(2),
+                        seq_no: FragmentIdentifier::SeqNo(2),
                         start: LogPosition::from_offset(22),
                         limit: LogPosition::from_offset(42),
                         num_bytes: 42,
@@ -1159,7 +1189,7 @@ mod tests {
     fn apply_fragment_with_snapshots() {
         let fragment1 = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentIdentifier(1),
+            seq_no: FragmentIdentifier::SeqNo(1),
             start: LogPosition::from_offset(1),
             limit: LogPosition::from_offset(22),
             num_bytes: 41,
@@ -1170,7 +1200,7 @@ mod tests {
         };
         let fragment2 = Fragment {
             path: "path2".to_string(),
-            seq_no: FragmentIdentifier(2),
+            seq_no: FragmentIdentifier::SeqNo(2),
             start: LogPosition::from_offset(22),
             limit: LogPosition::from_offset(42),
             num_bytes: 42,
@@ -1181,7 +1211,7 @@ mod tests {
         };
         let fragment3 = Fragment {
             path: "path3".to_string(),
-            seq_no: FragmentIdentifier(3),
+            seq_no: FragmentIdentifier::SeqNo(3),
             start: LogPosition::from_offset(42),
             limit: LogPosition::from_offset(84),
             num_bytes: 100,
@@ -1244,7 +1274,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(100)),
-            initial_seq_no: Some(FragmentIdentifier(10)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(10)),
         };
         assert_eq!(
             manifest.next_write_timestamp(),
@@ -1253,16 +1283,16 @@ mod tests {
         assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(100));
         assert_eq!(
             manifest.next_fragment_seq_no(),
-            Some(FragmentIdentifier(10))
+            Some(FragmentIdentifier::SeqNo(10))
         );
         assert_eq!(
             manifest.next_fragment_seq_no(),
-            Some(FragmentIdentifier(10))
+            Some(FragmentIdentifier::SeqNo(10))
         );
 
         let fragment = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentIdentifier(10),
+            seq_no: FragmentIdentifier::SeqNo(10),
             start: LogPosition::from_offset(100),
             limit: LogPosition::from_offset(200),
             num_bytes: 100,
@@ -1276,7 +1306,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(100)),
-            initial_seq_no: Some(FragmentIdentifier(10)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(10)),
         };
         assert_eq!(
             manifest_with_fragment.next_write_timestamp(),
@@ -1288,7 +1318,7 @@ mod tests {
         );
         assert_eq!(
             manifest_with_fragment.next_fragment_seq_no(),
-            Some(FragmentIdentifier(11)),
+            Some(FragmentIdentifier::SeqNo(11)),
         );
     }
 
@@ -1302,7 +1332,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(100)),
-            initial_seq_no: Some(FragmentIdentifier(10)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(10)),
         };
         assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(100));
         assert_eq!(
@@ -1311,12 +1341,12 @@ mod tests {
         );
         assert_eq!(
             manifest.next_fragment_seq_no(),
-            Some(FragmentIdentifier(10))
+            Some(FragmentIdentifier::SeqNo(10))
         );
 
         let fragment = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentIdentifier(10),
+            seq_no: FragmentIdentifier::SeqNo(10),
             start: LogPosition::from_offset(100),
             limit: LogPosition::from_offset(200),
             num_bytes: 100,
@@ -1330,7 +1360,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(100)),
-            initial_seq_no: Some(FragmentIdentifier(10)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(10)),
         };
         assert_eq!(
             manifest_with_fragment.oldest_timestamp(),
@@ -1338,7 +1368,7 @@ mod tests {
         );
         assert_eq!(
             manifest_with_fragment.next_fragment_seq_no(),
-            Some(FragmentIdentifier(11))
+            Some(FragmentIdentifier::SeqNo(11))
         );
     }
 
@@ -1354,7 +1384,7 @@ mod tests {
         };
         let fragment = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentIdentifier(1),
+            seq_no: FragmentIdentifier::SeqNo(1),
             start: LogPosition::from_offset(100),
             limit: LogPosition::from_offset(200),
             num_bytes: 100,
@@ -1369,7 +1399,7 @@ mod tests {
             snapshots: vec![snapshot],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(25)),
-            initial_seq_no: Some(FragmentIdentifier(1)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(1)),
         };
 
         assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(50));
@@ -1389,7 +1419,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(1000)),
-            initial_seq_no: Some(FragmentIdentifier(100)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(100)),
         };
 
         let serialized = serde_json::to_string(&manifest).unwrap();
@@ -1399,7 +1429,10 @@ mod tests {
             deserialized.initial_offset,
             Some(LogPosition::from_offset(1000))
         );
-        assert_eq!(deserialized.initial_seq_no, Some(FragmentIdentifier(100)));
+        assert_eq!(
+            deserialized.initial_seq_no,
+            Some(FragmentIdentifier::SeqNo(100))
+        );
 
         let manifest_none = Manifest {
             writer: "bootstrap".to_string(),
@@ -1428,12 +1461,12 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(500)),
-            initial_seq_no: Some(FragmentIdentifier(50)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(50)),
         };
 
         let fragment = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentIdentifier(50),
+            seq_no: FragmentIdentifier::SeqNo(50),
             start: LogPosition::from_offset(500),
             limit: LogPosition::from_offset(600),
             num_bytes: 100,
@@ -1454,13 +1487,13 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(500)),
-            initial_seq_no: Some(FragmentIdentifier(50)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(50)),
         };
 
         assert_eq!(manifest, expected_manifest);
         assert_eq!(
             manifest.next_fragment_seq_no(),
-            Some(FragmentIdentifier(51))
+            Some(FragmentIdentifier::SeqNo(51))
         );
     }
 
@@ -1468,7 +1501,7 @@ mod tests {
     fn manifest_fragment_for_position_with_initial_offset() {
         let fragment1 = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentIdentifier(1),
+            seq_no: FragmentIdentifier::SeqNo(1),
             start: LogPosition::from_offset(100),
             limit: LogPosition::from_offset(150),
             num_bytes: 50,
@@ -1476,7 +1509,7 @@ mod tests {
         };
         let fragment2 = Fragment {
             path: "path2".to_string(),
-            seq_no: FragmentIdentifier(2),
+            seq_no: FragmentIdentifier::SeqNo(2),
             start: LogPosition::from_offset(150),
             limit: LogPosition::from_offset(200),
             num_bytes: 50,
@@ -1491,7 +1524,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
             initial_offset: Some(LogPosition::from_offset(100)),
-            initial_seq_no: Some(FragmentIdentifier(1)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(1)),
         };
 
         assert_eq!(
@@ -1516,7 +1549,7 @@ mod tests {
     fn manifest_contains_position_with_initial_offset() {
         let fragment = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentIdentifier(1),
+            seq_no: FragmentIdentifier::SeqNo(1),
             start: LogPosition::from_offset(100),
             limit: LogPosition::from_offset(200),
             num_bytes: 100,
@@ -1531,7 +1564,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(100)),
-            initial_seq_no: Some(FragmentIdentifier(1)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(1)),
         };
 
         assert!(!manifest.contains_position(LogPosition::from_offset(50)));
@@ -1543,7 +1576,7 @@ mod tests {
     fn manifest_timestamps_with_initial_offset() {
         let fragment1 = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentIdentifier(1),
+            seq_no: FragmentIdentifier::SeqNo(1),
             start: LogPosition::from_offset(100),
             limit: LogPosition::from_offset(150),
             num_bytes: 50,
@@ -1551,7 +1584,7 @@ mod tests {
         };
         let fragment2 = Fragment {
             path: "path2".to_string(),
-            seq_no: FragmentIdentifier(2),
+            seq_no: FragmentIdentifier::SeqNo(2),
             start: LogPosition::from_offset(150),
             limit: LogPosition::from_offset(200),
             num_bytes: 50,
@@ -1566,7 +1599,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
             initial_offset: Some(LogPosition::from_offset(100)),
-            initial_seq_no: Some(FragmentIdentifier(42)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(42)),
         };
 
         assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(100));
@@ -1583,7 +1616,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(500)),
-            initial_seq_no: Some(FragmentIdentifier(50)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(50)),
         };
 
         assert_eq!(
@@ -1612,8 +1645,8 @@ mod tests {
         let garbage = Garbage {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
-            fragments_to_drop_start: FragmentIdentifier(5),
-            fragments_to_drop_limit: FragmentIdentifier(5),
+            fragments_to_drop_start: FragmentIdentifier::SeqNo(5),
+            fragments_to_drop_limit: FragmentIdentifier::SeqNo(5),
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(100),
             snapshot_for_root: None,
@@ -1623,7 +1656,7 @@ mod tests {
 
         // When fragments_to_drop_start == fragments_to_drop_limit and both are non-zero,
         // initial_seq_no should be set to the limit value
-        assert_eq!(result.initial_seq_no, Some(FragmentIdentifier(5)));
+        assert_eq!(result.initial_seq_no, Some(FragmentIdentifier::SeqNo(5)));
         assert_eq!(result.initial_offset, Some(LogPosition::from_offset(100)));
     }
 
@@ -1638,8 +1671,8 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier(10),
-            fragments_to_drop_limit: FragmentIdentifier(5),
+            fragments_to_drop_start: FragmentIdentifier::SeqNo(10),
+            fragments_to_drop_limit: FragmentIdentifier::SeqNo(5),
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         };
@@ -1648,8 +1681,9 @@ mod tests {
         assert!(result.is_err());
 
         if let Err(crate::Error::GarbageCollection(msg)) = result {
+            println!("GarbageCollection error message: {msg}");
             assert!(msg.contains("Garbage has start > limit"));
-            assert!(msg.contains("FragmentIdentifier(10) > FragmentIdentifier(5)"));
+            assert!(msg.contains("SeqNo(10) > SeqNo(5)"));
         } else {
             panic!("Expected GarbageCollection error, got {:?}", result);
         }
@@ -1659,8 +1693,8 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier(5),
-            fragments_to_drop_limit: FragmentIdentifier(5),
+            fragments_to_drop_start: FragmentIdentifier::SeqNo(5),
+            fragments_to_drop_limit: FragmentIdentifier::SeqNo(5),
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         };
@@ -1674,8 +1708,8 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier(1),
-            fragments_to_drop_limit: FragmentIdentifier(5),
+            fragments_to_drop_start: FragmentIdentifier::SeqNo(1),
+            fragments_to_drop_limit: FragmentIdentifier::SeqNo(5),
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         };
@@ -1703,7 +1737,7 @@ mod tests {
             fragments: vec![Fragment {
                 path: "log/Bucket=00000000002f2000/FragmentSeqNo=00000000002f2372.parquet"
                     .to_string(),
-                seq_no: FragmentIdentifier(3089266),
+                seq_no: FragmentIdentifier::SeqNo(3089266),
                 start: LogPosition { offset: 5566918 },
                 limit: LogPosition { offset: 5566919 },
                 num_bytes: 2116,
@@ -1713,7 +1747,7 @@ mod tests {
                 .unwrap(),
             }],
             initial_offset: Some(LogPosition { offset: 5566918 }),
-            initial_seq_no: Some(FragmentIdentifier(3089266)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(3089266)),
         };
 
         // Case 1: fragments_to_drop_limit <= initial_seq_no, no snapshots to drop/make
@@ -1721,8 +1755,8 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier(3089257),
-            fragments_to_drop_limit: FragmentIdentifier(3089266), // Equal to initial_seq_no
+            fragments_to_drop_start: FragmentIdentifier::SeqNo(3089257),
+            fragments_to_drop_limit: FragmentIdentifier::SeqNo(3089266), // Equal to initial_seq_no
             setsum_to_discard: Setsum::from_hexdigest(
                 "7287d2d717e35117811f1afb7c5e8dd6517417dcbc5ad195dabbafaca6df9ef3",
             )
@@ -1739,7 +1773,7 @@ mod tests {
 
         // Case 2: fragments_to_drop_limit < initial_seq_no, no snapshots to drop/make
         let garbage_below_initial = Garbage {
-            fragments_to_drop_limit: FragmentIdentifier(3089265), // Less than initial_seq_no
+            fragments_to_drop_limit: FragmentIdentifier::SeqNo(3089265), // Less than initial_seq_no
             ..garbage.clone()
         };
 
@@ -1822,6 +1856,277 @@ mod tests {
         assert!(
             result.is_err(),
             "head should return error for nonexistent manifest"
+        );
+    }
+
+    #[test]
+    fn manifest_scrub_rejects_mixed_fragment_identifiers() {
+        use uuid::Uuid;
+
+        let fragment_seq_no = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(1),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment_uuid = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::Uuid(Uuid::nil()),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let manifest = Manifest {
+            writer: "test_writer".to_string(),
+            setsum: fragment_seq_no.setsum + fragment_uuid.setsum,
+            collected: Setsum::default(),
+            acc_bytes: 8200,
+            snapshots: vec![],
+            fragments: vec![fragment_seq_no, fragment_uuid],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        let result = manifest.scrub();
+        assert!(
+            result.is_err(),
+            "scrub should reject mixed FragmentIdentifier variants"
+        );
+        let err = result.unwrap_err();
+        let err_str = format!("{err}");
+        println!("manifest_scrub_rejects_mixed_fragment_identifiers error: {err_str}");
+        assert!(
+            err_str.contains("mixed FragmentIdentifier variants"),
+            "error message should mention mixed variants: {err_str}"
+        );
+    }
+
+    #[test]
+    fn manifest_scrub_accepts_uniform_seq_no_identifiers() {
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(1),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(2),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let manifest = Manifest {
+            writer: "test_writer".to_string(),
+            setsum: Setsum::from_hexdigest(
+                "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
+            )
+            .unwrap(),
+            collected: Setsum::default(),
+            acc_bytes: 8200,
+            snapshots: vec![],
+            fragments: vec![fragment1, fragment2],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        assert!(
+            manifest.scrub().is_ok(),
+            "scrub should accept uniform SeqNo identifiers"
+        );
+    }
+
+    #[test]
+    fn manifest_scrub_accepts_uniform_uuid_identifiers() {
+        use uuid::Uuid;
+
+        let uuid1 = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap();
+        let uuid2 = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap();
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::Uuid(uuid1),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::Uuid(uuid2),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let manifest = Manifest {
+            writer: "test_writer".to_string(),
+            setsum: Setsum::from_hexdigest(
+                "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
+            )
+            .unwrap(),
+            collected: Setsum::default(),
+            acc_bytes: 8200,
+            snapshots: vec![],
+            fragments: vec![fragment1, fragment2],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        assert!(
+            manifest.scrub().is_ok(),
+            "scrub should accept uniform Uuid identifiers"
+        );
+    }
+
+    #[test]
+    fn snapshot_scrub_rejects_mixed_fragment_identifiers() {
+        use uuid::Uuid;
+
+        let fragment_seq_no = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(1),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment_uuid = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::Uuid(Uuid::nil()),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let combined_setsum = fragment_seq_no.setsum + fragment_uuid.setsum;
+        let snapshot = Snapshot {
+            path: unprefixed_snapshot_path(combined_setsum),
+            depth: 1,
+            setsum: combined_setsum,
+            writer: "test_writer".to_string(),
+            snapshots: vec![],
+            fragments: vec![fragment_seq_no, fragment_uuid],
+        };
+        let result = snapshot.scrub();
+        assert!(
+            result.is_err(),
+            "scrub should reject mixed FragmentIdentifier variants"
+        );
+        let err = result.unwrap_err();
+        let err_str = format!("{err}");
+        println!("snapshot_scrub_rejects_mixed_fragment_identifiers error: {err_str}");
+        assert!(
+            err_str.contains("mixed FragmentIdentifier variants"),
+            "error message should mention mixed variants: {err_str}"
+        );
+    }
+
+    #[test]
+    fn snapshot_scrub_accepts_uniform_seq_no_identifiers() {
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(1),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(2),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let combined_setsum = fragment1.setsum + fragment2.setsum;
+        let snapshot = Snapshot {
+            path: unprefixed_snapshot_path(combined_setsum),
+            depth: 1,
+            setsum: combined_setsum,
+            writer: "test_writer".to_string(),
+            snapshots: vec![],
+            fragments: vec![fragment1, fragment2],
+        };
+        assert!(
+            snapshot.scrub().is_ok(),
+            "scrub should accept uniform SeqNo identifiers"
+        );
+    }
+
+    #[test]
+    fn snapshot_scrub_accepts_uniform_uuid_identifiers() {
+        use uuid::Uuid;
+
+        let uuid1 = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap();
+        let uuid2 = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap();
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::Uuid(uuid1),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::Uuid(uuid2),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let combined_setsum = fragment1.setsum + fragment2.setsum;
+        let snapshot = Snapshot {
+            path: unprefixed_snapshot_path(combined_setsum),
+            depth: 1,
+            setsum: combined_setsum,
+            writer: "test_writer".to_string(),
+            snapshots: vec![],
+            fragments: vec![fragment1, fragment2],
+        };
+        assert!(
+            snapshot.scrub().is_ok(),
+            "scrub should accept uniform Uuid identifiers"
         );
     }
 }

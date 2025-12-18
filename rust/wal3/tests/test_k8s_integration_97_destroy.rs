@@ -41,7 +41,7 @@ async fn test_k8s_integration_97_destroy() {
             &format!(
                 "{}/{}",
                 PREFIX,
-                unprefixed_fragment_path(FragmentIdentifier(100_000))
+                unprefixed_fragment_path(FragmentIdentifier::SeqNo(100_000))
             ),
             Vec::from("CONTENT".to_string()),
             PutOptions::default(),

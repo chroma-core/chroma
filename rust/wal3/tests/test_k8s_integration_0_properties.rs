@@ -58,20 +58,21 @@ fn deltas_to_fragment_sequence(deltas: &[FragmentDelta]) -> Vec<Fragment> {
     let mut fragments: Vec<Fragment> = vec![];
     for delta in deltas.iter() {
         let fragment = if let Some(recent) = fragments.last() {
+            let next_seq_no = recent.seq_no.successor().expect("seq_no overflow in test");
             Fragment {
-                path: wal3::unprefixed_fragment_path(recent.seq_no + 1),
+                path: wal3::unprefixed_fragment_path(next_seq_no),
                 num_bytes: delta.num_bytes,
                 setsum: delta.setsum,
-                seq_no: recent.seq_no + 1,
+                seq_no: next_seq_no,
                 start: recent.limit,
                 limit: recent.limit + delta.num_records,
             }
         } else {
             Fragment {
-                path: wal3::unprefixed_fragment_path(FragmentIdentifier(1)),
+                path: wal3::unprefixed_fragment_path(FragmentIdentifier::SeqNo(1)),
                 num_bytes: delta.num_bytes,
                 setsum: delta.setsum,
-                seq_no: FragmentIdentifier(1),
+                seq_no: FragmentIdentifier::SeqNo(1),
                 start: LogPosition::from_offset(1),
                 limit: LogPosition::from_offset(1) + delta.num_records,
             }
@@ -201,7 +202,7 @@ proptest::proptest! {
             snapshots: snapshots.clone(),
         };
         eprintln!("[{:?}, {:?})", start, limit);
-        let mut last_initial_seq_no = FragmentIdentifier(0);
+        let mut last_initial_seq_no = FragmentIdentifier::SeqNo(0);
         for offset in start.offset()..=limit.offset() {
             let position = LogPosition::from_offset(offset);
             eprintln!("position = {position:?}");
@@ -229,7 +230,15 @@ proptest::proptest! {
                 last_initial_seq_no = new_manifest.initial_seq_no.unwrap();
             }
         }
-        assert_eq!(last_initial_seq_no, fragments.last().unwrap().seq_no + 1);
+        assert_eq!(
+            last_initial_seq_no,
+            fragments
+                .last()
+                .unwrap()
+                .seq_no
+                .successor()
+                .expect("seq_no overflow in test")
+        );
     }
 }
 

@@ -9337,6 +9337,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-opentelemetry",
+ "uuid",
 ]
 
 [[package]]
