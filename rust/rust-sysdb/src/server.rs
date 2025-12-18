@@ -1,3 +1,6 @@
+use chroma_config::{registry::Registry, Configurable};
+use chroma_error::ChromaError;
+use chroma_storage::Storage;
 use chroma_types::chroma_proto::{
     sys_db_server::{SysDb, SysDbServer},
     AttachFunctionRequest, AttachFunctionResponse, BatchGetCollectionSoftDeleteStatusRequest,
@@ -38,19 +41,23 @@ use tokio::{
 };
 use tonic::{transport::Server, Request, Response, Status};
 
+use crate::config::SysDbServiceConfig;
+
 pub struct SysdbService {
     port: u16,
+    #[allow(dead_code)]
+    storage: Storage,
 }
 
 impl SysdbService {
-    pub fn new(port: u16) -> Self {
-        Self { port }
+    pub fn new(port: u16, storage: Storage) -> Self {
+        Self { port, storage }
     }
 
     pub async fn run(self) -> Result<(), tonic::transport::Error> {
         let addr = format!("[::]:{}", self.port).parse().unwrap();
 
-        println!("Sysdb service listening on {}", addr);
+        tracing::info!("Sysdb service listening on {}", addr);
 
         let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
 
@@ -67,27 +74,24 @@ impl SysdbService {
                 let mut sigterm = match signal(SignalKind::terminate()) {
                     Ok(sigterm) => sigterm,
                     Err(err) => {
-                        // TODO(Sanket): Switch to tracing instead of println.
-                        println!("Failed to create SIGTERM handler: {err}");
+                        tracing::error!("Failed to create SIGTERM handler: {err}");
                         return;
                     }
                 };
                 let mut sigint = match signal(SignalKind::interrupt()) {
                     Ok(sigint) => sigint,
                     Err(err) => {
-                        // TODO(Sanket): Switch to tracing instead of println.
-                        println!("Failed to create SIGINT handler: {err}");
+                        tracing::error!("Failed to create SIGINT handler: {err}");
                         return;
                     }
                 };
                 // TODO(Sanket): Drain existing requests before shutting down.
-                // TODO(Sanket): Switch to tracing instead of println.
                 select! {
                     _ = sigterm.recv() => {
-                        println!("Received SIGTERM, shutting down server");
+                        tracing::info!("Received SIGTERM, shutting down server");
                     }
                     _ = sigint.recv() => {
-                        println!("Received SIGINT, shutting down server");
+                        tracing::info!("Received SIGINT, shutting down server");
                     }
                 }
             })
@@ -95,7 +99,18 @@ impl SysdbService {
     }
 }
 
-#[tonic::async_trait]
+#[async_trait::async_trait]
+impl Configurable<SysDbServiceConfig> for SysdbService {
+    async fn try_from_config(
+        config: &SysDbServiceConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let storage = Storage::try_from_config(&config.storage, registry).await?;
+        Ok(SysdbService::new(config.port, storage))
+    }
+}
+
+#[async_trait::async_trait]
 impl SysDb for SysdbService {
     async fn create_database(
         &self,

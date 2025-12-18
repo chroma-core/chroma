@@ -8,9 +8,17 @@ name = "sysdb_service"
 path = "src/bin/sysdb_service.rs"
 
 [dependencies]
+async-trait = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
 tonic-health = { workspace = true }
+chroma-config = { workspace = true }
+chroma-error = { workspace = true }
+chroma-storage = { workspace = true }
 chroma-types = { workspace = true }
 chroma-tracing = { workspace = true, features = ["grpc"]}
+serde = { workspace = true }
+tracing = { workspace = true }
+figment = { workspace = true }
+opentelemetry = { workspace = true }

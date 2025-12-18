@@ -175,7 +175,7 @@ if os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA_VALUES'):
 # We manually call helm template so we can call set-file
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=rust/worker/chroma_config.yaml,heapTenderService.configuration=rust/worker/chroma_config.yaml,compactionService.configuration=rust/worker/chroma_config.yaml,queryService.configuration=rust/worker/chroma_config.yaml,garbageCollector.configuration=rust/worker/chroma_config.yaml --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=rust/worker/chroma_config.yaml,heapTenderService.configuration=rust/worker/chroma_config.yaml,compactionService.configuration=rust/worker/chroma_config.yaml,queryService.configuration=rust/worker/chroma_config.yaml,garbageCollector.configuration=rust/worker/chroma_config.yaml,rustSysdbService.configuration=rust/worker/chroma_config.yaml --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
   ),
 )
 
@@ -187,7 +187,7 @@ if os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA2_VALUES'):
 
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=' + rfe2_config_file + ',rustLogService.configuration=rust/worker/chroma_config2.yaml,heapTenderService.configuration=rust/worker/chroma_config2.yaml,compactionService.configuration=rust/worker/chroma_config2.yaml,queryService.configuration=rust/worker/chroma_config2.yaml,garbageCollector.configuration=rust/worker/chroma_config2.yaml --values ' + distributed_chroma2_values + ' k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=' + rfe2_config_file + ',rustLogService.configuration=rust/worker/chroma_config2.yaml,heapTenderService.configuration=rust/worker/chroma_config2.yaml,compactionService.configuration=rust/worker/chroma_config2.yaml,queryService.configuration=rust/worker/chroma_config2.yaml,garbageCollector.configuration=rust/worker/chroma_config2.yaml,rustSysdbService.configuration=rust/worker/chroma_config2.yaml --values ' + distributed_chroma2_values + ' k8s/distributed-chroma'
   ),
 )
 
