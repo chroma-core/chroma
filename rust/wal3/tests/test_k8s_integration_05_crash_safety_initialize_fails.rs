@@ -4,7 +4,8 @@ use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
     create_factories, upload_parquet, FragmentIdentifier, FragmentSeqNo, LogPosition,
-    LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
+    LogReaderOptions, LogWriter, LogWriterOptions, Manifest, ManifestManagerFactory,
+    S3ManifestManagerFactory,
 };
 
 mod common;
@@ -18,7 +19,17 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let prefix = "test_k8s_integration_05_crash_safety_initialize_fails";
     let writer = "test writer";
-    Manifest::initialize(&LogWriterOptions::default(), &storage, prefix, "init")
+    let init_factory = S3ManifestManagerFactory {
+        write: LogWriterOptions::default(),
+        read: LogReaderOptions::default(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        writer: "init".to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
+    init_factory
+        .init_manifest(&Manifest::new_empty("init"))
         .await
         .unwrap();
     let position = LogPosition::from_offset(1);

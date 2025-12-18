@@ -22,7 +22,7 @@ use crate::interfaces::{
 use crate::{
     BatchManager, CursorStore, CursorStoreOptions, Error, ExponentialBackoff, Fragment,
     FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition, LogReader, LogReaderOptions,
-    LogWriterOptions, Manifest, ManifestAndETag, ManifestManager, ThrottleOptions,
+    LogWriterOptions, Manifest, ManifestAndETag, ManifestManager,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -89,13 +89,10 @@ impl<
         MP: ManifestManagerFactory<FragmentPointer = P>,
     > LogWriter<P, FP, MP>
 {
-    pub async fn initialize(
-        options: &LogWriterOptions,
-        storage: &Storage,
-        prefix: &str,
-        writer: &str,
-    ) -> Result<(), Error> {
-        Manifest::initialize(options, storage, prefix, writer).await
+    pub async fn initialize(new_manifest_publisher: &MP, writer: &str) -> Result<(), Error> {
+        new_manifest_publisher
+            .init_manifest(&Manifest::new_empty(writer))
+            .await
     }
 
     /// Open the log, possibly writing a new manifest to recover it.
@@ -159,7 +156,7 @@ impl<
         match this.ensure_open().await {
             Ok(_) => {}
             Err(Error::UninitializedLog) => {
-                Self::initialize(&this.options, &this.storage, &this.prefix, &this.writer).await?;
+                Self::initialize(&this.new_manifest_publisher, &this.writer).await?;
                 this.ensure_open().await?;
             }
             Err(err) => {
@@ -183,8 +180,6 @@ impl<
     #[allow(clippy::too_many_arguments)]
     pub async fn bootstrap<D: MarkDirty>(
         _options: &LogWriterOptions,
-        storage: &Arc<Storage>,
-        prefix: &str,
         writer: &str,
         mark_dirty: D,
         new_fragment_publisher: FP,
@@ -196,12 +191,9 @@ impl<
         let num_records = messages.len();
         let start = first_record_offset;
         let limit = first_record_offset + num_records;
-        // SAFETY(rescrv):  This is a speculative load to narrow the window in which we would see a
-        // race between writers.
-        let manifest = Manifest::load(&ThrottleOptions::default(), storage, prefix).await?;
-        if manifest.is_some() {
-            return Err(Error::LogContentionFailure);
-        }
+        // NOTE(rescrv):  There was once a speculative load to narrow the window in which we would
+        // see a race between writers.  That's been eliminated via other tuning, I think (re gc),
+        // so that check has been removed.
         // SAFETY(rescrv):  This will only succeed if the file doesn't exist.  Technically the log
         // could be initialized and garbage collected to leave a prefix hole, but our timing
         // assumption is that every op happens in less than 1/2 the GC interval, so there's no way
@@ -211,11 +203,6 @@ impl<
         // LogContention.  Other errors fail transparently, too.
         if num_records > 0 {
             let fragment_publisher = new_fragment_publisher.make_publisher().await?;
-            // NOTE(rescrv): We intentionally don't call new_manifest_publisher.make() here.
-            // The manifest doesn't exist yet (it's created below), and ManifestManager::new
-            // requires a manifest to exist. The manifest_publisher would be used to batch
-            // fragment updates, but for bootstrap we directly install the manifest instead.
-            let _ = new_manifest_publisher;
             let pointer = P::bootstrap(first_record_offset);
             let (path, setsum, num_bytes) = fragment_publisher
                 .upload_parquet(&pointer, messages, cmek)
@@ -239,16 +226,7 @@ impl<
             }
             new_manifest.apply_fragment(frag);
             // SAFETY(rescrv):  If this fails, there's nothing left to do.
-            empty_manifest
-                .install(
-                    //TODO(rescrv): Thread throttle options.
-                    &ThrottleOptions::default(),
-                    storage,
-                    prefix,
-                    None,
-                    &new_manifest,
-                )
-                .await?;
+            new_manifest_publisher.init_manifest(&new_manifest).await?;
             // Not Safety:
             // We mark dirty, but if we lose that we lose that.
             // Failure to mark dirty fails the bootstrap.
@@ -258,16 +236,7 @@ impl<
             let mut new_manifest = empty_manifest.clone();
             new_manifest.initial_offset = Some(start);
             // SAFETY(rescrv):  If this fails, there's nothing left to do.
-            empty_manifest
-                .install(
-                    //TODO(rescrv): Thread throttle options.
-                    &ThrottleOptions::default(),
-                    storage,
-                    prefix,
-                    None,
-                    &new_manifest,
-                )
-                .await?;
+            new_manifest_publisher.init_manifest(&new_manifest).await?;
             // No need to mark dirty as the manifest is empty.
         }
         Ok(())
@@ -480,7 +449,7 @@ impl<
                 inner.epoch
             };
             let batch_manager = self.new_fragment_publisher.make_publisher().await?;
-            let manifest_manager = self.new_manifest_publisher.make_publisher().await?;
+            let manifest_manager = self.new_manifest_publisher.open_publisher().await?;
             let writer = match OnceLogWriter::open(
                 self.options.clone(),
                 self.storage.clone(),

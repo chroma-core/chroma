@@ -6,8 +6,8 @@ use crate::cursors::CursorStore;
 use crate::interfaces::{FragmentPointer, ManifestPublisher};
 use crate::manifest::{snapshot_prefix, snapshot_setsum, unprefixed_manifest_path};
 use crate::{
-    parse_fragment_path, CursorStoreOptions, Error, Fragment, Manifest, SnapshotPointer,
-    ThrottleOptions, FRAGMENT_PREFIX_WITH_TRAILING_SLASH,
+    parse_fragment_path, CursorStoreOptions, Error, Fragment, SnapshotPointer,
+    FRAGMENT_PREFIX_WITH_TRAILING_SLASH,
 };
 
 async fn destroy_snapshot<P: FragmentPointer>(
@@ -147,8 +147,7 @@ pub async fn destroy<P: FragmentPointer>(
     prefix: &str,
     manifest_publisher: &dyn ManifestPublisher<P>,
 ) -> Result<(), Error> {
-    let Some((manifest, _)) = Manifest::load(&ThrottleOptions::default(), &storage, prefix).await?
-    else {
+    let Some((manifest, _)) = manifest_publisher.manifest_load().await? else {
         tracing::warn!("strategically refusing to erase {prefix} without a manifest");
         return Ok(());
     };

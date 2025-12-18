@@ -3,11 +3,12 @@ use std::time::Duration;
 use setsum::Setsum;
 use tracing::Span;
 
+use chroma_storage::ETag;
 use chroma_types::Cmek;
 
 use crate::{
     Error, FragmentIdentifier, FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition,
-    ManifestAndETag, Snapshot, SnapshotPointer,
+    Manifest, ManifestAndETag, Snapshot, SnapshotPointer,
 };
 
 pub mod s3;
@@ -108,8 +109,17 @@ pub trait ManifestManagerFactory {
     type Publisher: ManifestPublisher<Self::FragmentPointer>;
     type Consumer: ManifestConsumer<Self::FragmentPointer>;
 
-    async fn make_publisher(&self) -> Result<Self::Publisher, Error>;
+    async fn init_manifest(&self, manifest: &Manifest) -> Result<(), Error>;
+    async fn open_publisher(&self) -> Result<Self::Publisher, Error>;
     async fn make_consumer(&self) -> Result<Self::Consumer, Error>;
+}
+
+////////////////////////////////////////// ManifestWitness /////////////////////////////////////////
+
+pub enum ManifestWitness {
+    ETag(ETag),
+    // TODO(rescrv):  Spanner-specific type.
+    Timestamp(()),
 }
 
 ///////////////////////////////////////// ManifestPublisher ////////////////////////////////////////
@@ -145,6 +155,10 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     /// Snapshot storers and accessors
     async fn snapshot_load(&self, pointer: &SnapshotPointer) -> Result<Option<Snapshot>, Error>;
     async fn snapshot_install(&self, snapshot: &Snapshot) -> Result<SnapshotPointer, Error>;
+    /// Manifest storers and accessors
+    async fn manifest_init(&self, initial: &Manifest) -> Result<(), Error>;
+    async fn manifest_head(&self, witness: &ManifestWitness) -> Result<bool, Error>;
+    async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error>;
 
     /// Shutdown the manifest manager.  Must be called between prepare and finish of
     /// FragmentPublisher shutdown.
@@ -157,4 +171,7 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
 pub trait ManifestConsumer<FP: FragmentPointer>: Send + Sync + 'static {
     /// Snapshot storers and accessors
     async fn snapshot_load(&self, pointer: &SnapshotPointer) -> Result<Option<Snapshot>, Error>;
+    /// Manifest storers and accessors
+    async fn manifest_head(&self, witness: &ManifestWitness) -> Result<bool, Error>;
+    async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error>;
 }

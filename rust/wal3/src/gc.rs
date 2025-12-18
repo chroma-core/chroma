@@ -554,7 +554,7 @@ impl<
         prefix: &str,
     ) -> Result<Self, Error> {
         let batch_manager = new_fragment_publisher.make_publisher().await?;
-        let manifest_manager = new_manifest_publisher.make_publisher().await?;
+        let manifest_manager = new_manifest_publisher.open_publisher().await?;
         let log = OnceLogWriter::open_for_read_only_and_stale_ops(
             options.clone(),
             Arc::clone(&storage),

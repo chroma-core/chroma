@@ -392,7 +392,7 @@ mod tests {
 
     use super::*;
     use crate::interfaces::s3::manifest_manager::ManifestManager;
-    use crate::{FragmentSeqNo, LogWriterOptions, Manifest, SnapshotOptions, ThrottleOptions};
+    use crate::{FragmentSeqNo, LogWriterOptions, SnapshotOptions, ThrottleOptions};
 
     #[tokio::test]
     async fn test_k8s_integration_batches() {
@@ -413,7 +413,7 @@ mod tests {
             Arc::new(()),
         )
         .unwrap();
-        Manifest::initialize(
+        ManifestManager::initialize(
             &LogWriterOptions::default(),
             &storage,
             &prefix,

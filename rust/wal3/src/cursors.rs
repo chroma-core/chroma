@@ -48,15 +48,15 @@ impl CursorName<'_> {
     }
 }
 
-////////////////////////////////////////////// Witness /////////////////////////////////////////////
+/////////////////////////////////////////// CursorWitness //////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct Witness {
+pub struct CursorWitness {
     e_tag: ETag,
     pub cursor: Cursor,
 }
 
-impl Witness {
+impl CursorWitness {
     /// This method constructs a witness that will likely fail, but that contains a new cursor.
     /// Useful in tests and not much else.
     pub fn default_etag_with_cursor(cursor: Cursor) -> Self {
@@ -116,7 +116,7 @@ impl CursorStore {
         }
     }
 
-    pub async fn load(&self, name: &CursorName<'_>) -> Result<Option<Witness>, Error> {
+    pub async fn load(&self, name: &CursorName<'_>) -> Result<Option<CursorWitness>, Error> {
         // SAFETY(rescrv):  Semaphore poisoning.
         let _permit = self.semaphore.acquire().await.unwrap();
         let path = format!("{}/{}", self.prefix, name.path());
@@ -141,10 +141,14 @@ impl CursorStore {
         let cursor: Cursor = serde_json::from_slice(&data).map_err(|e| {
             Error::CorruptCursor(format!("Failed to deserialize cursor {}: {}", name.0, e))
         })?;
-        Ok(Some(Witness { e_tag, cursor }))
+        Ok(Some(CursorWitness { e_tag, cursor }))
     }
 
-    pub async fn init(&self, name: &CursorName<'_>, cursor: Cursor) -> Result<Witness, Error> {
+    pub async fn init(
+        &self,
+        name: &CursorName<'_>,
+        cursor: Cursor,
+    ) -> Result<CursorWitness, Error> {
         // Semaphore taken by put.
         self.put(
             name,
@@ -160,8 +164,8 @@ impl CursorStore {
         &self,
         name: &CursorName<'_>,
         cursor: &Cursor,
-        witness: &Witness,
-    ) -> Result<Witness, Error> {
+        witness: &CursorWitness,
+    ) -> Result<CursorWitness, Error> {
         // Semaphore taken by put.
         self.put(
             name,
@@ -178,7 +182,7 @@ impl CursorStore {
         name: &CursorName<'_>,
         mut cursor: Cursor,
         options: PutOptions,
-    ) -> Result<Witness, Error> {
+    ) -> Result<CursorWitness, Error> {
         // SAFETY(rescrv):  Semaphore poisoning.
         let _permit = self.semaphore.acquire().await.unwrap();
         cursor.writer = self.writer.clone();
@@ -197,7 +201,7 @@ impl CursorStore {
                 name.0
             )));
         };
-        Ok(Witness { e_tag, cursor })
+        Ok(CursorWitness { e_tag, cursor })
     }
 
     pub async fn list(&self) -> Result<Vec<CursorName<'_>>, Error> {

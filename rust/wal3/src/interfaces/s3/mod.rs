@@ -3,13 +3,13 @@ use std::sync::Arc;
 use tracing::Level;
 
 use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, GetOptions, Storage, StorageError,
+    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, Storage, StorageError,
 };
 
 use crate::interfaces::{FragmentManagerFactory, ManifestManagerFactory};
 use crate::{
-    Error, FragmentSeqNo, LogPosition, LogReaderOptions, LogWriterOptions, MarkDirty, Snapshot,
-    SnapshotCache, SnapshotPointer, ThrottleOptions,
+    Error, FragmentSeqNo, LogPosition, LogReaderOptions, LogWriterOptions, Manifest, MarkDirty,
+    Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
 pub mod batch_manager;
@@ -87,6 +87,7 @@ impl FragmentManagerFactory for S3FragmentManagerFactory {
     }
 }
 
+#[derive(Clone)]
 pub struct S3ManifestManagerFactory {
     pub write: LogWriterOptions,
     pub read: LogReaderOptions,
@@ -103,7 +104,17 @@ impl ManifestManagerFactory for S3ManifestManagerFactory {
     type Publisher = ManifestManager;
     type Consumer = ManifestReader;
 
-    async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
+    async fn init_manifest(&self, manifest: &Manifest) -> Result<(), Error> {
+        ManifestManager::initialize_from_manifest(
+            &self.write,
+            &self.storage,
+            &self.prefix,
+            manifest.clone(),
+        )
+        .await
+    }
+
+    async fn open_publisher(&self) -> Result<Self::Publisher, Error> {
         ManifestManager::new(
             self.write.throttle_manifest,
             self.write.snapshot_manifest,
@@ -172,6 +183,52 @@ async fn uncached_snapshot_load(
                     Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
                 })?;
                 return Ok(Some(snapshot));
+            }
+            Err(err) => match &*err {
+                StorageError::NotFound { path: _, source: _ } => return Ok(None),
+                err => {
+                    let backoff = exp_backoff.next();
+                    tokio::time::sleep(backoff).await;
+                    if retries >= 3 {
+                        return Err(Error::StorageError(Arc::new(err.clone())));
+                    }
+                    retries += 1;
+                }
+            },
+        }
+    }
+}
+
+/// Load the latest manifest from object storage.
+pub async fn manifest_load(
+    options: &ThrottleOptions,
+    storage: &Storage,
+    prefix: &str,
+) -> Result<Option<(Manifest, ETag)>, Error> {
+    let exp_backoff =
+        crate::backoff::ExponentialBackoff::new(options.throughput as f64, options.headroom as f64);
+    let mut retries = 0;
+    let path = crate::manifest::manifest_path(prefix);
+    loop {
+        match storage
+            .get_with_e_tag(
+                &path,
+                GetOptions::new(StorageRequestPriority::P0).with_strong_consistency(),
+            )
+            .await
+            .map_err(Arc::new)
+        {
+            Ok((ref manifest, e_tag)) => {
+                let Some(e_tag) = e_tag else {
+                    return Err(Error::CorruptManifest(format!(
+                        "no ETag for manifest at {}",
+                        path
+                    )));
+                };
+                let manifest: Manifest = serde_json::from_slice(manifest).map_err(|e| {
+                    Error::CorruptManifest(format!("could not decode JSON manifest: {e:?}"))
+                })?;
+                return Ok(Some((manifest, e_tag)));
             }
             Err(err) => match &*err {
                 StorageError::NotFound { path: _, source: _ } => return Ok(None),

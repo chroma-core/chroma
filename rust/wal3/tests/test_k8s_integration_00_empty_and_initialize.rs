@@ -1,6 +1,10 @@
+use std::sync::Arc;
+
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
-use wal3::{LogWriterOptions, Manifest};
+use wal3::{
+    LogReaderOptions, LogWriterOptions, Manifest, ManifestManagerFactory, S3ManifestManagerFactory,
+};
 
 mod common;
 
@@ -16,21 +20,26 @@ async fn test_k8s_integration_00_empty_and_initialize() {
         snapshots: vec![],
         fragments: vec![],
     })];
-    let storage = s3_client_for_test_with_new_bucket().await;
+    let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     assert_conditions(
         &storage,
         "test_k8s_integration_00_empty_and_initialize",
         &preconditions,
     )
     .await;
-    Manifest::initialize(
-        &LogWriterOptions::default(),
-        &storage,
-        "test_k8s_integration_00_empty_and_initialize",
-        "test",
-    )
-    .await
-    .unwrap();
+    let manifest_factory = S3ManifestManagerFactory {
+        write: LogWriterOptions::default(),
+        read: LogReaderOptions::default(),
+        storage: Arc::clone(&storage),
+        prefix: "test_k8s_integration_00_empty_and_initialize".to_string(),
+        writer: "test".to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
+    manifest_factory
+        .init_manifest(&Manifest::new_empty("test"))
+        .await
+        .unwrap();
     assert_conditions(
         &storage,
         "test_k8s_integration_00_empty_and_initialize",

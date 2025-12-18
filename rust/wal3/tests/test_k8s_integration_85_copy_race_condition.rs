@@ -5,7 +5,7 @@ use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
     create_factories, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions,
-    Manifest, ThrottleOptions,
+    ManifestManagerFactory, S3ManifestManagerFactory, ThrottleOptions,
 };
 
 #[tokio::test]
@@ -53,7 +53,17 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let prefix = format!("test_copy_empty_concurrent_{}", attempt);
 
-    Manifest::initialize(&LogWriterOptions::default(), &storage, &prefix, "init")
+    let init_manifest_factory = S3ManifestManagerFactory {
+        write: LogWriterOptions::default(),
+        read: LogReaderOptions::default(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.clone(),
+        writer: "init".to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
+    init_manifest_factory
+        .init_manifest(&wal3::Manifest::new_empty("init"))
         .await
         .unwrap();
 
@@ -119,12 +129,22 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
         tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
     }
 
+    let target_prefix = format!("{}_target", prefix);
+    let target_manifest_factory = S3ManifestManagerFactory {
+        write: LogWriterOptions::default(),
+        read: LogReaderOptions::default(),
+        storage: Arc::clone(&storage),
+        prefix: target_prefix.clone(),
+        writer: "copy".to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
     wal3::copy(
         &storage,
-        &LogWriterOptions::default(),
         &reader,
         LogPosition::default(),
-        format!("{}_target", prefix),
+        target_prefix.clone(),
+        target_manifest_factory,
     )
     .await
     .unwrap();
@@ -134,7 +154,7 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
     let copied_reader = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        format!("{}_target", prefix),
+        target_prefix,
     )
     .await
     .unwrap();
