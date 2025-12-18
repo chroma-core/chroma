@@ -18,6 +18,15 @@ spec:
         - name: rust-sysdb-service
           image: "{{ .Values.rustSysdbService.image.repository }}:{{ .Values.rustSysdbService.image.tag }}"
           imagePullPolicy: IfNotPresent
+          readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 30 # 30 seconds to allow for initial startup
+            grpc:
+              port: 50051
+              service: chroma.SysDB
+          ports:
+            - containerPort: 50051
+              name: grpc
           resources:
             limits:
               cpu: {{ .Values.rustSysdbService.resources.limits.cpu }}
@@ -25,4 +34,20 @@ spec:
             requests:
               cpu: {{ .Values.rustSysdbService.resources.requests.cpu }}
               memory: {{ .Values.rustSysdbService.resources.requests.memory }}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: rust-sysdb-service
+  namespace: {{ .Values.namespace }}
+spec:
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+  selector:
+    app: rust-sysdb-service
+  type: ClusterIP
 {{- end }}

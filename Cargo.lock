@@ -6954,8 +6954,12 @@ dependencies = [
 name = "rust-sysdb"
 version = "0.1.0"
 dependencies = [
+ "chroma-tracing",
+ "chroma-types",
  "tokio",
  "tokio-util",
+ "tonic",
+ "tonic-health",
 ]
 
 [[package]]
