@@ -22,3 +22,8 @@ serde = { workspace = true }
 tracing = { workspace = true }
 figment = { workspace = true }
 opentelemetry = { workspace = true }
+google-cloud-spanner = { workspace = true }
+google-cloud-gax = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

@@ -72,7 +72,7 @@ spec:
           image: "{{ .Values.rustLogService.image.repository }}:{{ .Values.rustLogService.image.tag }}"
           imagePullPolicy: IfNotPresent
           readinessProbe:
-            periodSeconds: 1
+            periodSeconds: 5
             failureThreshold: 30 # 30 seconds to allow for initial startup
             grpc:
               port: 50051

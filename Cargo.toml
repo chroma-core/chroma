@@ -75,6 +75,8 @@ humantime = { version = "2.2.0" }
 petgraph = { version = "0.8.1" }
 base64 = "0.22"
 tikv-jemallocator = { version = "0.6.0", features = ["profiling"] }
+google-cloud-spanner = { version = "0.33.0" }
+google-cloud-gax = { version = "0.19.2" }
 
 chroma = { path = "rust/chroma", version = "0.10.0" }
 chroma-api-types = { path = "rust/api-types", version = "0.10.0" }

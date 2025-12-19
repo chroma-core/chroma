@@ -279,3 +279,11 @@ sysdb_service:
         count_based_policy:
           max_concurrent_requests: 1000
           bandwidth_allocation: [1.0]
+  spanner:
+    emulator:
+      host: "spanner.chroma.svc.cluster.local"
+      grpc_port: 9010
+      rest_port: 9020
+      project: "local-project"
+      instance: "test-instance"
+      database: "local-database"

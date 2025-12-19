@@ -2,9 +2,9 @@ use chroma_config::Configurable;
 
 use crate::config::RootConfig;
 
-pub mod server;
-
 pub mod config;
+pub mod server;
+pub mod spanner;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
@@ -23,14 +23,10 @@ pub async fn sysdb_service_entrypoint() {
     let sysdb_server = match server::SysdbService::try_from_config(&config, &registry).await {
         Ok(sysdb_server) => sysdb_server,
         Err(err) => {
-            tracing::error!("Failed to create sysdb server component: {:?}", err);
-            return;
+            panic!("Failed to create sysdb server component: {:?}", err);
         }
     };
 
-    // Server task will run until it receives a shutdown signal
-    let _ = tokio::spawn(async move {
-        let _ = crate::server::SysdbService::run(sysdb_server).await;
-    })
-    .await;
+    // Server will run until it receives a shutdown signal
+    server::SysdbService::run(sysdb_server).await;
 }
