@@ -8,15 +8,53 @@ const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 /// Configuration for connecting to a Spanner emulator (local development)
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SpannerEmulatorConfig {
+    #[serde(default = "SpannerEmulatorConfig::default_host")]
     pub host: String,
+    #[serde(default = "SpannerEmulatorConfig::default_grpc_port")]
     pub grpc_port: u16,
+    #[serde(default = "SpannerEmulatorConfig::default_rest_port")]
     pub rest_port: u16,
+    #[serde(default = "SpannerEmulatorConfig::default_project")]
     pub project: String,
+    #[serde(default = "SpannerEmulatorConfig::default_instance")]
     pub instance: String,
+    #[serde(default = "SpannerEmulatorConfig::default_database")]
     pub database: String,
 }
 
+impl Default for SpannerEmulatorConfig {
+    fn default() -> Self {
+        Self {
+            host: Self::default_host(),
+            grpc_port: Self::default_grpc_port(),
+            rest_port: Self::default_rest_port(),
+            project: Self::default_project(),
+            instance: Self::default_instance(),
+            database: Self::default_database(),
+        }
+    }
+}
+
 impl SpannerEmulatorConfig {
+    fn default_host() -> String {
+        "spanner.chroma.svc.cluster.local".to_string()
+    }
+    fn default_grpc_port() -> u16 {
+        9010
+    }
+    fn default_rest_port() -> u16 {
+        9020
+    }
+    fn default_project() -> String {
+        "local-project".to_string()
+    }
+    fn default_instance() -> String {
+        "test-instance".to_string()
+    }
+    fn default_database() -> String {
+        "local-database".to_string()
+    }
+
     /// Returns the database path in the format required by the Spanner client
     pub fn database_path(&self) -> String {
         format!(
@@ -37,12 +75,20 @@ impl SpannerEmulatorConfig {
 }
 
 /// Spanner configuration - either emulator or GCP (mutually exclusive)
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct SpannerConfig {
+/// Defaults to emulator with standard local settings.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum SpannerConfig {
     /// Emulator configuration for local development
-    pub emulator: Option<SpannerEmulatorConfig>,
-    // TODO: Add GCP config later
-    // pub gcp: Option<SpannerGcpConfig>,
+    Emulator(SpannerEmulatorConfig),
+    // TODO: Add GCP variant later
+    // Gcp(SpannerGcpConfig),
+}
+
+impl Default for SpannerConfig {
+    fn default() -> Self {
+        Self::Emulator(SpannerEmulatorConfig::default())
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -111,6 +157,8 @@ impl RootConfig {
         }));
         if std::path::Path::new(path).exists() {
             f = figment::Figment::from(Yaml::file(path)).merge(f);
+        } else {
+            panic!("Config file {} does not exist", path);
         }
         // Apply defaults - this seems to be the best way to do it.
         // https://github.com/SergioBenitez/Figment/issues/77#issuecomment-1642490298

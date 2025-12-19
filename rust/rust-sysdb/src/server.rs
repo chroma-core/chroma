@@ -61,8 +61,14 @@ impl SysdbService {
         }
     }
 
-    pub async fn run(self) -> Result<(), tonic::transport::Error> {
-        let addr = format!("[::]:{}", self.port).parse().unwrap();
+    pub async fn run(self) {
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("Failed to create SIGTERM handler");
+        let mut sigint = signal(SignalKind::interrupt()).expect("Failed to create SIGINT handler");
+
+        let addr = format!("[::]:{}", self.port)
+            .parse()
+            .expect("Failed to parse address");
 
         tracing::info!("Sysdb service listening on {}", addr);
 
@@ -77,21 +83,7 @@ impl SysdbService {
             .layer(chroma_tracing::GrpcServerTraceLayer)
             .add_service(health_service)
             .add_service(SysDbServer::new(self))
-            .serve_with_shutdown(addr, async {
-                let mut sigterm = match signal(SignalKind::terminate()) {
-                    Ok(sigterm) => sigterm,
-                    Err(err) => {
-                        tracing::error!("Failed to create SIGTERM handler: {err}");
-                        return;
-                    }
-                };
-                let mut sigint = match signal(SignalKind::interrupt()) {
-                    Ok(sigint) => sigint,
-                    Err(err) => {
-                        tracing::error!("Failed to create SIGINT handler: {err}");
-                        return;
-                    }
-                };
+            .serve_with_shutdown(addr, async move {
                 // TODO(Sanket): Drain existing requests before shutting down.
                 select! {
                     _ = sigterm.recv() => {
@@ -103,6 +95,7 @@ impl SysdbService {
                 }
             })
             .await
+            .expect("Server failed");
     }
 }
 

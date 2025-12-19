@@ -10,8 +10,6 @@ use crate::config::{SpannerConfig, SpannerEmulatorConfig};
 
 #[derive(Error, Debug)]
 pub enum SpannerError {
-    #[error("Spanner configuration missing - either emulator or gcp config is required")]
-    ConfigMissing,
     #[error("Failed to connect to Spanner: {0}")]
     ConnectionError(String),
 }
@@ -32,6 +30,9 @@ impl Spanner {
     /// Creates the Spanner instance and database on the emulator if they don't exist.
     /// Uses REST API calls to the emulator's REST endpoint.
     async fn bootstrap_emulator(emulator: &SpannerEmulatorConfig) {
+        // TODO(Sanket): This is temporary, it will be moved out
+        // to an init container that does all the schema migrations
+        // before starting up the service.
         let http_client = reqwest::Client::new();
         let rest_url = emulator.rest_endpoint();
 
@@ -100,20 +101,23 @@ impl Configurable<SpannerConfig> for Spanner {
         config: &SpannerConfig,
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let (database_path, client_config) = if let Some(ref emulator) = config.emulator {
-            // Bootstrap emulator with instance and database
-            Self::bootstrap_emulator(emulator).await;
+        let (database_path, client_config) = match config {
+            SpannerConfig::Emulator(emulator) => {
+                // Bootstrap emulator with instance and database
+                // TODO(Sanket): This is temporary, it will be moved out
+                // to an init container that does all the schema migrations
+                // before starting up the service.
+                Self::bootstrap_emulator(emulator).await;
 
-            // Configure client to connect to emulator directly (no env var needed)
-            let client_config = ClientConfig {
-                environment: Environment::Emulator(emulator.grpc_endpoint()),
-                ..Default::default()
-            };
+                // Configure client to connect to emulator directly (no env var needed)
+                let client_config = ClientConfig {
+                    environment: Environment::Emulator(emulator.grpc_endpoint()),
+                    ..Default::default()
+                };
 
-            (emulator.database_path(), client_config)
-        } else {
-            // TODO: Add GCP config support
-            return Err(Box::new(SpannerError::ConfigMissing) as Box<dyn ChromaError>);
+                (emulator.database_path(), client_config)
+            } // TODO: Add GCP variant
+              // SpannerConfig::Gcp(gcp) => { ... }
         };
 
         let client = Client::new(&database_path, client_config)

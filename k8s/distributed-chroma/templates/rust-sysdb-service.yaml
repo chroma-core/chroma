@@ -52,8 +52,10 @@ spec:
             - containerPort: 50051
               name: grpc
           env:
+            {{if .Values.rustSysdbService.configuration}}
             - name: CONFIG_PATH
               value: "/config/config.yaml"
+            {{ end }}
           resources:
             limits:
               cpu: {{ .Values.rustSysdbService.resources.limits.cpu }}
