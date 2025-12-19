@@ -491,16 +491,19 @@ pub fn checksum_parquet(
     parquet: &[u8],
     starting_log_position: Option<LogPosition>,
 ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, bool), Error> {
-    let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from(parquet.to_vec()))
-        .map_err(|_| Error::internal(file!(), line!()))?;
+    let builder =
+        ParquetRecordBatchReaderBuilder::try_new(Bytes::from(parquet.to_vec())).map_err(|e| {
+            Error::CorruptFragment(format!("failed to create parquet reader builder: {}", e))
+        })?;
     let reader = builder
         .build()
-        .map_err(|_| Error::internal(file!(), line!()))?;
+        .map_err(|e| Error::CorruptFragment(format!("failed to build parquet reader: {}", e)))?;
     let mut setsum = Setsum::default();
     let mut records = vec![];
     let mut uses_relative_offsets = false;
     for batch in reader {
-        let batch = batch.map_err(|_| Error::internal(file!(), line!()))?;
+        let batch = batch
+            .map_err(|e| Error::CorruptFragment(format!("failed to read parquet batch: {}", e)))?;
         // Determine if we have absolute offsets or relative offsets.
         // - For absolute offsets: offset_base is 0, use offset directly for both setsum and position
         // - For relative offsets: offset_base is starting_log_position (or 0 if None), use raw
@@ -515,33 +518,39 @@ pub fn checksum_parquet(
             let base = starting_log_position.map(|p| p.offset()).unwrap_or(0);
             (relative_offset.clone(), base)
         } else {
-            return Err(Error::internal(file!(), line!()));
+            return Err(Error::CorruptFragment(
+                "missing offset or relative_offset column".to_string(),
+            ));
         };
         let epoch_micros = batch
             .column_by_name("timestamp_us")
-            .ok_or_else(|| Error::internal(file!(), line!()))?;
+            .ok_or_else(|| Error::CorruptFragment("missing timestamp_us column".to_string()))?;
         let body = batch
             .column_by_name("body")
-            .ok_or_else(|| Error::internal(file!(), line!()))?;
+            .ok_or_else(|| Error::CorruptFragment("missing body column".to_string()))?;
         let offset_array = offset_column
             .as_any()
             .downcast_ref::<arrow::array::UInt64Array>()
-            .ok_or_else(|| Error::internal(file!(), line!()))?;
+            .ok_or_else(|| {
+                Error::CorruptFragment("offset column is not UInt64Array".to_string())
+            })?;
         let epoch_micros = epoch_micros
             .as_any()
             .downcast_ref::<arrow::array::UInt64Array>()
-            .ok_or_else(|| Error::internal(file!(), line!()))?;
+            .ok_or_else(|| {
+                Error::CorruptFragment("timestamp_us column is not UInt64Array".to_string())
+            })?;
         let body = body
             .as_any()
             .downcast_ref::<arrow::array::BinaryArray>()
-            .ok_or_else(|| Error::internal(file!(), line!()))?;
+            .ok_or_else(|| Error::CorruptFragment("body column is not BinaryArray".to_string()))?;
         for i in 0..batch.num_rows() {
             // The raw offset from the file (relative or absolute depending on column type)
             let raw_offset = offset_array.value(i);
             // The absolute offset for returning positions to callers
-            let absolute_offset = raw_offset
-                .checked_add(offset_base)
-                .ok_or_else(|| Error::internal(file!(), line!()))?;
+            let absolute_offset = raw_offset.checked_add(offset_base).ok_or_else(|| {
+                Error::CorruptFragment(format!("offset overflow: {} + {}", raw_offset, offset_base))
+            })?;
             let epoch_micros = epoch_micros.value(i);
             let body = body.value(i);
             // Use raw_offset for setsum to match how the writer computed it.
@@ -568,8 +577,7 @@ pub async fn read_parquet(
         .map_err(Arc::new)?;
     let num_bytes = parquet.len() as u64;
     let (setsum, records, _uses_relative_offsets) =
-        checksum_parquet(&parquet, starting_log_position)
-            .map_err(|_| Error::CorruptFragment(path.to_string()))?;
+        checksum_parquet(&parquet, starting_log_position)?;
     Ok((setsum, records, num_bytes))
 }
 
