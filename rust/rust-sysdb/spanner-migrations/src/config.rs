@@ -1,29 +1,47 @@
 //! Configuration for Spanner migrations.
 
-use chroma_config::spanner::SpannerConfig;
+pub use chroma_config::spanner::SpannerConfig;
 use figment::providers::{Env, Format, Yaml};
 use serde::Deserialize;
+use std::default::Default;
 use std::env;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 // spanner-migration is in the chroma2 namespace on tilt
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config2.yaml";
 
-/// Migration-specific configuration
-#[derive(Deserialize)]
-pub struct MigrationConfig {
-    #[serde(default)]
-    pub spanner: SpannerConfig,
-    #[serde(default)]
-    pub _migration_mode: MigrationMode,
-}
-
 #[derive(Deserialize, Clone, Debug, Default)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum MigrationMode {
     Apply,
     #[default]
     Validate,
+}
+
+/// Migration-specific configuration
+#[derive(Deserialize)]
+pub struct MigrationConfig {
+    pub spanner: SpannerConfig,
+    #[serde(default)]
+    pub migration_mode: MigrationMode,
+    #[serde(default = "MigrationConfig::default_service_name")]
+    pub service_name: String,
+    #[serde(default = "MigrationConfig::default_otel_endpoint")]
+    pub otel_endpoint: String,
+    #[serde(default)]
+    pub otel_filters: Vec<OtelFilter>,
+}
+
+pub use chroma_tracing::OtelFilter;
+
+impl MigrationConfig {
+    fn default_service_name() -> String {
+        "rust-sysdb-migration".to_string()
+    }
+
+    fn default_otel_endpoint() -> String {
+        "http://otel-collector:4317".to_string()
+    }
 }
 
 /// Root config wrapper to extract rust-sysdb-migration section
