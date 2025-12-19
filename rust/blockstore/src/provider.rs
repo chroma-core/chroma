@@ -8,6 +8,8 @@ use super::arrow::types::{
     ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
 };
 use super::config::BlockfileProviderConfig;
+use super::dashmap::storage::{FromStoredValue, ToStoredValue};
+use super::dashmap::DashMapProvider;
 use super::key::{InvalidKeyConversion, KeyWrapper};
 use super::memory::provider::MemoryBlockfileProvider;
 use super::memory::storage::Readable;
@@ -28,6 +30,7 @@ use uuid::Uuid;
 pub enum BlockfileProvider {
     HashMapBlockfileProvider(MemoryBlockfileProvider),
     ArrowBlockfileProvider(ArrowBlockfileProvider),
+    DashMapProvider(DashMapProvider),
 }
 
 impl Debug for BlockfileProvider {
@@ -38,6 +41,9 @@ impl Debug for BlockfileProvider {
             }
             BlockfileProvider::ArrowBlockfileProvider(_provider) => {
                 f.debug_struct("ArrowBlockfileProvider").finish()
+            }
+            BlockfileProvider::DashMapProvider(_provider) => {
+                f.debug_struct("DashMapProvider").finish()
             }
         }
     }
@@ -52,7 +58,10 @@ pub trait ReadKey<'a>:
 {
 }
 
-pub trait ReadValue<'a>: Value + Readable<'a> + ArrowReadableValue<'a> + Sync + 'a {}
+pub trait ReadValue<'a>:
+    Value + Readable<'a> + ArrowReadableValue<'a> + FromStoredValue<'a> + Sync + 'a
+{
+}
 
 impl<'a, T> ReadKey<'a> for T where
     T: Key
@@ -64,7 +73,10 @@ impl<'a, T> ReadKey<'a> for T where
 {
 }
 
-impl<'a, T> ReadValue<'a> for T where T: Value + Readable<'a> + ArrowReadableValue<'a> + Sync + 'a {}
+impl<'a, T> ReadValue<'a> for T where
+    T: Value + Readable<'a> + ArrowReadableValue<'a> + FromStoredValue<'a> + Sync + 'a
+{
+}
 
 impl BlockfileProvider {
     pub fn new_memory() -> Self {
@@ -87,6 +99,10 @@ impl BlockfileProvider {
         ))
     }
 
+    pub fn new_dashmap() -> Self {
+        BlockfileProvider::DashMapProvider(DashMapProvider::new())
+    }
+
     pub async fn read<'new, K: ReadKey<'new>, V: ReadValue<'new>>(
         &self,
         options: BlockfileReaderOptions,
@@ -98,10 +114,14 @@ impl BlockfileProvider {
             BlockfileProvider::ArrowBlockfileProvider(provider) => {
                 provider.read::<K, V>(options).await
             }
+            BlockfileProvider::DashMapProvider(provider) => provider.read::<K, V>(options.id()),
         }
     }
 
-    pub async fn write<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
+    pub async fn write<
+        K: Key + ArrowWriteableKey,
+        V: Value + ArrowWriteableValue + ToStoredValue,
+    >(
         &self,
         options: BlockfileWriterOptions,
     ) -> Result<BlockfileWriter, Box<CreateError>> {
@@ -110,6 +130,7 @@ impl BlockfileProvider {
             BlockfileProvider::ArrowBlockfileProvider(provider) => {
                 provider.write::<K, V>(options).await
             }
+            BlockfileProvider::DashMapProvider(provider) => provider.write::<K, V>(options),
         }
     }
 
@@ -119,6 +140,7 @@ impl BlockfileProvider {
             BlockfileProvider::ArrowBlockfileProvider(provider) => {
                 provider.clear().await.map_err(|e| e.boxed())?
             }
+            BlockfileProvider::DashMapProvider(provider) => provider.clear(),
         };
         Ok(())
     }
@@ -134,6 +156,7 @@ impl BlockfileProvider {
                 .prefetch(id, prefix_path)
                 .await
                 .map_err(|e| Box::new(e) as _),
+            BlockfileProvider::DashMapProvider(_) => unimplemented!(),
         }
     }
 }
@@ -160,6 +183,9 @@ impl Configurable<(BlockfileProviderConfig, Storage)> for BlockfileProvider {
             BlockfileProviderConfig::Memory => Ok(BlockfileProvider::HashMapBlockfileProvider(
                 MemoryBlockfileProvider::new(),
             )),
+            BlockfileProviderConfig::DashMap => {
+                Ok(BlockfileProvider::DashMapProvider(DashMapProvider::new()))
+            }
         }
     }
 }

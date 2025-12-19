@@ -1,5 +1,6 @@
 use crate::arrow::flusher::ArrowBlockfileFlusher;
 use crate::arrow::types::{ArrowWriteableKey, ArrowWriteableValue};
+use crate::dashmap::reader_writer::DashMapBlockfileFlusher;
 use crate::key::KeyWrapper;
 use crate::memory::reader_writer::MemoryBlockfileFlusher;
 use crate::memory::storage::Writeable;
@@ -10,6 +11,7 @@ use super::{Key, Value};
 pub enum BlockfileFlusher {
     MemoryBlockfileFlusher(MemoryBlockfileFlusher),
     ArrowBlockfileFlusher(ArrowBlockfileFlusher),
+    DashMapBlockfileFlusher(DashMapBlockfileFlusher),
 }
 
 impl BlockfileFlusher {
@@ -22,6 +24,7 @@ impl BlockfileFlusher {
         match self {
             BlockfileFlusher::MemoryBlockfileFlusher(_) => Ok(()),
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.flush::<K, V>().await,
+            BlockfileFlusher::DashMapBlockfileFlusher(flusher) => flusher.flush(),
         }
     }
 
@@ -29,6 +32,7 @@ impl BlockfileFlusher {
         match self {
             BlockfileFlusher::MemoryBlockfileFlusher(flusher) => flusher.id(),
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.id(),
+            BlockfileFlusher::DashMapBlockfileFlusher(flusher) => flusher.id(),
         }
     }
 
@@ -36,6 +40,7 @@ impl BlockfileFlusher {
         match self {
             BlockfileFlusher::MemoryBlockfileFlusher(_) => unimplemented!(), // no op
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.count(),
+            BlockfileFlusher::DashMapBlockfileFlusher(_) => unimplemented!(),
         }
     }
 
@@ -43,6 +48,7 @@ impl BlockfileFlusher {
         match self {
             BlockfileFlusher::MemoryBlockfileFlusher(_) => unimplemented!(),
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.num_entries(),
+            BlockfileFlusher::DashMapBlockfileFlusher(_) => unimplemented!(),
         }
     }
 
@@ -50,6 +56,7 @@ impl BlockfileFlusher {
         match self {
             BlockfileFlusher::MemoryBlockfileFlusher(flusher) => flusher.prefix_path(),
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.prefix_path(),
+            BlockfileFlusher::DashMapBlockfileFlusher(_) => "",
         }
     }
 }

@@ -2,6 +2,7 @@ pub mod types;
 
 pub mod arrow;
 pub mod config;
+pub mod dashmap;
 pub mod key;
 pub mod memory;
 pub mod provider;
@@ -28,4 +29,8 @@ pub fn test_arrow_blockfile_provider(max_block_size_bytes: usize) -> (TempDir, B
         BlockManagerConfig::default_num_concurrent_block_flushes(),
     );
     (temp_dir, provider)
+}
+
+pub fn test_dashmap_provider() -> BlockfileProvider {
+    BlockfileProvider::new_dashmap()
 }

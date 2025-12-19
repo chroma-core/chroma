@@ -6,6 +6,8 @@ pub enum BlockfileProviderConfig {
     Arrow(Box<super::arrow::config::ArrowBlockfileProviderConfig>),
     #[serde(alias = "memory")]
     Memory,
+    #[serde(alias = "dashmap")]
+    DashMap,
 }
 
 impl Default for BlockfileProviderConfig {

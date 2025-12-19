@@ -1,6 +1,8 @@
 use super::{BlockfileError, Key, Value};
 use crate::arrow::blockfile::ArrowBlockfileReader;
 use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue};
+use crate::dashmap::reader_writer::DashMapBlockfileReader;
+use crate::dashmap::storage::FromStoredValue;
 use crate::key::{InvalidKeyConversion, KeyWrapper};
 use crate::memory::reader_writer::MemoryBlockfileReader;
 use crate::memory::storage::Readable;
@@ -17,6 +19,7 @@ pub enum BlockfileReader<
 > {
     MemoryBlockfileReader(MemoryBlockfileReader<K, V>),
     ArrowBlockfileReader(ArrowBlockfileReader<'me, K, V>),
+    DashMapBlockfileReader(DashMapBlockfileReader<K, V>),
 }
 
 impl<
@@ -25,7 +28,10 @@ impl<
             + Into<KeyWrapper>
             + TryFrom<&'referred_data KeyWrapper, Error = InvalidKeyConversion>
             + ArrowReadableKey<'referred_data>,
-        V: Value + Readable<'referred_data> + ArrowReadableValue<'referred_data>,
+        V: Value
+            + Readable<'referred_data>
+            + ArrowReadableValue<'referred_data>
+            + FromStoredValue<'referred_data>,
     > BlockfileReader<'referred_data, K, V>
 {
     pub async fn get(
@@ -36,6 +42,7 @@ impl<
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get(prefix, key),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.get(prefix, key).await,
+            BlockfileReader::DashMapBlockfileReader(reader) => reader.get(prefix, key),
         }
     }
 
@@ -47,6 +54,7 @@ impl<
         match self {
             BlockfileReader::ArrowBlockfileReader(reader) => reader.contains(prefix, key).await,
             BlockfileReader::MemoryBlockfileReader(reader) => Ok(reader.contains(prefix, key)),
+            BlockfileReader::DashMapBlockfileReader(reader) => Ok(reader.contains(prefix, key)),
         }
     }
 
@@ -64,6 +72,11 @@ impl<
                     .get_range_iter(prefix..=prefix, ..)?
                     .map(|(_, k, v)| (k, v)),
             )),
+            BlockfileReader::DashMapBlockfileReader(reader) => Ok(Box::new(
+                reader
+                    .get_range_iter(prefix..=prefix, ..)?
+                    .map(|(_, k, v)| (k, v)),
+            )),
         }
     }
 
@@ -77,6 +90,7 @@ impl<
                     Err(_) => Err(Box::new(BlockfileError::BlockNotFound)),
                 }
             }
+            BlockfileReader::DashMapBlockfileReader(reader) => reader.count(),
         }
     }
 
@@ -100,9 +114,14 @@ impl<
                     Err(e) => futures::stream::iter(vec![Err(e)]).boxed(),
                 }
             }
-
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.get_range_stream(prefix_range, key_range).boxed()
+            }
+            BlockfileReader::DashMapBlockfileReader(reader) => {
+                match reader.get_range_iter(prefix_range, key_range) {
+                    Ok(r) => futures::stream::iter(r.map(Ok)).boxed(),
+                    Err(e) => futures::stream::iter(vec![Err(e)]).boxed(),
+                }
             }
         }
     }
@@ -127,6 +146,9 @@ impl<
                 .get_range(prefix_range, key_range)
                 .await
                 .map(|iter| Box::new(iter) as Box<dyn Iterator<Item = _> + Send + 'referred_data>),
+            BlockfileReader::DashMapBlockfileReader(reader) => reader
+                .get_range_iter(prefix_range, key_range)
+                .map(|iter| Box::new(iter) as Box<dyn Iterator<Item = _> + Send + 'referred_data>),
         }
     }
 
@@ -134,6 +156,7 @@ impl<
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.id(),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.id(),
+            BlockfileReader::DashMapBlockfileReader(reader) => reader.id(),
         }
     }
 
@@ -144,6 +167,7 @@ impl<
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.load_blocks_for_keys(keys).await
             }
+            BlockfileReader::DashMapBlockfileReader(_) => (),
         }
     }
 
@@ -156,6 +180,7 @@ impl<
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.load_blocks_for_prefixes(prefixes).await
             }
+            BlockfileReader::DashMapBlockfileReader(_) => (),
         }
     }
 
@@ -167,6 +192,7 @@ impl<
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => Ok(reader.rank(prefix, key)),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.rank(prefix, key).await,
+            BlockfileReader::DashMapBlockfileReader(reader) => Ok(reader.rank(prefix, key)),
         }
     }
 }
@@ -187,6 +213,9 @@ impl<
             }
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 write!(f, "ArrowBlockfileReader({})", reader.id())
+            }
+            BlockfileReader::DashMapBlockfileReader(reader) => {
+                write!(f, "DashMapBlockfileReader({})", reader.id())
             }
         }
     }

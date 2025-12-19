@@ -1510,6 +1510,7 @@ dependencies = [
  "chroma-tracing",
  "chroma-types",
  "criterion",
+ "dashmap",
  "flatbuffers",
  "futures",
  "itertools 0.13.0",

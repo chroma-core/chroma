@@ -2,6 +2,8 @@ use super::{BlockfileFlusher, Key, Value};
 use crate::arrow::blockfile::ArrowUnorderedBlockfileWriter;
 use crate::arrow::ordered_blockfile_writer::ArrowOrderedBlockfileWriter;
 use crate::arrow::types::{ArrowWriteableKey, ArrowWriteableValue};
+use crate::dashmap::reader_writer::DashMapBlockfileWriter;
+use crate::dashmap::storage::ToStoredValue;
 use crate::key::KeyWrapper;
 use crate::memory::reader_writer::MemoryBlockfileWriter;
 use crate::memory::storage::Writeable;
@@ -12,6 +14,7 @@ pub enum BlockfileWriter {
     MemoryBlockfileWriter(MemoryBlockfileWriter),
     ArrowOrderedBlockfileWriter(ArrowOrderedBlockfileWriter),
     ArrowUnorderedBlockfileWriter(ArrowUnorderedBlockfileWriter),
+    DashMapBlockfileWriter(DashMapBlockfileWriter),
 }
 
 impl BlockfileWriter {
@@ -38,12 +41,16 @@ impl BlockfileWriter {
                     Err(e) => Err(e),
                 }
             }
+            BlockfileWriter::DashMapBlockfileWriter(writer) => match writer.commit() {
+                Ok(flusher) => Ok(BlockfileFlusher::DashMapBlockfileFlusher(flusher)),
+                Err(e) => Err(e),
+            },
         }
     }
 
     pub async fn set<
         K: Key + Into<KeyWrapper> + ArrowWriteableKey,
-        V: Value + Writeable + ArrowWriteableValue,
+        V: Value + Writeable + ArrowWriteableValue + ToStoredValue,
     >(
         &self,
         prefix: &str,
@@ -58,6 +65,7 @@ impl BlockfileWriter {
             BlockfileWriter::ArrowOrderedBlockfileWriter(writer) => {
                 writer.set(prefix, key, value).await
             }
+            BlockfileWriter::DashMapBlockfileWriter(writer) => writer.set(prefix, key, value),
         }
     }
 
@@ -77,6 +85,7 @@ impl BlockfileWriter {
             BlockfileWriter::ArrowOrderedBlockfileWriter(writer) => {
                 writer.delete::<K, V>(prefix, key).await
             }
+            BlockfileWriter::DashMapBlockfileWriter(writer) => writer.delete::<K, V>(prefix, key),
         }
     }
 
@@ -94,6 +103,7 @@ impl BlockfileWriter {
                 writer.get_owned::<K, V>(prefix, key).await
             }
             BlockfileWriter::ArrowOrderedBlockfileWriter(_) => todo!(),
+            BlockfileWriter::DashMapBlockfileWriter(_) => todo!(),
         }
     }
 
@@ -102,6 +112,7 @@ impl BlockfileWriter {
             BlockfileWriter::MemoryBlockfileWriter(writer) => writer.id(),
             BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => writer.id(),
             BlockfileWriter::ArrowOrderedBlockfileWriter(writer) => writer.id(),
+            BlockfileWriter::DashMapBlockfileWriter(writer) => writer.id(),
         }
     }
 }
