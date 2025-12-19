@@ -7,7 +7,7 @@ use super::{
 use crate::key::{InvalidKeyConversion, KeyWrapper};
 use chroma_error::ChromaError;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MemoryBlockfileWriter {
     builder: StorageBuilder,
     storage_manager: StorageManager,
@@ -19,17 +19,17 @@ pub struct MemoryBlockfileFlusher {
 }
 
 impl MemoryBlockfileFlusher {
-    pub(crate) fn id(&self) -> uuid::Uuid {
+    pub fn id(&self) -> uuid::Uuid {
         self.id
     }
 
-    pub(crate) fn prefix_path(&self) -> &str {
+    pub fn prefix_path(&self) -> &str {
         ""
     }
 }
 
 impl MemoryBlockfileWriter {
-    pub(super) fn new(storage_manager: StorageManager) -> Self {
+    pub fn new(storage_manager: StorageManager) -> Self {
         let builder = storage_manager.create();
         let id = builder.id;
         Self {
@@ -39,12 +39,12 @@ impl MemoryBlockfileWriter {
         }
     }
 
-    pub(crate) fn commit(&self) -> Result<MemoryBlockfileFlusher, Box<dyn ChromaError>> {
+    pub fn commit(&self) -> Result<MemoryBlockfileFlusher, Box<dyn ChromaError>> {
         self.storage_manager.commit(self.builder.id);
         Ok(MemoryBlockfileFlusher { id: self.id })
     }
 
-    pub(crate) fn set<K: Key + Into<KeyWrapper>, V: Value + Writeable>(
+    pub fn set<K: Key + Into<KeyWrapper>, V: Value + Writeable>(
         &self,
         prefix: &str,
         key: K,
@@ -55,7 +55,7 @@ impl MemoryBlockfileWriter {
         Ok(())
     }
 
-    pub(crate) fn delete<K: Key + Into<KeyWrapper>, V: Value + Writeable>(
+    pub fn delete<K: Key + Into<KeyWrapper>, V: Value + Writeable>(
         &self,
         prefix: &str,
         key: K,
@@ -65,7 +65,7 @@ impl MemoryBlockfileWriter {
         Ok(())
     }
 
-    pub(crate) fn id(&self) -> uuid::Uuid {
+    pub fn id(&self) -> uuid::Uuid {
         self.id
     }
 }
@@ -83,7 +83,7 @@ impl<
         V: Value + Readable<'storage>,
     > MemoryBlockfileReader<K, V>
 {
-    pub(crate) fn open(id: uuid::Uuid, storage_manager: StorageManager) -> Self {
+    pub fn open(id: uuid::Uuid, storage_manager: StorageManager) -> Self {
         let storage = storage_manager.get(id).unwrap();
         Self {
             _storage_manager: storage_manager,
@@ -92,16 +92,12 @@ impl<
         }
     }
 
-    pub(crate) fn get(
-        &'storage self,
-        prefix: &str,
-        key: K,
-    ) -> Result<Option<V>, Box<dyn ChromaError>> {
+    pub fn get(&'storage self, prefix: &str, key: K) -> Result<Option<V>, Box<dyn ChromaError>> {
         let key = key.into();
         Ok(V::read_from_storage(prefix, key, &self.storage))
     }
 
-    pub(crate) fn get_range_iter<'prefix, PrefixRange, KeyRange>(
+    pub fn get_range_iter<'prefix, PrefixRange, KeyRange>(
         &'storage self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
@@ -127,19 +123,19 @@ impl<
             .map(|(key, value)| (key.prefix.as_str(), K::try_from(&key.key).unwrap(), value)))
     }
 
-    pub(crate) fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
+    pub fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         V::count(&self.storage)
     }
 
-    pub(crate) fn contains(&'storage self, prefix: &str, key: K) -> bool {
+    pub fn contains(&'storage self, prefix: &str, key: K) -> bool {
         V::contains(prefix, key.into(), &self.storage)
     }
 
-    pub(crate) fn id(&self) -> uuid::Uuid {
+    pub fn id(&self) -> uuid::Uuid {
         self.storage.id
     }
 
-    pub(crate) fn rank(&'storage self, prefix: &'storage str, key: K) -> usize {
+    pub fn rank(&'storage self, prefix: &'storage str, key: K) -> usize {
         V::rank(prefix, key.into(), &self.storage)
     }
 }

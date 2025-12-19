@@ -17,7 +17,7 @@ type FastDashMap<K, V> = DashMap<K, V, RandomState>;
 
 // ============ Writer ============
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DashMapBlockfileWriter {
     storage: Arc<FastDashMap<CompositeKey, StoredValue>>,
     storage_manager: StorageManager,
@@ -75,17 +75,37 @@ impl DashMapBlockfileWriter {
         self.id
     }
 
+    /// Get a value from the writer, returning the PreparedValue form.
+    /// This is used during SPANN index construction to read back posting lists.
+    pub fn get_owned<K: Key + Into<KeyWrapper>, P: super::storage::PreparedValueFromStoredValue>(
+        &self,
+        prefix: &str,
+        key: K,
+    ) -> Result<Option<P>, Box<dyn ChromaError>> {
+        let composite_key = CompositeKey::new(prefix.to_string(), key);
+        Ok(self
+            .storage
+            .get(&composite_key)
+            .and_then(|entry| P::prepared_from_stored_value(entry.value())))
+    }
+
     /// Commit the writer - drains DashMap into sorted Vec and stores in StorageManager
     pub fn commit(self) -> Result<DashMapBlockfileFlusher, Box<dyn ChromaError>> {
-        // Drain DashMap into Vec
-        let mut data: Vec<(CompositeKey, StoredValue)> = self
-            .storage
-            .iter()
-            .map(|entry| (entry.key().clone(), entry.value().clone()))
-            .collect();
+        // Take ownership of Arc and unwrap the DashMap
+        let storage = Arc::try_unwrap(self.storage).unwrap_or_else(|arc| {
+            // Fallback: clone if other references exist
+            arc.iter()
+                .map(|entry| (entry.key().clone(), entry.value().clone()))
+                .collect::<Vec<_>>()
+                .into_iter()
+                .collect()
+        });
+
+        // Drain DashMap into Vec (no cloning needed)
+        let mut data: Vec<(CompositeKey, StoredValue)> = storage.into_iter().collect();
 
         // Sort by CompositeKey
-        data.sort_by(|a, b| a.0.cmp(&b.0));
+        data.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         // Store in manager
         self.storage_manager.commit(self.id, data);

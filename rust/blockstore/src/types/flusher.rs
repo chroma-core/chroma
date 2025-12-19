@@ -40,7 +40,7 @@ impl BlockfileFlusher {
         match self {
             BlockfileFlusher::MemoryBlockfileFlusher(_) => unimplemented!(), // no op
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.count(),
-            BlockfileFlusher::DashMapBlockfileFlusher(_) => unimplemented!(),
+            BlockfileFlusher::DashMapBlockfileFlusher(_) => 0,
         }
     }
 
@@ -48,7 +48,7 @@ impl BlockfileFlusher {
         match self {
             BlockfileFlusher::MemoryBlockfileFlusher(_) => unimplemented!(),
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.num_entries(),
-            BlockfileFlusher::DashMapBlockfileFlusher(_) => unimplemented!(),
+            BlockfileFlusher::DashMapBlockfileFlusher(_) => 0,
         }
     }
 

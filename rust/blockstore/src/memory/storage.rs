@@ -719,7 +719,7 @@ impl<'referred_data> Readable<'referred_data> for SpannPostingList<'referred_dat
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StorageBuilder {
     bool_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, bool>>>>,
     // String Value
@@ -741,7 +741,7 @@ pub struct StorageBuilder {
     pub(super) id: uuid::Uuid,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Storage {
     bool_storage: Arc<BTreeMap<CompositeKey, bool>>,
     // String Value
@@ -760,27 +760,27 @@ pub struct Storage {
     pub(super) id: uuid::Uuid,
 }
 
-#[derive(Clone)]
-pub(crate) struct StorageManager {
+#[derive(Clone, Debug)]
+pub struct StorageManager {
     read_cache: Arc<RwLock<HashMap<uuid::Uuid, Storage>>>,
     write_cache: Arc<RwLock<HashMap<uuid::Uuid, StorageBuilder>>>,
 }
 
 impl StorageManager {
-    pub(super) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             read_cache: Arc::new(RwLock::new(HashMap::new())),
             write_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    pub(super) fn get(&self, id: uuid::Uuid) -> Option<Storage> {
+    pub fn get(&self, id: uuid::Uuid) -> Option<Storage> {
         let cache_guard = self.read_cache.read();
         let storage = cache_guard.get(&id)?.clone();
         Some(storage)
     }
 
-    pub(super) fn create(&self) -> StorageBuilder {
+    pub fn create(&self) -> StorageBuilder {
         let id = uuid::Uuid::new_v4();
         let builder = StorageBuilder {
             bool_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
@@ -798,7 +798,7 @@ impl StorageManager {
         builder
     }
 
-    pub(super) fn commit(&self, id: uuid::Uuid) -> Storage {
+    pub fn commit(&self, id: uuid::Uuid) -> Storage {
         let mut write_cache_guard = self.write_cache.write();
         let builder = write_cache_guard.remove(&id).unwrap();
         let storage = Storage {
@@ -832,12 +832,18 @@ impl StorageManager {
         storage
     }
 
-    pub(super) fn clear(&self) {
+    pub fn clear(&self) {
         let mut write_cache_guard = self.write_cache.write();
         write_cache_guard.clear();
         write_cache_guard.shrink_to_fit();
         let mut read_cache_guard = self.read_cache.write();
         read_cache_guard.clear();
         read_cache_guard.shrink_to_fit();
+    }
+}
+
+impl Default for StorageManager {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -3,7 +3,7 @@ use crate::arrow::blockfile::ArrowUnorderedBlockfileWriter;
 use crate::arrow::ordered_blockfile_writer::ArrowOrderedBlockfileWriter;
 use crate::arrow::types::{ArrowWriteableKey, ArrowWriteableValue};
 use crate::dashmap::reader_writer::DashMapBlockfileWriter;
-use crate::dashmap::storage::ToStoredValue;
+use crate::dashmap::storage::{PreparedValueFromStoredValue, ToStoredValue};
 use crate::key::KeyWrapper;
 use crate::memory::reader_writer::MemoryBlockfileWriter;
 use crate::memory::storage::Writeable;
@@ -96,14 +96,19 @@ impl BlockfileWriter {
         &self,
         prefix: &str,
         key: K,
-    ) -> Result<Option<V::PreparedValue>, Box<dyn ChromaError>> {
+    ) -> Result<Option<V::PreparedValue>, Box<dyn ChromaError>>
+    where
+        V::PreparedValue: PreparedValueFromStoredValue,
+    {
         match self {
             BlockfileWriter::MemoryBlockfileWriter(_) => todo!(),
             BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => {
                 writer.get_owned::<K, V>(prefix, key).await
             }
             BlockfileWriter::ArrowOrderedBlockfileWriter(_) => todo!(),
-            BlockfileWriter::DashMapBlockfileWriter(_) => todo!(),
+            BlockfileWriter::DashMapBlockfileWriter(writer) => {
+                writer.get_owned::<K, V::PreparedValue>(prefix, key)
+            }
         }
     }
 

@@ -44,3 +44,7 @@ bincode = { workspace = true }
 [[bench]]
 name = "blockfile_writer"
 harness = false
+
+[[bench]]
+name = "dashmap_blockfile"
+harness = false

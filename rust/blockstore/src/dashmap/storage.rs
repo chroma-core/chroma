@@ -1,9 +1,10 @@
 use crate::key::CompositeKey;
+use ahash::RandomState;
 use chroma_types::{chroma_proto::UpdateMetadata, DataRecord, SpannPostingList};
-use parking_lot::RwLock;
+use dashmap::DashMap;
 use prost::Message;
 use roaring::RoaringBitmap;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Unified storage for all value types
@@ -36,6 +37,11 @@ pub trait ToStoredValue {
 /// Trait for converting StoredValue back to readable values
 pub trait FromStoredValue<'a>: Sized {
     fn from_stored_value(value: &'a StoredValue) -> Option<Self>;
+}
+
+/// Trait for extracting PreparedValue from StoredValue (for get_owned support)
+pub trait PreparedValueFromStoredValue: Sized {
+    fn prepared_from_stored_value(value: &StoredValue) -> Option<Self>;
 }
 
 // ============ ToStoredValue implementations ============
@@ -222,36 +228,61 @@ impl<'a> FromStoredValue<'a> for SpannPostingList<'a> {
     }
 }
 
+// ============ PreparedValueFromStoredValue implementations ============
+
+/// SpannPostingListDeltaEntry is (Vec<u32>, Vec<u32>, Vec<f32>)
+impl PreparedValueFromStoredValue for (Vec<u32>, Vec<u32>, Vec<f32>) {
+    fn prepared_from_stored_value(value: &StoredValue) -> Option<Self> {
+        match value {
+            StoredValue::SpannPostingList {
+                doc_offset_ids,
+                doc_versions,
+                doc_embeddings,
+            } => Some((
+                doc_offset_ids.clone(),
+                doc_versions.clone(),
+                doc_embeddings.clone(),
+            )),
+            _ => None,
+        }
+    }
+}
+
 // ============ StorageManager ============
 
+type CommittedData = Arc<Vec<(CompositeKey, StoredValue)>>;
+
 /// Holds committed (frozen) data by id for readers to access
-#[derive(Clone, Default)]
+#[derive(Clone, Debug)]
 pub struct StorageManager {
-    committed: Arc<RwLock<HashMap<Uuid, Arc<Vec<(CompositeKey, StoredValue)>>>>>,
+    committed: Arc<DashMap<Uuid, CommittedData, RandomState>>,
 }
 
 impl StorageManager {
     pub fn new() -> Self {
         Self {
-            committed: Arc::new(RwLock::new(HashMap::new())),
+            committed: Arc::new(DashMap::with_hasher(RandomState::new())),
         }
     }
 
     /// Store committed data (sorted vec)
     pub fn commit(&self, id: Uuid, data: Vec<(CompositeKey, StoredValue)>) {
-        let mut guard = self.committed.write();
-        guard.insert(id, Arc::new(data));
+        self.committed.insert(id, Arc::new(data));
     }
 
     /// Retrieve committed data for reader
-    pub fn get(&self, id: &Uuid) -> Option<Arc<Vec<(CompositeKey, StoredValue)>>> {
-        let guard = self.committed.read();
-        guard.get(id).cloned()
+    pub fn get(&self, id: &Uuid) -> Option<CommittedData> {
+        self.committed.get(id).map(|r| r.value().clone())
     }
 
     /// Clear all committed data
     pub fn clear(&self) {
-        let mut guard = self.committed.write();
-        guard.clear();
+        self.committed.clear();
+    }
+}
+
+impl Default for StorageManager {
+    fn default() -> Self {
+        Self::new()
     }
 }

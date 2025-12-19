@@ -126,7 +126,8 @@ fn bench_writer_for_generator_and_size<D: DataGenerator>(
     size: D::DataSize,
     provider: &ArrowBlockfileProvider,
 ) where
-    <D as DataGenerator>::Value: chroma_blockstore::memory::Writeable,
+    <D as DataGenerator>::Value:
+        chroma_blockstore::memory::Writeable + chroma_blockstore::dashmap::storage::ToStoredValue,
 {
     let generator = D::generate(size.clone());
     let data_byte_size = generator.num_bytes();
