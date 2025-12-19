@@ -1,10 +1,20 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use setsum::Setsum;
 use tracing::Span;
 
+use chroma_storage::{
+    admissioncontrolleds3::StorageRequestPriority, PutMode, PutOptions, Storage, StorageError,
+};
+use chroma_types::Cmek;
+
+use crate::backoff::ExponentialBackoff;
 use crate::interfaces::{FragmentPublisher, ManifestPublisher};
-use crate::{Error, FragmentIdentifier, LogPosition, ThrottleOptions};
+use crate::{
+    Error, FragmentIdentifier, FragmentSeqNo, LogPosition, LogWriterOptions, MarkDirty,
+    ThrottleOptions,
+};
 
 /////////////////////////////////////////// ManagerState ///////////////////////////////////////////
 
@@ -38,9 +48,9 @@ impl ManagerState {
     fn select_for_write(
         &mut self,
         options: &ThrottleOptions,
-        manifest_manager: &dyn ManifestPublisher<(FragmentIdentifier, LogPosition)>,
+        manifest_manager: &dyn ManifestPublisher<(FragmentSeqNo, LogPosition)>,
         record_count: usize,
-    ) -> Result<Option<(FragmentIdentifier, LogPosition)>, Error> {
+    ) -> Result<Option<(FragmentSeqNo, LogPosition)>, Error> {
         if self.next_write > Instant::now() {
             return Ok(None);
         }
@@ -73,18 +83,28 @@ impl Drop for ManagerState {
 
 /////////////////////////////////////////// BatchManager ///////////////////////////////////////////
 
-#[derive(Debug)]
 pub struct BatchManager {
-    options: ThrottleOptions,
+    options: LogWriterOptions,
+    storage: Arc<Storage>,
+    prefix: String,
+    mark_dirty: Arc<dyn MarkDirty>,
     state: Mutex<ManagerState>,
     write_finished: tokio::sync::Notify,
 }
 
 impl BatchManager {
-    pub fn new(options: ThrottleOptions) -> Option<Self> {
+    pub fn new(
+        options: LogWriterOptions,
+        storage: Arc<Storage>,
+        prefix: String,
+        mark_dirty: Arc<dyn MarkDirty>,
+    ) -> Option<Self> {
         let next_write = Instant::now();
         Some(Self {
             options,
+            storage,
+            prefix,
+            mark_dirty,
             state: Mutex::new(ManagerState {
                 backoff: false,
                 next_write,
@@ -112,9 +132,18 @@ impl BatchManager {
     }
 }
 
+impl std::fmt::Debug for BatchManager {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fmt.debug_struct("BatchManager")
+            .field("options", &self.options)
+            .field("prefix", &self.prefix)
+            .finish_non_exhaustive()
+    }
+}
+
 #[async_trait::async_trait]
 impl FragmentPublisher for BatchManager {
-    type FragmentPointer = (FragmentIdentifier, LogPosition);
+    type FragmentPointer = (FragmentSeqNo, LogPosition);
 
     /// Enqueue work to be published.
     async fn push_work(
@@ -139,7 +168,7 @@ impl FragmentPublisher for BatchManager {
     /// Take enqueued work to be published.
     async fn take_work(
         &self,
-        manifest_manager: &(dyn ManifestPublisher<(FragmentIdentifier, LogPosition)> + Sync),
+        manifest_manager: &(dyn ManifestPublisher<(FragmentSeqNo, LogPosition)> + Sync),
     ) -> Result<
         Option<(
             Self::FragmentPointer,
@@ -175,7 +204,9 @@ impl FragmentPublisher for BatchManager {
         for (batch, _, _) in state.enqueued.iter() {
             let cur_count = batch.len();
             let cur_bytes = batch.iter().map(|r| r.len()).sum::<usize>();
-            if split_off > 0 && acc_bytes + cur_bytes >= self.options.batch_size_bytes {
+            if split_off > 0
+                && acc_bytes + cur_bytes >= self.options.throttle_fragment.batch_size_bytes
+            {
                 did_split = true;
                 break;
             }
@@ -196,7 +227,7 @@ impl FragmentPublisher for BatchManager {
             return Ok(None);
         }
         let Some((fragment_identifier, log_position)) =
-            state.select_for_write(&self.options, manifest_manager, acc_count)?
+            state.select_for_write(&self.options.throttle_fragment, manifest_manager, acc_count)?
         else {
             // Cannot yet select for write.  Notify will come from the timeout background is on.
             return Ok(None);
@@ -209,7 +240,7 @@ impl FragmentPublisher for BatchManager {
                 .iter()
                 .map(|(recs, _, _)| recs.iter().map(|r| r.len()).sum::<usize>())
                 .sum::<usize>()
-                >= self.options.batch_size_bytes;
+                >= self.options.throttle_fragment.batch_size_bytes;
             self.write_finished.notify_one();
         } else {
             state.backoff = false;
@@ -240,6 +271,38 @@ impl FragmentPublisher for BatchManager {
         }
     }
 
+    /// upload a parquet fragment
+    async fn upload_parquet(
+        &self,
+        (fragment_seq_no, log_position): &(FragmentSeqNo, LogPosition),
+        messages: Vec<Vec<u8>>,
+        cmek: Option<Cmek>,
+    ) -> Result<(String, Setsum, usize), Error> {
+        let messages_len = messages.len();
+        let fut1 = upload_parquet(
+            &self.options,
+            &self.storage,
+            &self.prefix,
+            FragmentIdentifier::SeqNo(*fragment_seq_no),
+            Some(*log_position),
+            messages,
+            cmek,
+        );
+        let fut2 = async {
+            match self
+                .mark_dirty
+                .mark_dirty(*log_position, messages_len)
+                .await
+            {
+                Ok(_) | Err(Error::LogContentionDurable) => Ok(()),
+                Err(err) => Err(err),
+            }
+        };
+        let (res1, res2) = futures::future::join(fut1, fut2).await;
+        res2?;
+        res1
+    }
+
     /// Start shutting down.  The shutdown is split for historical and unprincipled reasons.
     fn shutdown_prepare(&self) {
         let enqueued = {
@@ -258,6 +321,67 @@ impl FragmentPublisher for BatchManager {
     }
 }
 
+#[tracing::instrument(skip(options, storage, messages))]
+pub async fn upload_parquet(
+    options: &LogWriterOptions,
+    storage: &Storage,
+    prefix: &str,
+    fragment_identifier: FragmentIdentifier,
+    log_position: Option<LogPosition>,
+    messages: Vec<Vec<u8>>,
+    cmek: Option<Cmek>,
+) -> Result<(String, Setsum, usize), Error> {
+    // Upload the log.
+    let unprefixed_path = crate::unprefixed_fragment_path(fragment_identifier);
+    let path = format!("{prefix}/{unprefixed_path}");
+    let exp_backoff: ExponentialBackoff = options.throttle_fragment.into();
+    let start = Instant::now();
+    let (buffer, setsum) = crate::writer::construct_parquet(log_position, &messages)?;
+    let mut put_options = PutOptions::default()
+        .with_priority(StorageRequestPriority::P0)
+        .with_mode(PutMode::IfNotExist);
+    if let Some(cmek) = cmek {
+        put_options = put_options.with_cmek(cmek);
+    }
+    loop {
+        tracing::info!("upload_parquet: {:?} with {} bytes", path, buffer.len());
+        // NOTE(rescrv):  This match block has been thoroughly reasoned through within the
+        // `bootstrap` call above.  Don't change the error handling here without re-reasoning
+        // there.
+        match storage
+            .put_bytes(&path, buffer.clone(), put_options.clone())
+            .await
+        {
+            Ok(_) => {
+                return Ok((unprefixed_path, setsum, buffer.len()));
+            }
+            // NOTE(sicheng): Permission denied requests should continue to fail if retried
+            Err(err @ StorageError::PermissionDenied { .. }) => {
+                return Err(Error::StorageError(Arc::new(err)));
+            }
+            Err(StorageError::Precondition { path: _, source: _ }) => {
+                return Err(Error::LogContentionFailure);
+            }
+            Err(err) => {
+                tracing::error!(
+                    error.message = err.to_string(),
+                    "failed to upload parquet, backing off"
+                );
+                // NOTE(sicheng): The frontend will fail the request on its end if we retry for too long here
+                // TODO(sicheng): Organize the magic numbers in the code at one place
+                if start.elapsed() > Duration::from_secs(20) {
+                    return Err(Error::StorageError(Arc::new(err)));
+                }
+                let mut backoff = exp_backoff.next();
+                if backoff > Duration::from_secs(10) {
+                    backoff = Duration::from_secs(10);
+                }
+                tokio::time::sleep(backoff).await;
+            }
+        }
+    }
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
@@ -268,22 +392,31 @@ mod tests {
 
     use super::*;
     use crate::interfaces::s3::manifest_manager::ManifestManager;
-    use crate::{LogWriterOptions, Manifest, SnapshotOptions, ThrottleOptions};
+    use crate::{FragmentSeqNo, LogWriterOptions, Manifest, SnapshotOptions, ThrottleOptions};
 
     #[tokio::test]
     async fn test_k8s_integration_batches() {
-        let batch_manager = BatchManager::new(ThrottleOptions {
-            throughput: 100,
-            headroom: 1,
-            batch_size_bytes: 4,
-            batch_interval_us: 1_000_000,
-        })
+        let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+        let prefix = "test-batches-prefix".to_string();
+        let batch_manager = BatchManager::new(
+            LogWriterOptions {
+                throttle_fragment: ThrottleOptions {
+                    throughput: 100,
+                    headroom: 1,
+                    batch_size_bytes: 4,
+                    batch_interval_us: 1_000_000,
+                },
+                ..Default::default()
+            },
+            Arc::clone(&storage),
+            prefix.clone(),
+            Arc::new(()),
+        )
         .unwrap();
-        let storage = s3_client_for_test_with_new_bucket().await;
         Manifest::initialize(
             &LogWriterOptions::default(),
             &storage,
-            "test-batches-prefix",
+            &prefix,
             "initializer",
         )
         .await
@@ -291,8 +424,8 @@ mod tests {
         let manifest_manager = ManifestManager::new(
             ThrottleOptions::default(),
             SnapshotOptions::default(),
-            storage.into(),
-            "test-batches-prefix".to_string(),
+            storage,
+            prefix.clone(),
             "writer".to_string(),
             Arc::new(()),
             Arc::new(()),
@@ -316,7 +449,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(seq_no, FragmentIdentifier::SeqNo(1));
+        assert_eq!(seq_no, FragmentSeqNo::from_u64(1));
         assert_eq!(log_position.offset(), 1);
         assert_eq!(2, work.len());
         // Check batch 1

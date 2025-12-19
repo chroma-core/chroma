@@ -2,16 +2,17 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use chroma_storage::{ETag, Storage};
+use setsum::Setsum;
 
 use crate::gc::Garbage;
 use crate::interfaces::ManifestPublisher;
-use crate::manifest::{Manifest, ManifestAndETag, Snapshot};
+use crate::manifest::{Manifest, ManifestAndETag, Snapshot, SnapshotPointer};
 use crate::reader::read_fragment;
 use crate::writer::MarkDirty;
 use crate::{
-    unprefixed_fragment_path, Error, Fragment, FragmentIdentifier, GarbageCollectionOptions,
-    LogPosition, SnapshotCache, SnapshotOptions, SnapshotPointerOrFragmentIdentifier,
-    ThrottleOptions, UnboundFragment,
+    unprefixed_fragment_path, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
+    GarbageCollectionOptions, LogPosition, SnapshotCache, SnapshotOptions,
+    SnapshotPointerOrFragmentIdentifier, ThrottleOptions,
 };
 
 ////////////////////////////////////////////// Staging /////////////////////////////////////////////
@@ -26,9 +27,9 @@ struct Staging {
     /// The next timestamp to assign.
     next_log_position: LogPosition,
     /// The next fragment sequence number to assign to a not-yet completed fragment upload  .
-    next_seq_no_to_assign: FragmentIdentifier,
+    next_seq_no_to_assign: FragmentSeqNo,
     /// The next fragment sequence number to look for when applying fragments.
-    next_seq_no_to_apply: FragmentIdentifier,
+    next_seq_no_to_apply: FragmentSeqNo,
     /// A prefix of the log to be garbage collected.  This is added to the manager from somewhere
     /// else and the manager will apply the garbage to the next manifest that gets written.
     garbage: Option<(Garbage, tokio::sync::oneshot::Sender<Option<Error>>)>,
@@ -52,7 +53,7 @@ impl Staging {
         Manifest,
         ETag,
         Manifest,
-        FragmentIdentifier,
+        FragmentSeqNo,
         Option<Snapshot>,
         Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
     )> {
@@ -70,7 +71,8 @@ impl Staging {
         let mut next_seq_no_to_apply = self.next_seq_no_to_apply;
         fragments.sort_by_key(|(fragment, _)| fragment.seq_no);
         for (fragment, tx) in fragments.into_iter() {
-            if fragment.seq_no == next_seq_no_to_apply && new_manifest.can_apply_fragment(&fragment)
+            if fragment.seq_no == next_seq_no_to_apply.into()
+                && new_manifest.can_apply_fragment(&fragment)
             {
                 let Some(next) = next_seq_no_to_apply.successor() else {
                     tracing::error!(
@@ -153,7 +155,7 @@ impl Staging {
         Manifest,
         ETag,
         Manifest,
-        FragmentIdentifier,
+        FragmentSeqNo,
         Option<Snapshot>,
         Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
     )> {
@@ -234,6 +236,9 @@ impl ManifestManager {
         let next_log_position = manifest.next_write_timestamp();
         let Some(next_seq_no_to_assign) = manifest.next_fragment_seq_no() else {
             return Err(Error::LogFull);
+        };
+        let FragmentIdentifier::SeqNo(next_seq_no_to_assign) = next_seq_no_to_assign else {
+            return Err(Error::internal(file!(), line!()));
         };
         let next_seq_no_to_apply = next_seq_no_to_assign;
         let stable = ManifestAndETag { manifest, e_tag };
@@ -369,7 +374,7 @@ impl ManifestManager {
 }
 
 #[async_trait::async_trait]
-impl ManifestPublisher<(FragmentIdentifier, LogPosition)> for ManifestManager {
+impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
     /// Signal log contention to anyone writing on the manifest.
     fn shutdown(&self) {
         let (fragments, garbage) = {
@@ -400,43 +405,51 @@ impl ManifestPublisher<(FragmentIdentifier, LogPosition)> for ManifestManager {
         let next_fragment = read_fragment(
             &self.storage,
             &self.prefix,
-            &unprefixed_fragment_path(next_seq_no_to_apply),
+            &unprefixed_fragment_path(next_seq_no_to_apply.into()),
         )
         .await?;
         if let Some(fragment) = next_fragment {
+            let fragment_identifier = fragment.seq_no;
+            let FragmentIdentifier::SeqNo(fragment_seq_no) = fragment_identifier else {
+                return Err(Error::internal(file!(), line!()));
+            };
             self.mark_dirty
                 .mark_dirty(fragment.start, (fragment.limit - fragment.start) as usize)
                 .await?;
-            let fragment_identifier = fragment.seq_no;
             let log_position = fragment.start;
-            let unbound = UnboundFragment {
-                path: fragment.path.clone(),
-                identifier: fragment_identifier,
-                num_records: fragment
-                    .limit
-                    .offset()
-                    .saturating_sub(fragment.start.offset()),
-                num_bytes: fragment.num_bytes,
-                setsum: fragment.setsum,
-            };
             match self
-                .publish_fragment((fragment_identifier, log_position), unbound)
+                .publish_fragment(
+                    &(fragment_seq_no, log_position),
+                    &fragment.path,
+                    fragment
+                        .limit
+                        .offset()
+                        .saturating_sub(fragment.start.offset()),
+                    fragment.num_bytes,
+                    fragment.setsum,
+                )
                 .await
             {
-                Ok(()) => Err(Error::LogContentionRetry),
+                Ok(_) => Err(Error::LogContentionRetry),
                 // NOTE(rescrv):  This is a hack.  We are recovering, we want to reset staging to
                 // be totally consistent.  It's easier to throw it away and restart than to get the
                 // adjustment right.
                 Err(Error::LogContentionDurable) => Err(Error::LogContentionRetry),
-                err => err,
+                Err(err) => Err(err),
             }
         } else {
             Ok(())
         }
     }
 
+    /// Return a possibly-stale version of the manifest.
+    async fn manifest_and_etag(&self) -> Result<ManifestAndETag, Error> {
+        let staging = self.staging.lock().unwrap();
+        Ok(staging.stable.clone())
+    }
+
     /// Assign a timestamp to a record.
-    fn assign_timestamp(&self, record_count: usize) -> Option<(FragmentIdentifier, LogPosition)> {
+    fn assign_timestamp(&self, record_count: usize) -> Option<(FragmentSeqNo, LogPosition)> {
         // SAFETY(rescrv):  Mutex poisoning.
         let mut staging = self.staging.lock().unwrap();
         // Steal the offset.
@@ -463,31 +476,25 @@ impl ManifestPublisher<(FragmentIdentifier, LogPosition)> for ManifestManager {
     #[tracing::instrument(skip(self))]
     async fn publish_fragment(
         &self,
-        (seq_no, log_position): (FragmentIdentifier, LogPosition),
-        UnboundFragment {
-            path,
-            identifier: unbound_ident,
-            num_records,
-            num_bytes,
-            setsum,
-        }: UnboundFragment,
-    ) -> Result<(), Error> {
-        if seq_no != unbound_ident {
-            return Err(Error::internal(file!(), line!()));
-        }
+        (seq_no, log_position): &(FragmentSeqNo, LogPosition),
+        path: &str,
+        num_records: u64,
+        num_bytes: u64,
+        setsum: Setsum,
+    ) -> Result<LogPosition, Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let fragment = Fragment {
-            path,
-            seq_no,
-            start: log_position,
-            limit: log_position + num_records,
+            path: path.to_string(),
+            seq_no: (*seq_no).into(),
+            start: *log_position,
+            limit: *log_position + num_records,
             num_bytes,
             setsum,
         };
         self.push_work(fragment, tx);
         self.do_work().await;
         match rx.await {
-            Ok(None) => Ok(()),
+            Ok(None) => Ok(*log_position),
             Ok(Some(err)) => Err(err),
             // NOTE(rescrv):  This is an error on a channel.  We made the oneshot above.  The
             // background push work call does not fail.  Do work does not fail.  The only way this
@@ -541,7 +548,7 @@ impl ManifestPublisher<(FragmentIdentifier, LogPosition)> for ManifestManager {
 
     async fn compute_garbage(
         &self,
-        options: &GarbageCollectionOptions,
+        _options: &GarbageCollectionOptions,
         first_to_keep: LogPosition,
     ) -> Result<Option<Garbage>, Error> {
         // SAFETY(rescrv):  Mutex poisoning.
@@ -549,13 +556,16 @@ impl ManifestPublisher<(FragmentIdentifier, LogPosition)> for ManifestManager {
             let staging = self.staging.lock().unwrap();
             staging.stable.manifest.clone()
         };
-        Garbage::new(
+        Garbage::new(&stable, &*self.snapshot_cache, self, first_to_keep).await
+    }
+
+    async fn snapshot_load(&self, pointer: &SnapshotPointer) -> Result<Option<Snapshot>, Error> {
+        super::snapshot_load(
+            self.throttle,
             &self.storage,
             &self.prefix,
-            &stable,
-            &options.throttle,
-            &*self.snapshot_cache,
-            first_to_keep,
+            &self.snapshot_cache,
+            pointer,
         )
         .await
     }
@@ -597,7 +607,7 @@ mod tests {
         manager.push_work(
             Fragment {
                 path: "path2".to_string(),
-                seq_no: FragmentIdentifier::SeqNo(2),
+                seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
                 num_bytes: 20,
                 start: LogPosition::from_offset(22),
                 limit: LogPosition::from_offset(42),
@@ -616,7 +626,7 @@ mod tests {
         manager.push_work(
             Fragment {
                 path: "path1".to_string(),
-                seq_no: FragmentIdentifier::SeqNo(1),
+                seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
                 num_bytes: 30,
                 start: LogPosition::from_offset(1),
                 limit: LogPosition::from_offset(22),
@@ -661,7 +671,7 @@ mod tests {
                 fragments: vec![
                     Fragment {
                         path: "path1".to_string(),
-                        seq_no: FragmentIdentifier::SeqNo(1),
+                        seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
                         num_bytes: 30,
                         start: LogPosition::from_offset(1),
                         limit: LogPosition::from_offset(22),
@@ -669,7 +679,7 @@ mod tests {
                     },
                     Fragment {
                         path: "path2".to_string(),
-                        seq_no: FragmentIdentifier::SeqNo(2),
+                        seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
                         num_bytes: 20,
                         start: LogPosition::from_offset(22),
                         limit: LogPosition::from_offset(42),

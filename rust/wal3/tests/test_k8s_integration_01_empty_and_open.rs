@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
-use wal3::{LogWriter, LogWriterOptions};
+use wal3::{create_factories, LogReaderOptions, LogWriter, LogWriterOptions};
 
 mod common;
 
@@ -14,27 +14,29 @@ async fn test_k8s_integration_01_empty_and_open() {
     let preconditions = [Condition::PathNotExist("manifest/MANIFEST".to_string())];
     let postconditions = [Condition::PathNotExist("manifest/MANIFEST".to_string())];
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
-    assert_conditions(
-        &storage,
-        "test_k8s_integration_01_empty_and_append",
-        &preconditions,
-    )
-    .await;
-    let _ = LogWriter::open(
-        LogWriterOptions::default(),
+    let prefix = "test_k8s_integration_01_empty_and_append";
+    let writer = "test writer";
+    assert_conditions(&storage, prefix, &preconditions).await;
+    let options = LogWriterOptions::default();
+    let (fragment_factory, manifest_factory) = create_factories(
+        options.clone(),
+        LogReaderOptions::default(),
         Arc::clone(&storage),
-        "test_k8s_integration_01_empty_and_append",
-        "test writer",
-        (),
-        (),
+        prefix.to_string(),
+        writer.to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
+    let _ = LogWriter::open(
+        options,
+        Arc::clone(&storage),
+        prefix,
+        writer,
+        fragment_factory,
+        manifest_factory,
         None,
     )
     .await
     .unwrap_err();
-    assert_conditions(
-        &storage,
-        "test_k8s_integration_01_empty_and_append",
-        &postconditions,
-    )
-    .await;
+    assert_conditions(&storage, prefix, &postconditions).await;
 }

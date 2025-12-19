@@ -3,16 +3,21 @@ use std::sync::Arc;
 use chroma_storage::Storage;
 use setsum::Setsum;
 
+use crate::interfaces::{FragmentConsumer, FragmentPointer, ManifestConsumer};
 use crate::reader::LogReader;
 use crate::{
     prefixed_fragment_path, Error, FragmentIdentifier, Limits, LogPosition, LogWriterOptions,
     Manifest,
 };
 
-pub async fn copy(
+pub async fn copy<
+    P: FragmentPointer,
+    FP: FragmentConsumer<FragmentPointer = P>,
+    MP: ManifestConsumer<P>,
+>(
     storage: &Storage,
     options: &LogWriterOptions,
-    reader: &LogReader,
+    reader: &LogReader<P, FP, MP>,
     offset: LogPosition,
     target: String,
 ) -> Result<(), Error> {

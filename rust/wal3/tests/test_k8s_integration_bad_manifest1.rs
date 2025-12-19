@@ -1,9 +1,11 @@
+mod mocks;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use chroma_storage::s3_client_for_test_with_new_bucket;
-use wal3::{Garbage, LogPosition, Manifest, Snapshot, SnapshotPointer, ThrottleOptions};
+use wal3::{Garbage, LogPosition, Manifest, Snapshot, SnapshotPointer};
 
+use mocks::MockManifestPublisher;
 use wal3::SnapshotCache;
 
 struct MockSnapshotCache {
@@ -53,11 +55,10 @@ async fn test_k8s_integration_garbage_new_with_bad_manifest1_offset_9340() {
 
     // Load the snapshots into the mock cache
     let snapshots_json = include_str!("bad_snapshots1.json");
-    let snapshot_cache = MockSnapshotCache::new();
+    let snapshot_cache = Arc::new(MockSnapshotCache::new());
     snapshot_cache.load_from_json(snapshots_json);
 
-    let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
-    let throttle = ThrottleOptions::default();
+    let mock_publisher = MockManifestPublisher::new(Arc::clone(&snapshot_cache));
 
     // The bug should occur when calling Garbage::new with offset 9340
     let first_to_keep = LogPosition::from_offset(9340);
@@ -90,15 +91,7 @@ async fn test_k8s_integration_garbage_new_with_bad_manifest1_offset_9340() {
     );
 
     // This should fail and demonstrate the bug
-    let result = Garbage::new(
-        &storage,
-        "test-prefix",
-        &manifest,
-        &throttle,
-        &snapshot_cache,
-        first_to_keep,
-    )
-    .await;
+    let result = Garbage::new(&manifest, &*snapshot_cache, &mock_publisher, first_to_keep).await;
 
     match result {
         Ok(garbage) => {
