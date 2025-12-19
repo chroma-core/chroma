@@ -152,7 +152,7 @@ impl<
         prefixes: impl IntoIterator<Item = &'prefix str>,
     ) {
         match self {
-            BlockfileReader::MemoryBlockfileReader(_reader) => unimplemented!(),
+            BlockfileReader::MemoryBlockfileReader(_reader) => (),
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.load_blocks_for_prefixes(prefixes).await
             }

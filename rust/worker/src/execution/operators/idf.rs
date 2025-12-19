@@ -105,8 +105,22 @@ impl Operator<IdfInput, IdfOutput> for Idf {
         .await?;
 
         if let Some(sparse_index_reader) = metadata_segment_reader.sparse_index_reader.as_ref() {
-            for &dimension_id in &self.query.indices {
-                let encoded_dimension_id = encode_u32(dimension_id);
+            let encoded_dimensions = self
+                .query
+                .indices
+                .iter()
+                .map(|dimension_id| (*dimension_id, encode_u32(*dimension_id)))
+                .collect::<Vec<_>>();
+
+            sparse_index_reader
+                .load_offset_values(
+                    encoded_dimensions
+                        .iter()
+                        .map(|(_, encoded_dimension)| encoded_dimension.as_str()),
+                )
+                .await;
+
+            for (dimension_id, encoded_dimension_id) in encoded_dimensions {
                 let nt = sparse_index_reader
                     .get_dimension_offset_rank(&encoded_dimension_id, u32::MAX)
                     .await?
