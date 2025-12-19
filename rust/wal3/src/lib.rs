@@ -28,7 +28,7 @@ pub use manifest::{
     unprefixed_snapshot_path, Manifest, ManifestAndETag, Snapshot, SnapshotPointer,
 };
 pub use manifest_manager::ManifestManager;
-pub use reader::{Limits, LogReader};
+pub use reader::{checksum_parquet, Limits, LogReader};
 pub use snapshot_cache::SnapshotCache;
 pub use writer::{upload_parquet, LogWriter, MarkDirty};
 

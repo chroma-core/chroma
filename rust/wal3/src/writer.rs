@@ -179,7 +179,7 @@ impl LogWriter {
                 storage,
                 prefix,
                 FragmentIdentifier::SeqNo(1),
-                first_record_offset,
+                Some(first_record_offset),
                 messages,
                 cmek,
             )
@@ -751,7 +751,7 @@ impl OnceLogWriter {
             &self.storage,
             &self.prefix,
             fragment_identifier,
-            log_position,
+            Some(log_position),
             messages,
             self.cmek.clone(),
         );
@@ -1055,7 +1055,7 @@ impl Drop for OnceLogWriter {
 
 #[tracing::instrument(skip(messages))]
 pub fn construct_parquet(
-    log_position: LogPosition,
+    log_position: Option<LogPosition>,
     messages: &[Vec<u8>],
 ) -> Result<(Vec<u8>, Setsum), Error> {
     // Construct the columns and construct the setsum.
@@ -1067,6 +1067,8 @@ pub fn construct_parquet(
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or(Duration::ZERO)
         .as_micros() as u64;
+    let relative = log_position.is_none();
+    let log_position = log_position.unwrap_or_default();
     for (index, message) in messages.iter().enumerate() {
         let position = log_position + index;
         setsum.insert_vectored(&[
@@ -1084,10 +1086,15 @@ pub fn construct_parquet(
     let offsets = UInt64Array::from(offsets);
     let timestamps_us = UInt64Array::from(timestamps_us);
     let bodies = BinaryArray::from(bodies);
+    let offset_column_name = if relative {
+        "relative_offset"
+    } else {
+        "offset"
+    };
     // SAFETY(rescrv):  The try_from_iter call will always succeed.
     // TODO(rescrv):  Arrow pre-allocator.
     let batch = RecordBatch::try_from_iter(vec![
-        ("offset", Arc::new(offsets) as ArrayRef),
+        (offset_column_name, Arc::new(offsets) as ArrayRef),
         ("timestamp_us", Arc::new(timestamps_us) as ArrayRef),
         ("body", Arc::new(bodies) as ArrayRef),
     ])
@@ -1110,7 +1117,7 @@ pub async fn upload_parquet(
     storage: &Storage,
     prefix: &str,
     fragment_identifier: FragmentIdentifier,
-    log_position: LogPosition,
+    log_position: Option<LogPosition>,
     messages: Vec<Vec<u8>>,
     cmek: Option<Cmek>,
 ) -> Result<(String, Setsum, usize), Error> {
@@ -1162,5 +1169,395 @@ pub async fn upload_parquet(
                 tokio::time::sleep(backoff).await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use arrow::array::Array;
+    use bytes::Bytes;
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+    /// Verifies that construct_parquet with Some(log_position) creates absolute offsets.
+    #[test]
+    fn construct_parquet_with_some_log_position_uses_absolute_offsets() {
+        let log_position = LogPosition::from_offset(100);
+        let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
+
+        let (buffer, setsum) = construct_parquet(Some(log_position), &messages)
+            .expect("construct_parquet should succeed");
+
+        // Verify that the parquet buffer is non-empty.
+        assert!(!buffer.is_empty(), "parquet buffer should not be empty");
+
+        // Verify the setsum is non-default (data was inserted).
+        assert_ne!(setsum, Setsum::default(), "setsum should not be default");
+
+        // Parse the parquet and verify the column structure.
+        let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(buffer))
+            .expect("parquet should be parseable");
+        let reader = builder.build().expect("parquet reader should build");
+
+        for batch in reader {
+            let batch = batch.expect("batch should be readable");
+
+            // Verify that "offset" column exists (not "relative_offset").
+            let offset_column = batch.column_by_name("offset");
+            assert!(
+                offset_column.is_some(),
+                "should have 'offset' column for Some(log_position)"
+            );
+
+            let relative_offset_column = batch.column_by_name("relative_offset");
+            assert!(
+                relative_offset_column.is_none(),
+                "should not have 'relative_offset' column for Some(log_position)"
+            );
+
+            // Verify offset values are absolute (starting at 100).
+            let offset_array = offset_column
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .expect("offset column should be UInt64Array");
+
+            assert_eq!(offset_array.len(), 3, "should have 3 records");
+            println!(
+                "construct_parquet_with_some_log_position_uses_absolute_offsets: offsets = {:?}",
+                (0..offset_array.len())
+                    .map(|i| offset_array.value(i))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(offset_array.value(0), 100, "first offset should be 100");
+            assert_eq!(offset_array.value(1), 101, "second offset should be 101");
+            assert_eq!(offset_array.value(2), 102, "third offset should be 102");
+
+            // Verify body column exists and has correct data.
+            let body_column = batch
+                .column_by_name("body")
+                .expect("body column should exist");
+            let body_array = body_column
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .expect("body column should be BinaryArray");
+
+            assert_eq!(body_array.value(0), &[1, 2, 3]);
+            assert_eq!(body_array.value(1), &[4, 5, 6]);
+            assert_eq!(body_array.value(2), &[7, 8, 9]);
+        }
+    }
+
+    /// Verifies that construct_parquet with None creates relative offsets.
+    #[test]
+    fn construct_parquet_with_none_log_position_uses_relative_offsets() {
+        let messages = vec![
+            vec![10, 20, 30],
+            vec![40, 50, 60],
+            vec![70, 80, 90],
+            vec![100, 110, 120],
+        ];
+
+        let (buffer, setsum) =
+            construct_parquet(None, &messages).expect("construct_parquet should succeed");
+
+        // Verify that the parquet buffer is non-empty.
+        assert!(!buffer.is_empty(), "parquet buffer should not be empty");
+
+        // Verify the setsum is non-default (data was inserted).
+        assert_ne!(setsum, Setsum::default(), "setsum should not be default");
+
+        // Parse the parquet and verify the column structure.
+        let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(buffer))
+            .expect("parquet should be parseable");
+        let reader = builder.build().expect("parquet reader should build");
+
+        for batch in reader {
+            let batch = batch.expect("batch should be readable");
+
+            // Verify that "relative_offset" column exists (not "offset").
+            let relative_offset_column = batch.column_by_name("relative_offset");
+            assert!(
+                relative_offset_column.is_some(),
+                "should have 'relative_offset' column for None log_position"
+            );
+
+            let offset_column = batch.column_by_name("offset");
+            assert!(
+                offset_column.is_none(),
+                "should not have 'offset' column for None log_position"
+            );
+
+            // Verify relative offset values start at 0.
+            let relative_offset_array = relative_offset_column
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .expect("relative_offset column should be UInt64Array");
+
+            assert_eq!(relative_offset_array.len(), 4, "should have 4 records");
+            println!(
+                "construct_parquet_with_none_log_position_uses_relative_offsets: relative_offsets = {:?}",
+                (0..relative_offset_array.len())
+                    .map(|i| relative_offset_array.value(i))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                relative_offset_array.value(0),
+                0,
+                "first relative offset should be 0"
+            );
+            assert_eq!(
+                relative_offset_array.value(1),
+                1,
+                "second relative offset should be 1"
+            );
+            assert_eq!(
+                relative_offset_array.value(2),
+                2,
+                "third relative offset should be 2"
+            );
+            assert_eq!(
+                relative_offset_array.value(3),
+                3,
+                "fourth relative offset should be 3"
+            );
+
+            // Verify body column exists and has correct data.
+            let body_column = batch
+                .column_by_name("body")
+                .expect("body column should exist");
+            let body_array = body_column
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .expect("body column should be BinaryArray");
+
+            assert_eq!(body_array.value(0), &[10, 20, 30]);
+            assert_eq!(body_array.value(1), &[40, 50, 60]);
+            assert_eq!(body_array.value(2), &[70, 80, 90]);
+            assert_eq!(body_array.value(3), &[100, 110, 120]);
+        }
+    }
+
+    /// Verifies setsum computation differs between Some and None log_position.
+    #[test]
+    fn construct_parquet_setsum_differs_based_on_log_position() {
+        let messages = vec![vec![1, 2, 3]];
+
+        let (_, setsum_with_position) =
+            construct_parquet(Some(LogPosition::from_offset(100)), &messages)
+                .expect("construct_parquet with Some should succeed");
+
+        let (_, setsum_without_position) =
+            construct_parquet(None, &messages).expect("construct_parquet with None should succeed");
+
+        // The setsums should differ because the offset used in the setsum calculation differs.
+        // With Some(100), offset is 100. With None, offset is 0.
+        println!(
+            "construct_parquet_setsum_differs_based_on_log_position: setsum_with_position = {}, setsum_without_position = {}",
+            setsum_with_position.hexdigest(),
+            setsum_without_position.hexdigest()
+        );
+        assert_ne!(
+            setsum_with_position, setsum_without_position,
+            "setsums should differ when log_position differs"
+        );
+    }
+
+    /// Verifies construct_parquet handles empty messages.
+    #[test]
+    fn construct_parquet_with_empty_messages() {
+        let messages: Vec<Vec<u8>> = vec![];
+
+        let (buffer_with_pos, setsum_with_pos) =
+            construct_parquet(Some(LogPosition::from_offset(1)), &messages)
+                .expect("construct_parquet with Some and empty messages should succeed");
+
+        let (buffer_without_pos, setsum_without_pos) = construct_parquet(None, &messages)
+            .expect("construct_parquet with None and empty messages should succeed");
+
+        // Both should produce non-empty parquet files (even with 0 rows).
+        assert!(
+            !buffer_with_pos.is_empty(),
+            "parquet buffer should not be empty"
+        );
+        assert!(
+            !buffer_without_pos.is_empty(),
+            "parquet buffer should not be empty"
+        );
+
+        // Setsums should be default (no data inserted).
+        println!(
+            "construct_parquet_with_empty_messages: setsum_with_pos = {}, setsum_without_pos = {}",
+            setsum_with_pos.hexdigest(),
+            setsum_without_pos.hexdigest()
+        );
+        assert_eq!(
+            setsum_with_pos,
+            Setsum::default(),
+            "setsum should be default for empty messages"
+        );
+        assert_eq!(
+            setsum_without_pos,
+            Setsum::default(),
+            "setsum should be default for empty messages"
+        );
+    }
+
+    /// Verifies that construct_parquet with log_position starting at 0 works correctly.
+    #[test]
+    fn construct_parquet_with_zero_log_position() {
+        let log_position = LogPosition::from_offset(0);
+        let messages = vec![vec![1], vec![2]];
+
+        let (buffer, _setsum) = construct_parquet(Some(log_position), &messages)
+            .expect("construct_parquet should succeed");
+
+        let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(buffer))
+            .expect("parquet should be parseable");
+        let reader = builder.build().expect("parquet reader should build");
+
+        for batch in reader {
+            let batch = batch.expect("batch should be readable");
+
+            // Should have "offset" column since Some was passed.
+            let offset_column = batch
+                .column_by_name("offset")
+                .expect("should have 'offset' column");
+            let offset_array = offset_column
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .expect("offset column should be UInt64Array");
+
+            println!(
+                "construct_parquet_with_zero_log_position: offsets = {:?}",
+                (0..offset_array.len())
+                    .map(|i| offset_array.value(i))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(offset_array.value(0), 0, "first offset should be 0");
+            assert_eq!(offset_array.value(1), 1, "second offset should be 1");
+        }
+    }
+
+    /// Verifies that construct_parquet with a large log_position offset works correctly.
+    #[test]
+    fn construct_parquet_with_large_log_position() {
+        let log_position = LogPosition::from_offset(u64::MAX - 2);
+        let messages = vec![vec![1], vec![2], vec![3]];
+
+        let (buffer, _setsum) = construct_parquet(Some(log_position), &messages)
+            .expect("construct_parquet should succeed");
+
+        let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(buffer))
+            .expect("parquet should be parseable");
+        let reader = builder.build().expect("parquet reader should build");
+
+        for batch in reader {
+            let batch = batch.expect("batch should be readable");
+
+            let offset_column = batch
+                .column_by_name("offset")
+                .expect("should have 'offset' column");
+            let offset_array = offset_column
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .expect("offset column should be UInt64Array");
+
+            println!(
+                "construct_parquet_with_large_log_position: offsets = {:?}",
+                (0..offset_array.len())
+                    .map(|i| offset_array.value(i))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                offset_array.value(0),
+                u64::MAX - 2,
+                "first offset should be u64::MAX - 2"
+            );
+            assert_eq!(
+                offset_array.value(1),
+                u64::MAX - 1,
+                "second offset should be u64::MAX - 1"
+            );
+            assert_eq!(
+                offset_array.value(2),
+                u64::MAX,
+                "third offset should be u64::MAX - 0"
+            );
+        }
+    }
+
+    /// Verifies that checksum_parquet returns the same setsum as construct_parquet for relative
+    /// offsets.
+    #[test]
+    fn relative_offset_setsum_consistency() {
+        use crate::reader::checksum_parquet;
+
+        let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
+
+        // Write with relative offsets (None) - setsum computed with offsets 0, 1, 2
+        let (buffer, setsum_from_writer) =
+            construct_parquet(None, &messages).expect("construct_parquet with None should succeed");
+
+        // Read back with checksum_parquet (no starting position)
+        let (setsum_from_reader, records, uses_relative_offsets) =
+            checksum_parquet(&buffer, None).expect("checksum_parquet should succeed");
+
+        println!(
+            "relative_offset_setsum_consistency: setsum_from_writer = {}, setsum_from_reader = {}",
+            setsum_from_writer.hexdigest(),
+            setsum_from_reader.hexdigest()
+        );
+
+        assert!(
+            uses_relative_offsets,
+            "should detect relative offsets in parquet"
+        );
+        assert_eq!(records.len(), 3, "should have 3 records");
+        assert_eq!(
+            setsum_from_writer, setsum_from_reader,
+            "writer and reader setsums should match for relative-offset files"
+        );
+    }
+
+    /// Verifies that checksum_parquet returns the same setsum as construct_parquet for absolute
+    /// offsets.
+    #[test]
+    fn absolute_offset_setsum_consistency() {
+        use crate::reader::checksum_parquet;
+
+        let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
+        let starting_position = LogPosition::from_offset(100);
+
+        // Write with absolute offsets
+        let (buffer, setsum_from_writer) = construct_parquet(Some(starting_position), &messages)
+            .expect("construct_parquet should succeed");
+
+        // Read back with checksum_parquet
+        let (setsum_from_reader, records, uses_relative_offsets) =
+            checksum_parquet(&buffer, Some(starting_position))
+                .expect("checksum_parquet should succeed");
+
+        println!(
+            "absolute_offset_setsum_consistency: setsum_from_writer = {}, setsum_from_reader = {}",
+            setsum_from_writer.hexdigest(),
+            setsum_from_reader.hexdigest()
+        );
+
+        assert!(
+            !uses_relative_offsets,
+            "should detect absolute offsets in parquet"
+        );
+        assert_eq!(records.len(), 3, "should have 3 records");
+        // Verify positions are absolute
+        assert_eq!(records[0].0.offset(), 100);
+        assert_eq!(records[1].0.offset(), 101);
+        assert_eq!(records[2].0.offset(), 102);
+        assert_eq!(
+            setsum_from_writer, setsum_from_reader,
+            "writer and reader setsums should match for absolute-offset files"
+        );
     }
 }
