@@ -72,6 +72,7 @@ async fn test_k8s_integration_99_ping_pong_contention() {
             prefix,
             "writer1",
             (),
+            (),
             None,
         )
         .await
@@ -84,6 +85,7 @@ async fn test_k8s_integration_99_ping_pong_contention() {
             Arc::clone(&storage),
             prefix,
             "writer2",
+            (),
             (),
             None,
         )

@@ -24,6 +24,7 @@ async fn test_k8s_integration_copy_single_fragment() {
         "copy_single_fragment_source",
         "writer",
         (),
+        (),
         None,
     )
     .await
@@ -124,6 +125,7 @@ async fn test_k8s_integration_copy_after_garbage_collection_leaves_empty() {
         "copy_gc_empty_source",
         "writer",
         (),
+        (),
         None,
     )
     .await
@@ -212,6 +214,7 @@ async fn test_k8s_integration_copy_preserves_fragment_boundaries() {
         "copy_boundaries_source",
         "writer",
         (),
+        (),
         None,
     )
     .await
@@ -288,6 +291,7 @@ async fn test_k8s_integration_copy_with_partial_offset_splits_correctly() {
         "copy_partial_source",
         "writer",
         (),
+        (),
         None,
     )
     .await
@@ -350,6 +354,7 @@ async fn test_k8s_integration_copy_multiple_times_creates_independent_copies() {
         Arc::clone(&storage),
         "copy_multiple_source",
         "writer",
+        (),
         (),
         None,
     )

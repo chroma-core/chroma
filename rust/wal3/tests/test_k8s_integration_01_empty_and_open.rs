@@ -26,6 +26,7 @@ async fn test_k8s_integration_01_empty_and_open() {
         "test_k8s_integration_01_empty_and_append",
         "test writer",
         (),
+        (),
         None,
     )
     .await

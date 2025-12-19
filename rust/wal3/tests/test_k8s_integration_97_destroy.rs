@@ -23,6 +23,7 @@ async fn test_k8s_integration_97_destroy() {
         PREFIX,
         WRITER,
         (),
+        (),
         None,
     )
     .await

@@ -13,7 +13,6 @@ mod destroy;
 mod gc;
 mod interfaces;
 mod manifest;
-mod manifest_manager;
 mod reader;
 mod snapshot_cache;
 mod writer;
@@ -23,12 +22,11 @@ pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, Witness};
 pub use destroy::destroy;
 pub use gc::{Garbage, GarbageCollector};
-pub use interfaces::s3::BatchManager;
+pub use interfaces::s3::{BatchManager, ManifestManager};
 pub use interfaces::FragmentPublisher;
 pub use manifest::{
     unprefixed_snapshot_path, Manifest, ManifestAndETag, Snapshot, SnapshotPointer,
 };
-pub use manifest_manager::ManifestManager;
 pub use reader::{checksum_parquet, Limits, LogReader};
 pub use snapshot_cache::SnapshotCache;
 pub use writer::{upload_parquet, LogWriter, MarkDirty};
@@ -604,6 +602,20 @@ impl Fragment {
     pub fn possibly_contains_position(&self, position: LogPosition) -> bool {
         LogPosition::contains_offset(self.start, self.limit, position.offset)
     }
+}
+
+////////////////////////////////////////// UnboundFragment /////////////////////////////////////////
+
+/// An UnboundFragment is an immutable piece of the log containing adjacent writes.  Where a
+/// fragment has a seq_no (really: identifier), start, and limit, an unbound fragment has none of
+/// this.  It will be assigned by the manifest manager.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UnboundFragment {
+    pub path: String,
+    pub identifier: FragmentIdentifier,
+    pub num_records: u64,
+    pub num_bytes: u64,
+    pub setsum: Setsum,
 }
 
 /////////////////////////////////////////////// util ///////////////////////////////////////////////
