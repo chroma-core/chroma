@@ -16,6 +16,7 @@ use setsum::Setsum;
 use tracing::{Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::interfaces::FragmentPublisher;
 use crate::{
     unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
     ExponentialBackoff, Fragment, FragmentIdentifier, Garbage, GarbageCollectionOptions,
@@ -571,8 +572,8 @@ impl OnceLogWriter {
                 };
                 if !that.done.load(std::sync::atomic::Ordering::Relaxed) {
                     that.batch_manager.wait_for_writable().await;
-                    match that.batch_manager.take_work(&that.manifest_manager) {
-                        Ok(Some((fragment_identifier, log_position, work))) => {
+                    match that.batch_manager.take_work(&that.manifest_manager).await {
+                        Ok(Some(((fragment_identifier, log_position), work))) => {
                             Arc::clone(&that)
                                 .append_batch(fragment_identifier, log_position, work)
                                 .await;
@@ -628,10 +629,10 @@ impl OnceLogWriter {
     }
 
     fn shutdown(&self) {
-        self.batch_manager.shutdown();
+        self.batch_manager.shutdown_prepare();
         self.manifest_manager.shutdown();
         self.done.store(true, std::sync::atomic::Ordering::Relaxed);
-        self.batch_manager.pump_write_finished();
+        self.batch_manager.shutdown_finish();
     }
 
     async fn close(mut self: Arc<Self>) -> Result<(), Error> {
@@ -658,10 +659,12 @@ impl OnceLogWriter {
         let append_span_clone = append_span.clone();
         async move {
             let (tx, rx) = tokio::sync::oneshot::channel();
-            self.batch_manager.push_work(messages, tx, append_span);
-            match self.batch_manager.take_work(&self.manifest_manager) {
+            self.batch_manager
+                .push_work(messages, tx, append_span)
+                .await;
+            match self.batch_manager.take_work(&self.manifest_manager).await {
                 Ok(Some(work)) => {
-                    let (fragment_identifier, log_position, work) = work;
+                    let ((fragment_identifier, log_position), work) = work;
                     {
                         tokio::task::spawn(Arc::clone(self).append_batch(
                             fragment_identifier,
@@ -784,7 +787,7 @@ impl OnceLogWriter {
                 self.shutdown();
             })?;
         // Record the records/batches written.
-        self.batch_manager.finish_write();
+        self.batch_manager.finish_write().await;
         Ok(log_position)
     }
 
