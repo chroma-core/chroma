@@ -82,7 +82,10 @@ impl<'me> SparseReader<'me> {
         }
     }
 
-    pub async fn load_blocks(&'me self, encoded_dimension_ids: impl Iterator<Item = &'me str>) {
+    pub async fn load_block_maxes(
+        &'me self,
+        encoded_dimension_ids: impl Iterator<Item = &'me str>,
+    ) {
         self.max_reader
             .load_blocks_for_prefixes(encoded_dimension_ids.chain([DIMENSION_PREFIX]))
             .await
@@ -116,7 +119,7 @@ impl<'me> SparseReader<'me> {
             .await? as u32)
     }
 
-    pub async fn get_blocks(
+    pub async fn get_block_maxes(
         &'me self,
         encoded_dimension_id: &'me str,
     ) -> Result<impl Iterator<Item = (u32, f32)> + 'me, SparseReaderError> {
@@ -145,7 +148,7 @@ impl<'me> SparseReader<'me> {
             .collect::<Vec<_>>();
 
         join(
-            self.load_blocks(
+            self.load_block_maxes(
                 collected_query
                     .iter()
                     .map(|(_, encoded_dimension_id, _)| encoded_dimension_id.as_str()),
@@ -180,7 +183,7 @@ impl<'me> SparseReader<'me> {
                 body_index: bodies.len() as u32,
             };
 
-            let mut block_iterator = self.get_blocks(encoded_dimension_id).await?;
+            let mut block_iterator = self.get_block_maxes(encoded_dimension_id).await?;
             let Some((block_next_offset, block_max)) = block_iterator
                 .by_ref()
                 .find(|&(block_next_offset, _)| offset < block_next_offset)
