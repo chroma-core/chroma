@@ -120,6 +120,7 @@ impl Bindings {
             segment_manager: Some(segment_manager_config),
             sqlitedb: Some(sqlite_db_config),
             sysdb: sysdb_config,
+            mcmr_sysdb: None,
             collections_with_segments_provider: collection_cache_config,
             log: log_config,
             executor: executor_config,

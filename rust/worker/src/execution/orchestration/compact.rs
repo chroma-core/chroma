@@ -2775,13 +2775,16 @@ mod tests {
 
         // Connect to Grpc SysDb (requires Tilt running)
         let grpc_sysdb = chroma_sysdb::GrpcSysDb::try_from_config(
-            &chroma_sysdb::GrpcSysDbConfig {
-                host: "localhost".to_string(),
-                port: 50051,
-                connect_timeout_ms: 5000,
-                request_timeout_ms: 10000,
-                num_channels: 4,
-            },
+            &(
+                chroma_sysdb::GrpcSysDbConfig {
+                    host: "localhost".to_string(),
+                    port: 50051,
+                    connect_timeout_ms: 5000,
+                    request_timeout_ms: 10000,
+                    num_channels: 4,
+                },
+                None,
+            ),
             &registry,
         )
         .await

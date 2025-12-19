@@ -68,7 +68,9 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (config, system) = config;
-        let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
+        let sysdb =
+            SysDb::try_from_config(&(config.sysdb.clone(), config.mcmr_sysdb.clone()), registry)
+                .await?;
         let log = Log::try_from_config(&(config.log.clone(), system.clone()), registry).await?;
         let storage = Storage::try_from_config(&config.storage, registry).await?;
         let blockfile_provider = BlockfileProvider::try_from_config(

@@ -130,6 +130,8 @@ pub struct QueryServiceConfig {
     #[serde(default)]
     pub sysdb: SysDbConfig,
     #[serde(default)]
+    pub mcmr_sysdb: Option<chroma_sysdb::GrpcSysDbConfig>,
+    #[serde(default)]
     pub storage: chroma_storage::config::StorageConfig,
     #[serde(default)]
     pub log: chroma_log::config::LogConfig,
@@ -219,6 +221,8 @@ pub struct CompactionServiceConfig {
     pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
     #[serde(default)]
     pub sysdb: SysDbConfig,
+    #[serde(default)]
+    pub mcmr_sysdb: Option<chroma_sysdb::GrpcSysDbConfig>,
     #[serde(default)]
     pub storage: chroma_storage::config::StorageConfig,
     #[serde(default)]

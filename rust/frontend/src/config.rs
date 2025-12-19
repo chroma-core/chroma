@@ -5,7 +5,7 @@ use crate::{
 use chroma_log::config::LogConfig;
 use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sqlite::config::SqliteDBConfig;
-use chroma_sysdb::SysDbConfig;
+use chroma_sysdb::{GrpcSysDbConfig, SysDbConfig};
 use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use chroma_types::{default_default_knn_index, KnnIndex};
 use figment::providers::{Env, Format, Yaml};
@@ -58,6 +58,8 @@ pub struct FrontendConfig {
     #[serde(default = "default_sysdb_config")]
     pub sysdb: SysDbConfig,
     #[serde(default)]
+    pub mcmr_sysdb: Option<GrpcSysDbConfig>,
+    #[serde(default)]
     pub collections_with_segments_provider: CollectionsWithSegmentsProviderConfig,
     #[serde(default = "default_log_config")]
     pub log: LogConfig,
@@ -86,6 +88,7 @@ impl FrontendConfig {
             segment_manager: default_segment_manager_config(),
             sysdb: default_sysdb_config(),
             collections_with_segments_provider: Default::default(),
+            mcmr_sysdb: None,
             log: default_log_config(),
             executor: default_executor_config(),
             default_knn_index: default_default_knn_index(),

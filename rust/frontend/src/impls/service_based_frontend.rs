@@ -2113,7 +2113,9 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             LocalSegmentManager::try_from_config(segment_manager_conf, registry).await?;
         };
 
-        let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
+        let sysdb =
+            SysDb::try_from_config(&(config.sysdb.clone(), config.mcmr_sysdb.clone()), registry)
+                .await?;
         let mut log = Log::try_from_config(&(config.log.clone(), system.clone()), registry).await?;
         let max_batch_size = log.get_max_batch_size().await?;
 
@@ -2231,7 +2233,7 @@ mod tests {
             port: 50051,
             ..Default::default()
         });
-        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+        let mut sysdb = SysDb::try_from_config(&(sysdb_config, None), &registry)
             .await
             .unwrap();
         let segments = sysdb
@@ -2282,7 +2284,7 @@ mod tests {
             port: 50051,
             ..Default::default()
         });
-        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+        let mut sysdb = SysDb::try_from_config(&(sysdb_config, None), &registry)
             .await
             .unwrap();
 

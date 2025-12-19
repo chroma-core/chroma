@@ -715,7 +715,10 @@ impl Configurable<(GarbageCollectorConfig, System)> for GarbageCollector {
         (config, system): &(GarbageCollectorConfig, System),
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let sysdb_config = SysDbConfig::Grpc(config.sysdb_config.clone());
+        let sysdb_config = (
+            SysDbConfig::Grpc(config.sysdb_config.clone()),
+            config.mcmr_sysdb_config.clone(),
+        );
         let sysdb_client = SysDb::try_from_config(&sysdb_config, registry).await?;
         let storage = Storage::try_from_config(&config.storage_config, registry).await?;
 
@@ -948,6 +951,7 @@ mod tests {
                 request_timeout_ms: 10000,
                 num_channels: 1,
             },
+            mcmr_sysdb_config: None,
             dispatcher_config: DispatcherConfig::default(),
             storage_config: s3_config_for_localhost_with_bucket_name("chroma-storage").await,
             default_mode: CleanupMode::DryRunV2,
@@ -1177,9 +1181,15 @@ mod tests {
         // Create collections
         let mut clients = ChromaGrpcClients::new().await.unwrap();
         let mut sysdb = SysDb::Grpc(
-            GrpcSysDb::try_from_config(&config.sysdb_config, &registry)
-                .await
-                .unwrap(),
+            GrpcSysDb::try_from_config(
+                &(
+                    config.sysdb_config.clone(),
+                    config.mcmr_sysdb_config.clone(),
+                ),
+                &registry,
+            )
+            .await
+            .unwrap(),
         );
 
         let collection_handle = tokio::spawn({
