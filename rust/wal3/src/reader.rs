@@ -478,6 +478,83 @@ pub fn fragment_path(prefix: &str, path: &str) -> String {
     format!("{prefix}/{path}")
 }
 
+/// Computes the setsum and extracts records from parquet bytes.
+///
+/// The `starting_log_position` is used to convert relative offsets to absolute positions for the
+/// returned records. The setsum is always computed using the raw offsets from the file (relative
+/// or absolute) to match how the writer computed it.
+///
+/// Returns `(setsum, records, uses_relative_offsets)` where `uses_relative_offsets` indicates
+/// whether the parquet file uses relative offsets (true) or absolute offsets (false).
+#[allow(clippy::type_complexity)]
+pub fn checksum_parquet(
+    parquet: &[u8],
+    starting_log_position: Option<LogPosition>,
+) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, bool), Error> {
+    let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from(parquet.to_vec()))
+        .map_err(|_| Error::internal(file!(), line!()))?;
+    let reader = builder
+        .build()
+        .map_err(|_| Error::internal(file!(), line!()))?;
+    let mut setsum = Setsum::default();
+    let mut records = vec![];
+    let mut uses_relative_offsets = false;
+    for batch in reader {
+        let batch = batch.map_err(|_| Error::internal(file!(), line!()))?;
+        // Determine if we have absolute offsets or relative offsets.
+        // - For absolute offsets: offset_base is 0, use offset directly for both setsum and position
+        // - For relative offsets: offset_base is starting_log_position (or 0 if None), use raw
+        //   offset for setsum (to match writer) and add offset_base for returned positions
+        let (offset_column, offset_base) = if let Some(offset) = batch.column_by_name("offset") {
+            (offset.clone(), 0u64)
+        } else if let Some(relative_offset) = batch.column_by_name("relative_offset") {
+            // For relative offsets, use the starting position if provided, otherwise 0.
+            // When starting_log_position is None, the returned positions will be relative
+            // (0, 1, 2...) which is appropriate for read_fragment which derives start/limit.
+            uses_relative_offsets = true;
+            let base = starting_log_position.map(|p| p.offset()).unwrap_or(0);
+            (relative_offset.clone(), base)
+        } else {
+            return Err(Error::internal(file!(), line!()));
+        };
+        let epoch_micros = batch
+            .column_by_name("timestamp_us")
+            .ok_or_else(|| Error::internal(file!(), line!()))?;
+        let body = batch
+            .column_by_name("body")
+            .ok_or_else(|| Error::internal(file!(), line!()))?;
+        let offset_array = offset_column
+            .as_any()
+            .downcast_ref::<arrow::array::UInt64Array>()
+            .ok_or_else(|| Error::internal(file!(), line!()))?;
+        let epoch_micros = epoch_micros
+            .as_any()
+            .downcast_ref::<arrow::array::UInt64Array>()
+            .ok_or_else(|| Error::internal(file!(), line!()))?;
+        let body = body
+            .as_any()
+            .downcast_ref::<arrow::array::BinaryArray>()
+            .ok_or_else(|| Error::internal(file!(), line!()))?;
+        for i in 0..batch.num_rows() {
+            // The raw offset from the file (relative or absolute depending on column type)
+            let raw_offset = offset_array.value(i);
+            // The absolute offset for returning positions to callers
+            let absolute_offset = raw_offset
+                .checked_add(offset_base)
+                .ok_or_else(|| Error::internal(file!(), line!()))?;
+            let epoch_micros = epoch_micros.value(i);
+            let body = body.value(i);
+            // Use raw_offset for setsum to match how the writer computed it.
+            // The writer uses the offset value that gets stored in the file (relative or absolute).
+            setsum.insert_vectored(&[&raw_offset.to_be_bytes(), &epoch_micros.to_be_bytes(), body]);
+            // Use absolute_offset for returned positions so callers get correct log positions.
+            records.push((LogPosition::from_offset(absolute_offset), body.to_vec()));
+        }
+    }
+    Ok((setsum, records, uses_relative_offsets))
+}
+
+/// Reads a parquet fragment from storage and computes its setsum and records.
 pub async fn read_parquet(
     storage: &Storage,
     prefix: &str,
@@ -490,55 +567,9 @@ pub async fn read_parquet(
         .await
         .map_err(Arc::new)?;
     let num_bytes = parquet.len() as u64;
-    let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(parquet.to_vec()))
-        .map_err(Arc::new)?;
-    let reader = builder.build().map_err(Arc::new)?;
-    let mut setsum = Setsum::default();
-    let mut records = vec![];
-    for batch in reader {
-        let batch = batch.map_err(|_| Error::CorruptFragment(path.to_string()))?;
-        let (offset_column, relative_offset_base) =
-            if let Some(offset) = batch.column_by_name("offset") {
-                (offset.clone(), 0u64)
-            } else if let (Some(relative_offset), Some(starting_log_position)) = (
-                batch.column_by_name("relative_offset"),
-                starting_log_position,
-            ) {
-                (relative_offset.clone(), starting_log_position.offset())
-            } else {
-                return Err(Error::CorruptFragment(path.to_string()));
-            };
-        let epoch_micros = batch
-            .column_by_name("timestamp_us")
-            .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
-        let body = batch
-            .column_by_name("body")
-            .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
-        let offset_array = offset_column
-            .as_any()
-            .downcast_ref::<arrow::array::UInt64Array>()
-            .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
-        let epoch_micros = epoch_micros
-            .as_any()
-            .downcast_ref::<arrow::array::UInt64Array>()
-            .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
-        let body = body
-            .as_any()
-            .downcast_ref::<arrow::array::BinaryArray>()
-            .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
-        for i in 0..batch.num_rows() {
-            let offset = offset_array
-                .value(i)
-                .checked_add(relative_offset_base)
-                .ok_or_else(|| {
-                    return Error::CorruptFragment(path.to_string());
-                })?;
-            let epoch_micros = epoch_micros.value(i);
-            let body = body.value(i);
-            setsum.insert_vectored(&[&offset.to_be_bytes(), &epoch_micros.to_be_bytes(), body]);
-            records.push((LogPosition::from_offset(offset), body.to_vec()));
-        }
-    }
+    let (setsum, records, _uses_relative_offsets) =
+        checksum_parquet(&parquet, starting_log_position)
+            .map_err(|_| Error::CorruptFragment(path.to_string()))?;
     Ok((setsum, records, num_bytes))
 }
 

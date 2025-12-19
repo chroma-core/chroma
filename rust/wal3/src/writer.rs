@@ -1488,4 +1488,76 @@ mod tests {
             );
         }
     }
+
+    /// Verifies that checksum_parquet returns the same setsum as construct_parquet for relative
+    /// offsets.
+    #[test]
+    fn relative_offset_setsum_consistency() {
+        use crate::reader::checksum_parquet;
+
+        let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
+
+        // Write with relative offsets (None) - setsum computed with offsets 0, 1, 2
+        let (buffer, setsum_from_writer) =
+            construct_parquet(None, &messages).expect("construct_parquet with None should succeed");
+
+        // Read back with checksum_parquet (no starting position)
+        let (setsum_from_reader, records, uses_relative_offsets) =
+            checksum_parquet(&buffer, None).expect("checksum_parquet should succeed");
+
+        println!(
+            "relative_offset_setsum_consistency: setsum_from_writer = {}, setsum_from_reader = {}",
+            setsum_from_writer.hexdigest(),
+            setsum_from_reader.hexdigest()
+        );
+
+        assert!(
+            uses_relative_offsets,
+            "should detect relative offsets in parquet"
+        );
+        assert_eq!(records.len(), 3, "should have 3 records");
+        assert_eq!(
+            setsum_from_writer, setsum_from_reader,
+            "writer and reader setsums should match for relative-offset files"
+        );
+    }
+
+    /// Verifies that checksum_parquet returns the same setsum as construct_parquet for absolute
+    /// offsets.
+    #[test]
+    fn absolute_offset_setsum_consistency() {
+        use crate::reader::checksum_parquet;
+
+        let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
+        let starting_position = LogPosition::from_offset(100);
+
+        // Write with absolute offsets
+        let (buffer, setsum_from_writer) = construct_parquet(Some(starting_position), &messages)
+            .expect("construct_parquet should succeed");
+
+        // Read back with checksum_parquet
+        let (setsum_from_reader, records, uses_relative_offsets) =
+            checksum_parquet(&buffer, Some(starting_position))
+                .expect("checksum_parquet should succeed");
+
+        println!(
+            "absolute_offset_setsum_consistency: setsum_from_writer = {}, setsum_from_reader = {}",
+            setsum_from_writer.hexdigest(),
+            setsum_from_reader.hexdigest()
+        );
+
+        assert!(
+            !uses_relative_offsets,
+            "should detect absolute offsets in parquet"
+        );
+        assert_eq!(records.len(), 3, "should have 3 records");
+        // Verify positions are absolute
+        assert_eq!(records[0].0.offset(), 100);
+        assert_eq!(records[1].0.offset(), 101);
+        assert_eq!(records[2].0.offset(), 102);
+        assert_eq!(
+            setsum_from_writer, setsum_from_reader,
+            "writer and reader setsums should match for absolute-offset files"
+        );
+    }
 }
