@@ -67,10 +67,9 @@
 //! automatically downloaded from HuggingFace on first run.
 
 use chroma_benchmark::datasets::wikipedia_splade::WikipediaSplade;
-use chroma_blockstore::{
-    arrow::{config::BlockManagerConfig, provider::ArrowBlockfileProvider},
-    provider::BlockfileProvider,
-};
+
+use chroma_blockstore::arrow::provider::ArrowBlockfileProvider;
+use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_index::{
     config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig},
@@ -78,7 +77,7 @@ use chroma_index::{
     spann::types::{GarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannMetrics},
     Index, IndexUuid,
 };
-use chroma_storage::{local::LocalStorage, Storage};
+use chroma_storage::{Storage, local::LocalStorage};
 use chroma_types::{CollectionUuid, InternalSpannConfiguration};
 use clap::Parser;
 use futures::StreamExt;
@@ -91,11 +90,11 @@ use std::{path::PathBuf, time::Instant};
 #[command(about = "Benchmark SPANN index construction with batch processing")]
 struct Args {
     /// Number of records to index (total)
-    #[arg(short = 'n', long, default_value_t = 1000000)]
+    #[arg(short = 'n', long, default_value_t = 100000)]
     num_records: usize,
 
     /// Batch size (records per batch)
-    #[arg(short = 'b', long, default_value_t = 100000)]
+    #[arg(short = 'b', long, default_value_t = 10000)]
     batch_size: usize,
 
     /// Test mode: 10K records in 10 batches, then verify with queries
@@ -125,8 +124,13 @@ struct Args {
 
     /// Number of parallel tasks for batch writes (default: 5)
     /// Each task gets a clone of the writer (shares underlying data)
-    #[arg(short = 'p', long, default_value_t = 5)]
+    #[arg(short = 'p', long, default_value_t = 1)]
     parallelism: usize,
+
+    /// Use DashMap blockfile storage instead of Arrow (disk-based)
+    /// Faster for benchmarking as it avoids disk I/O
+    #[arg(long)]
+    dashmap_store: bool,
 }
 
 /// Replica statistics for a batch
@@ -224,8 +228,8 @@ async fn main() -> anyhow::Result<()> {
     let records = load_dataset(&args).await?;
 
     // Setup SPANN infrastructure
-    let (temp_dir, blockfile_provider, hnsw_provider, collection_id) =
-        setup_spann_infrastructure().await?;
+    let (tmp_dir, blockfile_provider, hnsw_provider, collection_id) =
+        setup_spann_infrastructure(args.dashmap_store).await?;
 
     // Run benchmark
     let summary = run_benchmark(
@@ -262,7 +266,7 @@ async fn main() -> anyhow::Result<()> {
     // Cleanup
     drop(blockfile_provider);
     drop(hnsw_provider);
-    drop(temp_dir);
+    drop(tmp_dir);
 
     Ok(())
 }
@@ -387,29 +391,35 @@ async fn load_dataset(args: &Args) -> anyhow::Result<Vec<(u32, Vec<f32>)>> {
     Ok(records)
 }
 
-async fn setup_spann_infrastructure() -> anyhow::Result<(
-    tempfile::TempDir,
-    BlockfileProvider,
-    HnswIndexProvider,
-    CollectionUuid,
-)> {
+async fn setup_spann_infrastructure(
+    dashmap_store: bool,
+) -> anyhow::Result<(tempfile::TempDir, BlockfileProvider, HnswIndexProvider, CollectionUuid)> {
     let tmp_dir = tempfile::tempdir()?;
 
+    // Use local storage for HNSW
     let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
 
-    let arrow_blockfile_provider = ArrowBlockfileProvider::new(
-        storage.clone(),
-        2 * 1024 * 1024, // 2 MB
-        chroma_cache::from_config_persistent(&chroma_cache::CacheConfig::Nop)
-            .await
-            .unwrap(),
-        chroma_cache::from_config_persistent(&chroma_cache::CacheConfig::Nop)
-            .await
-            .unwrap(),
-        BlockManagerConfig::default_num_concurrent_block_flushes(),
-    );
-    let blockfile_provider = BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+    // Create blockfile provider based on flag
+    let blockfile_provider = if dashmap_store {
+        // Use DashMap for blockfiles (concurrent, avoids disk I/O)
+        BlockfileProvider::new_dashmap()
+    } else {
+        // Use Arrow for blockfiles (disk-based)
+        let arrow_provider = ArrowBlockfileProvider::new(
+            storage.clone(),
+            16 * 1024 * 1024, // 16 MB max block size
+            chroma_cache::from_config_persistent(&chroma_cache::CacheConfig::Nop)
+                .await
+                .unwrap(),
+            chroma_cache::from_config_persistent(&chroma_cache::CacheConfig::Nop)
+                .await
+                .unwrap(),
+            16, // num concurrent block flushes
+        );
+        BlockfileProvider::ArrowBlockfileProvider(arrow_provider)
+    };
 
+    // HNSW provider with disk mode
     let hnsw_provider = HnswIndexProvider::new(
         storage,
         PathBuf::from(tmp_dir.path()),
@@ -417,7 +427,7 @@ async fn setup_spann_infrastructure() -> anyhow::Result<(
             .await
             .unwrap(),
         16,
-        false,
+        false, // use_direct_hnsw = false for disk-based HNSW
     );
 
     Ok((
@@ -500,6 +510,7 @@ async fn run_benchmark(
             gc_context.clone(),
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create SPANN writer: {:?}", e))?;
@@ -528,12 +539,6 @@ async fn run_benchmark(
         versions_map_id = Some(paths.versions_map_id);
         pl_id = Some(paths.pl_id);
         max_head_id_id = Some(paths.max_head_id_id);
-
-        // Clear cache after each batch
-        blockfile_provider
-            .clear()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to clear cache: {:?}", e))?;
 
         // Compute replica statistics by scanning the index
         let (replica_stats, current_state) = compute_replica_stats(
