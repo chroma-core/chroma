@@ -1500,6 +1500,7 @@ dependencies = [
 name = "chroma-blockstore"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "arrow",
  "async-trait",
  "bincode",

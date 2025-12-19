@@ -31,6 +31,7 @@ opentelemetry-http = { version = "0.27", features = ["reqwest-rustls"] }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 parking_lot = { version = "0.12.3", features = ["serde"] }
 dashmap = "6.1"
+ahash = "0.8.11"
 parquet = { version = "55.1", features = ["async"] }
 pin-project = "1.1.10"
 prost = "0.13"

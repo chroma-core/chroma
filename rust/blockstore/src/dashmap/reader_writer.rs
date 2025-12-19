@@ -1,6 +1,7 @@
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use ahash::RandomState;
 use chroma_error::ChromaError;
 use dashmap::DashMap;
 use uuid::Uuid;
@@ -11,11 +12,14 @@ use crate::Value;
 
 use super::storage::{FromStoredValue, StorageManager, StoredValue, ToStoredValue};
 
+// Type alias for DashMap with ahash for faster hashing
+type FastDashMap<K, V> = DashMap<K, V, RandomState>;
+
 // ============ Writer ============
 
 #[derive(Clone)]
 pub struct DashMapBlockfileWriter {
-    storage: Arc<DashMap<CompositeKey, StoredValue>>,
+    storage: Arc<FastDashMap<CompositeKey, StoredValue>>,
     storage_manager: StorageManager,
     id: Uuid,
 }
@@ -23,7 +27,7 @@ pub struct DashMapBlockfileWriter {
 impl DashMapBlockfileWriter {
     pub fn new(storage_manager: StorageManager) -> Self {
         Self {
-            storage: Arc::new(DashMap::new()),
+            storage: Arc::new(DashMap::with_hasher(RandomState::new())),
             storage_manager,
             id: Uuid::new_v4(),
         }
@@ -34,7 +38,7 @@ impl DashMapBlockfileWriter {
     pub fn fork_from(storage_manager: StorageManager, fork_from: &Uuid) -> Option<Self> {
         let existing_data = storage_manager.get(fork_from)?;
 
-        let storage = DashMap::new();
+        let storage = DashMap::with_hasher(RandomState::new());
         for (key, value) in existing_data.iter() {
             storage.insert(key.clone(), value.clone());
         }
@@ -258,7 +262,7 @@ mod tests {
 
         let reader: DashMapBlockfileReader<&str, &str> =
             DashMapBlockfileReader::open(id, storage_manager).unwrap();
-        
+
         assert_eq!(reader.get("prefix", "key1").unwrap(), Some("value1"));
         assert_eq!(reader.get("prefix", "key2").unwrap(), Some("value2"));
         assert_eq!(reader.get("prefix", "key3").unwrap(), None);
@@ -275,7 +279,7 @@ mod tests {
 
         let reader: DashMapBlockfileReader<u32, &str> =
             DashMapBlockfileReader::open(id, storage_manager).unwrap();
-        
+
         assert_eq!(reader.get("prefix", 1u32).unwrap(), Some("value1"));
         assert_eq!(reader.get("prefix", 2u32).unwrap(), Some("value2"));
     }
@@ -291,7 +295,7 @@ mod tests {
 
         let reader: DashMapBlockfileReader<f32, &str> =
             DashMapBlockfileReader::open(id, storage_manager).unwrap();
-        
+
         assert_eq!(reader.get("prefix", 1.0f32).unwrap(), Some("value1"));
         assert_eq!(reader.get("prefix", 2.0f32).unwrap(), Some("value2"));
     }
@@ -301,13 +305,17 @@ mod tests {
         let storage_manager = StorageManager::new();
         let writer = DashMapBlockfileWriter::new(storage_manager.clone());
         let id = writer.id();
-        writer.set("prefix", true, "value_true".to_string()).unwrap();
-        writer.set("prefix", false, "value_false".to_string()).unwrap();
+        writer
+            .set("prefix", true, "value_true".to_string())
+            .unwrap();
+        writer
+            .set("prefix", false, "value_false".to_string())
+            .unwrap();
         writer.commit().unwrap();
 
         let reader: DashMapBlockfileReader<bool, &str> =
             DashMapBlockfileReader::open(id, storage_manager).unwrap();
-        
+
         assert_eq!(reader.get("prefix", true).unwrap(), Some("value_true"));
         assert_eq!(reader.get("prefix", false).unwrap(), Some("value_false"));
     }
@@ -322,7 +330,7 @@ mod tests {
 
         let reader: DashMapBlockfileReader<&str, &str> =
             DashMapBlockfileReader::open(id, storage_manager).unwrap();
-        
+
         assert!(reader.contains("prefix", "key1"));
         assert!(!reader.contains("prefix", "key2"));
     }
@@ -339,7 +347,7 @@ mod tests {
 
         let reader: DashMapBlockfileReader<&str, &str> =
             DashMapBlockfileReader::open(id, storage_manager).unwrap();
-        
+
         assert_eq!(reader.count().unwrap(), 3);
     }
 
@@ -355,7 +363,7 @@ mod tests {
 
         let reader: DashMapBlockfileReader<&str, &str> =
             DashMapBlockfileReader::open(id, storage_manager).unwrap();
-        
+
         assert_eq!(reader.get("prefix", "key1").unwrap(), None);
         assert_eq!(reader.get("prefix", "key2").unwrap(), Some("value2"));
         assert_eq!(reader.count().unwrap(), 1);
@@ -366,23 +374,35 @@ mod tests {
         let storage_manager = StorageManager::new();
         let writer = DashMapBlockfileWriter::new(storage_manager.clone());
         let id = writer.id();
-        writer.set("prefix_a", "key1", "value1".to_string()).unwrap();
-        writer.set("prefix_a", "key2", "value2".to_string()).unwrap();
-        writer.set("prefix_b", "key3", "value3".to_string()).unwrap();
-        writer.set("prefix_c", "key4", "value4".to_string()).unwrap();
+        writer
+            .set("prefix_a", "key1", "value1".to_string())
+            .unwrap();
+        writer
+            .set("prefix_a", "key2", "value2".to_string())
+            .unwrap();
+        writer
+            .set("prefix_b", "key3", "value3".to_string())
+            .unwrap();
+        writer
+            .set("prefix_c", "key4", "value4".to_string())
+            .unwrap();
         writer.commit().unwrap();
 
         let reader: DashMapBlockfileReader<&str, &str> =
             DashMapBlockfileReader::open(id, storage_manager).unwrap();
-        
+
         // Get only prefix_a
         let results: Vec<_> = reader
             .get_range_iter("prefix_a"..="prefix_a", ..)
             .unwrap()
             .collect();
         assert_eq!(results.len(), 2);
-        assert!(results.iter().any(|(_, k, v)| *k == "key1" && *v == "value1"));
-        assert!(results.iter().any(|(_, k, v)| *k == "key2" && *v == "value2"));
+        assert!(results
+            .iter()
+            .any(|(_, k, v)| *k == "key1" && *v == "value1"));
+        assert!(results
+            .iter()
+            .any(|(_, k, v)| *k == "key2" && *v == "value2"));
     }
 
     #[test]
@@ -398,7 +418,7 @@ mod tests {
 
         let reader: DashMapBlockfileReader<u32, &str> =
             DashMapBlockfileReader::open(id, storage_manager).unwrap();
-        
+
         // Get keys >= 2 and < 4
         let results: Vec<_> = reader
             .get_range_iter("prefix"..="prefix", 2u32..4u32)
@@ -421,10 +441,13 @@ mod tests {
 
         let reader: DashMapBlockfileReader<u32, &str> =
             DashMapBlockfileReader::open(id, storage_manager).unwrap();
-        
+
         // Get keys > 1
         let results: Vec<_> = reader
-            .get_range_iter("prefix"..="prefix", (Bound::Excluded(1u32), Bound::Unbounded))
+            .get_range_iter(
+                "prefix"..="prefix",
+                (Bound::Excluded(1u32), Bound::Unbounded),
+            )
             .unwrap()
             .collect();
         assert_eq!(results.len(), 2);
@@ -444,7 +467,7 @@ mod tests {
 
         let reader: DashMapBlockfileReader<u32, &str> =
             DashMapBlockfileReader::open(id, storage_manager).unwrap();
-        
+
         // Get keys <= 2
         let results: Vec<_> = reader
             .get_range_iter("prefix"..="prefix", ..=2u32)
@@ -458,7 +481,7 @@ mod tests {
     #[test]
     fn test_fork_from() {
         let storage_manager = StorageManager::new();
-        
+
         // Create initial blockfile
         let writer1 = DashMapBlockfileWriter::new(storage_manager.clone());
         let id1 = writer1.id();
@@ -469,10 +492,12 @@ mod tests {
         // Fork from first blockfile
         let writer2 = DashMapBlockfileWriter::fork_from(storage_manager.clone(), &id1).unwrap();
         let id2 = writer2.id();
-        
+
         // Add new key and overwrite existing
         writer2.set("prefix", "key3", "value3".to_string()).unwrap();
-        writer2.set("prefix", "key1", "updated".to_string()).unwrap();
+        writer2
+            .set("prefix", "key1", "updated".to_string())
+            .unwrap();
         writer2.commit().unwrap();
 
         // Verify original is unchanged
@@ -504,7 +529,7 @@ mod tests {
 
         let reader: DashMapBlockfileReader<&str, &str> =
             DashMapBlockfileReader::open(id, storage_manager).unwrap();
-        
+
         assert_eq!(reader.rank("prefix", "a"), 0);
         assert_eq!(reader.rank("prefix", "b"), 1);
         assert_eq!(reader.rank("prefix", "c"), 2);
@@ -519,18 +544,18 @@ mod tests {
         let storage_manager = StorageManager::new();
         let writer = DashMapBlockfileWriter::new(storage_manager.clone());
         let id = writer.id();
-        
+
         let mut bitmap = RoaringBitmap::new();
         bitmap.insert(1);
         bitmap.insert(2);
         bitmap.insert(100);
-        
+
         writer.set("prefix", "key1", bitmap.clone()).unwrap();
         writer.commit().unwrap();
 
         let reader: DashMapBlockfileReader<&str, RoaringBitmap> =
             DashMapBlockfileReader::open(id, storage_manager).unwrap();
-        
+
         let result = reader.get("prefix", "key1").unwrap().unwrap();
         assert!(result.contains(1));
         assert!(result.contains(2));
@@ -543,14 +568,14 @@ mod tests {
         let storage_manager = StorageManager::new();
         let writer = DashMapBlockfileWriter::new(storage_manager.clone());
         let id = writer.id();
-        
+
         let data: &[u32] = &[1, 2, 3, 4, 5];
         writer.set("prefix", "key1", data).unwrap();
         writer.commit().unwrap();
 
         let reader: DashMapBlockfileReader<&str, &[u32]> =
             DashMapBlockfileReader::open(id, storage_manager).unwrap();
-        
+
         let result = reader.get("prefix", "key1").unwrap().unwrap();
         assert_eq!(result, &[1, 2, 3, 4, 5]);
     }

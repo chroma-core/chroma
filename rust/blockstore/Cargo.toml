@@ -16,6 +16,7 @@ roaring = { workspace = true }
 futures = { workspace = true }
 parking_lot = { workspace = true }
 dashmap = { workspace = true }
+ahash = { workspace = true }
 tracing = { workspace = true }
 shuttle = { workspace = true }
 prost = { workspace = true }
