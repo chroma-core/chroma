@@ -1484,7 +1484,7 @@ mod tests {
             assert_eq!(
                 offset_array.value(2),
                 u64::MAX,
-                "third offset should be u64::MAX (wrapping)"
+                "third offset should be u64::MAX - 0"
             );
         }
     }

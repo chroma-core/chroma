@@ -527,7 +527,12 @@ pub async fn read_parquet(
             .downcast_ref::<arrow::array::BinaryArray>()
             .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
         for i in 0..batch.num_rows() {
-            let offset = offset_array.value(i) + relative_offset_base;
+            let offset = offset_array
+                .value(i)
+                .checked_add(relative_offset_base)
+                .ok_or_else(|| {
+                    return Error::CorruptFragment(path.to_string());
+                })?;
             let epoch_micros = epoch_micros.value(i);
             let body = body.value(i);
             setsum.insert_vectored(&[&offset.to_be_bytes(), &epoch_micros.to_be_bytes(), body]);
