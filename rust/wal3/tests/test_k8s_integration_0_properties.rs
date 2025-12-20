@@ -160,7 +160,7 @@ proptest::proptest! {
         let start = manifest.oldest_timestamp();
         let limit = manifest.next_write_timestamp();
         let cache = Arc::new(TestingSnapshotCache::default());
-        let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+        let mock_publisher = MockManifestPublisher::new();
         let mut count = 0;
         let mut last_limit = 0;
         for offset in start.offset()..=limit.offset() {
@@ -224,7 +224,7 @@ proptest::proptest! {
         let start = manifest.oldest_timestamp();
         let limit = manifest.next_write_timestamp();
         let cache = Arc::new(TestingSnapshotCache::with_snapshots(snapshots.clone()));
-        let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+        let mock_publisher = MockManifestPublisher::new();
         eprintln!("[{:?}, {:?})", start, limit);
         let mut last_initial_seq_no = FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(0));
         for offset in start.offset()..=limit.offset() {
@@ -295,7 +295,7 @@ proptest::proptest! {
             }
         }
         let cache = Arc::new(TestingSnapshotCache::with_snapshots(snapshots.clone()));
-        let mock_publisher = MockManifestPublisher::new(Arc::clone(&cache));
+        let mock_publisher = MockManifestPublisher::new();
         // Pick as victim the most recent snapshot and select so that we keep just one snapshot and
         // one frag within that snapshot.
         assert!(!manifest.snapshots.is_empty());

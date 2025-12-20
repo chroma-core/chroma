@@ -864,6 +864,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             };
             match garbage
                 .install(
+                    &self.manifest_manager,
                     &self.options.throttle_manifest,
                     &self.storage,
                     &self.prefix,

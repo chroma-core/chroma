@@ -176,15 +176,16 @@ impl Garbage {
         }
     }
 
-    #[tracing::instrument(skip(self, storage))]
-    pub async fn install(
+    #[tracing::instrument(skip(self, manifest_publisher, storage))]
+    pub async fn install<P: FragmentPointer>(
         &self,
+        manifest_publisher: &dyn ManifestPublisher<P>,
         options: &ThrottleOptions,
         storage: &Storage,
         prefix: &str,
         existing: Option<&ETag>,
     ) -> Result<Option<ETag>, Error> {
-        self.install_new_snapshots(storage, prefix, options).await?;
+        self.install_new_snapshots(manifest_publisher).await?;
         Self::transition(options, storage, prefix, existing, self).await
     }
 
@@ -277,14 +278,12 @@ impl Garbage {
         }))
     }
 
-    pub async fn install_new_snapshots(
+    pub async fn install_new_snapshots<P: FragmentPointer>(
         &self,
-        storage: &Storage,
-        prefix: &str,
-        throttle: &ThrottleOptions,
+        manifest_publisher: &dyn ManifestPublisher<P>,
     ) -> Result<(), Error> {
         for snap in self.snapshots_to_make.iter() {
-            snap.install(throttle, storage, prefix).await?;
+            manifest_publisher.snapshot_install(snap).await?;
         }
         Ok(())
     }
