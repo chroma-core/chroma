@@ -6,8 +6,7 @@ before issuing a request to an LLM, we find the relevant parts of data in the
 collection, and include them in the prompt so the LLM can answer based on real 
 information rather than its training data alone. 
 
-But here's the problem: we can't just throw entire documents at the model. For example, 
-if a single PDF from our data might contain 50 pages. A codebase might span 
+But here's the problem: we can't just throw entire documents at the model. For example, a single PDF from our data might contain 50 pages. A codebase might span 
 thousands of files. Even a modest knowledge base can exceed what fits in a 
 context window — and even when documents do fit, including entire files is 
 wasteful. If someone asks "What's the default timeout?", we don't want to 
@@ -16,7 +15,7 @@ answers the question.
 
 Beyond the context concerns, we also need to be mindful of how we embed and store 
 data. All embedding models have their own token limits. If we try to embed a document 
-exceeding this limit, the resulting embedding will not represent the parts of document 
+exceeding this limit, the resulting embedding will not represent the parts of the document 
 beyond the model's limit. Additionally, Chroma limits each record document size to 
 16KB.
 
@@ -134,7 +133,7 @@ we can split by headers - try to split by `h2` headers, and recursively try inne
 headers. 
 
 We can also contextualize each chunk by specifying its place in the document's
-structure. For example if end up with a chunk that is under an `h3` header, we can
+structure. For example, if end up with a chunk that is under an `h3` header, we can
 append at the top the path from the document's `h1` to this chunk. 
 
 LangChain's `MarkdownHeaderTextSplitter` splits by section and captures the header hierarchy as metadata.
@@ -206,7 +205,7 @@ When chunking text-based files, our split boundaries are often obvious - paragra
 Code is trickier — there's no single obvious unit. Functions? Classes? Files? Instance methods can be too granular, files too large, and the right choice often depends on the codebase and the types of queries you want to answer.
 
 Using the same idea that chunks should be self-contained units of our data, we 
-will choose classes and function as our chunking boundaries, and treat them as 
+will choose classes and functions as our chunking boundaries, and treat them as 
 atomic units of code that should not be broken down further.
 
 This way, if a query like "how is auth handled" is submitted, we can get back a 
@@ -223,13 +222,13 @@ class MyClass:
         print(f"Hello {name}")
 ```
 
-We will get a tree with a `class_declaration` node, which encompasses the entire class. It will have as a child a `method_definition` node, covering the `say_hello` method, and so on.
+We will get a tree with a `class_definition` node, which encompasses the entire class. It will have as a child a `method_definition` node, covering the `say_hello` method, and so on.
 
 Each node represents a construct of the language we work with, which is exactly what we want to have in our collection.
 
 ### A Small Example
 
-Let's examine a small example of using `tree-sitter` to parse Python files. To being, we'll set up Let's set up `tree-sitter` and a parser for Python files:
+Let's examine a small example of using `tree-sitter` to parse Python files. To being, we'll set up `tree-sitter` and a parser for Python files:
 
 {% Tabs %}
 
@@ -306,7 +305,7 @@ const root = tree.rootNode;
 
 {% /TabbedCodeBlock %}
 
-The root node encompasses the entire source code. It's first child is the `class_definition` node, spanning lines 1-3. If we explore further down the tree, we will find the `function_definition` node, which spans lines 2-3.
+The root node encompasses the entire source code. Its first child is the `class_definition` node, spanning lines 1-3. If we explore further down the tree, we will find the `function_definition` node, which spans lines 2-3.
 
 {% TabbedCodeBlock %}
 
@@ -348,7 +347,7 @@ We can also use the nodes' `start_byte` and `end_byte` fields to get back the co
 from uuid import uuid4
 
 def parse_code(file_path: str) -> list[Chunk]:
-    with open(file_path, "r") as f:
+    with open(file_path, "rb") as f:
         source_code = f.read()
     
     tree = parser.parse(source_code)
@@ -376,8 +375,8 @@ def parse_code(file_path: str) -> list[Chunk]:
         chunk = Chunk(
             id=str(uuid4()),
             content=source_code[node.start_byte : node.end_byte].decode("utf-8"),
-            start_line=node.start_line[0],
-            end_line=node.end_line[0],
+            start_line=node.start_point[0],
+            end_line=node.end_point[0],
             path=file_path,
         )
         chunks.append(chunk)
@@ -441,7 +440,7 @@ export function parseCode(filePath: string, parser: Parser): Chunk[] {
 
 {% /TabbedCodeBlock %}
 
-If chunks this method produces are still too large, we can default to splitting them by line spans. If we ever need to reconstruct them, we can use the line-number metadata fields.
+If the chunks this method produces are still too large, we can default to splitting them by line spans. If we ever need to reconstruct them, we can use the line-number metadata fields.
 
 ## Evaluation
 
@@ -560,8 +559,8 @@ results = collection.query(
 
 metrics = [
     {
-        "recall": recall_at_k(chunk_ids, test_quereies[i]["expected"], k),
-        "mrr": mrr(chunk_ids, test_quereies[i]["expected"])
+        "recall": recall_at_k(chunk_ids, test_queries[i]["expected_chunks"], k),
+        "mrr": mrr(chunk_ids, test_queries[i]["expected_chunks"])
     }
     for i, chunk_ids in enumerate(results["ids"])
 ]
@@ -579,8 +578,8 @@ const results = collection.query({
 });
 
 const metrics = results.ids.map((chunkIds: string[], i: number) => ({
-    recall: recallAtK(chunkIds, testQueries[i].expected, k),
-    mrr: mrr(chunkIds, testQueries[i].expected),
+    recall: recallAtK(chunkIds, testQueries[i].expected_chunks, k),
+    mrr: mrr(chunkIds, testQueries[i].expected_chunks),
 }));
 ```
 {% /Tab %}
@@ -591,4 +590,4 @@ If you see:
 * Low recall (the correct chunks are not in the top-k results) - try smaller chunks, with more overlap between them.
 * Correct chunks rank low - add context to the chunks themselves and leverage metadata filtering
 * Duplicate results - decrease chunk overlap
-* Irrelevant matches - try larger chunk, structure or semantic aware chunking.
+* Irrelevant matches - try larger chunks, structure-aware chunking, or semantic-aware chunking.
