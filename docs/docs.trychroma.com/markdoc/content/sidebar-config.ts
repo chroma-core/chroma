@@ -190,6 +190,7 @@ const sidebarConfig: AppSection[] = [
         pages: [
           { id: "building-with-ai", name: "Building With AI" },
           { id: "intro-to-retrieval", name: "Introduction to Retrieval" },
+          { id: "chunking", name: "Chunking" },
           { id: "agentic-search", name: "Agentic Search" },
           { id: "agentic-memory", name: "Agentic Memory" },
         ],
