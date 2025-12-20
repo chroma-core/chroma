@@ -1,0 +1,594 @@
+# Chunking
+
+Retrieval-Augmented Generation (RAG) lets us ground large language models in our 
+own data. The core idea is simple: we store our data in a Chroma collection. Then, 
+before issuing a request to an LLM, we find the relevant parts of data in the 
+collection, and include them in the prompt so the LLM can answer based on real 
+information rather than its training data alone. 
+
+But here's the problem: we can't just throw entire documents at the model. For example, 
+if a single PDF from our data might contain 50 pages. A codebase might span 
+thousands of files. Even a modest knowledge base can exceed what fits in a 
+context window — and even when documents do fit, including entire files is 
+wasteful. If someone asks "What's the default timeout?", we don't want to 
+retrieve a 20-page configuration guide; we want the specific paragraph that 
+answers the question.
+
+Beyond the context concerns, we also need to be mindful of how we embed and store 
+data. All embedding models have their own token limits. If we try to embed a document 
+exceeding this limit, the resulting embedding will not represent the parts of document 
+beyond the model's limit. Additionally, Chroma limits each record document size to 
+16KB.
+
+This is why RAG systems work with **chunks** — smaller pieces of documents 
+that can be independently retrieved based on relevance to a query.
+
+A common **ingestion pipeline** works as follows: we split data into chunks, collect metadata fields we can attach to each chunk, and insert the resulting records into our Chroma collection. Chroma will automatically embed the chunks using the collection's embedding function.
+
+## Choosing Chunking Boundaries
+
+Chunking forces a trade-off: chunks need to be small enough to match specific 
+queries, but large enough to be self-contained and meaningful.
+
+Consider building a chatbot over technical documentation, where we decide to chunk text by sentences. The following paragraph
+
+> The connection timeout controls how long the client waits when establishing a connection to the server. The default value is 30 seconds. For high-latency networks, consider increasing this to 60 seconds. Note that this is different from the read timeout, which controls how long the client waits for data after the connection is established.
+
+Will produce these chunks:
+
+* **Chunk 1**: "The connection timeout controls how long the client waits when establishing a connection to the server."
+* **Chunk 2**: "The default value is 30 seconds."
+* **Chunk 3**: "For high-latency networks, consider increasing this to 60 seconds."
+* **Chunk 4**: "Note that this is different from the read timeout, which controls how long the client waits for data after the connection is established."
+
+Now a user asks:
+
+> How long is the connection timeout?
+
+Chunk 2 contains "The default value is 30 seconds"—but it never mentions "connection timeout." That phrase only appears in Chunk 1.
+When we issue this query to the collection, we have no guarantee that both chunks will be retrieved so an LLM can compile the correct answer.
+
+A better approach keeps full paragraphs together, so the answer and its context share the same embedding and get retrieved as a unit.
+The right boundaries depend on what we're chunking. A novel has different natural units than an API reference. Code has different logical boundaries than an email thread.
+
+Poor chunking creates a chain of problems through your pipeline:
+
+1. Retrieval returns partial matches. In the example above, searching for "default connection timeout" might rank Chunk 1 highest (it mentions "connection timeout") even though Chunk 2 has the actual answer. Your relevance scores look reasonable, but the retrieved content doesn't actually answer the question.
+2. You compensate by increasing top-k. When individual chunks don't contain complete information, you retrieve 10 or 20 results instead of 3 or 4. This increases token costs, and dilutes the prompt with marginally relevant text—hurting the LLM's ability to focus on what matters.
+3. The LLM produces degraded answers. The model can only synthesize what you provide. Fragmentary context leads to hedged answers ("The default value appears to be 30 seconds, but I'm not certain what parameter this refers to..."), hallucinated details, or outright errors.
+
+## Chunking Strategies
+
+**Recursive splitting** — Try to split at the largest structural unit first 
+(e.g., double newlines for paragraphs), but if a resulting chunk exceeds your 
+size limit (token and/or document limit), recursively split it using smaller 
+units (single newlines, then sentences, then words). This balances 
+structure-awareness with size constraints. LangChain's `RecursiveCharacterTextSplitter` 
+is a common implementation.
+
+**Split with Overlap** - Use a chunking strategy (like recursive splitting), but 
+include an overlap between chunks. For example, if splitting a PDF by paragraphs, 
+Chunk-1 contains the first paragraph and the first sentence of the second paragraph. 
+Chunk-2 contains the second paragraph and the last sentence of the first paragraph.
+The overlap creates redundancy that helps preserve context across boundaries. 
+The downside: you're storing and embedding duplicate content.
+
+**Structure-aware splitting** — Parse the document's explicit structure: 
+Markdown headers, HTML DOM, or code ASTs. Split at structural boundaries and 
+optionally include hierarchical context in the chunk's content itself. For example, 
+when splitting the code for a class by instance methods, include at the top of 
+each chunk a code comment mentioning the encompassing class, file name, etc.
+
+**Semantic splitting** — Embed sentences or paragraphs, compute similarity 
+between adjacent segments, and place chunk boundaries where similarity 
+drops (indicating a topic shift). This process can also be driven by an LLM 
+alternatively. This method is more computationally expensive but can produce 
+more coherent chunks when documents lack clear structural markers.
+
+{% Banner type="tip" %}
+Learn more about different strategies in our [chunking research report](https://research.trychroma.com/evaluating-chunking) 
+{% /Banner %}
+
+## Chunking Text
+
+For most text documents, recursive chunking with some chunk overlap is a good 
+starting point. LangChain's `RecursiveCharacterTextSplitter` is an example implementation 
+for this strategy. It tries to split at natural boundaries (paragraphs first, 
+then sentences, then words) while respecting size limits and adding overlap 
+to preserve context across boundaries.
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+```python
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=500,
+    chunk_overlap=50,
+    separators=["\n\n", "\n", ". ", " "]
+)
+
+chunks = splitter.split_text(document)
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
+
+const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 500,
+    chunkOverlap: 50,
+    separators: ["\n\n", "\n", ". ", " "]
+});
+
+const chunks = await splitter.splitText(document);
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+When chunking Markdown files, we can take advantage of their structure. For example, 
+we can split by headers - try to split by `h2` headers, and recursively try inner 
+headers. 
+
+We can also contextualize each chunk by specifying its place in the document's
+structure. For example if end up with a chunk that is under an `h3` header, we can
+append at the top the path from the document's `h1` to this chunk. 
+
+LangChain's `MarkdownHeaderTextSplitter` splits by section and captures the header hierarchy as metadata.
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+```python
+from langchain.text_splitter import MarkdownHeaderTextSplitter
+
+splitter = MarkdownHeaderTextSplitter(
+    headers_to_split_on=[("#", "h1"), ("##", "h2"), ("###", "h3")]
+)
+chunks = splitter.split_text(markdown_doc)
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+import { MarkdownHeaderTextSplitter } from "langchain/text_splitter";
+
+const splitter = new MarkdownHeaderTextSplitter({
+    headersToSplitOn: [["#", "h1"], ["##", "h2"], ["###", "h3"]]
+});
+
+const chunks = await splitter.splitText(markdownDoc);
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+Each chunk includes the path to it from the document's `h1` header: 
+
+```JSON
+{
+  "h1": "Config", 
+  "h2": "Timeouts"
+}
+```
+
+We can leverage it to add this context for each chunk:
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+```python
+def contextualize(chunk) -> str:
+    headers = [chunk.metadata.get(f"h{i}") for i in range(1, 4)]
+    path = " > ".join(h for h in headers if h)
+    return f"[{path}]\n\n{chunk.page_content}" if path else chunk.page_content
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+function contextualize(chunk: Document): string {
+    const headers = [1, 2, 3].map(i => chunk.metadata[`h${i}`]).filter(Boolean);
+    const path = headers.join(" > ");
+    return path ? `[${path}]\n\n${chunk.pageContent}` : chunk.pageContent;
+}
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+## Chunking Code
+
+When chunking text-based files, our split boundaries are often obvious - paragraphs, sentences, Markdown headers, etc.
+Code is trickier — there's no single obvious unit. Functions? Classes? Files? Instance methods can be too granular, files too large, and the right choice often depends on the codebase and the types of queries you want to answer.
+
+Using the same idea that chunks should be self-contained units of our data, we 
+will choose classes and function as our chunking boundaries, and treat them as 
+atomic units of code that should not be broken down further.
+
+This way, if a query like "how is auth handled" is submitted, we can get back a 
+chunk containing a relevant function. If that chunk contains references to other 
+classes or functions, we can subsequently retrieve the chunks where they are represented (via [regex](../../docs/querying-collections/full-text-search.md) search for example).
+
+A great tool that gives us the ability to parse a file of code into these units is `tree-sitter`. It is a fast parsing library that can build an abstract syntax tree, or an AST, for an input source code.
+
+For example, if we parse this code snippet with tree sitter:
+
+```python
+class MyClass:
+    def say_hello(self, name: str) -> None:
+        print(f"Hello {name}")
+```
+
+We will get a tree with a `class_declaration` node, which encompasses the entire class. It will have as a child a `method_definition` node, covering the `say_hello` method, and so on.
+
+Each node represents a construct of the language we work with, which is exactly what we want to have in our collection.
+
+### A Small Example
+
+Let's examine a small example of using `tree-sitter` to parse Python files. To being, we'll set up Let's set up `tree-sitter` and a parser for Python files:
+
+{% Tabs %}
+
+{% Tab label="python" %}
+{% PythonInstallation packages="tree-sitter tree-sitter-python" / %}
+{% /Tab %}
+
+{% Tab label="typescript" %}
+{% TypescriptInstallation packages="tree-sitter tree-sitter-python" / %}
+{% /Tab %}
+
+{% /Tabs %}
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+
+```python
+from tree_sitter import Language, Parser
+import tree_sitter_python as tspython
+
+# Use Python grammar
+python_language = Language(tspython.language())
+
+# Set up the parser
+parser = Parser(python_language)
+```
+
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+import Parser from "tree-sitter";
+import Python from "tree-sitter-python";
+
+const parser = new Parser();
+parser.setLanguage(Python);
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+Using the parser, we can process the code snippet from our small example:
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+
+```python
+source_code = b"""
+class MyClass:
+    def say_hello(self, name: str) -> None:
+        print(f"Hello {name}")
+"""
+
+tree = parser.parse(source_code)
+root = tree.root_node
+```
+
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+const sourceCode = `
+class MyClass:
+    def say_hello(self, name: str) -> None:
+        print(f"Hello {name}")
+`;
+
+const tree = parser.parse(sourceCode);
+const root = tree.rootNode;
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+The root node encompasses the entire source code. It's first child is the `class_definition` node, spanning lines 1-3. If we explore further down the tree, we will find the `function_definition` node, which spans lines 2-3.
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+
+```python
+print(root.children[0])
+# <Node type=class_definition, start_point=(1, 0), end_point=(3, 30)>
+
+print(root.children[0].children[3].children[0])
+# <Node type=function_definition, start_point=(2, 4), end_point=(3, 30)>
+```
+
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+console.log(root.children[0].type);
+// class_definition
+
+console.log(root.children[0].children[3].children[0].type);
+// function_definition
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+### Recursively Exploring an AST
+
+We can write a function, that given source code, parses it using the `tree-sitter` parser, and recursively explores the tree to find the nodes we want represented in our chunks. Recall that we wanted to treat our "target" node as atomic units. So we will stop the recursion when we find such nodes.
+
+We can also use the nodes' `start_byte` and `end_byte` fields to get back the code each node represents. `tree-sitter` can also give us the line numbers each node spans, which we can save in chunks' metadata:
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+
+```python
+from uuid import uuid4
+
+def parse_code(file_path: str) -> list[Chunk]:
+    with open(file_path, "r") as f:
+        source_code = f.read()
+    
+    tree = parser.parse(source_code)
+    root = tree.root_node
+
+    target_types = ['function_definition', 'class_definition']
+
+    def collect_nodes(node: Node) -> list[Node]:
+        result: list[Node] = []
+
+        if node.type in target_types:
+            result.append(node)
+        else:
+            for child in node.children:
+                result.extend(collect_nodes(child))
+
+        return result
+
+    nodes = collect_nodes(root)
+    chunks = []
+
+    for node in nodes:
+        name_node = node.child_by_field_name("name")
+        symbol = source_code[name_node.start_byte:name_node.end_byte].decode()
+        chunk = Chunk(
+            id=str(uuid4()),
+            content=source_code[node.start_byte : node.end_byte].decode("utf-8"),
+            start_line=node.start_line[0],
+            end_line=node.end_line[0],
+            path=file_path,
+        )
+        chunks.append(chunk)
+    
+    return chunks
+```
+
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+import fs from "fs";
+import type Parser from "tree-sitter";
+import { v4 as uuid } from "uuid";
+
+export function parseCode(filePath: string, parser: Parser): Chunk[] {
+    const sourceCode = fs.readFileSync(filePath, "utf8");
+
+    const tree = parser.parse(sourceCode);
+    const root = tree.rootNode;
+
+    const targetTypes = ["function_definition", "class_definition"];
+
+    function collectNodes(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
+        const result: Parser.SyntaxNode[] = [];
+
+        if (targetTypes.includes(node.type)) {
+            result.push(node);
+        } else {
+            for (const child of node.children) {
+                result.push(...collectNodes(child));
+            }
+        }
+
+        return result;
+    }
+
+    const nodes = collectNodes(root);
+    const chunks: Chunk[] = [];
+
+    for (const node of nodes) {
+        const nameNode = node.childForFieldName("name");
+        if (!nameNode) continue;
+
+        const symbol = sourceCode.slice(nameNode.startIndex, nameNode.endIndex);
+
+        chunks.push({
+            id: uuid(),
+            content: sourceCode.slice(node.startIndex, node.endIndex),
+            start_line: node.startPosition.row,
+            end_line: node.endPosition.row,
+            path: filePath,
+        });
+    }
+
+    return chunks;
+}
+
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+If chunks this method produces are still too large, we can default to splitting them by line spans. If we ever need to reconstruct them, we can use the line-number metadata fields.
+
+## Evaluation
+
+To evaluate your chunking strategy, test it against real queries and measure how well the right chunks surface. The goal is retrieval quality: when we issue a query to Chroma, do the top results contain the information needed to answer it?
+
+Create a set of test queries with ground truth: each query maps to the chunk(s) that should be retrieved for it:
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+
+```python
+test_queries = [
+    {
+        "query": "What's the default connection timeout?",
+        "expected_chunks": ["chunk-3"],
+    },
+    {
+        "query": "How do I authenticate with OAuth?",
+        "expected_chunks": ["chunk-1", "chunk-2"],
+    },
+    # ...
+]
+```
+
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+const testQueries = [
+    {
+        query: "What's the default connection timeout?",
+        expected_chunks: ["chunk-3"],
+    },
+    {
+        query: "How do I authenticate with OAuth?",
+        expected_chunks: ["chunk-1", "chunk-2"],
+    },
+    // ...
+]
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+The key metrics you will measure are:
+* **Recall@k**: Of your test queries, what percentage have the correct chunk in the top `k` results?
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+
+```python
+def recall_at_k(results: list[str], expected: list[str], k: int) -> float:
+    top_k = set(results[:k])
+    return len(top_k & set(expected)) / len(expected)
+```
+
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+function recallAtK(results: string[], expected: string[], k: number): number {
+    const topK = new Set(results.slice(0, k));
+    return [...topK].filter(x => expected.includes(x)).length / expected.length;
+}
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+* **Mean Reciprocal Rank (MRR)** — Where does the first correct chunk appear? (Higher is better)
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+
+```python
+def mrr(results: list[str], expected: list[str]) -> float:
+    for i, chunk_id in enumerate(results):
+        if chunk_id in expected:
+            return 1 / (i + 1)
+    return 0
+```
+
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+function mrr(results: string[], expected: string[]): number {
+    for (let i = 0; i < results.length; i++) {
+        if (expected.includes(results[i])) {
+            return 1 / (i + 1);
+        }
+    }
+    return 0;
+}
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+Then test your queries against the chunks in your collection:
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+
+```python
+k = 10
+
+results = collection.query(
+    query_texts=[test_case["query"] for test_case in test_queries],
+    n_results=k
+)
+
+metrics = [
+    {
+        "recall": recall_at_k(chunk_ids, test_quereies[i]["expected"], k),
+        "mrr": mrr(chunk_ids, test_quereies[i]["expected"])
+    }
+    for i, chunk_ids in enumerate(results["ids"])
+]
+```
+
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+const k = 10;
+
+const results = collection.query({
+    query_texts: testQueries.map(testCase => testCase.query),
+    n_results: k,
+});
+
+const metrics = results.ids.map((chunkIds: string[], i: number) => ({
+    recall: recallAtK(chunkIds, testQueries[i].expected, k),
+    mrr: mrr(chunkIds, testQueries[i].expected),
+}));
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+If you see:
+* Low recall (the correct chunks are not in the top-k results) - try smaller chunks, with more overlap between them.
+* Correct chunks rank low - add context to the chunks themselves and leverage metadata filtering
+* Duplicate results - decrease chunk overlap
+* Irrelevant matches - try larger chunk, structure or semantic aware chunking.
