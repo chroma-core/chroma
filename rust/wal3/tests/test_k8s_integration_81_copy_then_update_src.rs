@@ -4,7 +4,7 @@ use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
     create_factories, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions,
-    Manifest, SnapshotOptions,
+    ManifestManagerFactory, S3ManifestManagerFactory, SnapshotOptions,
 };
 
 #[tokio::test]
@@ -14,7 +14,17 @@ async fn test_k8s_integration_81_copy_then_update_src() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let prefix = "test_k8s_integration_80_copy_source";
     let writer = "load and scrub writer";
-    Manifest::initialize(&LogWriterOptions::default(), &storage, prefix, "init")
+    let init_manifest_factory = S3ManifestManagerFactory {
+        write: LogWriterOptions::default(),
+        read: LogReaderOptions::default(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        writer: "init".to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
+    init_manifest_factory
+        .init_manifest(&wal3::Manifest::new_empty("init"))
         .await
         .unwrap();
     let options = LogWriterOptions {
@@ -59,12 +69,22 @@ async fn test_k8s_integration_81_copy_then_update_src() {
     .await
     .unwrap();
     let scrubbed_source = reader.scrub(wal3::Limits::default()).await.unwrap();
+    let target_prefix = "test_k8s_integration_80_copy_target";
+    let target_manifest_factory = S3ManifestManagerFactory {
+        write: LogWriterOptions::default(),
+        read: LogReaderOptions::default(),
+        storage: Arc::clone(&storage),
+        prefix: target_prefix.to_string(),
+        writer: "copy".to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
     wal3::copy(
         &storage,
-        &LogWriterOptions::default(),
         &reader,
         LogPosition::default(),
-        "test_k8s_integration_80_copy_target".to_string(),
+        target_prefix.to_string(),
+        target_manifest_factory,
     )
     .await
     .unwrap();
@@ -72,7 +92,7 @@ async fn test_k8s_integration_81_copy_then_update_src() {
     let copied = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "test_k8s_integration_80_copy_target".to_string(),
+        target_prefix.to_string(),
     )
     .await
     .unwrap();

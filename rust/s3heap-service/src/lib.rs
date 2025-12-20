@@ -32,8 +32,8 @@ use s3heap::{
     Triggerable,
 };
 use wal3::{
-    Cursor, CursorName, CursorStore, CursorStoreOptions, FragmentPuller, FragmentSeqNo,
-    LogPosition, LogReader, LogReaderOptions, ManifestReader, Witness,
+    Cursor, CursorName, CursorStore, CursorStoreOptions, CursorWitness, FragmentPuller,
+    FragmentSeqNo, LogPosition, LogReader, LogReaderOptions, ManifestReader,
 };
 
 /// gRPC client for heap tender service
@@ -255,7 +255,14 @@ impl HeapTender {
     /// Reads the dirty log and coalesces entries by collection.
     pub async fn read_and_coalesce_dirty_log(
         &self,
-    ) -> Result<(Option<Witness>, Cursor, Vec<(CollectionUuid, LogPosition)>), Error> {
+    ) -> Result<
+        (
+            Option<CursorWitness>,
+            Cursor,
+            Vec<(CollectionUuid, LogPosition)>,
+        ),
+        Error,
+    > {
         let witness = self.cursor.load(&HEAP_TENDER_CURSOR_NAME).await?;
         let position = match self.reader.oldest_timestamp().await {
             Ok(position) => position,

@@ -4,7 +4,7 @@ use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
     create_factories, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
-    SnapshotOptions,
+    ManifestManagerFactory, S3ManifestManagerFactory, SnapshotOptions,
 };
 
 #[tokio::test]
@@ -14,7 +14,17 @@ async fn test_k8s_integration_70_load_and_scrub() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let prefix = "test_k8s_integration_70_load_and_scrub";
     let writer = "load and scrub writer";
-    Manifest::initialize(&LogWriterOptions::default(), &storage, prefix, "init")
+    let init_factory = S3ManifestManagerFactory {
+        write: LogWriterOptions::default(),
+        read: LogReaderOptions::default(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        writer: "init".to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
+    init_factory
+        .init_manifest(&Manifest::new_empty("init"))
         .await
         .unwrap();
     let options = LogWriterOptions {

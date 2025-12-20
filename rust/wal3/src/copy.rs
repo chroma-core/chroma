@@ -3,23 +3,27 @@ use std::sync::Arc;
 use chroma_storage::Storage;
 use setsum::Setsum;
 
-use crate::interfaces::{FragmentConsumer, FragmentPointer, ManifestConsumer};
-use crate::reader::LogReader;
-use crate::{
-    prefixed_fragment_path, Error, FragmentIdentifier, Limits, LogPosition, LogWriterOptions,
-    Manifest,
+use crate::interfaces::{
+    FragmentConsumer, FragmentPointer, ManifestConsumer, ManifestManagerFactory,
 };
+use crate::reader::LogReader;
+use crate::{prefixed_fragment_path, Error, FragmentIdentifier, Limits, LogPosition, Manifest};
 
+/// Copy a log from one prefix to another.
+///
+/// The `manifest_factory` is used to initialize the target manifest. The target prefix is taken
+/// from the factory.
 pub async fn copy<
     P: FragmentPointer,
     FP: FragmentConsumer<FragmentPointer = P>,
-    MP: ManifestConsumer<P>,
+    MC: ManifestConsumer<P>,
+    MF: ManifestManagerFactory<FragmentPointer = P>,
 >(
     storage: &Storage,
-    options: &LogWriterOptions,
-    reader: &LogReader<P, FP, MP>,
+    reader: &LogReader<P, FP, MC>,
     offset: LogPosition,
     target: String,
+    manifest_factory: MF,
 ) -> Result<(), Error> {
     let reference = reader
         .manifest()
@@ -74,7 +78,7 @@ pub async fn copy<
             initial_offset,
             initial_seq_no,
         };
-        Manifest::initialize_from_manifest(options, storage, &target, manifest).await?;
+        manifest_factory.init_manifest(&manifest).await?;
     } else {
         let setsum = Setsum::default();
         let collected = Setsum::default();
@@ -92,7 +96,7 @@ pub async fn copy<
         if manifest.initial_offset.is_some() && manifest.initial_seq_no.is_none() {
             return Err(Error::internal(file!(), line!()));
         }
-        Manifest::initialize_from_manifest(options, storage, &target, manifest).await?;
+        manifest_factory.init_manifest(&manifest).await?;
     }
     Ok(())
 }

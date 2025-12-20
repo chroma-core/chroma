@@ -5,6 +5,7 @@ use chroma_storage::s3_client_for_test_with_new_bucket;
 use wal3::{
     create_factories, Cursor, CursorName, CursorStoreOptions, GarbageCollectionOptions, Limits,
     LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions,
+    S3ManifestManagerFactory,
 };
 
 #[tokio::test]
@@ -67,12 +68,22 @@ async fn test_k8s_integration_82_copy_empty_log_initializes() {
     .await
     .unwrap();
     let scrubbed_source = reader.scrub(wal3::Limits::default()).await.unwrap();
+    let target_prefix = "test_k8s_integration_82_copy_empty_log_initializes_target";
+    let target_manifest_factory = S3ManifestManagerFactory {
+        write: LogWriterOptions::default(),
+        read: LogReaderOptions::default(),
+        storage: Arc::clone(&storage),
+        prefix: target_prefix.to_string(),
+        writer: "copy".to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
     wal3::copy(
         &storage,
-        &LogWriterOptions::default(),
         &reader,
         LogPosition::default(),
-        "test_k8s_integration_82_copy_empty_log_initializes_target".to_string(),
+        target_prefix.to_string(),
+        target_manifest_factory,
     )
     .await
     .unwrap();
@@ -80,7 +91,7 @@ async fn test_k8s_integration_82_copy_empty_log_initializes() {
     let copied = LogReader::open_classic(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "test_k8s_integration_82_copy_empty_log_initializes_target".to_string(),
+        target_prefix.to_string(),
     )
     .await
     .unwrap();

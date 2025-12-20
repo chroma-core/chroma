@@ -7,7 +7,8 @@ use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
     create_factories, Cursor, CursorName, CursorStoreOptions, Error, GarbageCollectionOptions,
-    LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
+    LogReaderOptions, LogWriter, LogWriterOptions, Manifest, ManifestManagerFactory,
+    S3ManifestManagerFactory,
 };
 
 pub mod common;
@@ -132,7 +133,17 @@ async fn test_k8s_integration_98_garbage_alternate() {
     let writer_name = "init";
 
     // Initialize the log
-    Manifest::initialize(&LogWriterOptions::default(), &storage, prefix, writer_name)
+    let init_factory = S3ManifestManagerFactory {
+        write: LogWriterOptions::default(),
+        read: LogReaderOptions::default(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        writer: writer_name.to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
+    init_factory
+        .init_manifest(&Manifest::new_empty(writer_name))
         .await
         .unwrap();
 

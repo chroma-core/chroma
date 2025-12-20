@@ -2,18 +2,19 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, ETag, PutMode, PutOptions, Storage, StorageError,
+    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, PutMode, PutOptions, Storage,
+    StorageError,
 };
 use setsum::Setsum;
 
 use crate::gc::Garbage;
-use crate::interfaces::ManifestPublisher;
+use crate::interfaces::{ManifestPublisher, ManifestWitness};
 use crate::manifest::{Manifest, ManifestAndETag, Snapshot, SnapshotPointer};
 use crate::reader::read_fragment;
 use crate::writer::MarkDirty;
 use crate::{
     unprefixed_fragment_path, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
-    GarbageCollectionOptions, LogPosition, SnapshotCache, SnapshotOptions,
+    GarbageCollectionOptions, LogPosition, LogWriterOptions, SnapshotCache, SnapshotOptions,
     SnapshotPointerOrFragmentIdentifier, ThrottleOptions,
 };
 
@@ -232,7 +233,7 @@ impl ManifestManager {
         mark_dirty: Arc<dyn MarkDirty>,
         snapshot_cache: Arc<dyn SnapshotCache>,
     ) -> Result<Self, Error> {
-        let Some((manifest, e_tag)) = Manifest::load(&throttle, &storage, &prefix).await? else {
+        let Some((manifest, e_tag)) = Self::load(&throttle, &storage, &prefix).await? else {
             return Err(Error::UninitializedLog);
         };
         let next_log_position = manifest.next_write_timestamp();
@@ -294,14 +295,8 @@ impl ManifestManager {
                 let mut staging = self.staging.lock().unwrap();
                 staging.pull_work(self)
             };
-            if let Some((
-                old_manifest,
-                old_e_tag,
-                new_manifest,
-                next_seq_no_to_apply,
-                snapshot,
-                notifiers,
-            )) = work
+            if let Some((_, old_e_tag, new_manifest, next_seq_no_to_apply, snapshot, notifiers)) =
+                work
             {
                 if let Some(snapshot) = snapshot {
                     if let Err(err) = self.snapshot_install(&snapshot).await {
@@ -311,16 +306,7 @@ impl ManifestManager {
                         continue;
                     }
                 }
-                match old_manifest
-                    .install(
-                        &self.throttle,
-                        &self.storage,
-                        &self.prefix,
-                        Some(&old_e_tag),
-                        &new_manifest,
-                    )
-                    .await
-                {
+                match self.install(Some(&old_e_tag), &new_manifest).await {
                     Ok(e_tag) => {
                         // SAFETY(rescrv):  Mutex poisoning.
                         {
@@ -369,6 +355,139 @@ impl ManifestManager {
         output += &format!("tearing_down: {:?}\n", staging.tearing_down);
         output += &format!("fragments: {}\n", staging.fragments.len());
         output
+    }
+
+    /// Initialize the log with an empty manifest.
+    #[tracing::instrument(skip(storage))]
+    pub async fn initialize(
+        options: &LogWriterOptions,
+        storage: &Storage,
+        prefix: &str,
+        writer: &str,
+    ) -> Result<(), Error> {
+        let writer = writer.to_string();
+        let initial = Manifest {
+            writer,
+            setsum: Setsum::default(),
+            collected: Setsum::default(),
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        Self::initialize_from_manifest(options, storage, prefix, initial).await
+    }
+
+    /// Initialize the log with an empty manifest.
+    #[tracing::instrument(skip(storage))]
+    pub async fn initialize_from_manifest(
+        _: &LogWriterOptions,
+        storage: &Storage,
+        prefix: &str,
+        initial: Manifest,
+    ) -> Result<(), Error> {
+        let payload = serde_json::to_string(&initial)
+            .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
+            .into_bytes();
+        storage
+            .put_bytes(
+                &crate::manifest::manifest_path(prefix),
+                payload,
+                PutOptions::default()
+                    .with_priority(StorageRequestPriority::P0)
+                    .with_mode(PutMode::IfNotExist),
+            )
+            .await
+            .map_err(Arc::new)?;
+        Ok(())
+    }
+
+    /// Validate the e_tag against the manifest on object storage.
+    pub async fn head(
+        _: &ThrottleOptions,
+        storage: &Storage,
+        prefix: &str,
+        e_tag: &ETag,
+    ) -> Result<bool, Error> {
+        let path = crate::manifest::manifest_path(prefix);
+        Ok(storage.confirm_same(&path, e_tag).await.map_err(Arc::new)?)
+    }
+
+    /// Load the latest manifest from object storage.
+    pub async fn load(
+        options: &ThrottleOptions,
+        storage: &Storage,
+        prefix: &str,
+    ) -> Result<Option<(Manifest, ETag)>, Error> {
+        super::manifest_load(options, storage, prefix).await
+    }
+
+    /// Install a manifest to object storage.
+    #[tracing::instrument(skip(self, new))]
+    pub async fn install(&self, current: Option<&ETag>, new: &Manifest) -> Result<ETag, Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            self.throttle.throughput as f64,
+            self.throttle.headroom as f64,
+        );
+        tracing::info!(
+            "installing manifest at {} {:?} {:?}",
+            self.prefix,
+            new.next_write_timestamp(),
+            current,
+        );
+        let mut retry_count = 0;
+        loop {
+            let payload = serde_json::to_string(&new)
+                .map_err(|e| {
+                    Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
+                })?
+                .into_bytes();
+            let options = PutOptions::default().with_priority(StorageRequestPriority::P0);
+            let options = if let Some(e_tag) = current {
+                options.with_mode(PutMode::IfMatch(e_tag.clone()))
+            } else {
+                options.with_mode(PutMode::IfNotExist)
+            };
+            match self
+                .storage
+                .put_bytes(
+                    &crate::manifest::manifest_path(&self.prefix),
+                    payload,
+                    options,
+                )
+                .await
+            {
+                Ok(Some(e_tag)) => {
+                    return Ok(e_tag);
+                }
+                Ok(None) => {
+                    // NOTE(rescrv):  This is something of a lie.  We know that we put the log, but
+                    // without an e_tag we cannot do anything.  The log contention backoff protocol
+                    // cares for this case, rather than having to error-handle it separately
+                    // because it "crashes" the log and reinitializes.
+                    return Err(Error::LogContentionFailure);
+                }
+                Err(StorageError::Precondition { path: _, source: _ }) => {
+                    // NOTE(rescrv):  This is "durable" because it's a manifest failure.  See the
+                    // comment in the Error enum for why this makes sense.
+                    return Err(Error::LogContentionDurable);
+                }
+                Err(e) => {
+                    tracing::error!("error uploading manifest: {e:?}");
+                    let backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(60) || retry_count >= 3 {
+                        // NOTE(rescrv):  This is "durable" because it's a manifest failure.  See the
+                        // comment in the Error enum for why this makes sense.  By returning
+                        // "durable" rather than the underlying error we force an end-to-end
+                        // recovery.
+                        return Err(Error::LogContentionDurable);
+                    }
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+            retry_count += 1;
+        }
     }
 }
 
@@ -609,6 +728,79 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
             retry_count += 1;
         }
     }
+
+    async fn manifest_init(&self, initial: &Manifest) -> Result<(), Error> {
+        let payload = serde_json::to_string(initial)
+            .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
+            .into_bytes();
+        self.storage
+            .put_bytes(
+                &crate::manifest::manifest_path(&self.prefix),
+                payload,
+                PutOptions::default()
+                    .with_priority(StorageRequestPriority::P0)
+                    .with_mode(PutMode::IfNotExist),
+            )
+            .await
+            .map_err(Arc::new)?;
+        Ok(())
+    }
+
+    async fn manifest_head(&self, witness: &ManifestWitness) -> Result<bool, Error> {
+        let ManifestWitness::ETag(e_tag) = witness else {
+            return Err(Error::internal(file!(), line!()));
+        };
+        let path = crate::manifest::manifest_path(&self.prefix);
+        Ok(self
+            .storage
+            .confirm_same(&path, e_tag)
+            .await
+            .map_err(Arc::new)?)
+    }
+
+    async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            self.throttle.throughput as f64,
+            self.throttle.headroom as f64,
+        );
+        let mut retries = 0;
+        let path = crate::manifest::manifest_path(&self.prefix);
+        loop {
+            match self
+                .storage
+                .get_with_e_tag(
+                    &path,
+                    GetOptions::new(StorageRequestPriority::P0).with_strong_consistency(),
+                )
+                .await
+                .map_err(Arc::new)
+            {
+                Ok((ref manifest, e_tag)) => {
+                    let Some(e_tag) = e_tag else {
+                        return Err(Error::CorruptManifest(format!(
+                            "no ETag for manifest at {}",
+                            path
+                        )));
+                    };
+                    let manifest: Manifest = serde_json::from_slice(manifest).map_err(|e| {
+                        Error::CorruptManifest(format!("could not decode JSON manifest: {e:?}"))
+                    })?;
+                    return Ok(Some((manifest, ManifestWitness::ETag(e_tag))));
+                }
+                Err(err) => match &*err {
+                    StorageError::NotFound { path: _, source: _ } => return Ok(None),
+                    err => {
+                        let backoff = exp_backoff.next();
+                        tokio::time::sleep(backoff).await;
+                        if retries >= 3 {
+                            return Err(Error::StorageError(Arc::new(err.clone())));
+                        }
+                        retries += 1;
+                    }
+                },
+            }
+        }
+    }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -619,12 +811,14 @@ mod tests {
 
     use crate::*;
 
+    use super::*;
+
     #[tokio::test]
     async fn test_k8s_integration_manager_staging() {
         // NOTE(rescrv):  This stest doesn't check writes to storage.  It just tracks the logic of
         // the manager.
         let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
-        Manifest::initialize(
+        ManifestManager::initialize(
             &LogWriterOptions::default(),
             &storage,
             "prefix",
@@ -732,5 +926,79 @@ mod tests {
             work.2
         );
         assert_eq!(None, work.4);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_head_returns_true_for_matching_etag() {
+        use chroma_storage::s3::s3_client_for_test_with_new_bucket;
+
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let prefix = "test-head-matching";
+        let throttle_options = crate::ThrottleOptions::default();
+
+        let manifest = Manifest::new_empty("test-writer");
+
+        ManifestManager::initialize_from_manifest(
+            &crate::LogWriterOptions::default(),
+            &storage,
+            prefix,
+            manifest,
+        )
+        .await
+        .unwrap();
+
+        let (_loaded_manifest, etag) = ManifestManager::load(&throttle_options, &storage, prefix)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let result = ManifestManager::head(&throttle_options, &storage, prefix, &etag)
+            .await
+            .unwrap();
+        assert!(result, "head should return true for matching etag");
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_head_returns_error_for_nonexistent_manifest() {
+        use chroma_storage::s3::s3_client_for_test_with_new_bucket;
+
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let prefix = "test-head-nonexistent";
+        let throttle_options = crate::ThrottleOptions::default();
+
+        let fake_etag = chroma_storage::ETag("fake-etag".to_string());
+
+        let result = ManifestManager::head(&throttle_options, &storage, prefix, &fake_etag).await;
+        assert!(
+            result.is_err(),
+            "head should return error for nonexistent manifest"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_head_returns_false_for_non_matching_etag() {
+        use chroma_storage::s3::s3_client_for_test_with_new_bucket;
+
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let prefix = "test-head-non-matching";
+        let throttle_options = crate::ThrottleOptions::default();
+
+        let manifest = Manifest::new_empty("test-writer");
+
+        ManifestManager::initialize_from_manifest(
+            &crate::LogWriterOptions::default(),
+            &storage,
+            prefix,
+            manifest,
+        )
+        .await
+        .unwrap();
+
+        let fake_etag = chroma_storage::ETag("fake-etag-wont-match".to_string());
+
+        let result = ManifestManager::head(&throttle_options, &storage, prefix, &fake_etag)
+            .await
+            .unwrap();
+        assert!(!result, "head should return false for non-matching etag");
     }
 }

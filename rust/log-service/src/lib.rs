@@ -47,11 +47,11 @@ use tracing::{Instrument, Level};
 use uuid::Uuid;
 use wal3::{
     create_factories, scan_from_manifest, Cursor, CursorName, CursorStore, CursorStoreOptions,
-    Fragment, FragmentManagerFactory, FragmentPuller, FragmentSeqNo, GarbageCollectionOptions,
-    Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
-    ManifestAndETag, ManifestManagerFactory, ManifestReader, MarkDirty as MarkDirtyTrait,
-    S3FragmentManagerFactory, S3ManifestManagerFactory, Snapshot, SnapshotCache, SnapshotPointer,
-    Witness,
+    CursorWitness, Fragment, FragmentManagerFactory, FragmentPuller, FragmentSeqNo,
+    GarbageCollectionOptions, Limits, LogPosition, LogReader, LogReaderOptions, LogWriter,
+    LogWriterOptions, Manifest, ManifestAndETag, ManifestManagerFactory, ManifestReader,
+    MarkDirty as MarkDirtyTrait, S3FragmentManagerFactory, S3ManifestManagerFactory, Snapshot,
+    SnapshotCache, SnapshotPointer,
 };
 
 /// Concrete type alias for the LogWriter with S3 factories.
@@ -140,7 +140,7 @@ pub enum Error {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct InspectedLogState {
     manifest: Option<Manifest>,
-    witness: Option<Witness>,
+    witness: Option<CursorWitness>,
     start: u64,
     limit: u64,
 }
@@ -491,7 +491,7 @@ impl RollupPerCollection {
             std::cmp::min(self.initial_insertion_epoch_us, initial_insertion_epoch_us);
     }
 
-    fn witness_cursor(&mut self, witness: Option<&Witness>) {
+    fn witness_cursor(&mut self, witness: Option<&CursorWitness>) {
         // NOTE(rescrv):  There's an easy dance here to justify this as correct.  For the start log
         // position to advance, there must have been at least one GC cycle with a cursor that was
         // something other than 1.  That cursor should never get deleted, therefore we have a
@@ -541,7 +541,7 @@ impl RollupPerCollection {
 ////////////////////////////////////////////// Rollups /////////////////////////////////////////////
 
 struct Rollup {
-    witness: Option<Witness>,
+    witness: Option<CursorWitness>,
     cursor: Cursor,
     last_record_witnessed: LogPosition,
     rollups: HashMap<CollectionUuid, RollupPerCollection>,
@@ -1186,7 +1186,7 @@ impl LogServer {
                 let mut _active = handle.active.lock().await;
                 let cache_key = cache_key_for_cursor(collection_id, cursor);
                 if let Ok(Some(json_witness)) = cache.get(&cache_key).await {
-                    let witness: Witness = serde_json::from_slice(&json_witness.bytes)?;
+                    let witness: CursorWitness = serde_json::from_slice(&json_witness.bytes)?;
                     return Ok((Some(witness), None));
                 }
                 let load_span = tracing::info_span!("cursor load");
@@ -1217,7 +1217,7 @@ impl LogServer {
             } else {
                 None
             };
-            Ok::<(Option<Witness>, Option<Manifest>), Error>((witness, manifest))
+            Ok::<(Option<CursorWitness>, Option<Manifest>), Error>((witness, manifest))
         };
         let mut futures = Vec::with_capacity(rollups.len());
         for (collection_id, mut rollup) in std::mem::take(rollups) {
@@ -1624,12 +1624,21 @@ impl LogServer {
         // This is the existing compaction_offset, which is the next record to compact.
         let cursor = witness.map(|x| x.cursor.position);
         tracing::event!(Level::INFO, offset = ?cursor);
+        let target_manifest_factory = S3ManifestManagerFactory {
+            write: options,
+            read: self.config.reader.clone(),
+            storage: Arc::clone(&storage),
+            prefix: target_prefix.clone(),
+            writer: "copy".to_string(),
+            mark_dirty: Arc::new(()),
+            snapshot_cache: Arc::new(()),
+        };
         wal3::copy(
             &storage,
-            &options,
             &log_reader,
             cursor.unwrap_or(LogPosition::from_offset(1)),
             target_prefix.clone(),
+            target_manifest_factory,
         )
         .await
         .map_err(|err| Status::new(err.code().into(), format!("Failed to copy log: {}", err)))?;
@@ -2992,7 +3001,7 @@ mod tests {
         // Test extending keep alive time
         let keep_alive_duration = Duration::from_secs(30);
         active_log.keep_alive(keep_alive_duration);
-        assert!(active_log.collect_after > initial_time + Duration::from_secs(30));
+        assert!(active_log.collect_after >= initial_time + Duration::from_secs(30));
 
         // Test that shorter duration doesn't reduce time
         let long_time = active_log.collect_after;

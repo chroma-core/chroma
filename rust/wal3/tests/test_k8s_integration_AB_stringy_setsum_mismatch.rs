@@ -9,6 +9,7 @@ use chroma_storage::s3_client_for_test_with_new_bucket;
 use wal3::{
     create_factories, Cursor, CursorName, FragmentIdentifier, FragmentSeqNo,
     GarbageCollectionOptions, LogPosition, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
+    ManifestManagerFactory, S3ManifestManagerFactory,
 };
 
 mod common;
@@ -25,7 +26,17 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let prefix = "test_k8s_integration_AB_stringy_setsum_mismatch";
     let writer = "test writer";
-    Manifest::initialize(&LogWriterOptions::default(), &storage, prefix, "init")
+    let init_factory = S3ManifestManagerFactory {
+        write: LogWriterOptions::default(),
+        read: LogReaderOptions::default(),
+        storage: Arc::clone(&storage),
+        prefix: prefix.to_string(),
+        writer: "init".to_string(),
+        mark_dirty: Arc::new(()),
+        snapshot_cache: Arc::new(()),
+    };
+    init_factory
+        .init_manifest(&Manifest::new_empty("init"))
         .await
         .unwrap();
     let preconditions = [Condition::Manifest(ManifestCondition {

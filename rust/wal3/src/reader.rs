@@ -15,7 +15,7 @@ use chroma_storage::{
 use crate::interfaces::s3;
 use crate::interfaces::{
     FragmentConsumer, FragmentManagerFactory, FragmentPointer, ManifestConsumer,
-    ManifestManagerFactory,
+    ManifestManagerFactory, ManifestWitness,
 };
 use crate::{
     parse_fragment_path, Error, Fragment, FragmentIdentifier, FragmentSeqNo, LogPosition,
@@ -139,33 +139,33 @@ fn post_process_fragments(
 pub struct LogReader<
     P: FragmentPointer = (FragmentSeqNo, LogPosition),
     FP: FragmentConsumer<FragmentPointer = P> = s3::FragmentPuller,
-    MP: ManifestConsumer<P> = s3::ManifestReader,
+    MC: ManifestConsumer<P> = s3::ManifestReader,
 > {
-    options: LogReaderOptions,
+    _options: LogReaderOptions,
     // TODO(rescrv):  Fixup dead code.
     #[allow(dead_code)]
     fragment_publisher: FP,
-    manifest_publisher: MP,
+    manifest_consumer: MC,
     storage: Arc<Storage>,
     cache: Option<Arc<dyn SnapshotCache>>,
     pub(crate) prefix: String,
 }
 
-impl<P: FragmentPointer, FP: FragmentConsumer<FragmentPointer = P>, MP: ManifestConsumer<P>>
-    LogReader<P, FP, MP>
+impl<P: FragmentPointer, FP: FragmentConsumer<FragmentPointer = P>, MC: ManifestConsumer<P>>
+    LogReader<P, FP, MC>
 {
     pub fn new(
         options: LogReaderOptions,
         fragment_publisher: FP,
-        manifest_publisher: MP,
+        manifest_consumer: MC,
         storage: Arc<Storage>,
         prefix: String,
     ) -> Self {
         let cache = None;
         Self {
-            options,
+            _options: options,
             fragment_publisher,
-            manifest_publisher,
+            manifest_consumer,
             storage,
             cache,
             prefix,
@@ -175,15 +175,15 @@ impl<P: FragmentPointer, FP: FragmentConsumer<FragmentPointer = P>, MP: Manifest
     pub async fn open(
         options: LogReaderOptions,
         fragment_publisher: FP,
-        manifest_publisher: MP,
+        manifest_consumer: MC,
         storage: Arc<Storage>,
         prefix: String,
     ) -> Result<Self, Error> {
         let cache = None;
         Ok(Self {
-            options,
+            _options: options,
             fragment_publisher,
-            manifest_publisher,
+            manifest_consumer,
             storage,
             cache,
             prefix,
@@ -197,44 +197,39 @@ impl<P: FragmentPointer, FP: FragmentConsumer<FragmentPointer = P>, MP: Manifest
     /// Verify that the reader would read the same manifest as the one provided in
     /// manifest_and_etag, but do it in a way that doesn't load the whole manifest.
     pub async fn verify(&self, manifest_and_etag: &ManifestAndETag) -> Result<bool, Error> {
-        Manifest::head(
-            &self.options.throttle,
-            &self.storage,
-            &self.prefix,
-            &manifest_and_etag.e_tag,
-        )
-        .await
+        self.manifest_consumer
+            .manifest_head(&ManifestWitness::ETag(manifest_and_etag.e_tag.clone()))
+            .await
     }
 
     pub async fn manifest(&self) -> Result<Option<Manifest>, Error> {
-        Ok(
-            Manifest::load(&self.options.throttle, &self.storage, &self.prefix)
-                .await?
-                .map(|(m, _)| m),
-        )
+        Ok(self
+            .manifest_consumer
+            .manifest_load()
+            .await?
+            .map(|(m, _)| m))
     }
 
     pub async fn manifest_and_e_tag(&self) -> Result<Option<ManifestAndETag>, Error> {
-        match Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await {
-            Ok(Some((manifest, e_tag))) => Ok(Some(ManifestAndETag { manifest, e_tag })),
+        match self.manifest_consumer.manifest_load().await {
+            Ok(Some((manifest, ManifestWitness::ETag(e_tag)))) => {
+                Ok(Some(ManifestAndETag { manifest, e_tag }))
+            }
+            Ok(Some((_, _))) => Err(Error::internal(file!(), line!())),
             Ok(None) => Ok(None),
             Err(err) => Err(err),
         }
     }
 
     pub async fn oldest_timestamp(&self) -> Result<LogPosition, Error> {
-        let Some((manifest, _)) =
-            Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
-        else {
+        let Some((manifest, _)) = self.manifest_consumer.manifest_load().await? else {
             return Err(Error::UninitializedLog);
         };
         Ok(manifest.oldest_timestamp())
     }
 
     pub async fn next_write_timestamp(&self) -> Result<LogPosition, Error> {
-        let Some((manifest, _)) =
-            Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
-        else {
+        let Some((manifest, _)) = self.manifest_consumer.manifest_load().await? else {
             return Err(Error::UninitializedLog);
         };
         Ok(manifest.next_write_timestamp())
@@ -246,9 +241,7 @@ impl<P: FragmentPointer, FP: FragmentConsumer<FragmentPointer = P>, MP: Manifest
     /// 2. Up to, and including, the number of files to return.
     /// 3. Up to, and including, the total number of bytes to return.
     pub async fn scan(&self, from: LogPosition, limits: Limits) -> Result<Vec<Fragment>, Error> {
-        let Some((manifest, _)) =
-            Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
-        else {
+        let Some((manifest, _)) = self.manifest_consumer.manifest_load().await? else {
             return Err(Error::UninitializedLog);
         };
         let mut short_read = false;
@@ -298,13 +291,13 @@ impl<P: FragmentPointer, FP: FragmentConsumer<FragmentPointer = P>, MP: Manifest
                             if let Some(snapshot) = cache.get(s).await? {
                                 return Ok(Some(snapshot));
                             }
-                            let snap = self.manifest_publisher.snapshot_load(s).await?;
+                            let snap = self.manifest_consumer.snapshot_load(s).await?;
                             if let Some(snap) = snap.as_ref() {
                                 cache.put(s, snap).await?;
                             }
                             Ok(snap)
                         } else {
-                            self.manifest_publisher.snapshot_load(s).await
+                            self.manifest_consumer.snapshot_load(s).await
                         }
                     }
                 })
@@ -368,10 +361,11 @@ impl<P: FragmentPointer, FP: FragmentConsumer<FragmentPointer = P>, MP: Manifest
 
     #[tracing::instrument(skip(self), ret)]
     pub async fn scrub(&self, limits: Limits) -> Result<ScrubSuccess, Vec<Error>> {
-        let Some((manifest, _)) =
-            Manifest::load(&self.options.throttle, &self.storage, &self.prefix)
-                .await
-                .map_err(|x| vec![x])?
+        let Some((manifest, _)) = self
+            .manifest_consumer
+            .manifest_load()
+            .await
+            .map_err(|x| vec![x])?
         else {
             return Err(vec![Error::UninitializedLog]);
         };
@@ -676,6 +670,7 @@ pub async fn read_fragment(
 mod tests {
     use setsum::Setsum;
 
+    use crate::interfaces::s3::{ManifestManager, ManifestReader};
     use crate::interfaces::{FragmentManagerFactory, ManifestManagerFactory};
     use crate::{Fragment, FragmentIdentifier, FragmentSeqNo};
 
@@ -3594,9 +3589,14 @@ mod tests {
         let writer_options = crate::LogWriterOptions::default();
 
         let manifest = Manifest::new_empty("test-writer");
-        Manifest::initialize_from_manifest(&writer_options, &storage, &prefix, manifest.clone())
-            .await
-            .unwrap();
+        ManifestManager::initialize_from_manifest(
+            &writer_options,
+            &storage,
+            &prefix,
+            manifest.clone(),
+        )
+        .await
+        .unwrap();
 
         let (fragment_factory, manifest_factory) = s3::create_factories(
             writer_options,
@@ -3611,14 +3611,14 @@ mod tests {
         let manifest_manager = manifest_factory.make_consumer().await.unwrap();
 
         let reader = LogReader::new(
-            options,
+            options.clone(),
             batch_manager,
             manifest_manager,
             Arc::clone(&storage),
             prefix.clone(),
         );
 
-        let (loaded_manifest, etag) = Manifest::load(&reader.options.throttle, &storage, &prefix)
+        let (loaded_manifest, etag) = ManifestReader::load(&options.throttle, &storage, &prefix)
             .await
             .unwrap()
             .unwrap();
@@ -3640,9 +3640,14 @@ mod tests {
         let writer_options = crate::LogWriterOptions::default();
 
         let manifest = Manifest::new_empty("test-writer");
-        Manifest::initialize_from_manifest(&writer_options, &storage, &prefix, manifest.clone())
-            .await
-            .unwrap();
+        ManifestManager::initialize_from_manifest(
+            &writer_options,
+            &storage,
+            &prefix,
+            manifest.clone(),
+        )
+        .await
+        .unwrap();
 
         let (fragment_factory, manifest_factory) = s3::create_factories(
             writer_options,
@@ -3688,9 +3693,14 @@ mod tests {
         // Initialize a manifest first so we can create the managers
         // but we'll point the reader at a nonexistent prefix
         let manifest = Manifest::new_empty("test-writer");
-        Manifest::initialize_from_manifest(&writer_options, &storage, &prefix, manifest.clone())
-            .await
-            .unwrap();
+        ManifestManager::initialize_from_manifest(
+            &writer_options,
+            &storage,
+            &prefix,
+            manifest.clone(),
+        )
+        .await
+        .unwrap();
 
         let (fragment_factory, manifest_factory) = s3::create_factories(
             writer_options,
@@ -3740,9 +3750,14 @@ mod tests {
         let writer_options = crate::LogWriterOptions::default();
 
         let manifest = Manifest::new_empty("test-writer");
-        Manifest::initialize_from_manifest(&writer_options, &storage, &prefix, manifest.clone())
-            .await
-            .unwrap();
+        ManifestManager::initialize_from_manifest(
+            &writer_options,
+            &storage,
+            &prefix,
+            manifest.clone(),
+        )
+        .await
+        .unwrap();
 
         let (fragment_factory, manifest_factory) = s3::create_factories(
             writer_options,
@@ -3782,35 +3797,29 @@ mod tests {
     async fn test_k8s_integration_manifest_and_e_tag_returns_none_when_no_manifest() {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "nonexistent-prefix".to_string();
-        let init_prefix = "init-prefix".to_string();
         let options = LogReaderOptions::default();
         let writer_options = crate::LogWriterOptions::default();
 
-        // We need to initialize *some* manifest so the factories can work
-        // but we'll point the reader at a nonexistent prefix
-        let manifest = Manifest::new_empty("test-writer");
-        Manifest::initialize_from_manifest(
-            &writer_options,
-            &storage,
-            &init_prefix,
-            manifest.clone(),
-        )
-        .await
-        .unwrap();
-
-        let (fragment_factory, manifest_factory) = s3::create_factories(
-            writer_options,
-            LogReaderOptions::default(),
-            Arc::clone(&storage),
-            init_prefix.clone(),
-            "test-writer".to_string(),
-            Arc::new(()),
-            Arc::new(()),
-        );
+        // Create factories pointing to a prefix with no manifest.
+        let fragment_factory = crate::S3FragmentManagerFactory {
+            write: writer_options.clone(),
+            read: LogReaderOptions::default(),
+            storage: Arc::clone(&storage),
+            prefix: prefix.clone(),
+            mark_dirty: Arc::new(()),
+        };
+        let manifest_factory = crate::S3ManifestManagerFactory {
+            write: writer_options.clone(),
+            read: LogReaderOptions::default(),
+            storage: Arc::clone(&storage),
+            prefix: prefix.clone(),
+            writer: "test-writer".to_string(),
+            mark_dirty: Arc::new(()),
+            snapshot_cache: Arc::new(()),
+        };
         let batch_manager = fragment_factory.make_consumer().await.unwrap();
         let manifest_manager = manifest_factory.make_consumer().await.unwrap();
 
-        // Point the reader at the nonexistent prefix
         let reader = LogReader::new(
             options,
             batch_manager,

@@ -38,8 +38,6 @@ async fn test_k8s_integration_83_bootstrap() {
     );
     LogWriter::bootstrap(
         &options,
-        &storage,
-        PREFIX,
         WRITER,
         mark_dirty,
         fragment_factory,

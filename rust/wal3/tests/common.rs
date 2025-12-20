@@ -5,7 +5,8 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 extern crate wal3;
 
 use wal3::{
-    FragmentIdentifier, Garbage, LogPosition, Manifest, Snapshot, SnapshotPointer, ThrottleOptions,
+    FragmentIdentifier, Garbage, LogPosition, ManifestReader, Snapshot, SnapshotPointer,
+    ThrottleOptions,
 };
 
 ///////////////////////////////////////////// Condition ////////////////////////////////////////////
@@ -32,7 +33,7 @@ pub struct ManifestCondition {
 impl ManifestCondition {
     pub async fn assert(&self, storage: &Storage, prefix: &str) {
         println!("assert_postconditions: Manifest: {:#?}", self);
-        let manifest = Manifest::load(&ThrottleOptions::default(), storage, prefix)
+        let manifest = ManifestReader::load(&ThrottleOptions::default(), storage, prefix)
             .await
             .unwrap();
         if let Some((manifest, _)) = manifest {

@@ -19,7 +19,7 @@ mod writer;
 
 pub use backoff::ExponentialBackoff;
 pub use copy::copy;
-pub use cursors::{Cursor, CursorName, CursorStore, Witness};
+pub use cursors::{Cursor, CursorName, CursorStore, CursorWitness};
 pub use destroy::destroy;
 pub use gc::{Garbage, GarbageCollector};
 pub use interfaces::s3::{
@@ -28,7 +28,7 @@ pub use interfaces::s3::{
 };
 pub use interfaces::{
     FragmentConsumer, FragmentManagerFactory, FragmentPointer, FragmentPublisher, ManifestConsumer,
-    ManifestManagerFactory, ManifestPublisher,
+    ManifestManagerFactory, ManifestPublisher, ManifestWitness,
 };
 pub use manifest::{
     unprefixed_snapshot_path, Manifest, ManifestAndETag, Snapshot, SnapshotPointer,

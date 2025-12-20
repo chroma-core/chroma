@@ -3,9 +3,10 @@ use std::sync::Mutex;
 
 use setsum::Setsum;
 
+use wal3::ManifestWitness;
 use wal3::{
-    FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition, ManifestAndETag,
-    ManifestPublisher, Snapshot, SnapshotPointer,
+    Error, FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition, Manifest,
+    ManifestAndETag, ManifestPublisher, Snapshot, SnapshotPointer,
 };
 
 /// A mock ManifestPublisher that delegates snapshot_load to a SnapshotCache.
@@ -78,4 +79,16 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for MockManifestPublisher {
     }
 
     fn shutdown(&self) {}
+
+    async fn manifest_init(&self, _: &Manifest) -> Result<(), Error> {
+        Err(wal3::Error::UninitializedLog)
+    }
+
+    async fn manifest_head(&self, _: &ManifestWitness) -> Result<bool, Error> {
+        Err(wal3::Error::UninitializedLog)
+    }
+
+    async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error> {
+        Err(wal3::Error::UninitializedLog)
+    }
 }
