@@ -27,6 +27,7 @@ async-trait = { workspace = true }
 tempfile = { workspace = true }
 base64 = { workspace = true }
 
+dashmap = { workspace = true }
 chroma-error = { workspace = true }
 chroma-types = { workspace = true }
 chroma-blockstore = { workspace = true }
@@ -37,6 +38,7 @@ chroma-tracing = { workspace = true }
 chroma-distance = { workspace = true }
 itertools = { workspace = true }
 hnswlib = { workspace = true }
+usearch = "2.21"
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 
 [dev-dependencies]
@@ -49,6 +51,7 @@ regex = { workspace = true }
 rayon = { workspace = true }
 criterion = { workspace = true }
 proptest = { workspace = true }
+rand_chacha = "0.3"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { workspace = true }
 

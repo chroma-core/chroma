@@ -1,11 +1,14 @@
 pub mod config;
 pub mod fulltext;
 mod hnsw;
+pub mod hnsw_common;
 pub mod hnsw_provider;
 pub mod metadata;
 pub mod spann;
 pub mod sparse;
 mod types;
+pub mod usearch;
+pub mod usearch_provider;
 pub mod utils;
 
 // Re-export types

@@ -77,7 +77,7 @@ use chroma_index::{
     spann::types::{GarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannMetrics},
     Index, IndexUuid,
 };
-use chroma_storage::{Storage, local::LocalStorage};
+use chroma_storage::{local::LocalStorage, Storage};
 use chroma_types::{CollectionUuid, InternalSpannConfiguration};
 use clap::Parser;
 use futures::StreamExt;
@@ -393,7 +393,12 @@ async fn load_dataset(args: &Args) -> anyhow::Result<Vec<(u32, Vec<f32>)>> {
 
 async fn setup_spann_infrastructure(
     dashmap_store: bool,
-) -> anyhow::Result<(tempfile::TempDir, BlockfileProvider, HnswIndexProvider, CollectionUuid)> {
+) -> anyhow::Result<(
+    tempfile::TempDir,
+    BlockfileProvider,
+    HnswIndexProvider,
+    CollectionUuid,
+)> {
     let tmp_dir = tempfile::tempdir()?;
 
     // Use local storage for HNSW
