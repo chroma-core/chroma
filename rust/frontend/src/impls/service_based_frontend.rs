@@ -1271,7 +1271,7 @@ impl ServiceBasedFrontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.retryable_delete(request_clone).await;
+                let res = Box::pin(self_clone.retryable_delete(request_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -1287,20 +1287,22 @@ impl ServiceBasedFrontend {
                 }
             }
         };
-        let res = delete_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying delete() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .await;
+        let res = Box::pin(
+            delete_to_retry
+                .retry(self.collections_with_segments_provider.get_retry_backoff())
+                // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+                .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+                .notify(|_, _| {
+                    let retried = retries.fetch_add(1, Ordering::Relaxed);
+                    if retried > 0 {
+                        tracing::info!(
+                            "Retrying delete() request for collection {}",
+                            request.collection_id
+                        );
+                    }
+                }),
+        )
+        .await;
         self.metrics
             .delete_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
