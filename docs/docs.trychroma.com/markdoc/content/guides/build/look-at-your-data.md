@@ -23,7 +23,7 @@ All Chroma collections enable semantic search by default. You can specify the em
 {% Tab label="python" %}
 ```python
 import chromadb
-import OpenAIEmbeddingFunction from chromadb.utils.embedding_functions
+from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 
 client = chromadb.CloudClient()
 
@@ -39,7 +39,7 @@ collection = client.create_collection(
 
 {% Tab label="typescript" %}
 ```typescript
-import { CloudClient} from "chromadb";
+import { CloudClient } from "chromadb";
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 
 const client = new CloudClient();
@@ -206,7 +206,7 @@ Chroma also supports **text filtering** on top of your searches via the `where_d
 
 Chroma has first-class support for many embedding models. The tradeoffs include cost (API-based vs. local), latency, embedding dimensions (which affect storage and search speed), and quality on your specific domain. General-purpose models work well for most text, but specialized models trained on code, legal documents, or medical text can outperform them on domain-specific tasks. Larger models typically produce better embeddings but cost more and run slower—so the right choice depends on your quality requirements and constraints.
 * If you're building a customer support bot over general documentation, a model like `text-embedding-3-small` offers a good balance of quality and cost. 
-* For a codebase search tool, code specific models will better capture the semantics of function names, syntax, and programming patterns. Chroma works with code-specific models from [OpenAI](../../integrations/embedding-models/openai), [Cohere](../../integrations/embedding-models/cohere), [Mistral](../../integrations/embedding-models/mistral), [Morph](../../integrations/embedding-models/morph), and more. 
+* For a codebase search tool, code-specific models will better capture the semantics of function names, syntax, and programming patterns. Chroma works with code-specific models from [OpenAI](../../integrations/embedding-models/openai), [Cohere](../../integrations/embedding-models/cohere), [Mistral](../../integrations/embedding-models/mistral), [Morph](../../integrations/embedding-models/morph), and more. 
 * If you need to run entirely locally for privacy or cost reasons, smaller open-source models like `all-MiniLM-L6-v2` are a practical choice, though with some quality tradeoff.
 
 **Sparse embedding models** power lexical search. For example, BM25 counts the frequency of tokens in a document and produces a vector representing the counts for each token. When we issue a lexical search query, we will get back the documents whose sparse vectors have a higher count for the tokens in our query.
@@ -217,7 +217,7 @@ SPLADE is a learned alternative that expands terms—so a document about "dogs" 
 
 ## Collections in your Chroma Database
 
-A Chroma collection indexes records using a specific embedding model and configuration. Whether your records live in one Chroma collections or many depends on your application's access patterns and data types.
+A Chroma collection indexes records using a specific embedding model and configuration. Whether your records live in one Chroma collection or many depends on your application's access patterns and data types.
 
 **Use a single collection when**:
 * You are using the same embedding model for all of your data.
@@ -233,12 +233,12 @@ A Chroma collection indexes records using a specific embedding model and configu
 Chunking is the process of breaking source data into smaller, meaningful units (“chunks”) that are embedded and stored as individual records in a Chroma collection. Because embedding models operate on limited context windows and produce a single vector per input, storing entire documents as one record often blurs multiple ideas together and reduces retrieval quality. Chunking allows Chroma to index information at the level users actually search for—paragraphs, sections, functions, or messages—improving both recall and precision. Well-chosen chunks ensure that retrieved results are specific, semantically coherent, and useful on their own, while still allowing larger context to be reconstructed through metadata when needed.
 
 {% Banner type="tip" %}
-To learn more about chunking best-practices, see our [Chunking Guide](./chunking)
+To learn more about chunking best practices, see our [Chunking Guide](./chunking)
 {% /Banner %}
 
-Chroma is flexible enough to support nearly any chunking strategy so long as each chunk fits in 16kB.  This is  also the best way to work with large documents, regardless of performance concerns.
+Chroma is flexible enough to support nearly any chunking strategy so long as each chunk fits in 16kB.  This is also the best way to work with large documents, regardless of performance concerns.
 
-When adding chunks to your collection, we recommend using batch operations. Batching increases the number of items sent per operation acting as a throughput multiplier.  Going
+When adding chunks to your collection, we recommend using batch operations. Batching increases the number of items sent per operation, acting as a throughput multiplier.  Going
 from one vector to two will generally double the number of vectors per second with diminishing
 returns as the batch size increases.  Chroma Cloud allows ingesting up to 300 vectors per batch.
 
@@ -251,7 +251,7 @@ for chunk in chunks:
     collection.add(
         ids=[chunk.id],
         documents=[chunk.document],
-        metadatas=[chunk.metadatas]
+        metadatas=[chunk.metadata]
     )
 
 # Use batching
@@ -273,7 +273,7 @@ for (const chunk of chunks) {
     await collection.add({
         ids: [chunk.id],
         documents: [chunk.document],
-        metadatas: [chunk.metadatas]
+        metadatas: [chunk.metadata]
     })
 }
 
@@ -293,7 +293,7 @@ for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
 {% /TabbedCodeBlock %}
 
 Finally, issuing concurrent requests to the same collection will allow for even more throughput.
-Internally, requests are batched to give better performance than would be seen issuing requests.
+Internally, requests are batched to give better performance than would be seen issuing requests individually.
 This batching happens automatically and to greater numbers than the 300 vectors per batch permitted
 by default.  Every Chroma Cloud user can issue up to 10 concurrent requests.
 
