@@ -22,6 +22,12 @@ target "sysdb-migration" {
   tags = [ "sysdb-migration:ci" ]
 }
 
+target "rust-sysdb-migration" {
+  dockerfile = "rust/Dockerfile"
+  target = "rust-sysdb-migration"
+  tags = [ "rust-sysdb-migration:ci" ]
+}
+
 target "rust-frontend-service" {
   dockerfile = "rust/Dockerfile"
   target = "cli"
@@ -59,6 +65,7 @@ group "default" {
     "rust-sysdb-service",
     "sysdb",
     "sysdb-migration",
+    "rust-sysdb-migration",
     "rust-frontend-service",
     "query-service",
     "compactor-service",

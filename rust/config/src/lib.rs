@@ -1,6 +1,7 @@
 pub mod assignment;
 pub mod helpers;
 pub mod registry;
+pub mod spanner;
 
 use async_trait::async_trait;
 use chroma_error::ChromaError;

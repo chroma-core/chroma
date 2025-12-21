@@ -287,3 +287,18 @@ sysdb_service:
       project: "local-project"
       instance: "test-instance"
       database: "local-database"
+rust-sysdb-migration:
+  service_name: "rust-sysdb-migration"
+  otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
+  otel_filters:
+    - crate_name: "spanner_migration"
+      filter_level: "trace"
+  spanner:
+    emulator:
+      host: "spanner.chroma.svc.cluster.local"
+      grpc_port: 9010
+      rest_port: 9020
+      project: "local-project"
+      instance: "test-instance"
+      database: "local-database"
+  migration_mode: "apply"

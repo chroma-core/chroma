@@ -7106,6 +7106,7 @@ dependencies = [
  "tonic",
  "tonic-health",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -7919,6 +7920,27 @@ dependencies = [
  "byteorder",
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "spanner-migrations"
+version = "0.1.0"
+dependencies = [
+ "chroma-config",
+ "chroma-tracing",
+ "figment",
+ "google-cloud-gax",
+ "google-cloud-googleapis",
+ "google-cloud-spanner",
+ "regex",
+ "rust-embed",
+ "serde",
+ "sha2",
+ "thiserror 1.0.69",
+ "tokio",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
