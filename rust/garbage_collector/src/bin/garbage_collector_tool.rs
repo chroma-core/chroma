@@ -196,7 +196,10 @@ async fn main() {
                 .expect("Failed to create storage client");
 
             let mut sysdb_client = SysDb::try_from_config(
-                &chroma_sysdb::SysDbConfig::Grpc(config.sysdb_config),
+                &(
+                    chroma_sysdb::SysDbConfig::Grpc(config.sysdb_config.clone()),
+                    config.mcmr_sysdb_config.clone(),
+                ),
                 &registry,
             )
             .await

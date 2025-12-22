@@ -102,7 +102,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
             };
 
             let mut sysdb = SysDb::Grpc(
-                GrpcSysDb::try_from_config(&config, &registry)
+                GrpcSysDb::try_from_config(&(config, None), &registry)
                     .await
                     .unwrap(),
             );

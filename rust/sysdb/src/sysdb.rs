@@ -727,6 +727,9 @@ impl SysDb {
 pub struct GrpcSysDb {
     #[allow(clippy::type_complexity)]
     client: SysDbClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>,
+    #[allow(clippy::type_complexity)]
+    _mcmr_client:
+        Option<SysDbClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>>,
 }
 
 #[derive(Error, Debug)]
@@ -744,11 +747,12 @@ impl ChromaError for GrpcSysDbError {
 }
 
 #[async_trait]
-impl Configurable<GrpcSysDbConfig> for GrpcSysDb {
+impl Configurable<(GrpcSysDbConfig, Option<GrpcSysDbConfig>)> for GrpcSysDb {
     async fn try_from_config(
-        my_config: &GrpcSysDbConfig,
+        config: &(GrpcSysDbConfig, Option<GrpcSysDbConfig>),
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        let my_config = &config.0;
         let host = &my_config.host;
         let port = &my_config.port;
         tracing::info!("Connecting to sysdb at {}:{}", host, port);
@@ -768,7 +772,30 @@ impl Configurable<GrpcSysDbConfig> for GrpcSysDb {
             .layer(chroma_tracing::GrpcClientTraceLayer)
             .service(channel);
         let client = SysDbClient::new(channel);
-        Ok(GrpcSysDb { client })
+        let mcmr_client = if let Some(mcmr_config) = &config.1 {
+            let host = &mcmr_config.host;
+            let port = &mcmr_config.port;
+            let connection_string = format!("http://{}:{}", host, port);
+            let endpoint = match Endpoint::from_shared(connection_string) {
+                Ok(endpoint) => endpoint,
+                Err(e) => return Err(Box::new(GrpcSysDbError::FailedToConnect(e))),
+            };
+            let endpoint = endpoint
+                .connect_timeout(Duration::from_millis(mcmr_config.connect_timeout_ms))
+                .timeout(Duration::from_millis(mcmr_config.request_timeout_ms));
+            let channel =
+                Channel::balance_list((0..mcmr_config.num_channels).map(|_| endpoint.clone()));
+            let channel = ServiceBuilder::new()
+                .layer(chroma_tracing::GrpcClientTraceLayer)
+                .service(channel);
+            Some(SysDbClient::new(channel))
+        } else {
+            None
+        };
+        Ok(GrpcSysDb {
+            client,
+            _mcmr_client: mcmr_client,
+        })
     }
 }
 

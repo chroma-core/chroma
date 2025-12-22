@@ -418,8 +418,8 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
                 return Err(err);
             }
         };
-        let sysdb_config = &config.sysdb;
-        let sysdb = match SysDb::try_from_config(sysdb_config, registry).await {
+        let sysdb_config = (config.sysdb.clone(), config.mcmr_sysdb.clone());
+        let sysdb = match SysDb::try_from_config(&sysdb_config, registry).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
                 return Err(err);
