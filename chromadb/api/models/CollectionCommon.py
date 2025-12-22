@@ -1021,6 +1021,7 @@ class CollectionCommon(Generic[ClientT]):
         return Search(
             where=search._where,
             rank=embedded_rank,
+            group_by=search._group_by,
             limit=search._limit,
             select=search._select,
         )
