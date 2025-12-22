@@ -371,6 +371,23 @@ impl CreateDatabaseRequest {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum ClientResolutionError {
+    #[error("Not supported")]
+    McmrNotSupported,
+    #[error("Database not found")]
+    DatabaseNotFound,
+}
+
+impl ChromaError for ClientResolutionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ClientResolutionError::McmrNotSupported => ErrorCodes::InvalidArgument,
+            ClientResolutionError::DatabaseNotFound => ErrorCodes::NotFound,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateDatabaseResponse {}
@@ -381,6 +398,8 @@ pub enum CreateDatabaseError {
     AlreadyExists(String),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+    #[error("Client resolution error: {0}")]
+    ClientResolutionError(#[from] ClientResolutionError),
 }
 
 impl ChromaError for CreateDatabaseError {
@@ -388,6 +407,7 @@ impl ChromaError for CreateDatabaseError {
         match self {
             CreateDatabaseError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             CreateDatabaseError::Internal(status) => status.code(),
+            CreateDatabaseError::ClientResolutionError(e) => e.code(),
         }
     }
 }
@@ -499,6 +519,8 @@ pub enum GetDatabaseError {
     InvalidID(String),
     #[error("Database [{0}] not found. Are you sure it exists?")]
     NotFound(String),
+    #[error("Client resolution error: {0}")]
+    ClientResolutionError(#[from] ClientResolutionError),
 }
 
 impl ChromaError for GetDatabaseError {
@@ -507,6 +529,7 @@ impl ChromaError for GetDatabaseError {
             GetDatabaseError::Internal(err) => err.code(),
             GetDatabaseError::InvalidID(_) => ErrorCodes::InvalidArgument,
             GetDatabaseError::NotFound(_) => ErrorCodes::NotFound,
+            GetDatabaseError::ClientResolutionError(e) => e.code(),
         }
     }
 }
