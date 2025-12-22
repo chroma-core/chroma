@@ -37,3 +37,6 @@ garbageCollector:
 
 rustSysdbService:
   replicaCount: 1
+
+rustSysdbMigration:
+  enabled: true

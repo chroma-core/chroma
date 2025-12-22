@@ -69,13 +69,6 @@ sysdbMigration:
   port: 5432
   dbName: sysdb
   sslmode: disable
-# Rust Sysdb Migration Configuration
-rustSysdbMigration:
-  image:
-    repository: 'rust-sysdb-migration'
-    tag: 'latest'
-  tolerations: []
-  nodeSelector: {}
 # Add the garbage collector configuration
 garbageCollector:
   image:
