@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Set, Any, Union
+from typing import Optional, List, Dict, Set, Any, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -7,9 +7,11 @@ from chromadb.api.types import (
     Embeddings,
     IDs,
     Include,
+    OneOrMany,
     SparseVector,
     TYPE_KEY,
     SPARSE_VECTOR_TYPE_VALUE,
+    maybe_cast_one_to_many,
     normalize_embeddings,
     validate_embeddings,
 )
@@ -1307,14 +1309,14 @@ class Aggregate:
     - MaxK: Keep k records with maximum values (descending order)
 
     Examples:
-        # Keep top 3 by score per group
-        MinK(keys=[Key.SCORE], k=3)
+        # Keep top 3 by score per group (single key)
+        MinK(keys=Key.SCORE, k=3)
 
-        # Keep top 5 by priority, then score as tiebreaker
+        # Keep top 5 by priority, then score as tiebreaker (multiple keys)
         MinK(keys=[Key("priority"), Key.SCORE], k=5)
 
         # Keep bottom 2 by score per group
-        MaxK(keys=[Key.SCORE], k=2)
+        MaxK(keys=Key.SCORE, k=2)
     """
 
     def to_dict(self) -> Dict[str, Any]:
@@ -1358,6 +1360,8 @@ class Aggregate:
                 raise TypeError(
                     f"$min_k keys must be a list, got {type(keys).__name__}"
                 )
+            if not keys:
+                raise ValueError("$min_k keys cannot be empty")
 
             k = agg_data["k"]
             if not isinstance(k, int):
@@ -1385,6 +1389,8 @@ class Aggregate:
                 raise TypeError(
                     f"$max_k keys must be a list, got {type(keys).__name__}"
                 )
+            if not keys:
+                raise ValueError("$max_k keys cannot be empty")
 
             k = agg_data["k"]
             if not isinstance(k, int):
@@ -1404,12 +1410,13 @@ class Aggregate:
 class MinK(Aggregate):
     """Keep k records with minimum aggregate key values per group"""
 
-    keys: List[Union[Key, str]]
+    keys: OneOrMany[Union[Key, str]]
     k: int
 
     def to_dict(self) -> Dict[str, Any]:
+        keys_list = cast(List[Union[Key, str]], maybe_cast_one_to_many(self.keys))
         key_strings = []
-        for k in self.keys:
+        for k in keys_list:
             if isinstance(k, Key):
                 key_strings.append(k.name)
             else:
@@ -1421,12 +1428,13 @@ class MinK(Aggregate):
 class MaxK(Aggregate):
     """Keep k records with maximum aggregate key values per group"""
 
-    keys: List[Union[Key, str]]
+    keys: OneOrMany[Union[Key, str]]
     k: int
 
     def to_dict(self) -> Dict[str, Any]:
+        keys_list = cast(List[Union[Key, str]], maybe_cast_one_to_many(self.keys))
         key_strings = []
-        for k in self.keys:
+        for k in keys_list:
             if isinstance(k, Key):
                 key_strings.append(k.name)
             else:
@@ -1443,38 +1451,40 @@ class GroupBy:
     The final output is flattened and sorted by score.
 
     Args:
-        keys: Metadata keys to group by (e.g., [Key("category")])
+        keys: Metadata key(s) to group by. Can be a single key or a list of keys.
+              E.g., Key("category") or [Key("category"), Key("author")]
         aggregate: Aggregation to apply within each group (MinK or MaxK)
 
     Note: Both keys and aggregate must be specified together.
 
     Examples:
-        # Top 3 documents per category
+        # Top 3 documents per category (single key)
         GroupBy(
-            keys=[Key("category")],
-            aggregate=MinK(keys=[Key.SCORE], k=3)
+            keys=Key("category"),
+            aggregate=MinK(keys=Key.SCORE, k=3)
         )
 
-        # Top 2 per (year, category) combination
+        # Top 2 per (year, category) combination (multiple keys)
         GroupBy(
             keys=[Key("year"), Key("category")],
-            aggregate=MinK(keys=[Key.SCORE], k=2)
+            aggregate=MinK(keys=Key.SCORE, k=2)
         )
 
         # Top 1 per category by priority, score as tiebreaker
         GroupBy(
-            keys=[Key("category")],
+            keys=Key("category"),
             aggregate=MinK(keys=[Key("priority"), Key.SCORE], k=1)
         )
     """
 
-    keys: List[Union[Key, str]]
+    keys: OneOrMany[Union[Key, str]]
     aggregate: Aggregate
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert the GroupBy to a dictionary for JSON serialization"""
+        keys_list = cast(List[Union[Key, str]], maybe_cast_one_to_many(self.keys))
         key_strings = []
-        for k in self.keys:
+        for k in keys_list:
             if isinstance(k, Key):
                 key_strings.append(k.name)
             else:
@@ -1502,8 +1512,7 @@ class GroupBy:
         keys = data["keys"]
         if not isinstance(keys, (list, tuple)):
             raise TypeError(f"GroupBy keys must be a list, got {type(keys).__name__}")
-
-        if len(keys) == 0:
+        if not keys:
             raise ValueError("GroupBy keys cannot be empty")
 
         key_list = [Key(k) if isinstance(k, str) else k for k in keys]
