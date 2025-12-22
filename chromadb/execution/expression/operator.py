@@ -1477,8 +1477,8 @@ class GroupBy:
         )
     """
 
-    keys: OneOrMany[Union[Key, str]]
-    aggregate: Aggregate
+    keys: OneOrMany[Union[Key, str]] = field(default_factory=list)
+    aggregate: Optional[Aggregate] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert the GroupBy to a dictionary for JSON serialization"""
@@ -1489,10 +1489,10 @@ class GroupBy:
                 key_strings.append(k.name)
             else:
                 key_strings.append(k)
-        return {
-            "keys": key_strings,
-            "aggregate": self.aggregate.to_dict(),
-        }
+        result: Dict[str, Any] = {"keys": key_strings}
+        if self.aggregate is not None:
+            result["aggregate"] = self.aggregate.to_dict()
+        return result
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "GroupBy":
@@ -1522,7 +1522,6 @@ class GroupBy:
             raise TypeError(
                 f"GroupBy aggregate must be a dict, got {type(aggregate_data).__name__}"
             )
-
         aggregate = Aggregate.from_dict(aggregate_data)
 
         return GroupBy(keys=key_list, aggregate=aggregate)

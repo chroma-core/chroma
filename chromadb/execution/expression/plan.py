@@ -144,7 +144,7 @@ class Search:
 
         # Handle group_by parameter
         if group_by is None:
-            self._group_by = None
+            self._group_by = GroupBy()
         elif isinstance(group_by, GroupBy):
             self._group_by = group_by
         elif isinstance(group_by, dict):
@@ -188,9 +188,7 @@ class Search:
         return {
             "filter": self._where.to_dict() if self._where is not None else None,
             "rank": self._rank.to_dict() if self._rank is not None else None,
-            "group_by": self._group_by.to_dict()
-            if self._group_by is not None
-            else None,
+            "group_by": self._group_by.to_dict(),
             "limit": self._limit.to_dict(),
             "select": self._select.to_dict(),
         }
