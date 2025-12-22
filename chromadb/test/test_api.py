@@ -2717,6 +2717,11 @@ def test_group_by_serialization() -> None:
     original = GroupBy(keys=[Key("category")], aggregate=MinK(keys=[Key.SCORE], k=3))
     assert GroupBy.from_dict(original.to_dict()).to_dict() == original.to_dict()
 
+    # Empty GroupBy serializes to {} and from_dict({}) returns default GroupBy
+    empty_group_by = GroupBy()
+    assert empty_group_by.to_dict() == {}
+    assert GroupBy.from_dict({}).to_dict() == {}
+
     # Error cases
     with pytest.raises(ValueError, match="requires 'keys' field"):
         GroupBy.from_dict({"aggregate": {"$min_k": {"keys": ["#score"], "k": 3}}})
@@ -2867,9 +2872,9 @@ class TestSearchDictSupport:
         from chromadb.execution.expression.plan import Search
         from chromadb.execution.expression.operator import GroupBy, MinK, Key, Knn
 
-        # Without group_by - empty keys
+        # Without group_by - empty dict
         search = Search().rank(Knn(query=[0.1, 0.2])).limit(10)
-        assert search.to_dict()["group_by"] == {"keys": []}
+        assert search.to_dict()["group_by"] == {}
 
         # With group_by - has keys and aggregate
         search = Search().group_by(

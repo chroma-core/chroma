@@ -235,20 +235,8 @@ class Search:
             search.where({"status": "active"})
             search.where({"$and": [{"status": "active"}, {"score": {"$gt": 0.5}}]})
         """
-        # Convert dict to Where if needed
-        if where is None:
-            converted_where = None
-        elif isinstance(where, Where):
-            converted_where = where
-        elif isinstance(where, dict):
-            converted_where = Where.from_dict(where)
-        else:
-            raise TypeError(
-                f"where must be a Where object, dict, or None, got {type(where).__name__}"
-            )
-
         return Search(
-            where=converted_where,
+            where=where,
             rank=self._rank,
             group_by=self._group_by,
             limit=self._limit,
@@ -268,21 +256,9 @@ class Search:
             search.rank({"$knn": {"query": [0.1, 0.2]}})
             search.rank({"$sum": [{"$knn": {"query": [0.1, 0.2]}}, {"$val": 0.5}]})
         """
-        # Convert dict to Rank if needed
-        if rank_expr is None:
-            converted_rank = None
-        elif isinstance(rank_expr, Rank):
-            converted_rank = rank_expr
-        elif isinstance(rank_expr, dict):
-            converted_rank = Rank.from_dict(rank_expr)
-        else:
-            raise TypeError(
-                f"rank_expr must be a Rank object, dict, or None, got {type(rank_expr).__name__}"
-            )
-
         return Search(
             where=self._where,
-            rank=converted_rank,
+            rank=rank_expr,
             group_by=self._group_by,
             limit=self._limit,
             select=self._select,
@@ -305,22 +281,10 @@ class Search:
                 "aggregate": {"$min_k": {"keys": ["#score"], "k": 3}}
             })
         """
-        # Convert dict to GroupBy if needed
-        if group_by is None:
-            converted_group_by = None
-        elif isinstance(group_by, GroupBy):
-            converted_group_by = group_by
-        elif isinstance(group_by, dict):
-            converted_group_by = GroupBy.from_dict(group_by)
-        else:
-            raise TypeError(
-                f"group_by must be a GroupBy object, dict, or None, got {type(group_by).__name__}"
-            )
-
         return Search(
             where=self._where,
             rank=self._rank,
-            group_by=converted_group_by,
+            group_by=group_by,
             limit=self._limit,
             select=self._select,
         )

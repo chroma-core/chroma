@@ -1300,6 +1300,58 @@ class Select:
 
 
 # GroupBy and Aggregate types for grouping search results
+
+
+def _keys_to_strings(keys: OneOrMany[Union[Key, str]]) -> List[str]:
+    """Convert OneOrMany[Key|str] to List[str] for serialization."""
+    keys_list = cast(List[Union[Key, str]], maybe_cast_one_to_many(keys))
+    return [k.name if isinstance(k, Key) else k for k in keys_list]
+
+
+def _strings_to_keys(keys: Union[List[Any], tuple[Any, ...]]) -> List[Union[Key, str]]:
+    """Convert List[str] to List[Key] for deserialization."""
+    return [Key(k) if isinstance(k, str) else k for k in keys]
+
+
+def _parse_k_aggregate(
+    op: str, data: Dict[str, Any]
+) -> tuple[List[Union[Key, str]], int]:
+    """Parse common fields for MinK/MaxK from dict.
+
+    Args:
+        op: The operator name (e.g., "$min_k" or "$max_k")
+        data: The dict containing the operator
+
+    Returns:
+        Tuple of (keys, k) where keys is List[Union[Key, str]] and k is int
+
+    Raises:
+        TypeError: If data types are invalid
+        ValueError: If required fields are missing or invalid
+    """
+    agg_data = data[op]
+    if not isinstance(agg_data, dict):
+        raise TypeError(f"{op} requires a dict, got {type(agg_data).__name__}")
+    if "keys" not in agg_data:
+        raise ValueError(f"{op} requires 'keys' field")
+    if "k" not in agg_data:
+        raise ValueError(f"{op} requires 'k' field")
+
+    keys = agg_data["keys"]
+    if not isinstance(keys, (list, tuple)):
+        raise TypeError(f"{op} keys must be a list, got {type(keys).__name__}")
+    if not keys:
+        raise ValueError(f"{op} keys cannot be empty")
+
+    k = agg_data["k"]
+    if not isinstance(k, int):
+        raise TypeError(f"{op} k must be an integer, got {type(k).__name__}")
+    if k <= 0:
+        raise ValueError(f"{op} k must be positive, got {k}")
+
+    return _strings_to_keys(keys), k
+
+
 @dataclass
 class Aggregate:
     """Base class for aggregation expressions within groups.
@@ -1345,63 +1397,11 @@ class Aggregate:
         op = next(iter(data.keys()))
 
         if op == "$min_k":
-            agg_data = data["$min_k"]
-            if not isinstance(agg_data, dict):
-                raise TypeError(
-                    f"$min_k requires a dict, got {type(agg_data).__name__}"
-                )
-            if "keys" not in agg_data:
-                raise ValueError("$min_k requires 'keys' field")
-            if "k" not in agg_data:
-                raise ValueError("$min_k requires 'k' field")
-
-            keys = agg_data["keys"]
-            if not isinstance(keys, (list, tuple)):
-                raise TypeError(
-                    f"$min_k keys must be a list, got {type(keys).__name__}"
-                )
-            if not keys:
-                raise ValueError("$min_k keys cannot be empty")
-
-            k = agg_data["k"]
-            if not isinstance(k, int):
-                raise TypeError(f"$min_k k must be an integer, got {type(k).__name__}")
-            if k <= 0:
-                raise ValueError(f"$min_k k must be positive, got {k}")
-
-            return MinK(
-                keys=[Key(key) if isinstance(key, str) else key for key in keys], k=k
-            )
-
+            keys, k = _parse_k_aggregate(op, data)
+            return MinK(keys=keys, k=k)
         elif op == "$max_k":
-            agg_data = data["$max_k"]
-            if not isinstance(agg_data, dict):
-                raise TypeError(
-                    f"$max_k requires a dict, got {type(agg_data).__name__}"
-                )
-            if "keys" not in agg_data:
-                raise ValueError("$max_k requires 'keys' field")
-            if "k" not in agg_data:
-                raise ValueError("$max_k requires 'k' field")
-
-            keys = agg_data["keys"]
-            if not isinstance(keys, (list, tuple)):
-                raise TypeError(
-                    f"$max_k keys must be a list, got {type(keys).__name__}"
-                )
-            if not keys:
-                raise ValueError("$max_k keys cannot be empty")
-
-            k = agg_data["k"]
-            if not isinstance(k, int):
-                raise TypeError(f"$max_k k must be an integer, got {type(k).__name__}")
-            if k <= 0:
-                raise ValueError(f"$max_k k must be positive, got {k}")
-
-            return MaxK(
-                keys=[Key(key) if isinstance(key, str) else key for key in keys], k=k
-            )
-
+            keys, k = _parse_k_aggregate(op, data)
+            return MaxK(keys=keys, k=k)
         else:
             raise ValueError(f"Unknown aggregate operator: {op}")
 
@@ -1414,14 +1414,7 @@ class MinK(Aggregate):
     k: int
 
     def to_dict(self) -> Dict[str, Any]:
-        keys_list = cast(List[Union[Key, str]], maybe_cast_one_to_many(self.keys))
-        key_strings = []
-        for k in keys_list:
-            if isinstance(k, Key):
-                key_strings.append(k.name)
-            else:
-                key_strings.append(k)
-        return {"$min_k": {"keys": key_strings, "k": self.k}}
+        return {"$min_k": {"keys": _keys_to_strings(self.keys), "k": self.k}}
 
 
 @dataclass
@@ -1432,14 +1425,7 @@ class MaxK(Aggregate):
     k: int
 
     def to_dict(self) -> Dict[str, Any]:
-        keys_list = cast(List[Union[Key, str]], maybe_cast_one_to_many(self.keys))
-        key_strings = []
-        for k in keys_list:
-            if isinstance(k, Key):
-                key_strings.append(k.name)
-            else:
-                key_strings.append(k)
-        return {"$max_k": {"keys": key_strings, "k": self.k}}
+        return {"$max_k": {"keys": _keys_to_strings(self.keys), "k": self.k}}
 
 
 @dataclass
@@ -1482,16 +1468,11 @@ class GroupBy:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert the GroupBy to a dictionary for JSON serialization"""
-        keys_list = cast(List[Union[Key, str]], maybe_cast_one_to_many(self.keys))
-        key_strings = []
-        for k in keys_list:
-            if isinstance(k, Key):
-                key_strings.append(k.name)
-            else:
-                key_strings.append(k)
-        result: Dict[str, Any] = {"keys": key_strings}
-        if self.aggregate is not None:
-            result["aggregate"] = self.aggregate.to_dict()
+        # Default GroupBy (no keys, no aggregate) serializes to {}
+        if not self.keys or self.aggregate is None:
+            return {}
+        result: Dict[str, Any] = {"keys": _keys_to_strings(self.keys)}
+        result["aggregate"] = self.aggregate.to_dict()
         return result
 
     @staticmethod
@@ -1499,11 +1480,17 @@ class GroupBy:
         """Create GroupBy from dictionary.
 
         Examples:
+        - {} -> GroupBy() (default, no grouping)
         - {"keys": ["category"], "aggregate": {"$min_k": {"keys": ["#score"], "k": 3}}}
         """
         if not isinstance(data, dict):
             raise TypeError(f"Expected dict for GroupBy, got {type(data).__name__}")
 
+        # Empty dict returns default GroupBy (no grouping)
+        if not data:
+            return GroupBy()
+
+        # Non-empty dict requires keys and aggregate
         if "keys" not in data:
             raise ValueError("GroupBy requires 'keys' field")
         if "aggregate" not in data:
@@ -1515,8 +1502,6 @@ class GroupBy:
         if not keys:
             raise ValueError("GroupBy keys cannot be empty")
 
-        key_list = [Key(k) if isinstance(k, str) else k for k in keys]
-
         aggregate_data = data["aggregate"]
         if not isinstance(aggregate_data, dict):
             raise TypeError(
@@ -1524,4 +1509,4 @@ class GroupBy:
             )
         aggregate = Aggregate.from_dict(aggregate_data)
 
-        return GroupBy(keys=key_list, aggregate=aggregate)
+        return GroupBy(keys=_strings_to_keys(keys), aggregate=aggregate)
