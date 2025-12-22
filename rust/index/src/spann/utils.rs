@@ -5,7 +5,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use rand::{seq::SliceRandom, Rng};
 use thiserror::Error;
 
-use crate::{hnsw_provider::HnswIndexRef, Index};
+use crate::{usearch_provider::UsearchIndexRef, Index};
 
 // TODO(Sanket): I don't understand why the reference implementation defined
 // max_distance this way.
@@ -524,7 +524,7 @@ impl ChromaError for RngQueryError {
 #[allow(clippy::too_many_arguments)]
 pub async fn rng_query(
     normalized_query: &[f32],
-    hnsw_index: HnswIndexRef,
+    hnsw_index: UsearchIndexRef,
     k: usize,
     replica_count: Option<usize>,
     rng_epsilon: f32,
@@ -536,11 +536,11 @@ pub async fn rng_query(
     let mut nearby_distances: Vec<f32> = vec![];
     let mut embeddings: Vec<Vec<f32>> = vec![];
     {
-        let read_guard = hnsw_index.inner.read();
+        // No lock needed - UsearchIndex is internally thread-safe
         let allowed_ids = vec![];
         let disallowed_ids = vec![];
-        let (ids, distances) = read_guard
-            .hnsw_index
+        let (ids, distances) = hnsw_index
+            .inner
             .query(normalized_query, k, &allowed_ids, &disallowed_ids)
             .map_err(|_| RngQueryError::HnswSearchError)?;
         for (id, distance) in ids.iter().zip(distances.iter()) {
@@ -558,14 +558,28 @@ pub async fn rng_query(
             }
         }
         // Get the embeddings also for distance computation.
-        for id in nearby_ids.iter() {
-            let emb = read_guard
-                .hnsw_index
-                .get(*id)
-                .map_err(|_| RngQueryError::HnswSearchError)?
-                .ok_or(RngQueryError::HnswSearchError)?;
-            embeddings.push(emb);
+        // Filter out IDs that may have been deleted between query and get (race condition)
+        let mut valid_nearby_ids = Vec::with_capacity(nearby_ids.len());
+        let mut valid_nearby_distances = Vec::with_capacity(nearby_distances.len());
+        for (id, dist) in nearby_ids.iter().zip(nearby_distances.iter()) {
+            match hnsw_index.inner.get(*id) {
+                Ok(Some(emb)) => {
+                    valid_nearby_ids.push(*id);
+                    valid_nearby_distances.push(*dist);
+                    embeddings.push(emb);
+                }
+                Ok(None) => {
+                    // ID was deleted between query and get - skip it
+                    eprintln!("RNG: skipping deleted id {} (race condition)", id);
+                }
+                Err(e) => {
+                    eprintln!("RNG get embedding for id {} failed: {:?}", id, e);
+                    return Err(RngQueryError::HnswSearchError);
+                }
+            }
         }
+        nearby_ids = valid_nearby_ids;
+        nearby_distances = valid_nearby_distances;
     }
     if !apply_rng_rule {
         return Ok((nearby_ids, nearby_distances, embeddings));

@@ -12,6 +12,7 @@ use chroma_index::{
     hnsw_provider::HnswIndexProvider,
     spann::types::{GarbageCollectionContext, SpannMetrics},
     test_hnsw_index_provider,
+    usearch_provider::UsearchIndexProvider,
 };
 use chroma_types::{
     operator::{
@@ -39,6 +40,7 @@ pub struct TestDistributedSegment {
     pub temp_dirs: Vec<TempDir>,
     pub blockfile_provider: BlockfileProvider,
     pub hnsw_provider: HnswIndexProvider,
+    pub usearch_provider: UsearchIndexProvider,
     pub spann_provider: SpannProvider,
     pub collection: Collection,
     pub metadata_segment: Segment,
@@ -57,12 +59,14 @@ impl TestDistributedSegment {
             .await
             .expect("Expected to construct gc context for spann");
 
+        let usearch_provider = UsearchIndexProvider::new(16, 100, 100);
         Self {
             temp_dirs: vec![blockfile_dir, hnsw_dir],
             blockfile_provider: blockfile_provider.clone(),
             hnsw_provider: hnsw_provider.clone(),
+            usearch_provider: usearch_provider.clone(),
             spann_provider: SpannProvider {
-                hnsw_provider,
+                hnsw_provider: usearch_provider,
                 blockfile_provider,
                 garbage_collection_context,
                 metrics: SpannMetrics::default(),

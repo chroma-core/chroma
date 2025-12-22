@@ -73,8 +73,8 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_index::{
     config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig},
-    hnsw_provider::HnswIndexProvider,
     spann::types::{GarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannMetrics},
+    usearch_provider::UsearchIndexProvider,
     Index, IndexUuid,
 };
 use chroma_storage::{local::LocalStorage, Storage};
@@ -145,6 +145,8 @@ struct ReplicaStats {
     total_clusters: usize,
     clusters_with_docs: usize,
     clusters_modified: usize,
+    /// Sum of all versions in the versions map (total version count across all docs)
+    versions_sum: u64,
 }
 
 /// Metrics collected for each batch
@@ -396,12 +398,12 @@ async fn setup_spann_infrastructure(
 ) -> anyhow::Result<(
     tempfile::TempDir,
     BlockfileProvider,
-    HnswIndexProvider,
+    UsearchIndexProvider,
     CollectionUuid,
 )> {
     let tmp_dir = tempfile::tempdir()?;
 
-    // Use local storage for HNSW
+    // Use local storage for blockfiles
     let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
 
     // Create blockfile provider based on flag
@@ -424,16 +426,8 @@ async fn setup_spann_infrastructure(
         BlockfileProvider::ArrowBlockfileProvider(arrow_provider)
     };
 
-    // HNSW provider with disk mode
-    let hnsw_provider = HnswIndexProvider::new(
-        storage,
-        PathBuf::from(tmp_dir.path()),
-        chroma_cache::from_config(&chroma_cache::CacheConfig::Nop)
-            .await
-            .unwrap(),
-        16,
-        false, // use_direct_hnsw = false for disk-based HNSW
-    );
+    // UsearchIndexProvider (in-memory, no persistence)
+    let hnsw_provider = UsearchIndexProvider::new(16, 200, 100);
 
     Ok((
         tmp_dir,
@@ -451,7 +445,7 @@ async fn run_benchmark(
     args: &Args,
     records: &[(u32, Vec<f32>)],
     blockfile_provider: &BlockfileProvider,
-    hnsw_provider: &HnswIndexProvider,
+    hnsw_provider: &UsearchIndexProvider,
     collection_id: &CollectionUuid,
     params: &InternalSpannConfiguration,
 ) -> anyhow::Result<BenchmarkSummary> {
@@ -727,6 +721,7 @@ fn print_batch_summary(metrics: &BatchMetrics) {
         modified_pct,
         replica_stats.total_clusters
     );
+    println!("  📋 Versions sum: {}", replica_stats.versions_sum);
 
     println!();
 }
@@ -812,7 +807,7 @@ fn format_duration_ms(ms: f64) -> String {
 
 async fn compute_replica_stats(
     blockfile_provider: &BlockfileProvider,
-    hnsw_provider: &HnswIndexProvider,
+    hnsw_provider: &UsearchIndexProvider,
     collection_id: &CollectionUuid,
     hnsw_id: &IndexUuid,
     versions_map_id: &uuid::Uuid,
@@ -854,14 +849,13 @@ async fn compute_replica_stats(
     let (non_deleted_heads, _) = reader
         .hnsw_index
         .inner
-        .read()
-        .hnsw_index
         .get_all_ids()
         .map_err(|e| anyhow::anyhow!("Failed to get cluster heads: {:?}", e))?;
 
     let total_clusters = non_deleted_heads.len();
     let mut clusters_with_docs = 0;
     let mut clusters_modified = 0;
+    let mut versions_sum: u64 = 0;
 
     // Build current state: head_id -> (doc_id -> version)
     let mut current_state: std::collections::HashMap<u32, std::collections::HashMap<u32, u32>> =
@@ -907,6 +901,7 @@ async fn compute_replica_stats(
                     let version = pl_data.doc_versions[idx];
                     cluster_docs.insert(doc_id, version);
                     *replica_counts.entry(doc_id).or_insert(0) += 1;
+                    versions_sum += version as u64;
                 }
 
                 // Check if this cluster was modified compared to previous state
@@ -942,6 +937,7 @@ async fn compute_replica_stats(
                 total_clusters,
                 clusters_with_docs: 0,
                 clusters_modified: 0,
+                versions_sum: 0,
             },
             current_state,
         ));
@@ -972,6 +968,7 @@ async fn compute_replica_stats(
             total_clusters,
             clusters_with_docs,
             clusters_modified,
+            versions_sum,
         },
         current_state,
     ))
@@ -985,7 +982,7 @@ async fn verify_index_correctness(
     records: &[(u32, Vec<f32>)],
     summary: &BenchmarkSummary,
     blockfile_provider: &BlockfileProvider,
-    hnsw_provider: &HnswIndexProvider,
+    hnsw_provider: &UsearchIndexProvider,
     collection_id: &CollectionUuid,
     params: &InternalSpannConfiguration,
 ) -> anyhow::Result<()> {
@@ -1132,7 +1129,7 @@ fn write_csv_output(csv_path: &str, summary: &BenchmarkSummary) -> anyhow::Resul
     let mut file = File::create(csv_path)?;
 
     // Write header
-    writeln!(file, "batch_idx,num_records,total_records_so_far,add_time_ms,total_time_ms,throughput_recs_per_sec,memory_bytes,memory_delta_bytes,min_replicas,max_replicas,avg_replicas,median_replicas,p90_replicas,p99_replicas")?;
+    writeln!(file, "batch_idx,num_records,total_records_so_far,add_time_ms,total_time_ms,throughput_recs_per_sec,memory_bytes,memory_delta_bytes,min_replicas,max_replicas,avg_replicas,median_replicas,p90_replicas,p99_replicas,versions_sum")?;
 
     // Write data rows
     for metrics in &summary.batch_metrics {
@@ -1141,7 +1138,7 @@ fn write_csv_output(csv_path: &str, summary: &BenchmarkSummary) -> anyhow::Resul
 
         writeln!(
             file,
-            "{},{},{},{:.2},{:.2},{:.2},{},{},{},{},{:.2},{},{},{}",
+            "{},{},{},{:.2},{:.2},{:.2},{},{},{},{},{:.2},{},{},{},{}",
             metrics.batch_idx,
             metrics.num_records,
             metrics.total_records_so_far,
@@ -1156,6 +1153,7 @@ fn write_csv_output(csv_path: &str, summary: &BenchmarkSummary) -> anyhow::Resul
             replica_stats.median_replicas,
             replica_stats.p90_replicas,
             replica_stats.p99_replicas,
+            replica_stats.versions_sum,
         )?;
     }
 

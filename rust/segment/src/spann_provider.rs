@@ -4,8 +4,8 @@ use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_index::{
     config::SpannProviderConfig,
-    hnsw_provider::HnswIndexProvider,
     spann::types::{GarbageCollectionContext, SpannMetrics},
+    usearch_provider::UsearchIndexProvider,
 };
 use chroma_types::{Cmek, Collection, Segment};
 
@@ -13,7 +13,7 @@ use crate::distributed_spann::{SpannSegmentWriter, SpannSegmentWriterError};
 
 #[derive(Debug, Clone)]
 pub struct SpannProvider {
-    pub hnsw_provider: HnswIndexProvider,
+    pub hnsw_provider: UsearchIndexProvider,
     pub blockfile_provider: BlockfileProvider,
     pub garbage_collection_context: GarbageCollectionContext,
     pub metrics: SpannMetrics,
@@ -22,9 +22,11 @@ pub struct SpannProvider {
 }
 
 #[async_trait]
-impl Configurable<(HnswIndexProvider, BlockfileProvider, SpannProviderConfig)> for SpannProvider {
+impl Configurable<(UsearchIndexProvider, BlockfileProvider, SpannProviderConfig)>
+    for SpannProvider
+{
     async fn try_from_config(
-        config: &(HnswIndexProvider, BlockfileProvider, SpannProviderConfig),
+        config: &(UsearchIndexProvider, BlockfileProvider, SpannProviderConfig),
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let garbage_collection_context = GarbageCollectionContext::try_from_config(

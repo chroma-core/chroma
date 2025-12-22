@@ -125,7 +125,12 @@ impl UsearchIndex {
 
     /// Resize the index to accommodate more elements.
     pub fn resize(&self, new_capacity: usize) -> Result<(), Box<dyn ChromaError>> {
-        self.index.reserve(new_capacity).map_err(usearch_err)
+        let thread_count = std::thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or(8);
+        self.index
+            .reserve_capacity_and_threads(new_capacity, thread_count)
+            .map_err(usearch_err)
     }
 }
 
@@ -149,7 +154,14 @@ impl Index<UsearchIndexConfig> for UsearchIndex {
 
         let index = UsearchNativeIndex::new(&options).map_err(usearch_err)?;
 
-        index.reserve(config.max_elements).map_err(usearch_err)?;
+        // Reserve with thread count for concurrent operations
+        // Use a reasonable default thread count for parallel workloads
+        let thread_count = std::thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or(8);
+        index
+            .reserve_capacity_and_threads(config.max_elements, thread_count)
+            .map_err(usearch_err)?;
 
         Ok(UsearchIndex {
             index,
@@ -161,10 +173,15 @@ impl Index<UsearchIndexConfig> for UsearchIndex {
     }
 
     fn add(&self, id: usize, vector: &[f32]) -> Result<(), Box<dyn ChromaError>> {
-        // Auto-resize if needed
+        // Auto-resize if needed - must use reserve_capacity_and_threads for thread safety
         if self.index.size() >= self.index.capacity() {
             let new_capacity = (self.index.capacity() * 2).max(100);
-            self.index.reserve(new_capacity).map_err(usearch_err)?;
+            let thread_count = std::thread::available_parallelism()
+                .map(|p| p.get())
+                .unwrap_or(8);
+            self.index
+                .reserve_capacity_and_threads(new_capacity, thread_count)
+                .map_err(usearch_err)?;
         }
 
         self.index.add(id as u64, vector).map_err(usearch_err)?;
@@ -190,8 +207,15 @@ impl Index<UsearchIndexConfig> for UsearchIndex {
             // Fast path: no filtering
             let result = self.index.search(vector, k).map_err(usearch_err)?;
 
-            let ids: Vec<usize> = result.keys.iter().map(|&k| k as usize).collect();
-            Ok((ids, result.distances))
+            // Filter out u64::MAX sentinel values (indicates no match)
+            let (ids, distances): (Vec<usize>, Vec<f32>) = result
+                .keys
+                .iter()
+                .zip(result.distances.iter())
+                .filter(|(&k, _)| k != u64::MAX)
+                .map(|(&k, &d)| (k as usize, d))
+                .unzip();
+            Ok((ids, distances))
         } else {
             // Filtered search using HashSet for O(1) lookups
             let allowed_set: HashSet<u64> = allowed_ids.iter().map(|&id| id as u64).collect();
@@ -208,16 +232,19 @@ impl Index<UsearchIndexConfig> for UsearchIndex {
                 .filtered_search(vector, k, &filter)
                 .map_err(usearch_err)?;
 
-            let ids: Vec<usize> = result.keys.iter().map(|&k| k as usize).collect();
-            Ok((ids, result.distances))
+            // Filter out u64::MAX sentinel values (indicates no match)
+            let (ids, distances): (Vec<usize>, Vec<f32>) = result
+                .keys
+                .iter()
+                .zip(result.distances.iter())
+                .filter(|(&k, _)| k != u64::MAX)
+                .map(|(&k, &d)| (k as usize, d))
+                .unzip();
+            Ok((ids, distances))
         }
     }
 
     fn get(&self, id: usize) -> Result<Option<Vec<f32>>, Box<dyn ChromaError>> {
-        if !self.index.contains(id as u64) {
-            return Ok(None);
-        }
-
         let mut vector = vec![0.0f32; self.dimensionality];
         let count = self
             .index
