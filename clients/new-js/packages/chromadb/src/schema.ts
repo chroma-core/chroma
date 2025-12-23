@@ -664,11 +664,7 @@ export class Schema {
     // Deserialize CMEK if present
     instance.cmek = null;
     if (data.cmek && typeof data.cmek === "object") {
-      try {
-        instance.cmek = Cmek.fromJSON(data.cmek as Record<string, unknown>);
-      } catch (error) {
-        console.warn("Failed to deserialize CMEK:", error);
-      }
+      instance.cmek = Cmek.fromJSON(data.cmek as Record<string, unknown>);
     }
 
     return instance;

@@ -2561,13 +2561,7 @@ class Schema:
         # Deserialize CMEK if present
         instance.cmek = None
         if "cmek" in json_data and json_data["cmek"] is not None:
-            try:
-                instance.cmek = Cmek.from_dict(json_data["cmek"])
-            except (ValueError, KeyError) as e:
-                warnings.warn(
-                    f"Could not deserialize CMEK configuration: {e}. Setting to None."
-                )
-                instance.cmek = None
+            instance.cmek = Cmek.from_dict(json_data["cmek"])
 
         return instance
 
