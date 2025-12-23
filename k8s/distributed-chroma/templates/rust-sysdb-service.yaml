@@ -27,6 +27,7 @@ spec:
       labels:
         app: rust-sysdb-service
     spec:
+      serviceAccountName: sysdb-serviceaccount
       volumes:
         {{if .Values.rustSysdbService.configuration}}
         - name: rust-sysdb-service-config
