@@ -63,6 +63,10 @@ spec:
             requests:
               cpu: {{ .Values.rustSysdbService.resources.requests.cpu }}
               memory: {{ .Values.rustSysdbService.resources.requests.memory }}
+      {{if .Values.rustSysdbService.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.rustSysdbService.nodeSelector | nindent 8 }}
+      {{ end }}
 
 ---
 

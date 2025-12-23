@@ -22,8 +22,9 @@ use chroma_types::{
 };
 use chroma_types::{
     AttachedFunctionUpdateInfo, AttachedFunctionUuid, BatchGetCollectionSoftDeleteStatusError,
-    BatchGetCollectionVersionFilePathsError, Collection, CollectionConversionError, CollectionUuid,
-    CountForksError, DatabaseUuid, FinishCreateAttachedFunctionError, FinishDatabaseDeletionError,
+    BatchGetCollectionVersionFilePathsError, ClientResolutionError, Collection,
+    CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
+    FinishCreateAttachedFunctionError, FinishDatabaseDeletionError,
     FlushCompactionAndAttachedFunctionResponse, FlushCompactionResponse,
     FlushCompactionResponseConversionError, ForkCollectionError, Schema, SchemaError, Segment,
     SegmentConversionError, SegmentScope, Tenant,
@@ -851,6 +852,32 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
 }
 
 impl GrpcSysDb {
+    fn client(
+        &self,
+        database_name: &str,
+    ) -> Result<
+        SysDbClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>,
+        ClientResolutionError,
+    > {
+        // Extract prefix from database name. For now if it begins with topo then mcmr
+        // client otherwise use single region client. # is the delimiter.
+        // TODO(Sanket): Config for regions and handle prefix accordingly here.
+        // Only extract the beginning of the string up to the first #.
+        let prefix = database_name
+            .split('#')
+            .next()
+            .ok_or(ClientResolutionError::DatabaseNotFound)?;
+        if prefix.starts_with("topo") {
+            if let Some(mcmr_client) = &self._mcmr_client {
+                Ok(mcmr_client.clone())
+            } else {
+                Err(ClientResolutionError::McmrNotSupported)
+            }
+        } else {
+            Ok(self.client.clone())
+        }
+    }
+
     pub async fn create_tenant(
         &mut self,
         tenant_name: String,
@@ -858,6 +885,7 @@ impl GrpcSysDb {
         let req = chroma_proto::CreateTenantRequest {
             name: tenant_name.clone(),
         };
+        // TODO(Sanket): This should fan out to all topologies.
         match self.client.create_tenant(req).await {
             Ok(_) => Ok(CreateTenantResponse {}),
             Err(err) if matches!(err.code(), Code::AlreadyExists) => {
@@ -900,7 +928,10 @@ impl GrpcSysDb {
             name: database_name.clone(),
             tenant,
         };
-        let res = self.client.create_database(req).await;
+        let res = self
+            .client(database_name.as_str())?
+            .create_database(req)
+            .await;
         match res {
             Ok(_) => Ok(CreateDatabaseResponse {}),
             Err(e) => {
@@ -953,7 +984,7 @@ impl GrpcSysDb {
             name: database_name.clone(),
             tenant,
         };
-        let res = self.client.get_database(req).await;
+        let res = self.client(database_name.as_str())?.get_database(req).await;
         match res {
             Ok(res) => {
                 let res = match res.into_inner().database {
