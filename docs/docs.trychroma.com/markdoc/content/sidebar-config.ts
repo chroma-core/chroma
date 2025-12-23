@@ -152,6 +152,7 @@ const sidebarConfig: AppSection[] = [
           { id: "search-basics", name: "Search Basics" },
           { id: "filtering", name: "Filtering with Where" },
           { id: "ranking", name: "Ranking and Scoring" },
+          { id: "group-by", name: "Group By & Aggregation" },
           { id: "hybrid-search", name: "Hybrid Search with RRF" },
           { id: "pagination-selection", name: "Pagination & Selection" },
           { id: "batch-operations", name: "Batch Operations" },

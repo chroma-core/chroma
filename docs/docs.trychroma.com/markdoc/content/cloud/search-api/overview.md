@@ -82,6 +82,7 @@ When passing text to `Knn()`, the embedding is automatically created using the c
 | Vector similarity search | ✅ | ❌ | ✅ |
 | Filtering (metadata, document, ID) | ✅ | ✅ | ✅ |
 | Custom ranking expressions | ❌ | ❌ | ✅ |
+| Result grouping/deduplication | ❌ | ❌ | ✅ |
 | Batch operations | ⚠️ Embedding only | ❌ | ✅ |
 | Field selection | ⚠️ Coarse | ⚠️ Coarse | ✅ |
 | Pagination | ❌ | ✅ | ✅ |
@@ -240,5 +241,6 @@ Please report issues or feedback through the [Chroma GitHub repository](https://
 - **[Search Basics](./search-basics)** - Learn how to construct searches
 - **[Filtering with Where](./filtering)** - Master metadata filtering
 - **[Ranking and Scoring](./ranking)** - Understand ranking expressions
+- **[Grouping Results](./group-by)** - Diversify results with grouping
 - **[Hybrid Search](./hybrid-search)** - Combine multiple strategies
 - **[Examples](./examples)** - See real-world patterns
