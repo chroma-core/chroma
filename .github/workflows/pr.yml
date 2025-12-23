@@ -46,9 +46,15 @@ jobs:
             # JavaScript client changes
             js-client:
               - 'clients/js/**'
+            # Ruby client changes
+            ruby-client:
+              - 'clients/ruby/**'
             # Outside JS client
             outside-js-client:
               - '!clients/js/**'
+            # Outside Ruby client
+            outside-ruby-client:
+              - '!clients/ruby/**'
 
       - name: Determine tests to run
         id: determine-tests
@@ -74,9 +80,17 @@ jobs:
             exit 0
           fi
 
+          # Check for Ruby-only changes
+          if [[ "${{ steps.filter.outputs.ruby-client }}" == "true" && "${{ steps.filter.outputs.outside-ruby-client }}" == "false" ]]; then
+            echo "Ruby-only changes detected"
+            TESTS_TO_RUN='["ruby-client"]'
+            echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           # If we get here, we need to run all tests (core changes)
           echo "Core changes detected, running all tests"
-          TESTS_TO_RUN='["python", "rust", "js-client", "go"]'
+          TESTS_TO_RUN='["python", "rust", "js-client", "ruby-client", "go"]'
           echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
 
       - name: Check Helm version change
@@ -185,6 +199,12 @@ jobs:
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js-client')
     uses: ./.github/workflows/_javascript-client-tests.yml
 
+  ruby-client-tests:
+    name: Ruby client tests
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'ruby-client')
+    uses: ./.github/workflows/_ruby-client-tests.yml
+
   rust-tests:
     name: Rust tests
     needs: change-detection
@@ -253,6 +273,7 @@ jobs:
     - python-tests
     - python-vulnerability-scan
     - javascript-client-tests
+    - ruby-client-tests
     - rust-tests
     - rust-feature-tests
     - go-tests
@@ -265,7 +286,7 @@ jobs:
       uses: re-actors/alls-green@release/v1
       with:
         jobs: ${{ toJSON(needs) }}
-        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,rust-feature-tests,go-tests,check-helm-version-bump,delete-helm-comment
+        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,ruby-client-tests,rust-tests,rust-feature-tests,go-tests,check-helm-version-bump,delete-helm-comment
 
   notify-slack-on-failure:
     name: Notify Slack on Test Failure
@@ -274,6 +295,7 @@ jobs:
     - python-tests
     - python-vulnerability-scan
     - javascript-client-tests
+    - ruby-client-tests
     - rust-tests
     - rust-feature-tests
     - go-tests
