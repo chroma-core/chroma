@@ -2778,42 +2778,19 @@ class TestNewSchema:
 
     def test_cmek_invalid_deserialization(self) -> None:
         """Test that invalid CMEK data raises a warning and sets cmek to None."""
-        import warnings
+        with pytest.raises(ValueError, match="Unsupported or missing CMEK provider in data"):
+            Schema.deserialize_from_json(
+                {"defaults": {}, "keys": {}, "cmek": {}}
+            )
 
-        # Test invalid provider
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-
-            schema = Schema.deserialize_from_json(
+        with pytest.raises(ValueError, match="Unsupported or missing CMEK provider in data"):
+            Schema.deserialize_from_json(
                 {
                     "defaults": {},
                     "keys": {},
                     "cmek": {"invalid_provider": "some-resource"},
                 }
             )
-
-            # Should have raised a warning
-            assert len(w) == 1
-            assert "Could not deserialize CMEK configuration" in str(w[0].message)
-
-            # CMEK should be None
-            assert schema.cmek is None
-
-        # Test malformed CMEK data (missing required fields)
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-
-            schema = Schema.deserialize_from_json(
-                {"defaults": {}, "keys": {}, "cmek": {}}
-            )
-
-            # Should have raised a warning
-            assert len(w) == 1
-            assert "Could not deserialize CMEK configuration" in str(w[0].message)
-
-            # CMEK should be None
-            assert schema.cmek is None
-
 
 def test_sparse_vector_cannot_be_created_globally() -> None:
     """Test that sparse vector index cannot be created globally (without a key)."""
