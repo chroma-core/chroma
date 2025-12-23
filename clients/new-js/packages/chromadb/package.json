@@ -73,11 +73,11 @@
     "wait-on": "^8.0.3"
   },
   "optionalDependencies": {
-    "chromadb-js-bindings-darwin-arm64": "^1.1.4",
-    "chromadb-js-bindings-darwin-x64": "^1.1.4",
-    "chromadb-js-bindings-linux-arm64-gnu": "^1.1.4",
-    "chromadb-js-bindings-linux-x64-gnu": "^1.1.4",
-    "chromadb-js-bindings-win32-x64-msvc": "^1.1.4"
+    "chromadb-js-bindings-darwin-arm64": "^1.2.0",
+    "chromadb-js-bindings-darwin-x64": "^1.2.0",
+    "chromadb-js-bindings-linux-arm64-gnu": "^1.2.0",
+    "chromadb-js-bindings-linux-x64-gnu": "^1.2.0",
+    "chromadb-js-bindings-win32-x64-msvc": "^1.2.0"
   },
   "engines": {
     "node": ">=20"
