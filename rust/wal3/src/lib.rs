@@ -13,6 +13,7 @@ mod destroy;
 mod gc;
 mod interfaces;
 mod manifest;
+mod quorum_writer;
 mod reader;
 mod snapshot_cache;
 mod writer;
@@ -33,6 +34,7 @@ pub use interfaces::{
 pub use manifest::{
     unprefixed_snapshot_path, Manifest, ManifestAndETag, Snapshot, SnapshotPointer,
 };
+pub use quorum_writer::write_quorum;
 pub use reader::{checksum_parquet, scan_from_manifest, Limits, LogReader};
 pub use snapshot_cache::SnapshotCache;
 pub use writer::{LogWriter, MarkDirty};
