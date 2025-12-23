@@ -4,12 +4,12 @@ from typing import List, Dict, Any, Union, Set, Optional
 from chromadb.execution.expression.operator import (
     KNN,
     Filter,
+    GroupBy,
     Limit,
     Projection,
     Scan,
     Rank,
     Select,
-    Val,
     Where,
     Key,
 )
@@ -77,9 +77,18 @@ class Search:
     Combined with metadata filtering:
         Search().where((Key.ID.is_in(["id1", "id2"])) & (Key("status") == "active"))
 
+    With group_by:
+        (Search()
+            .rank(Knn(query=[0.1, 0.2]))
+            .group_by(GroupBy(
+                keys=[Key("category")],
+                aggregate=MinK(keys=[Key.SCORE], k=3)
+            )))
+
     Empty Search() is valid and will use defaults:
         - where: None (no filtering)
         - rank: None (no ranking - results ordered by default order)
+        - group_by: None (no grouping)
         - limit: No limit
         - select: Empty selection
     """
@@ -88,6 +97,7 @@ class Search:
         self,
         where: Optional[Union[Where, Dict[str, Any]]] = None,
         rank: Optional[Union[Rank, Dict[str, Any]]] = None,
+        group_by: Optional[Union[GroupBy, Dict[str, Any]]] = None,
         limit: Optional[Union[Limit, Dict[str, Any], int]] = None,
         select: Optional[Union[Select, Dict[str, Any], List[str], Set[str]]] = None,
     ):
@@ -99,11 +109,13 @@ class Search:
             rank: Rank expression or dict for scoring (defaults to None - no ranking)
                   Dict will be converted using Rank.from_dict()
                   Note: Primitive numbers are not accepted - use {"$val": number} for constant ranks
+            group_by: GroupBy configuration for grouping and aggregating results (defaults to None)
+                      Dict will be converted using GroupBy.from_dict()
             limit: Limit configuration for pagination (defaults to no limit)
                    Can be a Limit object, a dict for Limit.from_dict(), or an int
                    When passing an int, it creates Limit(limit=value, offset=0)
             select: Select configuration for keys (defaults to empty selection)
-                    Can be a Select object, a dict for Select.from_dict(), 
+                    Can be a Select object, a dict for Select.from_dict(),
                     or a list/set of strings (e.g., ["#document", "#score"])
         """
         # Handle where parameter
@@ -117,7 +129,7 @@ class Search:
             raise TypeError(
                 f"where must be a Where object, dict, or None, got {type(where).__name__}"
             )
-        
+
         # Handle rank parameter
         if rank is None:
             self._rank = None
@@ -129,7 +141,19 @@ class Search:
             raise TypeError(
                 f"rank must be a Rank object, dict, or None, got {type(rank).__name__}"
             )
-        
+
+        # Handle group_by parameter
+        if group_by is None:
+            self._group_by = GroupBy()
+        elif isinstance(group_by, GroupBy):
+            self._group_by = group_by
+        elif isinstance(group_by, dict):
+            self._group_by = GroupBy.from_dict(group_by)
+        else:
+            raise TypeError(
+                f"group_by must be a GroupBy object, dict, or None, got {type(group_by).__name__}"
+            )
+
         # Handle limit parameter
         if limit is None:
             self._limit = Limit()
@@ -143,7 +167,7 @@ class Search:
             raise TypeError(
                 f"limit must be a Limit object, dict, int, or None, got {type(limit).__name__}"
             )
-        
+
         # Handle select parameter
         if select is None:
             self._select = Select()
@@ -164,6 +188,7 @@ class Search:
         return {
             "filter": self._where.to_dict() if self._where is not None else None,
             "rank": self._rank.to_dict() if self._rank is not None else None,
+            "group_by": self._group_by.to_dict(),
             "limit": self._limit.to_dict(),
             "select": self._select.to_dict(),
         }
@@ -173,7 +198,11 @@ class Search:
         """Select all predefined keys (document, embedding, metadata, score)"""
         new_select = Select(keys={Key.DOCUMENT, Key.EMBEDDING, Key.METADATA, Key.SCORE})
         return Search(
-            where=self._where, rank=self._rank, limit=self._limit, select=new_select
+            where=self._where,
+            rank=self._rank,
+            group_by=self._group_by,
+            limit=self._limit,
+            select=new_select,
         )
 
     def select(self, *keys: Union[Key, str]) -> "Search":
@@ -187,7 +216,11 @@ class Search:
         """
         new_select = Select(keys=set(keys))
         return Search(
-            where=self._where, rank=self._rank, limit=self._limit, select=new_select
+            where=self._where,
+            rank=self._rank,
+            group_by=self._group_by,
+            limit=self._limit,
+            select=new_select,
         )
 
     def where(self, where: Optional[Union[Where, Dict[str, Any]]]) -> "Search":
@@ -202,20 +235,12 @@ class Search:
             search.where({"status": "active"})
             search.where({"$and": [{"status": "active"}, {"score": {"$gt": 0.5}}]})
         """
-        # Convert dict to Where if needed
-        if where is None:
-            converted_where = None
-        elif isinstance(where, Where):
-            converted_where = where
-        elif isinstance(where, dict):
-            converted_where = Where.from_dict(where)
-        else:
-            raise TypeError(
-                f"where must be a Where object, dict, or None, got {type(where).__name__}"
-            )
-        
         return Search(
-            where=converted_where, rank=self._rank, limit=self._limit, select=self._select
+            where=where,
+            rank=self._rank,
+            group_by=self._group_by,
+            limit=self._limit,
+            select=self._select,
         )
 
     def rank(self, rank_expr: Optional[Union[Rank, Dict[str, Any]]]) -> "Search":
@@ -231,20 +256,37 @@ class Search:
             search.rank({"$knn": {"query": [0.1, 0.2]}})
             search.rank({"$sum": [{"$knn": {"query": [0.1, 0.2]}}, {"$val": 0.5}]})
         """
-        # Convert dict to Rank if needed
-        if rank_expr is None:
-            converted_rank = None
-        elif isinstance(rank_expr, Rank):
-            converted_rank = rank_expr
-        elif isinstance(rank_expr, dict):
-            converted_rank = Rank.from_dict(rank_expr)
-        else:
-            raise TypeError(
-                f"rank_expr must be a Rank object, dict, or None, got {type(rank_expr).__name__}"
-            )
-        
         return Search(
-            where=self._where, rank=converted_rank, limit=self._limit, select=self._select
+            where=self._where,
+            rank=rank_expr,
+            group_by=self._group_by,
+            limit=self._limit,
+            select=self._select,
+        )
+
+    def group_by(self, group_by: Optional[Union[GroupBy, Dict[str, Any]]]) -> "Search":
+        """Set the group_by configuration for grouping and aggregating results
+
+        Args:
+            group_by: A GroupBy object, dict, or None for grouping
+                      Dicts will be converted using GroupBy.from_dict()
+
+        Example:
+            search.group_by(GroupBy(
+                keys=[Key("category")],
+                aggregate=MinK(keys=[Key.SCORE], k=3)
+            ))
+            search.group_by({
+                "keys": ["category"],
+                "aggregate": {"$min_k": {"keys": ["#score"], "k": 3}}
+            })
+        """
+        return Search(
+            where=self._where,
+            rank=self._rank,
+            group_by=group_by,
+            limit=self._limit,
+            select=self._select,
         )
 
     def limit(self, limit: int, offset: int = 0) -> "Search":
@@ -259,5 +301,9 @@ class Search:
         """
         new_limit = Limit(offset=offset, limit=limit)
         return Search(
-            where=self._where, rank=self._rank, limit=new_limit, select=self._select
+            where=self._where,
+            rank=self._rank,
+            group_by=self._group_by,
+            limit=new_limit,
+            select=self._select,
         )

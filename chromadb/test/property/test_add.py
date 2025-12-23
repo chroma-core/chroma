@@ -31,7 +31,7 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
         normal=hypothesis.settings(max_examples=500),
         fast=hypothesis.settings(max_examples=200),
     ),
-    max_examples=2
+    max_examples=2,
 )
 def test_add_miniscule(
     client: ClientAPI,
@@ -332,7 +332,8 @@ def test_out_of_order_ids(client: ClientAPI) -> None:
     ]
 
     coll = client.create_collection(
-        "test", embedding_function=lambda input: [[1, 2, 3] for _ in input]  # type: ignore
+        "test",
+        embedding_function=lambda input: [[1, 2, 3] for _ in input],  # type: ignore
     )
     embeddings: Embeddings = [np.array([1, 2, 3]) for _ in ooo_ids]
     coll.add(ids=ooo_ids, embeddings=embeddings)
@@ -369,3 +370,155 @@ def test_add_partial(client: ClientAPI) -> None:
     assert results["ids"] == ["1", "2", "3"]
     assert results["metadatas"] == [{"a": 1}, None, {"a": 3}]
     assert results["documents"] == ["a", "b", None]
+
+
+@pytest.mark.skipif(
+    NOT_CLUSTER_ONLY,
+    reason="GroupBy is only supported in distributed mode",
+)
+def test_search_group_by(client: ClientAPI) -> None:
+    """Test GroupBy with single key, multiple keys, and multiple ranking keys."""
+    from chromadb.execution.expression.operator import GroupBy, MinK, Key
+    from chromadb.execution.expression.plan import Search
+    from chromadb.execution.expression import Knn
+
+    create_isolated_database(client)
+
+    coll = client.create_collection(name="test_group_by")
+
+    # Test data: 12 records across 3 categories and 2 years
+    # Embeddings are designed so science docs are closest to query [1,0,0,0]
+    ids = [
+        "sci_2023_1",
+        "sci_2023_2",
+        "sci_2024_1",
+        "sci_2024_2",
+        "tech_2023_1",
+        "tech_2023_2",
+        "tech_2024_1",
+        "tech_2024_2",
+        "arts_2023_1",
+        "arts_2023_2",
+        "arts_2024_1",
+        "arts_2024_2",
+    ]
+    embeddings = cast(
+        Embeddings,
+        [
+            # Science - closest to [1,0,0,0]
+            [1.0, 0.0, 0.0, 0.0],  # sci_2023_1: score ~0.0
+            [0.9, 0.1, 0.0, 0.0],  # sci_2023_2: score ~0.141
+            [0.8, 0.2, 0.0, 0.0],  # sci_2024_1: score ~0.283
+            [0.7, 0.3, 0.0, 0.0],  # sci_2024_2: score ~0.424
+            # Tech - farther from [1,0,0,0]
+            [0.0, 1.0, 0.0, 0.0],  # tech_2023_1: score ~1.414
+            [0.0, 0.9, 0.1, 0.0],  # tech_2023_2: score ~1.345
+            [0.0, 0.8, 0.2, 0.0],  # tech_2024_1: score ~1.281
+            [0.0, 0.7, 0.3, 0.0],  # tech_2024_2: score ~1.221
+            # Arts - farther from [1,0,0,0]
+            [0.0, 0.0, 1.0, 0.0],  # arts_2023_1: score ~1.414
+            [0.0, 0.0, 0.9, 0.1],  # arts_2023_2: score ~1.345
+            [0.0, 0.0, 0.8, 0.2],  # arts_2024_1: score ~1.281
+            [0.0, 0.0, 0.7, 0.3],  # arts_2024_2: score ~1.221
+        ],
+    )
+    metadatas: Metadatas = [
+        {"category": "science", "year": 2023, "priority": 1},
+        {"category": "science", "year": 2023, "priority": 2},
+        {"category": "science", "year": 2024, "priority": 1},
+        {"category": "science", "year": 2024, "priority": 3},
+        {"category": "tech", "year": 2023, "priority": 2},
+        {"category": "tech", "year": 2023, "priority": 1},
+        {"category": "tech", "year": 2024, "priority": 1},
+        {"category": "tech", "year": 2024, "priority": 2},
+        {"category": "arts", "year": 2023, "priority": 3},
+        {"category": "arts", "year": 2023, "priority": 1},
+        {"category": "arts", "year": 2024, "priority": 2},
+        {"category": "arts", "year": 2024, "priority": 1},
+    ]
+    documents = [f"doc_{id}" for id in ids]
+
+    coll.add(
+        ids=ids,
+        embeddings=embeddings,
+        metadatas=metadatas,
+        documents=documents,
+    )
+
+    query = [1.0, 0.0, 0.0, 0.0]
+
+    # Test 1: Single key grouping - top 2 per category by score
+    # Expected: 2 best from each category (science, tech, arts)
+    # - science: sci_2023_1 (0.0), sci_2023_2 (0.141)
+    # - tech: tech_2024_2 (1.221), tech_2024_1 (1.281)
+    # - arts: arts_2024_2 (1.221), arts_2024_1 (1.281)
+    results1 = coll.search(
+        Search()
+        .rank(Knn(query=query, limit=12))
+        .group_by(GroupBy(keys=Key("category"), aggregate=MinK(keys=Key.SCORE, k=2)))
+        .limit(12)
+    )
+    assert results1["ids"] is not None
+    result1_ids = results1["ids"][0]
+    assert len(result1_ids) == 6
+    expected1 = {
+        "sci_2023_1",
+        "sci_2023_2",
+        "tech_2024_2",
+        "tech_2024_1",
+        "arts_2024_2",
+        "arts_2024_1",
+    }
+    assert set(result1_ids) == expected1
+
+    # Test 2: Multiple key grouping - top 1 per (category, year) combination
+    # 6 groups: (science,2023), (science,2024), (tech,2023), (tech,2024), (arts,2023), (arts,2024)
+    results2 = coll.search(
+        Search()
+        .rank(Knn(query=query, limit=12))
+        .group_by(
+            GroupBy(
+                keys=[Key("category"), Key("year")],
+                aggregate=MinK(keys=Key.SCORE, k=1),
+            )
+        )
+        .limit(12)
+    )
+    assert results2["ids"] is not None
+    result2_ids = results2["ids"][0]
+    assert len(result2_ids) == 6
+    expected2 = {
+        "sci_2023_1",
+        "sci_2024_1",
+        "tech_2023_2",
+        "tech_2024_2",
+        "arts_2023_2",
+        "arts_2024_2",
+    }
+    assert set(result2_ids) == expected2
+
+    # Test 3: Multiple ranking keys - priority first, then score as tiebreaker
+    # Top 2 per category, sorted by priority (ascending), then score (ascending)
+    results3 = coll.search(
+        Search()
+        .rank(Knn(query=query, limit=12))
+        .group_by(
+            GroupBy(
+                keys=Key("category"),
+                aggregate=MinK(keys=[Key("priority"), Key.SCORE], k=2),
+            )
+        )
+        .limit(12)
+    )
+    assert results3["ids"] is not None
+    result3_ids = results3["ids"][0]
+    assert len(result3_ids) == 6
+    expected3 = {
+        "sci_2023_1",
+        "sci_2024_1",
+        "tech_2024_1",
+        "tech_2023_2",
+        "arts_2024_2",
+        "arts_2023_2",
+    }
+    assert set(result3_ids) == expected3

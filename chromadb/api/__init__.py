@@ -33,6 +33,10 @@ from chromadb.execution.expression import (  # noqa: F401, F403
     Sub,
     Sum,
     Val,
+    Aggregate,
+    MinK,
+    MaxK,
+    GroupBy,
 )
 
 from abc import ABC, abstractmethod

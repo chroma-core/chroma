@@ -1,4 +1,6 @@
 import type { SearchPayload } from "../../api";
+import type { GroupByInput } from "./groupBy";
+import { GroupBy } from "./groupBy";
 import type { LimitInput } from "./limit";
 import { Limit } from "./limit";
 import type { RankInput } from "./rank";
@@ -11,6 +13,7 @@ import { WhereExpression } from "./where";
 interface SearchParts {
   where?: WhereExpression;
   rank?: RankExpression;
+  groupBy?: GroupBy;
   limit: Limit;
   select: Select;
 }
@@ -18,6 +21,7 @@ interface SearchParts {
 export interface SearchInit {
   where?: WhereInput;
   rank?: RankInput;
+  groupBy?: GroupByInput;
   limit?: LimitInput;
   select?: SelectInput;
 }
@@ -25,12 +29,14 @@ export interface SearchInit {
 export class Search {
   private _where?: WhereExpression;
   private _rank?: RankExpression;
+  private _groupBy?: GroupBy;
   private _limit: Limit;
   private _select: Select;
 
   constructor(init: SearchInit = {}) {
     this._where = init.where ? WhereExpression.from(init.where) : undefined;
     this._rank = init.rank ? RankExpression.from(init.rank) : undefined;
+    this._groupBy = init.groupBy ? GroupBy.from(init.groupBy) : undefined;
     this._limit = Limit.from(init.limit ?? undefined);
     this._select = Select.from(init.select ?? undefined);
   }
@@ -39,6 +45,7 @@ export class Search {
     const next = Object.create(Search.prototype) as Search;
     next._where = overrides.where ?? this._where;
     next._rank = overrides.rank ?? this._rank;
+    next._groupBy = overrides.groupBy ?? this._groupBy;
     next._limit = overrides.limit ?? this._limit;
     next._select = overrides.select ?? this._select;
     return next;
@@ -50,6 +57,10 @@ export class Search {
 
   public rank(rank?: RankInput): Search {
     return this.clone({ rank: RankExpression.from(rank ?? undefined) });
+  }
+
+  public groupBy(groupBy?: GroupByInput): Search {
+    return this.clone({ groupBy: GroupBy.from(groupBy) });
   }
 
   public limit(limit?: LimitInput, offset?: number): Search {
@@ -102,6 +113,10 @@ export class Search {
     return this._rank;
   }
 
+  public get groupByConfig(): GroupBy | undefined {
+    return this._groupBy;
+  }
+
   public get limitConfig(): Limit {
     return this._limit;
   }
@@ -125,6 +140,10 @@ export class Search {
 
     if (this._rank) {
       payload.rank = this._rank.toJSON();
+    }
+
+    if (this._groupBy) {
+      payload.group_by = this._groupBy.toJSON();
     }
 
     return payload;
