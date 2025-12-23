@@ -10,6 +10,12 @@ data:
 {{ .Values.rustSysdbMigration.configuration | indent 4 }}
 {{- end }}
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rust-sysdb-migration-serviceaccount
+  namespace: {{ .Values.namespace }}
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -21,6 +27,7 @@ spec:
       labels:
         app: rust-sysdb-migration
     spec:
+      serviceAccountName: rust-sysdb-migration-serviceaccount
       restartPolicy: OnFailure
       containers:
         - name: rust-sysdb-migration
