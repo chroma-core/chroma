@@ -12,6 +12,12 @@ data:
 
 ---
 
+{{ if .Values.rustSysdbService.additionalConfigMaps }}
+{{ toYaml .Values.rustSysdbService.additionalConfigMaps }}
+{{ end }}
+
+---
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,11 +33,15 @@ spec:
       labels:
         app: rust-sysdb-service
     spec:
+      serviceAccountName: sysdb-serviceaccount
       volumes:
         {{if .Values.rustSysdbService.configuration}}
         - name: rust-sysdb-service-config
           configMap:
             name: rust-sysdb-service-config
+        {{ end }}
+        {{ if .Values.rustSysdbService.additionalVolumes }}
+        {{ toYaml .Values.rustSysdbService.additionalVolumes | nindent 8 }}
         {{ end }}
       containers:
         - name: rust-sysdb-service
@@ -48,6 +58,9 @@ spec:
             - name: rust-sysdb-service-config
               mountPath: /config/
             {{ end }}
+            {{ if .Values.rustSysdbService.additionalVolumeMounts }}
+            {{ toYaml .Values.rustSysdbService.additionalVolumeMounts | nindent 12 }}
+            {{ end }}
           ports:
             - containerPort: 50051
               name: grpc
@@ -55,6 +68,9 @@ spec:
             {{if .Values.rustSysdbService.configuration}}
             - name: CONFIG_PATH
               value: "/config/config.yaml"
+            {{ end }}
+            {{ if .Values.rustSysdbService.additionalEnv }}
+            {{ toYaml .Values.rustSysdbService.additionalEnv | nindent 12 }}
             {{ end }}
           resources:
             limits:
