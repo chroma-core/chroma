@@ -1,0 +1,6 @@
+# Spanner migrations manifest - DO NOT EDIT MANUALLY
+# Format: {filename} {sha256_hash}
+# This file protects against merge conflicts and forgotten migration files.
+# Run `cargo run --bin spanner_migration -- --generate-sum` to regenerate.
+
+0001-create_tenants.spanner.sql 87dbaa652753aba0730b9b784a2974f0b23c2017b562ec9f0b01663d9c840321
