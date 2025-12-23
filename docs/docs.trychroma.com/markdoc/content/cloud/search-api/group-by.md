@@ -15,7 +15,7 @@ GroupBy currently requires a ranking expression to be specified. Support for gro
 
 GroupBy organizes ranked results into groups based on metadata keys, then performs aggregation on each group. Currently, aggregation supports `MinK` and `MaxK`, which select the top k results from each group based on the specified sorting keys.
 
-After grouping and aggregation, results from all groups are flattened and sorted by score. The `limit()` operates on this flattened list.
+After grouping and aggregation, results from all groups are flattened and sorted by score. The `limit()` method operates on this flattened list.
 
 {% TabbedCodeBlock %}
 
@@ -498,5 +498,5 @@ for (const row of rows) {
 ## Next Steps
 
 - Learn about [ranking expressions](./ranking) to control how documents are scored before grouping
-- See [filtering](./filtering) to narrow down candidates before grouping
+- See [Filtering with Where](./filtering) to narrow down candidates before grouping
 - Explore [batch operations](./batch-operations) to run multiple grouped searches at once
