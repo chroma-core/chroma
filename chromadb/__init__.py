@@ -11,6 +11,7 @@ from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings
 from chromadb.api import AdminAPI, AsyncClientAPI, ClientAPI
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
+    Cmek,
     CollectionMetadata,
     UpdateMetadata,
     Documents,
@@ -58,6 +59,7 @@ import os
 
 # Re-export types from chromadb.types
 __all__ = [
+    "Cmek",
     "Collection",
     "Metadata",
     "Metadatas",

@@ -13,6 +13,8 @@ from chromadb.api.types import (
     FtsIndexConfig,
     EmbeddingFunction,
     Embeddings,
+    Cmek,
+    CmekProvider,
 )
 from chromadb.execution.expression.operator import Key
 from typing import List, Dict, Any
@@ -825,16 +827,25 @@ class TestNewSchema:
         assert deserialized.defaults.string is not None
         assert deserialized.defaults.string.fts_index is not None
         assert deserialized.defaults.string.fts_index.enabled is False
-        assert deserialized.defaults.string.fts_index.enabled == original.defaults.string.fts_index.enabled  # type: ignore[union-attr]
+        assert (
+            deserialized.defaults.string.fts_index.enabled
+            == original.defaults.string.fts_index.enabled
+        )  # type: ignore[union-attr]
         assert deserialized.defaults.string.string_inverted_index is not None
         assert deserialized.defaults.string.string_inverted_index.enabled is True
-        assert deserialized.defaults.string.string_inverted_index.enabled == original.defaults.string.string_inverted_index.enabled  # type: ignore[union-attr]
+        assert (
+            deserialized.defaults.string.string_inverted_index.enabled
+            == original.defaults.string.string_inverted_index.enabled
+        )  # type: ignore[union-attr]
 
         # Check defaults.float_list (vector index)
         assert deserialized.defaults.float_list is not None
         assert deserialized.defaults.float_list.vector_index is not None
         assert deserialized.defaults.float_list.vector_index.enabled is False
-        assert deserialized.defaults.float_list.vector_index.enabled == original.defaults.float_list.vector_index.enabled  # type: ignore[union-attr]
+        assert (
+            deserialized.defaults.float_list.vector_index.enabled
+            == original.defaults.float_list.vector_index.enabled
+        )  # type: ignore[union-attr]
         # Space is resolved during serialization, so deserialized has explicit value
         assert deserialized.defaults.float_list.vector_index.config.space == "l2"
         # Check embedding function is preserved
@@ -846,56 +857,83 @@ class TestNewSchema:
             deserialized.defaults.float_list.vector_index.config.embedding_function.name()
             == "default"
         )
-        assert original.defaults.float_list.vector_index.config.embedding_function.name() == "default"  # type: ignore[union-attr]
+        assert (
+            original.defaults.float_list.vector_index.config.embedding_function.name()
+            == "default"
+        )  # type: ignore[union-attr]
 
         # Check defaults.sparse_vector
         assert deserialized.defaults.sparse_vector is not None
         assert deserialized.defaults.sparse_vector.sparse_vector_index is not None
         assert deserialized.defaults.sparse_vector.sparse_vector_index.enabled is False
-        assert deserialized.defaults.sparse_vector.sparse_vector_index.enabled == original.defaults.sparse_vector.sparse_vector_index.enabled  # type: ignore[union-attr]
+        assert (
+            deserialized.defaults.sparse_vector.sparse_vector_index.enabled
+            == original.defaults.sparse_vector.sparse_vector_index.enabled
+        )  # type: ignore[union-attr]
 
         # Check defaults.int_value
         assert deserialized.defaults.int_value is not None
         assert deserialized.defaults.int_value.int_inverted_index is not None
         assert deserialized.defaults.int_value.int_inverted_index.enabled is True
-        assert deserialized.defaults.int_value.int_inverted_index.enabled == original.defaults.int_value.int_inverted_index.enabled  # type: ignore[union-attr]
+        assert (
+            deserialized.defaults.int_value.int_inverted_index.enabled
+            == original.defaults.int_value.int_inverted_index.enabled
+        )  # type: ignore[union-attr]
 
         # Check defaults.float_value
         assert deserialized.defaults.float_value is not None
         assert deserialized.defaults.float_value.float_inverted_index is not None
         assert deserialized.defaults.float_value.float_inverted_index.enabled is True
-        assert deserialized.defaults.float_value.float_inverted_index.enabled == original.defaults.float_value.float_inverted_index.enabled  # type: ignore[union-attr]
+        assert (
+            deserialized.defaults.float_value.float_inverted_index.enabled
+            == original.defaults.float_value.float_inverted_index.enabled
+        )  # type: ignore[union-attr]
 
         # Check defaults.boolean
         assert deserialized.defaults.boolean is not None
         assert deserialized.defaults.boolean.bool_inverted_index is not None
         assert deserialized.defaults.boolean.bool_inverted_index.enabled is True
-        assert deserialized.defaults.boolean.bool_inverted_index.enabled == original.defaults.boolean.bool_inverted_index.enabled  # type: ignore[union-attr]
+        assert (
+            deserialized.defaults.boolean.bool_inverted_index.enabled
+            == original.defaults.boolean.bool_inverted_index.enabled
+        )  # type: ignore[union-attr]
 
         # Check keys.#document
         assert "#document" in deserialized.keys
         assert deserialized.keys["#document"].string is not None
         assert deserialized.keys["#document"].string.fts_index is not None
         assert deserialized.keys["#document"].string.fts_index.enabled is True
-        assert deserialized.keys["#document"].string.fts_index.enabled == original.keys["#document"].string.fts_index.enabled  # type: ignore[union-attr]
+        assert (
+            deserialized.keys["#document"].string.fts_index.enabled
+            == original.keys["#document"].string.fts_index.enabled
+        )  # type: ignore[union-attr]
         assert deserialized.keys["#document"].string.string_inverted_index is not None
         assert (
             deserialized.keys["#document"].string.string_inverted_index.enabled is False
         )
-        assert deserialized.keys["#document"].string.string_inverted_index.enabled == original.keys["#document"].string.string_inverted_index.enabled  # type: ignore[union-attr]
+        assert (
+            deserialized.keys["#document"].string.string_inverted_index.enabled
+            == original.keys["#document"].string.string_inverted_index.enabled
+        )  # type: ignore[union-attr]
 
         # Check keys.#embedding
         assert "#embedding" in deserialized.keys
         assert deserialized.keys["#embedding"].float_list is not None
         assert deserialized.keys["#embedding"].float_list.vector_index is not None
         assert deserialized.keys["#embedding"].float_list.vector_index.enabled is True
-        assert deserialized.keys["#embedding"].float_list.vector_index.enabled == original.keys["#embedding"].float_list.vector_index.enabled  # type: ignore[union-attr]
+        assert (
+            deserialized.keys["#embedding"].float_list.vector_index.enabled
+            == original.keys["#embedding"].float_list.vector_index.enabled
+        )  # type: ignore[union-attr]
         # Verify source_key is preserved
         assert (
             deserialized.keys["#embedding"].float_list.vector_index.config.source_key
             == "#document"
         )
-        assert original.keys["#embedding"].float_list.vector_index.config.source_key == "#document"  # type: ignore[union-attr]
+        assert (
+            original.keys["#embedding"].float_list.vector_index.config.source_key
+            == "#document"
+        )  # type: ignore[union-attr]
         # Verify space is preserved (resolved during serialization)
         assert (
             deserialized.keys["#embedding"].float_list.vector_index.config.space == "l2"
@@ -913,14 +951,20 @@ class TestNewSchema:
             ].float_list.vector_index.config.embedding_function.name()
             == "default"
         )
-        assert original.keys["#embedding"].float_list.vector_index.config.embedding_function.name() == "default"  # type: ignore[union-attr]
+        assert (
+            original.keys[
+                "#embedding"
+            ].float_list.vector_index.config.embedding_function.name()
+            == "default"
+        )  # type: ignore[union-attr]
 
     def test_serialize_deserialize_with_vector_config_no_ef(self) -> None:
         """Test serialization/deserialization of Schema with vector config where embedding_function=None."""
         # Create a default schema and modify vector config with ef=None
         original = Schema()
         vector_config = VectorIndexConfig(
-            space="cosine", embedding_function=None  # Explicitly set to None
+            space="cosine",
+            embedding_function=None,  # Explicitly set to None
         )
         original.create_index(config=vector_config)
 
@@ -1087,9 +1131,7 @@ class TestNewSchema:
                 == "mock_embedding"
             )
             # Verify the EF config is correct
-            ef_config = (
-                deserialized.defaults.float_list.vector_index.config.embedding_function.get_config()
-            )
+            ef_config = deserialized.defaults.float_list.vector_index.config.embedding_function.get_config()
             assert ef_config["model_name"] == "custom_model_v3"
             # HNSW config should be preserved
             assert deserialized.defaults.float_list.vector_index.config.hnsw is not None
@@ -1273,9 +1315,7 @@ class TestNewSchema:
                 == "mock_embedding"
             )
             # Verify the EF config is correct
-            ef_config = (
-                deserialized.defaults.float_list.vector_index.config.embedding_function.get_config()
-            )
+            ef_config = deserialized.defaults.float_list.vector_index.config.embedding_function.get_config()
             assert ef_config["model_name"] == "spann_model"
             # SPANN config should be preserved
             assert (
@@ -2435,7 +2475,9 @@ class TestNewSchema:
             schema.create_index(config=vector_config1)
 
             # Capture the initial state of #embedding
-            initial_embedding_hnsw = schema.keys["#embedding"].float_list.vector_index.config.hnsw  # type: ignore[union-attr]
+            initial_embedding_hnsw = schema.keys[
+                "#embedding"
+            ].float_list.vector_index.config.hnsw  # type: ignore[union-attr]
             assert initial_embedding_hnsw is not None
             assert initial_embedding_hnsw.ef_construction == 100
             assert initial_embedding_hnsw.max_neighbors == 16
@@ -2494,7 +2536,10 @@ class TestNewSchema:
         schema.create_index(config=StringInvertedIndexConfig(), key="key_c")
 
         # Verify each key has its own config
-        assert schema.keys["key_a"].sparse_vector.sparse_vector_index.config.source_key == "source_a"  # type: ignore[union-attr]
+        assert (
+            schema.keys["key_a"].sparse_vector.sparse_vector_index.config.source_key
+            == "source_a"
+        )  # type: ignore[union-attr]
         assert schema.keys["key_b"].string.string_inverted_index.enabled is True  # type: ignore[union-attr]
         assert schema.keys["key_c"].string.string_inverted_index.enabled is True  # type: ignore[union-attr]
 
@@ -2626,6 +2671,126 @@ class TestNewSchema:
         assert des_field.string is None
         assert des_field.int_value is None
 
+    def test_cmek_basic_creation(self) -> None:
+        """Test basic CMEK creation and validation."""
+        # Test GCP CMEK creation
+        cmek = Cmek.gcp(
+            "projects/test-project/locations/us-central1/keyRings/test-ring/cryptoKeys/test-key"
+        )
+        assert cmek.provider == CmekProvider.GCP
+        assert (
+            cmek.resource
+            == "projects/test-project/locations/us-central1/keyRings/test-ring/cryptoKeys/test-key"
+        )
+
+        # Test valid pattern
+        assert cmek.validate_pattern() is True
+
+        # Test invalid pattern
+        invalid_cmek = Cmek.gcp("invalid-format")
+        assert invalid_cmek.validate_pattern() is False
+
+    def test_cmek_serialization(self) -> None:
+        """Test CMEK serialization and deserialization."""
+        cmek = Cmek.gcp("projects/p/locations/l/keyRings/r/cryptoKeys/k")
+
+        # Serialize - should use snake_case format matching Rust serde
+        cmek_dict = cmek.to_dict()
+        assert cmek_dict == {"gcp": "projects/p/locations/l/keyRings/r/cryptoKeys/k"}
+        assert "gcp" in cmek_dict
+        assert cmek_dict["gcp"] == "projects/p/locations/l/keyRings/r/cryptoKeys/k"
+
+        # Deserialize
+        restored = Cmek.from_dict(cmek_dict)
+        assert restored.provider == CmekProvider.GCP
+        assert restored.resource == cmek.resource
+
+    def test_cmek_in_schema(self) -> None:
+        """Test CMEK integration with Schema using set_cmek() method."""
+        schema = Schema()
+
+        # Initially no CMEK
+        assert schema.cmek is None
+
+        # Add CMEK using set_cmek()
+        cmek = Cmek.gcp("projects/test/locations/us/keyRings/ring/cryptoKeys/key")
+        result = schema.set_cmek(cmek)
+
+        # Verify method returns self for chaining
+        assert result is schema
+
+        # Verify CMEK is set
+        assert schema.cmek is not None
+        assert schema.cmek.provider == CmekProvider.GCP
+        assert (
+            schema.cmek.resource
+            == "projects/test/locations/us/keyRings/ring/cryptoKeys/key"
+        )
+
+        # Test removing CMEK by passing None
+        schema.set_cmek(None)
+        assert schema.cmek is None
+
+        # Test method chaining
+        cmek2 = Cmek.gcp("projects/p/locations/l/keyRings/r/cryptoKeys/k")
+        schema2 = Schema().set_cmek(cmek2)
+        assert schema2.cmek is not None
+        assert schema2.cmek.resource == "projects/p/locations/l/keyRings/r/cryptoKeys/k"
+
+    def test_cmek_schema_serialization(self) -> None:
+        """Test Schema serialization with CMEK."""
+        cmek = Cmek.gcp("projects/p/locations/l/keyRings/r/cryptoKeys/k")
+        schema = Schema().set_cmek(cmek)
+
+        # Serialize
+        json_data = schema.serialize_to_json()
+
+        # Verify CMEK is in JSON with snake_case format
+        assert "cmek" in json_data
+        assert json_data["cmek"] == {
+            "gcp": "projects/p/locations/l/keyRings/r/cryptoKeys/k"
+        }
+        assert "gcp" in json_data["cmek"]
+        assert (
+            json_data["cmek"]["gcp"] == "projects/p/locations/l/keyRings/r/cryptoKeys/k"
+        )
+
+        # Deserialize
+        deserialized = Schema.deserialize_from_json(json_data)
+        assert deserialized.cmek is not None
+        assert deserialized.cmek.provider == CmekProvider.GCP
+        assert deserialized.cmek.resource == cmek.resource
+
+    def test_cmek_schema_without_cmek_serialization(self) -> None:
+        """Test Schema serialization without CMEK (backward compatibility)."""
+        schema = Schema()
+        # Don't set CMEK
+
+        # Serialize
+        json_data = schema.serialize_to_json()
+
+        # CMEK should not be in JSON
+        assert "cmek" not in json_data
+
+        # Deserialize
+        deserialized = Schema.deserialize_from_json(json_data)
+        assert deserialized.cmek is None
+
+    def test_cmek_invalid_deserialization(self) -> None:
+        """Test that invalid CMEK data raises a warning and sets cmek to None."""
+        with pytest.raises(ValueError, match="Unsupported or missing CMEK provider in data"):
+            Schema.deserialize_from_json(
+                {"defaults": {}, "keys": {}, "cmek": {}}
+            )
+
+        with pytest.raises(ValueError, match="Unsupported or missing CMEK provider in data"):
+            Schema.deserialize_from_json(
+                {
+                    "defaults": {},
+                    "keys": {},
+                    "cmek": {"invalid_provider": "some-resource"},
+                }
+            )
 
 def test_sparse_vector_cannot_be_created_globally() -> None:
     """Test that sparse vector index cannot be created globally (without a key)."""
