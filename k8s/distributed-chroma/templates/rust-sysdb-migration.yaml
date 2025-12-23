@@ -1,4 +1,5 @@
-{{- if .Values.rustSysdbMigration.configuration }}
+{{- if hasKey .Values "rustSysdbMigration" }}
+{{- if and .Values.rustSysdbMigration.enabled .Values.rustSysdbMigration.configuration  }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -23,6 +24,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: rust-sysdb-migration
+          {{- if .Values.rustSysdbMigration.enabled }}
           image: "{{ .Values.rustSysdbMigration.image.repository }}:{{ .Values.rustSysdbMigration.image.tag }}"
           imagePullPolicy: IfNotPresent
           env:
@@ -33,7 +35,11 @@ spec:
             - name: config
               mountPath: /config/
             {{- end }}
-      {{- if .Values.rustSysdbMigration.configuration }}
+          {{- else }}
+          image: "alpine:3.18"
+          command: ["echo", "rust-sysdb-migration is disabled"]
+          {{- end }}
+      {{- if and .Values.rustSysdbMigration.enabled .Values.rustSysdbMigration.configuration }}
       volumes:
         - name: config
           configMap:
@@ -48,3 +54,4 @@ spec:
         {{- toYaml .Values.rustSysdbMigration.nodeSelector | nindent 8 }}
       {{- end }}
 ---
+{{- end }}

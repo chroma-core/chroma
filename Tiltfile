@@ -80,6 +80,8 @@ else:
     target='rust-sysdb-migration'
   )
 
+update_settings(suppress_unused_image_warnings=["rust-sysdb-migration"])
+
 if config.tilt_subcommand == "ci":
   custom_build(
     'rust-frontend-service',
@@ -191,7 +193,7 @@ if os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA_VALUES'):
 # We manually call helm template so we can call set-file
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=rust/worker/chroma_config.yaml,heapTenderService.configuration=rust/worker/chroma_config.yaml,compactionService.configuration=rust/worker/chroma_config.yaml,queryService.configuration=rust/worker/chroma_config.yaml,garbageCollector.configuration=rust/worker/chroma_config.yaml,rustSysdbService.configuration=rust/worker/chroma_config.yaml,rustSysdbMigration.configuration=rust/worker/chroma_config2.yaml --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=rust/worker/chroma_config.yaml,heapTenderService.configuration=rust/worker/chroma_config.yaml,compactionService.configuration=rust/worker/chroma_config.yaml,queryService.configuration=rust/worker/chroma_config.yaml,garbageCollector.configuration=rust/worker/chroma_config.yaml,rustSysdbService.configuration=rust/worker/chroma_config.yaml --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
   ),
 )
 
@@ -326,9 +328,9 @@ k8s_resource('postgres:deployment:chroma2', resource_deps=['k8s_setup2'], labels
 # Jobs are suffixed with the image tag to ensure they are unique. In this context, the image tag is defined in k8s/distributed-chroma/values.yaml.
 k8s_resource('sysdb-migration-latest:job:chroma2', resource_deps=['postgres:deployment:chroma2'], labels=["infrastructure2"])
 k8s_resource('rust-log-service:statefulset:chroma2', labels=["chroma2"], port_forwards=['60054:50051', '60052:50052'], resource_deps=['minio-deployment'])
-k8s_resource('rust-sysdb-migration-latest:job:chroma2', resource_deps=['spanner-deployment'], labels=["infrastructure2"])
+k8s_resource('rust-sysdb-migration-latest', resource_deps=['spanner-deployment'], labels=["infrastructure2"])
 k8s_resource('sysdb:deployment:chroma2', resource_deps=['sysdb-migration-latest:job:chroma2'], labels=["chroma2"], port_forwards='60051:50051')
-k8s_resource('rust-sysdb-service:deployment:chroma2', resource_deps=['k8s_setup2', 'spanner-deployment', 'rust-sysdb-migration-latest:job:chroma2'], labels=["chroma2"], port_forwards='60055:50051')
+k8s_resource('rust-sysdb-service:deployment:chroma2', resource_deps=['k8s_setup2', 'spanner-deployment', 'rust-sysdb-migration-latest'], labels=["chroma2"], port_forwards='60055:50051')
 k8s_resource('rust-frontend-service:deployment:chroma2', resource_deps=['sysdb:deployment:chroma2', 'rust-log-service:statefulset:chroma2'], labels=["chroma2"], port_forwards='8001:8000')
 k8s_resource('query-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2'], labels=["chroma2"], port_forwards='60053:50051')
 k8s_resource('compaction-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2'], labels=["chroma2"])
@@ -373,7 +375,7 @@ groups = {
     'k8s_setup2',
     'postgres:deployment:chroma2',
     'sysdb-migration-latest:job:chroma2',
-    'rust-sysdb-migration-latest:job:chroma2',
+    'rust-sysdb-migration-latest',
     'rust-log-service:statefulset:chroma2',
     'sysdb:deployment:chroma2',
     'rust-sysdb-service:deployment:chroma',
