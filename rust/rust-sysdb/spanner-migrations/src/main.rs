@@ -89,6 +89,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             tracing::info!("All migrations are applied!");
         }
+        SpannerConfig::Gcp => {
+            tracing::info!("GCP spanner migration not yet implemented");
+        }
     }
 
     Ok(())

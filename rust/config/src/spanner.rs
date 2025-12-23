@@ -76,12 +76,12 @@ impl SpannerEmulatorConfig {
 pub enum SpannerConfig {
     /// Emulator configuration for local development
     Emulator(SpannerEmulatorConfig),
-    // TODO: Add GCP variant later
-    // Gcp(SpannerGcpConfig),
+    // TODO: Add params to gcp variant later
+    Gcp,
 }
 
 impl Default for SpannerConfig {
     fn default() -> Self {
-        Self::Emulator(SpannerEmulatorConfig::default())
+        Self::Gcp
     }
 }

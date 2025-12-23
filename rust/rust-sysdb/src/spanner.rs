@@ -23,7 +23,7 @@ impl ChromaError for SpannerError {
 /// Wrapper around the Spanner client.
 pub struct Spanner {
     #[allow(dead_code)]
-    client: Client,
+    client: Option<Client>,
 }
 
 #[async_trait::async_trait]
@@ -32,7 +32,7 @@ impl Configurable<SpannerConfig> for Spanner {
         config: &SpannerConfig,
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let (database_path, client_config) = match config {
+        let client = match config {
             SpannerConfig::Emulator(emulator) => {
                 // Configure client to connect to emulator directly (no env var needed)
                 let client_config = ClientConfig {
@@ -40,18 +40,19 @@ impl Configurable<SpannerConfig> for Spanner {
                     ..Default::default()
                 };
 
-                (emulator.database_path(), client_config)
-            } // TODO: Add GCP variant
-              // SpannerConfig::Gcp(gcp) => { ... }
+                let client = Client::new(&emulator.database_path(), client_config)
+                    .await
+                    .map_err(|e| {
+                        Box::new(SpannerError::ConnectionError(e.to_string()))
+                            as Box<dyn ChromaError>
+                    })?;
+
+                tracing::info!("Connected to Spanner: {}", emulator.database_path());
+
+                Some(client)
+            }
+            SpannerConfig::Gcp => None,
         };
-
-        let client = Client::new(&database_path, client_config)
-            .await
-            .map_err(|e| {
-                Box::new(SpannerError::ConnectionError(e.to_string())) as Box<dyn ChromaError>
-            })?;
-
-        tracing::info!("Connected to Spanner: {}", database_path);
 
         Ok(Spanner { client })
     }
