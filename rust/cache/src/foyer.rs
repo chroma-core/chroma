@@ -4,9 +4,9 @@ use chroma_error::ChromaError;
 use chroma_tracing::util::{StopWatchUnit, Stopwatch};
 use clap::Parser;
 use foyer::{
-    CacheBuilder, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCacheBuilder,
-    InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, S3FifoConfig, StorageKey,
-    StorageValue, Throttle, TracingOptions,
+    BlockEngineBuilder, CacheBuilder, DeviceBuilder, FifoConfig, FifoPicker, FsDeviceBuilder,
+    HybridCacheBuilder, InvalidRatioPicker, IoEngineBuilder, LfuConfig, LruConfig,
+    PsyncIoEngineBuilder, S3FifoConfig, StorageKey, StorageValue, Throttle, TracingOptions,
 };
 use opentelemetry::{global, KeyValue};
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,8 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::time::Duration;
+
+pub use foyer::Error as FoyerError;
 
 pub const MIB: usize = 1024 * 1024;
 
@@ -35,10 +37,6 @@ const fn default_file_size() -> usize {
 
 const fn default_flushers() -> usize {
     4
-}
-
-const fn default_flush() -> bool {
-    false
 }
 
 const fn default_reclaimers() -> usize {
@@ -80,10 +78,6 @@ const fn default_trace_insert_us() -> usize {
 }
 
 const fn default_trace_get_us() -> usize {
-    1000 * 100
-}
-
-const fn default_trace_obtain_us() -> usize {
     1000 * 100
 }
 
@@ -142,11 +136,6 @@ pub struct FoyerCacheConfig {
     #[serde(default = "default_buffer_pool_size")]
     pub buffer_pool: usize,
 
-    /// AKA fsync
-    #[arg(long, default_value_t = false)]
-    #[serde(default = "default_flush")]
-    pub flush: bool,
-
     /// Reclaimer count.
     #[arg(long, default_value_t = 2)]
     #[serde(default = "default_reclaimers")]
@@ -194,11 +183,6 @@ pub struct FoyerCacheConfig {
     #[arg(long, default_value_t = 1000 * 100)]
     #[serde(default = "default_trace_get_us")]
     pub trace_get_us: usize,
-
-    /// Record obtain trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 100)]
-    #[serde(default = "default_trace_obtain_us")]
-    pub trace_obtain_us: usize,
 
     /// Record remove trace threshold. Only effective with "mtrace" feature.
     #[arg(long, default_value_t = 1000 * 100)]
@@ -279,7 +263,6 @@ impl Default for FoyerCacheConfig {
             disk: default_disk(),
             file_size: default_file_size(),
             flushers: default_flushers(),
-            flush: default_flush(),
             reclaimers: default_reclaimers(),
             recover_concurrency: default_recover_concurrency(),
             deterministic_hashing: default_deterministic_hashing(),
@@ -289,7 +272,6 @@ impl Default for FoyerCacheConfig {
             invalid_ratio: default_invalid_ratio(),
             trace_insert_us: default_trace_insert_us(),
             trace_get_us: default_trace_get_us(),
-            trace_obtain_us: default_trace_obtain_us(),
             trace_remove_us: default_trace_remove_us(),
             trace_fetch_us: default_trace_fetch_us(),
             buffer_pool: default_buffer_pool_size(),
@@ -307,7 +289,6 @@ where
     cache_hit: opentelemetry::metrics::Counter<u64>,
     cache_miss: opentelemetry::metrics::Counter<u64>,
     get_latency: opentelemetry::metrics::Histogram<u64>,
-    obtain_latency: opentelemetry::metrics::Histogram<u64>,
     insert_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
     clear_latency: opentelemetry::metrics::Histogram<u64>,
@@ -336,9 +317,10 @@ where
         let tracing_options = TracingOptions::new()
             .with_record_hybrid_insert_threshold(Duration::from_micros(config.trace_insert_us as _))
             .with_record_hybrid_get_threshold(Duration::from_micros(config.trace_get_us as _))
-            .with_record_hybrid_obtain_threshold(Duration::from_micros(config.trace_obtain_us as _))
             .with_record_hybrid_remove_threshold(Duration::from_micros(config.trace_remove_us as _))
-            .with_record_hybrid_fetch_threshold(Duration::from_micros(config.trace_fetch_us as _));
+            .with_record_hybrid_get_or_fetch_threshold(Duration::from_micros(
+                config.trace_fetch_us as _,
+            ));
 
         let otel_0_27_metrics = Box::new(
             mixtrics::registry::opentelemetry_0_27::OpenTelemetryMetricsRegistry::new(
@@ -386,25 +368,28 @@ where
             )));
         };
 
-        let mut device_options = DirectFsDeviceOptions::new(dir)
-            .with_capacity(config.disk * MIB)
-            .with_file_size(config.file_size * MIB);
+        let io_engine = PsyncIoEngineBuilder::new().build().await.map_err(|e| {
+            CacheError::InvalidCacheConfig(format!("build io engine failed: {:?}", e)).boxed()
+        })?;
 
+        let mut io_device_builder = FsDeviceBuilder::new(dir).with_capacity(config.disk * MIB);
         if config.admission_rate_limit > 0 {
-            device_options = device_options.with_throttle(
+            io_device_builder = io_device_builder.with_throttle(
                 Throttle::new().with_write_throughput(config.admission_rate_limit * MIB),
             );
         }
+        let io_device = io_device_builder.build().map_err(|e| {
+            CacheError::InvalidCacheConfig(format!("build io device failed: {:?}", e)).boxed()
+        })?;
 
         let builder = builder
             .with_weighter(|_, v| v.weight())
-            .storage(Engine::Large)
-            .with_device_options(device_options)
-            .with_flush(config.flush)
-            .with_recover_mode(foyer::RecoverMode::Strict)
-            .with_large_object_disk_cache_options(
-                LargeEngineOptions::new()
-                    .with_indexer_shards(config.shards)
+            .storage()
+            .with_recover_mode(foyer::RecoverMode::Quiet)
+            .with_io_engine(io_engine)
+            .with_engine_config(
+                BlockEngineBuilder::new(io_device)
+                    .with_block_size(config.file_size * MIB)
                     .with_recover_concurrency(config.recover_concurrency)
                     .with_flushers(config.flushers)
                     .with_reclaimers(config.reclaimers)
@@ -424,7 +409,6 @@ where
         let cache_hit = meter.u64_counter("cache_hit").build();
         let cache_miss = meter.u64_counter("cache_miss").build();
         let get_latency = meter.u64_histogram("get_latency").build();
-        let obtain_latency = meter.u64_histogram("obtain_latency").build();
         let insert_latency = meter.u64_histogram("insert_latency").build();
         let remove_latency = meter.u64_histogram("remove_latency").build();
         let clear_latency = meter.u64_histogram("clear_latency").build();
@@ -435,7 +419,6 @@ where
             cache_hit,
             cache_miss,
             get_latency,
-            obtain_latency,
             insert_latency,
             remove_latency,
             clear_latency,
@@ -485,18 +468,6 @@ where
         Ok(self.cache.clear().await?)
     }
 
-    async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
-        let hostname = &[self.hostname.clone()];
-        let _stopwatch = Stopwatch::new(&self.obtain_latency, hostname, StopWatchUnit::Millis);
-        let res = self.cache.obtain(key).await?.map(|v| v.value().clone());
-        if res.is_some() {
-            self.cache_hit.add(1, hostname);
-        } else {
-            self.cache_miss.add(1, hostname);
-        }
-        Ok(res)
-    }
-
     async fn may_contain(&self, key: &K) -> bool {
         self.cache.contains(key)
     }
@@ -519,7 +490,6 @@ where
     cache_hit: opentelemetry::metrics::Counter<u64>,
     cache_miss: opentelemetry::metrics::Counter<u64>,
     get_latency: opentelemetry::metrics::Histogram<u64>,
-    obtain_latency: opentelemetry::metrics::Histogram<u64>,
     insert_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
     clear_latency: opentelemetry::metrics::Histogram<u64>,
@@ -554,7 +524,6 @@ where
         let cache_hit = meter.u64_counter("cache_hit").build();
         let cache_miss = meter.u64_counter("cache_miss").build();
         let get_latency = meter.u64_histogram("get_latency").build();
-        let obtain_latency = meter.u64_histogram("obtain_latency").build();
         let insert_latency = meter.u64_histogram("insert_latency").build();
         let remove_latency = meter.u64_histogram("remove_latency").build();
         let clear_latency = meter.u64_histogram("clear_latency").build();
@@ -565,7 +534,6 @@ where
             cache_hit,
             cache_miss,
             get_latency,
-            obtain_latency,
             insert_latency,
             remove_latency,
             clear_latency,
@@ -612,7 +580,6 @@ where
         let cache_hit = meter.u64_counter("cache_hit").build();
         let cache_miss = meter.u64_counter("cache_miss").build();
         let get_latency = meter.u64_histogram("get_latency").build();
-        let obtain_latency = meter.u64_histogram("obtain_latency").build();
         let insert_latency = meter.u64_histogram("insert_latency").build();
         let remove_latency = meter.u64_histogram("remove_latency").build();
         let clear_latency = meter.u64_histogram("clear_latency").build();
@@ -623,7 +590,6 @@ where
             cache_hit,
             cache_miss,
             get_latency,
-            obtain_latency,
             insert_latency,
             remove_latency,
             clear_latency,
@@ -667,18 +633,6 @@ where
         let _stopwatch = Stopwatch::new(&self.clear_latency, hostname, StopWatchUnit::Millis);
         self.cache.clear();
         Ok(())
-    }
-
-    async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
-        let hostname = &[self.hostname.clone()];
-        let _stopwatch = Stopwatch::new(&self.obtain_latency, hostname, StopWatchUnit::Millis);
-        let res = self.cache.get(&key).map(|v| v.value().clone());
-        if res.is_some() {
-            self.cache_hit.add(1, hostname);
-        } else {
-            self.cache_miss.add(1, hostname);
-        }
-        Ok(res)
     }
 }
 
@@ -796,7 +750,6 @@ mod test {
             .to_string();
         let cache = FoyerCacheConfig {
             dir: Some(dir.clone()),
-            flush: true,
             ..Default::default()
         }
         .build_hybrid_test::<String, String>()
@@ -826,7 +779,6 @@ mod test {
             .to_string();
         let cache = FoyerCacheConfig {
             dir: Some(dir.clone()),
-            flush: true,
             ..Default::default()
         }
         .build_hybrid_test::<String, String>()
@@ -853,7 +805,6 @@ mod test {
             .to_string();
         let cache = FoyerCacheConfig {
             dir: Some(dir.clone()),
-            flush: true,
             ..Default::default()
         }
         .build_hybrid_test::<String, String>()

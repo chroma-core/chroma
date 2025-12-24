@@ -27,14 +27,14 @@ pub enum CacheError {
     #[error("Invalid cache config")]
     InvalidCacheConfig(String),
     #[error("I/O error when serving from cache {0}")]
-    DiskError(#[from] anyhow::Error),
+    FoyerError(#[from] foyer::FoyerError),
 }
 
 impl ChromaError for CacheError {
     fn code(&self) -> ErrorCodes {
         match self {
             CacheError::InvalidCacheConfig(_) => ErrorCodes::InvalidArgument,
-            CacheError::DiskError(_) => ErrorCodes::Unavailable,
+            CacheError::FoyerError(_) => ErrorCodes::Unavailable,
         }
     }
 }
@@ -76,7 +76,6 @@ where
     }
     async fn remove(&self, key: &K);
     async fn clear(&self) -> Result<(), CacheError>;
-    async fn obtain(&self, key: K) -> Result<Option<V>, CacheError>;
 }
 
 /// A persistent cache extends the traits of a cache to require StorageKey and StorageValue.
