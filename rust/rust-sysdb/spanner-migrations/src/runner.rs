@@ -62,6 +62,7 @@ impl MigrationRunner {
                 self.apply_migration(&migration).await?;
             }
         }
+        self.client.clone().close().await;
         Ok(())
     }
 
@@ -76,6 +77,7 @@ impl MigrationRunner {
                 return Err(MigrationError::UnappliedMigrationsFound(unapplied.len()));
             }
         }
+        self.client.clone().close().await;
         Ok(())
     }
 

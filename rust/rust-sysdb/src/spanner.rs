@@ -10,20 +10,31 @@ use crate::config::SpannerConfig;
 
 #[derive(Error, Debug)]
 pub enum SpannerError {
-    #[error("Failed to connect to Spanner: {0}")]
+    #[error("Failed to connect to Spanner database: {0}")]
     ConnectionError(String),
+    #[error("Failed to configure Spanner client: {0}")]
+    ConfigurationError(String),
 }
 
 impl ChromaError for SpannerError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::Internal
+        match self {
+            SpannerError::ConnectionError(_) => ErrorCodes::Internal,
+            SpannerError::ConfigurationError(_) => ErrorCodes::Internal,
+        }
     }
 }
 
 /// Wrapper around the Spanner client.
+#[derive(Clone)]
 pub struct Spanner {
-    #[allow(dead_code)]
-    client: Option<Client>,
+    client: Client,
+}
+
+impl Spanner {
+    pub async fn close(self) {
+        self.client.close().await;
+    }
 }
 
 #[async_trait::async_trait]
@@ -47,11 +58,27 @@ impl Configurable<SpannerConfig> for Spanner {
                             as Box<dyn ChromaError>
                     })?;
 
-                tracing::info!("Connected to Spanner: {}", emulator.database_path());
+                tracing::info!("Connected to Spanne emulator: {}", emulator.database_path());
 
-                Some(client)
+                client
             }
-            SpannerConfig::Gcp => None,
+            SpannerConfig::Gcp(gcp) => {
+                let client_config = ClientConfig::default().with_auth().await.map_err(|e| {
+                    Box::new(SpannerError::ConfigurationError(e.to_string()))
+                        as Box<dyn ChromaError>
+                })?;
+
+                let client = Client::new(&gcp.database_path(), client_config)
+                    .await
+                    .map_err(|e| {
+                        Box::new(SpannerError::ConnectionError(e.to_string()))
+                            as Box<dyn ChromaError>
+                    })?;
+
+                tracing::info!("Connected to Spanner GCP: {}", gcp.database_path());
+
+                client
+            }
         };
 
         Ok(Spanner { client })
