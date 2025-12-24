@@ -856,14 +856,14 @@ fn verify_buffers_layout(bytes: &[u8]) -> Result<(), ArrowLayoutVerificationErro
             for block in blocks.iter().skip(1) {
                 let curr_offset = block.offset();
                 let len = (curr_offset - prev_offset) as usize;
-                if len % ARROW_ALIGNMENT != 0 {
+                if !len.is_multiple_of(ARROW_ALIGNMENT) {
                     return Err(ArrowLayoutVerificationError::BufferLengthNotAligned);
                 }
                 prev_offset = curr_offset;
             }
             // Check the remaining buffer length based on the body length
             let last_buffer_len = record_batch_body_len - prev_offset as usize;
-            if last_buffer_len % ARROW_ALIGNMENT != 0 {
+            if !last_buffer_len.is_multiple_of(ARROW_ALIGNMENT) {
                 return Err(ArrowLayoutVerificationError::BufferLengthNotAligned);
             }
         }

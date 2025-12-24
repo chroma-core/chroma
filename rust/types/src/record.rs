@@ -266,7 +266,7 @@ impl_base_convert_error!(VectorConversionError, {
 fn vec_to_f32(bytes: &[u8]) -> Result<&[f32], VectorConversionError> {
     // Transmutes a vector of bytes into vector of f32s
 
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return Err(VectorConversionError::InvalidByteLength);
     }
 

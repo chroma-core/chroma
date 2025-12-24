@@ -168,6 +168,7 @@ impl SqliteLog {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn init_compactor_handle(
         &self,
         compactor_handle: ComponentHandle<LocalCompactionManager>,
@@ -177,6 +178,7 @@ impl SqliteLog {
             .map_err(|_| SqlitePushLogsError::CompactorHandleSetError)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn init_max_batch_size(&self, max_batch_size: u32) -> Result<(), SqlitePushLogsError> {
         self.max_batch_size
             .set(max_batch_size)

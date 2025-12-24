@@ -637,6 +637,7 @@ impl GarbageCollectorOrchestrator {
             })
             .collect::<Vec<_>>();
 
+            #[allow(clippy::result_large_err)]
             fn extract_paths(
                 version_file: &CollectionVersionFile,
                 node: &VersionGraphNode,

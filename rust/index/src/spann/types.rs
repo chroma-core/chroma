@@ -1319,7 +1319,7 @@ impl SpannIndexWriter {
                 return Ok(());
             } else {
                 // None of the cluster_counts should be 0. Points to some error if it is.
-                if clustering_output.cluster_counts.iter().any(|&x| x == 0) {
+                if clustering_output.cluster_counts.contains(&0) {
                     tracing::error!("Zero points in a cluster after clustering");
                     return Err(SpannIndexWriterError::KMeansClusteringError(
                         KMeansError::ZeroPointsInCluster,

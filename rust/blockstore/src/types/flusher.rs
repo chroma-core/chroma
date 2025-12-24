@@ -7,6 +7,7 @@ use chroma_error::ChromaError;
 
 use super::{Key, Value};
 
+#[allow(clippy::large_enum_variant)]
 pub enum BlockfileFlusher {
     MemoryBlockfileFlusher(MemoryBlockfileFlusher),
     ArrowBlockfileFlusher(ArrowBlockfileFlusher),

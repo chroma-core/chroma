@@ -51,7 +51,7 @@ use tracing::{trace_span, Instrument, Span};
 - The dispatcher has a queue of tasks that it distributes to worker threads
 - A worker thread sends a TaskRequestMessage to the dispatcher when it is ready for a new task
 - If no task is available for the worker thread, the dispatcher will place that worker's reciever
-    in a queue and send a task to the worker when it recieves another one
+  in a queue and send a task to the worker when it recieves another one
 - The reason to introduce this abstraction is to allow us to control fairness and dynamically adjust
   system utilization. It also makes mechanisms like pausing/stopping work easier.
   It would have likely been more performant to use the Tokio MT runtime, but we chose to use

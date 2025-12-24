@@ -734,6 +734,7 @@ impl LogServer {
         std::mem::swap(&mut *backpressure, &mut new_backpressure);
     }
 
+    #[allow(clippy::result_large_err)]
     fn check_for_backpressure(&self, collection_id: CollectionUuid) -> Result<(), Status> {
         let backpressure = {
             let backpressure = self.backpressure.lock();
@@ -746,6 +747,7 @@ impl LogServer {
     }
 
     /// Verify that the service is not in read-only mode.
+    #[allow(clippy::result_large_err)]
     fn ensure_write_mode(&self) -> Result<(), Status> {
         if self.dirty_log.is_none() {
             // NOTE(rescrv):  This should NEVER happen in production.
@@ -2142,6 +2144,7 @@ impl LogService for LogServerWrapper {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn parquet_to_records(parquet: Arc<Vec<u8>>) -> Result<Vec<(LogPosition, Vec<u8>)>, Status> {
     let parquet = match Arc::try_unwrap(parquet) {
         Ok(parquet) => parquet,
@@ -4152,7 +4155,7 @@ mod tests {
 
         runtime.block_on(async move {
             for (offset, log) in operations.iter().enumerate() {
-                push_log_to_server(&log_server, collection_id, &[log.clone()]).await;
+                push_log_to_server(&log_server, collection_id, std::slice::from_ref(log)).await;
                 tx.send(offset as i64 + 1)
                     .expect("Should be able to send compaction signal");
             }
@@ -4192,14 +4195,14 @@ mod tests {
             .collect::<Vec<_>>();
 
         for log in &logs[..=25] {
-            push_log_to_server(&log_server, collection_id, &[log.clone()]).await;
+            push_log_to_server(&log_server, collection_id, std::slice::from_ref(log)).await;
         }
 
         update_compact_offset_on_server(&log_server, collection_id, 6).await;
         garbage_collect_unused_logs(&log_server, collection_id, 7).await;
 
         for log in &logs[26..] {
-            push_log_to_server(&log_server, collection_id, &[log.clone()]).await;
+            push_log_to_server(&log_server, collection_id, std::slice::from_ref(log)).await;
         }
 
         let prefix = collection_id.storage_prefix_for_log();

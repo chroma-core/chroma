@@ -336,10 +336,7 @@ impl GrpcLog {
         batch_size: i32,
         end_timestamp: Option<i64>,
     ) -> Result<Vec<LogRecord>, GrpcPullLogsError> {
-        let end_timestamp = match end_timestamp {
-            Some(end_timestamp) => end_timestamp,
-            None => i64::MAX,
-        };
+        let end_timestamp = end_timestamp.unwrap_or(i64::MAX);
         let mut client = self.client_for(collection_id)?;
         let request = client.pull_logs(chroma_proto::PullLogsRequest {
             // NOTE(rescrv):  Use the untyped string representation of the collection ID.
@@ -495,6 +492,7 @@ impl GrpcLog {
         Self::post_process_get_all(combined_response)
     }
 
+    #[allow(clippy::result_large_err)]
     fn post_process_get_all(
         combined_response: Vec<GetAllCollectionInfoToCompactResponse>,
     ) -> Result<Vec<CollectionInfo>, GrpcGetCollectionsWithNewDataError> {

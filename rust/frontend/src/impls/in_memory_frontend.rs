@@ -445,6 +445,7 @@ impl InMemoryFrontend {
         Ok(chroma_types::UpsertCollectionRecordsResponse {})
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn delete(
         &mut self,
         request: chroma_types::DeleteCollectionRecordsRequest,
@@ -505,6 +506,7 @@ impl InMemoryFrontend {
         Ok(chroma_types::DeleteCollectionRecordsResponse {})
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn count(
         &self,
         request: chroma_types::CountRequest,
@@ -540,6 +542,7 @@ impl InMemoryFrontend {
         Ok(count.count)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn get(
         &self,
         request: chroma_types::GetRequest,
@@ -598,6 +601,7 @@ impl InMemoryFrontend {
         Ok((get_response, include).into())
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn query(
         &mut self,
         request: chroma_types::QueryRequest,
