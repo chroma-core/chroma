@@ -1,4 +1,4 @@
-FROM rust:1.88.0 AS builder
+FROM rust:1.92.0 AS builder
 
 ARG RELEASE_MODE=
 ARG PROTOC_VERSION=31.1
