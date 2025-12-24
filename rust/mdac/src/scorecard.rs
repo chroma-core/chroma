@@ -95,7 +95,7 @@ impl<T: ScorecardMetrics> ScorecardMetrics for &T {
 /// It is a sync/send data structure that is implemented to be highly concurrent.
 #[derive(Debug)]
 pub struct Scorecard<'a> {
-    metrics: &'a (dyn ScorecardMetrics),
+    metrics: &'a dyn ScorecardMetrics,
     stride: usize,
     rules: Mutex<Arc<RuleEvaluator>>,
     buckets: Vec<Bucket>,
