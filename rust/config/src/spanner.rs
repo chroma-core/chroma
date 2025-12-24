@@ -69,6 +69,49 @@ impl SpannerEmulatorConfig {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SpannerGcpConfig {
+    #[serde(default = "SpannerGcpConfig::default_project")]
+    pub project: String,
+    #[serde(default = "SpannerGcpConfig::default_instance")]
+    pub instance: String,
+    #[serde(default = "SpannerGcpConfig::default_database")]
+    pub database: String,
+}
+
+impl SpannerGcpConfig {
+    // points to staging.
+    fn default_project() -> String {
+        "chroma-398322".to_string()
+    }
+
+    fn default_instance() -> String {
+        "sysdb-nam-eur-asia3".to_string()
+    }
+
+    fn default_database() -> String {
+        "sysdb".to_string()
+    }
+
+    /// Returns the database path in the format required by the Spanner client
+    pub fn database_path(&self) -> String {
+        format!(
+            "projects/{}/instances/{}/databases/{}",
+            self.project, self.instance, self.database
+        )
+    }
+}
+
+impl Default for SpannerGcpConfig {
+    fn default() -> Self {
+        Self {
+            project: Self::default_project(),
+            instance: Self::default_instance(),
+            database: Self::default_database(),
+        }
+    }
+}
+
 /// Spanner configuration - either emulator or GCP (mutually exclusive)
 /// Defaults to emulator with standard local settings.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -76,12 +119,11 @@ impl SpannerEmulatorConfig {
 pub enum SpannerConfig {
     /// Emulator configuration for local development
     Emulator(SpannerEmulatorConfig),
-    // TODO: Add params to gcp variant later
-    Gcp,
+    Gcp(SpannerGcpConfig),
 }
 
 impl Default for SpannerConfig {
     fn default() -> Self {
-        Self::Gcp
+        Self::Gcp(SpannerGcpConfig::default())
     }
 }

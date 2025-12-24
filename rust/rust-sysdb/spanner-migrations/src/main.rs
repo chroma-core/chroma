@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
     init_tracing(tracing_layers);
 
-    match &config.spanner {
+    let runner = match &config.spanner {
         SpannerConfig::Emulator(emulator) => {
             // Bootstrap emulator (create instance/database if needed)
             if let Err(e) = bootstrap::bootstrap_emulator(emulator).await {
@@ -61,37 +61,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 environment: Environment::Emulator(emulator.grpc_endpoint()),
             };
 
-            tracing::info!("Connecting to Spanner: {}", emulator.database_path());
+            tracing::info!(
+                "Connecting to Spanner database {} in emulator",
+                emulator.database_path()
+            );
 
             let client = Client::new(&emulator.database_path(), client_config).await?;
             let admin_client = AdminClient::new(admin_client_config).await?;
 
-            tracing::info!("Connected to Spanner");
+            tracing::info!(
+                "Connected to Spanner database {} in emulator",
+                emulator.database_path()
+            );
 
-            let runner = MigrationRunner::new(client, admin_client, emulator.database_path());
-
-            match config.migration_mode {
-                MigrationMode::Apply => {
-                    tracing::info!("Initializing migrations table...");
-                    runner.initialize_migrations_table().await?;
-
-                    tracing::info!("Applying migrations...");
-                    runner.apply_all_migrations().await?;
-
-                    tracing::info!("Migrations applied successfully!");
-                }
-                MigrationMode::Validate => {
-                    tracing::info!("Validating migrations...");
-                    runner.validate_all_migrations().await?;
-
-                    tracing::info!("All migrations are applied!");
-                }
-            }
+            MigrationRunner::new(client, admin_client, emulator.database_path())
         }
-        SpannerConfig::Gcp => {
-            tracing::info!("GCP spanner migration not yet implemented");
+        SpannerConfig::Gcp(gcp) => {
+            let client_config = ClientConfig::default().with_auth().await?;
+            let admin_client_config = AdminClientConfig::default().with_auth().await?;
+
+            tracing::info!(
+                "Connecting to Spanner database {} in gcp",
+                gcp.database_path()
+            );
+
+            let client = Client::new(&gcp.database_path(), client_config).await?;
+            let admin_client = AdminClient::new(admin_client_config).await?;
+
+            tracing::info!(
+                "Connected to Spanner database {} in gcp",
+                gcp.database_path()
+            );
+
+            MigrationRunner::new(client, admin_client, gcp.database_path())
         }
     };
+
+    match config.migration_mode {
+        MigrationMode::Apply => {
+            tracing::info!("Initializing migrations table...");
+            runner.initialize_migrations_table().await?;
+
+            tracing::info!("Applying migrations...");
+            runner.apply_all_migrations().await?;
+
+            tracing::info!("Migrations applied successfully!");
+        }
+        MigrationMode::Validate => {
+            tracing::info!("Validating migrations...");
+            runner.validate_all_migrations().await?;
+
+            tracing::info!("All migrations are applied!");
+        }
+    }
 
     Ok(())
 }

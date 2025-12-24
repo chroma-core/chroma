@@ -79,6 +79,7 @@ impl SysdbService {
             .set_serving::<SysDbServer<SysdbService>>()
             .await;
 
+        let spanner = self.spanner.clone();
         Server::builder()
             .layer(chroma_tracing::GrpcServerTraceLayer)
             .add_service(health_service)
@@ -87,9 +88,11 @@ impl SysdbService {
                 // TODO(Sanket): Drain existing requests before shutting down.
                 select! {
                     _ = sigterm.recv() => {
+                        spanner.close().await;
                         tracing::info!("Received SIGTERM, shutting down server");
                     }
                     _ = sigint.recv() => {
+                        spanner.close().await;
                         tracing::info!("Received SIGINT, shutting down server");
                     }
                 }
