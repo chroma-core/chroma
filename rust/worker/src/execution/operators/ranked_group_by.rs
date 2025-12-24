@@ -244,7 +244,7 @@ mod tests {
             1 => "B",
             _ => "C",
         };
-        let year = if ((offset - 1) / 3) % 2 == 0 {
+        let year = if ((offset - 1) / 3).is_multiple_of(2) {
             2023
         } else {
             2024
@@ -273,7 +273,7 @@ mod tests {
         .collect();
 
         // optional_category: None for every 7th record
-        if offset % 7 != 0 {
+        if !offset.is_multiple_of(7) {
             metadata.insert(
                 "optional_category".to_string(),
                 UpdateMetadataValue::Str(category.to_string()),

@@ -160,8 +160,7 @@ impl Scheduler {
 
     #[cfg(test)]
     fn should_continue(num_times: Option<usize>, counter: usize) -> bool {
-        if num_times.is_some() {
-            let num_times = num_times.unwrap();
+        if let Some(num_times) = num_times {
             if counter >= num_times {
                 return false;
             }

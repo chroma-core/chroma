@@ -44,16 +44,11 @@ pub enum ColorLevel {
     TrueColor,
 }
 
-#[derive(Debug, Clone, ValueEnum, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, ValueEnum, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Theme {
+    #[default]
     Dark,
     Light,
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Self::Dark
-    }
 }
 
 pub fn read_secret(prompt: &str) -> io::Result<String> {

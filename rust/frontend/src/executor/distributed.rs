@@ -252,6 +252,7 @@ impl DistributedExecutor {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn choose_client_weighted<T: Clone>(
     clients: &[T],
     config: &ClientSelectionConfig,
@@ -301,6 +302,7 @@ fn choose_client_weighted<T: Clone>(
     Ok(clients[idx].clone())
 }
 
+#[allow(clippy::result_large_err)]
 fn choose_query_client_weighted(
     clients: &[QueryClient],
     config: &ClientSelectionConfig,

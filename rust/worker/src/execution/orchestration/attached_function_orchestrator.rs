@@ -195,6 +195,7 @@ where
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum AttachedFunctionOrchestratorResponse {
     /// No attached function was found, so nothing was executed
     NoAttachedFunction { job_id: JobId },
@@ -236,6 +237,7 @@ impl AttachedFunctionOrchestrator {
     }
 
     /// Get the output collection info if it has been set
+    #[allow(clippy::result_large_err)]
     pub fn get_output_collection_info(
         &self,
     ) -> Result<&CollectionCompactInfo, AttachedFunctionOrchestratorError> {
@@ -245,6 +247,7 @@ impl AttachedFunctionOrchestrator {
     }
 
     /// Get the output collection ID if it has been set
+    #[allow(clippy::result_large_err)]
     pub fn get_output_collection_id(
         &self,
     ) -> Result<CollectionUuid, AttachedFunctionOrchestratorError> {
@@ -255,6 +258,7 @@ impl AttachedFunctionOrchestrator {
     }
 
     /// Set the output collection info
+    #[allow(clippy::result_large_err)]
     pub fn set_output_collection_info(
         &mut self,
         collection_info: CollectionCompactInfo,

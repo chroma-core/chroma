@@ -386,6 +386,7 @@ impl GarbageCollector {
             .collect()
     }
 
+    #[allow(clippy::result_large_err)]
     fn manual_garbage_collection_request(
         &self,
         collection_id: CollectionUuid,

@@ -905,7 +905,7 @@ mod tests {
             nonce: Uuid::new_v4(),
         };
 
-        let result = construct_parquet(&[item.clone()]);
+        let result = construct_parquet(std::slice::from_ref(&item));
         assert!(result.is_ok());
         let buffer = result.unwrap();
 

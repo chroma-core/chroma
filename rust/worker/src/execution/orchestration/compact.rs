@@ -107,6 +107,7 @@ pub struct CollectionCompactInfo {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum BackfillResult {
     BackfillCompleted {
         function_context: FunctionContext,

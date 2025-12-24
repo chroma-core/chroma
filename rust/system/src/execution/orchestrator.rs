@@ -237,6 +237,7 @@ mod tests {
     use tokio::time::sleep;
 
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct SleepingOperator {}
 
     #[async_trait]
@@ -248,13 +249,6 @@ mod tests {
             sleep(Duration::MAX).await;
             unreachable!("Should've been sleeping!")
         }
-    }
-
-    #[derive(Debug)]
-    struct TestOrchestrator {
-        context: OrchestratorContext,
-        result_channel: Option<Sender<Result<(), TestError>>>,
-        num_tasks: usize,
     }
 
     #[derive(Debug, thiserror::Error)]
@@ -273,6 +267,14 @@ mod tests {
         fn code(&self) -> chroma_error::ErrorCodes {
             chroma_error::ErrorCodes::Internal
         }
+    }
+
+    #[derive(Debug)]
+    #[allow(dead_code)]
+    struct TestOrchestrator {
+        context: OrchestratorContext,
+        result_channel: Option<Sender<Result<(), TestError>>>,
+        num_tasks: usize,
     }
 
     #[async_trait]

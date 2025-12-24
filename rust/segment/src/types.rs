@@ -919,6 +919,7 @@ pub async fn materialize_logs(
 }
 
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum VectorSegmentWriter {
     Hnsw(Box<DistributedHNSWSegmentWriter>),
     Spann(SpannSegmentWriter),
@@ -978,6 +979,7 @@ impl VectorSegmentWriter {
 }
 
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ChromaSegmentWriter<'bf> {
     RecordSegment(RecordSegmentWriter),
     MetadataSegment(MetadataSegmentWriter<'bf>),
@@ -1046,12 +1048,14 @@ impl ChromaSegmentWriter<'_> {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum VectorSegmentFlusher {
     Hnsw(Box<DistributedHNSWSegmentWriter>),
     Spann(SpannSegmentFlusher),
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ChromaSegmentFlusher {
     RecordSegment(RecordSegmentFlusher),
     MetadataSegment(MetadataSegmentFlusher),

@@ -18,20 +18,20 @@ const NUM_ITERS_NO_IMPROVEMENT: usize = 5;
 /// The input for kmeans algorithm.
 /// - indices: The indices of the embeddings that we want to cluster.
 /// - embeddings: The entire list of embeddings. We only cluster a subset from this
-///     list based on the indices. This is a flattened out list so for e.g.
-///     the first embedding will be stored from 0..embedding_dimension, the second
-///     from embedding_dimension..2*embedding_dimension and so on.
+///   list based on the indices. This is a flattened out list so for e.g.
+///   the first embedding will be stored from 0..embedding_dimension, the second
+///   from embedding_dimension..2*embedding_dimension and so on.
 /// - embedding_dimension: The dimension of the embeddings.
 /// - k: The number of clusters.
 /// - first: The start index in the indices array from where we start clustering.
 /// - last: The end index in the indices array till where we cluster. It excludes this index.
 /// - num_samples: Each run of kmeans only clusters num_samples number of points. This is
-///     done to speed up clustering without losing much accuracy. In the end, we cluster all
-///     the points.
+///   done to speed up clustering without losing much accuracy. In the end, we cluster all
+///   the points.
 /// - distance_function: The distance function to use for clustering.
 /// - initial_lambda: Lambda is a parameter used to penalize large clusters. This is used
-///     to generate balanced clusters. The algorithm generate a lambda on the fly using this
-///     initial_lambda as the starting point.
+///   to generate balanced clusters. The algorithm generate a lambda on the fly using this
+///   initial_lambda as the starting point.
 pub struct KMeansAlgorithmInput<'referred_data> {
     indices: Vec<usize>,
     embeddings: &'referred_data [f32],
@@ -76,8 +76,8 @@ impl<'referred_data> KMeansAlgorithmInput<'referred_data> {
 /// - cluster_centers: The embeddings of the centers of the clusters.
 /// - cluster_counts: The number of points in each cluster.
 /// - cluster_labels: The mapping of each point to the cluster it belongs to. Clusters are
-///     identified by unsigned integers starting from 0. These ids are also indexes in the
-///    cluster_centers and cluster_counts arrays.
+///   identified by unsigned integers starting from 0. These ids are also indexes in the
+///   cluster_centers and cluster_counts arrays.
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct KMeansAlgorithmOutput {

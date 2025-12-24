@@ -645,6 +645,7 @@ impl WorkerServer {
         }))
     }
 
+    #[allow(clippy::result_large_err)]
     fn clone_dispatcher(&self) -> Result<ComponentHandle<Dispatcher>, Status> {
         self.dispatcher
             .as_ref()

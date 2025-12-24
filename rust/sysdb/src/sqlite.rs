@@ -34,7 +34,7 @@ use uuid::Uuid;
 /// This is the database that stores metadata about databases, tenants, and collections etc
 /// ## Notes
 /// - The SqliteSysDb should be "Shareable" - it should be possible to clone it and use it in multiple threads
-///     without having divergent state
+///   without having divergent state
 pub struct SqliteSysDb {
     db: SqliteDb,
     log_topic_namespace: String,

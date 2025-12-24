@@ -444,7 +444,7 @@ async fn write_files_for_segment(storage: &Storage, file_paths: &SegmentFilePath
                     let block_ids = block_paths
                         .iter()
                         .map(|block_path| {
-                            Uuid::parse_str(block_path.split('/').last().unwrap()).unwrap()
+                            Uuid::parse_str(block_path.split('/').next_back().unwrap()).unwrap()
                         })
                         .collect::<Vec<_>>();
                     create_test_sparse_index(

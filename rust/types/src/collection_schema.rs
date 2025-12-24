@@ -2700,6 +2700,7 @@ pub struct BoolInvertedIndexConfig {
 
 /// Union type for all index configurations (used by builder pattern)
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum IndexConfig {
     Vector(VectorIndexConfig),
     SparseVector(SparseVectorIndexConfig),

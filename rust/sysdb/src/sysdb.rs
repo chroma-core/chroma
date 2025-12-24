@@ -98,6 +98,7 @@ fn prost_struct_to_json(s: prost_types::Struct) -> serde_json::Value {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum SysDb {
     Grpc(GrpcSysDb),
     Sqlite(SqliteSysDb),
@@ -1905,6 +1906,7 @@ impl GrpcSysDb {
     }
 
     /// Helper function to convert a proto AttachedFunction to a chroma_types::AttachedFunction
+    #[allow(clippy::result_large_err)]
     fn attached_function_from_proto(
         attached_function: chroma_proto::AttachedFunction,
     ) -> Result<chroma_types::AttachedFunction, GetAttachedFunctionError> {

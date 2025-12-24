@@ -132,6 +132,7 @@ impl MigrationRunner {
         Ok(())
     }
 
+    #[allow(clippy::result_large_err)]
     fn get_unapplied_migrations(
         &self,
         applied: Vec<Migration>,
