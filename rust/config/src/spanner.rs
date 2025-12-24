@@ -124,6 +124,6 @@ pub enum SpannerConfig {
 
 impl Default for SpannerConfig {
     fn default() -> Self {
-        Self::Gcp(SpannerGcpConfig::default())
+        Self::Emulator(SpannerEmulatorConfig::default())
     }
 }
