@@ -52,7 +52,8 @@ pub fn modulo_metadata(value: usize) -> HashMap<String, UpdateMetadataValue> {
         ("id".to_string(), UpdateMetadataValue::Int(value as i64)),
         (
             "is_even".to_string(),
-            UpdateMetadataValue::Bool(value.is_multiple_of(2)),
+            #[allow(clippy::manual_is_multiple_of)]
+            UpdateMetadataValue::Bool(value % 2 == 0),
         ),
         (
             "modulo_3".to_string(),
@@ -71,9 +72,10 @@ pub fn random_document(len: usize) -> String {
         .collect()
 }
 
+#[allow(clippy::manual_is_multiple_of)]
 pub fn modulo_document(value: usize) -> String {
-    let cat = if value.is_multiple_of(3) { "<cat>" } else { "" };
-    let dog = if value.is_multiple_of(5) { "<dog>" } else { "" };
+    let cat = if value % 3 == 0 { "<cat>" } else { "" };
+    let dog = if value % 5 == 0 { "<dog>" } else { "" };
     format!("{cat}{dog}")
 }
 
@@ -92,8 +94,9 @@ pub fn upsert_generator(offset: usize) -> OperationRecord {
 ///
 /// # Illustration for head of log
 /// [Add 1], [Add 2], [Add 3], [Add 4], [Add 5], [Del 1], [Add 6] ...
+#[allow(clippy::manual_is_multiple_of)]
 pub fn add_delete_generator(offset: usize) -> OperationRecord {
-    if offset.is_multiple_of(6) {
+    if offset % 6 == 0 {
         OperationRecord {
             id: int_as_id(offset / 6),
             embedding: None,

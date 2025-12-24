@@ -244,7 +244,8 @@ mod tests {
             1 => "B",
             _ => "C",
         };
-        let year = if ((offset - 1) / 3).is_multiple_of(2) {
+        #[allow(clippy::manual_is_multiple_of)]
+        let year = if ((offset - 1) / 3) % 2 == 0 {
             2023
         } else {
             2024
@@ -273,7 +274,8 @@ mod tests {
         .collect();
 
         // optional_category: None for every 7th record
-        if !offset.is_multiple_of(7) {
+        #[allow(clippy::manual_is_multiple_of)]
+        if offset % 7 != 0 {
             metadata.insert(
                 "optional_category".to_string(),
                 UpdateMetadataValue::Str(category.to_string()),
