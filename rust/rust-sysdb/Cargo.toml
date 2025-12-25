@@ -24,6 +24,7 @@ tracing-subscriber = { workspace = true }
 figment = { workspace = true }
 opentelemetry = { workspace = true }
 thiserror = { workspace = true }
+uuid = { workspace = true }
 google-cloud-spanner = { workspace = true }
 google-cloud-gax = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }

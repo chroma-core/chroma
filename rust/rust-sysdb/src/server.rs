@@ -42,22 +42,24 @@ use tokio::{
 use tonic::{transport::Server, Request, Response, Status};
 
 use crate::config::SysDbServiceConfig;
-use crate::spanner::Spanner;
+use crate::router::{Operation, RouteRequest, Router};
+use crate::spanner::SpannerBackend;
+use crate::types as internal;
 
 pub struct SysdbService {
     port: u16,
     #[allow(dead_code)]
     storage: Storage,
     #[allow(dead_code)]
-    spanner: Spanner,
+    router: Router,
 }
 
 impl SysdbService {
-    pub fn new(port: u16, storage: Storage, spanner: Spanner) -> Self {
+    pub fn new(port: u16, storage: Storage, router: Router) -> Self {
         Self {
             port,
             storage,
-            spanner,
+            router,
         }
     }
 
@@ -79,7 +81,7 @@ impl SysdbService {
             .set_serving::<SysDbServer<SysdbService>>()
             .await;
 
-        let spanner = self.spanner.clone();
+        let router = self.router.clone();
         Server::builder()
             .layer(chroma_tracing::GrpcServerTraceLayer)
             .add_service(health_service)
@@ -88,11 +90,11 @@ impl SysdbService {
                 // TODO(Sanket): Drain existing requests before shutting down.
                 select! {
                     _ = sigterm.recv() => {
-                        spanner.close().await;
+                        router.close().await;
                         tracing::info!("Received SIGTERM, shutting down server");
                     }
                     _ = sigint.recv() => {
-                        spanner.close().await;
+                        router.close().await;
                         tracing::info!("Received SIGINT, shutting down server");
                     }
                 }
@@ -109,8 +111,9 @@ impl Configurable<SysDbServiceConfig> for SysdbService {
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let storage = Storage::try_from_config(&config.storage, registry).await?;
-        let spanner = Spanner::try_from_config(&config.spanner, registry).await?;
-        Ok(SysdbService::new(config.port, storage, spanner))
+        let spanner = SpannerBackend::try_from_config(&config.spanner, registry).await?;
+        let router = Router::new(spanner);
+        Ok(SysdbService::new(config.port, storage, router))
     }
 }
 
@@ -153,23 +156,80 @@ impl SysDb for SysdbService {
 
     async fn create_tenant(
         &self,
-        _request: Request<CreateTenantRequest>,
+        request: Request<CreateTenantRequest>,
     ) -> Result<Response<CreateTenantResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        // Convert proto -> internal request type
+        let internal_req: internal::CreateTenantRequest = proto_req.into();
+
+        let backends = self.router.route(&RouteRequest {
+            op: Operation::CreateTenant,
+            db_name: None,
+            tenant: Some(&internal_req.name),
+        })?;
+
+        // Fan out to all backends
+        let mut internal_resp = None;
+        for backend in backends {
+            internal_resp = Some(backend.create_tenant(&internal_req).await?);
+        }
+
+        // Convert internal -> proto response type
+        let resp = internal_resp.ok_or_else(|| Status::internal("no backend for request"))?;
+        Ok(Response::new(resp.into()))
     }
 
     async fn get_tenant(
         &self,
-        _request: Request<GetTenantRequest>,
+        request: Request<GetTenantRequest>,
     ) -> Result<Response<GetTenantResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        // Convert proto -> internal request type
+        let internal_req: internal::GetTenantRequest = proto_req.into();
+
+        let backends = self.router.route(&RouteRequest {
+            op: Operation::GetTenant,
+            db_name: None,
+            tenant: Some(&internal_req.name),
+        })?;
+
+        // Should be exactly one backend for GetTenant
+        let backend = backends
+            .into_iter()
+            .next()
+            .ok_or_else(|| Status::internal("no backend for request"))?;
+
+        let internal_resp = backend.get_tenant(&internal_req).await?.ok_or_else(|| {
+            Status::not_found(format!("tenant '{}' not found", internal_req.name))
+        })?;
+
+        // Convert internal -> proto response type
+        Ok(Response::new(internal_resp.into()))
     }
 
     async fn set_tenant_resource_name(
         &self,
-        _request: Request<SetTenantResourceNameRequest>,
+        request: Request<SetTenantResourceNameRequest>,
     ) -> Result<Response<SetTenantResourceNameResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        // Convert proto -> internal request type
+        let internal_req: internal::SetTenantResourceNameRequest = proto_req.into();
+
+        let backends = self.router.route(&RouteRequest {
+            op: Operation::SetTenantResourceName,
+            db_name: None,
+            tenant: Some(&internal_req.id),
+        })?;
+
+        // Fan out to all backends
+        let mut internal_resp = None;
+        for backend in backends {
+            internal_resp = Some(backend.set_tenant_resource_name(&internal_req).await?);
+        }
+
+        // Convert internal -> proto response type
+        let resp = internal_resp.ok_or_else(|| Status::internal("no backend for request"))?;
+        Ok(Response::new(resp.into()))
     }
 
     async fn create_segment(
