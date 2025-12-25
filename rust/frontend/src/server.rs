@@ -709,6 +709,9 @@ async fn create_database(
             },
         )
         .await?;
+    // enforce scorecard
+    let _guard =
+        server.scorecard_request(&["op:create_database", format!("tenant:{}", tenant).as_str()])?;
     // Enforce quota.
     let api_token = headers
         .get("x-chroma-token")
@@ -717,8 +720,6 @@ async fn create_database(
     let mut quota_payload = QuotaPayload::new(Action::CreateDatabase, tenant.clone(), api_token);
     quota_payload = quota_payload.with_collection_name(&name);
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
-    let _guard =
-        server.scorecard_request(&["op:create_database", format!("tenant:{}", tenant).as_str()])?;
     let create_database_request = CreateDatabaseRequest::try_new(tenant, name)?;
     let res = server
         .frontend
@@ -896,6 +897,8 @@ async fn list_collections(
             },
         )
         .await?;
+    let _guard = server
+        .scorecard_request(&["op:list_collections", format!("tenant:{}", tenant).as_str()])?;
     let api_token = headers
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
@@ -912,9 +915,6 @@ async fn list_collections(
         Some(overrides) => Some(overrides.limit),
         None => limit,
     };
-
-    let _guard = server
-        .scorecard_request(&["op:list_collections", format!("tenant:{}", tenant).as_str()])?;
 
     // TODO: Limit shouldn't be optional here
     let request = ListCollectionsRequest::try_new(tenant, database, validated_limit, offset)?;
@@ -996,6 +996,10 @@ async fn create_collection(
             },
         )
         .await?;
+    let _guard = server.scorecard_request(&[
+        "op:create_collection",
+        format!("tenant:{}", tenant).as_str(),
+    ])?;
     let api_token = headers
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
@@ -1006,10 +1010,6 @@ async fn create_collection(
         quota_payload = quota_payload.with_create_collection_metadata(metadata);
     }
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
-    let _guard = server.scorecard_request(&[
-        "op:create_collection",
-        format!("tenant:{}", tenant).as_str(),
-    ])?;
 
     let payload_clone = payload.clone();
 
@@ -1155,6 +1155,10 @@ async fn update_collection(
             CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
+    let _guard = server.scorecard_request(&[
+        "op:update_collection",
+        format!("tenant:{}", tenant).as_str(),
+    ])?;
     let api_token = headers
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
@@ -1167,10 +1171,6 @@ async fn update_collection(
         quota_payload = quota_payload.with_update_collection_metadata(new_metadata);
     }
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
-    let _guard = server.scorecard_request(&[
-        "op:update_collection",
-        format!("tenant:{}", tenant).as_str(),
-    ])?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
@@ -1274,6 +1274,11 @@ async fn fork_collection(
             },
         )
         .await?;
+    let _guard = server.scorecard_request(&[
+        "op:fork_collection",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ])?;
 
     let api_token = headers
         .get("x-chroma-token")
@@ -1293,12 +1298,6 @@ async fn fork_collection(
             database.clone(),
             collection_id.0.to_string(),
         ));
-
-    let _guard = server.scorecard_request(&[
-        "op:fork_collection",
-        format!("tenant:{}", tenant).as_str(),
-        format!("collection:{}", collection_id).as_str(),
-    ])?;
 
     let request = chroma_types::ForkCollectionRequest::try_new(
         tenant,
@@ -1351,6 +1350,11 @@ async fn collection_add(
         .await?;
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
+    let _guard = server.scorecard_request(&[
+        "op:write",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ])?;
     let api_token = headers
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
@@ -1371,11 +1375,6 @@ async fn collection_add(
     }
     quota_payload = quota_payload.with_collection_uuid(collection_id);
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
-    let _guard = server.scorecard_request(&[
-        "op:write",
-        format!("tenant:{}", tenant).as_str(),
-        format!("collection:{}", collection_id).as_str(),
-    ])?;
 
     // Create a metering context
     let metering_context_container =
@@ -1448,6 +1447,11 @@ async fn collection_update(
         .await?;
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
+    let _guard = server.scorecard_request(&[
+        "op:write",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ])?;
     let api_token = headers
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
@@ -1469,11 +1473,6 @@ async fn collection_update(
         quota_payload = quota_payload.with_uris(uris);
     }
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
-    let _guard = server.scorecard_request(&[
-        "op:write",
-        format!("tenant:{}", tenant).as_str(),
-        format!("collection:{}", collection_id).as_str(),
-    ])?;
 
     // Create a metering context
     let metering_context_container =
@@ -1553,6 +1552,11 @@ async fn collection_upsert(
         .await?;
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
+    let _guard = server.scorecard_request(&[
+        "op:write",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ])?;
     let api_token = headers
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
@@ -1572,11 +1576,6 @@ async fn collection_upsert(
     }
     quota_payload = quota_payload.with_collection_uuid(collection_id);
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
-    let _guard = server.scorecard_request(&[
-        "op:write",
-        format!("tenant:{}", tenant).as_str(),
-        format!("collection:{}", collection_id).as_str(),
-    ])?;
 
     // Create a metering context
     let metering_context_container =
@@ -1652,6 +1651,11 @@ async fn collection_delete(
         .await?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    let _guard = server.scorecard_request(&[
+        "op:write",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ])?;
     let r#where = payload.where_fields.parse()?;
     let api_token = headers
         .get("x-chroma-token")
@@ -1665,11 +1669,6 @@ async fn collection_delete(
         quota_payload = quota_payload.with_where(r#where);
     }
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
-    let _guard = server.scorecard_request(&[
-        "op:write",
-        format!("tenant:{}", tenant).as_str(),
-        format!("collection:{}", collection_id).as_str(),
-    ])?;
 
     // Create a metering context
     // NOTE(c-gamble): This is a read context because read happens first on delete, then write.
@@ -1820,6 +1819,12 @@ async fn collection_get(
         .await?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    let _guard = server.scorecard_request(&[
+        "op:read",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+        format!("requester:{}", requester_identity.tenant).as_str(),
+    ])?;
     let parsed_where = payload.where_fields.parse()?;
     let api_token = headers
         .get("x-chroma-token")
@@ -1842,13 +1847,6 @@ async fn collection_get(
         Some(overrides) => Some(overrides.limit),
         None => payload.limit,
     };
-
-    let _guard = server.scorecard_request(&[
-        "op:read",
-        format!("tenant:{}", tenant).as_str(),
-        format!("collection:{}", collection_id).as_str(),
-        format!("requester:{}", requester_identity.tenant).as_str(),
-    ])?;
 
     // Create a metering context
     let metering_context_container = if requester_identity.tenant == tenant {
@@ -1944,6 +1942,12 @@ async fn collection_query(
         .await?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    let _guard = server.scorecard_request(&[
+        "op:read",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+        format!("requester:{}", requester_identity.tenant).as_str(),
+    ])?;
     let parsed_where = payload.where_fields.parse()?;
     let api_token = headers
         .get("x-chroma-token")
@@ -1964,12 +1968,6 @@ async fn collection_query(
         quota_payload = quota_payload.with_query_ids(ids);
     }
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
-    let _guard = server.scorecard_request(&[
-        "op:read",
-        format!("tenant:{}", tenant).as_str(),
-        format!("collection:{}", collection_id).as_str(),
-        format!("requester:{}", requester_identity.tenant).as_str(),
-    ])?;
 
     // Create a metering context
     let metering_context_container = if requester_identity.tenant == tenant {
@@ -2065,6 +2063,14 @@ async fn collection_search(
         .await?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    let _guard = server.scorecard_request(&[
+        // TODO: Make this a read operation once we stablize this
+        // "op:read",
+        "op:search",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+        format!("requester:{}", requester_identity.tenant).as_str(),
+    ])?;
 
     let api_token = headers
         .get("x-chroma-token")
@@ -2074,14 +2080,6 @@ async fn collection_search(
     let quota_payload = QuotaPayload::new(Action::Search, tenant.clone(), api_token)
         .with_search_payloads(payload.searches.as_slice());
     let quota_override = server.quota_enforcer.enforce(&quota_payload).await?;
-    let _guard = server.scorecard_request(&[
-        // TODO: Make this a read operation once we stablize this
-        // "op:read",
-        "op:search",
-        format!("tenant:{}", tenant).as_str(),
-        format!("collection:{}", collection_id).as_str(),
-        format!("requester:{}", requester_identity.tenant).as_str(),
-    ])?;
 
     // Create a metering context
     let metering_context_container = if requester_identity.tenant == tenant {
