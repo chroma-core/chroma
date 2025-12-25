@@ -93,7 +93,7 @@ impl SpannerBackend {
                         );
                         insert_stmt.add_param("id", &tenant_id);
                         insert_stmt.add_param("is_deleted", &false);
-                        
+
                         tx.update(insert_stmt).await?;
                         tracing::info!("Created tenant: {}", tenant_id);
                     } else {
@@ -273,12 +273,12 @@ impl SpannerBackend {
             let id: String = row
                 .column_by_name("ID")
                 .map_err(|e| SysDbError::Internal(format!("failed to read 'ID' column: {}", e)))?;
-            let name: String = row
-                .column_by_name("NAME")
-                .map_err(|e| SysDbError::Internal(format!("failed to read 'NAME' column: {}", e)))?;
-            let tenant_id: String = row
-                .column_by_name("TENANT_ID")
-                .map_err(|e| SysDbError::Internal(format!("failed to read 'TENANT_ID' column: {}", e)))?;
+            let name: String = row.column_by_name("NAME").map_err(|e| {
+                SysDbError::Internal(format!("failed to read 'NAME' column: {}", e))
+            })?;
+            let tenant_id: String = row.column_by_name("TENANT_ID").map_err(|e| {
+                SysDbError::Internal(format!("failed to read 'TENANT_ID' column: {}", e))
+            })?;
 
             Ok(Some(GetDatabaseResponse {
                 database: Database {
@@ -579,11 +579,7 @@ mod tests {
             tenant: tenant_name.clone(),
         };
         let result = backend.get_database(&get_db_req).await;
-        assert!(
-            result.is_ok(),
-            "Failed to get database: {:?}",
-            result.err()
-        );
+        assert!(result.is_ok(), "Failed to get database: {:?}", result.err());
 
         let db_response = result.unwrap();
         assert!(
@@ -660,11 +656,7 @@ mod tests {
             tenant: tenant_name.clone(),
         };
         let result = backend.get_database(&get_db_req).await;
-        assert!(
-            result.is_ok(),
-            "Failed to get database: {:?}",
-            result.err()
-        );
+        assert!(result.is_ok(), "Failed to get database: {:?}", result.err());
         assert!(result.unwrap().is_some(), "Database should exist");
     }
 
