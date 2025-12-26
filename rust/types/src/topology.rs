@@ -526,9 +526,6 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>>
             if !topology_names.insert(&topology.name) {
                 error.duplicate_topology_names.push(topology.name.clone());
             }
-        }
-
-        for topology in &self.topologies {
             for region_ref in &topology.regions {
                 if !region_names.contains(region_ref) {
                     error.unknown_topology_regions.push(region_ref.clone());
