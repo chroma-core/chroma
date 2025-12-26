@@ -56,6 +56,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let manifest_path = std::path::Path::new(root)
                 .join(dir.folder_name())
                 .join(dir.manifest_filename());
+            if let Some(parent) = manifest_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
             std::fs::write(&manifest_path, manifest_content)?;
             println!("  Wrote {}", manifest_path.display());
         }
@@ -138,6 +141,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let slug = args.slug.as_deref();
+
+    if let Some(slug_val) = slug {
+        let known_slugs: Vec<&str> = MIGRATION_DIRS.iter().map(|d| d.migration_slug()).collect();
+        if !known_slugs.contains(&slug_val) {
+            return Err(format!(
+                "Unknown migration slug '{}'. Available slugs are: {}",
+                slug_val,
+                known_slugs.join(", ")
+            )
+            .into());
+        }
+    }
 
     match mode {
         MigrationMode::Apply => {
