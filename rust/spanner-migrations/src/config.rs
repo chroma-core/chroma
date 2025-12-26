@@ -8,7 +8,7 @@ use std::env;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 // spanner-migration is in the chroma2 namespace on tilt
-const DEFAULT_CONFIG_PATH: &str = "./chroma_config2.yaml";
+const DEFAULT_CONFIG_PATH: &str = "../worker/chroma_config2.yaml";
 
 #[derive(Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "snake_case")]
@@ -55,8 +55,7 @@ impl RootConfig {
     pub fn load() -> Result<MigrationConfig, Box<dyn std::error::Error>> {
         let path =
             env::var(CONFIG_PATH_ENV_VAR).unwrap_or_else(|_| DEFAULT_CONFIG_PATH.to_string());
-        tracing::info!("Loading config from: {}", path);
-
+        println!("Loading config from: {}", path);
         println!(
             r#"Full config is:
 ================================================================================

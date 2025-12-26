@@ -32,9 +32,11 @@ impl Migration {
 
 pub enum MigrationDir {
     SpannerSysDb,
+    SpannerLogDb,
 }
 
-pub const MIGRATION_DIRS: [MigrationDir; 1] = [MigrationDir::SpannerSysDb];
+pub const MIGRATION_DIRS: &[MigrationDir] =
+    &[MigrationDir::SpannerSysDb, MigrationDir::SpannerLogDb];
 
 #[derive(Error, Debug)]
 pub enum GetSourceMigrationsError {
@@ -57,9 +59,27 @@ impl MigrationDir {
             .collect()
     }
 
-    pub fn as_str(&self) -> &str {
+    /// Returns a string identifier for this migration directory.
+    pub fn migration_slug(&self) -> &str {
         match self {
             Self::SpannerSysDb => "spanner_sysdb",
+            Self::SpannerLogDb => "spanner_logdb",
+        }
+    }
+
+    /// Returns the filename of the migrations manifest for this directory.
+    pub fn manifest_filename(&self) -> &str {
+        match self {
+            Self::SpannerSysDb => "migrations.sum",
+            Self::SpannerLogDb => "log_migrations.sum",
+        }
+    }
+
+    /// Returns the folder name for this migration directory.
+    pub fn folder_name(&self) -> &str {
+        match self {
+            Self::SpannerSysDb => "migrations",
+            Self::SpannerLogDb => "log_migrations",
         }
     }
 
@@ -100,27 +120,32 @@ impl MigrationDir {
     fn iter(&self) -> Box<dyn Iterator<Item = Cow<'static, str>>> {
         match self {
             Self::SpannerSysDb => Box::new(SpannerSysDbMigrationsFolder::iter()),
+            Self::SpannerLogDb => Box::new(SpannerLogDbMigrationsFolder::iter()),
         }
     }
 
     fn get_file(&self, name: &str) -> Option<rust_embed::EmbeddedFile> {
         match self {
             Self::SpannerSysDb => SpannerSysDbMigrationsFolder::get(name),
+            Self::SpannerLogDb => SpannerLogDbMigrationsFolder::get(name),
         }
     }
 
-    /// Load the migrations.sum manifest and return a map of filename -> expected hash
+    /// Load the manifest file and return a map of filename -> expected hash
     fn load_manifest(&self) -> Result<HashMap<String, String>, GetSourceMigrationsError> {
-        let manifest_file = self.get_file("migrations.sum").ok_or_else(|| {
-            GetSourceMigrationsError::ManifestValidationError(
-                "migrations.sum file not found - run: cargo run --bin spanner_migration -- --generate-sum".to_string(),
-            )
+        let manifest_filename = self.manifest_filename();
+        let manifest_file = self.get_file(manifest_filename).ok_or_else(|| {
+            GetSourceMigrationsError::ManifestValidationError(format!(
+                "{} file not found - run: cargo run --bin spanner_migration -- --generate-sum",
+                manifest_filename
+            ))
         })?;
 
         let manifest_content = str::from_utf8(&manifest_file.data).map_err(|_| {
-            GetSourceMigrationsError::ManifestValidationError(
-                "Failed to parse migrations.sum as UTF-8".to_string(),
-            )
+            GetSourceMigrationsError::ManifestValidationError(format!(
+                "Failed to parse {} as UTF-8",
+                manifest_filename
+            ))
         })?;
 
         let mut manifest = HashMap::new();
@@ -155,15 +180,15 @@ impl MigrationDir {
                 Some(m) => {
                     if m.hash != *expected_hash {
                         return Err(GetSourceMigrationsError::ManifestValidationError(format!(
-                            "Hash mismatch for {}: manifest={}, actual={}, you might have to regenerate migrations.sum with: cargo run --bin spanner_migration -- --generate-sum",
-                            filename, expected_hash, m.hash
+                            "Hash mismatch for {}: manifest={}, actual={}, you might have to regenerate {} with: cargo run --bin spanner_migration -- --generate-sum",
+                            filename, expected_hash, m.hash, self.manifest_filename()
                         )));
                     }
                 }
                 None => {
                     return Err(GetSourceMigrationsError::ManifestValidationError(format!(
-                        "Migration file {} listed in manifest but not found, you might have to regenerate migrations.sum with: cargo run --bin spanner_migration -- --generate-sum",
-                        filename
+                        "Migration file {} listed in manifest but not found, you might have to regenerate {} with: cargo run --bin spanner_migration -- --generate-sum",
+                        filename, self.manifest_filename()
                     )));
                 }
             }
@@ -173,8 +198,9 @@ impl MigrationDir {
         for migration in migrations {
             if !manifest.contains_key(&migration.filename) {
                 return Err(GetSourceMigrationsError::ManifestValidationError(format!(
-                    "Migration file {} not listed in migrations.sum - regenerate the manifest",
-                    migration.filename
+                    "Migration file {} not listed in {} - regenerate the manifest",
+                    migration.filename,
+                    self.manifest_filename()
                 )));
             }
         }
@@ -210,7 +236,7 @@ impl MigrationDir {
             hasher.update(sql.as_bytes());
             let hash = format!("{:x}", hasher.finalize());
             migrations.push(Migration::new(
-                self.as_str().to_string(),
+                self.migration_slug().to_string(),
                 migration_name.to_string(),
                 version,
                 sql,
@@ -227,7 +253,7 @@ impl MigrationDir {
         Ok(migrations)
     }
 
-    /// Generate manifest content for all migrations (for updating migrations.sum)
+    /// Generate manifest content for all migrations.
     pub fn generate_manifest(&self) -> String {
         let mut lines = vec![
             "# Spanner migrations manifest - DO NOT EDIT MANUALLY".to_string(),
@@ -290,3 +316,9 @@ static MIGRATION_FILENAME_REGEX: LazyLock<Regex> =
 #[include = "*.sql"]
 #[include = "migrations.sum"]
 struct SpannerSysDbMigrationsFolder;
+
+#[derive(Embed)]
+#[folder = "log_migrations/"]
+#[include = "*.sql"]
+#[include = "log_migrations.sum"]
+struct SpannerLogDbMigrationsFolder;
