@@ -1,0 +1,4 @@
+# Spanner migrations manifest - DO NOT EDIT MANUALLY
+# Format: {filename} {sha256_hash}
+# This file protects against merge conflicts and forgotten migration files.
+# Run `cargo run --bin spanner_migration -- --generate-sum` to regenerate.
