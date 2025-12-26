@@ -511,29 +511,59 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>>
     /// Validates the configuration against the invariants.
     ///
     /// Returns `Ok(())` if validation passes, or a [`ValidationError`] describing any violations.
+    /// Each unique error is reported only once, even if it occurs multiple times.
     fn validate(&self) -> Result<(), ValidationError> {
         let mut error = ValidationError::default();
+        let all_region_names: HashSet<_> = self.regions.iter().map(|r| &r.name).collect();
 
-        let mut region_names: HashSet<&RegionName> = HashSet::new();
-        for region in &self.regions {
-            if !region_names.insert(&region.name) {
-                error.duplicate_region_names.push(region.name.clone());
-            }
-        }
-
-        let mut topology_names: HashSet<&TopologyName> = HashSet::new();
-        for topology in &self.topologies {
-            if !topology_names.insert(&topology.name) {
-                error.duplicate_topology_names.push(topology.name.clone());
-            }
-            for region_ref in &topology.regions {
-                if !region_names.contains(region_ref) {
-                    error.unknown_topology_regions.push(region_ref.clone());
+        // Find duplicate region names, ensuring each duplicate is reported only once.
+        let mut seen_regions = HashSet::new();
+        let mut duplicate_regions: Vec<_> = self
+            .regions
+            .iter()
+            .filter_map(|r| {
+                if !seen_regions.insert(&r.name) {
+                    Some(r.name.clone())
+                } else {
+                    None
                 }
-            }
-        }
+            })
+            .collect();
+        duplicate_regions.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        duplicate_regions.dedup();
+        error.duplicate_region_names = duplicate_regions;
 
-        if !region_names.contains(&self.preferred) {
+        // Find duplicate topology names, ensuring each duplicate is reported only once.
+        let mut seen_topologies = HashSet::new();
+        let mut duplicate_topologies: Vec<_> = self
+            .topologies
+            .iter()
+            .filter_map(|t| {
+                if !seen_topologies.insert(&t.name) {
+                    Some(t.name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        duplicate_topologies.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        duplicate_topologies.dedup();
+        error.duplicate_topology_names = duplicate_topologies;
+
+        // Find all unique unknown regions across all topologies.
+        let mut unknown_regions: Vec<_> = self
+            .topologies
+            .iter()
+            .flat_map(|t| &t.regions)
+            .filter(|r| !all_region_names.contains(r))
+            .cloned()
+            .collect();
+        unknown_regions.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        unknown_regions.dedup();
+        error.unknown_topology_regions = unknown_regions;
+
+        // Check if the preferred region is one of the defined regions.
+        if !all_region_names.contains(&self.preferred) {
             error.unknown_preferred_region = Some(self.preferred.clone());
         }
 
@@ -942,6 +972,8 @@ mod tests {
 
     #[test]
     fn unknown_topology_region_duplicated_in_multiple_topologies() {
+        // When the same unknown region is referenced in multiple topologies, it should only
+        // appear once in the error output for cleaner, more deterministic error messages.
         let config = MultiCloudMultiRegionConfiguration::new(
             region_name("aws-us-east-1"),
             vec![provider_region("aws-us-east-1", "aws", "us-east-1")],
@@ -956,10 +988,7 @@ mod tests {
             ValidationError {
                 duplicate_region_names: vec![],
                 duplicate_topology_names: vec![],
-                unknown_topology_regions: vec![
-                    region_name("nonexistent"),
-                    region_name("nonexistent"),
-                ],
+                unknown_topology_regions: vec![region_name("nonexistent")],
                 unknown_preferred_region: None,
             }
         );
