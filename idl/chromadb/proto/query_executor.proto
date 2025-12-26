@@ -105,7 +105,7 @@ message RankExpr {
         optional float default = 4;
         bool return_rank = 5;
     }
-    
+
     message RankPair {
         RankExpr left = 1;
         RankExpr right = 2;
@@ -173,6 +173,8 @@ message SearchPayload {
 message SearchPlan {
     ScanOperator scan = 1;
     repeated SearchPayload payloads = 2;
+    // If true, skip reading from the log for eventual consistency queries
+    bool eventual_consistency = 3;
 }
 
 message SearchRecord {
@@ -198,4 +200,3 @@ service QueryExecutor {
     rpc KNN(KNNPlan) returns (KNNBatchResult) {}
     rpc Search(SearchPlan) returns (SearchResult) {}
 }
-

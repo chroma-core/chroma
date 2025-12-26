@@ -342,6 +342,7 @@ impl WorkerServer {
             collection_and_segments.clone(),
             fetch_log,
             filter.try_into()?,
+            false, // Don't skip log for KNN queries
         );
 
         let matching_records = match knn_filter_orchestrator.run(system.clone()).await {
@@ -478,6 +479,7 @@ impl WorkerServer {
         &self,
         scan: chroma_proto::ScanOperator,
         payload: chroma_proto::SearchPayload,
+        eventual_consistency: bool,
     ) -> Result<RankOrchestratorOutput, Status> {
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
         let search_payload = SearchPayload::try_from(payload)?;
@@ -497,6 +499,7 @@ impl WorkerServer {
             collection_and_segments.clone(),
             fetch_log,
             search_payload.filter.clone(),
+            eventual_consistency, // Skip log fetching for eventual consistency queries
         );
 
         let knn_filter_output = match knn_filter_orchestrator.run(self.system.clone()).await {
@@ -621,11 +624,12 @@ impl WorkerServer {
         let scan = search_plan
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
+        let eventual_consistency = search_plan.eventual_consistency;
 
         let futures = search_plan
             .payloads
             .into_iter()
-            .map(|payload| self.orchestrate_search(scan.clone(), payload));
+            .map(|payload| self.orchestrate_search(scan.clone(), payload, eventual_consistency));
 
         let orchestrator_results = stream::iter(futures)
             .buffered(32) // Process up to 32 payloads concurrently
