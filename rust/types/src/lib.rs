@@ -26,6 +26,7 @@ mod spann_posting_list;
 pub mod strategies;
 mod task;
 mod tenant;
+mod topology;
 mod validators;
 mod where_parsing;
 
@@ -59,6 +60,7 @@ pub use spann_configuration::*;
 pub use spann_posting_list::*;
 pub use task::*;
 pub use tenant::*;
+pub use topology::*;
 pub use types::*;
 pub use where_parsing::*;
 
