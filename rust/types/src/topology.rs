@@ -95,7 +95,7 @@ use thiserror::Error;
 /// let name = RegionName::new("aws-us-east-1");
 /// assert_eq!(name.as_str(), "aws-us-east-1");
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct RegionName(String);
 
@@ -130,7 +130,7 @@ impl std::fmt::Display for RegionName {
 /// let name = TopologyName::new("global");
 /// assert_eq!(name.as_str(), "global");
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct TopologyName(String);
 
@@ -227,6 +227,11 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> Pr
     /// Returns the region within the provider (e.g., "us-east-1", "europe-west1").
     pub fn region(&self) -> &str {
         &self.region
+    }
+
+    /// Returns the additional per-region configuration data.
+    pub fn config(&self) -> &T {
+        &self.config
     }
 }
 
@@ -374,27 +379,58 @@ impl<'de, T: Clone + Debug + Eq + PartialEq + Serialize + serde::de::Deserialize
 #[derive(Clone, Debug, Default, Eq, Error, PartialEq)]
 #[error("{}", self.format_message())]
 pub struct ValidationError {
-    /// Provider region names that appear more than once.
-    pub duplicate_region_names: Vec<RegionName>,
-    /// Topology names that appear more than once.
-    pub duplicate_topology_names: Vec<TopologyName>,
-    /// Region names referenced by topologies that do not exist in the configuration.
-    pub unknown_topology_regions: Vec<RegionName>,
-    /// The preferred region name if it does not exist in the configuration.
-    pub unknown_preferred_region: Option<RegionName>,
+    duplicate_region_names: Vec<RegionName>,
+    duplicate_topology_names: Vec<TopologyName>,
+    unknown_topology_regions: Vec<RegionName>,
+    unknown_preferred_region: Option<RegionName>,
 }
 
 impl ValidationError {
-    /// Returns true if no validation errors were found.
-    pub fn is_ok(&self) -> bool {
-        self.duplicate_region_names.is_empty()
-            && self.duplicate_topology_names.is_empty()
-            && self.unknown_topology_regions.is_empty()
-            && self.unknown_preferred_region.is_none()
+    #[cfg(test)]
+    fn new(
+        duplicate_region_names: Vec<RegionName>,
+        duplicate_topology_names: Vec<TopologyName>,
+        unknown_topology_regions: Vec<RegionName>,
+        unknown_preferred_region: Option<RegionName>,
+    ) -> Self {
+        Self {
+            duplicate_region_names,
+            duplicate_topology_names,
+            unknown_topology_regions,
+            unknown_preferred_region,
+        }
+    }
+
+    /// Returns true if validation errors were found.
+    pub fn has_errors(&self) -> bool {
+        !self.duplicate_region_names.is_empty()
+            || !self.duplicate_topology_names.is_empty()
+            || !self.unknown_topology_regions.is_empty()
+            || self.unknown_preferred_region.is_some()
+    }
+
+    /// Returns the provider region names that appear more than once.
+    pub fn duplicate_region_names(&self) -> &[RegionName] {
+        &self.duplicate_region_names
+    }
+
+    /// Returns the topology names that appear more than once.
+    pub fn duplicate_topology_names(&self) -> &[TopologyName] {
+        &self.duplicate_topology_names
+    }
+
+    /// Returns the region names referenced by topologies that do not exist in the configuration.
+    pub fn unknown_topology_regions(&self) -> &[RegionName] {
+        &self.unknown_topology_regions
+    }
+
+    /// Returns the preferred region name if it does not exist in the configuration.
+    pub fn unknown_preferred_region(&self) -> Option<&RegionName> {
+        self.unknown_preferred_region.as_ref()
     }
 
     fn format_message(&self) -> String {
-        if self.is_ok() {
+        if !self.has_errors() {
             return "no validation errors".to_string();
         }
 
@@ -529,7 +565,7 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>>
                 }
             })
             .collect();
-        duplicate_regions.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        duplicate_regions.sort();
         duplicate_regions.dedup();
         error.duplicate_region_names = duplicate_regions;
 
@@ -546,7 +582,7 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>>
                 }
             })
             .collect();
-        duplicate_topologies.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        duplicate_topologies.sort();
         duplicate_topologies.dedup();
         error.duplicate_topology_names = duplicate_topologies;
 
@@ -558,7 +594,7 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>>
             .filter(|r| !all_region_names.contains(r))
             .cloned()
             .collect();
-        unknown_regions.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        unknown_regions.sort();
         unknown_regions.dedup();
         error.unknown_topology_regions = unknown_regions;
 
@@ -567,10 +603,10 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>>
             error.unknown_preferred_region = Some(self.preferred.clone());
         }
 
-        if error.is_ok() {
-            Ok(())
-        } else {
+        if error.has_errors() {
             Err(error)
+        } else {
+            Ok(())
         }
     }
 }
@@ -579,22 +615,26 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>>
 mod tests {
     use super::*;
 
-    fn region_name(s: &str) -> RegionName {
+    fn region_name(s: impl Into<String>) -> RegionName {
         RegionName::new(s)
     }
 
-    fn topology_name(s: &str) -> TopologyName {
+    fn topology_name(s: impl Into<String>) -> TopologyName {
         TopologyName::new(s)
     }
 
-    fn provider_region(name: &str, provider: &str, region: &str) -> ProviderRegion<()> {
-        ProviderRegion::new(region_name(name), provider, region, ())
+    fn provider_region(
+        name: impl Into<String>,
+        provider: impl Into<String>,
+        region: impl Into<String>,
+    ) -> ProviderRegion<()> {
+        ProviderRegion::new(RegionName::new(name), provider, region, ())
     }
 
-    fn topology(name: &str, regions: Vec<&str>) -> Topology {
+    fn topology(name: impl Into<String>, regions: Vec<&str>) -> Topology {
         Topology::new(
-            topology_name(name),
-            regions.into_iter().map(region_name).collect(),
+            TopologyName::new(name),
+            regions.into_iter().map(RegionName::new).collect(),
         )
     }
 
@@ -878,14 +918,13 @@ mod tests {
             vec![],
         );
 
+        let err = config.unwrap_err();
+        assert!(err.duplicate_region_names().is_empty());
+        assert!(err.duplicate_topology_names().is_empty());
+        assert!(err.unknown_topology_regions().is_empty());
         assert_eq!(
-            config.unwrap_err(),
-            ValidationError {
-                duplicate_region_names: vec![],
-                duplicate_topology_names: vec![],
-                unknown_topology_regions: vec![],
-                unknown_preferred_region: Some(region_name("nonexistent")),
-            }
+            err.unknown_preferred_region(),
+            Some(&region_name("nonexistent"))
         );
     }
 
@@ -915,15 +954,14 @@ mod tests {
             vec![],
         );
 
+        let err = config.unwrap_err();
         assert_eq!(
-            config.unwrap_err(),
-            ValidationError {
-                duplicate_region_names: vec![region_name("aws-us-east-1")],
-                duplicate_topology_names: vec![],
-                unknown_topology_regions: vec![],
-                unknown_preferred_region: None,
-            }
+            err.duplicate_region_names(),
+            &[region_name("aws-us-east-1")]
         );
+        assert!(err.duplicate_topology_names().is_empty());
+        assert!(err.unknown_topology_regions().is_empty());
+        assert_eq!(err.unknown_preferred_region(), None);
     }
 
     #[test]
@@ -937,15 +975,11 @@ mod tests {
             ],
         );
 
-        assert_eq!(
-            config.unwrap_err(),
-            ValidationError {
-                duplicate_region_names: vec![],
-                duplicate_topology_names: vec![topology_name("global")],
-                unknown_topology_regions: vec![],
-                unknown_preferred_region: None,
-            }
-        );
+        let err = config.unwrap_err();
+        assert!(err.duplicate_region_names().is_empty());
+        assert_eq!(err.duplicate_topology_names(), &[topology_name("global")]);
+        assert!(err.unknown_topology_regions().is_empty());
+        assert_eq!(err.unknown_preferred_region(), None);
     }
 
     #[test]
@@ -959,15 +993,14 @@ mod tests {
             )],
         );
 
+        let err = config.unwrap_err();
+        assert!(err.duplicate_region_names().is_empty());
+        assert!(err.duplicate_topology_names().is_empty());
         assert_eq!(
-            config.unwrap_err(),
-            ValidationError {
-                duplicate_region_names: vec![],
-                duplicate_topology_names: vec![],
-                unknown_topology_regions: vec![region_name("nonexistent-region")],
-                unknown_preferred_region: None,
-            }
+            err.unknown_topology_regions(),
+            &[region_name("nonexistent-region")]
         );
+        assert_eq!(err.unknown_preferred_region(), None);
     }
 
     #[test]
@@ -983,15 +1016,14 @@ mod tests {
             ],
         );
 
+        let err = config.unwrap_err();
+        assert!(err.duplicate_region_names().is_empty());
+        assert!(err.duplicate_topology_names().is_empty());
         assert_eq!(
-            config.unwrap_err(),
-            ValidationError {
-                duplicate_region_names: vec![],
-                duplicate_topology_names: vec![],
-                unknown_topology_regions: vec![region_name("nonexistent")],
-                unknown_preferred_region: None,
-            }
+            err.unknown_topology_regions(),
+            &[region_name("nonexistent")]
         );
+        assert_eq!(err.unknown_preferred_region(), None);
     }
 
     #[test]
@@ -1002,14 +1034,13 @@ mod tests {
             vec![],
         );
 
+        let err = config.unwrap_err();
+        assert!(err.duplicate_region_names().is_empty());
+        assert!(err.duplicate_topology_names().is_empty());
+        assert!(err.unknown_topology_regions().is_empty());
         assert_eq!(
-            config.unwrap_err(),
-            ValidationError {
-                duplicate_region_names: vec![],
-                duplicate_topology_names: vec![],
-                unknown_topology_regions: vec![],
-                unknown_preferred_region: Some(region_name("nonexistent-region")),
-            }
+            err.unknown_preferred_region(),
+            Some(&region_name("nonexistent-region"))
         );
     }
 
@@ -1021,15 +1052,11 @@ mod tests {
             vec![],
         );
 
-        assert_eq!(
-            config.unwrap_err(),
-            ValidationError {
-                duplicate_region_names: vec![],
-                duplicate_topology_names: vec![],
-                unknown_topology_regions: vec![],
-                unknown_preferred_region: Some(region_name("")),
-            }
-        );
+        let err = config.unwrap_err();
+        assert!(err.duplicate_region_names().is_empty());
+        assert!(err.duplicate_topology_names().is_empty());
+        assert!(err.unknown_topology_regions().is_empty());
+        assert_eq!(err.unknown_preferred_region(), Some(&region_name("")));
     }
 
     #[test]
@@ -1061,14 +1088,19 @@ mod tests {
             ],
         );
 
+        let err = config.unwrap_err();
         assert_eq!(
-            config.unwrap_err(),
-            ValidationError {
-                duplicate_region_names: vec![region_name("aws-us-east-1")],
-                duplicate_topology_names: vec![topology_name("topo1")],
-                unknown_topology_regions: vec![region_name("unknown-region")],
-                unknown_preferred_region: Some(region_name("nonexistent-preferred")),
-            }
+            err.duplicate_region_names(),
+            &[region_name("aws-us-east-1")]
+        );
+        assert_eq!(err.duplicate_topology_names(), &[topology_name("topo1")]);
+        assert_eq!(
+            err.unknown_topology_regions(),
+            &[region_name("unknown-region")]
+        );
+        assert_eq!(
+            err.unknown_preferred_region(),
+            Some(&region_name("nonexistent-preferred"))
         );
     }
 
@@ -1080,12 +1112,12 @@ mod tests {
 
     #[test]
     fn display_duplicate_region_names_only() {
-        let error = ValidationError {
-            duplicate_region_names: vec![region_name("region-a"), region_name("region-b")],
-            duplicate_topology_names: vec![],
-            unknown_topology_regions: vec![],
-            unknown_preferred_region: None,
-        };
+        let error = ValidationError::new(
+            vec![region_name("region-a"), region_name("region-b")],
+            vec![],
+            vec![],
+            None,
+        );
         assert_eq!(
             error.to_string(),
             "duplicate region names: region-a, region-b"
@@ -1094,23 +1126,18 @@ mod tests {
 
     #[test]
     fn display_duplicate_topology_names_only() {
-        let error = ValidationError {
-            duplicate_region_names: vec![],
-            duplicate_topology_names: vec![topology_name("topo-x")],
-            unknown_topology_regions: vec![],
-            unknown_preferred_region: None,
-        };
+        let error = ValidationError::new(vec![], vec![topology_name("topo-x")], vec![], None);
         assert_eq!(error.to_string(), "duplicate topology names: topo-x");
     }
 
     #[test]
     fn display_unknown_topology_regions_only() {
-        let error = ValidationError {
-            duplicate_region_names: vec![],
-            duplicate_topology_names: vec![],
-            unknown_topology_regions: vec![region_name("missing-1"), region_name("missing-2")],
-            unknown_preferred_region: None,
-        };
+        let error = ValidationError::new(
+            vec![],
+            vec![],
+            vec![region_name("missing-1"), region_name("missing-2")],
+            None,
+        );
         assert_eq!(
             error.to_string(),
             "unknown topology regions: missing-1, missing-2"
@@ -1119,12 +1146,8 @@ mod tests {
 
     #[test]
     fn display_unknown_preferred_region_only() {
-        let error = ValidationError {
-            duplicate_region_names: vec![],
-            duplicate_topology_names: vec![],
-            unknown_topology_regions: vec![],
-            unknown_preferred_region: Some(region_name("missing-region")),
-        };
+        let error =
+            ValidationError::new(vec![], vec![], vec![], Some(region_name("missing-region")));
         assert_eq!(
             error.to_string(),
             "unknown preferred region: missing-region"
@@ -1133,12 +1156,12 @@ mod tests {
 
     #[test]
     fn display_all_errors() {
-        let error = ValidationError {
-            duplicate_region_names: vec![region_name("dup-region")],
-            duplicate_topology_names: vec![topology_name("dup-topo")],
-            unknown_topology_regions: vec![region_name("unknown-reg")],
-            unknown_preferred_region: Some(region_name("bad-preferred")),
-        };
+        let error = ValidationError::new(
+            vec![region_name("dup-region")],
+            vec![topology_name("dup-topo")],
+            vec![region_name("unknown-reg")],
+            Some(region_name("bad-preferred")),
+        );
         assert_eq!(
             error.to_string(),
             "duplicate region names: dup-region; duplicate topology names: dup-topo; unknown topology regions: unknown-reg; unknown preferred region: bad-preferred"
@@ -1147,12 +1170,12 @@ mod tests {
 
     #[test]
     fn display_empty_string_names() {
-        let error = ValidationError {
-            duplicate_region_names: vec![region_name("")],
-            duplicate_topology_names: vec![topology_name("")],
-            unknown_topology_regions: vec![region_name("")],
-            unknown_preferred_region: Some(region_name("")),
-        };
+        let error = ValidationError::new(
+            vec![region_name("")],
+            vec![topology_name("")],
+            vec![region_name("")],
+            Some(region_name("")),
+        );
         assert_eq!(
             error.to_string(),
             "duplicate region names: ; duplicate topology names: ; unknown topology regions: ; unknown preferred region: "
@@ -1161,15 +1184,15 @@ mod tests {
 
     #[test]
     fn display_special_characters() {
-        let error = ValidationError {
-            duplicate_region_names: vec![
+        let error = ValidationError::new(
+            vec![
                 region_name("region-with-dash_and_underscore"),
                 region_name("region with spaces"),
             ],
-            duplicate_topology_names: vec![topology_name("topo.dot")],
-            unknown_topology_regions: vec![region_name("region\nwith\nnewlines")],
-            unknown_preferred_region: None,
-        };
+            vec![topology_name("topo.dot")],
+            vec![region_name("region\nwith\nnewlines")],
+            None,
+        );
         assert_eq!(
             error.to_string(),
             "duplicate region names: region-with-dash_and_underscore, region with spaces; duplicate topology names: topo.dot; unknown topology regions: region\nwith\nnewlines"
@@ -1178,12 +1201,12 @@ mod tests {
 
     #[test]
     fn display_unicode_characters() {
-        let error = ValidationError {
-            duplicate_region_names: vec![region_name("region-🌍")],
-            duplicate_topology_names: vec![topology_name("拓扑名")],
-            unknown_topology_regions: vec![region_name("регион-с-кириллицей")],
-            unknown_preferred_region: Some(region_name("preferred-🌐")),
-        };
+        let error = ValidationError::new(
+            vec![region_name("region-🌍")],
+            vec![topology_name("拓扑名")],
+            vec![region_name("регион-с-кириллицей")],
+            Some(region_name("preferred-🌐")),
+        );
         assert_eq!(
             error.to_string(),
             "duplicate region names: region-🌍; duplicate topology names: 拓扑名; unknown topology regions: регион-с-кириллицей; unknown preferred region: preferred-🌐"
@@ -1193,12 +1216,7 @@ mod tests {
     #[test]
     fn display_long_names() {
         let long_prefix = "very_long_region_name_that_contains_many_characters_and_pushes_the_boundary_of_reasonableness";
-        let error = ValidationError {
-            duplicate_region_names: vec![region_name(long_prefix)],
-            duplicate_topology_names: vec![],
-            unknown_topology_regions: vec![],
-            unknown_preferred_region: None,
-        };
+        let error = ValidationError::new(vec![region_name(long_prefix)], vec![], vec![], None);
         assert_eq!(
             error.to_string(),
             format!("duplicate region names: {}", long_prefix)
@@ -1206,45 +1224,33 @@ mod tests {
     }
 
     #[test]
-    fn validation_error_is_ok_default() {
+    fn validation_error_has_errors_default() {
         let error = ValidationError::default();
-        assert!(error.is_ok());
+        assert!(!error.has_errors());
     }
 
     #[test]
-    fn validation_error_is_ok_with_duplicate_regions() {
-        let error = ValidationError {
-            duplicate_region_names: vec![region_name("dup")],
-            ..Default::default()
-        };
-        assert!(!error.is_ok());
+    fn validation_error_has_errors_with_duplicate_regions() {
+        let error = ValidationError::new(vec![region_name("dup")], vec![], vec![], None);
+        assert!(error.has_errors());
     }
 
     #[test]
-    fn validation_error_is_ok_with_duplicate_topologies() {
-        let error = ValidationError {
-            duplicate_topology_names: vec![topology_name("dup")],
-            ..Default::default()
-        };
-        assert!(!error.is_ok());
+    fn validation_error_has_errors_with_duplicate_topologies() {
+        let error = ValidationError::new(vec![], vec![topology_name("dup")], vec![], None);
+        assert!(error.has_errors());
     }
 
     #[test]
-    fn validation_error_is_ok_with_unknown_topology_regions() {
-        let error = ValidationError {
-            unknown_topology_regions: vec![region_name("unknown")],
-            ..Default::default()
-        };
-        assert!(!error.is_ok());
+    fn validation_error_has_errors_with_unknown_topology_regions() {
+        let error = ValidationError::new(vec![], vec![], vec![region_name("unknown")], None);
+        assert!(error.has_errors());
     }
 
     #[test]
-    fn validation_error_is_ok_with_unknown_preferred() {
-        let error = ValidationError {
-            unknown_preferred_region: Some(region_name("unknown")),
-            ..Default::default()
-        };
-        assert!(!error.is_ok());
+    fn validation_error_has_errors_with_unknown_preferred() {
+        let error = ValidationError::new(vec![], vec![], vec![], Some(region_name("unknown")));
+        assert!(error.has_errors());
     }
 
     #[test]
