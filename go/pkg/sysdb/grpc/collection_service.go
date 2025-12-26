@@ -767,3 +767,20 @@ func (s *Server) BatchGetCollectionSoftDeleteStatus(ctx context.Context, req *co
 	}
 	return res, nil
 }
+
+func (s *Server) IncrementCompactionFailureCount(ctx context.Context, req *coordinatorpb.IncrementCompactionFailureCountRequest) (*coordinatorpb.IncrementCompactionFailureCountResponse, error) {
+	collectionID := req.CollectionId
+	parsedCollectionID, err := types.ToUniqueID(&collectionID)
+	if err != nil {
+		log.Error("IncrementCompactionFailureCount failed. collection id format error", zap.Error(err), zap.String("collection_id", collectionID))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	err = s.coordinator.IncrementCompactionFailureCount(ctx, parsedCollectionID)
+	if err != nil {
+		log.Error("IncrementCompactionFailureCount failed", zap.Error(err), zap.String("collection_id", collectionID))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	return &coordinatorpb.IncrementCompactionFailureCountResponse{}, nil
+}

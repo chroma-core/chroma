@@ -132,6 +132,10 @@ pub struct Collection {
     pub updated_at: SystemTime,
     #[serde(skip)]
     pub database_id: DatabaseUuid,
+    /// Number of consecutive compaction failures for this collection.
+    /// Used by the scheduler to track and skip collections that repeatedly fail compaction.
+    #[serde(skip)]
+    pub compaction_failure_count: i32,
 }
 
 impl Default for Collection {
@@ -155,6 +159,7 @@ impl Default for Collection {
             lineage_file_path: None,
             updated_at: SystemTime::now(),
             database_id: DatabaseUuid::new(),
+            compaction_failure_count: 0,
         }
     }
 }
@@ -333,6 +338,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             lineage_file_path: proto_collection.lineage_file_path,
             updated_at,
             database_id,
+            compaction_failure_count: proto_collection.compaction_failure_count,
         })
     }
 }
@@ -377,6 +383,7 @@ impl TryFrom<Collection> for chroma_proto::Collection {
             lineage_file_path: value.lineage_file_path,
             updated_at: Some(value.updated_at.into()),
             database_id: Some(value.database_id.0.to_string()),
+            compaction_failure_count: value.compaction_failure_count,
         })
     }
 }
@@ -460,6 +467,7 @@ mod test {
                 nanos: 1,
             }),
             database_id: Some("00000000-0000-0000-0000-000000000000".to_string()),
+            compaction_failure_count: 0,
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
         assert_eq!(

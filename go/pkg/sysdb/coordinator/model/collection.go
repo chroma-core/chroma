@@ -28,6 +28,7 @@ type Collection struct {
 	VersionFileName            string
 	CreatedAt                  time.Time
 	DatabaseId                 types.UniqueID
+	CompactionFailureCount     int32
 }
 
 type CollectionToGc struct {
