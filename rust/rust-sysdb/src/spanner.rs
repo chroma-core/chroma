@@ -158,7 +158,7 @@ impl SpannerBackend {
         &self,
         _req: &SetTenantResourceNameRequest,
     ) -> Result<SetTenantResourceNameResponse, SysDbError> {
-        unimplemented!("implement set_tenant_resource_name")
+        todo!("implement set_tenant_resource_name")
     }
 
     // ============================================================
@@ -169,6 +169,8 @@ impl SpannerBackend {
     ///
     /// Validates that the database name is not empty and that the tenant exists.
     /// Uses commit timestamps for created_at and updated_at.
+    /// TODO(Sanket): This is not atomic and has TOCTOU.
+    /// TODO(Sanket): Enforce uniqueness of database name.
     pub async fn create_database(
         &self,
         req: &CreateDatabaseRequest,
