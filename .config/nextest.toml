@@ -44,3 +44,11 @@ default-filter = "test(/test_long_running_/)"
 
 [profile.ci_long_running.junit]
 path = "junit.xml"
+
+[profile.rust_sysdb_k8s_integration]
+default-filter = "test(/test_k8s_integration_/) and package(rust-sysdb)"
+test-group = "against-tilt"
+
+[[profile.rust_sysdb_k8s_integration.overrides]]
+filter = "all()"
+test-group = "against-tilt"

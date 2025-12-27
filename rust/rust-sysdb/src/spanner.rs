@@ -398,11 +398,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Tilt running
-    async fn test_create_and_get_tenant() {
+    async fn test_k8s_integration_create_and_get_tenant() {
         let Some(backend) = setup_test_backend().await else {
-            println!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
-            return;
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
 
         let tenant_name = format!(
@@ -438,11 +436,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Tilt running
-    async fn test_create_tenant_idempotent() {
+    async fn test_k8s_integration_create_tenant_idempotent() {
         let Some(backend) = setup_test_backend().await else {
-            println!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
-            return;
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
 
         let tenant_name = format!(
@@ -482,11 +478,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Tilt running
-    async fn test_get_nonexistent_tenant() {
+    async fn test_k8s_integration_get_nonexistent_tenant() {
         let Some(backend) = setup_test_backend().await else {
-            println!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
-            return;
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
 
         let tenant_name = format!(
@@ -510,11 +504,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Tilt running
-    async fn test_create_and_get_database() {
+    async fn test_k8s_integration_create_and_get_database() {
         let Some(backend) = setup_test_backend().await else {
-            println!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
-            return;
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
 
         // First create a tenant
@@ -573,11 +565,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Tilt running
-    async fn test_create_database_conflict() {
+    async fn test_k8s_integration_create_database_conflict() {
         let Some(backend) = setup_test_backend().await else {
-            println!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
-            return;
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
 
         // First create a tenant
@@ -645,11 +635,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Tilt running
-    async fn test_get_nonexistent_database() {
+    async fn test_k8s_integration_get_nonexistent_database() {
         let Some(backend) = setup_test_backend().await else {
-            println!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
-            return;
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
 
         // First create a tenant
@@ -695,11 +683,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Tilt running
-    async fn test_create_database_invalid_tenant() {
+    async fn test_k8s_integration_create_database_invalid_tenant() {
         let Some(backend) = setup_test_backend().await else {
-            println!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
-            return;
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
 
         let db_id = Uuid::new_v4().to_string();
@@ -730,11 +716,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Tilt running
-    async fn test_create_database_empty_name() {
+    async fn test_k8s_integration_create_database_empty_name() {
         let Some(backend) = setup_test_backend().await else {
-            println!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
-            return;
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
 
         // First create a tenant

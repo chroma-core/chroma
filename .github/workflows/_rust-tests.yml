@@ -151,6 +151,67 @@ jobs:
       - name: Run benchmark
         run: cargo bench ${{ matrix.bench-command }}
 
+  test-rust-sysdb-integration:
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    # OIDC token auth for AWS
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_MIN_STACK_SIZE: 8388608
+      MULTI_REGION: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Set up Docker
+        uses: ./.github/actions/docker
+        with:
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Tilt Setup & Pre-Build
+        uses: ./.github/actions/tilt-setup-prebuild
+      - name: Start Tilt with MULTI_REGION
+        shell: bash
+        env:
+          MULTI_REGION: "true"
+        run: tilt ci
+      - name: Forward ports
+        shell: bash
+        run: |
+          # tilt ci does not forward ports
+          # https://github.com/tilt-dev/tilt/issues/5964
+          kubectl -n chroma port-forward svc/sysdb 50051:50051 &
+          kubectl -n chroma port-forward svc/rust-log-service 50054:50051 &
+          kubectl -n chroma port-forward svc/query-service 50053:50051 &
+          kubectl -n chroma port-forward svc/rust-frontend-service 8000:8000 &
+          kubectl -n chroma port-forward svc/minio 9000:9000 &
+          kubectl -n chroma port-forward svc/jaeger 16686:16686 &
+          # Forward Spanner emulator port for rust-sysdb backend tests
+          kubectl -n chroma2 port-forward svc/spanner-deployment 9010:9010 &
+          # Forward rust-sysdb-service gRPC port (for potential gRPC integration tests)
+          kubectl -n chroma2 port-forward svc/rust-sysdb-service 60056:50051 &
+      - name: Wait for services to be ready
+        shell: bash
+        run: |
+          echo "Waiting for rust-sysdb-service to be ready..."
+          kubectl wait --for=condition=available --timeout=600s deployment/rust-sysdb-service -n chroma2 || true
+          echo "Waiting for migrations to complete..."
+          sleep 10
+      - name: Build CLI
+        run: cargo build --bin chroma
+      - name: Run rust-sysdb k8s integration tests
+        run: cargo nextest run --profile rust_sysdb_k8s_integration --test-threads 1
+      - name: Save service logs to artifact
+        if: always()
+        uses: ./.github/actions/export-tilt-logs
+        with:
+          artifact-name: "rust-sysdb-integration-test"
+
   can-build-release:
     runs-on: blacksmith-16vcpu-ubuntu-2404
     env:
