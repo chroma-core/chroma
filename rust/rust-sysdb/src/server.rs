@@ -41,23 +41,25 @@ use tokio::{
 };
 use tonic::{transport::Server, Request, Response, Status};
 
+use crate::backend::{Assignable, BackendFactory, Runnable};
 use crate::config::SysDbServiceConfig;
-use crate::spanner::Spanner;
+use crate::error::SysDbError;
+use crate::spanner::SpannerBackend;
+use crate::types as internal;
 
 pub struct SysdbService {
     port: u16,
     #[allow(dead_code)]
     storage: Storage,
-    #[allow(dead_code)]
-    spanner: Spanner,
+    backends: BackendFactory,
 }
 
 impl SysdbService {
-    pub fn new(port: u16, storage: Storage, spanner: Spanner) -> Self {
+    pub fn new(port: u16, storage: Storage, backends: BackendFactory) -> Self {
         Self {
             port,
             storage,
-            spanner,
+            backends,
         }
     }
 
@@ -79,7 +81,7 @@ impl SysdbService {
             .set_serving::<SysDbServer<SysdbService>>()
             .await;
 
-        let spanner = self.spanner.clone();
+        let backends = self.backends.clone();
         Server::builder()
             .layer(chroma_tracing::GrpcServerTraceLayer)
             .add_service(health_service)
@@ -88,11 +90,11 @@ impl SysdbService {
                 // TODO(Sanket): Drain existing requests before shutting down.
                 select! {
                     _ = sigterm.recv() => {
-                        spanner.close().await;
+                        backends.close().await;
                         tracing::info!("Received SIGTERM, shutting down server");
                     }
                     _ = sigint.recv() => {
-                        spanner.close().await;
+                        backends.close().await;
                         tracing::info!("Received SIGINT, shutting down server");
                     }
                 }
@@ -109,8 +111,9 @@ impl Configurable<SysDbServiceConfig> for SysdbService {
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let storage = Storage::try_from_config(&config.storage, registry).await?;
-        let spanner = Spanner::try_from_config(&config.spanner, registry).await?;
-        Ok(SysdbService::new(config.port, storage, spanner))
+        let spanner = SpannerBackend::try_from_config(&config.spanner, registry).await?;
+        let backends = BackendFactory::new(spanner);
+        Ok(SysdbService::new(config.port, storage, backends))
     }
 }
 
@@ -118,16 +121,34 @@ impl Configurable<SysDbServiceConfig> for SysdbService {
 impl SysDb for SysdbService {
     async fn create_database(
         &self,
-        _request: Request<CreateDatabaseRequest>,
+        request: Request<CreateDatabaseRequest>,
     ) -> Result<Response<CreateDatabaseResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        let internal_req: internal::CreateDatabaseRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backend = internal_req.assign(&self.backends);
+        let resp = internal_req.run(backend).await?;
+
+        Ok(Response::new(resp.into()))
     }
 
     async fn get_database(
         &self,
-        _request: Request<GetDatabaseRequest>,
+        request: Request<GetDatabaseRequest>,
     ) -> Result<Response<GetDatabaseResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        let internal_req: internal::GetDatabaseRequest = proto_req.into();
+
+        let backend = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backend).await?;
+
+        let proto_resp = GetDatabaseResponse {
+            database: Some(internal_resp.database.into()),
+        };
+
+        Ok(Response::new(proto_resp))
     }
 
     async fn list_databases(
@@ -153,23 +174,43 @@ impl SysDb for SysdbService {
 
     async fn create_tenant(
         &self,
-        _request: Request<CreateTenantRequest>,
+        request: Request<CreateTenantRequest>,
     ) -> Result<Response<CreateTenantResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        let internal_req: internal::CreateTenantRequest = proto_req.into();
+
+        let backends = internal_req.assign(&self.backends);
+        let resp = internal_req.run(backends).await?;
+
+        Ok(Response::new(resp.into()))
     }
 
     async fn get_tenant(
         &self,
-        _request: Request<GetTenantRequest>,
+        request: Request<GetTenantRequest>,
     ) -> Result<Response<GetTenantResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        let internal_req: internal::GetTenantRequest = proto_req.into();
+
+        let backend = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backend).await?;
+
+        Ok(Response::new(internal_resp.into()))
     }
 
     async fn set_tenant_resource_name(
         &self,
-        _request: Request<SetTenantResourceNameRequest>,
+        request: Request<SetTenantResourceNameRequest>,
     ) -> Result<Response<SetTenantResourceNameResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        let internal_req: internal::SetTenantResourceNameRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backends = internal_req.assign(&self.backends);
+        let resp = internal_req.run(backends).await?;
+
+        Ok(Response::new(resp.into()))
     }
 
     async fn create_segment(

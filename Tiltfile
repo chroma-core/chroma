@@ -316,7 +316,7 @@ k8s_resource('postgres:deployment:chroma', resource_deps=['k8s_setup'], labels=[
 k8s_resource('sysdb-migration-latest:job:chroma', resource_deps=['postgres:deployment:chroma'], labels=["infrastructure"])
 k8s_resource('rust-log-service:statefulset:chroma', labels=["chroma"], port_forwards=['50054:50051', '50052:50052'], resource_deps=['minio-deployment'])
 k8s_resource('sysdb:deployment:chroma', resource_deps=['sysdb-migration-latest:job:chroma'], labels=["chroma"], port_forwards='50051:50051')
-k8s_resource('rust-sysdb-service:deployment:chroma', resource_deps = ['k8s_setup', 'spanner-deployment'], labels = ["chroma"], port_forwards = '50056:50051')
+k8s_resource('rust-sysdb-service:deployment:chroma', resource_deps = ['k8s_setup', 'spanner-deployment', 'rust-sysdb-migration-latest'], labels = ["chroma"], port_forwards = '50056:50051')
 k8s_resource('rust-frontend-service:deployment:chroma', resource_deps=['sysdb:deployment:chroma', 'rust-log-service:statefulset:chroma'], labels=["chroma"], port_forwards='8000:8000')
 k8s_resource('query-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"])
