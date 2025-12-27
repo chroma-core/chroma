@@ -43,6 +43,7 @@ use tonic::{transport::Server, Request, Response, Status};
 
 use crate::backend::{Assignable, BackendFactory, Runnable};
 use crate::config::SysDbServiceConfig;
+use crate::error::SysDbError;
 use crate::spanner::SpannerBackend;
 use crate::types as internal;
 
@@ -123,7 +124,9 @@ impl SysDb for SysdbService {
         request: Request<CreateDatabaseRequest>,
     ) -> Result<Response<CreateDatabaseResponse>, Status> {
         let proto_req = request.into_inner();
-        let internal_req: internal::CreateDatabaseRequest = proto_req.into();
+        let internal_req: internal::CreateDatabaseRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
 
         let backend = internal_req.assign(&self.backends);
         let resp = internal_req.run(backend).await?;
@@ -200,7 +203,9 @@ impl SysDb for SysdbService {
         request: Request<SetTenantResourceNameRequest>,
     ) -> Result<Response<SetTenantResourceNameResponse>, Status> {
         let proto_req = request.into_inner();
-        let internal_req: internal::SetTenantResourceNameRequest = proto_req.into();
+        let internal_req: internal::SetTenantResourceNameRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
 
         let backends = internal_req.assign(&self.backends);
         let resp = internal_req.run(backends).await?;

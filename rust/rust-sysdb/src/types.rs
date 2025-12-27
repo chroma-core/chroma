@@ -8,6 +8,7 @@
 
 use chroma_types::chroma_proto;
 use google_cloud_spanner::row::Row;
+use uuid::Uuid;
 
 use crate::backend::{Assignable, Backend, BackendFactory, Runnable};
 use crate::error::SysDbError;
@@ -15,6 +16,17 @@ use crate::error::SysDbError;
 // ============================================================================
 // Request Types (proto -> internal)
 // ============================================================================
+
+/// Validates that a string is a valid UUID.
+fn validate_uuid(id: &str, field_name: &str) -> Result<String, SysDbError> {
+    Uuid::parse_str(id).map_err(|_| {
+        SysDbError::InvalidArgument(format!(
+            "{} must be a valid UUID, got: '{}'",
+            field_name, id
+        ))
+    })?;
+    Ok(id.to_string())
+}
 
 /// Internal request for creating a tenant.
 #[derive(Debug, Clone)]
@@ -47,12 +59,15 @@ pub struct SetTenantResourceNameRequest {
     pub resource_name: String,
 }
 
-impl From<chroma_proto::SetTenantResourceNameRequest> for SetTenantResourceNameRequest {
-    fn from(req: chroma_proto::SetTenantResourceNameRequest) -> Self {
-        Self {
-            id: req.id,
+impl TryFrom<chroma_proto::SetTenantResourceNameRequest> for SetTenantResourceNameRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::SetTenantResourceNameRequest) -> Result<Self, Self::Error> {
+        let id = validate_uuid(&req.id, "tenant id")?;
+        Ok(Self {
+            id,
             resource_name: req.resource_name,
-        }
+        })
     }
 }
 
@@ -64,13 +79,16 @@ pub struct CreateDatabaseRequest {
     pub tenant: String,
 }
 
-impl From<chroma_proto::CreateDatabaseRequest> for CreateDatabaseRequest {
-    fn from(req: chroma_proto::CreateDatabaseRequest) -> Self {
-        Self {
-            id: req.id,
+impl TryFrom<chroma_proto::CreateDatabaseRequest> for CreateDatabaseRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::CreateDatabaseRequest) -> Result<Self, Self::Error> {
+        let id = validate_uuid(&req.id, "database id")?;
+        Ok(Self {
+            id,
             name: req.name,
             tenant: req.tenant,
-        }
+        })
     }
 }
 
