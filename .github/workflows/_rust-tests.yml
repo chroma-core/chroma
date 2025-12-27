@@ -192,18 +192,7 @@ jobs:
           kubectl -n chroma port-forward svc/minio 9000:9000 &
           kubectl -n chroma port-forward svc/jaeger 16686:16686 &
           # Forward Spanner emulator port for rust-sysdb backend tests
-          kubectl -n chroma2 port-forward svc/spanner-deployment 9010:9010 &
-          # Forward rust-sysdb-service gRPC port (for potential gRPC integration tests)
-          kubectl -n chroma2 port-forward svc/rust-sysdb-service 60056:50051 &
-      - name: Wait for services to be ready
-        shell: bash
-        run: |
-          echo "Waiting for rust-sysdb-service to be ready..."
-          kubectl wait --for=condition=available --timeout=600s deployment/rust-sysdb-service -n chroma2 || true
-          echo "Waiting for migrations to complete..."
-          sleep 10
-      - name: Build CLI
-        run: cargo build --bin chroma
+          kubectl -n chroma2 port-forward svc/spanner 9010:9010 &
       - name: Run rust-sysdb k8s integration tests
         run: cargo nextest run --profile rust_sysdb_k8s_integration --test-threads 1
       - name: Save service logs to artifact
