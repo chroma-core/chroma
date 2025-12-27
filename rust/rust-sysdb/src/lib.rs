@@ -5,7 +5,6 @@ use crate::config::RootConfig;
 pub mod backend;
 pub mod config;
 pub mod error;
-pub mod router;
 pub mod server;
 pub mod spanner;
 pub mod types;

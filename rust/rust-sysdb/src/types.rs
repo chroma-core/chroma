@@ -8,6 +8,9 @@
 
 use chroma_types::chroma_proto;
 
+use crate::backend::{Assignable, Backend, BackendFactory, Runnable};
+use crate::error::SysDbError;
+
 // ============================================================================
 // Request Types (proto -> internal)
 // ============================================================================
@@ -83,6 +86,103 @@ impl From<chroma_proto::GetDatabaseRequest> for GetDatabaseRequest {
             name: req.name,
             tenant: req.tenant,
         }
+    }
+}
+
+// ============================================================================
+// Assignable Trait Implementations
+// ============================================================================
+
+impl Assignable for CreateTenantRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Fan out to all backends
+        vec![
+            Backend::Spanner(factory.spanner().clone()),
+            // TODO: Backend::Aurora(factory.aurora().clone()),
+        ]
+    }
+}
+
+impl Assignable for GetTenantRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Single backend operation
+        Backend::Spanner(factory.spanner().clone())
+    }
+}
+
+impl Assignable for SetTenantResourceNameRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Fan out to all backends
+        vec![
+            Backend::Spanner(factory.spanner().clone()),
+            // TODO: Backend::Aurora(factory.aurora().clone()),
+        ]
+    }
+}
+
+impl Assignable for CreateDatabaseRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by db_name prefix (for now, default to Spanner)
+        // TODO: Check self.name prefix to route to Aurora if needed
+        Backend::Spanner(factory.spanner().clone())
+    }
+}
+
+impl Assignable for GetDatabaseRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by db_name prefix (for now, default to Spanner)
+        // TODO: Check self.name prefix to route to Aurora if needed
+        Backend::Spanner(factory.spanner().clone())
+    }
+}
+
+// ============================================================================
+// Runnable Trait Implementations
+// ============================================================================
+
+#[async_trait::async_trait]
+impl Runnable for CreateTenantRequest {
+    type Response = CreateTenantResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(&self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        for backend in backends {
+            backend.create_tenant(self).await?;
+        }
+        Ok(CreateTenantResponse {})
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for GetTenantRequest {
+    type Response = Option<GetTenantResponse>;
+    type Input = Backend;
+
+    async fn run(&self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.get_tenant(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for SetTenantResourceNameRequest {
+    type Response = SetTenantResourceNameResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(&self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        for backend in backends {
+            backend.set_tenant_resource_name(self).await?;
+        }
+        Ok(SetTenantResourceNameResponse {})
     }
 }
 
