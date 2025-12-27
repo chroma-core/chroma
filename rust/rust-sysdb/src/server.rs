@@ -120,16 +120,32 @@ impl Configurable<SysDbServiceConfig> for SysdbService {
 impl SysDb for SysdbService {
     async fn create_database(
         &self,
-        _request: Request<CreateDatabaseRequest>,
+        request: Request<CreateDatabaseRequest>,
     ) -> Result<Response<CreateDatabaseResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        let internal_req: internal::CreateDatabaseRequest = proto_req.into();
+
+        let backend = internal_req.assign(&self.backends);
+        let resp = internal_req.run(backend).await?;
+
+        Ok(Response::new(resp.into()))
     }
 
     async fn get_database(
         &self,
-        _request: Request<GetDatabaseRequest>,
+        request: Request<GetDatabaseRequest>,
     ) -> Result<Response<GetDatabaseResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        let internal_req: internal::GetDatabaseRequest = proto_req.into();
+
+        let backend = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backend).await?;
+
+        let proto_resp = GetDatabaseResponse {
+            database: Some(internal_resp.database.into()),
+        };
+
+        Ok(Response::new(proto_resp))
     }
 
     async fn list_databases(
@@ -174,11 +190,7 @@ impl SysDb for SysdbService {
         let internal_req: internal::GetTenantRequest = proto_req.into();
 
         let backend = internal_req.assign(&self.backends);
-        let resp = internal_req.run(backend).await?;
-
-        let internal_resp = resp.ok_or_else(|| {
-            Status::not_found(format!("tenant '{}' not found", internal_req.name))
-        })?;
+        let internal_resp = internal_req.run(backend).await?;
 
         Ok(Response::new(internal_resp.into()))
     }
@@ -455,45 +467,3 @@ impl SysDb for SysdbService {
         todo!()
     }
 }
-
-/*
-struct BackendFactory {
-    spanner_backend: SpannerBackend,
-    // In future
-    // aurora_backend: AuroraBackend,
-}
-
-impl BackendFactory {
-    fn new() -> BackendFactory {
-        BackendFactory {
-            spanner_backend: SpannerBackend::new(),
-            // in future: aurora_backend: AuroraBackend::new(),
-        }
-    }
-    fn get_spanner_backend() -> SpannerBackend {
-        self.spanner_backend
-    }
-    // in future: fn get_aurora_backend() -> AuroraBackend {
-    //     self.aurora_backend
-    // }
-}
-
-trait SysdbOperation {
-    type response_type;
-    type error_type;
-    fn run(backend_factory: BackendFactory) -> Result<Self::response_type, Self::error_type>;
-    fn filter(backend_factory: BackendFactory) -> Vec<Backend>;
-}
-
-impl SysdbOperation for CreateTenantRequest {
-    fn run(backend_factory: BackendFactory) -> Result<CreateTenantResponse, Status> {
-        let backends = Self::filter(backend_factory);
-        for backend in backends {
-            backend.create_tenant().await;
-        }
-    }
-    fn filter(backend_factory: BackendFactory) -> Vec<Backend> {
-        return vec![backend_factory.get_spanner_backend(), backend_factory.get_aurora_backend()];
-    }
-}
-*/

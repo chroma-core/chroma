@@ -161,11 +161,13 @@ impl Backend {
         }
     }
 
-    /// Get a tenant by name. Returns None if not found.
+    /// Get a tenant by name.
+    ///
+    /// Returns `SysDbError::NotFound` if the tenant does not exist.
     pub async fn get_tenant(
         &self,
         req: &GetTenantRequest,
-    ) -> Result<Option<GetTenantResponse>, SysDbError> {
+    ) -> Result<GetTenantResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.get_tenant(req).await,
         }
@@ -196,11 +198,12 @@ impl Backend {
     }
 
     /// Get a database by name and tenant.
-    /// Returns None if the database does not exist.
+    ///
+    /// Returns `SysDbError::NotFound` if the database does not exist.
     pub async fn get_database(
         &self,
         req: &GetDatabaseRequest,
-    ) -> Result<Option<GetDatabaseResponse>, SysDbError> {
+    ) -> Result<GetDatabaseResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.get_database(req).await,
         }

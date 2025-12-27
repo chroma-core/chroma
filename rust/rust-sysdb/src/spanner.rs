@@ -111,11 +111,11 @@ impl SpannerBackend {
 
     /// Get a tenant by name.
     ///
-    /// Returns None if the tenant does not exist or is marked as deleted.
+    /// Returns `SysDbError::NotFound` if the tenant does not exist or is marked as deleted.
     pub async fn get_tenant(
         &self,
         req: &GetTenantRequest,
-    ) -> Result<Option<GetTenantResponse>, SysDbError> {
+    ) -> Result<GetTenantResponse, SysDbError> {
         let tenant_id = &req.name;
 
         let mut stmt = Statement::new(
@@ -140,22 +140,14 @@ impl SpannerBackend {
             .await
             .map_err(|e| SysDbError::Spanner(e.to_string()))?
         {
-            let id: String = row
-                .column_by_name("id")
-                .map_err(|e| SysDbError::Internal(format!("failed to read 'id' column: {}", e)))?;
-
-            // resource_name can be NULL, so we handle the error as None
-            let resource_name: Option<String> = row.column_by_name("resource_name").ok();
-
-            Ok(Some(GetTenantResponse {
-                tenant: Tenant {
-                    id: id.clone(),
-                    name: id, // In this schema, id IS the name
-                    resource_name,
-                },
-            }))
+            Ok(GetTenantResponse {
+                tenant: Tenant::try_from(row)?,
+            })
         } else {
-            Ok(None)
+            Err(SysDbError::NotFound(format!(
+                "tenant '{}' not found",
+                tenant_id
+            )))
         }
     }
 
@@ -188,48 +180,58 @@ impl SpannerBackend {
             ));
         }
 
-        // Check if tenant exists
+        // Check if tenant exists (get_tenant now returns NotFound error if not found)
         let get_tenant_req = GetTenantRequest {
             name: req.tenant.clone(),
         };
-        let tenant = self.get_tenant(&get_tenant_req).await?;
-        if tenant.is_none() {
-            return Err(SysDbError::NotFound(format!(
-                "tenant '{}' not found",
-                req.tenant
+        self.get_tenant(&get_tenant_req).await?;
+
+        // Check if database with this ID already exists
+        let mut check_stmt =
+            Statement::new("SELECT id FROM databases WHERE id = @id AND is_deleted = FALSE");
+        check_stmt.add_param("id", &req.id);
+
+        let mut tx = self
+            .client
+            .single()
+            .await
+            .map_err(|e| SysDbError::Spanner(e.to_string()))?;
+
+        let mut iter = tx
+            .query(check_stmt)
+            .await
+            .map_err(|e| SysDbError::Spanner(e.to_string()))?;
+
+        if iter
+            .next()
+            .await
+            .map_err(|e| SysDbError::Spanner(e.to_string()))?
+            .is_some()
+        {
+            return Err(SysDbError::AlreadyExists(format!(
+                "database with id '{}' already exists",
+                req.id
             )));
         }
 
-        // Use a read-write transaction to atomically check and insert
+        // Use a read-write transaction to atomically insert
         self.client
             .read_write_transaction(|tx| {
                 let db_id = req.id.clone();
                 let db_name = req.name.clone();
                 let tenant_id = req.tenant.clone();
                 Box::pin(async move {
-                    // Check if database already exists
-                    let mut check_stmt = Statement::new(
-                        "SELECT ID FROM databases WHERE ID = @id AND IS_DELETED = FALSE",
+                    // Insert the new database
+                    let mut insert_stmt = Statement::new(
+                        "INSERT INTO databases (id, name, tenant_id, is_deleted, created_at, updated_at) VALUES (@id, @name, @tenant_id, @is_deleted, PENDING_COMMIT_TIMESTAMP(), PENDING_COMMIT_TIMESTAMP())",
                     );
-                    check_stmt.add_param("id", &db_id);
+                    insert_stmt.add_param("id", &db_id);
+                    insert_stmt.add_param("name", &db_name);
+                    insert_stmt.add_param("tenant_id", &tenant_id);
+                    insert_stmt.add_param("is_deleted", &false);
 
-                    let mut iter = tx.query(check_stmt).await?;
-
-                    // If database doesn't exist, insert it
-                    if iter.next().await?.is_none() {
-                        let mut insert_stmt = Statement::new(
-                            "INSERT INTO databases (ID, NAME, TENANT_ID, IS_DELETED, CREATED_AT, UPDATED_AT) VALUES (@id, @name, @tenant_id, @is_deleted, PENDING_COMMIT_TIMESTAMP(), PENDING_COMMIT_TIMESTAMP())",
-                        );
-                        insert_stmt.add_param("id", &db_id);
-                        insert_stmt.add_param("name", &db_name);
-                        insert_stmt.add_param("tenant_id", &tenant_id);
-                        insert_stmt.add_param("is_deleted", &false);
-
-                        tx.update(insert_stmt).await?;
-                        tracing::info!("Created database: {} for tenant: {}", db_name, tenant_id);
-                    } else {
-                        tracing::debug!("Database already exists, skipping insert: {}", db_id);
-                    }
+                    tx.update(insert_stmt).await?;
+                    tracing::info!("Created database: {} for tenant: {}", db_name, tenant_id);
 
                     Ok(())
                 })
@@ -242,13 +244,13 @@ impl SpannerBackend {
 
     /// Get a database by name and tenant.
     ///
-    /// Returns None if the database does not exist or is marked as deleted.
+    /// Returns `SysDbError::NotFound` if the database does not exist or is marked as deleted.
     pub async fn get_database(
         &self,
         req: &GetDatabaseRequest,
-    ) -> Result<Option<GetDatabaseResponse>, SysDbError> {
+    ) -> Result<GetDatabaseResponse, SysDbError> {
         let mut stmt = Statement::new(
-            "SELECT ID, NAME, TENANT_ID FROM databases WHERE NAME = @name AND TENANT_ID = @tenant_id AND IS_DELETED = FALSE",
+            "SELECT id, name, tenant_id FROM databases WHERE name = @name AND tenant_id = @tenant_id AND is_deleted = FALSE",
         );
         stmt.add_param("name", &req.name);
         stmt.add_param("tenant_id", &req.tenant);
@@ -270,25 +272,14 @@ impl SpannerBackend {
             .await
             .map_err(|e| SysDbError::Spanner(e.to_string()))?
         {
-            let id: String = row
-                .column_by_name("ID")
-                .map_err(|e| SysDbError::Internal(format!("failed to read 'ID' column: {}", e)))?;
-            let name: String = row.column_by_name("NAME").map_err(|e| {
-                SysDbError::Internal(format!("failed to read 'NAME' column: {}", e))
-            })?;
-            let tenant_id: String = row.column_by_name("TENANT_ID").map_err(|e| {
-                SysDbError::Internal(format!("failed to read 'TENANT_ID' column: {}", e))
-            })?;
-
-            Ok(Some(GetDatabaseResponse {
-                database: Database {
-                    id,
-                    name,
-                    tenant_id,
-                },
-            }))
+            Ok(GetDatabaseResponse {
+                database: Database::try_from(row)?,
+            })
         } else {
-            Ok(None)
+            Err(SysDbError::NotFound(format!(
+                "database '{}' not found for tenant '{}'",
+                req.name, req.tenant
+            )))
         }
     }
 
@@ -440,13 +431,7 @@ mod tests {
         let result = backend.get_tenant(&get_req).await;
         assert!(result.is_ok(), "Failed to get tenant: {:?}", result.err());
 
-        let tenant_response = result.unwrap();
-        assert!(
-            tenant_response.is_some(),
-            "Tenant should exist after creation"
-        );
-
-        let tenant = tenant_response.unwrap();
+        let tenant = result.unwrap();
         println!("Tenant: {:?}", tenant);
         assert_eq!(tenant.tenant.name, tenant_name);
         assert_eq!(tenant.tenant.id, tenant_name);
@@ -493,7 +478,7 @@ mod tests {
         };
         let result = backend.get_tenant(&get_req).await;
         assert!(result.is_ok(), "Failed to get tenant: {:?}", result.err());
-        assert!(result.unwrap().is_some(), "Tenant should exist");
+        let _tenant = result.unwrap(); // Tenant should exist
     }
 
     #[tokio::test]
@@ -515,13 +500,13 @@ mod tests {
         let get_req = GetTenantRequest { name: tenant_name };
         let result = backend.get_tenant(&get_req).await;
         assert!(
-            result.is_ok(),
-            "Getting nonexistent tenant should not error"
+            result.is_err(),
+            "Getting nonexistent tenant should return error"
         );
-        assert!(
-            result.unwrap().is_none(),
-            "Nonexistent tenant should return None"
-        );
+        match result.unwrap_err() {
+            SysDbError::NotFound(_) => {}
+            e => panic!("Expected NotFound error, got: {:?}", e),
+        }
     }
 
     #[tokio::test]
@@ -581,13 +566,7 @@ mod tests {
         let result = backend.get_database(&get_db_req).await;
         assert!(result.is_ok(), "Failed to get database: {:?}", result.err());
 
-        let db_response = result.unwrap();
-        assert!(
-            db_response.is_some(),
-            "Database should exist after creation"
-        );
-
-        let db = db_response.unwrap();
+        let db = result.unwrap();
         assert_eq!(db.database.name, db_name);
         assert_eq!(db.database.id, db_id);
         assert_eq!(db.database.tenant_id, tenant_name);
@@ -595,7 +574,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore] // Requires Tilt running
-    async fn test_create_database_idempotent() {
+    async fn test_create_database_conflict() {
         let Some(backend) = setup_test_backend().await else {
             println!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
             return;
@@ -603,7 +582,7 @@ mod tests {
 
         // First create a tenant
         let tenant_name = format!(
-            "test_tenant_idempotent_db_{}",
+            "test_tenant_conflict_db_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -623,7 +602,7 @@ mod tests {
         // Create database first time
         let db_id = Uuid::new_v4().to_string();
         let db_name = format!(
-            "test_database_idempotent_{}",
+            "test_database_conflict_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -642,22 +621,27 @@ mod tests {
             result1.err()
         );
 
-        // Create database second time (should succeed - idempotent)
+        // Create database second time with same ID (should return AlreadyExists)
         let result2 = backend.create_database(&create_db_req).await;
         assert!(
-            result2.is_ok(),
-            "Failed to create database second time (should be idempotent): {:?}",
-            result2.err()
+            result2.is_err(),
+            "Creating database with duplicate ID should return error"
         );
+        match result2.unwrap_err() {
+            SysDbError::AlreadyExists(_) => {
+                // Expected error
+            }
+            e => panic!("Expected AlreadyExists error, got: {:?}", e),
+        }
 
-        // Verify database exists
+        // Verify database still exists
         let get_db_req = GetDatabaseRequest {
             name: db_name.clone(),
             tenant: tenant_name.clone(),
         };
         let result = backend.get_database(&get_db_req).await;
         assert!(result.is_ok(), "Failed to get database: {:?}", result.err());
-        assert!(result.unwrap().is_some(), "Database should exist");
+        let _db = result.unwrap(); // Database should exist
     }
 
     #[tokio::test]
@@ -701,13 +685,13 @@ mod tests {
         };
         let result = backend.get_database(&get_db_req).await;
         assert!(
-            result.is_ok(),
-            "Getting nonexistent database should not error"
+            result.is_err(),
+            "Getting nonexistent database should return error"
         );
-        assert!(
-            result.unwrap().is_none(),
-            "Nonexistent database should return None"
-        );
+        match result.unwrap_err() {
+            SysDbError::NotFound(_) => {}
+            e => panic!("Expected NotFound error, got: {:?}", e),
+        }
     }
 
     #[tokio::test]
@@ -742,6 +726,53 @@ mod tests {
                 // Expected error
             }
             e => panic!("Expected NotFound error, got: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires Tilt running
+    async fn test_create_database_empty_name() {
+        let Some(backend) = setup_test_backend().await else {
+            println!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+            return;
+        };
+
+        // First create a tenant
+        let tenant_name = format!(
+            "test_tenant_empty_name_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        );
+
+        let create_tenant_req = CreateTenantRequest {
+            name: tenant_name.clone(),
+        };
+        let result = backend.create_tenant(&create_tenant_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to create tenant: {:?}",
+            result.err()
+        );
+
+        // Try to create database with empty name
+        let db_id = Uuid::new_v4().to_string();
+        let create_db_req = CreateDatabaseRequest {
+            id: db_id,
+            name: "".to_string(), // Empty name
+            tenant: tenant_name,
+        };
+        let result = backend.create_database(&create_db_req).await;
+        assert!(
+            result.is_err(),
+            "Creating database with empty name should fail"
+        );
+        match result.unwrap_err() {
+            SysDbError::InvalidArgument(_) => {
+                // Expected error
+            }
+            e => panic!("Expected InvalidArgument error, got: {:?}", e),
         }
     }
 }

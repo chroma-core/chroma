@@ -4,4 +4,4 @@
 # Run `cargo run --bin spanner_migration -- --generate-sum` to regenerate.
 
 0001-create_tenants.spanner.sql 87dbaa652753aba0730b9b784a2974f0b23c2017b562ec9f0b01663d9c840321
-0002-create_databases.spanner.sql b4998aaf5ee43e93031a00167c2f369de3792d81078608a7d1f904eef4f2c33d
+0002-create_databases.spanner.sql 167906c4b0c6de55f535925908bbb8130a1492741f4584b4987f97c0a4fd8818
