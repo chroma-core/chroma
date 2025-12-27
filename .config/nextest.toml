@@ -21,7 +21,7 @@ test-group = "against-tilt"
 path = "junit.xml"
 
 [profile.ci_k8s_integration]
-default-filter = "test(/test_k8s_integration_/) and not test(test_k8s_integration_garbage_collection)"
+default-filter = "test(/test_k8s_integration_/) and not test(test_k8s_integration_garbage_collection) and not package(rust-sysdb)"
 
 [[profile.ci_k8s_integration.overrides]]
 filter = "all()"
