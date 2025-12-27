@@ -77,10 +77,36 @@
 
 use std::collections::HashSet;
 use std::fmt::Debug;
+use std::hash::Hash;
 
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
+
+/// Finds duplicate values in a slice by extracting a key from each item.
+///
+/// Returns a sorted, deduplicated list of keys that appear more than once.
+fn find_duplicates<'a, T, K, F>(items: &'a [T], key_fn: F) -> Vec<K>
+where
+    K: 'a + Clone + Eq + Hash + Ord,
+    F: Fn(&'a T) -> &'a K,
+{
+    let mut seen = HashSet::new();
+    let mut duplicates: Vec<_> = items
+        .iter()
+        .filter_map(|item| {
+            let key = key_fn(item);
+            if !seen.insert(key) {
+                Some(key.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    duplicates.sort();
+    duplicates.dedup();
+    duplicates
+}
 
 /// A strongly-typed region name.
 ///
@@ -552,39 +578,8 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>>
         let mut error = ValidationError::default();
         let all_region_names: HashSet<_> = self.regions.iter().map(|r| &r.name).collect();
 
-        // Find duplicate region names, ensuring each duplicate is reported only once.
-        let mut seen_regions = HashSet::new();
-        let mut duplicate_regions: Vec<_> = self
-            .regions
-            .iter()
-            .filter_map(|r| {
-                if !seen_regions.insert(&r.name) {
-                    Some(r.name.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        duplicate_regions.sort();
-        duplicate_regions.dedup();
-        error.duplicate_region_names = duplicate_regions;
-
-        // Find duplicate topology names, ensuring each duplicate is reported only once.
-        let mut seen_topologies = HashSet::new();
-        let mut duplicate_topologies: Vec<_> = self
-            .topologies
-            .iter()
-            .filter_map(|t| {
-                if !seen_topologies.insert(&t.name) {
-                    Some(t.name.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        duplicate_topologies.sort();
-        duplicate_topologies.dedup();
-        error.duplicate_topology_names = duplicate_topologies;
+        error.duplicate_region_names = find_duplicates(&self.regions, |r| &r.name);
+        error.duplicate_topology_names = find_duplicates(&self.topologies, |t| &t.name);
 
         // Find all unique unknown regions across all topologies.
         let mut unknown_regions: Vec<_> = self
