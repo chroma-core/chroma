@@ -1,0 +1,382 @@
+//! Internal domain types for the SysDb service.
+//!
+//! These types provide a layer of indirection between the protobuf types
+//! and the backend implementations. This allows:
+//! - Changing the wire format without affecting backends
+//! - Backend-specific optimizations without affecting the API
+//! - Cleaner internal APIs that aren't tied to protobuf conventions
+
+use chroma_types::chroma_proto;
+use google_cloud_spanner::row::Row;
+use uuid::Uuid;
+
+use crate::backend::{Assignable, Backend, BackendFactory, Runnable};
+use crate::error::SysDbError;
+
+// ============================================================================
+// Request Types (proto -> internal)
+// ============================================================================
+
+/// Validates that a string is a valid UUID.
+fn validate_uuid(id: &str, field_name: &str) -> Result<String, SysDbError> {
+    Uuid::parse_str(id).map_err(|_| {
+        SysDbError::InvalidArgument(format!(
+            "{} must be a valid UUID, got: '{}'",
+            field_name, id
+        ))
+    })?;
+    Ok(id.to_string())
+}
+
+/// Internal request for creating a tenant.
+#[derive(Debug, Clone)]
+pub struct CreateTenantRequest {
+    pub name: String,
+}
+
+impl From<chroma_proto::CreateTenantRequest> for CreateTenantRequest {
+    fn from(req: chroma_proto::CreateTenantRequest) -> Self {
+        Self { name: req.name }
+    }
+}
+
+/// Internal request for getting a tenant.
+#[derive(Debug, Clone)]
+pub struct GetTenantRequest {
+    pub name: String,
+}
+
+impl From<chroma_proto::GetTenantRequest> for GetTenantRequest {
+    fn from(req: chroma_proto::GetTenantRequest) -> Self {
+        Self { name: req.name }
+    }
+}
+
+/// Internal request for setting tenant resource name.
+#[derive(Debug, Clone)]
+pub struct SetTenantResourceNameRequest {
+    pub id: String,
+    pub resource_name: String,
+}
+
+impl TryFrom<chroma_proto::SetTenantResourceNameRequest> for SetTenantResourceNameRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::SetTenantResourceNameRequest) -> Result<Self, Self::Error> {
+        let id = validate_uuid(&req.id, "tenant id")?;
+        Ok(Self {
+            id,
+            resource_name: req.resource_name,
+        })
+    }
+}
+
+/// Internal request for creating a database.
+#[derive(Debug, Clone)]
+pub struct CreateDatabaseRequest {
+    pub id: String,
+    pub name: String,
+    pub tenant: String,
+}
+
+impl TryFrom<chroma_proto::CreateDatabaseRequest> for CreateDatabaseRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::CreateDatabaseRequest) -> Result<Self, Self::Error> {
+        let id = validate_uuid(&req.id, "database id")?;
+        Ok(Self {
+            id,
+            name: req.name,
+            tenant: req.tenant,
+        })
+    }
+}
+
+/// Internal request for getting a database.
+#[derive(Debug, Clone)]
+pub struct GetDatabaseRequest {
+    pub name: String,
+    pub tenant: String,
+}
+
+impl From<chroma_proto::GetDatabaseRequest> for GetDatabaseRequest {
+    fn from(req: chroma_proto::GetDatabaseRequest) -> Self {
+        Self {
+            name: req.name,
+            tenant: req.tenant,
+        }
+    }
+}
+
+// ============================================================================
+// Assignable Trait Implementations
+// ============================================================================
+
+impl Assignable for CreateTenantRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Fan out to all backends
+        vec![
+            Backend::Spanner(factory.spanner().clone()),
+            // TODO: Backend::Aurora(factory.aurora().clone()),
+        ]
+    }
+}
+
+impl Assignable for GetTenantRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Single backend operation
+        Backend::Spanner(factory.spanner().clone())
+    }
+}
+
+impl Assignable for SetTenantResourceNameRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Fan out to all backends
+        vec![
+            Backend::Spanner(factory.spanner().clone()),
+            // TODO: Backend::Aurora(factory.aurora().clone()),
+        ]
+    }
+}
+
+impl Assignable for CreateDatabaseRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by db_name prefix (for now, default to Spanner)
+        // TODO: Check self.name prefix to route to Aurora if needed
+        Backend::Spanner(factory.spanner().clone())
+    }
+}
+
+impl Assignable for GetDatabaseRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by db_name prefix (for now, default to Spanner)
+        // TODO: Check self.name prefix to route to Aurora if needed
+        Backend::Spanner(factory.spanner().clone())
+    }
+}
+
+// ============================================================================
+// Runnable Trait Implementations
+// ============================================================================
+
+#[async_trait::async_trait]
+impl Runnable for CreateTenantRequest {
+    type Response = CreateTenantResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(&self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        for backend in backends {
+            backend.create_tenant(self).await?;
+        }
+        Ok(CreateTenantResponse {})
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for GetTenantRequest {
+    type Response = GetTenantResponse;
+    type Input = Backend;
+
+    async fn run(&self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.get_tenant(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for SetTenantResourceNameRequest {
+    type Response = SetTenantResourceNameResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(&self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        for backend in backends {
+            backend.set_tenant_resource_name(self).await?;
+        }
+        Ok(SetTenantResourceNameResponse {})
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for CreateDatabaseRequest {
+    type Response = CreateDatabaseResponse;
+    type Input = Backend;
+
+    async fn run(&self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.create_database(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for GetDatabaseRequest {
+    type Response = GetDatabaseResponse;
+    type Input = Backend;
+
+    async fn run(&self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.get_database(self).await
+    }
+}
+
+// ============================================================================
+// Domain Types (internal)
+// ============================================================================
+
+/// Internal tenant representation.
+#[derive(Debug, Clone)]
+pub struct Tenant {
+    pub id: String,
+    pub name: String,
+    pub resource_name: Option<String>,
+}
+
+// ============================================================================
+// Response Types (internal -> proto)
+// ============================================================================
+
+/// Internal response for creating a tenant.
+#[derive(Debug, Clone)]
+pub struct CreateTenantResponse {
+    // Empty - tenant creation returns no data
+}
+
+impl From<CreateTenantResponse> for chroma_proto::CreateTenantResponse {
+    fn from(_: CreateTenantResponse) -> Self {
+        chroma_proto::CreateTenantResponse {}
+    }
+}
+
+/// Internal response for getting a tenant.
+#[derive(Debug, Clone)]
+pub struct GetTenantResponse {
+    pub tenant: Tenant,
+}
+
+impl From<GetTenantResponse> for chroma_proto::GetTenantResponse {
+    fn from(r: GetTenantResponse) -> Self {
+        chroma_proto::GetTenantResponse {
+            tenant: Some(r.tenant.into()),
+        }
+    }
+}
+
+/// Internal response for setting tenant resource name.
+#[derive(Debug, Clone)]
+pub struct SetTenantResourceNameResponse {
+    // Empty - set resource name returns no data
+}
+
+impl From<SetTenantResourceNameResponse> for chroma_proto::SetTenantResourceNameResponse {
+    fn from(_: SetTenantResourceNameResponse) -> Self {
+        chroma_proto::SetTenantResourceNameResponse {}
+    }
+}
+
+/// Internal response for creating a database.
+#[derive(Debug, Clone)]
+pub struct CreateDatabaseResponse {
+    // Empty - database creation returns no data
+}
+
+impl From<CreateDatabaseResponse> for chroma_proto::CreateDatabaseResponse {
+    fn from(_: CreateDatabaseResponse) -> Self {
+        chroma_proto::CreateDatabaseResponse {}
+    }
+}
+
+/// Internal response for getting a database.
+#[derive(Debug, Clone)]
+pub struct GetDatabaseResponse {
+    pub database: Database,
+}
+
+impl From<GetDatabaseResponse> for chroma_proto::GetDatabaseResponse {
+    fn from(r: GetDatabaseResponse) -> Self {
+        chroma_proto::GetDatabaseResponse {
+            database: Some(r.database.into()),
+        }
+    }
+}
+
+// ============================================================================
+// Domain Types -> Proto Conversions
+// ============================================================================
+
+impl From<Tenant> for chroma_proto::Tenant {
+    fn from(t: Tenant) -> Self {
+        chroma_proto::Tenant {
+            name: t.name,
+            resource_name: t.resource_name,
+        }
+    }
+}
+
+/// Internal database representation.
+#[derive(Debug, Clone)]
+pub struct Database {
+    pub id: String,
+    pub name: String,
+    pub tenant_id: String,
+}
+
+impl From<Database> for chroma_proto::Database {
+    fn from(d: Database) -> Self {
+        chroma_proto::Database {
+            id: d.id,
+            name: d.name,
+            tenant: d.tenant_id,
+        }
+    }
+}
+
+// ============================================================================
+// Row Conversion Implementations (DAO layer)
+// ============================================================================
+
+impl TryFrom<Row> for Tenant {
+    type Error = SysDbError;
+
+    fn try_from(row: Row) -> Result<Self, Self::Error> {
+        let id: String = row
+            .column_by_name("id")
+            .map_err(|e| SysDbError::Internal(format!("failed to read 'id' column: {}", e)))?;
+
+        // resource_name can be NULL, so we handle the error as None
+        let resource_name: Option<String> = row.column_by_name("resource_name").ok();
+
+        Ok(Tenant {
+            id: id.clone(),
+            name: id, // In this schema, id IS the name
+            resource_name,
+        })
+    }
+}
+
+impl TryFrom<Row> for Database {
+    type Error = SysDbError;
+
+    fn try_from(row: Row) -> Result<Self, Self::Error> {
+        let id: String = row
+            .column_by_name("id")
+            .map_err(|e| SysDbError::Internal(format!("failed to read 'id' column: {}", e)))?;
+        let name: String = row
+            .column_by_name("name")
+            .map_err(|e| SysDbError::Internal(format!("failed to read 'name' column: {}", e)))?;
+        let tenant_id: String = row.column_by_name("tenant_id").map_err(|e| {
+            SysDbError::Internal(format!("failed to read 'tenant_id' column: {}", e))
+        })?;
+
+        Ok(Database {
+            id,
+            name,
+            tenant_id,
+        })
+    }
+}

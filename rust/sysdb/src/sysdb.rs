@@ -886,14 +886,24 @@ impl GrpcSysDb {
         let req = chroma_proto::CreateTenantRequest {
             name: tenant_name.clone(),
         };
-        // TODO(Sanket): This should fan out to all topologies.
-        match self.client.create_tenant(req).await {
+        // TODO(Sanket): More sophisticated error handling here.
+        match self.client.create_tenant(req.clone()).await {
             Ok(_) => Ok(CreateTenantResponse {}),
             Err(err) if matches!(err.code(), Code::AlreadyExists) => {
-                Err(CreateTenantError::AlreadyExists(tenant_name))
+                Err(CreateTenantError::AlreadyExists(tenant_name.clone()))
             }
             Err(err) => Err(CreateTenantError::Internal(err.into())),
+        }?;
+        if let Some(mut mcmr_client) = self._mcmr_client.clone() {
+            return match mcmr_client.create_tenant(req).await {
+                Ok(_) => Ok(CreateTenantResponse {}),
+                Err(err) if matches!(err.code(), Code::AlreadyExists) => {
+                    Err(CreateTenantError::AlreadyExists(tenant_name))
+                }
+                Err(err) => Err(CreateTenantError::Internal(err.into())),
+            };
         }
+        Ok(CreateTenantResponse {})
     }
 
     pub async fn get_tenant(
@@ -1797,8 +1807,11 @@ impl GrpcSysDb {
             id: tenant_id,
             resource_name,
         };
-
-        self.client.set_tenant_resource_name(req).await?;
+        // TODO(Sanket): More sophisticated error handling here.
+        self.client.set_tenant_resource_name(req.clone()).await?;
+        if let Some(mut mcmr_client) = self._mcmr_client.clone() {
+            mcmr_client.set_tenant_resource_name(req).await?;
+        }
         Ok(UpdateTenantResponse {})
     }
 
