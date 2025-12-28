@@ -1041,8 +1041,33 @@ impl LogServer {
             .log_total_uncompacted_records_count
             .record(total_uncompacted as f64, &[]);
         self.set_backpressure(&backpressure);
-        let mut need_to_compact = self.need_to_compact.lock();
-        std::mem::swap(&mut *need_to_compact, &mut rollup.rollups);
+        let after = rollup.rollups.clone();
+        {
+            let mut need_to_compact = self.need_to_compact.lock();
+            std::mem::swap(&mut *need_to_compact, &mut rollup.rollups);
+        }
+        // NOTE(rescrv):  This is protection against a collection hopping from one log to another
+        // permanently.  Every reinsert_threshold reinserts it will remove the cached compaction
+        // cursor, which will, on the next dirty log rollup, update the lower bound on the cursor,
+        // restoring order to the dirty log.
+        if let Some(cache) = self.cache.as_ref() {
+            let mut cache_collections_to_purge = Vec::with_capacity(rollup.rollups.len());
+            let before = rollup.rollups;
+            for after in after.into_iter() {
+                let Some(before) = before.iter().find(|x| *x.0 == after.0) else {
+                    continue;
+                };
+                if before.1.reinsert_count / self.config.reinsert_threshold
+                    != after.1.reinsert_count / self.config.reinsert_threshold
+                {
+                    cache_collections_to_purge.push(*before.0);
+                }
+            }
+            for collection_id in cache_collections_to_purge {
+                let cache_key = cache_key_for_cursor(collection_id, &COMPACTION);
+                cache.remove(&cache_key).await;
+            }
+        }
         Ok(())
     }
 
