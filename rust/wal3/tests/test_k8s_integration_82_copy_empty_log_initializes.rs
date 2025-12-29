@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    create_factories, Cursor, CursorName, CursorStoreOptions, GarbageCollectionOptions, Limits,
+    create_s3_factories, Cursor, CursorName, CursorStoreOptions, GarbageCollectionOptions, Limits,
     LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions,
     S3ManifestManagerFactory,
 };
@@ -16,7 +16,7 @@ async fn test_k8s_integration_82_copy_empty_log_initializes() {
     let prefix = "test_k8s_integration_82_copy_empty_log_initializes_source";
     let writer = "writer";
     let options = LogWriterOptions::default();
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),

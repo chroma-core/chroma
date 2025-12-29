@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    create_factories, Limits, LogPosition, LogReader, LogReaderOptions, LogWriter,
+    create_s3_factories, Limits, LogPosition, LogReader, LogReaderOptions, LogWriter,
     LogWriterOptions, Manifest, ManifestManagerFactory, S3ManifestManagerFactory, SnapshotOptions,
 };
 
@@ -34,7 +34,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
         },
         ..LogWriterOptions::default()
     };
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),
@@ -109,7 +109,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
         },
         ..LogWriterOptions::default()
     };
-    let (fragment_factory2, manifest_factory2) = create_factories(
+    let (fragment_factory2, manifest_factory2) = create_s3_factories(
         options2.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),

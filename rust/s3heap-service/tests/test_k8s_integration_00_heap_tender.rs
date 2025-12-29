@@ -4,7 +4,7 @@ use chroma_storage::Storage;
 use chroma_sysdb::{SysDb, TestSysDb};
 use chroma_types::{CollectionUuid, DirtyMarker};
 use wal3::{
-    create_factories, CursorStore, CursorStoreOptions, FragmentSeqNo, LogPosition, LogReader,
+    create_s3_factories, CursorStore, CursorStoreOptions, FragmentSeqNo, LogPosition, LogReader,
     LogReaderOptions, LogWriter, LogWriterOptions, ManifestReader, S3FragmentManagerFactory,
     S3FragmentPuller, S3ManifestManagerFactory,
 };
@@ -22,7 +22,7 @@ type S3LogWriter =
 /// Helper to create a test log writer with the new factory interfaces.
 async fn create_test_log_writer(storage: &Storage, prefix: &str, writer_name: &str) -> S3LogWriter {
     let options = LogWriterOptions::default();
-    let (fragment_publisher_factory, manifest_publisher_factory) = create_factories(
+    let (fragment_publisher_factory, manifest_publisher_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::new(storage.clone()),

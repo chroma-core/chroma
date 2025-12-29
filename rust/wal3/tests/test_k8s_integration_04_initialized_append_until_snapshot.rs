@@ -4,8 +4,8 @@ use std::time::Duration;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    create_factories, FragmentIdentifier, FragmentSeqNo, LogPosition, LogReaderOptions, LogWriter,
-    LogWriterOptions, Manifest, ManifestManagerFactory, S3ManifestManagerFactory,
+    create_s3_factories, FragmentIdentifier, FragmentSeqNo, LogPosition, LogReaderOptions,
+    LogWriter, LogWriterOptions, Manifest, ManifestManagerFactory, S3ManifestManagerFactory,
 };
 
 mod common;
@@ -44,7 +44,7 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
     let mut options = LogWriterOptions::default();
     options.snapshot_manifest.fragment_rollover_threshold = 1;
     options.snapshot_manifest.snapshot_rollover_threshold = 2;
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),

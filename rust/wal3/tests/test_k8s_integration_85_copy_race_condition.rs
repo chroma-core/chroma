@@ -4,7 +4,7 @@ use tokio::sync::Barrier;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    create_factories, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions,
+    create_s3_factories, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions,
     ManifestManagerFactory, S3ManifestManagerFactory, ThrottleOptions,
 };
 
@@ -95,7 +95,7 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
             },
             ..LogWriterOptions::default()
         };
-        let (fragment_factory, manifest_factory) = create_factories(
+        let (fragment_factory, manifest_factory) = create_s3_factories(
             options.clone(),
             LogReaderOptions::default(),
             Arc::clone(&storage_clone),

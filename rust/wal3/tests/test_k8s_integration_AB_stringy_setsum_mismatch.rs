@@ -7,7 +7,7 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    create_factories, Cursor, CursorName, FragmentIdentifier, FragmentSeqNo,
+    create_s3_factories, Cursor, CursorName, FragmentIdentifier, FragmentSeqNo,
     GarbageCollectionOptions, LogPosition, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
     ManifestManagerFactory, S3ManifestManagerFactory,
 };
@@ -49,7 +49,7 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
     let mut options = LogWriterOptions::default();
     options.snapshot_manifest.fragment_rollover_threshold = 2;
     options.snapshot_manifest.snapshot_rollover_threshold = 2;
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),
