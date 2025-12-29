@@ -13,13 +13,14 @@ use crate::{
     SnapshotPointer, ThrottleOptions,
 };
 
-pub mod batch_manager;
 pub mod fragment_puller;
+pub mod fragment_uploader;
 pub mod manifest_manager;
 pub mod manifest_reader;
 
-pub use batch_manager::{upload_parquet, BatchManager};
+pub use super::batch_manager::{upload_parquet, BatchManager};
 pub use fragment_puller::S3FragmentPuller;
+pub use fragment_uploader::S3FragmentUploader;
 pub use manifest_manager::ManifestManager;
 pub use manifest_reader::ManifestReader;
 
@@ -27,7 +28,7 @@ pub use manifest_reader::ManifestReader;
 ///
 /// This helper encapsulates the common factory setup logic, reducing boilerplate
 /// when opening logs.
-pub fn create_factories(
+pub fn create_s3_factories(
     write: LogWriterOptions,
     read: LogReaderOptions,
     storage: Arc<Storage>,
@@ -66,17 +67,18 @@ pub struct S3FragmentManagerFactory {
 #[async_trait::async_trait]
 impl FragmentManagerFactory for S3FragmentManagerFactory {
     type FragmentPointer = (FragmentSeqNo, LogPosition);
-    type Publisher = BatchManager;
+    type Publisher = BatchManager<Self::FragmentPointer, S3FragmentUploader>;
     type Consumer = S3FragmentPuller;
 
     async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
-        BatchManager::new(
+        let fragment_uploader = S3FragmentUploader::new(
             self.write.clone(),
             Arc::clone(&self.storage),
             self.prefix.clone(),
             Arc::clone(&self.mark_dirty),
-        )
-        .ok_or_else(|| Error::internal(file!(), line!()))
+        );
+        BatchManager::new(self.write.clone(), fragment_uploader)
+            .ok_or_else(|| Error::internal(file!(), line!()))
     }
 
     async fn make_consumer(&self) -> Result<Self::Consumer, Error> {

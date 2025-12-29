@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    create_factories, Cursor, CursorName, CursorStore, CursorStoreOptions, Error,
+    create_s3_factories, Cursor, CursorName, CursorStore, CursorStoreOptions, Error,
     GarbageCollectionOptions, LogPosition, LogReaderOptions, LogWriter, LogWriterOptions,
     SnapshotOptions,
 };
@@ -20,7 +20,7 @@ async fn test_k8s_integration_90_garbage_collect() {
         },
         ..LogWriterOptions::default()
     };
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),

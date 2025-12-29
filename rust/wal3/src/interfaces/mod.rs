@@ -10,15 +10,19 @@ use chroma_storage::ETag;
 use chroma_types::Cmek;
 
 use crate::{
-    Error, Fragment, FragmentIdentifier, FragmentSeqNo, Garbage, GarbageCollectionOptions,
-    LogPosition, Manifest, ManifestAndETag, Snapshot, SnapshotPointer,
+    Error, Fragment, FragmentIdentifier, FragmentSeqNo, FragmentUuid, Garbage,
+    GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness, Snapshot, SnapshotPointer,
 };
 
+pub mod batch_manager;
+pub mod repl;
 pub mod s3;
+
+pub use batch_manager::BatchManager;
 
 ////////////////////////////////////////// FragmentPointer /////////////////////////////////////////
 
-pub trait FragmentPointer: Clone + Send + 'static {
+pub trait FragmentPointer: Clone + Send + Sync + 'static {
     fn identifier(&self) -> FragmentIdentifier;
     fn bootstrap(position: LogPosition) -> Self
     where
@@ -35,6 +39,16 @@ impl FragmentPointer for (FragmentSeqNo, LogPosition) {
     }
 }
 
+impl FragmentPointer for FragmentUuid {
+    fn identifier(&self) -> FragmentIdentifier {
+        FragmentIdentifier::Uuid(*self)
+    }
+
+    fn bootstrap(_: LogPosition) -> Self {
+        FragmentUuid::generate()
+    }
+}
+
 ////////////////////////////////////// FragmentManagerFactory //////////////////////////////////////
 
 #[async_trait::async_trait]
@@ -45,6 +59,20 @@ pub trait FragmentManagerFactory {
 
     async fn make_publisher(&self) -> Result<Self::Publisher, Error>;
     async fn make_consumer(&self) -> Result<Self::Consumer, Error>;
+}
+
+///////////////////////////////////////// FragmentUploader /////////////////////////////////////////
+
+#[async_trait::async_trait]
+pub trait FragmentUploader<FP: FragmentPointer>: Send + Sync + 'static {
+    /// upload a parquet fragment
+    async fn upload_parquet(
+        &self,
+        pointer: &FP,
+        messages: Vec<Vec<u8>>,
+        cmek: Option<Cmek>,
+        epoch_micros: u64,
+    ) -> Result<(String, Setsum, usize), Error>;
 }
 
 ///////////////////////////////////////// FragmentPublisher ////////////////////////////////////////
@@ -89,6 +117,7 @@ pub trait FragmentPublisher: Send + Sync + 'static {
         pointer: &Self::FragmentPointer,
         messages: Vec<Vec<u8>>,
         cmek: Option<Cmek>,
+        epoch_micros: u64,
     ) -> Result<(String, Setsum, usize), Error>;
 
     /// Start shutting down.  The shutdown is split for historical and unprincipled reasons.
@@ -137,10 +166,10 @@ pub trait ManifestManagerFactory {
 
 ////////////////////////////////////////// ManifestWitness /////////////////////////////////////////
 
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ManifestWitness {
     ETag(ETag),
-    // TODO(rescrv):  Spanner-specific type.
-    Timestamp(()),
+    Position(LogPosition),
 }
 
 ///////////////////////////////////////// ManifestPublisher ////////////////////////////////////////
@@ -150,7 +179,7 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     /// Recover the manifest so that it can do work.
     async fn recover(&mut self) -> Result<(), Error>;
     /// Return a possibly-stale version of the manifest.
-    async fn manifest_and_etag(&self) -> Result<ManifestAndETag, Error>;
+    async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error>;
     /// Assign a timestamp for the next fragment that's going to be published on this manifest.
     fn assign_timestamp(&self, record_count: usize) -> Option<FP>;
     /// Publish a fragment previously assigned a timestamp using assign_timestamp.
@@ -177,7 +206,6 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     async fn snapshot_load(&self, pointer: &SnapshotPointer) -> Result<Option<Snapshot>, Error>;
     async fn snapshot_install(&self, snapshot: &Snapshot) -> Result<SnapshotPointer, Error>;
     /// Manifest storers and accessors
-    async fn manifest_init(&self, initial: &Manifest) -> Result<(), Error>;
     async fn manifest_head(&self, witness: &ManifestWitness) -> Result<bool, Error>;
     async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error>;
 

@@ -10,11 +10,10 @@ use chroma_storage::{
 use chroma_types::Cmek;
 
 use crate::backoff::ExponentialBackoff;
-use crate::interfaces::{FragmentPublisher, ManifestPublisher};
-use crate::{
-    Error, FragmentIdentifier, FragmentSeqNo, LogPosition, LogWriterOptions, MarkDirty,
-    ThrottleOptions,
-};
+use crate::interfaces::{FragmentPointer, FragmentPublisher, ManifestPublisher};
+use crate::{Error, FragmentIdentifier, LogPosition, LogWriterOptions, ThrottleOptions};
+
+use super::FragmentUploader;
 
 /////////////////////////////////////////// ManagerState ///////////////////////////////////////////
 
@@ -45,27 +44,27 @@ impl ManagerState {
     }
 
     /// Select a fragment seq no and log position for writing, if possible.
-    fn select_for_write(
+    fn select_for_write<FP: FragmentPointer>(
         &mut self,
         options: &ThrottleOptions,
-        manifest_manager: &dyn ManifestPublisher<(FragmentSeqNo, LogPosition)>,
+        manifest_manager: &(dyn ManifestPublisher<FP> + Sync),
         record_count: usize,
-    ) -> Result<Option<(FragmentSeqNo, LogPosition)>, Error> {
+    ) -> Result<Option<FP>, Error> {
         if self.next_write > Instant::now() {
             return Ok(None);
         }
         if self.writers_active > 0 {
             return Ok(None);
         }
-        let (next_seq_no, log_position) = match manifest_manager.assign_timestamp(record_count) {
-            Some((next_seq_no, log_position)) => (next_seq_no, log_position),
+        let pointer = match manifest_manager.assign_timestamp(record_count) {
+            Some(pointer) => pointer,
             None => {
                 return Err(Error::LogFull);
             }
         };
         self.writers_active += 1;
         self.set_next_write(options);
-        Ok(Some((next_seq_no, log_position)))
+        Ok(Some(pointer))
     }
 
     fn finish_write(&mut self) {
@@ -83,28 +82,21 @@ impl Drop for ManagerState {
 
 /////////////////////////////////////////// BatchManager ///////////////////////////////////////////
 
-pub struct BatchManager {
+pub struct BatchManager<FP: FragmentPointer, U: FragmentUploader<FP>> {
     options: LogWriterOptions,
-    storage: Arc<Storage>,
-    prefix: String,
-    mark_dirty: Arc<dyn MarkDirty>,
+    fragment_uploader: U,
+    _fp_phantom: std::marker::PhantomData<FP>,
     state: Mutex<ManagerState>,
     write_finished: tokio::sync::Notify,
 }
 
-impl BatchManager {
-    pub fn new(
-        options: LogWriterOptions,
-        storage: Arc<Storage>,
-        prefix: String,
-        mark_dirty: Arc<dyn MarkDirty>,
-    ) -> Option<Self> {
+impl<FP: FragmentPointer, U: FragmentUploader<FP>> BatchManager<FP, U> {
+    pub fn new(options: LogWriterOptions, fragment_uploader: U) -> Option<Self> {
         let next_write = Instant::now();
         Some(Self {
+            fragment_uploader,
+            _fp_phantom: std::marker::PhantomData,
             options,
-            storage,
-            prefix,
-            mark_dirty,
             state: Mutex::new(ManagerState {
                 backoff: false,
                 next_write,
@@ -132,18 +124,17 @@ impl BatchManager {
     }
 }
 
-impl std::fmt::Debug for BatchManager {
+impl<FP: FragmentPointer, U: FragmentUploader<FP>> std::fmt::Debug for BatchManager<FP, U> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
         fmt.debug_struct("BatchManager")
             .field("options", &self.options)
-            .field("prefix", &self.prefix)
             .finish_non_exhaustive()
     }
 }
 
 #[async_trait::async_trait]
-impl FragmentPublisher for BatchManager {
-    type FragmentPointer = (FragmentSeqNo, LogPosition);
+impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchManager<FP, U> {
+    type FragmentPointer = FP;
 
     /// Enqueue work to be published.
     async fn push_work(
@@ -168,7 +159,7 @@ impl FragmentPublisher for BatchManager {
     /// Take enqueued work to be published.
     async fn take_work(
         &self,
-        manifest_manager: &(dyn ManifestPublisher<(FragmentSeqNo, LogPosition)> + Sync),
+        manifest_manager: &(dyn ManifestPublisher<Self::FragmentPointer> + Sync),
     ) -> Result<
         Option<(
             Self::FragmentPointer,
@@ -226,7 +217,7 @@ impl FragmentPublisher for BatchManager {
             self.write_finished.notify_one();
             return Ok(None);
         }
-        let Some((fragment_identifier, log_position)) =
+        let Some(pointer) =
             state.select_for_write(&self.options.throttle_fragment, manifest_manager, acc_count)?
         else {
             // Cannot yet select for write.  Notify will come from the timeout background is on.
@@ -245,7 +236,7 @@ impl FragmentPublisher for BatchManager {
         } else {
             state.backoff = false;
         }
-        Ok(Some(((fragment_identifier, log_position), work)))
+        Ok(Some((pointer, work)))
     }
 
     /// Finish the previous call to take_work.
@@ -274,33 +265,14 @@ impl FragmentPublisher for BatchManager {
     /// upload a parquet fragment
     async fn upload_parquet(
         &self,
-        (fragment_seq_no, log_position): &(FragmentSeqNo, LogPosition),
+        pointer: &Self::FragmentPointer,
         messages: Vec<Vec<u8>>,
         cmek: Option<Cmek>,
+        epoch_micros: u64,
     ) -> Result<(String, Setsum, usize), Error> {
-        let messages_len = messages.len();
-        let fut1 = upload_parquet(
-            &self.options,
-            &self.storage,
-            &self.prefix,
-            FragmentIdentifier::SeqNo(*fragment_seq_no),
-            Some(*log_position),
-            messages,
-            cmek,
-        );
-        let fut2 = async {
-            match self
-                .mark_dirty
-                .mark_dirty(*log_position, messages_len)
-                .await
-            {
-                Ok(_) | Err(Error::LogContentionDurable) => Ok(()),
-                Err(err) => Err(err),
-            }
-        };
-        let (res1, res2) = futures::future::join(fut1, fut2).await;
-        res2?;
-        res1
+        self.fragment_uploader
+            .upload_parquet(pointer, messages, cmek, epoch_micros)
+            .await
     }
 
     /// Start shutting down.  The shutdown is split for historical and unprincipled reasons.
@@ -321,6 +293,7 @@ impl FragmentPublisher for BatchManager {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip(options, storage, messages))]
 pub async fn upload_parquet(
     options: &LogWriterOptions,
@@ -330,13 +303,14 @@ pub async fn upload_parquet(
     log_position: Option<LogPosition>,
     messages: Vec<Vec<u8>>,
     cmek: Option<Cmek>,
+    epoch_micros: u64,
 ) -> Result<(String, Setsum, usize), Error> {
     // Upload the log.
     let unprefixed_path = crate::unprefixed_fragment_path(fragment_identifier);
     let path = format!("{prefix}/{unprefixed_path}");
     let exp_backoff: ExponentialBackoff = options.throttle_fragment.into();
     let start = Instant::now();
-    let (buffer, setsum) = crate::writer::construct_parquet(log_position, &messages)?;
+    let (buffer, setsum) = crate::writer::construct_parquet(log_position, &messages, epoch_micros)?;
     let mut put_options = PutOptions::default()
         .with_priority(StorageRequestPriority::P0)
         .with_mode(PutMode::IfNotExist);
@@ -392,27 +366,29 @@ mod tests {
 
     use super::*;
     use crate::interfaces::s3::manifest_manager::ManifestManager;
+    use crate::interfaces::s3::S3FragmentUploader;
     use crate::{FragmentSeqNo, LogWriterOptions, SnapshotOptions, ThrottleOptions};
 
     #[tokio::test]
     async fn test_k8s_integration_batches() {
         let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
         let prefix = "test-batches-prefix".to_string();
-        let batch_manager = BatchManager::new(
-            LogWriterOptions {
-                throttle_fragment: ThrottleOptions {
-                    throughput: 100,
-                    headroom: 1,
-                    batch_size_bytes: 4,
-                    batch_interval_us: 1_000_000,
-                },
-                ..Default::default()
+        let options = LogWriterOptions {
+            throttle_fragment: ThrottleOptions {
+                throughput: 100,
+                headroom: 1,
+                batch_size_bytes: 4,
+                batch_interval_us: 1_000_000,
             },
+            ..Default::default()
+        };
+        let fragment_uploader = S3FragmentUploader::new(
+            options.clone(),
             Arc::clone(&storage),
             prefix.clone(),
             Arc::new(()),
-        )
-        .unwrap();
+        );
+        let batch_manager = BatchManager::new(options, fragment_uploader).unwrap();
         ManifestManager::initialize(
             &LogWriterOptions::default(),
             &storage,

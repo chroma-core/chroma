@@ -3,8 +3,8 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    create_factories, upload_parquet, FragmentIdentifier, FragmentSeqNo, LogPosition,
-    LogReaderOptions, LogWriter, LogWriterOptions, Manifest, ManifestManagerFactory,
+    create_s3_factories, now_micros, upload_parquet, FragmentIdentifier, FragmentSeqNo,
+    LogPosition, LogReaderOptions, LogWriter, LogWriterOptions, Manifest, ManifestManagerFactory,
     S3ManifestManagerFactory,
 };
 
@@ -41,6 +41,7 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
         Some(position),
         vec![vec![42, 43, 44, 45]],
         None,
+        now_micros(),
     )
     .await
     .unwrap();
@@ -74,7 +75,7 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
     ];
     assert_conditions(&storage, prefix, &conditions).await;
     let options = LogWriterOptions::default();
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),

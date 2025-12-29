@@ -11,10 +11,10 @@ use chroma_storage::Storage;
 use crate::interfaces::s3;
 use crate::interfaces::{
     FragmentConsumer, FragmentManagerFactory, FragmentPointer, ManifestConsumer,
-    ManifestManagerFactory, ManifestWitness,
+    ManifestManagerFactory,
 };
 use crate::{
-    Error, Fragment, FragmentSeqNo, LogPosition, LogReaderOptions, Manifest, ManifestAndETag,
+    Error, Fragment, FragmentSeqNo, LogPosition, LogReaderOptions, Manifest, ManifestAndWitness,
     ScrubError, ScrubSuccess, SnapshotCache,
 };
 
@@ -184,10 +184,10 @@ impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: Manifest
     }
 
     /// Verify that the reader would read the same manifest as the one provided in
-    /// manifest_and_etag, but do it in a way that doesn't load the whole manifest.
-    pub async fn verify(&self, manifest_and_etag: &ManifestAndETag) -> Result<bool, Error> {
+    /// manifest_and_witness, but do it in a way that doesn't load the whole manifest.
+    pub async fn verify(&self, manifest_and_witness: &ManifestAndWitness) -> Result<bool, Error> {
         self.manifest_consumer
-            .manifest_head(&ManifestWitness::ETag(manifest_and_etag.e_tag.clone()))
+            .manifest_head(&manifest_and_witness.witness)
             .await
     }
 
@@ -199,12 +199,9 @@ impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: Manifest
             .map(|(m, _)| m))
     }
 
-    pub async fn manifest_and_e_tag(&self) -> Result<Option<ManifestAndETag>, Error> {
+    pub async fn manifest_and_witness(&self) -> Result<Option<ManifestAndWitness>, Error> {
         match self.manifest_consumer.manifest_load().await {
-            Ok(Some((manifest, ManifestWitness::ETag(e_tag)))) => {
-                Ok(Some(ManifestAndETag { manifest, e_tag }))
-            }
-            Ok(Some((_, _))) => Err(Error::internal(file!(), line!())),
+            Ok(Some((manifest, witness))) => Ok(Some(ManifestAndWitness { manifest, witness })),
             Ok(None) => Ok(None),
             Err(err) => Err(err),
         }
@@ -468,7 +465,7 @@ impl LogReader<(FragmentSeqNo, LogPosition), s3::S3FragmentPuller, s3::ManifestR
         prefix: String,
     ) -> Result<Self, Error> {
         let write = crate::LogWriterOptions::default();
-        let (fragment_factory, manifest_factory) = s3::create_factories(
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
             write,
             options.clone(),
             Arc::clone(&storage),
@@ -3415,7 +3412,7 @@ mod tests {
         .await
         .unwrap();
 
-        let (fragment_factory, manifest_factory) = s3::create_factories(
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
             writer_options,
             LogReaderOptions::default(),
             Arc::clone(&storage),
@@ -3439,12 +3436,12 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        let manifest_and_etag = ManifestAndETag {
+        let manifest_and_witness = ManifestAndWitness {
             manifest: loaded_manifest,
-            e_tag: etag,
+            witness: crate::ManifestWitness::ETag(etag),
         };
 
-        let result = reader.verify(&manifest_and_etag).await.unwrap();
+        let result = reader.verify(&manifest_and_witness).await.unwrap();
         assert!(result, "verify should return true for matching etag");
     }
 
@@ -3465,7 +3462,7 @@ mod tests {
         .await
         .unwrap();
 
-        let (fragment_factory, manifest_factory) = s3::create_factories(
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
             writer_options,
             LogReaderOptions::default(),
             Arc::clone(&storage),
@@ -3480,12 +3477,12 @@ mod tests {
         let reader = LogReader::new(options, batch_manager, manifest_manager, prefix.clone());
 
         let fake_etag = chroma_storage::ETag("fake-etag-that-wont-match".to_string());
-        let manifest_and_etag = ManifestAndETag {
+        let manifest_and_witness = ManifestAndWitness {
             manifest,
-            e_tag: fake_etag,
+            witness: crate::ManifestWitness::ETag(fake_etag),
         };
 
-        let result = reader.verify(&manifest_and_etag).await.unwrap();
+        let result = reader.verify(&manifest_and_witness).await.unwrap();
         assert!(!result, "verify should return false for non-matching etag");
     }
 
@@ -3512,7 +3509,7 @@ mod tests {
         .await
         .unwrap();
 
-        let (fragment_factory, manifest_factory) = s3::create_factories(
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
             writer_options,
             LogReaderOptions::default(),
             Arc::clone(&storage),
@@ -3527,12 +3524,12 @@ mod tests {
         let reader = LogReader::new(options, batch_manager, manifest_manager, prefix.clone());
 
         let fake_etag = chroma_storage::ETag("fake-etag".to_string());
-        let manifest_and_etag = ManifestAndETag {
+        let manifest_and_witness = ManifestAndWitness {
             manifest,
-            e_tag: fake_etag,
+            witness: crate::ManifestWitness::ETag(fake_etag),
         };
 
-        let result = reader.verify(&manifest_and_etag).await;
+        let result = reader.verify(&manifest_and_witness).await;
         match result {
             Err(crate::Error::StorageError(storage_error)) => {
                 match storage_error.as_ref() {
@@ -3547,7 +3544,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_manifest_and_e_tag_returns_both_manifest_and_etag() {
+    async fn test_k8s_integration_manifest_and_witness_returns_both_manifest_and_witness() {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "test-prefix".to_string();
         let options = LogReaderOptions::default();
@@ -3563,7 +3560,7 @@ mod tests {
         .await
         .unwrap();
 
-        let (fragment_factory, manifest_factory) = s3::create_factories(
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
             writer_options,
             LogReaderOptions::default(),
             Arc::clone(&storage),
@@ -3577,22 +3574,26 @@ mod tests {
 
         let reader = LogReader::new(options, batch_manager, manifest_manager, prefix.clone());
 
-        let result = reader.manifest_and_e_tag().await.unwrap();
+        let result = reader.manifest_and_witness().await.unwrap();
         assert!(
             result.is_some(),
-            "manifest_and_e_tag should return Some when manifest exists"
+            "manifest_and_witness should return Some when manifest exists"
         );
 
-        let manifest_and_etag = result.unwrap();
-        assert_eq!(manifest_and_etag.manifest.writer, "test-writer");
-        assert!(
-            !manifest_and_etag.e_tag.0.is_empty(),
-            "etag should not be empty"
-        );
+        let manifest_and_witness = result.unwrap();
+        assert_eq!(manifest_and_witness.manifest.writer, "test-writer");
+        match manifest_and_witness.witness {
+            crate::ManifestWitness::ETag(e_tag) => {
+                assert!(!e_tag.0.is_empty(), "etag should not be empty");
+            }
+            crate::ManifestWitness::Position(_) => {
+                panic!("Expected ETag witness, got Timestamp");
+            }
+        }
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_manifest_and_e_tag_returns_none_when_no_manifest() {
+    async fn test_k8s_integration_manifest_and_witness_returns_none_when_no_manifest() {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "nonexistent-prefix".to_string();
         let options = LogReaderOptions::default();
@@ -3620,10 +3621,149 @@ mod tests {
 
         let reader = LogReader::new(options, batch_manager, manifest_manager, prefix);
 
-        let result = reader.manifest_and_e_tag().await.unwrap();
+        let result = reader.manifest_and_witness().await.unwrap();
         assert!(
             result.is_none(),
-            "manifest_and_e_tag should return None when no manifest exists"
+            "manifest_and_witness should return None when no manifest exists"
+        );
+    }
+
+    const TEST_EPOCH_MICROS: u64 = 1234567890123456;
+
+    /// Verifies checksum_parquet returns relative positions (0, 1, 2...) when called with None
+    /// starting_log_position on a relative-offset parquet file.
+    #[test]
+    fn checksum_parquet_with_none_starting_position_returns_relative_positions() {
+        use crate::writer::construct_parquet;
+
+        let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
+
+        // Create a relative-offset parquet file
+        let (buffer, _setsum) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet should succeed");
+
+        // Read with None starting_log_position
+        let (setsum, records, uses_relative_offsets) =
+            checksum_parquet(&buffer, None).expect("checksum_parquet should succeed");
+
+        println!(
+            "checksum_parquet_with_none_starting_position_returns_relative_positions: \
+             uses_relative_offsets={}, positions={:?}, setsum={}",
+            uses_relative_offsets,
+            records.iter().map(|(p, _)| p.offset()).collect::<Vec<_>>(),
+            setsum.hexdigest()
+        );
+
+        assert!(uses_relative_offsets, "should detect relative offsets");
+        assert_eq!(records.len(), 3, "should have 3 records");
+        // Positions should be 0, 1, 2 (relative)
+        assert_eq!(records[0].0.offset(), 0, "first position should be 0");
+        assert_eq!(records[1].0.offset(), 1, "second position should be 1");
+        assert_eq!(records[2].0.offset(), 2, "third position should be 2");
+    }
+
+    /// Verifies checksum_parquet translates relative positions to absolute when given a
+    /// starting_log_position.
+    #[test]
+    fn checksum_parquet_with_starting_position_translates_relative_to_absolute() {
+        use crate::writer::construct_parquet;
+
+        let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
+        let starting_position = LogPosition::from_offset(100);
+
+        // Create a relative-offset parquet file
+        let (buffer, setsum_from_writer) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet should succeed");
+
+        // Read with a starting_log_position - positions should be translated
+        let (setsum_from_reader, records, uses_relative_offsets) =
+            checksum_parquet(&buffer, Some(starting_position))
+                .expect("checksum_parquet should succeed");
+
+        println!(
+            "checksum_parquet_with_starting_position_translates_relative_to_absolute: \
+             uses_relative_offsets={}, positions={:?}, setsum_writer={}, setsum_reader={}",
+            uses_relative_offsets,
+            records.iter().map(|(p, _)| p.offset()).collect::<Vec<_>>(),
+            setsum_from_writer.hexdigest(),
+            setsum_from_reader.hexdigest()
+        );
+
+        assert!(uses_relative_offsets, "should detect relative offsets");
+        assert_eq!(records.len(), 3, "should have 3 records");
+        // Positions should be translated to absolute (100, 101, 102)
+        assert_eq!(
+            records[0].0.offset(),
+            100,
+            "first position should be 100 (translated)"
+        );
+        assert_eq!(
+            records[1].0.offset(),
+            101,
+            "second position should be 101 (translated)"
+        );
+        assert_eq!(
+            records[2].0.offset(),
+            102,
+            "third position should be 102 (translated)"
+        );
+
+        // Setsum should still match because it uses raw offsets (0, 1, 2) not translated ones
+        assert_eq!(
+            setsum_from_writer, setsum_from_reader,
+            "setsums should match regardless of starting_log_position translation"
+        );
+    }
+
+    /// Verifies that for absolute-offset files, the starting_log_position parameter is ignored
+    /// for position calculation (since positions are already absolute).
+    #[test]
+    fn checksum_parquet_ignores_starting_position_for_absolute_offset_files() {
+        use crate::writer::construct_parquet;
+
+        let messages = vec![vec![1, 2, 3], vec![4, 5, 6]];
+        let write_position = LogPosition::from_offset(50);
+
+        // Create an absolute-offset parquet file starting at offset 50
+        let (buffer, setsum_from_writer) =
+            construct_parquet(Some(write_position), &messages, TEST_EPOCH_MICROS)
+                .expect("construct_parquet should succeed");
+
+        // Read with a different starting_log_position - should be ignored for absolute files
+        let different_position = LogPosition::from_offset(999);
+        let (setsum_from_reader, records, uses_relative_offsets) =
+            checksum_parquet(&buffer, Some(different_position))
+                .expect("checksum_parquet should succeed");
+
+        println!(
+            "checksum_parquet_ignores_starting_position_for_absolute_offset_files: \
+             uses_relative_offsets={}, positions={:?}",
+            uses_relative_offsets,
+            records.iter().map(|(p, _)| p.offset()).collect::<Vec<_>>()
+        );
+
+        assert!(
+            !uses_relative_offsets,
+            "should detect absolute offsets in file"
+        );
+        assert_eq!(records.len(), 2, "should have 2 records");
+        // Positions should be the original absolute values (50, 51), not affected by
+        // the different_position parameter
+        assert_eq!(
+            records[0].0.offset(),
+            50,
+            "first position should be 50 (original absolute)"
+        );
+        assert_eq!(
+            records[1].0.offset(),
+            51,
+            "second position should be 51 (original absolute)"
+        );
+
+        // Setsums should match
+        assert_eq!(
+            setsum_from_writer, setsum_from_reader,
+            "setsums should match for absolute-offset files"
         );
     }
 }

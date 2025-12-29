@@ -7,7 +7,7 @@ use std::time::Duration;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    create_factories, Error, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
+    create_s3_factories, Error, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
     ManifestManagerFactory, S3ManifestManagerFactory,
 };
 
@@ -85,7 +85,7 @@ async fn test_k8s_integration_99_ping_pong_contention() {
 
     // Create two writers that will contend with each other
     let options1 = LogWriterOptions::default();
-    let (fragment_factory1, manifest_factory1) = create_factories(
+    let (fragment_factory1, manifest_factory1) = create_s3_factories(
         options1.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),
@@ -109,7 +109,7 @@ async fn test_k8s_integration_99_ping_pong_contention() {
     );
 
     let options2 = LogWriterOptions::default();
-    let (fragment_factory2, manifest_factory2) = create_factories(
+    let (fragment_factory2, manifest_factory2) = create_s3_factories(
         options2.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),
