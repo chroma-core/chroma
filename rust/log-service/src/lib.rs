@@ -1051,16 +1051,16 @@ impl LogServer {
         // cursor, which will, on the next dirty log rollup, update the lower bound on the cursor,
         // restoring order to the dirty log.
         if let Some(cache) = self.cache.as_ref() {
-            let mut cache_collections_to_purge = Vec::with_capacity(rollup.rollups.len());
+            let mut cache_collections_to_purge = Vec::with_capacity(after.len());
             let before = rollup.rollups;
-            for after in after.into_iter() {
-                let Some(before) = before.iter().find(|x| *x.0 == after.0) else {
+            for (collection_id, after_state) in after.into_iter() {
+                let Some(before_state) = before.get(&collection_id) else {
                     continue;
                 };
-                if before.1.reinsert_count / self.config.reinsert_threshold
-                    != after.1.reinsert_count / self.config.reinsert_threshold
+                if before_state.reinsert_count / self.config.reinsert_threshold
+                    != after_state.reinsert_count / self.config.reinsert_threshold
                 {
-                    cache_collections_to_purge.push(*before.0);
+                    cache_collections_to_purge.push(collection_id);
                 }
             }
             for collection_id in cache_collections_to_purge {
